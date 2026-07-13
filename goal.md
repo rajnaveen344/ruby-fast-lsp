@@ -1604,3 +1604,34 @@ At the end of every goal session, record:
   platform is stable and failure-isolated, performance and memory are repeatably measured,
   packaged artifacts are exercised, and remaining work such as project-wide
   method rename is a narrow enhancement rather than a missing daily workflow.
+
+### July 2026: Multi-service workspace isolation
+
+- Workspace model: editor folders are containers. A root Gemfile owns the
+  folder; otherwise nearest nested Gemfiles become deterministic, isolated Ruby
+  projects. `.git`, dependency, generated, and cache directories are pruned and
+  Git topology never determines semantic ownership. Explicit non-overlapping
+  `indexing.projectRoots` handles umbrella repositories with a root Gemfile.
+- Isolation evidence: red-first `FakeEditor` lifecycle tests proved methods in
+  one workspace previously satisfied unresolved calls in another. Every
+  project now owns its own engine and dependency lifecycle; document queries,
+  watchers, diagnostics, hierarchy, rename, extensions, namespace tree, and
+  debug APIs route to that engine. Workspace symbols aggregate isolated results
+  intentionally and deterministically.
+- Lifecycle evidence: dynamically added or removed folders rehome open buffers
+  between project and orphan engines and clear facts from the former owner.
+  Container discovery ignores `vendor/cache`, root Gemfiles retain nested
+  examples, explicit roots reject traversal and overlap, and standalone
+  Gemfile-less folders retain backward-compatible single-project behavior.
+- Cached Git dependencies: the exact `goshposh/server` pbkdf2 lock/cache shape
+  is supported without executing project gemspec code. The release profiler
+  discovers 98 gems, indexes locked `pbkdf2` 0.2.0 from
+  `vendor/cache/pbkdf2-ruby-b8c9fd171c32`, and completes the isolated server
+  project in 11.3 s using 160.3 MiB estimated engine heap. The independent
+  `admin` project completes 1,025 project files in 3.6 s using 57.4 MiB.
+- Verification: 1,019 root tests, all workspace tests including 345
+  `ruby-analysis` tests, release build, version and npm audit checks, and the
+  packaged VSIX initialization smoke with bundled RSpec, Rails, Minitest, and
+  ERB HTML behavior pass locally.
+- Rating remains **9.0/10**. This closes a genuine multi-service daily-workflow
+  gap rather than relaxing the product definition.

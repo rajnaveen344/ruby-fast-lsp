@@ -13,6 +13,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
+use parking_lot::RwLock;
+use ruby_analysis::engine::AnalysisEngine;
+use std::sync::Arc;
+use tower_lsp::lsp_types::Url;
+
+fn project_engine(server: &RubyLanguageServer, uri: Option<&str>) -> Arc<RwLock<AnalysisEngine>> {
+    uri.and_then(|value| Url::parse(value).ok())
+        .map(|uri| server.analysis_engine_for_uri(&uri))
+        .or_else(|| {
+            let projects = server.list_workspaces();
+            (projects.len() == 1).then(|| projects[0].analysis_engine.clone())
+        })
+        .unwrap_or_else(|| server.analysis_engine.clone())
+}
 
 // ============================================================================
 // Protocol Types
@@ -55,6 +69,8 @@ pub struct ListCommandsResponse {
 pub struct LookupParams {
     /// The fully qualified name to look up (e.g., "User#find", "Foo::Bar")
     pub fqn: String,
+    #[serde(default)]
+    pub uri: Option<String>,
 }
 
 // ============================================================================
@@ -64,7 +80,10 @@ pub struct LookupParams {
 /// Parameters for `ruby-fast-lsp/debug/stats`.
 /// Empty struct to satisfy tower-lsp custom method requirements.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StatsParams {}
+pub struct StatsParams {
+    #[serde(default)]
+    pub uri: Option<String>,
+}
 
 // ============================================================================
 // Ancestors Types
@@ -75,6 +94,8 @@ pub struct StatsParams {}
 pub struct AncestorsParams {
     /// The class/module name to get ancestors for
     pub class: String,
+    #[serde(default)]
+    pub uri: Option<String>,
 }
 
 // ============================================================================
@@ -83,7 +104,10 @@ pub struct AncestorsParams {
 
 /// Parameters for `ruby/exportGraph`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ExportGraphParams {}
+pub struct ExportGraphParams {
+    #[serde(default)]
+    pub uri: Option<String>,
+}
 
 // ============================================================================
 // Handlers
@@ -148,21 +172,21 @@ pub fn handle_list_commands() -> ListCommandsResponse {
 /// Handle `ruby-fast-lsp/debug/lookup` - query analysis state for an FQN.
 pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> LookupResponse {
     debug!("[DEBUG] Looking up FQN: {}", params.fqn);
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
     query.debug_lookup(&params.fqn)
 }
 
 /// Handle `ruby-fast-lsp/debug/stats` - return index statistics.
-pub fn handle_stats(server: &RubyLanguageServer) -> StatsResponse {
+pub fn handle_stats(server: &RubyLanguageServer, params: StatsParams) -> StatsResponse {
     debug!("[DEBUG] Getting index stats");
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
     query.debug_stats(server.is_indexing_complete())
 }
 
 /// Handle `ruby-fast-lsp/debug/ancestors` - get inheritance chain for a class.
 pub fn handle_ancestors(server: &RubyLanguageServer, params: AncestorsParams) -> AncestorsResponse {
     debug!("[DEBUG] Getting ancestors for: {}", params.class);
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
     query.debug_ancestors(&params.class)
 }
 
@@ -171,12 +195,14 @@ pub fn handle_ancestors(server: &RubyLanguageServer, params: AncestorsParams) ->
 pub struct MethodsParams {
     /// The class name to list methods for
     pub class: String,
+    #[serde(default)]
+    pub uri: Option<String>,
 }
 
 /// Handle `ruby-fast-lsp/debug/methods` - list methods for a class.
 pub fn handle_methods(server: &RubyLanguageServer, params: MethodsParams) -> MethodsResponse {
     debug!("[DEBUG] Getting methods for: {}", params.class);
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
     query.debug_methods(&params.class)
 }
 
@@ -186,21 +212,27 @@ pub fn handle_methods(server: &RubyLanguageServer, params: MethodsParams) -> Met
 
 /// Parameters for `ruby-fast-lsp/debug/inference-stats`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct InferenceStatsParams {}
+pub struct InferenceStatsParams {
+    #[serde(default)]
+    pub uri: Option<String>,
+}
 
 /// Handle `ruby-fast-lsp/debug/inference-stats` - get type inference statistics.
-pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResponse {
+pub fn handle_inference_stats(
+    server: &RubyLanguageServer,
+    params: InferenceStatsParams,
+) -> InferenceStatsResponse {
     debug!("[DEBUG] Getting inference stats");
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
     query.debug_inference_stats()
 }
 
 /// Handle `ruby/exportGraph` - export the inheritance graph as JSON.
 pub fn handle_export_graph(
     server: &RubyLanguageServer,
-    _params: ExportGraphParams,
+    params: ExportGraphParams,
 ) -> ExportGraphResponse {
     debug!("[DEBUG] Exporting inheritance graph");
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
     query.debug_export_graph()
 }

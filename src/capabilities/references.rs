@@ -22,7 +22,7 @@ pub async fn find_references_at_position(
     };
 
     // Create unified query with document context.
-    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine.clone());
+    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(uri));
 
     query.find_references_at_position(uri, position, &content)
 }

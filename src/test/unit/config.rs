@@ -31,7 +31,8 @@ mod tests {
                 "excludedPatterns": ["vendor/**/*", "tmp/**/*.rb"],
                 "includedPatterns": ["bin/*"],
                 "excludedGems": ["debug"],
-                "includedGems": ["rails"]
+                "includedGems": ["rails"],
+                "projectRoots": ["services/billing", "services/identity"]
             }
         });
 

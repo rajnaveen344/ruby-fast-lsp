@@ -119,6 +119,23 @@ The Query Engine provides a unified service layer for querying the `AnalysisEngi
 - Provides a stable API for capabilities to query project-wide information
 - Enables complex "chained" queries through composable helpers
 
+### Project Containers and Engine Isolation
+
+The LSP lifecycle distinguishes editor workspace folders from Ruby projects.
+A folder with a root Gemfile is one project; a folder without one expands to
+its nearest nested Gemfile roots unless `indexing.projectRoots` explicitly
+defines non-overlapping roots. `.git` is never a project marker. Discovery and
+workspace-folder ownership live in `src/`, not `ruby-analysis`.
+
+Each registered project owns an `Arc<RwLock<AnalysisEngine>>`. Document,
+watcher, hierarchy, rename, completion, diagnostics, and extension queries use
+the engine selected by longest project-root prefix. Files outside every project
+use a separate orphan engine. Workspace-symbol search is the intentional
+cross-project operation and aggregates already-shaped results deterministically;
+semantic lookup never combines project engines. Cold gem and stdlib indexing
+receive the owning engine explicitly because dependency paths commonly live
+outside the project root or under external directories.
+
 ### 5. Server (`src/server.rs`)
 
 The Server coordinates between LSP clients and the internal components.

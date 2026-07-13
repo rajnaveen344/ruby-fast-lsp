@@ -46,7 +46,8 @@ pub async fn handle_prepare_rename(
     let Identifier::RubyConstant { iden, .. } = identifier? else {
         return None;
     };
-    let engine = server.analysis_engine.read();
+    let analysis_engine = server.analysis_engine_for_uri(&uri);
+    let engine = analysis_engine.read();
     let target = AnalysisQuery::new(&engine).constant_rename_target(&iden, &ancestors)?;
     let location = locations_for_ranges(&engine, target.ranges)
         .into_iter()
@@ -96,13 +97,14 @@ pub async fn handle_rename(
         changes.insert(uri, edits);
     } else {
         let new_constant = RubyConstant::new(&new_name).ok()?;
-        let analyzer = RubyPrismAnalyzer::new(uri, content.clone());
+        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
         let (identifier, _, ancestors, _, _) = analyzer.get_identifier(position);
         let Identifier::RubyConstant { iden, .. } = identifier? else {
             return None;
         };
 
-        let engine = server.analysis_engine.read();
+        let analysis_engine = server.analysis_engine_for_uri(&uri);
+        let engine = analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         let target = query.constant_rename_target_for_name(&iden, &ancestors, new_constant)?;
         for location in locations_for_ranges(&engine, target.ranges) {

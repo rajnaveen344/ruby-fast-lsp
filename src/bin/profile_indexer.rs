@@ -59,7 +59,11 @@ fn main() -> anyhow::Result<()> {
                 info!("Indexing completed successfully!");
                 info!(
                     "Total method facts: {}",
-                    server.analysis_engine.read().all_method_facts().len()
+                    server
+                        .analysis_engine_for_uri(&workspace_uri)
+                        .read()
+                        .all_method_facts()
+                        .len()
                 );
             }
             Err(e) => info!("Indexing failed: {}", e),

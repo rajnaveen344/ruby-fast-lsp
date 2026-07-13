@@ -271,12 +271,12 @@ fn main() -> anyhow::Result<()> {
             Phase::All => {
                 // Full indexing (includes type inference)
                 info!("=== PROFILING: Full Indexing (with type inference) ===");
-                run_full_indexing(&server, workspace_uri).await
+                run_full_indexing(&server, workspace_uri.clone()).await
             }
             Phase::Index => {
                 // Index only (no type inference)
                 info!("=== PROFILING: Indexing Only (no type inference) ===");
-                run_indexing_only(&server, workspace_uri).await
+                run_indexing_only(&server, workspace_uri.clone()).await
             }
             Phase::Infer => {
                 // Index first, then profile inference separately
@@ -293,7 +293,7 @@ fn main() -> anyhow::Result<()> {
         info!("=== TOTAL TIME: {:?} ===", total_start.elapsed());
 
         // Print stats
-        print_stats(&server);
+        print_stats(&server, &workspace_uri);
 
         sample_open_file_diagnostics(&server, &workspace_path, &config.diagnostics_files).await?;
 
@@ -392,7 +392,7 @@ async fn sample_open_file_diagnostics(
             },
         )
         .await;
-        let diagnostics = EngineQuery::with_engine(server.analysis_engine.clone())
+        let diagnostics = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri))
             .get_unresolved_diagnostics(&uri);
 
         println!(
@@ -581,7 +581,8 @@ async fn run_production_benchmark(
         );
     }
 
-    let diagnostic_query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let analysis_engine = server.analysis_engine_for_uri(&uri);
+    let diagnostic_query = EngineQuery::with_engine(analysis_engine.clone());
     let mut diagnostic_samples = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = Instant::now();
@@ -616,6 +617,7 @@ async fn run_production_benchmark(
         edit_samples.push(start.elapsed());
     }
 
+    let engine_heap_bytes = analysis_engine.read().estimated_memory_stats().total();
     Ok(ProductionMeasurements {
         cold_indexing,
         edit: LatencySummary::from_samples(&edit_samples),
@@ -624,11 +626,7 @@ async fn run_production_benchmark(
         definition: LatencySummary::from_samples(&definition_samples),
         references: LatencySummary::from_samples(&reference_samples),
         diagnostics: LatencySummary::from_samples(&diagnostic_samples),
-        engine_heap_bytes: server
-            .analysis_engine
-            .read()
-            .estimated_memory_stats()
-            .total(),
+        engine_heap_bytes,
     })
 }
 
@@ -690,8 +688,9 @@ fn print_latency(name: &str, summary: LatencySummary, budget: Duration) {
     );
 }
 
-fn print_stats(server: &RubyLanguageServer) {
-    let engine = server.analysis_engine.read();
+fn print_stats(server: &RubyLanguageServer, workspace_uri: &Url) {
+    let analysis_engine = server.analysis_engine_for_uri(workspace_uri);
+    let engine = analysis_engine.read();
     let stats = engine.stats();
 
     info!("=== ANALYSIS STATS ===");

@@ -189,6 +189,15 @@ always win, and `.git` is never traversed. Explicitly included gems augment
 dependencies inferred from source, while excluded gems are omitted even when
 they are direct or transitive dependencies.
 
+Workspace folders are Ruby project containers. A root `Gemfile` owns the whole
+folder. Without one, Ruby Fast LSP discovers the nearest nested Gemfiles, stops
+below each discovered root, and gives every project an isolated semantic
+engine, Bundler environment, diagnostics state, and extension fact lifecycle.
+Git repositories do not define semantic boundaries; `.git` is only pruned from
+discovery. For an umbrella repository with a root Gemfile, `projectRoots` can
+declare non-overlapping workspace-relative service roots explicitly. Open files
+outside discovered projects remain available through the orphan engine.
+
 Source ownership is explicit:
 
 - Workspace files selected by the project policy are editable project sources.
@@ -208,6 +217,10 @@ Source ownership is explicit:
 - Bundler/RubyGems dependencies, stdlib, and bundled stubs remain available for
   navigation and inference but do not contribute project diagnostics,
   workspace-symbol results, or rename edits.
+- Extracted Git dependencies under `vendor/cache/<repository>-<revision>` are
+  read from the owning project's `Gemfile.lock` when Bundler's normal checkout
+  is unavailable. They enter only that project's engine as dependency sources;
+  their gemspecs are never executed by the fallback.
 - `.git` is never traversed or opt-in indexable. Workspace trust controls local
   Wasm extensions, not ordinary static Ruby parsing.
 
@@ -245,6 +258,7 @@ canonical list in `editors/vscode/vsix/ruby_file_kinds.json`.
 ```json
 {
   "rubyFastLsp.indexing": {
+    "projectRoots": ["services/billing", "services/identity"],
     "includedPatterns": ["bin/*"],
     "excludedPatterns": ["vendor/**/*", "tmp/**/*.rb"],
     "includedGems": ["rails"],
@@ -257,10 +271,11 @@ The VS Code extension restarts the language server when this setting changes so
 that excluded files cannot leave stale semantic facts behind. Other LSP clients
 should send the same `indexing` object in initialization options and restart the
 server after changing it. Invalid glob patterns abort workspace indexing with an
-actionable error instead of silently applying a partial policy. For closed
-files, watcher create/change events replace facts through the normal engine
-write path and delete events remove stale facts; open buffers remain owned by
-the document lifecycle.
+actionable error instead of silently applying a partial policy. Explicit
+project roots must exist, remain inside the workspace, and not overlap. For
+closed files, watcher create/change events replace facts through the normal
+engine write path and delete events remove stale facts; open buffers remain
+owned by the document lifecycle.
 
 ## Test discovery and execution
 

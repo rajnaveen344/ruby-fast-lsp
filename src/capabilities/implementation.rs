@@ -22,6 +22,6 @@ pub async fn find_implementation_at_position(
         (doc.content.clone(), doc_arc.clone())
     };
 
-    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine.clone());
+    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(&uri));
     query.find_implementations_at_position(&uri, position, &content)
 }

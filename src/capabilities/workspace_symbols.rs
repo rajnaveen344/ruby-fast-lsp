@@ -22,12 +22,35 @@ pub async fn handle_workspace_symbols(
     info!("Workspace symbols request for query: '{}'", query_text);
 
     let start_time = Instant::now();
-    let engine_query = EngineQuery::with_engine(lang_server.analysis_engine.clone());
-    let symbols = if query_text.is_empty() {
-        engine_query.get_top_level_symbols()
-    } else {
-        engine_query.search_workspace_symbols(&query_text)
-    };
+    let mut symbols = Vec::new();
+    for analysis_engine in lang_server.analysis_engines() {
+        let engine_query = EngineQuery::with_engine(analysis_engine);
+        if query_text.is_empty() {
+            symbols.extend(engine_query.get_top_level_symbols());
+        } else {
+            symbols.extend(engine_query.search_workspace_symbols(&query_text));
+        }
+    }
+    symbols.sort_by(|left, right| {
+        (
+            left.name.as_str(),
+            left.location.uri.as_str(),
+            left.location.range.start,
+            left.location.range.end,
+        )
+            .cmp(&(
+                right.name.as_str(),
+                right.location.uri.as_str(),
+                right.location.range.start,
+                right.location.range.end,
+            ))
+    });
+    symbols.dedup_by(|left, right| {
+        left.name == right.name
+            && left.kind == right.kind
+            && left.location == right.location
+            && left.container_name == right.container_name
+    });
 
     info!(
         "Workspace symbols search completed in {:?} - found {} symbols",

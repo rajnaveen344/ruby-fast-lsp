@@ -11,6 +11,7 @@ pub use ruby_analysis::engine::{
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NamespaceTreeParams {
+    #[serde(default, rename = "uri", alias = "workspace_uri")]
     pub workspace_uri: Option<String>,
     #[serde(default)]
     pub show_external_types: bool,

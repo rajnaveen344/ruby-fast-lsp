@@ -25,7 +25,7 @@ pub async fn find_definition_at_position(
     };
 
     // Create unified query with document context (no lock held here).
-    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine.clone());
+    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(&uri));
 
     // query.find_definitions_at_position already checks YARD and uses analyzer
     // AND now handles local variables via self.doc

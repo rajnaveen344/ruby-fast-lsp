@@ -155,8 +155,15 @@ impl IndexerProject {
         let file_processor_ref = &file_processor;
         let required_stdlib_ref = &required_stdlib;
         let required_gems_ref = &required_gems;
+        let project_uri = Url::from_directory_path(&self.workspace_root).map_err(|_| {
+            anyhow::anyhow!(
+                "Project root is not a valid file URI: {}",
+                self.workspace_root.display()
+            )
+        })?;
+        let analysis_engine = server.analysis_engine_for_uri(&project_uri);
         let known_namespaces = {
-            let engine = server.analysis_engine.read();
+            let engine = analysis_engine.read();
             ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
         };
 
@@ -172,10 +179,10 @@ impl IndexerProject {
 
             if let Ok(uri) = Url::from_file_path(file_path) {
                 if let Err(e) = file_processor_ref
-                    .collect_file_facts_as_deferred_resolution_with_known_namespaces(
+                    .collect_file_facts_as_deferred_resolution_with_known_namespaces_in_engine(
                         &uri,
                         &content,
-                        server,
+                        analysis_engine.clone(),
                         ruby_analysis::core::SourceKind::Project,
                         &known_namespaces,
                     )
@@ -195,7 +202,7 @@ impl IndexerProject {
         );
 
         let resolve_start = Instant::now();
-        server.analysis_engine.write().resolve();
+        analysis_engine.write().resolve();
         let resolve_elapsed = resolve_start.elapsed();
         info!(
             "Project reference/diagnostic resolution completed in {:?}",

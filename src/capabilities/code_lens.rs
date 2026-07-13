@@ -38,7 +38,7 @@ pub async fn handle_code_lens(
     };
 
     // 3. Create query with document context.
-    let query = EngineQuery::with_doc_and_engine(doc_arc, lang_server.analysis_engine.clone());
+    let query = EngineQuery::with_doc_and_engine(doc_arc, lang_server.analysis_engine_for_uri(uri));
 
     // 4. Delegate to query layer.
     let lens_data = query.get_code_lenses(uri);

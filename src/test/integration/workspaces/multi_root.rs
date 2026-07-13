@@ -2,6 +2,7 @@
 //! live in the shared engine.
 
 use crate::test::harness::FakeEditor;
+use tower_lsp::lsp_types::{PartialResultParams, WorkDoneProgressParams, WorkspaceSymbolParams};
 
 #[tokio::test]
 async fn each_workspace_gets_its_own_index() {
@@ -84,22 +85,84 @@ async fn longest_prefix_wins_for_nested_workspaces() {
     );
 }
 
+#[tokio::test]
+async fn semantic_facts_do_not_cross_workspace_project_boundaries() {
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("workspace_a");
+    editor.add_workspace("workspace_b");
+
+    editor
+        .open(
+            "workspace_a/user.rb",
+            "class User\n  def only_in_a; end\nend\n",
+        )
+        .await;
+    editor
+        .open(
+            "workspace_b/user.rb",
+            "class User\n  def call\n    only_in_a\n  end\nend\n",
+        )
+        .await;
+
+    editor
+        .check(
+            "workspace_b/user.rb",
+            "class User\n  def call\n    <warn code=\"unresolved-method\">only_in_a</warn>\n  end\nend\n",
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn workspace_symbol_search_aggregates_isolated_project_engines() {
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("workspace_a");
+    editor.add_workspace("workspace_b");
+    editor
+        .open("workspace_a/a.rb", "class AlphaService\nend\n")
+        .await;
+    editor
+        .open("workspace_b/b.rb", "class BetaService\nend\n")
+        .await;
+
+    let symbols = crate::capabilities::workspace_symbols::handle_workspace_symbols(
+        editor.server(),
+        WorkspaceSymbolParams {
+            query: "Service".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await
+    .unwrap();
+    let names = symbols
+        .into_iter()
+        .map(|symbol| symbol.name)
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, ["AlphaService", "BetaService"]);
+}
+
 fn method_fact_in_path(
     server: &crate::server::RubyLanguageServer,
     method_name: &str,
     path_suffix: &str,
 ) -> bool {
-    let engine = server.analysis_engine.read();
-    engine.all_method_facts().into_iter().any(|fact| {
-        let ruby_analysis::core::FullyQualifiedName::Method(_, method) = fact.fqn else {
-            return false;
-        };
-        if method.as_str() != method_name {
-            return false;
-        }
-        engine
-            .file(fact.range.file_id)
-            .map(|file| file.path.to_string_lossy().ends_with(path_suffix))
-            .unwrap_or(false)
-    })
+    server
+        .analysis_engines()
+        .into_iter()
+        .any(|analysis_engine| {
+            let engine = analysis_engine.read();
+            engine.all_method_facts().into_iter().any(|fact| {
+                let ruby_analysis::core::FullyQualifiedName::Method(_, method) = fact.fqn else {
+                    return false;
+                };
+                if method.as_str() != method_name {
+                    return false;
+                }
+                engine
+                    .file(fact.range.file_id)
+                    .map(|file| file.path.to_string_lossy().ends_with(path_suffix))
+                    .unwrap_or(false)
+            })
+        })
 }

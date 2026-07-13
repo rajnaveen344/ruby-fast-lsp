@@ -208,9 +208,16 @@
             "excludedPatterns": [],
             "includedPatterns": [],
             "excludedGems": [],
-            "includedGems": []
+            "includedGems": [],
+            "projectRoots": []
           },
           "properties": {
+            "projectRoots": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [],
+              "description": "Optional workspace-relative Ruby project roots. Use this to split an umbrella workspace explicitly; roots must exist, remain inside the workspace, and must not overlap."
+            },
             "excludedPatterns": {
               "type": "array",
               "items": { "type": "string" },

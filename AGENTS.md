@@ -162,6 +162,26 @@ augment statically inferred roots, while excluded gems win over direct and
 transitive requirements. The VS Code extension restarts the server after this
 configuration changes so removed sources cannot leave stale engine facts.
 
+An editor workspace folder is a project container, not necessarily one Ruby
+project. A root `Gemfile` owns the folder. Without one, discover the nearest
+nested Gemfiles deterministically, prune `.git` and default-external trees, and
+stop below each discovered root. `indexing.projectRoots` explicitly overrides
+automatic discovery for umbrella repositories; entries must be relative,
+workspace-contained, existing, and non-overlapping. Git topology never defines
+Ruby semantic topology. Every discovered project owns an isolated
+`AnalysisEngine`, Bundler/stdlib inputs, diagnostics, and extension facts.
+Document queries and watchers route by longest project-root prefix;
+workspace-symbol search aggregates isolated engines deterministically. Dynamic
+folder add/remove must rehome open documents between project and orphan engines
+and clear their stale facts from the previous owner.
+
+Bundler discovery must use the owning project's exact `Gemfile`. If a locked
+Git dependency has no normal Bundler checkout but has an extracted
+`vendor/cache/<repository>-<revision>` source, parse its `GIT` lockfile section
+without executing the cached gemspec and index only its `lib` tree as
+`SourceKind::Gem` in that project's engine. Never promote a vendor cache into a
+project root or editable project truth.
+
 Full-document formatting is available through opt-in RuboCop or Standard
 integration. It consumes the current unsaved buffer over stdin, uses RuboCop's
 safe `--autocorrect` or Standard's `--fix`, and returns one UTF-16-correct

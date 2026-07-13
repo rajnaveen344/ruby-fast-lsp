@@ -18,7 +18,7 @@ pub async fn handle_signature_help(
         let content = document.read().content.clone();
         (content, document)
     };
-    let query = EngineQuery::with_doc_and_engine(document, server.analysis_engine.clone());
+    let query = EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri));
     let help = query.signature_help_at_position(&uri, position, &content)?;
 
     Some(SignatureHelp {

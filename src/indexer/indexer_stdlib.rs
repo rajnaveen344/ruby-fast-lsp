@@ -74,7 +74,11 @@ impl IndexerStdlib {
     // ========================================================================
 
     /// Index standard library based on Ruby version and required modules
-    pub async fn index_stdlib(&mut self, server: &RubyLanguageServer) -> Result<()> {
+    pub async fn index_stdlib(
+        &mut self,
+        server: &RubyLanguageServer,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
         let start = Instant::now();
         info!("Starting stdlib indexing");
 
@@ -86,10 +90,10 @@ impl IndexerStdlib {
         }
 
         // Index core stubs first (if available)
-        self.index_core_stubs(server).await?;
+        self.index_core_stubs(analysis_engine.clone()).await?;
 
         // Index required stdlib modules
-        self.index_required_modules(server).await?;
+        self.index_required_modules(server, analysis_engine).await?;
 
         info!("Stdlib indexing completed in {:?}", start.elapsed());
         Ok(())
@@ -100,7 +104,10 @@ impl IndexerStdlib {
     /// Stubs are loaded from the extension's stubs directory (stubs/rubystubsXY/).
     /// In production, these are extracted from zip files by the VS Code extension
     /// on first activation.
-    async fn index_core_stubs(&self, server: &RubyLanguageServer) -> Result<()> {
+    async fn index_core_stubs(
+        &self,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
         let Some(version) = &self.ruby_version else {
             return Ok(());
         };
@@ -124,19 +131,21 @@ impl IndexerStdlib {
                 stub_files.par_iter().for_each(|path| {
                     if let Ok(content) = std::fs::read_to_string(path) {
                         if let Ok(uri) = Url::from_file_path(path) {
-                            if let Err(e) = processor.collect_file_facts_as_deferred_resolution(
-                                &uri,
-                                &content,
-                                server,
-                                ruby_analysis::core::SourceKind::Stub,
-                            ) {
+                            if let Err(e) = processor
+                                .collect_file_facts_as_deferred_resolution_in_engine(
+                                    &uri,
+                                    &content,
+                                    analysis_engine.clone(),
+                                    ruby_analysis::core::SourceKind::Stub,
+                                )
+                            {
                                 warn!("Failed to index stub {:?}: {}", path, e);
                             }
                         }
                     }
                 });
 
-                server.analysis_engine.write().resolve();
+                analysis_engine.write().resolve();
 
                 info!("Indexed {} core stub files", stub_files.len());
                 return Ok(());
@@ -160,10 +169,10 @@ impl IndexerStdlib {
         stub_files.par_iter().for_each(|path| {
             if let Ok(content) = std::fs::read_to_string(path) {
                 if let Ok(uri) = Url::from_file_path(path) {
-                    if let Err(e) = processor.collect_file_facts_as_deferred_resolution(
+                    if let Err(e) = processor.collect_file_facts_as_deferred_resolution_in_engine(
                         &uri,
                         &content,
-                        server,
+                        analysis_engine.clone(),
                         ruby_analysis::core::SourceKind::Stub,
                     ) {
                         warn!("Failed to index stub {:?}: {}", path, e);
@@ -171,14 +180,18 @@ impl IndexerStdlib {
                 }
             }
         });
-        server.analysis_engine.write().resolve();
+        analysis_engine.write().resolve();
         info!("Indexed {} core stub files", stub_files.len());
 
         Ok(())
     }
 
     /// Index only the required stdlib modules
-    async fn index_required_modules(&self, server: &RubyLanguageServer) -> Result<()> {
+    async fn index_required_modules(
+        &self,
+        server: &RubyLanguageServer,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
         if self.required_modules.is_empty() {
             debug!("No required stdlib modules to index");
             return Ok(());
@@ -213,12 +226,14 @@ impl IndexerStdlib {
             files.par_iter().for_each(|path| {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     if let Ok(uri) = Url::from_file_path(path) {
-                        if let Err(e) = processor.collect_file_facts_as_deferred_resolution(
-                            &uri,
-                            &content,
-                            server,
-                            ruby_analysis::core::SourceKind::Stdlib,
-                        ) {
+                        if let Err(e) = processor
+                            .collect_file_facts_as_deferred_resolution_in_engine(
+                                &uri,
+                                &content,
+                                analysis_engine.clone(),
+                                ruby_analysis::core::SourceKind::Stdlib,
+                            )
+                        {
                             warn!("Failed to index stdlib file {:?}: {}", path, e);
                         }
                     }
@@ -229,7 +244,7 @@ impl IndexerStdlib {
         }
 
         if indexed_count > 0 {
-            server.analysis_engine.write().resolve();
+            analysis_engine.write().resolve();
         }
 
         info!(

@@ -20,7 +20,7 @@ pub async fn handle_prepare_call_hierarchy(
     let position = params.text_document_position_params.position;
     let doc = server.get_doc(&uri)?;
     let content = doc.content.clone();
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
     query.prepare_call_hierarchy(&uri, position, content)
 }
 
@@ -29,13 +29,14 @@ pub async fn handle_incoming_calls(
     server: &RubyLanguageServer,
     params: CallHierarchyIncomingCallsParams,
 ) -> Option<Vec<CallHierarchyIncomingCall>> {
+    let analysis_engine = server.analysis_engine_for_uri(&params.item.uri);
     let data: CallHierarchyData = params
         .item
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Incoming calls request for: {}", data.fqn);
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(analysis_engine);
     query.get_incoming_calls(&data)
 }
 
@@ -44,12 +45,13 @@ pub async fn handle_outgoing_calls(
     server: &RubyLanguageServer,
     params: CallHierarchyOutgoingCallsParams,
 ) -> Option<Vec<CallHierarchyOutgoingCall>> {
+    let analysis_engine = server.analysis_engine_for_uri(&params.item.uri);
     let data: CallHierarchyData = params
         .item
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Outgoing calls request for: {}", data.fqn);
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(analysis_engine);
     query.get_outgoing_calls(&data)
 }

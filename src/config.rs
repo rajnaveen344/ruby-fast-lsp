@@ -69,6 +69,9 @@ impl LinterKind {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct IndexingConfig {
+    #[serde(rename = "projectRoots")]
+    pub project_roots: Vec<String>,
+
     #[serde(rename = "excludedPatterns")]
     pub excluded_patterns: Vec<String>,
 

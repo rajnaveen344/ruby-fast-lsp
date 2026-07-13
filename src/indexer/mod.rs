@@ -23,5 +23,6 @@ pub mod indexer_gem;
 pub mod indexer_project;
 pub mod indexer_stdlib;
 pub mod interner;
+pub mod project_roots;
 
 pub mod version;

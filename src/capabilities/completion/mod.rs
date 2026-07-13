@@ -225,7 +225,7 @@ pub async fn find_completion_at_position(
     // Prioritize constant completions when in scope resolution context (::)
     if is_scope_resolution_context {
         // Focus on constant completions for scope resolution
-        let query = EngineQuery::with_engine(server.analysis_engine.clone());
+        let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
         let constant_completions =
             query.find_constant_completions(&analyzer, position, partial_string);
         completions.extend(constant_completions);
@@ -233,7 +233,9 @@ pub async fn find_completion_at_position(
         // Method call context: provide type-aware method completions
 
         // Get receiver type using type snapshots
-        let semantic_query = ServerCompletionSemanticQuery { server };
+        let semantic_query = ServerCompletionSemanticQuery {
+            analysis_engine: server.analysis_engine_for_uri(&uri),
+        };
         let receiver_type = ruby_analysis::inference::completion::receiver_type_from_context(
             &semantic_query,
             &document,
@@ -262,7 +264,7 @@ pub async fn find_completion_at_position(
                 NamespaceKind::Instance
             };
 
-            let query = EngineQuery::with_engine(server.analysis_engine.clone());
+            let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
             let method_completions =
                 query.find_method_completions(&receiver_type, &partial_string, kind);
             completions.extend(method_completions);
@@ -275,7 +277,7 @@ pub async fn find_completion_at_position(
         completions.extend(variable_completions);
 
         // Add constant completions
-        let query = EngineQuery::with_engine(server.analysis_engine.clone());
+        let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
         let constant_completions =
             query.find_constant_completions(&analyzer, position, partial_string.clone());
         completions.extend(constant_completions);
@@ -311,17 +313,17 @@ pub async fn find_completion_at_position(
 
     CompletionResponse::Array(completions)
 }
-struct ServerCompletionSemanticQuery<'a> {
-    server: &'a RubyLanguageServer,
+struct ServerCompletionSemanticQuery {
+    analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
 }
 
-impl CompletionSemanticQuery for ServerCompletionSemanticQuery<'_> {
+impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
     fn method_return_type_for_receiver(
         &self,
         namespace: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<RubyType> {
-        let engine = self.server.analysis_engine.read();
+        let engine = self.analysis_engine.read();
         ruby_analysis::engine::AnalysisQuery::new(&engine)
             .method_return_type_for_receiver(namespace, method)
     }
@@ -337,7 +339,7 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery<'_> {
             CompletionVariableKind::Class => ruby_analysis::engine::VariableTypeKind::Class,
             CompletionVariableKind::Global => ruby_analysis::engine::VariableTypeKind::Global,
         };
-        let engine = self.server.analysis_engine.read();
+        let engine = self.analysis_engine.read();
         ruby_analysis::engine::AnalysisQuery::new(&engine)
             .variable_type_in_file(kind, name, file_id)
     }

@@ -124,7 +124,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
 
     // Add unresolved entry diagnostics from the analysis engine.
     let diag_start = Instant::now();
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
     append_external_linter_diagnostics(server, &uri, &content, &mut diagnostics).await;
     let diag_count = diagnostics.len();
@@ -217,7 +217,8 @@ fn analysis_file_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKi
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-    let engine = server.analysis_engine.read();
+    let analysis_engine = server.analysis_engine_for_uri(uri);
+    let engine = analysis_engine.read();
     engine
         .file_id(&path)
         .and_then(|file_id| engine.file(file_id))
@@ -284,7 +285,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
 
     // Add unresolved diagnostics (now freshly computed with correct positions)
     let diag_start = Instant::now();
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
     let diag_count = diagnostics.len();
     let diag_elapsed = diag_start.elapsed();
@@ -359,7 +360,7 @@ async fn refresh_bounded_open_diagnostics(
             log::warn!("Failed to refresh open-file diagnostics for {}", uri.path());
             continue;
         };
-        let query = EngineQuery::with_engine(server.analysis_engine.clone());
+        let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
         let mut diagnostics = result.diagnostics;
         diagnostics.extend(query.get_unresolved_diagnostics(&uri));
         server.publish_diagnostics(uri, diagnostics).await;
@@ -421,7 +422,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     server.invalidate_namespace_tree_cache_debounced();
 
     // Add unresolved diagnostics from the analysis engine.
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
     append_external_linter_diagnostics(server, &uri, &content, &mut diagnostics).await;
     server.publish_diagnostics(uri.clone(), diagnostics).await;
@@ -504,7 +505,7 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     // Keep unresolved entry diagnostics visible (project-wide diagnostics).
     // Use the file's workspace index so we don't surface diagnostics from
     // other workspaces.
-    let query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
     let diagnostics = query.get_unresolved_diagnostics(&uri);
     server.publish_diagnostics(uri, diagnostics).await;
 }
@@ -621,7 +622,8 @@ fn clear_file_facts_if_kind(
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-    let mut engine = server.analysis_engine.write();
+    let analysis_engine = server.analysis_engine_for_uri(uri);
+    let mut engine = analysis_engine.write();
     let Some(file_id) = engine.file_id(&path) else {
         return false;
     };
@@ -656,8 +658,9 @@ mod tests {
         ])
     }
 
-    fn has_namespace(server: &RubyLanguageServer, name: &str) -> bool {
-        let engine = server.analysis_engine.read();
+    fn has_namespace(server: &RubyLanguageServer, uri: &Url, name: &str) -> bool {
+        let analysis_engine = server.analysis_engine_for_uri(uri);
+        let engine = analysis_engine.read();
         !AnalysisQuery::new(&engine)
             .symbols_for_fqn(&namespace(name))
             .is_empty()
@@ -682,7 +685,7 @@ mod tests {
             },
         )
         .await;
-        assert!(has_namespace(&server, "WatchedOne"));
+        assert!(has_namespace(&server, &uri, "WatchedOne"));
 
         std::fs::write(&path, "class WatchedTwo\nend\n").unwrap();
         handle_watched_files_changed(
@@ -695,21 +698,21 @@ mod tests {
             },
         )
         .await;
-        assert!(!has_namespace(&server, "WatchedOne"));
-        assert!(has_namespace(&server, "WatchedTwo"));
+        assert!(!has_namespace(&server, &uri, "WatchedOne"));
+        assert!(has_namespace(&server, &uri, "WatchedTwo"));
 
         std::fs::remove_file(&path).unwrap();
         handle_watched_files_changed(
             &server,
             DidChangeWatchedFilesParams {
                 changes: vec![FileEvent {
-                    uri,
+                    uri: uri.clone(),
                     typ: FileChangeType::DELETED,
                 }],
             },
         )
         .await;
-        assert!(!has_namespace(&server, "WatchedTwo"));
+        assert!(!has_namespace(&server, &uri, "WatchedTwo"));
 
         let vendor_path = workspace.path().join("vendor/owned.rb");
         std::fs::create_dir_all(vendor_path.parent().unwrap()).unwrap();
@@ -725,20 +728,20 @@ mod tests {
             },
         )
         .await;
-        assert!(!has_namespace(&server, "VendorOwned"));
+        assert!(!has_namespace(&server, &vendor_uri, "VendorOwned"));
 
         server.config.lock().indexing.included_patterns = vec!["vendor/owned.rb".to_string()];
         handle_watched_files_changed(
             &server,
             DidChangeWatchedFilesParams {
                 changes: vec![FileEvent {
-                    uri: vendor_uri,
+                    uri: vendor_uri.clone(),
                     typ: FileChangeType::CHANGED,
                 }],
             },
         )
         .await;
-        assert!(has_namespace(&server, "VendorOwned"));
+        assert!(has_namespace(&server, &vendor_uri, "VendorOwned"));
     }
 
     #[tokio::test]
@@ -765,7 +768,7 @@ mod tests {
             },
         )
         .await;
-        assert!(has_namespace(&server, "NativeWidget"));
+        assert!(has_namespace(&server, &uri, "NativeWidget"));
 
         std::fs::write(
             &path,
@@ -782,8 +785,8 @@ mod tests {
             },
         )
         .await;
-        assert!(!has_namespace(&server, "NativeWidget"));
-        assert!(has_namespace(&server, "GeneratedWidget"));
+        assert!(!has_namespace(&server, &uri, "NativeWidget"));
+        assert!(has_namespace(&server, &uri, "GeneratedWidget"));
 
         std::fs::write(&path, "class GeneratedWidget\n  def broken: (\n").unwrap();
         handle_watched_files_changed(
@@ -797,7 +800,7 @@ mod tests {
         )
         .await;
         assert!(
-            !has_namespace(&server, "GeneratedWidget"),
+            !has_namespace(&server, &uri, "GeneratedWidget"),
             "malformed regenerated RBS must clear stale signature facts"
         );
 
@@ -806,13 +809,13 @@ mod tests {
             &server,
             DidChangeWatchedFilesParams {
                 changes: vec![FileEvent {
-                    uri,
+                    uri: uri.clone(),
                     typ: FileChangeType::DELETED,
                 }],
             },
         )
         .await;
-        assert!(!has_namespace(&server, "GeneratedWidget"));
+        assert!(!has_namespace(&server, &uri, "GeneratedWidget"));
     }
 
     #[tokio::test]
@@ -837,7 +840,8 @@ mod tests {
         )
         .await;
 
-        let engine = server.analysis_engine.read();
+        let analysis_engine = server.analysis_engine_for_uri(&uri);
+        let engine = analysis_engine.read();
         let file_id = engine
             .file_id(&path)
             .expect("opened workspace file must be registered");
@@ -879,7 +883,8 @@ mod tests {
         )
         .await;
 
-        let engine = server.analysis_engine.read();
+        let analysis_engine = server.analysis_engine_for_uri(&uri);
+        let engine = analysis_engine.read();
         assert!(
             !engine
                 .file(file_id)
@@ -899,13 +904,13 @@ mod tests {
         handle_did_close(
             &server,
             DidCloseTextDocumentParams {
-                text_document: TextDocumentIdentifier { uri },
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
             },
         )
         .await;
 
         assert!(
-            !has_namespace(&server, "ChangedVendor"),
+            !has_namespace(&server, &uri, "ChangedVendor"),
             "closing an excluded workspace file must remove its interactive-only facts"
         );
     }

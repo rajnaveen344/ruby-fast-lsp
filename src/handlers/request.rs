@@ -252,10 +252,10 @@ pub async fn handle_debug_lookup(
 
 pub async fn handle_debug_stats(
     lang_server: &RubyLanguageServer,
-    _params: debug::StatsParams,
+    params: debug::StatsParams,
 ) -> LspResult<debug::StatsResponse> {
     info!("Debug stats request received");
-    Ok(debug::handle_stats(lang_server))
+    Ok(debug::handle_stats(lang_server, params))
 }
 
 pub async fn handle_debug_ancestors(
@@ -276,10 +276,10 @@ pub async fn handle_debug_methods(
 
 pub async fn handle_debug_inference_stats(
     lang_server: &RubyLanguageServer,
-    _params: debug::InferenceStatsParams,
+    params: debug::InferenceStatsParams,
 ) -> LspResult<debug::InferenceStatsResponse> {
     info!("Debug inference-stats request received");
-    Ok(debug::handle_inference_stats(lang_server))
+    Ok(debug::handle_inference_stats(lang_server, params))
 }
 
 pub async fn handle_export_graph(

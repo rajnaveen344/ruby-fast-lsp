@@ -34,7 +34,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
     };
 
     // Create unified query with document context.
-    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine.clone());
+    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine_for_uri(&uri));
 
     // Get hover info from query layer
     let hover_info = query.get_hover_at_position(&uri, position, &content)?;

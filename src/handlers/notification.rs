@@ -80,11 +80,23 @@ pub async fn handle_initialize(
                 "Registering workspace folder for indexing: {}",
                 folder.uri.as_str()
             );
-            lang_server.add_workspace(folder.uri.clone());
+            if let Err(error) = lang_server.add_workspace_folder(folder.uri.clone()) {
+                warn!(
+                    "Failed to discover Ruby projects in workspace folder {}: {}",
+                    folder.uri.as_str(),
+                    error
+                );
+            }
         }
     } else if let Some(root) = root_uri {
         info!("Registering workspace root for indexing: {}", root.as_str());
-        lang_server.add_workspace(root.clone());
+        if let Err(error) = lang_server.add_workspace_folder(root.clone()) {
+            warn!(
+                "Failed to discover Ruby projects in workspace root {}: {}",
+                root.as_str(),
+                error
+            );
+        }
     } else {
         warn!("No workspace folder or root URI provided. Files opened ad-hoc will use the orphan index.");
     }
@@ -353,15 +365,48 @@ pub async fn handle_did_change_workspace_folders(
     server: &RubyLanguageServer,
     params: DidChangeWorkspaceFoldersParams,
 ) {
+    let changed_paths = params
+        .event
+        .removed
+        .iter()
+        .chain(params.event.added.iter())
+        .filter_map(|folder| folder.uri.to_file_path().ok())
+        .collect::<Vec<_>>();
+    let open_documents_to_rehome = server
+        .docs
+        .lock()
+        .values()
+        .filter_map(|document| {
+            let document = document.read();
+            let path = document.uri.to_file_path().ok()?;
+            changed_paths
+                .iter()
+                .any(|removed| path.starts_with(removed))
+                .then(|| TextDocumentItem {
+                    uri: document.uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: document.version,
+                    text: document.content.clone(),
+                })
+        })
+        .collect::<Vec<_>>();
+
     for removed in &params.event.removed {
         info!("Removing workspace folder: {}", removed.uri.as_str());
-        server.remove_workspace(&removed.uri);
+        server.remove_workspace_folder(&removed.uri);
     }
 
     let mut added_workspaces = Vec::new();
     for added in params.event.added {
         info!("Adding workspace folder: {}", added.uri.as_str());
-        added_workspaces.push(server.add_workspace(added.uri));
+        match server.add_workspace_folder(added.uri.clone()) {
+            Ok(projects) => added_workspaces.extend(projects),
+            Err(error) => warn!(
+                "Failed to discover Ruby projects in workspace folder {}: {}",
+                added.uri.as_str(),
+                error
+            ),
+        }
     }
 
     let config = server.config.lock().clone();
@@ -369,6 +414,12 @@ pub async fn handle_did_change_workspace_folders(
         .extension_registry
         .configure_from_config_and_workspace_roots(&config, &server.workspace_root_paths());
     refresh_extension_watch_registration(server).await;
+
+    for text_document in open_documents_to_rehome {
+        let owner = server.analysis_engine_for_uri(&text_document.uri);
+        server.clear_file_from_other_engines(&text_document.uri, &owner);
+        indexing::handle_did_open(server, DidOpenTextDocumentParams { text_document }).await;
+    }
 
     for workspace in added_workspaces {
         // Spawn coordinator for the new workspace. Mirrors the per-workspace

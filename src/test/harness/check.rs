@@ -1019,14 +1019,15 @@ async fn run_diagnostics_check(
         use ruby_analysis::indexer::fact_collector::FactCollector;
         use ruby_prism::Visit;
         use std::sync::Arc;
+        let analysis_engine = server.analysis_engine_for_uri(uri);
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
             Arc::new(server.extension_registry.clone()),
-            server.analysis_engine.clone(),
+            analysis_engine.clone(),
         );
         visitor.visit(&parse_result.node());
         let file_id = visitor.document.analysis_file_id();
-        let mut engine = server.analysis_engine.write();
+        let mut engine = analysis_engine.write();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let facts = ruby_analysis::engine::FileFacts {
             symbols: query.symbol_facts_in_file(file_id),
@@ -1055,7 +1056,7 @@ async fn run_diagnostics_check(
     // Add unresolved-entry diagnostics (unresolved-constant, unresolved-method, etc.)
     // populated by indexing.
     {
-        let query = crate::query::EngineQuery::with_engine(server.analysis_engine.clone());
+        let query = crate::query::EngineQuery::with_engine(server.analysis_engine_for_uri(uri));
         diagnostics.extend(query.get_unresolved_diagnostics(uri));
     }
 

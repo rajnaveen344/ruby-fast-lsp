@@ -86,10 +86,16 @@ pub struct Workspace {
     pub root_uri: Url,
     pub root_path: PathBuf,
     pub indexing_complete: Arc<AtomicBool>,
+    pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    workspace_folder_uris: Arc<RwLock<std::collections::HashSet<Url>>>,
 }
 
 impl Workspace {
     pub fn new(root_uri: Url) -> Self {
+        Self::for_workspace_folder(root_uri.clone(), root_uri)
+    }
+
+    fn for_workspace_folder(root_uri: Url, workspace_folder_uri: Url) -> Self {
         let root_path = root_uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(root_uri.path()));
@@ -97,6 +103,10 @@ impl Workspace {
             root_uri,
             root_path,
             indexing_complete: Arc::new(AtomicBool::new(false)),
+            analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
+            workspace_folder_uris: Arc::new(RwLock::new(std::collections::HashSet::from([
+                workspace_folder_uri,
+            ]))),
         }
     }
 }
@@ -108,7 +118,9 @@ pub struct RubyLanguageServer {
     /// `workspace_for_uri`.
     pub workspaces: Arc<RwLock<Vec<Workspace>>>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
-    /// Editor-agnostic analysis state shared by LSP and future agent APIs.
+    /// Analysis state for open files outside every registered Ruby project.
+    /// Project facts live in `Workspace::analysis_engine` and must never be
+    /// written here.
     pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
     pub extension_registry: ExtensionRegistryHandle,
@@ -214,6 +226,45 @@ impl RubyLanguageServer {
         best.cloned()
     }
 
+    /// Return the isolated semantic engine that owns a document URI. Files
+    /// outside registered workspaces use the orphan engine.
+    pub fn analysis_engine_for_uri(&self, uri: &Url) -> Arc<RwLock<AnalysisEngine>> {
+        self.workspace_for_uri(uri)
+            .map(|workspace| workspace.analysis_engine)
+            .unwrap_or_else(|| self.analysis_engine.clone())
+    }
+
+    /// Snapshot every active project engine plus the orphan engine.
+    pub fn analysis_engines(&self) -> Vec<Arc<RwLock<AnalysisEngine>>> {
+        let mut engines = self
+            .workspaces
+            .read()
+            .iter()
+            .map(|workspace| workspace.analysis_engine.clone())
+            .collect::<Vec<_>>();
+        engines.push(self.analysis_engine.clone());
+        engines
+    }
+
+    pub fn clear_file_from_other_engines(&self, uri: &Url, owner: &Arc<RwLock<AnalysisEngine>>) {
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+        for analysis_engine in self.analysis_engines() {
+            if Arc::ptr_eq(&analysis_engine, owner) {
+                continue;
+            }
+            let mut engine = analysis_engine.write();
+            if let Some(file_id) = engine.file_id(&path) {
+                engine.replace_facts(
+                    file_id,
+                    ruby_analysis::engine::FileFacts::default(),
+                    ruby_analysis::engine::ResolveMode::Immediate,
+                );
+            }
+        }
+    }
+
     pub fn open_or_update_analysis_file(
         &self,
         uri: &Url,
@@ -231,32 +282,76 @@ impl RubyLanguageServer {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        self.analysis_engine
-            .write()
-            .register_file(ruby_analysis::engine::SourceFileInput {
+        self.analysis_engine_for_uri(uri).write().register_file(
+            ruby_analysis::engine::SourceFileInput {
                 path,
                 content: source.into(),
                 kind,
-            })
+            },
+        )
     }
 
     /// Register a new workspace. If a workspace with the same root URI is
     /// already registered, returns the existing one without creating a new
     /// index. Returns the (existing or newly created) `Workspace`.
     pub fn add_workspace(&self, root_uri: Url) -> Workspace {
+        self.add_project(root_uri.clone(), root_uri)
+    }
+
+    /// Register an editor workspace folder, expanding a container folder into
+    /// its nearest Gemfile-owned Ruby projects.
+    pub fn add_workspace_folder(&self, folder_uri: Url) -> anyhow::Result<Vec<Workspace>> {
+        let folder_path = folder_uri.to_file_path().map_err(|_| {
+            anyhow::anyhow!(
+                "Workspace folder URI is not a filesystem path: {}",
+                folder_uri
+            )
+        })?;
+        let explicit_roots = self.config.lock().indexing.project_roots.clone();
+        let roots = crate::indexer::project_roots::discover_project_roots_with_explicit(
+            &folder_path,
+            &explicit_roots,
+        )?;
+        roots
+            .into_iter()
+            .map(|root| {
+                let root_uri = Url::from_directory_path(&root).map_err(|_| {
+                    anyhow::anyhow!(
+                        "Ruby project root is not a valid file URI: {}",
+                        root.display()
+                    )
+                })?;
+                Ok(self.add_project(root_uri, folder_uri.clone()))
+            })
+            .collect()
+    }
+
+    fn add_project(&self, root_uri: Url, workspace_folder_uri: Url) -> Workspace {
         {
             let workspaces = self.workspaces.read();
             if let Some(existing) = workspaces.iter().find(|w| w.root_uri == root_uri) {
+                existing
+                    .workspace_folder_uris
+                    .write()
+                    .insert(workspace_folder_uri);
                 return existing.clone();
             }
         }
-        let ws = Workspace::new(root_uri);
+        let ws = Workspace::for_workspace_folder(root_uri, workspace_folder_uri);
         self.workspaces.write().push(ws.clone());
         ws
     }
 
     pub fn remove_workspace(&self, root_uri: &Url) {
         self.workspaces.write().retain(|w| w.root_uri != *root_uri);
+    }
+
+    pub fn remove_workspace_folder(&self, folder_uri: &Url) {
+        self.workspaces.write().retain(|workspace| {
+            let mut owners = workspace.workspace_folder_uris.write();
+            owners.remove(folder_uri);
+            !owners.is_empty()
+        });
     }
 
     /// Snapshot of all currently registered workspaces.

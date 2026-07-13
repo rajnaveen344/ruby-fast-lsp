@@ -48,7 +48,8 @@ pub async fn handle_inlay_hints(
     };
 
     // Create query context.
-    let query = EngineQuery::with_doc_and_engine(doc_arc.clone(), server.analysis_engine.clone());
+    let query =
+        EngineQuery::with_doc_and_engine(doc_arc.clone(), server.analysis_engine_for_uri(&uri));
 
     // Get document for query
     let document = doc_arc.read();

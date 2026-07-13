@@ -26,7 +26,9 @@ use ruby_analysis::core::{
     SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
-use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode, SemanticChange};
+use ruby_analysis::engine::{
+    AnalysisEngine, AnalysisQuery, FileFacts, ResolveMode, SemanticChange,
+};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{is_erb_path, mask_erb, AnalysisIndexer};
@@ -192,6 +194,7 @@ impl FileProcessor {
 
         // 1. Parse ONLY ONCE
         let analysis_source = analysis_source(uri, content);
+        let analysis_engine = server.analysis_engine_for_uri(uri);
         let parse_result = ruby_prism::parse(analysis_source.as_bytes());
         let node = parse_result.node();
         let source_kind = self.analysis_source_kind_for_uri(server, uri);
@@ -209,8 +212,7 @@ impl FileProcessor {
             document_version,
             analysis_file_id,
         );
-        let previous_export_fingerprint = server
-            .analysis_engine
+        let previous_export_fingerprint = analysis_engine
             .read()
             .semantic_export_fingerprint(analysis_file_id);
 
@@ -219,8 +221,12 @@ impl FileProcessor {
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
-            let semantic_change =
-                replace_file_analysis(server, analysis_file_id, FileFacts::default(), resolution);
+            let semantic_change = replace_file_analysis(
+                &analysis_engine,
+                analysis_file_id,
+                FileFacts::default(),
+                resolution,
+            );
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -232,25 +238,25 @@ impl FileProcessor {
 
         // 3. Collect facts.
         let direct_facts_seed = collect_direct_facts(
-            server,
+            &analysis_engine,
             &node,
             analysis_source.as_ref(),
             document.analysis_file_id(),
             None,
         );
         replace_analysis_facts_for_file(
-            server,
+            &analysis_engine,
             document.analysis_file_id(),
             &direct_facts_seed,
             false,
         );
         self.extension_registry
-            .ensure_semantic_seed_facts(&server.analysis_engine);
+            .ensure_semantic_seed_facts(&analysis_engine);
 
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
             Arc::new(self.extension_registry.clone()),
-            server.analysis_engine.clone(),
+            analysis_engine.clone(),
         );
         visitor.visit(&node);
 
@@ -258,7 +264,7 @@ impl FileProcessor {
         let updated_document = visitor.document.clone();
         let mut direct_facts = direct_facts_seed;
         add_extension_analysis_facts(
-            server,
+            &analysis_engine,
             &updated_document,
             &extension_index_patches,
             &mut direct_facts,
@@ -278,7 +284,7 @@ impl FileProcessor {
                 .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
         );
         replace_file_analysis(
-            server,
+            &analysis_engine,
             updated_document.analysis_file_id(),
             FileFacts {
                 symbols: symbol_facts,
@@ -306,8 +312,7 @@ impl FileProcessor {
             },
             resolution,
         );
-        let current_export_fingerprint = server
-            .analysis_engine
+        let current_export_fingerprint = analysis_engine
             .read()
             .semantic_export_fingerprint(analysis_file_id)
             .expect(
@@ -359,7 +364,15 @@ impl FileProcessor {
         server: &RubyLanguageServer,
         source_kind: SourceKind,
     ) -> Result<()> {
-        self.collect_file_facts_as_with_resolution(uri, content, server, source_kind, true, None)
+        let analysis_engine = server.analysis_engine_for_uri(uri);
+        self.collect_file_facts_as_with_resolution(
+            uri,
+            content,
+            analysis_engine,
+            source_kind,
+            true,
+            None,
+        )
     }
 
     pub fn collect_file_facts_as_deferred_resolution(
@@ -369,7 +382,32 @@ impl FileProcessor {
         server: &RubyLanguageServer,
         source_kind: SourceKind,
     ) -> Result<()> {
-        self.collect_file_facts_as_with_resolution(uri, content, server, source_kind, false, None)
+        let analysis_engine = server.analysis_engine_for_uri(uri);
+        self.collect_file_facts_as_with_resolution(
+            uri,
+            content,
+            analysis_engine,
+            source_kind,
+            false,
+            None,
+        )
+    }
+
+    pub fn collect_file_facts_as_deferred_resolution_in_engine(
+        &self,
+        uri: &Url,
+        content: &str,
+        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        source_kind: SourceKind,
+    ) -> Result<()> {
+        self.collect_file_facts_as_with_resolution(
+            uri,
+            content,
+            analysis_engine,
+            source_kind,
+            false,
+            None,
+        )
     }
 
     pub fn collect_rbs_facts_as_deferred_resolution(
@@ -397,6 +435,7 @@ impl FileProcessor {
         server: &RubyLanguageServer,
         resolution: FileResolution,
     ) -> Result<()> {
+        let analysis_engine = server.analysis_engine_for_uri(uri);
         let analysis_file_id = server.open_or_update_analysis_file_with_kind(
             uri,
             content.to_string(),
@@ -405,7 +444,12 @@ impl FileProcessor {
         let facts = match ruby_analysis::indexer::index_rbs(analysis_file_id, content) {
             Ok(facts) => facts,
             Err(error) => {
-                replace_file_analysis(server, analysis_file_id, FileFacts::default(), resolution);
+                replace_file_analysis(
+                    &analysis_engine,
+                    analysis_file_id,
+                    FileFacts::default(),
+                    resolution,
+                );
                 return Err(anyhow::anyhow!(
                     "Failed to parse RBS {}: {error}",
                     uri.path()
@@ -413,7 +457,7 @@ impl FileProcessor {
             }
         };
         replace_file_analysis(
-            server,
+            &analysis_engine,
             analysis_file_id,
             FileFacts {
                 symbols: facts.symbols,
@@ -441,7 +485,25 @@ impl FileProcessor {
         self.collect_file_facts_as_with_resolution(
             uri,
             content,
-            server,
+            server.analysis_engine_for_uri(uri),
+            source_kind,
+            false,
+            Some(known_namespaces),
+        )
+    }
+
+    pub fn collect_file_facts_as_deferred_resolution_with_known_namespaces_in_engine(
+        &self,
+        uri: &Url,
+        content: &str,
+        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        source_kind: SourceKind,
+        known_namespaces: &HashSet<FullyQualifiedName>,
+    ) -> Result<()> {
+        self.collect_file_facts_as_with_resolution(
+            uri,
+            content,
+            analysis_engine,
             source_kind,
             false,
             Some(known_namespaces),
@@ -452,15 +514,24 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
         source_kind: SourceKind,
         resolve_references: bool,
         known_namespaces: Option<&HashSet<FullyQualifiedName>>,
     ) -> Result<()> {
         debug!("Collecting facts for: {:?}", uri);
 
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         let analysis_file_id =
-            server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
+            analysis_engine
+                .write()
+                .register_file(ruby_analysis::engine::SourceFileInput {
+                    path,
+                    content: content.to_string(),
+                    kind: source_kind,
+                });
         let document = RubyDocument::with_analysis_file_id(
             uri.clone(),
             content.to_string(),
@@ -474,7 +545,7 @@ impl FileProcessor {
 
         let direct_facts_seed = if resolve_references {
             collect_direct_facts(
-                server,
+                &analysis_engine,
                 &node,
                 analysis_source.as_ref(),
                 analysis_file_id,
@@ -485,24 +556,24 @@ impl FileProcessor {
         };
         if resolve_references {
             replace_analysis_facts_for_file(
-                server,
+                &analysis_engine,
                 analysis_file_id,
                 &direct_facts_seed,
                 resolve_references,
             );
         }
         self.extension_registry
-            .ensure_semantic_seed_facts(&server.analysis_engine);
+            .ensure_semantic_seed_facts(&analysis_engine);
 
         let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
             Arc::new(self.extension_registry.clone()),
-            server.analysis_engine.clone(),
+            analysis_engine.clone(),
         );
         if !resolve_references {
             let direct_known_namespaces = known_namespaces
                 .cloned()
-                .unwrap_or_else(|| collect_known_namespaces(server));
+                .unwrap_or_else(|| collect_known_namespaces(&analysis_engine));
             fact_collector = fact_collector.with_direct_known_namespaces(direct_known_namespaces);
         }
         fact_collector.visit(&node);
@@ -513,7 +584,7 @@ impl FileProcessor {
             fact_collector.direct_facts.clone()
         };
         add_extension_analysis_facts(
-            server,
+            &analysis_engine,
             &document,
             &fact_collector.extension_index_patches,
             &mut direct_facts,
@@ -533,7 +604,7 @@ impl FileProcessor {
             (Vec::new(), Vec::new())
         };
         replace_file_analysis(
-            server,
+            &analysis_engine,
             analysis_file_id,
             FileFacts {
                 symbols: direct_facts.symbols,
@@ -561,7 +632,8 @@ impl FileProcessor {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let engine = server.analysis_engine.read();
+        let analysis_engine = server.analysis_engine_for_uri(uri);
+        let engine = analysis_engine.read();
         engine
             .file_id(&path)
             .and_then(|file_id| engine.file(file_id))
@@ -586,7 +658,7 @@ struct ExtensionGraphEdge<'a> {
 }
 
 fn collect_direct_facts(
-    server: &RubyLanguageServer,
+    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
     node: &ruby_prism::Node<'_>,
     content: &str,
     file_id: ruby_analysis::core::SourceFileId,
@@ -594,19 +666,19 @@ fn collect_direct_facts(
 ) -> ruby_analysis::indexer::AnalysisIndex {
     let known_namespaces = known_namespaces
         .cloned()
-        .unwrap_or_else(|| collect_known_namespaces(server));
+        .unwrap_or_else(|| collect_known_namespaces(analysis_engine));
     AnalysisIndexer::with_known_namespaces(file_id, known_namespaces)
         .index_node_with_source(node, content)
 }
 
 fn replace_analysis_facts_for_file(
-    server: &RubyLanguageServer,
+    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
     file_id: ruby_analysis::core::SourceFileId,
     facts: &ruby_analysis::indexer::AnalysisIndex,
     resolve_references: bool,
 ) {
     replace_file_analysis(
-        server,
+        analysis_engine,
         file_id,
         file_analysis_facts_from_index(facts),
         if resolve_references {
@@ -618,12 +690,12 @@ fn replace_analysis_facts_for_file(
 }
 
 fn replace_file_analysis(
-    server: &RubyLanguageServer,
+    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
     file_id: ruby_analysis::core::SourceFileId,
     facts: FileFacts,
     resolution: FileResolution,
 ) -> SemanticChange {
-    let mut engine = server.analysis_engine.write();
+    let mut engine = analysis_engine.write();
     match resolution {
         FileResolution::Full => engine.replace_facts(file_id, facts, ResolveMode::Immediate),
         FileResolution::CurrentFile => {
@@ -701,15 +773,44 @@ mod tests {
 
         assert_eq!(result.semantic_change, SemanticChange::InitialIndex);
     }
+
+    #[test]
+    fn explicit_project_engine_owns_external_gem_source() {
+        let server = RubyLanguageServer::default();
+        let project_uri = Url::parse("file:///workspace/server/").unwrap();
+        let project = server.add_workspace(project_uri);
+        let dependency_uri =
+            Url::parse("file:///workspace/server/vendor/cache/pbkdf2/lib/pbkdf2.rb").unwrap();
+        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+
+        processor
+            .collect_file_facts_as_deferred_resolution_in_engine(
+                &dependency_uri,
+                "class PBKDF2\nend\n",
+                project.analysis_engine.clone(),
+                SourceKind::Gem,
+            )
+            .unwrap();
+
+        let engine = project.analysis_engine.read();
+        let path = dependency_uri.to_file_path().unwrap();
+        let file_id = engine
+            .file_id(&path)
+            .expect("gem source must be registered");
+        assert_eq!(engine.file(file_id).unwrap().kind, SourceKind::Gem);
+        assert!(server.analysis_engine.read().file_id(&path).is_none());
+    }
 }
 
-fn collect_known_namespaces(server: &RubyLanguageServer) -> HashSet<FullyQualifiedName> {
-    let engine = server.analysis_engine.read();
+fn collect_known_namespaces(
+    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+) -> HashSet<FullyQualifiedName> {
+    let engine = analysis_engine.read();
     AnalysisQuery::new(&engine).known_namespace_fqns()
 }
 
 fn add_extension_analysis_facts(
-    server: &RubyLanguageServer,
+    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
     document: &RubyDocument,
     patches: &[IndexPatch],
     facts: &mut ruby_analysis::indexer::AnalysisIndex,
@@ -719,7 +820,7 @@ fn add_extension_analysis_facts(
     }
 
     let mut known_namespaces = {
-        let engine = server.analysis_engine.read();
+        let engine = analysis_engine.read();
         AnalysisQuery::new(&engine).known_namespace_fqns()
     };
     for node in &facts.graph_nodes {

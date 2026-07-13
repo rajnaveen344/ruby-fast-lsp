@@ -17,6 +17,7 @@ use ruby_analysis::engine::SourceFile;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
@@ -131,6 +132,15 @@ pub struct IndexingCoordinator {
 }
 
 impl IndexingCoordinator {
+    fn analysis_engine(
+        &self,
+        server: &RubyLanguageServer,
+    ) -> Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>> {
+        let uri = Url::from_directory_path(&self.workspace_root).expect(
+            "INVARIANT VIOLATED: workspace root cannot be represented as a file URI. This is a bug because indexing only accepts filesystem workspace roots. Fix: register a canonical filesystem project root before creating the coordinator.",
+        );
+        server.analysis_engine_for_uri(&uri)
+    }
     /// Creates a new IndexingCoordinator for the given workspace.
     ///
     /// Call `run_complete_indexing()` to actually start the indexing process.
@@ -216,7 +226,8 @@ impl IndexingCoordinator {
         let total_dur = start_time.elapsed();
         info!("Complete indexing finished in {:?}", total_dur);
         {
-            let mut engine = server.analysis_engine.write();
+            let analysis_engine = self.analysis_engine(server);
+            let mut engine = analysis_engine.write();
             engine.shrink_to_fit();
         }
         release_allocator_free_pages();
@@ -232,7 +243,8 @@ impl IndexingCoordinator {
     }
 
     fn log_analysis_memory_stats(&self, server: &RubyLanguageServer) {
-        let engine = server.analysis_engine.read();
+        let analysis_engine = self.analysis_engine(server);
+        let engine = analysis_engine.read();
         let stats = engine.stats();
         let memory = engine.estimated_memory_stats();
         let total = memory.total();
@@ -358,7 +370,8 @@ impl IndexingCoordinator {
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
         let open_uris = server.docs.lock().keys().cloned().collect::<HashSet<_>>();
         let file_ids = {
-            let engine = server.analysis_engine.read();
+            let analysis_engine = self.analysis_engine(server);
+            let engine = analysis_engine.read();
             let mut file_ids = engine.diagnostic_store().file_ids();
             file_ids.retain(|file_id| {
                 engine
@@ -387,7 +400,8 @@ impl IndexingCoordinator {
 
         for file_id in file_ids {
             let Some((uri, diagnostics)) = ({
-                let engine = server.analysis_engine.read();
+                let analysis_engine = self.analysis_engine(server);
+                let engine = analysis_engine.read();
                 match engine.file(file_id) {
                     Some(file) => match Url::from_file_path(&file.path) {
                         Ok(uri) => {
@@ -436,7 +450,9 @@ impl IndexingCoordinator {
         }
 
         stdlib_indexer.set_required_modules(required_stdlib);
-        stdlib_indexer.index_stdlib(server).await?;
+        stdlib_indexer
+            .index_stdlib(server, self.analysis_engine(server))
+            .await?;
         self.stdlib_indexer = Some(stdlib_indexer);
         Ok(())
     }
@@ -1481,7 +1497,12 @@ end
         coordinator.run_complete_indexing(&server).await.unwrap();
 
         assert!(
-            server.analysis_engine.read().stats().diagnostics > 0,
+            server
+                .analysis_engine_for_uri(&uri)
+                .read()
+                .stats()
+                .diagnostics
+                > 0,
             "cold indexing must retain workspace diagnostics in the engine"
         );
         assert!(

@@ -111,15 +111,26 @@ impl IndexerGem {
 
         self.discover_gems().await?;
         info!("Discovered {} gems", self.discovered_gems.len());
+        let project_root = self.workspace_root.as_ref().expect(
+            "INVARIANT VIOLATED: gem indexing has no Ruby project root. This is a bug because dependency facts must be owned by one isolated project engine. Fix: construct IndexerGem with the owning project root.",
+        );
+        let project_uri = Url::from_directory_path(project_root).map_err(|_| {
+            anyhow!(
+                "Ruby project root is not a valid file URI: {}",
+                project_root.display()
+            )
+        })?;
+        let analysis_engine = server.analysis_engine_for_uri(&project_uri);
 
         let indexed_files = if selective && !self.required_gems.is_empty() {
-            self.index_required_gems(server).await?
+            self.index_required_gems(server, analysis_engine.clone())
+                .await?
         } else {
-            self.index_all_gems(server).await?
+            self.index_all_gems(server, analysis_engine.clone()).await?
         };
 
         if !indexed_files.is_empty() {
-            server.analysis_engine.write().resolve();
+            analysis_engine.write().resolve();
         }
 
         info!("Indexed {} files from gems", indexed_files.len());
@@ -127,7 +138,11 @@ impl IndexerGem {
     }
 
     /// Index only the gems required by the project
-    async fn index_required_gems(&self, server: &RubyLanguageServer) -> Result<Vec<Url>> {
+    async fn index_required_gems(
+        &self,
+        server: &RubyLanguageServer,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<Vec<Url>> {
         let required_gems = self.required_gems_with_dependencies();
         let total = required_gems.len();
         let mut indexed_files = Vec::new();
@@ -147,7 +162,7 @@ impl IndexerGem {
                         "Indexing required gem: {} v{}",
                         gem_info.name, gem_info.version
                     );
-                    indexed_files.extend(self.index_gem_files(gem_info, server));
+                    indexed_files.extend(self.index_gem_files(gem_info, analysis_engine.clone()));
                 }
             } else {
                 debug!("Required gem not found: {}", gem_name);
@@ -158,7 +173,11 @@ impl IndexerGem {
     }
 
     /// Index all discovered gems
-    async fn index_all_gems(&self, server: &RubyLanguageServer) -> Result<Vec<Url>> {
+    async fn index_all_gems(
+        &self,
+        server: &RubyLanguageServer,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<Vec<Url>> {
         let total = self.discovered_gems.len();
         let mut indexed_files = Vec::new();
 
@@ -176,7 +195,7 @@ impl IndexerGem {
                     continue;
                 }
                 info!("Indexing gem: {} v{}", gem_info.name, gem_info.version);
-                indexed_files.extend(self.index_gem_files(gem_info, server));
+                indexed_files.extend(self.index_gem_files(gem_info, analysis_engine.clone()));
             }
         }
 
@@ -184,7 +203,11 @@ impl IndexerGem {
     }
 
     /// Index all Ruby files from a gem's lib paths
-    fn index_gem_files(&self, gem_info: &GemInfo, server: &RubyLanguageServer) -> Vec<Url> {
+    fn index_gem_files(
+        &self,
+        gem_info: &GemInfo,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Vec<Url> {
         let Some(processor) = &self.file_processor else {
             warn!(
                 "No file processor set for gem indexer, skipping {}",
@@ -204,12 +227,14 @@ impl IndexerGem {
                 ruby_files.par_iter().for_each(|file_path| {
                     if let Ok(content) = std::fs::read_to_string(file_path) {
                         if let Ok(uri) = Url::from_file_path(file_path) {
-                            if let Err(e) = processor.collect_file_facts_as_deferred_resolution(
-                                &uri,
-                                &content,
-                                server,
-                                ruby_analysis::core::SourceKind::Gem,
-                            ) {
+                            if let Err(e) = processor
+                                .collect_file_facts_as_deferred_resolution_in_engine(
+                                    &uri,
+                                    &content,
+                                    analysis_engine.clone(),
+                                    ruby_analysis::core::SourceKind::Gem,
+                                )
+                            {
                                 warn!("Failed to index gem file {:?}: {}", file_path, e);
                             }
                         }
@@ -240,6 +265,7 @@ impl IndexerGem {
 
         self.discover_gem_paths()?;
         self.discover_installed_gems()?;
+        self.discover_cached_git_gems()?;
         self.resolve_gem_lib_paths();
 
         info!("Discovered {} unique gems", self.discovered_gems.len());
@@ -302,7 +328,7 @@ impl IndexerGem {
 
     /// Discover gems using Bundler (Gemfile-based)
     fn discover_bundler_gems(&mut self) -> Result<()> {
-        self.find_gemfile()?;
+        let gemfile = self.find_gemfile()?;
 
         let script = r#"
             require 'bundler'
@@ -328,6 +354,7 @@ impl IndexerGem {
 
         let output = self
             .ruby_command()
+            .env("BUNDLE_GEMFILE", &gemfile)
             .args(["-e", script])
             .output()
             .map_err(|e| anyhow!("Failed to execute bundler gem discovery: {}", e))?;
@@ -377,6 +404,93 @@ impl IndexerGem {
         self.process_gem_json(&output.stdout, "Global")
     }
 
+    /// Add extracted Bundler Git caches using only lockfile metadata. Gemfiles
+    /// and gemspecs are project code and must not be executed by this fallback.
+    fn discover_cached_git_gems(&mut self) -> Result<()> {
+        let Some(root) = &self.workspace_root else {
+            return Ok(());
+        };
+        let lockfile_path = root.join("Gemfile.lock");
+        let Ok(lockfile) = std::fs::read_to_string(&lockfile_path) else {
+            return Ok(());
+        };
+        let cache_root = root.join("vendor/cache");
+        if !cache_root.is_dir() {
+            return Ok(());
+        }
+
+        let mut lines = lockfile.lines().peekable();
+        while let Some(line) = lines.next() {
+            if line != "GIT" {
+                continue;
+            }
+            let mut remote = None;
+            let mut revision = None;
+            let mut specs = Vec::new();
+            while let Some(section_line) = lines.peek().copied() {
+                if !section_line.is_empty() && !section_line.starts_with(' ') {
+                    break;
+                }
+                let section_line = lines.next().expect(
+                    "INVARIANT VIOLATED: peeked lockfile line disappeared. This is a bug because iterator state must remain stable between peek and next. Fix: keep lockfile parsing single-threaded.",
+                );
+                if let Some(value) = section_line.strip_prefix("  remote: ") {
+                    remote = Some(value.to_string());
+                } else if let Some(value) = section_line.strip_prefix("  revision: ") {
+                    revision = Some(value.to_string());
+                } else if section_line.starts_with("    ") && !section_line.starts_with("      ") {
+                    let spec = section_line.trim();
+                    if let Some((name, version)) = spec.split_once(" (") {
+                        if let Some(version) = version.strip_suffix(')') {
+                            specs.push((name.to_string(), version.to_string()));
+                        }
+                    }
+                }
+            }
+
+            let (Some(remote), Some(revision)) = (remote, revision) else {
+                continue;
+            };
+            if revision.len() < 7 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                warn!(
+                    "Skipping cached Git dependency with invalid lockfile revision: {}",
+                    revision
+                );
+                continue;
+            }
+            let repository = remote
+                .rsplit(['/', ':'])
+                .next()
+                .map(|name| name.strip_suffix(".git").unwrap_or(name))
+                .filter(|name| !name.is_empty());
+            let Some(repository) = repository else {
+                continue;
+            };
+            let revision_prefix = revision.get(..revision.len().min(12)).expect(
+                "INVARIANT VIOLATED: Git revision prefix is not a UTF-8 boundary. This is a bug because lockfile revisions must be ASCII hexadecimal. Fix: validate Bundler lockfile revision syntax before slicing.",
+            );
+            let cache_path = cache_root.join(format!("{repository}-{revision_prefix}"));
+            let lib_path = cache_path.join("lib");
+            if !cache_path.is_dir() || !lib_path.is_dir() {
+                continue;
+            }
+            for (name, version) in specs {
+                self.discovered_gems
+                    .entry(name.clone())
+                    .or_default()
+                    .push(GemInfo {
+                        name,
+                        version,
+                        path: cache_path.clone(),
+                        lib_paths: vec![lib_path.clone()],
+                        dependencies: Vec::new(),
+                        is_default: false,
+                    });
+            }
+        }
+        Ok(())
+    }
+
     /// Find Gemfile in workspace hierarchy
     fn find_gemfile(&self) -> Result<PathBuf> {
         if let Some(root) = &self.workspace_root {
@@ -386,17 +500,10 @@ impl IndexerGem {
                 return Ok(gemfile);
             }
 
-            // Check subdirectories
-            if let Ok(entries) = std::fs::read_dir(root) {
-                for entry in entries.flatten() {
-                    if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                        let subdir_gemfile = entry.path().join("Gemfile");
-                        if subdir_gemfile.exists() {
-                            return Ok(subdir_gemfile);
-                        }
-                    }
-                }
-            }
+            return Err(anyhow!(
+                "No Gemfile found at Ruby project root {}",
+                root.display()
+            ));
         }
 
         // Fallback to current directory
@@ -527,6 +634,18 @@ impl IndexerGem {
                 || g.path.to_string_lossy().contains(".bundle")
         }) {
             return Some(bundler_gem);
+        }
+
+        // An extracted Git cache is locked project input and must win over an
+        // unrelated globally installed gem with the same name.
+        if let Some(root) = &self.workspace_root {
+            let cache_root = root.join("vendor/cache");
+            if let Some(cached_git_gem) = versions
+                .iter()
+                .find(|gem| gem.path.starts_with(&cache_root))
+            {
+                return Some(cached_git_gem);
+            }
         }
 
         // Otherwise select highest version
@@ -712,6 +831,47 @@ mod tests {
         let indexer = create_test_indexer();
         assert_eq!(indexer.gem_count(), 0);
         assert!(indexer.get_required_gems().is_empty());
+    }
+
+    #[test]
+    fn gem_discovery_requires_the_project_roots_own_gemfile() {
+        let workspace = TempDir::new().unwrap();
+        std::fs::create_dir_all(workspace.path().join("service")).unwrap();
+        std::fs::write(workspace.path().join("service/Gemfile"), "").unwrap();
+        let indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
+
+        assert!(
+            indexer.find_gemfile().is_err(),
+            "a container folder must be expanded into projects before Bundler discovery"
+        );
+    }
+
+    #[test]
+    fn locked_git_gem_uses_extracted_vendor_cache_without_executing_gemspec() {
+        let workspace = TempDir::new().unwrap();
+        std::fs::write(
+            workspace.path().join("Gemfile.lock"),
+            "GIT\n  remote: git@github.com:emerose/pbkdf2-ruby.git\n  revision: b8c9fd171c32d4abcab52be629996448cf0bf63a\n  specs:\n    pbkdf2 (0.2.0)\n\nGEM\n",
+        )
+        .unwrap();
+        let cache = workspace
+            .path()
+            .join("vendor/cache/pbkdf2-ruby-b8c9fd171c32");
+        std::fs::create_dir_all(cache.join("lib")).unwrap();
+        std::fs::write(cache.join("lib/pbkdf2.rb"), "class PBKDF2; end\n").unwrap();
+        std::fs::write(
+            cache.join("pbkdf2.gemspec"),
+            "raise 'must never execute project gemspec'\n",
+        )
+        .unwrap();
+        let mut indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
+
+        indexer.discover_cached_git_gems().unwrap();
+
+        let gem = &indexer.discovered_gems["pbkdf2"][0];
+        assert_eq!(gem.version, "0.2.0");
+        assert_eq!(gem.path, cache);
+        assert_eq!(gem.lib_paths, [cache.join("lib")]);
     }
 
     #[test]
