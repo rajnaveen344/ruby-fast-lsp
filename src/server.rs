@@ -79,8 +79,8 @@ fn is_process_alive(pid: u32) -> bool {
 }
 
 /// One Ruby project root. Files are routed to the workspace whose `root_path`
-/// is the longest prefix of the file's path. Analysis facts live in
-/// `RubyLanguageServer::analysis_engine`.
+/// is the longest prefix of the file's path. Each project owns an isolated
+/// analysis engine; external documents may retain one project's context.
 #[derive(Clone)]
 pub struct Workspace {
     pub root_uri: Url,
@@ -122,6 +122,11 @@ pub struct RubyLanguageServer {
     /// Project facts live in `Workspace::analysis_engine` and must never be
     /// written here.
     pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    /// Project context retained for external dependency documents reached from
+    /// a project-owned navigation result. Values are project root URIs rather
+    /// than engine handles so workspace removal cannot leave a live stale
+    /// semantic owner behind.
+    external_document_projects: Arc<RwLock<HashMap<Url, Url>>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
     pub extension_registry: ExtensionRegistryHandle,
     pub extension_watch_dynamic_registration: Arc<AtomicBool>,
@@ -146,6 +151,7 @@ impl RubyLanguageServer {
             workspaces: Arc::new(RwLock::new(Vec::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
             analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
+            external_document_projects: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(Mutex::new(config)),
             extension_registry,
             extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
@@ -229,9 +235,59 @@ impl RubyLanguageServer {
     /// Return the isolated semantic engine that owns a document URI. Files
     /// outside registered workspaces use the orphan engine.
     pub fn analysis_engine_for_uri(&self, uri: &Url) -> Arc<RwLock<AnalysisEngine>> {
-        self.workspace_for_uri(uri)
+        self.analysis_workspace_for_uri(uri)
             .map(|workspace| workspace.analysis_engine)
             .unwrap_or_else(|| self.analysis_engine.clone())
+    }
+
+    /// Return the project semantic context for a URI. Project-owned paths win,
+    /// followed by retained external navigation provenance, followed by a
+    /// unique project engine that already owns the exact dependency path.
+    pub fn analysis_workspace_for_uri(&self, uri: &Url) -> Option<Workspace> {
+        if let Some(workspace) = self.workspace_for_uri(uri) {
+            return Some(workspace);
+        }
+
+        if let Some(root_uri) = self.external_document_projects.read().get(uri).cloned() {
+            if let Some(workspace) = self
+                .workspaces
+                .read()
+                .iter()
+                .find(|workspace| workspace.root_uri == root_uri)
+                .cloned()
+            {
+                return Some(workspace);
+            }
+            self.external_document_projects.write().remove(uri);
+        }
+
+        let path = uri.to_file_path().ok()?;
+        let mut owner = None;
+        for workspace in self.workspaces.read().iter() {
+            if workspace.analysis_engine.read().file_id(&path).is_none() {
+                continue;
+            }
+            if owner.is_some() {
+                return None;
+            }
+            owner = Some(workspace.clone());
+        }
+        owner
+    }
+
+    /// Retain the originating project for external locations returned by a
+    /// semantic request. LSP follow-up requests carry only the target URI, so
+    /// this provenance is required to preserve the correct bundle context.
+    pub fn retain_external_document_project(&self, uri: &Url, project: &Workspace) {
+        if self.workspace_for_uri(uri).is_none() {
+            self.external_document_projects
+                .write()
+                .insert(uri.clone(), project.root_uri.clone());
+        }
+    }
+
+    pub fn release_external_document_project(&self, uri: &Url) {
+        self.external_document_projects.write().remove(uri);
     }
 
     /// Snapshot every active project engine plus the orphan engine.
@@ -512,6 +568,7 @@ impl Default for RubyLanguageServer {
             workspaces: Arc::new(RwLock::new(Vec::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
             analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
+            external_document_projects: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),

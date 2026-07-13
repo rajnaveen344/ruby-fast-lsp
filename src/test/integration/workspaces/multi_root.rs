@@ -1,7 +1,8 @@
-//! Multi-root workspace routing: files map to correct roots while analysis facts
-//! live in the shared engine.
+//! Multi-root workspace routing: project and dependency files map to the correct
+//! isolated analysis engine without leaking semantic facts across roots.
 
 use crate::test::harness::FakeEditor;
+use ruby_analysis::core::SourceKind;
 use tower_lsp::lsp_types::{PartialResultParams, WorkDoneProgressParams, WorkspaceSymbolParams};
 
 #[tokio::test]
@@ -140,6 +141,212 @@ async fn workspace_symbol_search_aggregates_isolated_project_engines() {
         .collect::<Vec<_>>();
 
     assert_eq!(names, ["AlphaService", "BetaService"]);
+}
+
+#[tokio::test]
+async fn navigation_into_external_dependency_retains_originating_project_context() {
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("workspace_a");
+    let workspace = editor
+        .workspace_for("workspace_a/app.rb")
+        .expect("workspace_a must own its project files");
+    let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
+        editor.server().extension_registry.clone(),
+    );
+    let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/demo-gem/lib/entry.rb")
+        .expect("dependency URI must parse");
+    let inner_uri = tower_lsp::lsp_types::Url::parse("file:///external/demo-gem/lib/inner.rb")
+        .expect("dependency URI must parse");
+    let entry_source = "module DemoGem\n  class Entry\n    Inner\n  end\nend\n";
+
+    processor
+        .collect_file_facts_as_deferred_resolution_in_engine(
+            &entry_uri,
+            entry_source,
+            workspace.analysis_engine.clone(),
+            SourceKind::Gem,
+        )
+        .expect("entry dependency facts must index");
+    processor
+        .collect_file_facts_as_deferred_resolution_in_engine(
+            &inner_uri,
+            "module DemoGem\n  class Inner\n  end\nend\n",
+            workspace.analysis_engine.clone(),
+            SourceKind::Gem,
+        )
+        .expect("inner dependency facts must index");
+    workspace.analysis_engine.write().resolve();
+
+    editor.open("workspace_a/app.rb", "DemoGem::Entry\n").await;
+    let entry_definitions = editor.goto_def_at("workspace_a/app.rb", 0, 10).await;
+    assert_eq!(entry_definitions.len(), 1);
+    assert_eq!(entry_definitions[0].uri, entry_uri);
+
+    editor
+        .open("external/demo-gem/lib/entry.rb", entry_source)
+        .await;
+    let inner_definitions = editor
+        .goto_def_at("external/demo-gem/lib/entry.rb", 2, 6)
+        .await;
+
+    assert_eq!(inner_definitions.len(), 1);
+    assert_eq!(inner_definitions[0].uri, inner_uri);
+    assert!(
+        editor
+            .server()
+            .analysis_engine
+            .read()
+            .file_id(
+                entry_uri
+                    .to_file_path()
+                    .expect("dependency URI must be a file path")
+            )
+            .is_none(),
+        "opening a navigated dependency must not promote it into orphan project state"
+    );
+}
+
+#[tokio::test]
+async fn directly_opened_dependency_uses_its_unique_indexed_project_owner() {
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("workspace_a");
+    let workspace = editor
+        .workspace_for("workspace_a/app.rb")
+        .expect("workspace_a must own its project files");
+    let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
+        editor.server().extension_registry.clone(),
+    );
+    let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/unique-gem/lib/entry.rb")
+        .expect("dependency URI must parse");
+    let inner_uri = tower_lsp::lsp_types::Url::parse("file:///external/unique-gem/lib/inner.rb")
+        .expect("dependency URI must parse");
+    let entry_source = "module UniqueGem\n  class Entry\n    Inner\n  end\nend\n";
+
+    for (uri, source) in [
+        (&entry_uri, entry_source),
+        (&inner_uri, "module UniqueGem\n  class Inner\n  end\nend\n"),
+    ] {
+        processor
+            .collect_file_facts_as_deferred_resolution_in_engine(
+                uri,
+                source,
+                workspace.analysis_engine.clone(),
+                SourceKind::Gem,
+            )
+            .expect("dependency facts must index");
+    }
+    workspace.analysis_engine.write().resolve();
+
+    editor
+        .open("external/unique-gem/lib/entry.rb", entry_source)
+        .await;
+    let definitions = editor
+        .goto_def_at("external/unique-gem/lib/entry.rb", 2, 6)
+        .await;
+
+    assert_eq!(definitions.len(), 1);
+    assert_eq!(definitions[0].uri, inner_uri);
+}
+
+#[tokio::test]
+async fn unbound_external_document_is_not_promoted_to_project_source() {
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("workspace_a");
+    let external_uri = tower_lsp::lsp_types::Url::parse("file:///external/loose.rb")
+        .expect("external URI must parse");
+
+    editor.open("external/loose.rb", "UnknownExternal\n").await;
+
+    let path = external_uri
+        .to_file_path()
+        .expect("external URI must be a file path");
+    let orphan = editor.server().analysis_engine.read();
+    let file_id = orphan
+        .file_id(&path)
+        .expect("unbound open document must retain local interactive facts");
+    assert_eq!(
+        orphan
+            .file(file_id)
+            .expect("open file metadata must exist")
+            .kind,
+        SourceKind::Excluded
+    );
+    drop(orphan);
+    assert!(
+        editor.published_diagnostics("external/loose.rb").is_empty(),
+        "unbound external documents must not publish project diagnostics"
+    );
+}
+
+#[tokio::test]
+async fn closing_external_document_releases_ambiguous_project_provenance() {
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("workspace_a");
+    editor.add_workspace("workspace_b");
+    let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
+        editor.server().extension_registry.clone(),
+    );
+    let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/shared-gem/lib/entry.rb")
+        .expect("dependency URI must parse");
+    let entry_source = "module SharedGem\n  class Entry\n    Inner\n  end\nend\n";
+
+    for (workspace_file, inner_path) in [
+        ("workspace_a/app.rb", "inner_a.rb"),
+        ("workspace_b/app.rb", "inner_b.rb"),
+    ] {
+        let workspace = editor
+            .workspace_for(workspace_file)
+            .expect("project file must have a workspace");
+        let inner_uri = tower_lsp::lsp_types::Url::parse(&format!(
+            "file:///external/shared-gem/lib/{inner_path}"
+        ))
+        .expect("dependency URI must parse");
+        processor
+            .collect_file_facts_as_deferred_resolution_in_engine(
+                &entry_uri,
+                entry_source,
+                workspace.analysis_engine.clone(),
+                SourceKind::Gem,
+            )
+            .expect("entry dependency facts must index");
+        processor
+            .collect_file_facts_as_deferred_resolution_in_engine(
+                &inner_uri,
+                "module SharedGem\n  class Inner\n  end\nend\n",
+                workspace.analysis_engine.clone(),
+                SourceKind::Gem,
+            )
+            .expect("inner dependency facts must index");
+        workspace.analysis_engine.write().resolve();
+    }
+
+    editor
+        .open("workspace_a/app.rb", "SharedGem::Entry\n")
+        .await;
+    assert_eq!(
+        editor.goto_def_at("workspace_a/app.rb", 0, 12).await.len(),
+        1
+    );
+    editor
+        .open("external/shared-gem/lib/entry.rb", entry_source)
+        .await;
+    let contextual = editor
+        .goto_def_at("external/shared-gem/lib/entry.rb", 2, 6)
+        .await;
+    assert_eq!(contextual.len(), 1);
+    assert!(contextual[0].uri.path().ends_with("/inner_a.rb"));
+
+    editor.close("external/shared-gem/lib/entry.rb").await;
+    editor
+        .open("external/shared-gem/lib/entry.rb", entry_source)
+        .await;
+    assert!(
+        editor
+            .goto_def_at("external/shared-gem/lib/entry.rb", 2, 6)
+            .await
+            .is_empty(),
+        "direct reopen with two possible owners must not guess a project context"
+    );
 }
 
 fn method_fact_in_path(

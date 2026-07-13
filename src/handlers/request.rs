@@ -26,10 +26,17 @@ pub async fn handle_goto_definition(
         .clone();
     let position = params.text_document_position_params.position;
 
-    let definition = definitions::find_definition_at_position(lang_server, uri, position).await;
+    let project = lang_server.analysis_workspace_for_uri(&uri);
+    let definition =
+        definitions::find_definition_at_position(lang_server, uri.clone(), position).await;
 
     match definition {
         Some(locations) => {
+            if let Some(project) = &project {
+                for location in &locations {
+                    lang_server.retain_external_document_project(&location.uri, project);
+                }
+            }
             trace!("Returning {} goto definition locations", locations.len());
             Ok(Some(GotoDefinitionResponse::Array(locations)))
         }

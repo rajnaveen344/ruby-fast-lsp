@@ -127,6 +127,9 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
     append_external_linter_diagnostics(server, &uri, &content, &mut diagnostics).await;
+    if !source_kind.is_editable() {
+        diagnostics.clear();
+    }
     let diag_count = diagnostics.len();
     let diag_elapsed = diag_start.elapsed();
     let publish_start = Instant::now();
@@ -164,7 +167,11 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
 
 fn source_kind_for_new_open_file(server: &RubyLanguageServer, uri: &Url) -> SourceKind {
     let Some(workspace) = server.workspace_for_uri(uri) else {
-        return SourceKind::Project;
+        return if server.list_workspaces().is_empty() {
+            SourceKind::Project
+        } else {
+            SourceKind::Excluded
+        };
     };
     let Ok(path) = uri.to_file_path() else {
         return SourceKind::Excluded;
@@ -494,6 +501,7 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
 
     // Remove the document from in-memory cache but keep analysis facts.
     server.docs.lock().remove(&uri);
+    server.release_external_document_project(&uri);
     debug!("Doc cache size: {}", server.docs.lock().len());
 
     if clear_file_facts_if_kind(server, &uri, SourceKind::Excluded) {

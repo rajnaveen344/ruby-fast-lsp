@@ -237,6 +237,15 @@ their interactive-only facts. Closed-file watcher
 create/change/delete events must use the same policy and the normal per-file
 engine replacement lifecycle. Open buffers remain under didOpen/didChange/didClose.
 
+External gem, stdlib, stub, and signature documents retain the isolated project
+context that produced their navigation location. Subsequent requests for that
+external URI must use the originating project's engine even though the path is
+outside the project root. Without retained provenance, an exact dependency path
+may use a project engine only when exactly one engine owns it. Ambiguous or
+unknown external files stay diagnostic-free `SourceKind::Excluded` interactive
+documents in the orphan engine; never merge project engines or promote an
+external file to project truth. `didClose` releases retained provenance.
+
 Native/generated declarations use existing semantic write paths. Ruby and RBI
 stubs are ordinary indexed Ruby. Project `sig/**/*.rbs` files, plus additional
 `.rbs` paths selected by `includedPatterns`, are converted in
