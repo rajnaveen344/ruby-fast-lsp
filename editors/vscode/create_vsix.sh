@@ -175,8 +175,11 @@ build_for_target() {
     
     binary_path="$ROOT_DIR/target/${target}/release/${binary_name}"
     
-    # Check if we need to build
-    if [ ! -f "$binary_path" ] || [ "$REBUILD_LSP" = true ]; then
+    # Native packages must always be built from the current checkout. Reusing a
+    # target-specific artifact can silently package an older server even after
+    # `cargo build --release` refreshed the ordinary native target directory.
+    # Cross-platform release assembly may reuse intentionally prebuilt artifacts.
+    if [ "$platform" == "$CURRENT_PLATFORM" ] || [ ! -f "$binary_path" ] || [ "$REBUILD_LSP" = true ]; then
         if [ "$SKIP_BUILDS" = true ]; then
             echo "Skipping build for $platform ($target)"
             return 0

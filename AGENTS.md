@@ -272,6 +272,12 @@ requires all extension statuses to be `loaded`. It clears developer extension-pa
 environment variables so a local package cannot mask a missing, invalid, or
 checksum-broken bundled copy.
 
+Current-platform VSIX packaging must rebuild the target-specific native binary
+from the current checkout. Never reuse an existing native target artifact:
+`cargo build --release` writes a different path and an old target-specific
+binary can otherwise be silently packaged and installed. Only explicit
+`--skip-builds` workflows may reuse the binaries already staged in the VSIX.
+
 Wasm extensions are bounded by payload, memory, fuel, and wall-clock limits.
 Each loaded extension owns one cancellable Wasmtime epoch ticker; every guest
 call boundary resets its fuel and 500 ms epoch deadline, including allocation
