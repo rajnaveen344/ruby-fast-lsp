@@ -130,3 +130,24 @@ After these changes, the deterministic 100-iteration benchmark still passed
 every budget: 786.751 ms cold indexing, 0.935 ms edit p95, 0.067 ms completion,
 0.072 ms hover, 0.068 ms definition, 7.796 ms references, 0.001 ms diagnostics,
 and 5.8 MiB estimated engine heap.
+
+### Extension-complete GoshPosh smoke
+
+The dependency-complete `/Users/naveenraj/goshposh/server` corpus exercises
+3,065 indexed files and 43.4 MB of Ruby with all five packaged framework guests.
+The release profiler must be pointed at an extracted/installed VS Code extension
+root; that path supplies both stubs and the adjacent `extensions/` packages.
+
+After moving immutable 98-gem project metadata to RSpec activation and replacing
+the mruby SDK's Ruby JSON hot path with bounded native JSON, cold indexing was
+30.79 s with a 170.0 MB estimated engine heap. The RSpec guest handled 6,148
+index calls in 3.36 s total (4.90 ms maximum), emitted 6,531 patches and 4,940
+execution contexts, and reported zero failures, traps, resource failures,
+rejections, conflicts, or disablements. The same workload previously took
+55.7 s after basic compiler/GC tuning, with 39.0 s spent in the guest.
+
+Opening `spec/apps/api/auth2_spec.rb` reused cold facts in 9.80 ms. A reference
+probe on the RSpec-group `platform` helper returned exactly its single use at
+line 1912; the extension-free control returned 631 unrelated project calls.
+This is representative production evidence, not a project-specific semantic
+test suite.

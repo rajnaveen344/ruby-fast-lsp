@@ -65,6 +65,7 @@ pub struct MethodFact {
     pub fqn: FullyQualifiedName,
     pub owner: FullyQualifiedName,
     pub range: TextRange,
+    pub name_range: TextRange,
     pub params: Vec<String>,
     pub param_facts: Vec<MethodParamFact>,
     pub delegate_receiver: Option<RubyMethod>,
@@ -79,6 +80,7 @@ impl MethodFact {
             fqn,
             owner,
             range,
+            name_range: range,
             params: Vec::new(),
             param_facts: Vec::new(),
             delegate_receiver: None,
@@ -112,6 +114,7 @@ impl MethodFact {
             fqn,
             owner,
             range,
+            name_range: range,
             params,
             param_facts,
             delegate_receiver: None,
@@ -131,6 +134,7 @@ impl MethodFact {
             fqn,
             owner,
             range,
+            name_range: range,
             params: Vec::new(),
             param_facts: Vec::new(),
             delegate_receiver: Some(delegate_receiver),
@@ -142,6 +146,20 @@ impl MethodFact {
 
     pub fn with_visibility(mut self, visibility: MethodVisibility) -> Self {
         self.visibility = visibility;
+        self
+    }
+
+    pub fn with_name_range(mut self, name_range: TextRange) -> Self {
+        assert!(
+            name_range.file_id == self.range.file_id,
+            "INVARIANT VIOLATED: method name range belongs to a different file than its declaration. This is a bug because declaration edits must stay within their source file. Fix: derive both ranges from the same registered source document."
+        );
+        assert!(
+            self.range.start_byte <= name_range.start_byte
+                && name_range.end_byte <= self.range.end_byte,
+            "INVARIANT VIOLATED: method name range is outside its declaration range. This is a bug because rename requires the exact declaration token. Fix: use Prism's method name location inside the enclosing declaration location."
+        );
+        self.name_range = name_range;
         self
     }
 
@@ -186,6 +204,7 @@ pub struct StoredMethodFact {
     pub owner: FqnId,
     pub method: Option<RubyMethod>,
     pub range: TextRange,
+    pub name_range: TextRange,
     pub params: Vec<String>,
     pub param_facts: Vec<MethodParamFact>,
     pub delegate_receiver: Option<RubyMethod>,
@@ -201,6 +220,7 @@ impl StoredMethodFact {
             owner,
             method,
             range,
+            name_range: range,
             params: Vec::new(),
             param_facts: Vec::new(),
             delegate_receiver: None,
@@ -223,6 +243,7 @@ impl StoredMethodFact {
             owner,
             method,
             range,
+            name_range: range,
             params,
             param_facts,
             delegate_receiver: None,

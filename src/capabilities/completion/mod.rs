@@ -13,7 +13,7 @@ use ruby_analysis::inference::{
 };
 
 use crate::{
-    query::EngineQuery,
+    query::{analyzer_for_document, EngineQuery},
     server::RubyLanguageServer,
     utils::{ast::is_in_statement_position, position_to_offset},
 };
@@ -37,7 +37,12 @@ pub async fn find_completion_at_position(
     if !document.is_ruby_position(position) {
         return CompletionResponse::Array(Vec::new());
     }
-    let analyzer = RubyPrismAnalyzer::new(uri.clone(), document.content.clone());
+    let analyzer = analyzer_for_document(
+        RubyPrismAnalyzer::new(uri.clone(), document.content.clone()),
+        &document,
+        &server.analysis_engine_for_uri(&uri),
+        position,
+    );
 
     // Check if completion was triggered by a trigger character
     let is_trigger_character = context
@@ -342,5 +347,16 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
         let engine = self.analysis_engine.read();
         ruby_analysis::engine::AnalysisQuery::new(&engine)
             .variable_type_in_file(kind, name, file_id)
+    }
+
+    fn implicit_receiver_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<FullyQualifiedName> {
+        let engine = self.analysis_engine.read();
+        ruby_analysis::engine::AnalysisQuery::new(&engine)
+            .execution_context_at(file_id, byte_offset)
+            .map(|context| context.implicit_receiver.clone())
     }
 }

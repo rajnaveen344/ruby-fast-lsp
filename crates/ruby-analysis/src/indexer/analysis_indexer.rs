@@ -56,6 +56,7 @@ pub struct AnalysisIndexer {
     namespace_stack: Vec<RubyConstant>,
     scope_stack: Vec<ScopeKind>,
     method_context_stack: Vec<(RubyMethod, NamespaceKind)>,
+    eval_context_depths: Vec<(usize, usize)>,
     module_function_mode_stack: Vec<bool>,
     visibility_stack: Vec<MethodVisibility>,
     known_namespaces: HashSet<FullyQualifiedName>,
@@ -77,6 +78,7 @@ impl AnalysisIndexer {
             namespace_stack: Vec::new(),
             scope_stack: Vec::new(),
             method_context_stack: Vec::new(),
+            eval_context_depths: Vec::new(),
             module_function_mode_stack: Vec::new(),
             visibility_stack: vec![MethodVisibility::Public],
             known_namespaces,
@@ -108,6 +110,15 @@ impl AnalysisIndexer {
             .last()
             .copied()
             .unwrap_or(ScopeKind::Instance)
+    }
+
+    fn eval_context_active(&self) -> bool {
+        self.eval_context_depths
+            .last()
+            .is_some_and(|(scope_depth, method_depth)| {
+                *scope_depth == self.scope_stack.len()
+                    && *method_depth == self.method_context_stack.len()
+            })
     }
 
     fn inside_singleton_included_method(&self) -> bool {
@@ -465,7 +476,7 @@ impl AnalysisIndexer {
         }
 
         for arg in arguments.arguments().iter() {
-            let Some((name, range)) = attr_name_and_range(&arg, self.file_id) else {
+            let Some((name, range)) = method_name_and_range(&arg, self.file_id) else {
                 continue;
             };
             let Ok(method) = RubyMethod::new(&name) else {
@@ -556,15 +567,68 @@ impl AnalysisIndexer {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        let owner_kind = match self.current_scope_kind() {
-            ScopeKind::Instance => crate::core::NamespaceKind::Instance,
-            ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
+        if self.namespace_stack.is_empty() {
+            return;
+        }
+        let owner_kind = if self.eval_context_active() {
+            crate::core::NamespaceKind::Instance
+        } else if self.current_scope_kind() == ScopeKind::Singleton {
+            crate::core::NamespaceKind::Singleton
+        } else if let Some((_method, method_kind)) = self.method_context_stack.last() {
+            if *method_kind == NamespaceKind::Instance {
+                return;
+            }
+            crate::core::NamespaceKind::Instance
+        } else {
+            crate::core::NamespaceKind::Instance
         };
         self.push_method_fact(self.namespace_stack.clone(), owner_kind, method, range);
     }
 
-    fn push_send_define_method_fact(&mut self, node: &CallNode<'_>) {
-        if node.name().as_slice() != b"send" {
+    fn push_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
+        if self.namespace_stack.is_empty() || !self.method_context_stack.is_empty() {
+            return;
+        }
+        self.push_define_singleton_method_for_namespace(node, self.namespace_stack.clone());
+    }
+
+    fn push_receiver_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
+        if node.name().as_slice() != b"define_singleton_method" {
+            return;
+        }
+        let Some(receiver) = node.receiver() else {
+            return;
+        };
+        let Some(namespace) = self.resolve_constant_receiver_namespace(&receiver) else {
+            return;
+        };
+        self.push_define_singleton_method_for_namespace(node, namespace);
+    }
+
+    fn push_define_singleton_method_for_namespace(
+        &mut self,
+        node: &CallNode<'_>,
+        namespace: Vec<RubyConstant>,
+    ) {
+        let Some((name, range)) = define_method_name_and_range(node, self.file_id, 0) else {
+            return;
+        };
+        let Ok(method) = RubyMethod::new(&name) else {
+            return;
+        };
+        self.push_method_fact(
+            namespace,
+            crate::core::NamespaceKind::Singleton,
+            method,
+            range,
+        );
+    }
+
+    fn push_send_dynamic_method_fact(&mut self, node: &CallNode<'_>) {
+        if !matches!(
+            node.name().as_slice(),
+            b"send" | b"public_send" | b"__send__"
+        ) {
             return;
         }
         let Some(arguments) = node.arguments() else {
@@ -577,9 +641,13 @@ impl AnalysisIndexer {
         else {
             return;
         };
-        if selector != "define_method" {
-            return;
-        }
+        let owner_kind = match selector.as_str() {
+            "define_method" if node.name().as_slice() != b"public_send" => {
+                crate::core::NamespaceKind::Instance
+            }
+            "define_singleton_method" => crate::core::NamespaceKind::Singleton,
+            _ => return,
+        };
         let Some(receiver) = node.receiver() else {
             return;
         };
@@ -592,12 +660,7 @@ impl AnalysisIndexer {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        self.push_method_fact(
-            namespace,
-            crate::core::NamespaceKind::Instance,
-            method,
-            range,
-        );
+        self.push_method_fact(namespace, owner_kind, method, range);
     }
 
     fn resolve_constant_receiver_namespace(
@@ -716,14 +779,29 @@ impl AnalysisIndexer {
         }
     }
 
-    fn static_eval_block_namespace(&self, node: &CallNode<'_>) -> Option<Vec<RubyConstant>> {
-        if !matches!(node.name().as_slice(), b"class_eval" | b"module_eval") {
-            return None;
-        }
+    fn static_eval_block_context(
+        &self,
+        node: &CallNode<'_>,
+    ) -> Option<(Vec<RubyConstant>, ScopeKind)> {
+        let definition_scope = match node.name().as_slice() {
+            b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => ScopeKind::Instance,
+            b"instance_eval" | b"instance_exec" => ScopeKind::Singleton,
+            _ => return None,
+        };
         node.block()?;
-        let receiver = node.receiver()?;
-        let (parts, absolute) = constant_parts_and_absolute(&receiver)?;
-        self.resolve_static_eval_namespace(&parts, absolute)
+        let namespace = match node.receiver() {
+            None => (!self.namespace_stack.is_empty() && self.method_context_stack.is_empty())
+                .then(|| self.namespace_stack.clone())?,
+            Some(receiver) if receiver.as_self_node().is_some() => {
+                (!self.namespace_stack.is_empty() && self.method_context_stack.is_empty())
+                    .then(|| self.namespace_stack.clone())?
+            }
+            Some(receiver) => {
+                let (parts, absolute) = constant_parts_and_absolute(&receiver)?;
+                self.resolve_static_eval_namespace(&parts, absolute)?
+            }
+        };
+        Some((namespace, definition_scope))
     }
 
     fn resolve_static_eval_namespace(
@@ -981,6 +1059,7 @@ impl Visit<'_> for AnalysisIndexer {
         let owner =
             FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
         let range = self.range(&node.location());
+        let name_range = self.range(&node.name_loc());
         let yard_doc = self.source.as_deref().and_then(|source| {
             YardParser::extract_from_source(source, node.location().start_offset())
         });
@@ -996,11 +1075,12 @@ impl Visit<'_> for AnalysisIndexer {
                 )
             })
             .collect::<Vec<_>>();
-        self.facts
-            .symbols
-            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
+        self.facts.symbols.push(
+            SymbolFact::new(fqn.clone(), SymbolKind::Method, range).with_name_range(name_range),
+        );
         self.facts.methods.push(
             MethodFact::with_param_facts(fqn.clone(), owner, range, params.clone())
+                .with_name_range(name_range)
                 .with_signature_metadata(
                     yard_doc.as_ref().and_then(|doc| doc.description.clone()),
                     yard_doc
@@ -1023,6 +1103,7 @@ impl Visit<'_> for AnalysisIndexer {
             );
             self.facts.methods.push(
                 MethodFact::with_param_facts(fqn.clone(), owner, range, params)
+                    .with_name_range(name_range)
                     .with_signature_metadata(
                         yard_doc.as_ref().and_then(|doc| doc.description.clone()),
                         yard_doc
@@ -1152,7 +1233,7 @@ impl Visit<'_> for AnalysisIndexer {
     }
 
     fn visit_call_node(&mut self, node: &CallNode<'_>) {
-        if let Some(eval_namespace) = self.static_eval_block_namespace(node) {
+        if let Some((eval_namespace, definition_scope)) = self.static_eval_block_context(node) {
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
             }
@@ -1161,9 +1242,18 @@ impl Visit<'_> for AnalysisIndexer {
             }
             if let Some(block) = node.block() {
                 let old_namespace = std::mem::replace(&mut self.namespace_stack, eval_namespace);
-                self.scope_stack.push(ScopeKind::Instance);
+                self.eval_context_depths.push((
+                    self.scope_stack.len().checked_add(1).expect(
+                        "INVARIANT VIOLATED: analysis indexer scope depth overflowed while entering an eval block. This is a bug because source nesting cannot exceed usize address space. Fix: reject impossibly deep source before traversal.",
+                    ),
+                    self.method_context_stack.len(),
+                ));
+                self.scope_stack.push(definition_scope);
                 self.visit(&block);
                 self.scope_stack.pop();
+                self.eval_context_depths.pop().expect(
+                    "INVARIANT VIOLATED: analysis indexer eval-context stack underflow. This is a bug because every static eval block context must be popped exactly once. Fix: keep AnalysisIndexer::visit_call_node eval traversal balanced.",
+                );
                 self.namespace_stack = old_namespace;
             }
             return;
@@ -1203,6 +1293,7 @@ impl Visit<'_> for AnalysisIndexer {
                 b"public" => self.push_visibility_modifier(node, MethodVisibility::Public),
                 b"alias_method" => self.push_alias_method_call_fact(node),
                 b"define_method" => self.push_define_method_fact(node),
+                b"define_singleton_method" => self.push_define_singleton_method_fact(node),
                 b"delegate" => self.push_delegate_method_facts(node),
                 b"def_delegator" | b"def_delegators" => {
                     self.push_forwardable_delegate_method_facts(node)
@@ -1253,7 +1344,8 @@ impl Visit<'_> for AnalysisIndexer {
                 }
             }
         } else {
-            self.push_send_define_method_fact(node);
+            self.push_send_dynamic_method_fact(node);
+            self.push_receiver_define_singleton_method_fact(node);
         }
 
         visit_call_node(self, node);
@@ -1430,6 +1522,23 @@ fn attr_name_and_range(node: &Node<'_>, file_id: SourceFileId) -> Option<(String
         return Some((
             String::from_utf8_lossy(symbol.unescaped()).to_string(),
             text_range(file_id, &symbol.location()),
+        ));
+    }
+    if let Some(string) = node.as_string_node() {
+        return Some((
+            String::from_utf8_lossy(string.unescaped()).to_string(),
+            text_range(file_id, &string.content_loc()),
+        ));
+    }
+    None
+}
+
+fn method_name_and_range(node: &Node<'_>, file_id: SourceFileId) -> Option<(String, TextRange)> {
+    if let Some(symbol) = node.as_symbol_node() {
+        let location = symbol.value_loc().unwrap_or_else(|| symbol.location());
+        return Some((
+            String::from_utf8_lossy(symbol.unescaped()).to_string(),
+            text_range(file_id, &location),
         ));
     }
     if let Some(string) = node.as_string_node() {

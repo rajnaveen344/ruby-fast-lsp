@@ -6,13 +6,27 @@ module.
 
 Current coverage:
 
-- `let(:name) { ... }` -> generated instance helper method
-- `let!(:name) { ... }` -> generated instance helper method
-- `subject(:name) { ... }` -> generated instance helper method
-- `subject { ... }` -> generated `subject` helper method
+- `let(:name) { ... }` -> generated instance helper method whose return type is
+  inferred from the block
+- `let!(:name) { ... }` -> generated instance helper method whose return type is
+  inferred from the block
+- `subject(:name) { ... }` -> generated instance helper method whose return type
+  is inferred from the block
+- `subject { ... }` -> generated `subject` helper method whose return type is
+  inferred from the block
+- `RSpec.shared_context "name"` -> project-scoped hidden semantic owner
+- `include_context "name"` -> exact cross-file mixin relationship, including
+  direct, `let`, and hook-defined helpers with edit/removal lifecycle
+- `RSpec.shared_examples "name"` and `shared_examples_for` -> project-scoped
+  reusable execution template
+- `include_examples`, `it_behaves_like`, and `it_should_behave_like` ->
+  independently connect each consuming group, including bidirectional helper
+  navigation, multi-application ambiguity, references, and stale-edge removal
 - Document symbols for `describe`, `context`, `it`, `example`, `specify`,
   `shared_examples`, and `shared_context`
 - Code lenses for RSpec run/debug entry points
+- Locked-gem applicability for `rspec-core >= 3, < 4`; unsupported or incomplete
+  project lock data fails closed without disabling the package
 
 Local Ruby verification:
 

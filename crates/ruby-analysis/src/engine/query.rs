@@ -2,9 +2,9 @@ use std::path::Path;
 
 use crate::core::method_store::MethodVisibilityOverrideFact;
 use crate::core::{
-    DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, ReferenceFact,
-    SourceFileId, StoredReferenceCandidateKind, SymbolFact, TextRange, TypeFact, TypeResolution,
-    TypeSubject,
+    DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
+    MethodFact, MethodReferenceAccess, ReferenceFact, SourceFileId, StoredReferenceCandidateKind,
+    SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject,
 };
 
 use crate::{AnalysisEngine, SourceFile};
@@ -24,6 +24,14 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn file(&self, file_id: SourceFileId) -> Option<&'a SourceFile> {
         self.engine.file(file_id)
+    }
+
+    pub fn execution_context_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<&'a ExecutionContextFact> {
+        self.engine.execution_context_at(file_id, byte_offset)
     }
 
     pub fn type_at(
@@ -108,12 +116,10 @@ impl<'a> AnalysisQuery<'a> {
                         owner_kind,
                         method,
                         is_super,
+                        access,
+                        caller,
                         diagnostics,
-                        ..
                     } => {
-                        if diagnostics.is_some() {
-                            return None;
-                        }
                         let owner = self.engine.names.const_lookup(owner).expect(
                             "INVARIANT VIOLATED: exact method reference points to a missing owner lookup. \
                              This is a bug because candidates contain only interned lookup ids. \
@@ -123,19 +129,85 @@ impl<'a> AnalysisQuery<'a> {
                             owner.path.to_vec(),
                             owner_kind,
                         );
-                        let resolution = if is_super {
-                            self.resolve_super_method_reference(&owner, &method)
-                        } else {
-                            self.resolve_method_reference(&owner, &method)
+                        if is_super {
+                            return self
+                                .resolve_super_method_reference(&owner, &method)
+                                .reference_parts()
+                                .filter(|(_resolved_owner, resolved_method, _)| {
+                                    *resolved_method == method
+                                })
+                                .map(|(resolved_owner, resolved_method, _)| {
+                                    FullyQualifiedName::method(
+                                        resolved_owner.namespace_parts(),
+                                        resolved_method,
+                                    )
+                                });
+                        }
+
+                        if diagnostics.is_none() {
+                            return self
+                                .resolve_method_reference(&owner, &method)
+                                .reference_parts()
+                                .filter(|(_resolved_owner, resolved_method, _)| {
+                                    *resolved_method == method
+                                })
+                                .map(|(resolved_owner, resolved_method, _)| {
+                                    FullyQualifiedName::method(
+                                        resolved_owner.namespace_parts(),
+                                        resolved_method,
+                                    )
+                                });
+                        }
+
+                        let callees = match access {
+                            MethodReferenceAccess::Normal
+                            | MethodReferenceAccess::VisibilityBypass => {
+                                self.resolve_method_callees(&owner, &method)
+                            }
+                            MethodReferenceAccess::ExplicitReceiver => caller
+                                .and_then(|caller| self.engine.fqn_for_id(caller))
+                                .and_then(|caller| {
+                                    let mut owners = self
+                                        .engine
+                                        .method_facts_for(caller)
+                                        .into_iter()
+                                        .map(|fact| fact.owner)
+                                        .collect::<Vec<_>>();
+                                    owners.sort_by_key(ToString::to_string);
+                                    owners.dedup();
+                                    let caller = if owners.len() == 1 {
+                                        owners.pop().expect(
+                                            "INVARIANT VIOLATED: one caller owner disappeared after length validation. This is a bug because protected navigation needs a stable caller namespace. Fix: keep caller-owner selection atomic.",
+                                        )
+                                    } else {
+                                        FullyQualifiedName::namespace(caller.namespace_parts())
+                                    };
+                                    self.resolve_protected_method_callees(
+                                        &owner,
+                                        &method,
+                                        &caller,
+                                    )
+                                })
+                                .or_else(|| self.resolve_public_method_callees(&owner, &method)),
                         };
-                        resolution.reference_parts().map(
-                            |(resolved_owner, resolved_method, _)| {
+                        let mut exact_targets = callees
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|callee| {
+                                callee.method == method && !callee.definition_ranges.is_empty()
+                            })
+                            .map(|callee| {
                                 FullyQualifiedName::method(
-                                    resolved_owner.namespace_parts(),
-                                    resolved_method,
+                                    callee.owner.namespace_parts(),
+                                    callee.method,
                                 )
-                            },
-                        )
+                            })
+                            .collect::<Vec<_>>();
+                        exact_targets.sort_by_key(ToString::to_string);
+                        exact_targets.dedup();
+                        (exact_targets.len() == 1)
+                            .then(|| exact_targets.pop())
+                            .flatten()
                     }
                     StoredReferenceCandidateKind::Constant { .. } => None,
                 }

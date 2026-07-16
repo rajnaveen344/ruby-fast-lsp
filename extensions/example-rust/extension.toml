@@ -1,0 +1,26 @@
+id = "example-rust"
+name = "Example Rust Extension"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.6, <0.3.0"
+runtime = "wasm"
+wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_example_rust_extension.wasm"
+checksum_sha256 = "6a45645724f08e297ca657aa1144eabb171b626192ec9cb0479cc1c177742c60"
+capabilities = ["index.call", "document_symbol", "code_lens"]
+permissions = []
+
+[applicability]
+locked_gems = [{ name = "example-framework", version = ">=1.0.0, <2.0.0" }]
+
+[build]
+output = "target/wasm32-wasip1/release/ruby_fast_lsp_example_rust_extension.wasm"
+
+[indexing]
+call_names = ["scope", "property", "isolation_probe"]
+frame_call_names = ["scope"]
+
+[[indexing.targets]]
+owner = ["ExampleDsl"]
+owner_kind = "singleton"
+method = "scope"
+frame = true

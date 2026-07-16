@@ -222,15 +222,21 @@ impl IdentifierVisitor {
                     MethodReceiver::None
                 };
 
+                let namespace = if node.receiver().is_none() {
+                    self.scope_tracker.implicit_receiver_context().0
+                } else {
+                    self.scope_tracker.get_ns_stack()
+                };
+
                 let method = RubyMethod::new(&method_name).unwrap();
                 self.set_result(
                     Some(Identifier::RubyMethod {
-                        namespace: self.scope_tracker.get_ns_stack(),
+                        namespace: namespace.clone(),
                         receiver,
                         iden: method,
                     }),
                     Some(IdentifierType::MethodCall),
-                    self.scope_tracker.get_ns_stack(),
+                    namespace,
                     Some(0),
                 );
             }
@@ -242,28 +248,59 @@ impl IdentifierVisitor {
     }
 
     fn process_define_method_symbol(&mut self, node: &CallNode) -> bool {
-        let (name_index, namespace) = if node.receiver().is_none() {
-            if node.name().as_slice() != b"define_method" {
-                return false;
+        let (name_index, namespace, owner_kind) = if node.receiver().is_none() {
+            match node.name().as_slice() {
+                b"define_method" => (
+                    0,
+                    {
+                        let (namespace, receiver_kind) =
+                            self.scope_tracker.implicit_receiver_context();
+                        if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
+                            return false;
+                        }
+                        namespace
+                    },
+                    if !self.scope_tracker.execution_context_active()
+                        && self.scope_tracker.in_singleton()
+                    {
+                        NamespaceKind::Singleton
+                    } else {
+                        NamespaceKind::Instance
+                    },
+                ),
+                b"define_singleton_method" => {
+                    let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
+                    if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
+                        return false;
+                    }
+                    (0, namespace, NamespaceKind::Singleton)
+                }
+                _ => return false,
             }
-            (0, self.scope_tracker.get_ns_stack())
         } else {
-            if node.name().as_slice() != b"send" {
-                return false;
-            }
-            let Some((selector, _)) = call_arg_name_and_location(node, 0) else {
-                return false;
-            };
-            if selector != "define_method" {
-                return false;
-            }
             let Some(receiver) = node.receiver() else {
                 return false;
             };
             let MethodReceiver::Constant(namespace) = extract_receiver_from_node(&receiver) else {
                 return false;
             };
-            (1, namespace)
+            match node.name().as_slice() {
+                b"define_singleton_method" => (0, namespace, NamespaceKind::Singleton),
+                b"send" | b"public_send" | b"__send__" => {
+                    let Some((selector, _)) = call_arg_name_and_location(node, 0) else {
+                        return false;
+                    };
+                    let owner_kind = match selector.as_str() {
+                        "define_method" if node.name().as_slice() != b"public_send" => {
+                            NamespaceKind::Instance
+                        }
+                        "define_singleton_method" => NamespaceKind::Singleton,
+                        _ => return false,
+                    };
+                    (1, namespace, owner_kind)
+                }
+                _ => return false,
+            }
         };
 
         let Some((method_name, name_loc)) = call_arg_name_and_location(node, name_index) else {
@@ -285,6 +322,7 @@ impl IdentifierVisitor {
             namespace,
             Some(0),
         );
+        self.namespace_kind_at_pos = Some(owner_kind);
         true
     }
 

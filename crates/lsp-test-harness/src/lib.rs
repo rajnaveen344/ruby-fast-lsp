@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use ruby_fast_lsp::extensions::{ExtensionStatusParams, ExtensionStatusReport};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use tower_lsp::lsp_types::{
-    CodeLens, CodeLensParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, Location, PartialResultParams,
-    Position, ReferenceContext, ReferenceParams, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
+    CompletionResponse, CompletionTriggerKind, DidChangeTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, Location,
+    PartialResultParams, Position, ReferenceContext, ReferenceParams,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
 };
 use tower_lsp::LanguageServer;
 
@@ -46,6 +47,48 @@ impl FakeEditor {
             "extensionDirs": []
         })))
         .await
+    }
+
+    pub async fn with_extension_package_and_workspace(
+        package_path: impl AsRef<std::path::Path>,
+        workspace_root: impl AsRef<std::path::Path>,
+    ) -> Self {
+        Self::with_extension_packages_and_workspace([package_path], workspace_root).await
+    }
+
+    pub async fn with_extension_packages_and_workspace<I, P>(
+        package_paths: I,
+        workspace_root: impl AsRef<std::path::Path>,
+    ) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<std::path::Path>,
+    {
+        let server = RubyLanguageServer::default();
+        let root_uri = Url::from_directory_path(workspace_root.as_ref()).expect(
+            "INVARIANT VIOLATED: black-box workspace root is not a valid file URI. This is a test setup bug because project-context tests require a real filesystem root. Fix: create the workspace with tempfile.",
+        );
+        let extension_packages = package_paths
+            .into_iter()
+            .map(|path| path.as_ref().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        server
+            .initialize(InitializeParams {
+                root_uri: Some(root_uri),
+                initialization_options: Some(serde_json::json!({
+                    "extensionPackages": extension_packages,
+                    "extensionDirs": [],
+                    "workspaceTrusted": true
+                })),
+                ..InitializeParams::default()
+            })
+            .await
+            .expect("INVARIANT VIOLATED: project-aware FakeEditor failed to initialize RubyLanguageServer. This is a test harness bug because the supplied workspace and extension package are valid. Fix: inspect initialization routing.");
+
+        Self {
+            server,
+            buffers: HashMap::new(),
+        }
     }
 
     pub async fn open(&mut self, filename: &str, content: &str) {
@@ -185,6 +228,37 @@ impl FakeEditor {
             })
             .await
             .expect("INVARIANT VIOLATED: hover request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.")
+    }
+
+    pub async fn completion_after_dot(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<CompletionItem> {
+        self.assert_open(filename, "completion_after_dot");
+        let uri = filename_to_uri(filename);
+        let response = self
+            .server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    position: Position { line, character },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(".".to_string()),
+                }),
+            })
+            .await
+            .expect("INVARIANT VIOLATED: completion request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.");
+        match response {
+            Some(CompletionResponse::Array(items)) => items,
+            Some(CompletionResponse::List(list)) => list.items,
+            None => Vec::new(),
+        }
     }
 
     pub async fn references(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {

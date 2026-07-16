@@ -92,11 +92,17 @@ Claude Code's agent-critical LSP requests are implemented: definition,
 references, hover, document symbols, workspace symbols, implementation, call
 hierarchy, and diagnostics after edits.
 
-Verified gaps worth tracking:
+No agent-critical LSP request is currently known to be absent. Add a gap here
+only after checking advertised capabilities, handlers, and integration tests.
 
-| Gap | Current state | Why it matters |
-| --- | --- | --- |
-| Cross-file method rename | `rename` supports local variables, parameters, and project-owned classes/modules/constants. | Project-wide method rename still needs explicit ambiguity, alias, visibility, and dynamic-send policy. |
+Project-wide method rename is engine-owned and fail-closed. It uses exact
+declaration-name ranges and namespace-kind identity, updates editable resolved
+calls, static `send`/`__send__` targets, alias source operands, visibility
+modifiers, inherited calls, and reopened definitions. It rejects external or
+generated/macro declarations, unresolved lookup chains, ambiguous targets,
+operator syntax, writer-shape changes, `super`-coupled override families, and
+destination collisions across ancestor and descendant lookup chains. The LSP
+adapter only validates the new Ruby name and converts engine ranges into edits.
 
 Do not treat old feature matrices as source of truth. Before adding a feature
 gap here, verify it against `src/handlers`, advertised server capabilities, and
@@ -283,8 +289,8 @@ installed wrapper can complete a real LSP initialize handshake.
 Current-platform VSIX packaging must run `editors/scripts/smoke_vsix.js` on the
 produced archive before moving it to `target/`. The smoke test extracts the
 actual VSIX, executes its packaged platform binary, initializes it with the
-bundled RSpec, Rails, and Minitest package paths from that same extraction, and
-requires all extension statuses to be `loaded`. It clears developer extension-path
+bundled RSpec, Rails, Minitest, Sinatra, and Cucumber package paths from that
+same extraction, and requires all extension statuses to be `loaded`. It clears developer extension-path
 environment variables so a local package cannot mask a missing, invalid, or
 checksum-broken bundled copy.
 
@@ -364,8 +370,9 @@ keeps the normal gate toolchain-independent; set
 `RUBY_FAST_LSP_TEST_BUILT_EXAMPLE=1` after an SDK build to exercise the actual
 Ruby-authored Wasm.
 
-`extensions/rails-ruby` is the bundled Rails guest and must remain a normal
-consumer of the public mruby SDK and extension patch vocabulary. Its initial
+`extensions/rails-ruby` retains its stable package ID but is a Rust-authored
+Wasm guest and must remain a normal consumer of the typed public guest SDK and
+extension patch vocabulary. Its initial
 static Active Record contract recognizes `belongs_to`, `has_one`, and
 `has_many`, emitting generated public reader/writer methods, structured return
 types, and exact references to conventionally inferred target classes. Active
@@ -380,16 +387,23 @@ blocks remain attached to the concern and flow through the existing engine
 mixin/MRO graph; do not duplicate include or method lookup policy in the Rails
 guest. Existing indexer/engine concern handling maps `class_methods` through a
 generated `ClassMethods` module and the simulator owns its semantic coverage. The
-deterministic WAT fixture and Ruby-authored Wasm black-box test must both prove
+deterministic WAT fixture and actual Rust-Wasm black-box tests must both prove
 navigation, hover/type behavior, and stale-fact removal after edits. Keep Rails
 inflection and DSL policy in this extension; do not add association names or
 framework-specific resolution to `ruby-analysis` or the server indexer.
 
-`extensions/minitest-ruby` is the bundled public-contract test discovery guest.
-It contributes synthetic `def test_*` and Rails-style `test "…"` document
-symbols plus class/test Run and Debug code lenses, while core indexing remains
-the owner of ordinary class/method symbols. VS Code owns terminal argv shaping,
-workspace runner selection, structured process execution, and `rdbg` launch configuration.
+`extensions/minitest-ruby` retains its stable package ID but is a Rust-authored
+Wasm guest using the public typed guest SDK. It contributes synthetic
+`def test_*`, Rails-style `test "…"`, and Minitest::Spec group/example document
+symbols plus Run and Debug code lenses, while core indexing remains the owner
+of ordinary class/method symbols. Its spec execution contexts use source-scoped
+hidden subclasses of `Minitest::Spec`: nested groups inherit, siblings remain
+isolated, group `def` methods plus `let`/`subject` belong to group instances,
+and example/hook/helper blocks preserve lexical/local scope while using the
+group instance receiver. Applicability requires a complete owning-project lock
+with Minitest `>= 5, < 7`. Keep this policy in the guest. VS Code owns terminal
+argv shaping, workspace runner selection, structured process execution, and
+`rdbg` launch configuration.
 RSpec and Minitest debug lenses must start a debugger; a notification-only
 placeholder is not a completed debug workflow.
 
@@ -401,6 +415,28 @@ meaning such as Rails `class_name` or `polymorphic` belongs in the consuming
 guest. Unsupported/dynamic values must remain explicit rather than being
 coerced into guessed strings.
 
+Large, immutable project metadata may be delivered once at activation rather
+than repeated on every call. Manifest `[indexing].project_context =
+"activation"` opts into this mode: `lifecycle.activate` carries the complete
+owning `ProjectContext`, while subsequent call payloads omit it. The host must
+still retain and use the complete context for applicability and patch
+validation. Packages that omit the field retain ABI-v1 per-call delivery.
+
+An active lexical extension frame carries its owning extension IDs in
+`ResolvedCall.frame_extension_ids`. Implicit/self calls inside that frame are
+dispatched only to its owners; another extension may participate only through
+an explicit non-self receiver. This host-derived provenance prevents common DSL
+names such as `describe`, `before`, and `include` from creating cross-framework
+facts when multiple supported testing gems are locked in one project.
+
+Extension status telemetry is bounded and low-cardinality. It records call
+classes, failures/traps/resource limits, rejection/conflict counts, emitted
+patch families, total/max guest time, and per-project Wasm instance creation.
+Count a disablement only on the first healthy-to-disabled transition so
+concurrent in-flight failures cannot inflate evidence or overwrite the first
+error. Official load stress must exercise every bundled guest, overlapping
+framework applicability, unsupported versions, and isolated projects.
+
 Manifest `[indexing].frame_call_names` declares lexical DSL frames separately
 from guest handler `call_names`. Loaded frame calls are tracked even when the
 guest has no handler for the frame itself, and `ResolvedCall.arguments`
@@ -408,6 +444,77 @@ preserves literal/keyword values plus ranges for nested handlers. Frame names
 must be valid Ruby method names and are part of deterministic manifest reload
 identity. Keep frame tracking framework-neutral; a guest must verify its own
 root frame before interpreting nested calls.
+
+Frame tracking does not establish the block's semantic execution context.
+Ruby analysis must independently represent lexical constant scope, implicit
+receiver, method-definition owner, and closure/local scope. RSpec example
+groups, Sinatra/Cucumber-style execution blocks, and Ruby evaluation APIs can
+change the receiver or definition owner while preserving lexical lookup. The
+required framework-neutral execution-context contract and acceptance matrix are
+specified in `extensions/README.md`; treat that work as blocking extension
+architecture completeness and broad framework expansion. Do not encode another
+framework-name list in `ruby-analysis` or reuse `current_namespace` as all four
+contexts.
+
+`extensions/sinatra-rust` is the bundled Rust/Wasm proof that exact existing
+namespace targets do not require an RSpec-style generated owner. Sinatra route,
+filter, and error blocks preserve lexical/local scope while switching the
+implicit receiver to the application instance. `helpers do` uses the
+application singleton as `self` and the application instance as the `def`
+owner; constant helper arguments emit ordinary instance mixin patches. Classic
+calls target `Sinatra::Application`, modular calls target the current
+`Sinatra::Base` subclass, and applicability requires locked Sinatra `>= 3, < 5`.
+Keep this policy in the guest. The host validator may accept namespace-only
+execution contexts, but generated targets must still be declared in the same
+patch.
+
+`extensions/cucumber-rust` models Cucumber-Ruby's per-scenario World as a
+project-scoped hidden owner. Step and scenario-hook blocks use that owner as
+their implicit receiver while preserving lexical constants, closure locals,
+and the source Ruby `def` owner. `World(SomeModule)` applies instance mixins to
+the same owner across files; `World { factory }` must not receive World scope.
+The guest supports locked Cucumber `>= 9, < 12`. Keep English DSL names,
+top-level `Object` semantic targets, and all World policy in the guest.
+
+Reusable execution templates are not Ruby mixins. Extensions connect a
+template receiver to each concrete application through
+`ConnectExecutionContextPatch`; fact conversion emits
+`GraphEdgeKind::ExecutionContextApplication`. Engine method lookup searches
+the template's ordinary chain first and then searches every application chain
+independently. Never add these edges to Ruby MRO or select one application by
+file/indexing order. Connection facts are file-owned and disappear through
+ordinary replacement.
+
+`ScopeTracker` owns the framework-neutral execution-context stack used by
+static block forms of `class_eval`, `module_eval`, `class_exec`, `module_exec`,
+`instance_eval`, `instance_exec`, `define_method`, and
+`define_singleton_method`, as well as validated extension contexts. A frame
+overrides implicit receiver and method-definition owner without replacing
+lexical constant or closure/local scope. Ordinary nested blocks preserve the
+frame; a real nested class/module or method body suspends it. A `def` declared
+by an eval/extension context therefore receives that context's owner, but its
+body runs with the declared method's instance/singleton receiver through a
+method-runtime frame. Never let the eval block receiver leak into that method
+body.
+
+For block-form dynamic definitions, the block is the eventual method body:
+`define_method` uses the target instance (or the target singleton when invoked
+inside `class << self`) and `define_singleton_method` uses the target singleton,
+while lexical constants, captured locals, and nested Ruby `def` ownership stay
+tied to the source context. Static `send`/`__send__` and `const_get` receiver
+chains follow the same rule. String-eval forms are an explicit unsupported
+boundary and must never be parsed as block-form facts. Keep all of these rules
+in `ruby-analysis`; framework guests only declare framework execution
+contexts.
+
+Generated semantic owners are represented by `GeneratedOwnerId` wrapped in a
+reserved, non-Ruby `RubyConstant` sentinel. The sentinel is collision-proof
+against `RubyConstant::new`, remains the same compact size as `Ustr`, and is
+detected through `FullyQualifiedName::has_generated_owner`. Generated owners
+may participate in graph/MRO/method/reference semantics, but constant
+completion, workspace symbols, namespace trees, and rename must filter them.
+Never replace this with a valid-looking synthetic Ruby constant or display the
+reserved identity as user code.
 
 `DefineMethodPatch` metadata is semantic, not decorative. The extension boundary
 validates method/namespace/type/range/parameter payloads before conversion.
@@ -417,6 +524,11 @@ the extension host mirrors the method identity/visibility and return type into
 the collector's local facts so later expressions can infer it without a second
 AST traversal. Final facts still enter the engine only through per-file
 `replace_facts`; edit/reindex removes stale extension methods and types.
+An extension may declare `return_type_source = Block` instead of a concrete
+return type. The framework-neutral collector infers the call block's value in
+the active lexical/local/execution context, mirrors it for same-pass receiver
+inference, and persists it as an extension-provenance method-return fact. A
+patch must never provide both a concrete return type and a derived source.
 
 `DefineNamespacePatch` and `DefineConstantPatch` are the public contracts for
 generated class/module declarations and typed value constants. The extension
@@ -455,6 +567,15 @@ identity, and rejects competing parents deterministically. Fact conversion
 emits ordinary resolved or unresolved `Superclass` graph edges (plus singleton
 inheritance when immediately resolvable), so engine MRO and hierarchy policy
 remain single-sourced. Extensions must not override parser-owned inheritance.
+
+Generated semantic owner identity has two explicit scopes. Source-scoped owners
+combine extension ID, document URI, and local frame ID; project-scoped owners
+combine extension ID, owning project URI, and logical local ID so a relationship
+can cross files without crossing Gemfile-owned projects. `ApplyMixinPatch` may
+target such an owner exactly through `mixin_target`; it must use exactly one of
+that target or an ordinary Ruby `mixin` namespace. Project-scoped declarations
+and targets require `ProjectContext` and fail closed when it is absent. Keep
+these rules framework-neutral and preserve normal per-file fact replacement.
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 

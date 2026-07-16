@@ -45,11 +45,11 @@ pub async fn handle_code_lens(
 
     // 5. Convert Vec<CodeLensData> → Vec<CodeLens>.
     let mut lenses: Vec<CodeLens> = lens_data.into_iter().map(to_lsp_code_lens).collect();
-    lenses.extend(
-        lang_server
-            .extension_registry
-            .code_lenses(uri.as_str(), &content),
-    );
+    lenses.extend(lang_server.extension_registry.code_lenses(
+        uri.as_str(),
+        &content,
+        lang_server.extension_project_context_for_document(uri),
+    ));
     Some(lenses)
 }
 

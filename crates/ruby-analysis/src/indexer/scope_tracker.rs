@@ -44,10 +44,21 @@ impl fmt::Display for LocalScopeKind {
 #[derive(Debug, Clone)]
 pub struct ScopeTracker {
     frames: Vec<ScopeFrame>,
+    execution_context_stack: Vec<ExecutionContextFrame>,
     scope_kind_stack: Vec<LocalScopeKind>,
     method_fqn_stack: Vec<Option<FullyQualifiedName>>,
     module_function_mode_stack: Vec<bool>,
     visibility_stack: Vec<MethodVisibility>,
+}
+
+#[derive(Debug, Clone)]
+struct ExecutionContextFrame {
+    lexical_frame_depth: usize,
+    local_scope_depth: usize,
+    implicit_receiver: Vec<RubyConstant>,
+    implicit_receiver_kind: NamespaceKind,
+    method_definition_owner: Vec<RubyConstant>,
+    method_definition_kind: NamespaceKind,
 }
 
 #[derive(Debug, Clone)]
@@ -66,11 +77,100 @@ impl ScopeTracker {
     pub fn new() -> Self {
         Self {
             frames: Vec::new(),
+            execution_context_stack: Vec::new(),
             scope_kind_stack: vec![LocalScopeKind::Constant],
             method_fqn_stack: Vec::new(),
             module_function_mode_stack: Vec::new(),
             visibility_stack: vec![MethodVisibility::Public],
         }
+    }
+
+    pub fn push_execution_context(
+        &mut self,
+        implicit_receiver: Vec<RubyConstant>,
+        implicit_receiver_kind: NamespaceKind,
+        method_definition_owner: Vec<RubyConstant>,
+        method_definition_kind: NamespaceKind,
+    ) {
+        self.execution_context_stack.push(ExecutionContextFrame {
+            lexical_frame_depth: self.frames.len(),
+            local_scope_depth: self.scope_kind_stack.len(),
+            implicit_receiver,
+            implicit_receiver_kind,
+            method_definition_owner,
+            method_definition_kind,
+        });
+        self.module_function_mode_stack.push(false);
+        self.visibility_stack.push(MethodVisibility::Public);
+    }
+
+    pub fn pop_execution_context(&mut self) {
+        self.execution_context_stack.pop().expect(
+            "INVARIANT VIOLATED: execution context stack underflow. This is a bug because every pushed block execution context must be popped exactly once. Fix: keep execution-context traversal balanced.",
+        );
+        self.module_function_mode_stack.pop().expect(
+            "INVARIANT VIOLATED: module_function stack underflow after execution context. This is a bug because every execution context owns one module_function flag. Fix: keep execution-context traversal balanced.",
+        );
+        self.visibility_stack.pop().expect(
+            "INVARIANT VIOLATED: visibility stack underflow after execution context. This is a bug because every execution context owns one visibility frame. Fix: keep execution-context traversal balanced.",
+        );
+    }
+
+    fn current_execution_context(&self) -> Option<&ExecutionContextFrame> {
+        let context = self.execution_context_stack.last()?;
+        assert!(
+            context.local_scope_depth <= self.scope_kind_stack.len(),
+            "INVARIANT VIOLATED: execution context local-scope depth exceeds the active scope stack. This is a bug because scopes present when an execution context was pushed cannot disappear before that context is popped. Fix: keep execution-context and local-scope traversal balanced."
+        );
+        (context.lexical_frame_depth == self.frames.len()
+            && !self.scope_kind_stack[context.local_scope_depth..]
+                .iter()
+                .any(|kind| {
+                    matches!(
+                        kind,
+                        LocalScopeKind::Constant
+                            | LocalScopeKind::InstanceMethod
+                            | LocalScopeKind::ClassMethod
+                            | LocalScopeKind::FrameworkInstanceBlock
+                    )
+                }))
+        .then_some(context)
+    }
+
+    pub fn execution_context_active(&self) -> bool {
+        self.current_execution_context().is_some()
+    }
+
+    pub fn implicit_receiver_context(&self) -> (Vec<RubyConstant>, NamespaceKind) {
+        self.current_execution_context()
+            .map(|context| {
+                (
+                    context.implicit_receiver.clone(),
+                    context.implicit_receiver_kind,
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    self.get_ns_stack(),
+                    self.current_method_context_without_execution(),
+                )
+            })
+    }
+
+    pub fn method_definition_context(&self) -> (Vec<RubyConstant>, NamespaceKind) {
+        self.current_execution_context()
+            .map(|context| {
+                (
+                    context.method_definition_owner.clone(),
+                    context.method_definition_kind,
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    self.get_ns_stack(),
+                    self.current_macro_definition_context_without_execution(),
+                )
+            })
     }
 
     pub fn push_ns_scope(&mut self, ns: RubyConstant) {
@@ -209,6 +309,13 @@ impl ScopeTracker {
     }
 
     pub fn current_method_context(&self) -> NamespaceKind {
+        if let Some(context) = self.current_execution_context() {
+            return context.implicit_receiver_kind;
+        }
+        self.current_method_context_without_execution()
+    }
+
+    fn current_method_context_without_execution(&self) -> NamespaceKind {
         for kind in self.scope_kind_stack.iter().rev() {
             match kind {
                 LocalScopeKind::InstanceMethod => return NamespaceKind::Instance,
@@ -229,6 +336,13 @@ impl ScopeTracker {
     }
 
     pub fn current_macro_definition_context(&self) -> NamespaceKind {
+        if let Some(context) = self.current_execution_context() {
+            return context.method_definition_kind;
+        }
+        self.current_macro_definition_context_without_execution()
+    }
+
+    fn current_macro_definition_context_without_execution(&self) -> NamespaceKind {
         for kind in self.scope_kind_stack.iter().rev() {
             match kind {
                 LocalScopeKind::InstanceMethod => return NamespaceKind::Instance,
@@ -429,5 +543,89 @@ mod tests {
 
         tracker.pop_method_fqn();
         assert_eq!(tracker.current_method_fqn(), None);
+    }
+
+    #[test]
+    fn execution_context_separates_lexical_and_runtime_owners() {
+        let mut tracker = ScopeTracker::new();
+        let lexical = RubyConstant::new("Lexical").expect("test constant must be valid");
+        let target = RubyConstant::new("Target").expect("test constant must be valid");
+        tracker.push_ns_scope(lexical.clone());
+
+        tracker.push_execution_context(
+            vec![target.clone()],
+            NamespaceKind::Instance,
+            vec![target.clone()],
+            NamespaceKind::Instance,
+        );
+
+        assert_eq!(tracker.get_ns_stack(), vec![lexical]);
+        assert_eq!(
+            tracker.implicit_receiver_context(),
+            (vec![target.clone()], NamespaceKind::Instance)
+        );
+        assert_eq!(
+            tracker.method_definition_context(),
+            (vec![target], NamespaceKind::Instance)
+        );
+    }
+
+    #[test]
+    fn nested_ruby_namespace_suspends_outer_execution_context() {
+        let mut tracker = ScopeTracker::new();
+        let lexical = RubyConstant::new("Lexical").expect("test constant must be valid");
+        let target = RubyConstant::new("Target").expect("test constant must be valid");
+        let nested = RubyConstant::new("Nested").expect("test constant must be valid");
+        tracker.push_ns_scope(lexical.clone());
+        tracker.push_execution_context(
+            vec![target],
+            NamespaceKind::Instance,
+            vec![RubyConstant::new("Target").expect("test constant must be valid")],
+            NamespaceKind::Instance,
+        );
+        tracker.push_ns_scope(nested.clone());
+
+        assert_eq!(
+            tracker.method_definition_context(),
+            (vec![lexical.clone(), nested], NamespaceKind::Instance)
+        );
+
+        tracker.pop_ns_scope();
+        tracker.pop_execution_context();
+        assert_eq!(
+            tracker.implicit_receiver_context(),
+            (vec![lexical], NamespaceKind::Singleton)
+        );
+    }
+
+    #[test]
+    fn ordinary_block_preserves_execution_context_but_method_scope_suspends_it() {
+        let mut tracker = ScopeTracker::new();
+        let lexical = RubyConstant::new("Lexical").expect("test constant must be valid");
+        let target = RubyConstant::new("Target").expect("test constant must be valid");
+        tracker.push_ns_scope(lexical.clone());
+        tracker.push_execution_context(
+            vec![target.clone()],
+            NamespaceKind::Singleton,
+            vec![target.clone()],
+            NamespaceKind::Instance,
+        );
+
+        tracker.push_scope_kind(LocalScopeKind::Block);
+        assert_eq!(
+            tracker.implicit_receiver_context(),
+            (vec![target], NamespaceKind::Singleton)
+        );
+        tracker.pop_scope_kind();
+
+        tracker.push_scope_kind(LocalScopeKind::InstanceMethod);
+        assert_eq!(
+            tracker.implicit_receiver_context(),
+            (vec![lexical.clone()], NamespaceKind::Instance)
+        );
+        assert_eq!(
+            tracker.method_definition_context(),
+            (vec![lexical], NamespaceKind::Instance)
+        );
     }
 }

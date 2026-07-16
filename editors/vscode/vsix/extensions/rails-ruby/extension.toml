@@ -3,17 +3,20 @@ name = "Rails Ruby"
 version = "0.1.0"
 abi_version = 1
 server_version = ">=0.2.6, <0.3.0"
-runtime = "mruby-wasm"
-entry = "extension.rb"
-wasm = "extension.wasm"
-checksum_sha256 = "0be95ad5fc5dd358fa674a58d531d728ec5f0f881a0bb8b2303e8c5efdeeb7fc"
+runtime = "wasm"
+wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_rails_extension.wasm"
+checksum_sha256 = "edd80fb7d9a27f8434f64cf1954543ad4708a1f91220d9fac9251af54726b133"
 capabilities = ["index.call", "code_lens"]
 permissions = []
 
+[applicability]
+locked_gems = [{ name = "rails", version = ">=6.0.0, <9.0.0" }]
+
 [build]
-output = "extension.wasm"
+output = "target/wasm32-wasip1/release/ruby_fast_lsp_rails_extension.wasm"
 
 [indexing]
+project_context = "activation"
 frame_call_names = ["draw", "namespace", "scope"]
 call_names = [
   "belongs_to", "has_one", "has_many",

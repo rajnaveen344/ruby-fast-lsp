@@ -27,7 +27,7 @@ impl MethodParamInfo {
 }
 
 impl FactCollector {
-    pub fn process_def_node_entry(&mut self, node: &DefNode) {
+    pub fn process_def_node_entry(&mut self, node: &DefNode) -> bool {
         let method_name_id = node.name();
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
@@ -36,21 +36,39 @@ impl FactCollector {
         //   * `def self.foo`            (receiver: self)
         //   * `def Foo.foo` inside `class Foo`  (constant read matching current class/module)
         // Otherwise skip indexing.
-        let (namespace_kind, skip_method) = get_method_namespace_kind(
-            node.receiver(),
-            &self.scope_tracker.get_ns_stack(),
-            self.scope_tracker.in_singleton(),
-        );
+        let (definition_namespace, namespace_kind, skip_method) = match node.receiver() {
+            None => {
+                let (namespace, kind) = self.scope_tracker.method_definition_context();
+                (namespace, kind, false)
+            }
+            Some(receiver) if receiver.as_self_node().is_some() => {
+                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
+                (
+                    namespace,
+                    NamespaceKind::Singleton,
+                    receiver_kind != NamespaceKind::Singleton,
+                )
+            }
+            Some(_) => {
+                let namespace = self.scope_tracker.get_ns_stack();
+                let (kind, skip) = get_method_namespace_kind(
+                    node.receiver(),
+                    &namespace,
+                    self.scope_tracker.in_singleton(),
+                );
+                (namespace, kind, skip)
+            }
+        };
 
         if skip_method {
             warn!("Skipping method with unsupported receiver");
-            return;
+            return false;
         }
 
         // Validate method name using centralized validation
         if !RubyMethod::is_valid_ruby_method_name(method_name_str.as_ref()) {
             warn!("Skipping invalid method name: {}", method_name_str);
-            return;
+            return false;
         }
 
         let mut method = RubyMethod::new(method_name_str.as_ref()).unwrap();
@@ -86,7 +104,7 @@ impl FactCollector {
             Some(self.document.offset_to_position(name_location.end_offset()))
         };
 
-        let namespace_parts = self.scope_tracker.get_ns_stack();
+        let namespace_parts = definition_namespace;
 
         let fqn = FullyQualifiedName::method(namespace_parts.clone(), method);
         self.scope_tracker.push_method_fqn(Some(fqn.clone()));
@@ -107,11 +125,12 @@ impl FactCollector {
                 )
             })
             .collect();
-        self.direct_push_method_fact_with_signature(
+        self.direct_push_method_fact_with_signature_and_name_range(
             namespace_parts.clone(),
             actual_namespace_kind,
             method,
             self.direct_range(&full_location),
+            self.direct_range(&name_location),
             direct_params,
             yard_doc.as_ref().and_then(|doc| doc.description.clone()),
             yard_doc
@@ -122,11 +141,12 @@ impl FactCollector {
             && actual_namespace_kind == NamespaceKind::Instance
             && self.scope_tracker.module_function_mode_enabled()
         {
-            self.direct_push_method_fact_with_signature(
+            self.direct_push_method_fact_with_signature_and_name_range(
                 namespace_parts.clone(),
                 NamespaceKind::Singleton,
                 method,
                 self.direct_range(&full_location),
+                self.direct_range(&name_location),
                 params
                     .iter()
                     .map(|param| {
@@ -154,6 +174,12 @@ impl FactCollector {
             NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
         self.scope_tracker.push_scope_kind(scope_kind);
+        self.scope_tracker.push_execution_context(
+            namespace_parts.clone(),
+            namespace_kind,
+            namespace_parts.clone(),
+            namespace_kind,
+        );
 
         self.document.variable_scopes_mut().enter_scope(
             scope_kind,
@@ -267,6 +293,7 @@ impl FactCollector {
         }
 
         self.validate_declared_return_type(node, &return_type, &instance_owner_fqn);
+        true
     }
 
     fn validate_declared_return_type(
@@ -300,6 +327,7 @@ impl FactCollector {
     }
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
+        self.scope_tracker.pop_execution_context();
         self.scope_tracker.pop_method_fqn();
         self.scope_tracker.pop_scope_kind();
         self.document.variable_scopes_mut().exit_scope();

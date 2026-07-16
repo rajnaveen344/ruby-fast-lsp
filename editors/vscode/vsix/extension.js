@@ -635,7 +635,7 @@ function getServerPath() {
 
 function getBundledExtensionPackages(extensionPath) {
     const packages = [];
-    for (const packageName of ['rspec-ruby', 'rails-ruby', 'minitest-ruby']) {
+    for (const packageName of ['rspec-ruby', 'rails-ruby', 'minitest-ruby', 'sinatra-rust', 'cucumber-rust']) {
         const extensionPackage = path.join(extensionPath, 'extensions', packageName);
         if (fs.existsSync(path.join(extensionPackage, 'extension.toml'))) {
             packages.push(extensionPackage);

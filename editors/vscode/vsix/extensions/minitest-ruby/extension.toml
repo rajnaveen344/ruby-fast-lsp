@@ -3,12 +3,31 @@ name = "Minitest Ruby"
 version = "0.1.0"
 abi_version = 1
 server_version = ">=0.2.6, <0.3.0"
-runtime = "mruby-wasm"
-entry = "extension.rb"
-wasm = "extension.wasm"
-checksum_sha256 = "55b5b9c9ef93dc247566ea6b82e65d21e4c876792e77f02e1e0a055d38d549f2"
-capabilities = ["document_symbol", "code_lens"]
+runtime = "wasm"
+wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_minitest_extension.wasm"
+checksum_sha256 = "7f09fe7c6a02f8bef0eba652cdb23a90ec22aba489852f65e3808039499e76d6"
+capabilities = ["index.call", "document_symbol", "code_lens"]
 permissions = []
 
+[applicability]
+locked_gems = [{ name = "minitest", version = ">=5.0.0, <7.0.0" }]
+
 [build]
-output = "extension.wasm"
+output = "target/wasm32-wasip1/release/ruby_fast_lsp_minitest_extension.wasm"
+
+[indexing]
+project_context = "activation"
+call_names = ["describe", "it", "specify", "let", "subject", "before", "after"]
+frame_call_names = ["describe"]
+targets = [
+  { owner = ["Kernel"], owner_kind = "instance", method = "describe", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "describe", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "describe", frame = true },
+  { owner = ["Minitest", "Spec", "DSL"], owner_kind = "instance", method = "describe", frame = true },
+  { owner = ["Minitest", "Spec", "DSL"], owner_kind = "instance", method = "it" },
+  { owner = ["Minitest", "Spec", "DSL"], owner_kind = "instance", method = "specify" },
+  { owner = ["Minitest", "Spec", "DSL"], owner_kind = "instance", method = "let" },
+  { owner = ["Minitest", "Spec", "DSL"], owner_kind = "instance", method = "subject" },
+  { owner = ["Minitest", "Spec", "DSL"], owner_kind = "instance", method = "before" },
+  { owner = ["Minitest", "Spec", "DSL"], owner_kind = "instance", method = "after" },
+]

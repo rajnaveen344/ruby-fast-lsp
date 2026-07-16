@@ -1,4 +1,4 @@
-use crate::core::{NamespaceKind, RubyConstant};
+use crate::core::{ExecutionContextFact, ExecutionScopeMode, NamespaceKind, RubyConstant};
 
 use crate::{Identifier, LVScopeId, RubyDocument, ScopeTracker};
 
@@ -41,9 +41,11 @@ pub struct IdentifierVisitor {
     document: RubyDocument,
     position: Position,
     scope_tracker: ScopeTracker,
+    execution_context: Option<ExecutionContextFact>,
 
     // Output
     pub ns_stack_at_pos: Vec<RubyConstant>,
+    namespace_kind_at_pos: Option<NamespaceKind>,
     pub lv_scope_id_at_pos: Option<LVScopeId>,
     pub identifier: Option<Identifier>,
     pub identifier_type: Option<IdentifierType>,
@@ -51,17 +53,39 @@ pub struct IdentifierVisitor {
 
 impl IdentifierVisitor {
     pub fn new(document: RubyDocument, position: Position) -> Self {
+        Self::new_with_execution_context(document, position, None)
+    }
+
+    pub fn new_with_execution_context(
+        document: RubyDocument,
+        position: Position,
+        execution_context: Option<ExecutionContextFact>,
+    ) -> Self {
         let scope_tracker = ScopeTracker::new();
 
         Self {
             document,
             position,
             scope_tracker,
+            execution_context,
             ns_stack_at_pos: Vec::new(),
+            namespace_kind_at_pos: None,
             lv_scope_id_at_pos: None,
             identifier: None,
             identifier_type: None,
         }
+    }
+
+    fn execution_context_for_call(&self, node: &CallNode) -> Option<&ExecutionContextFact> {
+        let context = self.execution_context.as_ref()?;
+        let block = node.block()?;
+        let location = block.location();
+        (context.range.start_byte == u32::try_from(location.start_offset()).expect(
+            "INVARIANT VIOLATED: Prism block start exceeds u32. This is a bug because TextRange stores u32 byte offsets. Fix: widen TextRange before parsing files larger than u32::MAX bytes.",
+        ) && context.range.end_byte == u32::try_from(location.end_offset()).expect(
+            "INVARIANT VIOLATED: Prism block end exceeds u32. This is a bug because TextRange stores u32 byte offsets. Fix: widen TextRange before parsing files larger than u32::MAX bytes.",
+        ))
+        .then_some(context)
     }
 
     pub fn is_position_in_location(&self, location: &Location) -> bool {
@@ -81,6 +105,15 @@ impl IdentifierVisitor {
         ns_stack_at_pos: Vec<RubyConstant>,
         lv_scope_id_at_pos: Option<LVScopeId>,
     ) {
+        let implicit_context = self.scope_tracker.implicit_receiver_context();
+        let definition_context = self.scope_tracker.method_definition_context();
+        self.namespace_kind_at_pos = Some(if ns_stack_at_pos == implicit_context.0 {
+            implicit_context.1
+        } else if ns_stack_at_pos == definition_context.0 {
+            definition_context.1
+        } else {
+            self.scope_tracker.current_method_context()
+        });
         self.identifier = identifier;
         self.identifier_type = identifier_type;
         self.ns_stack_at_pos = ns_stack_at_pos;
@@ -110,7 +143,9 @@ impl IdentifierVisitor {
         let lv_scope_id = self.lv_scope_id_at_pos.unwrap_or(0);
 
         // Determine namespace kind from current method context
-        let namespace_kind = self.scope_tracker.current_method_context();
+        let namespace_kind = self
+            .namespace_kind_at_pos
+            .unwrap_or_else(|| self.scope_tracker.current_method_context());
 
         (
             self.identifier.clone(),
@@ -122,14 +157,141 @@ impl IdentifierVisitor {
     }
 }
 
-fn static_eval_block_namespace(node: &CallNode) -> Option<Vec<RubyConstant>> {
-    if !matches!(node.name().as_slice(), b"class_eval" | b"module_eval") {
+fn static_receiver_namespace(
+    node: &Node<'_>,
+    scope_tracker: &ScopeTracker,
+) -> Option<Vec<RubyConstant>> {
+    if node.as_self_node().is_some() {
+        let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
+        return (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
+            .then_some(namespace);
+    }
+    if let Some(receiver) = crate::mixin_ref_from_node(node) {
+        return Some(receiver.parts);
+    }
+    let call = node.as_call_node()?;
+    if call.name().as_slice() != b"const_get" {
         return None;
     }
+    let mut namespace = static_receiver_namespace(&call.receiver()?, scope_tracker)?;
+    let arguments = call.arguments()?;
+    let argument = arguments.arguments().iter().next()?;
+    let name = if let Some(symbol) = argument.as_symbol_node() {
+        String::from_utf8_lossy(symbol.unescaped()).to_string()
+    } else if let Some(string) = argument.as_string_node() {
+        String::from_utf8_lossy(string.unescaped()).to_string()
+    } else {
+        return None;
+    };
+    namespace.push(RubyConstant::new(&name).ok()?);
+    Some(namespace)
+}
+
+fn static_eval_block_context(
+    node: &CallNode,
+    scope_tracker: &ScopeTracker,
+) -> Option<(Vec<RubyConstant>, NamespaceKind, NamespaceKind)> {
+    let (implicit_receiver_kind, method_definition_kind) = match node.name().as_slice() {
+        b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => {
+            (NamespaceKind::Singleton, NamespaceKind::Instance)
+        }
+        b"instance_eval" | b"instance_exec" => (NamespaceKind::Singleton, NamespaceKind::Singleton),
+        _ => return None,
+    };
     node.block()?;
-    let receiver = node.receiver()?;
-    let eval_ref = crate::mixin_ref_from_node(&receiver)?;
-    Some(eval_ref.parts)
+    let eval_namespace = match node.receiver() {
+        None => {
+            let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
+            (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
+                .then_some(namespace)?
+        }
+        Some(receiver) if receiver.as_self_node().is_some() => {
+            let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
+            (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
+                .then_some(namespace)?
+        }
+        Some(receiver) => static_receiver_namespace(&receiver, scope_tracker)?,
+    };
+    Some((
+        eval_namespace,
+        implicit_receiver_kind,
+        method_definition_kind,
+    ))
+}
+
+fn static_dynamic_definition_block_context(
+    node: &CallNode,
+    scope_tracker: &ScopeTracker,
+) -> Option<(
+    Vec<RubyConstant>,
+    NamespaceKind,
+    Vec<RubyConstant>,
+    NamespaceKind,
+)> {
+    node.block()?;
+    let (definition_namespace, definition_kind) = scope_tracker.method_definition_context();
+    let (implicit_namespace, implicit_kind) = match node.receiver() {
+        None => {
+            let target_kind = match node.name().as_slice() {
+                b"define_method"
+                    if !scope_tracker.execution_context_active()
+                        && scope_tracker.in_singleton() =>
+                {
+                    NamespaceKind::Singleton
+                }
+                b"define_method" => NamespaceKind::Instance,
+                b"define_singleton_method" => NamespaceKind::Singleton,
+                _ => return None,
+            };
+            let (namespace, receiver_kind) = scope_tracker.implicit_receiver_context();
+            if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
+                return None;
+            }
+            (namespace, target_kind)
+        }
+        Some(receiver) if node.name().as_slice() == b"define_singleton_method" => (
+            static_receiver_namespace(&receiver, scope_tracker)?,
+            NamespaceKind::Singleton,
+        ),
+        Some(receiver)
+            if matches!(
+                node.name().as_slice(),
+                b"send" | b"public_send" | b"__send__"
+            ) =>
+        {
+            let arguments = node.arguments()?;
+            let selector = arguments.arguments().iter().next()?;
+            let target_kind = if let Some(symbol) = selector.as_symbol_node() {
+                match symbol.unescaped() {
+                    b"define_method" => NamespaceKind::Instance,
+                    b"define_singleton_method" => NamespaceKind::Singleton,
+                    _ => return None,
+                }
+            } else if let Some(string) = selector.as_string_node() {
+                match string.unescaped() {
+                    b"define_method" => NamespaceKind::Instance,
+                    b"define_singleton_method" => NamespaceKind::Singleton,
+                    _ => return None,
+                }
+            } else {
+                return None;
+            };
+            if node.name().as_slice() == b"public_send" && target_kind == NamespaceKind::Instance {
+                return None;
+            }
+            (
+                static_receiver_namespace(&receiver, scope_tracker)?,
+                target_kind,
+            )
+        }
+        Some(_) => return None,
+    };
+    Some((
+        implicit_namespace,
+        implicit_kind,
+        definition_namespace,
+        definition_kind,
+    ))
 }
 
 fn concern_class_methods_block_namespace(node: &CallNode) -> Option<Vec<RubyConstant>> {
@@ -206,7 +368,71 @@ impl Visit<'_> for IdentifierVisitor {
 
     fn visit_call_node(&mut self, node: &CallNode) {
         self.process_call_node_entry(node);
-        if let Some(eval_namespace) = static_eval_block_namespace(node) {
+        if let Some(context) = self.execution_context_for_call(node).cloned() {
+            assert_eq!(
+                context.lexical_scope,
+                ExecutionScopeMode::Preserve,
+                "INVARIANT VIOLATED: unsupported lexical execution-scope mode reached IdentifierVisitor. This is a bug because only implemented scope modes may enter engine facts. Fix: validate modes at the extension boundary and add traversal support before extending the enum."
+            );
+            assert_eq!(
+                context.local_scope,
+                ExecutionScopeMode::Preserve,
+                "INVARIANT VIOLATED: unsupported local execution-scope mode reached IdentifierVisitor. This is a bug because only implemented scope modes may enter engine facts. Fix: validate modes at the extension boundary and add traversal support before extending the enum."
+            );
+            assert_eq!(
+                self.scope_tracker.get_ns_stack(),
+                context.lexical_namespace.namespace_parts(),
+                "INVARIANT VIOLATED: persisted execution context lexical namespace differs from current AST traversal. This is a bug because stale context facts must be removed on every file replacement. Fix: keep extension contexts in the ordinary per-file replacement lifecycle."
+            );
+            if let Some(receiver) = node.receiver() {
+                self.visit(&receiver);
+            }
+            if let Some(arguments) = node.arguments() {
+                self.visit_arguments_node(&arguments);
+            }
+            let implicit_kind = context.implicit_receiver.namespace_kind().expect(
+                "INVARIANT VIOLATED: execution implicit receiver is not a namespace. This is a bug because engine ingestion validates execution targets. Fix: keep ExecutionContextFact namespace validation in replace_facts.",
+            );
+            let definition_kind = context.method_definition_owner.namespace_kind().expect(
+                "INVARIANT VIOLATED: execution method owner is not a namespace. This is a bug because engine ingestion validates execution targets. Fix: keep ExecutionContextFact namespace validation in replace_facts.",
+            );
+            self.scope_tracker.push_execution_context(
+                context.implicit_receiver.namespace_parts(),
+                implicit_kind,
+                context.method_definition_owner.namespace_parts(),
+                definition_kind,
+            );
+            self.visit(&node.block().expect(
+                "INVARIANT VIOLATED: matching execution context call lost its block. This is a bug because execution_context_for_call matched that block immediately before traversal. Fix: keep the Prism call node immutable during visitor dispatch.",
+            ));
+            self.scope_tracker.pop_execution_context();
+        } else if let Some((
+            implicit_namespace,
+            implicit_kind,
+            definition_namespace,
+            definition_kind,
+        )) = static_dynamic_definition_block_context(node, &self.scope_tracker)
+        {
+            if let Some(receiver) = node.receiver() {
+                self.visit(&receiver);
+            }
+            if let Some(arguments) = node.arguments() {
+                self.visit_arguments_node(&arguments);
+            }
+            let block = node.block().expect(
+                "INVARIANT VIOLATED: dynamic-definition identifier context lost its block. This is a bug because static_dynamic_definition_block_context required the same immutable Prism call to have a block. Fix: keep identifier traversal and context matching atomic.",
+            );
+            self.scope_tracker.push_execution_context(
+                implicit_namespace,
+                implicit_kind,
+                definition_namespace,
+                definition_kind,
+            );
+            self.visit(&block);
+            self.scope_tracker.pop_execution_context();
+        } else if let Some((eval_namespace, implicit_kind, definition_kind)) =
+            static_eval_block_context(node, &self.scope_tracker)
+        {
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
             }
@@ -214,9 +440,14 @@ impl Visit<'_> for IdentifierVisitor {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_ns_scopes(eval_namespace);
+                self.scope_tracker.push_execution_context(
+                    eval_namespace.clone(),
+                    implicit_kind,
+                    eval_namespace,
+                    definition_kind,
+                );
                 self.visit(&block);
-                self.scope_tracker.pop_ns_scope();
+                self.scope_tracker.pop_execution_context();
             }
         } else if let Some(class_methods_namespace) = concern_class_methods_block_namespace(node) {
             if let Some(arguments) = node.arguments() {

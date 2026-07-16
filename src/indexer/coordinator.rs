@@ -187,6 +187,10 @@ impl IndexingCoordinator {
 
         // Step 1: Figure out which Ruby version we're using
         let ruby_version = self.detect_ruby_version();
+        server.set_extension_project_ruby_version(
+            &self.workspace_root,
+            ruby_version.map(|version| version.to_string()),
+        );
         info!("Detected Ruby version: {:?}", ruby_version);
 
         // Step 2: Find where Ruby libraries are installed
@@ -329,10 +333,14 @@ impl IndexingCoordinator {
     }
 
     /// Step 3: Set up the main indexing engine
-    fn setup_file_processor(&mut self, _server: &RubyLanguageServer) {
-        self.file_processor = Some(FileProcessor::with_extension_registry(
-            self.extension_registry.clone(),
-        ));
+    fn setup_file_processor(&mut self, server: &RubyLanguageServer) {
+        let processor = FileProcessor::with_extension_registry(self.extension_registry.clone());
+        self.file_processor = Some(
+            server
+                .extension_project_context_seed_for_root(&self.workspace_root)
+                .map(|seed| processor.clone().with_extension_project_context_seed(seed))
+                .unwrap_or(processor),
+        );
     }
 
     /// Quick scan for dependencies without indexing.
@@ -463,7 +471,12 @@ impl IndexingCoordinator {
             configured_gem_selection(self.get_required_gems(), &self.config.indexing);
 
         let mut gem_indexer = IndexerGem::new(Some(self.workspace_root.clone()));
-        gem_indexer.set_file_processor();
+        gem_indexer.set_file_processor(
+            self.file_processor
+                .as_ref()
+                .expect("INVARIANT VIOLATED: gem indexing started before FileProcessor setup. This is a coordinator bug because every source kind must share the owning project's extension context. Fix: keep setup_file_processor before index_gems.")
+                .clone(),
+        );
         gem_indexer.set_required_gems(required_gems);
         gem_indexer.set_excluded_gems(excluded_gems);
         gem_indexer.index_gems(true, server).await?; // selective = true

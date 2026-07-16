@@ -1,6 +1,46 @@
 use std::fmt::{self, Display, Formatter};
 use ustr::Ustr;
 
+const MAX_GENERATED_OWNER_COMPONENT_BYTES: usize = 4096;
+const GENERATED_OWNER_PREFIX: &str = "\0ruby-fast-lsp-generated-owner:";
+
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct GeneratedOwnerId(Ustr);
+
+impl GeneratedOwnerId {
+    pub fn new(
+        extension_id: &str,
+        source_identity: &str,
+        local_identity: &str,
+    ) -> Result<Self, &'static str> {
+        for component in [extension_id, source_identity, local_identity] {
+            if component.is_empty() {
+                return Err("Generated owner identity components cannot be empty");
+            }
+            if component.len() > MAX_GENERATED_OWNER_COMPONENT_BYTES {
+                return Err("Generated owner identity component exceeds 4096 bytes");
+            }
+        }
+
+        // Length-prefix every component so different triples cannot serialize to
+        // the same interned key even when their contents contain separators.
+        let key = format!(
+            "{GENERATED_OWNER_PREFIX}{}:{}{}:{}{}:{}",
+            extension_id.len(),
+            extension_id,
+            source_identity.len(),
+            source_identity,
+            local_identity.len(),
+            local_identity
+        );
+        Ok(Self(Ustr::from(&key)))
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        self.0.as_str()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct RubyConstant(Ustr);
 
@@ -28,6 +68,18 @@ impl RubyConstant {
         Ok(Self(Ustr::from(name)))
     }
 
+    pub fn generated_owner(owner: GeneratedOwnerId) -> Self {
+        assert!(
+            owner.as_str().starts_with(GENERATED_OWNER_PREFIX),
+            "INVARIANT VIOLATED: generated owner identity lacks its reserved prefix. This is a bug because generated semantic owners must never collide with source-level Ruby constants. Fix: construct identities only through GeneratedOwnerId::new."
+        );
+        Self(owner.0)
+    }
+
+    pub fn is_generated_owner(&self) -> bool {
+        self.0.as_str().starts_with(GENERATED_OWNER_PREFIX)
+    }
+
     /// Zero-alloc view into the interned Ustr arena. The returned &str has
     /// 'static lifetime since Ustr stores strings in a global arena.
     pub fn as_str(&self) -> &'static str {
@@ -52,7 +104,11 @@ impl TryFrom<&str> for RubyConstant {
 
 impl Display for RubyConstant {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        if let Some(identity) = self.0.as_str().strip_prefix(GENERATED_OWNER_PREFIX) {
+            write!(f, "#<generated-owner:{identity}>")
+        } else {
+            write!(f, "{}", self.0)
+        }
     }
 }
 
@@ -97,5 +153,40 @@ mod tests {
     fn test_try_from_empty() {
         let namespace = RubyConstant::try_from("");
         assert!(namespace.is_err());
+    }
+
+    #[test]
+    fn generated_owner_is_distinct_from_every_source_constant() {
+        let owner = GeneratedOwnerId::new("rspec-ruby", "file:///spec/user_spec.rb", "group:4:2")
+            .expect("test generated owner identity must be valid");
+        let generated = RubyConstant::generated_owner(owner);
+        let named = RubyConstant::new("RspecRubyFileSpecUserSpecRbGroup42")
+            .expect("test source constant must be valid");
+
+        assert!(generated.is_generated_owner());
+        assert!(!named.is_generated_owner());
+        assert_ne!(generated, named);
+    }
+
+    #[test]
+    fn generated_owner_support_keeps_ruby_constants_compact() {
+        assert_eq!(
+            std::mem::size_of::<RubyConstant>(),
+            std::mem::size_of::<Ustr>(),
+            "generated-owner tagging must not increase every indexed namespace segment"
+        );
+    }
+
+    #[test]
+    fn generated_owner_component_boundaries_are_unambiguous() {
+        let left = GeneratedOwnerId::new("a", "bc", "d")
+            .expect("test generated owner identity must be valid");
+        let right = GeneratedOwnerId::new("ab", "c", "d")
+            .expect("test generated owner identity must be valid");
+        let repeat = GeneratedOwnerId::new("a", "bc", "d")
+            .expect("test generated owner identity must be valid");
+
+        assert_ne!(left, right);
+        assert_eq!(left, repeat);
     }
 }

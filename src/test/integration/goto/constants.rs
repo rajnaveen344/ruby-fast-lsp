@@ -83,6 +83,149 @@ end
 }
 
 #[tokio::test]
+async fn class_eval_block_preserves_lexical_constant_scope() {
+    check(
+        r#"
+class MetaTarget
+end
+
+module LexicalOwner
+  <def>VALUE = "lexical"</def>
+
+  ::MetaTarget.class_eval do
+    def value
+      VALUE$0
+    end
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn class_exec_block_preserves_lexical_constant_scope() {
+    check(
+        r#"
+class MetaTarget
+end
+
+module LexicalOwner
+  <def>VALUE = "lexical"</def>
+
+  ::MetaTarget.class_exec do
+    def value
+      VALUE$0
+    end
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn instance_exec_block_preserves_lexical_constant_scope() {
+    check(
+        r#"
+class MetaTarget
+end
+
+module LexicalOwner
+  <def>VALUE = "lexical"</def>
+
+  ::MetaTarget.instance_exec do
+    def value
+      VALUE$0
+    end
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn module_exec_block_preserves_lexical_constant_scope() {
+    check(
+        r#"
+module MetaTarget
+end
+
+module LexicalOwner
+  <def>VALUE = "lexical"</def>
+
+  ::MetaTarget.module_exec do
+    def value
+      VALUE$0
+    end
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn instance_eval_block_preserves_lexical_constant_scope() {
+    check(
+        r#"
+class MetaTarget
+end
+
+module LexicalOwner
+  <def>VALUE = "lexical"</def>
+
+  ::MetaTarget.instance_eval do
+    def value
+      VALUE$0
+    end
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn define_method_block_preserves_lexical_constant_scope() {
+    check(
+        r#"
+class MetaTarget
+end
+
+module LexicalOwner
+  <def>VALUE = "lexical"</def>
+
+  ::MetaTarget.send(:define_method, :value) do
+    VALUE$0
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn define_singleton_method_block_preserves_lexical_constant_scope() {
+    check(
+        r#"
+class MetaTarget
+end
+
+module LexicalOwner
+  <def>VALUE = "lexical"</def>
+
+  ::MetaTarget.define_singleton_method(:value) do
+    VALUE$0
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn goto_const_get_literal_symbol_constant() {
     check(
         r#"

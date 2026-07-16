@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
     ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateStore,
-    DiagnosticFact, DiagnosticStore, FqnId, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
-    MethodFact, MethodStore, MethodVisibilityOverrideFact, ReferenceCandidate,
-    ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact, ReferenceStore, RubyConstant,
-    SemanticGraph, SourceFileId, SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact,
-    StoredMethodFact, StoredReferenceCandidate, StoredSymbolFact, StoredUnresolvedGraphEdgeFact,
-    SymbolFact, SymbolKind, SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore,
-    TypeSubject, UnresolvedGraphEdgeFact,
+    DiagnosticFact, DiagnosticStore, ExecutionContextFact, FqnId, FullyQualifiedName,
+    GraphEdgeFact, GraphNodeFact, MethodFact, MethodStore, MethodVisibilityOverrideFact,
+    ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact,
+    ReferenceStore, RubyConstant, SemanticGraph, SourceFileId, SourceKind, StoredGraphEdgeFact,
+    StoredGraphNodeFact, StoredMethodFact, StoredReferenceCandidate, StoredSymbolFact,
+    StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolKind, SymbolStore, TextRange, TypeFact,
+    TypeResolution, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
@@ -124,6 +124,7 @@ pub struct FileFacts {
     pub reference_candidates: Vec<ReferenceCandidate>,
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
     pub diagnostics: Vec<DiagnosticFact>,
+    pub execution_contexts: Vec<ExecutionContextFact>,
 }
 
 impl SemanticExportFingerprint {
@@ -468,6 +469,7 @@ pub struct AnalysisEngine {
     pub(super) facts: FactArena,
     pub(super) graph: SemanticGraph,
     pub(super) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
+    execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
     semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
 }
 
@@ -663,6 +665,7 @@ impl AnalysisEngine {
         self.method_visibility_overrides
             .extend(facts.method_visibility_overrides);
         self.facts.types.replace_file(file_id, facts.types);
+        self.replace_execution_contexts(file_id, facts.execution_contexts);
         let graph_nodes = self.intern_graph_node_facts(facts.graph_nodes);
         let graph_edges = self.intern_graph_edge_facts(facts.graph_edges);
         let unresolved_graph_edges =
@@ -683,6 +686,59 @@ impl AnalysisEngine {
             .diagnostics
             .resolved
             .replace_file(file_id, facts.diagnostics);
+    }
+
+    fn replace_execution_contexts(
+        &mut self,
+        file_id: SourceFileId,
+        mut contexts: Vec<ExecutionContextFact>,
+    ) {
+        for context in &contexts {
+            assert_eq!(
+                context.range.file_id, file_id,
+                "INVARIANT VIOLATED: execution context range belongs to a different file. This is a bug because FileFacts replacement must be file-local. Fix: construct execution context ranges from the owning RubyDocument."
+            );
+            assert!(
+                context.lexical_namespace.namespace_kind().is_some()
+                    && context.implicit_receiver.namespace_kind().is_some()
+                    && context.method_definition_owner.namespace_kind().is_some(),
+                "INVARIANT VIOLATED: execution context contains a non-namespace semantic target. This is a bug because receiver and definition ownership require namespace identities. Fix: validate and convert extension targets before engine ingestion."
+            );
+            assert!(
+                !context.extension_id.is_empty(),
+                "INVARIANT VIOLATED: execution context has empty extension provenance. This is a bug because generated runtime semantics must remain attributable. Fix: retain the validated manifest ID in ExecutionContextFact."
+            );
+        }
+        contexts.sort_by_key(|context| {
+            (
+                context.range.start_byte,
+                std::cmp::Reverse(context.range.end_byte),
+                context.extension_id.clone(),
+            )
+        });
+        for pair in contexts.windows(2) {
+            assert!(
+                pair[0].range != pair[1].range,
+                "INVARIANT VIOLATED: multiple execution contexts own the same block range. This is a bug because extension context conflicts must be resolved before engine ingestion. Fix: deterministically reject incompatible contexts at the host boundary."
+            );
+        }
+        if contexts.is_empty() {
+            self.execution_contexts.remove(&file_id);
+        } else {
+            self.execution_contexts.insert(file_id, contexts);
+        }
+    }
+
+    pub fn execution_context_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<&ExecutionContextFact> {
+        self.execution_contexts
+            .get(&file_id)?
+            .iter()
+            .filter(|context| context.range.contains_offset(file_id, byte_offset))
+            .min_by_key(|context| context.range.end_byte - context.range.start_byte)
     }
 
     pub fn type_at(
@@ -1058,6 +1114,7 @@ impl AnalysisEngine {
                     owner,
                     method,
                     range: fact.range,
+                    name_range: fact.name_range,
                     params: fact.params,
                     param_facts: fact.param_facts,
                     delegate_receiver: fact.delegate_receiver,
@@ -1145,6 +1202,7 @@ impl AnalysisEngine {
             fqn,
             owner,
             range: fact.range,
+            name_range: fact.name_range,
             params: fact.params,
             param_facts: fact.param_facts,
             delegate_receiver: fact.delegate_receiver,

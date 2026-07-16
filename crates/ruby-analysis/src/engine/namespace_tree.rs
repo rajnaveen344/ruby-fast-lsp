@@ -32,7 +32,10 @@ fn compute_namespace_tree_hash(engine: &AnalysisEngine, show_external_types: boo
     let mut node_keys = engine
         .all_graph_nodes()
         .into_iter()
-        .filter(|node| show_external_types || analysis_range_is_project(engine, node.range))
+        .filter(|node| {
+            !node.fqn.has_generated_owner()
+                && (show_external_types || analysis_range_is_project(engine, node.range))
+        })
         .map(|node| {
             (
                 node.fqn.to_string(),
@@ -49,7 +52,11 @@ fn compute_namespace_tree_hash(engine: &AnalysisEngine, show_external_types: boo
     let mut edge_keys = engine
         .all_graph_edges()
         .into_iter()
-        .filter(|edge| show_external_types || analysis_range_is_project(engine, edge.range))
+        .filter(|edge| {
+            !edge.source.has_generated_owner()
+                && !edge.target.has_generated_owner()
+                && (show_external_types || analysis_range_is_project(engine, edge.range))
+        })
         .map(|edge| {
             (
                 edge.source.to_string(),
@@ -74,6 +81,9 @@ fn compute_namespace_tree(
     let mut nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>> = HashMap::new();
 
     for node in engine.all_graph_nodes() {
+        if node.fqn.has_generated_owner() {
+            continue;
+        }
         if node.fqn.namespace_kind() == Some(crate::core::NamespaceKind::Singleton) {
             continue;
         }
@@ -375,8 +385,8 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Namesp
 mod tests {
     use super::*;
     use crate::core::{
-        FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
-        RubyConstant, SourceKind, TextRange,
+        FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
+        GraphNodeKind, RubyConstant, SourceKind, TextRange,
     };
     use crate::{FileFacts, ResolveMode, SourceFileInput};
 
@@ -441,6 +451,36 @@ mod tests {
         assert_eq!(with_external.modules.len(), 1);
         assert_eq!(with_external.modules[0].fqn, "Auth");
         assert_eq!(with_external.classes[0].includes[0].name, "Auth");
+    }
+
+    #[test]
+    fn namespace_tree_hides_generated_semantic_owners() {
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: "/tmp/user_spec.rb".into(),
+            content: "RSpec.describe User do; end".into(),
+            kind: SourceKind::Project,
+        });
+        let generated = FullyQualifiedName::namespace(vec![RubyConstant::generated_owner(
+            GeneratedOwnerId::new("rspec-ruby", "file:///tmp/user_spec.rb", "group:0:0")
+                .expect("test generated owner identity must be valid"),
+        )]);
+        engine.replace_facts(
+            file_id,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    generated,
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 0, 10),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        let query = AnalysisQuery::new(&engine);
+
+        assert!(query.namespace_tree(false).classes.is_empty());
+        assert!(query.namespace_tree(true).classes.is_empty());
     }
 }
 

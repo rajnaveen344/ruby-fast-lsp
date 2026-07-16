@@ -15,13 +15,15 @@
 //! the actual processing to `FileProcessor` with appropriate options.
 
 use crate::capabilities::diagnostics::generate_diagnostics;
-use crate::extensions::{analysis_ruby_type_from_extension, ExtensionRegistryHandle};
+use crate::extensions::{
+    analysis_ruby_type_from_extension, ExtensionRegistryHandle, ProjectContextSeed,
+};
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::{debug, info};
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
-    MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
+    FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
+    GraphNodeKind, MethodFact, MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
     NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
@@ -33,7 +35,9 @@ use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{is_erb_path, mask_erb, AnalysisIndexer};
 use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
-use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, NamespaceDeclarationKind, SourceRange};
+use ruby_fast_lsp_extension_api::{
+    IndexPatch, MixinKind, NamespaceDeclarationKind, ProjectContext, SourceRange,
+};
 use ruby_prism::Visit;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -79,17 +83,30 @@ fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
 #[derive(Debug, Clone)]
 pub struct FileProcessor {
     extension_registry: ExtensionRegistryHandle,
+    extension_project_context_seed: Option<Arc<parking_lot::RwLock<ProjectContextSeed>>>,
 }
 
 impl FileProcessor {
     pub fn new() -> Self {
         Self {
             extension_registry: ExtensionRegistryHandle::from_environment(),
+            extension_project_context_seed: None,
         }
     }
 
     pub fn with_extension_registry(extension_registry: ExtensionRegistryHandle) -> Self {
-        Self { extension_registry }
+        Self {
+            extension_registry,
+            extension_project_context_seed: None,
+        }
+    }
+
+    pub(crate) fn with_extension_project_context_seed(
+        mut self,
+        seed: Arc<parking_lot::RwLock<ProjectContextSeed>>,
+    ) -> Self {
+        self.extension_project_context_seed = Some(seed);
+        self
     }
 
     /// Process a file: parse, collect facts and reference candidates, and return diagnostics.
@@ -255,8 +272,9 @@ impl FileProcessor {
             &direct_facts_seed,
             false,
         );
+        let extension_project_context = server.extension_project_context_for_uri(uri, source_kind);
         self.extension_registry
-            .ensure_semantic_seed_facts(&analysis_engine);
+            .ensure_semantic_seed_facts(&analysis_engine, extension_project_context.as_ref());
         let direct_elapsed = direct_start.elapsed();
 
         let visitor_start = Instant::now();
@@ -265,29 +283,32 @@ impl FileProcessor {
             Arc::new(self.extension_registry.clone()),
             analysis_engine.clone(),
         );
+        visitor.extension_project_context = extension_project_context.clone();
         visitor.visit(&node);
         let visitor_elapsed = visitor_start.elapsed();
 
         let extension_index_patches = visitor.extension_index_patches.clone();
         let updated_document = visitor.document.clone();
         let mut direct_facts = direct_facts_seed;
+        merge_execution_context_direct_facts(&visitor.direct_facts, &mut direct_facts);
         add_extension_analysis_facts(
             &analysis_engine,
             &updated_document,
             &extension_index_patches,
+            extension_project_context.as_ref(),
             &mut direct_facts,
         );
         let symbol_facts = direct_facts.symbols;
         let method_facts = direct_facts.methods;
         let mut type_facts = direct_facts.types;
+        let visitor_type_facts = visitor.type_store.all_facts();
+        rehome_execution_context_type_facts(&visitor_type_facts, &mut type_facts);
         let existing_type_subjects = type_facts
             .iter()
             .map(|fact| fact.subject.clone())
             .collect::<HashSet<_>>();
         type_facts.extend(
-            visitor
-                .type_store
-                .all_facts()
+            visitor_type_facts
                 .into_iter()
                 .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
         );
@@ -318,6 +339,7 @@ impl FileProcessor {
                 } else {
                     Vec::new()
                 },
+                execution_contexts: visitor.extension_execution_context_facts,
             },
             resolution,
         );
@@ -581,14 +603,19 @@ impl FileProcessor {
                 resolve_references,
             );
         }
+        let extension_project_context = self
+            .extension_project_context_seed
+            .as_ref()
+            .map(|seed| seed.read().context(uri.to_string(), source_kind));
         self.extension_registry
-            .ensure_semantic_seed_facts(&analysis_engine);
+            .ensure_semantic_seed_facts(&analysis_engine, extension_project_context.as_ref());
 
         let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
             Arc::new(self.extension_registry.clone()),
             analysis_engine.clone(),
         );
+        fact_collector.extension_project_context = extension_project_context.clone();
         if !resolve_references {
             let direct_known_namespaces = known_namespaces
                 .cloned()
@@ -602,10 +629,14 @@ impl FileProcessor {
         } else {
             fact_collector.direct_facts.clone()
         };
+        if resolve_references {
+            merge_execution_context_direct_facts(&fact_collector.direct_facts, &mut direct_facts);
+        }
         add_extension_analysis_facts(
             &analysis_engine,
             &document,
             &fact_collector.extension_index_patches,
+            extension_project_context.as_ref(),
             &mut direct_facts,
         );
         let reference_candidates = if source_kind.contributes_references() {
@@ -636,6 +667,7 @@ impl FileProcessor {
                 reference_candidates,
                 diagnostic_candidates,
                 diagnostics,
+                execution_contexts: fact_collector.extension_execution_context_facts,
             },
             if resolve_references {
                 FileResolution::Full
@@ -690,6 +722,135 @@ fn collect_direct_facts(
         .index_node_with_source(node, content)
 }
 
+fn merge_execution_context_direct_facts(
+    extension_aware: &ruby_analysis::indexer::AnalysisIndex,
+    merged: &mut ruby_analysis::indexer::AnalysisIndex,
+) {
+    let generated_methods = extension_aware
+        .methods
+        .iter()
+        .filter(|fact| fact.owner.has_generated_owner())
+        .cloned()
+        .collect::<Vec<_>>();
+    for generated in generated_methods {
+        merged.methods.retain(|fact| {
+            fact.owner.has_generated_owner()
+                || fact.range != generated.range
+                || fact.fqn.name() != generated.fqn.name()
+        });
+        if !merged.methods.contains(&generated) {
+            merged.methods.push(generated);
+        }
+    }
+
+    let generated_symbols = extension_aware
+        .symbols
+        .iter()
+        .filter(|fact| fact.kind == AnalysisSymbolKind::Method && fact.fqn.has_generated_owner())
+        .cloned()
+        .collect::<Vec<_>>();
+    for generated in generated_symbols {
+        merged.symbols.retain(|fact| {
+            fact.fqn.has_generated_owner()
+                || fact.kind != AnalysisSymbolKind::Method
+                || fact.range != generated.range
+                || fact.fqn.name() != generated.fqn.name()
+        });
+        if !merged.symbols.contains(&generated) {
+            merged.symbols.push(generated);
+        }
+    }
+
+    for generated in extension_aware
+        .method_visibility_overrides
+        .iter()
+        .filter(|fact| fact.owner.has_generated_owner())
+    {
+        merged.method_visibility_overrides.retain(|fact| {
+            fact.owner.has_generated_owner()
+                || fact.range != generated.range
+                || fact.method != generated.method
+        });
+        if !merged.method_visibility_overrides.contains(generated) {
+            merged.method_visibility_overrides.push(generated.clone());
+        }
+    }
+
+    for generated in extension_aware
+        .graph_nodes
+        .iter()
+        .filter(|fact| fact.fqn.has_generated_owner())
+    {
+        if !merged.graph_nodes.contains(generated) {
+            merged.graph_nodes.push(generated.clone());
+        }
+    }
+    for generated in extension_aware
+        .graph_edges
+        .iter()
+        .filter(|fact| fact.source.has_generated_owner() || fact.target.has_generated_owner())
+    {
+        if !merged.graph_edges.contains(generated) {
+            merged.graph_edges.push(generated.clone());
+        }
+    }
+}
+
+fn rehome_execution_context_type_facts(extension_aware: &[TypeFact], merged: &mut Vec<TypeFact>) {
+    for generated in extension_aware
+        .iter()
+        .filter(|fact| type_subject_has_generated_owner(&fact.subject))
+    {
+        merged.retain(|fact| {
+            type_subject_has_generated_owner(&fact.subject)
+                || fact.range != generated.range
+                || !same_type_subject_slot(&fact.subject, &generated.subject)
+        });
+    }
+}
+
+fn type_subject_has_generated_owner(subject: &TypeSubject) -> bool {
+    match subject {
+        TypeSubject::Constant(fqn) | TypeSubject::MethodReturn(fqn) => fqn.has_generated_owner(),
+        TypeSubject::InstanceVariable { owner, .. } | TypeSubject::ClassVariable { owner, .. } => {
+            owner.has_generated_owner()
+        }
+        TypeSubject::Parameter { method, .. } => method.has_generated_owner(),
+        TypeSubject::Local { .. } | TypeSubject::GlobalVariable(_) | TypeSubject::Expression(_) => {
+            false
+        }
+    }
+}
+
+fn same_type_subject_slot(left: &TypeSubject, right: &TypeSubject) -> bool {
+    match (left, right) {
+        (TypeSubject::Constant(_), TypeSubject::Constant(_))
+        | (TypeSubject::MethodReturn(_), TypeSubject::MethodReturn(_)) => true,
+        (
+            TypeSubject::InstanceVariable { name: left, .. },
+            TypeSubject::InstanceVariable { name: right, .. },
+        )
+        | (
+            TypeSubject::ClassVariable { name: left, .. },
+            TypeSubject::ClassVariable { name: right, .. },
+        ) => left == right,
+        (TypeSubject::Parameter { name: left, .. }, TypeSubject::Parameter { name: right, .. }) => {
+            left == right
+        }
+        (TypeSubject::Local { .. }, TypeSubject::Local { .. })
+        | (TypeSubject::GlobalVariable(_), TypeSubject::GlobalVariable(_))
+        | (TypeSubject::Expression(_), TypeSubject::Expression(_)) => false,
+        (TypeSubject::Constant(_), _)
+        | (TypeSubject::Local { .. }, _)
+        | (TypeSubject::InstanceVariable { .. }, _)
+        | (TypeSubject::ClassVariable { .. }, _)
+        | (TypeSubject::GlobalVariable(_), _)
+        | (TypeSubject::MethodReturn(_), _)
+        | (TypeSubject::Parameter { .. }, _)
+        | (TypeSubject::Expression(_), _) => false,
+    }
+}
+
 fn replace_analysis_facts_for_file(
     analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
     file_id: ruby_analysis::core::SourceFileId,
@@ -738,6 +899,7 @@ fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex)
         reference_candidates: Vec::new(),
         diagnostic_candidates: Vec::new(),
         diagnostics: Vec::new(),
+        execution_contexts: Vec::new(),
     }
 }
 
@@ -777,6 +939,64 @@ mod tests {
             )
             .unwrap();
         assert_eq!(api.semantic_change, SemanticChange::ExportsChanged);
+    }
+
+    #[test]
+    fn execution_context_merge_replaces_lexical_method_with_generated_owner() {
+        let file_id = ruby_analysis::core::SourceFileId(7);
+        let range = TextRange::new(file_id, 20, 44);
+        let method = RubyMethod::new("helper").unwrap();
+        let lexical_parts = vec![RubyConstant::new("Lexical").unwrap()];
+        let generated_part = RubyConstant::generated_owner(
+            ruby_analysis::core::GeneratedOwnerId::new(
+                "rspec-ruby",
+                "file:///workspace/spec/example_spec.rb",
+                "group:1:2",
+            )
+            .unwrap(),
+        );
+        let generated_parts = vec![generated_part];
+        let lexical_fqn = FullyQualifiedName::method(lexical_parts.clone(), method);
+        let generated_fqn = FullyQualifiedName::method(generated_parts.clone(), method);
+        let mut merged = ruby_analysis::indexer::AnalysisIndex {
+            methods: vec![MethodFact::new(
+                lexical_fqn.clone(),
+                FullyQualifiedName::namespace(lexical_parts),
+                range,
+            )],
+            symbols: vec![SymbolFact::new(
+                lexical_fqn,
+                AnalysisSymbolKind::Method,
+                range,
+            )],
+            ..Default::default()
+        };
+        let extension_aware = ruby_analysis::indexer::AnalysisIndex {
+            methods: vec![MethodFact::new(
+                generated_fqn.clone(),
+                FullyQualifiedName::namespace(generated_parts.clone()),
+                range,
+            )],
+            symbols: vec![SymbolFact::new(
+                generated_fqn,
+                AnalysisSymbolKind::Method,
+                range,
+            )],
+            graph_nodes: vec![GraphNodeFact::new(
+                FullyQualifiedName::namespace(generated_parts),
+                GraphNodeKind::Class,
+                range,
+            )],
+            ..Default::default()
+        };
+
+        merge_execution_context_direct_facts(&extension_aware, &mut merged);
+
+        assert_eq!(merged.methods.len(), 1);
+        assert!(merged.methods[0].owner.has_generated_owner());
+        assert_eq!(merged.symbols.len(), 1);
+        assert!(merged.symbols[0].fqn.has_generated_owner());
+        assert_eq!(merged.graph_nodes, extension_aware.graph_nodes);
     }
 
     #[test]
@@ -832,6 +1052,7 @@ fn add_extension_analysis_facts(
     analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
     document: &RubyDocument,
     patches: &[IndexPatch],
+    project: Option<&ProjectContext>,
     facts: &mut ruby_analysis::indexer::AnalysisIndex,
 ) {
     if patches.is_empty() {
@@ -948,7 +1169,15 @@ fn add_extension_analysis_facts(
                 // from direct parser/index facts.
             }
             IndexPatch::DefineMethod(method) => {
-                let namespace = ruby_constants(&method.namespace, "DefineMethod namespace");
+                let (namespace, owner_kind) = analysis_patch_owner(
+                    document,
+                    project,
+                    method.owner_target.as_ref(),
+                    &method.namespace,
+                    method.owner_kind,
+                    &method.source.extension_id,
+                    "DefineMethod owner",
+                );
                 let ruby_method = RubyMethod::new(&method.name).unwrap_or_else(|err| {
                     panic!(
                         "INVARIANT VIOLATED: extension emitted invalid analysis method `{}`: {}. \
@@ -958,10 +1187,7 @@ fn add_extension_analysis_facts(
                     )
                 });
                 let fqn = FullyQualifiedName::method(namespace.clone(), ruby_method);
-                let owner = FullyQualifiedName::namespace_with_kind(
-                    namespace,
-                    analysis_namespace_kind(method.owner_kind),
-                );
+                let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
                 let range = text_range_from_source_range(document, method.location, "method");
                 if !facts
                     .symbols
@@ -1042,8 +1268,16 @@ fn add_extension_analysis_facts(
                 );
             }
             IndexPatch::ApplyMixin(mixin) => {
-                let mut source_parts = ruby_constants(&mixin.namespace, "ApplyMixin namespace");
-                if source_parts.is_empty() {
+                let (mut source_parts, source_kind) = analysis_patch_owner(
+                    document,
+                    project,
+                    mixin.owner_target.as_ref(),
+                    &mixin.namespace,
+                    mixin.target_kind,
+                    &mixin.source.extension_id,
+                    "ApplyMixin owner",
+                );
+                if source_parts.is_empty() && mixin.owner_target.is_none() {
                     source_parts.push(RubyConstant::new("Object").expect(
                         "INVARIANT VIOLATED: Object is not a valid Ruby constant. \
                          This is a bug because root mixin patches normalize to Object. \
@@ -1068,13 +1302,41 @@ fn add_extension_analysis_facts(
                     known_namespaces.insert(object);
                 }
 
-                let source = FullyQualifiedName::namespace_with_kind(
-                    source_parts.clone(),
-                    analysis_namespace_kind(mixin.target_kind),
-                );
-                let target_parts = ruby_constants(&mixin.mixin, "ApplyMixin target");
+                let source =
+                    FullyQualifiedName::namespace_with_kind(source_parts.clone(), source_kind);
                 let kind = analysis_mixin_kind(mixin.kind);
                 let range = text_range_from_source_range(document, mixin.location, "mixin");
+                if let Some(target) = mixin.mixin_target.as_ref() {
+                    let (target_parts, target_kind) = analysis_patch_owner(
+                        document,
+                        project,
+                        Some(target),
+                        &[],
+                        ruby_fast_lsp_extension_api::NamespaceKind::Instance,
+                        &mixin.source.extension_id,
+                        "ApplyMixin semantic target",
+                    );
+                    let target = FullyQualifiedName::namespace_with_kind(target_parts, target_kind);
+                    facts.graph_edges.push(GraphEdgeFact::new(
+                        source.clone(),
+                        target.clone(),
+                        kind,
+                        range,
+                    ));
+                    if mixin.kind == MixinKind::Extend {
+                        if let Some(singleton_source) = source.to_singleton_namespace() {
+                            facts.graph_edges.push(GraphEdgeFact::new(
+                                singleton_source,
+                                target,
+                                GraphEdgeKind::Include,
+                                range,
+                            ));
+                        }
+                    }
+                    continue;
+                }
+
+                let target_parts = ruby_constants(&mixin.mixin, "ApplyMixin target");
                 push_extension_graph_edge(
                     facts,
                     &known_namespaces,
@@ -1104,6 +1366,94 @@ fn add_extension_analysis_facts(
                     }
                 }
             }
+            IndexPatch::ConnectExecutionContext(connection) => {
+                let (template_parts, template_kind) = analysis_patch_owner(
+                    document,
+                    project,
+                    Some(&connection.template),
+                    &[],
+                    ruby_fast_lsp_extension_api::NamespaceKind::Instance,
+                    &connection.source.extension_id,
+                    "ConnectExecutionContext template",
+                );
+                let (application_parts, application_kind) = analysis_patch_owner(
+                    document,
+                    project,
+                    Some(&connection.application),
+                    &[],
+                    ruby_fast_lsp_extension_api::NamespaceKind::Instance,
+                    &connection.source.extension_id,
+                    "ConnectExecutionContext application",
+                );
+                facts.graph_edges.push(GraphEdgeFact::new(
+                    FullyQualifiedName::namespace_with_kind(template_parts, template_kind),
+                    FullyQualifiedName::namespace_with_kind(application_parts, application_kind),
+                    GraphEdgeKind::ExecutionContextApplication,
+                    text_range_from_source_range(
+                        document,
+                        connection.location,
+                        "execution context application",
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+fn analysis_patch_owner(
+    document: &RubyDocument,
+    project: Option<&ProjectContext>,
+    target: Option<&ruby_fast_lsp_extension_api::ExecutionContextTarget>,
+    fallback_namespace: &[String],
+    fallback_kind: ruby_fast_lsp_extension_api::NamespaceKind,
+    extension_id: &str,
+    label: &str,
+) -> (Vec<RubyConstant>, AnalysisNamespaceKind) {
+    match target {
+        None => (
+            ruby_constants(fallback_namespace, label),
+            analysis_namespace_kind(fallback_kind),
+        ),
+        Some(ruby_fast_lsp_extension_api::ExecutionContextTarget::Namespace {
+            namespace,
+            owner_kind,
+        }) => (
+            ruby_constants(namespace, label),
+            analysis_namespace_kind(*owner_kind),
+        ),
+        Some(ruby_fast_lsp_extension_api::ExecutionContextTarget::GeneratedOwner {
+            local_id,
+            owner_kind,
+        }) => {
+            let owner = GeneratedOwnerId::new(extension_id, document.uri.as_str(), local_id)
+                .expect(
+                    "INVARIANT VIOLATED: invalid generated patch owner reached fact conversion. This is a bug because extension owner targets must be validated before collection. Fix: keep validate_patch_owner_target before add_extension_analysis_facts.",
+                );
+            (
+                vec![RubyConstant::generated_owner(owner)],
+                owner_kind
+                    .map(analysis_namespace_kind)
+                    .unwrap_or_else(|| analysis_namespace_kind(fallback_kind)),
+            )
+        }
+        Some(ruby_fast_lsp_extension_api::ExecutionContextTarget::ProjectGeneratedOwner {
+            local_id,
+            owner_kind,
+        }) => {
+            let project_uri = project
+                .map(|project| project.project_uri.as_str())
+                .expect(
+                    "INVARIANT VIOLATED: project-generated patch owner reached fact conversion without ProjectContext. This is a host validation bug because project-scoped targets must be rejected before collection. Fix: preserve the owning project context through extension fact conversion.",
+                );
+            let owner = GeneratedOwnerId::new(extension_id, project_uri, local_id).expect(
+                "INVARIANT VIOLATED: invalid project-generated patch owner reached fact conversion. This is a bug because extension owner targets must be validated before collection. Fix: keep validate_patch_owner_target before add_extension_analysis_facts.",
+            );
+            (
+                vec![RubyConstant::generated_owner(owner)],
+                owner_kind
+                    .map(analysis_namespace_kind)
+                    .unwrap_or_else(|| analysis_namespace_kind(fallback_kind)),
+            )
         }
     }
 }

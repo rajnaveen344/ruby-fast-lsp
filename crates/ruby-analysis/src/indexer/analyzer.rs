@@ -1,4 +1,4 @@
-use crate::core::RubyConstant;
+use crate::core::{ExecutionContextFact, RubyConstant};
 use crate::{
     analyzer_utils as utils, is_erb_path, mask_erb, Identifier, IdentifierType, IdentifierVisitor,
     LVScopeId, RubyDocument,
@@ -11,6 +11,7 @@ pub struct RubyPrismAnalyzer {
     pub uri: Url,
     pub code: String,
     analysis_code: String,
+    execution_context: Option<ExecutionContextFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +35,13 @@ impl RubyPrismAnalyzer {
             uri,
             code,
             analysis_code,
+            execution_context: None,
         }
+    }
+
+    pub fn with_execution_context(mut self, context: ExecutionContextFact) -> Self {
+        self.execution_context = Some(context);
+        self
     }
 
     /// Returns the identifier, identifier type, and the ancestors stack at the time of the lookup.
@@ -50,10 +57,22 @@ impl RubyPrismAnalyzer {
     ) {
         let parse_result = ruby_prism::parse(self.analysis_code.as_bytes());
         // Create a RubyDocument with a dummy URI since we only need it for position handling
-        let document = RubyDocument::new(self.uri.clone(), self.code.clone(), 0);
+        let document = match &self.execution_context {
+            Some(context) => RubyDocument::with_analysis_file_id(
+                self.uri.clone(),
+                self.code.clone(),
+                0,
+                context.range.file_id,
+            ),
+            None => RubyDocument::new(self.uri.clone(), self.code.clone(), 0),
+        };
         let root_node = parse_result.node();
 
-        let mut iden_visitor = IdentifierVisitor::new(document.clone(), position);
+        let mut iden_visitor = IdentifierVisitor::new_with_execution_context(
+            document.clone(),
+            position,
+            self.execution_context.clone(),
+        );
         iden_visitor.visit(&root_node);
 
         iden_visitor.get_result()

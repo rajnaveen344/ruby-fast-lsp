@@ -1,0 +1,11 @@
+[package]
+name = "ruby-fast-lsp-extension-guest-sdk"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Typed Rust Wasm guest SDK for Ruby Fast LSP extensions"
+
+[dependencies]
+ruby-fast-lsp-extension-api = { path = "../extension-api" }
+serde = "1.0.188"
+serde_json = "1.0.107"

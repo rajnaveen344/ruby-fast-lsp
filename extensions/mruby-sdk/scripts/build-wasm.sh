@@ -56,7 +56,7 @@ fi
 "$LINKER" \
   --target=wasm32-wasip1 \
   "${SJLJ_FLAGS[@]}" \
-  -Oz \
+  -O3 \
   -D"EXTENSION_IREP=$IREP_SYMBOL" \
   -I "$MRUBY_ROOT/include" \
   -I "$MRUBY_ROOT/build/wasm32-wasip1/include" \

@@ -377,7 +377,12 @@ fn define_method_project() -> SyntheticProject {
 
     project
         .class("SimDefineMethod::Target", |class| {
-            class.method("patched").returns("String").as_define_method();
+            class.method("helper").returns("String");
+            class
+                .method("patched")
+                .returns("String")
+                .calls("SimDefineMethod::Target#helper", CallShape::Bare)
+                .as_define_method();
         })
         .class("SimDefineMethod::Caller", |class| {
             class.method("run").calls(
@@ -394,9 +399,11 @@ fn const_get_define_method_project() -> SyntheticProject {
 
     project
         .class("SimConstGetDefineMethod::SMTP", |class| {
+            class.method("helper").returns("String");
             class
                 .method("tls?")
                 .returns("String")
+                .calls("SimConstGetDefineMethod::SMTP#helper", CallShape::Bare)
                 .as_const_get_define_method();
         })
         .class("SimConstGetDefineMethod::Caller", |class| {

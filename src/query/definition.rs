@@ -42,7 +42,7 @@ impl EngineQuery {
             return Some(locations);
         }
 
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier(position);
 

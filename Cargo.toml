@@ -5,8 +5,14 @@ members = [
     "crates/lsp-test-harness",
     "crates/ruby-analysis",
     "crates/extension-api",
+    "crates/extension-guest-sdk",
     "crates/extension-rspec",
     "crates/extension-wasm-host",
+    "extensions/example-rust",
+    "extensions/sinatra-rust",
+    "extensions/cucumber-rust",
+    "extensions/minitest-ruby",
+    "extensions/rails-ruby",
 ]
 resolver = "2"
 

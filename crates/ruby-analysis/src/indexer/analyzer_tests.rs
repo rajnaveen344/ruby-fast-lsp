@@ -10,6 +10,44 @@ mod tests {
         RubyPrismAnalyzer::new(Url::parse("file:///dummy.rb").unwrap(), content.to_string())
     }
 
+    #[test]
+    fn persisted_execution_context_changes_method_receiver_but_not_lexical_constants() {
+        use crate::core::{
+            ExecutionContextFact, ExecutionScopeMode, FullyQualifiedName, GeneratedOwnerId,
+            NamespaceKind, SourceFileId, TextRange,
+        };
+
+        let source = "module Lexical\n  describe do\n    helper\n    VALUE\n  end\nend\n";
+        let owner = FullyQualifiedName::namespace_with_kind(
+            vec![RubyConstant::generated_owner(
+                GeneratedOwnerId::new("rspec-ruby", "file:///dummy.rb", "group:1:2").unwrap(),
+            )],
+            NamespaceKind::Instance,
+        );
+        let analyzer = create_analyzer(source).with_execution_context(ExecutionContextFact {
+            range: TextRange::new(SourceFileId(0), 26, 55),
+            lexical_namespace: FullyQualifiedName::namespace(vec![
+                RubyConstant::new("Lexical").unwrap()
+            ]),
+            implicit_receiver: owner.clone(),
+            method_definition_owner: owner.clone(),
+            lexical_scope: ExecutionScopeMode::Preserve,
+            local_scope: ExecutionScopeMode::Preserve,
+            extension_id: "rspec-ruby".to_string(),
+        });
+
+        let (method, _, _, _, _) = analyzer.get_identifier(Position::new(2, 5));
+        let Identifier::RubyMethod { namespace, .. } = method.expect("helper must be identified")
+        else {
+            panic!("helper must be a method identifier")
+        };
+        assert_eq!(namespace, owner.namespace_parts());
+
+        let (constant, _, lexical, _, _) = analyzer.get_identifier(Position::new(3, 6));
+        assert!(matches!(constant, Some(Identifier::RubyConstant { .. })));
+        assert_eq!(lexical, vec![RubyConstant::new("Lexical").unwrap()]);
+    }
+
     // Test helper - wraps get_identifier to return 3-tuple for backward compatibility
     fn get_identifier_for_test(
         analyzer: &RubyPrismAnalyzer,

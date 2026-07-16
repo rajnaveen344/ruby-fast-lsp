@@ -68,10 +68,11 @@ impl<'a> AnalysisQuery<'a> {
 }
 
 fn fact_is_project(query: &AnalysisQuery<'_>, fact: &SymbolFact) -> bool {
-    query
-        .engine
-        .file(fact.range.file_id)
-        .is_some_and(|file| file.kind.is_workspace_owned())
+    !fact.fqn.has_generated_owner()
+        && query
+            .engine
+            .file(fact.range.file_id)
+            .is_some_and(|file| file.kind.is_workspace_owned())
 }
 
 fn workspace_symbol_match(fact: SymbolFact, relevance: f64) -> Option<WorkspaceSymbolMatch> {
@@ -271,8 +272,8 @@ impl SymbolMatcher {
 #[cfg(test)]
 mod tests {
     use crate::core::{
-        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind, SymbolFact,
-        SymbolKind, TextRange,
+        FullyQualifiedName, GeneratedOwnerId, RubyConstant, RubyMethod, SourceFileId, SourceKind,
+        SymbolFact, SymbolKind, TextRange,
     };
     use crate::engine::AnalysisQuery;
     use crate::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
@@ -370,6 +371,36 @@ mod tests {
             .top_level_symbols(50)
             .iter()
             .all(|symbol| symbol.name != "ExternalGem"));
+    }
+
+    #[test]
+    fn workspace_symbols_hide_generated_semantic_owners_and_their_methods() {
+        let (mut engine, file_id) = query_with_symbols();
+        let owner = RubyConstant::generated_owner(
+            GeneratedOwnerId::new("rspec-ruby", "file:///tmp/user_spec.rb", "group:0:0")
+                .expect("test generated owner identity must be valid"),
+        );
+        engine.replace_facts(
+            file_id,
+            FileFacts {
+                symbols: vec![SymbolFact::new(
+                    FullyQualifiedName::method(
+                        vec![owner],
+                        RubyMethod::new("generated_helper").expect("test method must be valid"),
+                    ),
+                    SymbolKind::Method,
+                    TextRange::new(file_id, 0, 1),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        let query = AnalysisQuery::new(&engine);
+
+        assert!(query
+            .search_workspace_symbols("generated_helper", 100)
+            .is_empty());
+        assert!(query.top_level_symbols(100).is_empty());
     }
 
     #[test]

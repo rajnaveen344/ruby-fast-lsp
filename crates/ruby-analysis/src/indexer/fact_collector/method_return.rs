@@ -1,4 +1,8 @@
-use crate::core::{FullyQualifiedName, RubyConstant, RubyMethod, TypeResolution, TypeSubject};
+use std::collections::HashSet;
+
+use crate::core::{
+    FullyQualifiedName, GraphEdgeKind, RubyConstant, RubyMethod, TypeResolution, TypeSubject,
+};
 use crate::engine::AnalysisQuery;
 
 use crate::inference::rbs::{
@@ -73,10 +77,8 @@ impl FactCollector {
         let namespace = receiver_namespace_for_analysis(receiver_type)?;
         let engine = self.analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
-        let caller_namespace = FullyQualifiedName::namespace_with_kind(
-            self.scope_tracker.get_ns_stack(),
-            crate::core::NamespaceKind::Instance,
-        );
+        let (caller_parts, caller_kind) = self.scope_tracker.implicit_receiver_context();
+        let caller_namespace = FullyQualifiedName::namespace_with_kind(caller_parts, caller_kind);
         let local_method_fqn = FullyQualifiedName::method(namespace.namespace_parts(), method);
         if self.direct_method_fact_is_visible(
             &local_method_fqn,
@@ -88,6 +90,14 @@ impl FactCollector {
             if let Some(return_type) = self.local_method_return_type(&local_method_fqn) {
                 return Some(return_type);
             }
+        }
+        if let Some(return_type) = self.local_superclass_method_return_type(
+            &namespace,
+            &method,
+            allow_private,
+            &caller_namespace,
+        ) {
+            return Some(return_type);
         }
         let callees = if allow_private {
             query.resolve_method_callees(&namespace, &method)?
@@ -156,6 +166,56 @@ impl FactCollector {
             | TypeResolution::Ambiguous(_)
             | TypeResolution::Unresolved => None,
         }
+    }
+
+    fn local_superclass_method_return_type(
+        &self,
+        receiver: &FullyQualifiedName,
+        method: &RubyMethod,
+        allow_private: bool,
+        caller_namespace: &FullyQualifiedName,
+    ) -> Option<RubyType> {
+        let mut current = receiver.clone();
+        let mut visited = HashSet::new();
+        while visited.insert(current.clone()) {
+            let mut parents = self
+                .direct_facts
+                .graph_edges
+                .iter()
+                .filter(|edge| edge.source == current && edge.kind == GraphEdgeKind::Superclass)
+                .map(|edge| edge.target.clone())
+                .collect::<Vec<_>>();
+            parents.sort_by_key(ToString::to_string);
+            parents.dedup();
+            match parents.len() {
+                0 => return None,
+                1 => current = parents.pop().expect(
+                    "INVARIANT VIOLATED: one local superclass disappeared after length validation. This is a bug because local same-pass inheritance lookup must be deterministic. Fix: keep parent extraction and selection atomic.",
+                ),
+                2.. => panic!(
+                    "INVARIANT VIOLATED: namespace `{}` has multiple local superclass edges. This is a bug because Ruby classes have exactly one superclass. Fix: reject conflicting generated or parser superclass facts before same-pass inference.",
+                    current
+                ),
+            }
+
+            let method_fqn = FullyQualifiedName::method(current.namespace_parts(), method.clone());
+            if self.direct_method_fact_is_visible(
+                &method_fqn,
+                &current,
+                receiver,
+                allow_private,
+                caller_namespace,
+            ) {
+                if let Some(return_type) = self.local_method_return_type(&method_fqn) {
+                    return Some(return_type);
+                }
+            }
+        }
+
+        panic!(
+            "INVARIANT VIOLATED: local superclass cycle encountered while inferring `{}` on `{}`. This is a bug because inheritance cycles cannot define a valid Ruby MRO. Fix: reject cyclic graph facts before same-pass inference.",
+            method, receiver
+        );
     }
 
     fn direct_method_fact_is_visible(

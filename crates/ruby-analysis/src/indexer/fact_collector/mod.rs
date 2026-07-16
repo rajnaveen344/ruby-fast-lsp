@@ -1,9 +1,10 @@
 use crate::core::method_store::{MethodVisibility, MethodVisibilityOverrideFact};
 use crate::core::{
-    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, FullyQualifiedName, GraphEdgeFact,
-    GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact, MethodParamFact, NamespaceKind,
-    ReferenceCandidate, RubyConstant, RubyMethod, SymbolFact, SymbolKind, TextRange, TypeFact,
-    TypeProvenance, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
+    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ExecutionContextFact,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
+    MethodParamFact, NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, SymbolFact,
+    SymbolKind, TextRange, TypeFact, TypeProvenance, TypeStore, TypeSubject,
+    UnresolvedGraphEdgeFact,
 };
 use crate::engine::AnalysisEngine;
 use once_cell::unsync::OnceCell;
@@ -48,8 +49,11 @@ pub struct FactCollector {
     pub analysis_diagnostics: Vec<DiagnosticFact>,
     pub type_store: TypeStore,
     pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
+    pub extension_project_context: Option<ruby_fast_lsp_extension_api::ProjectContext>,
     pub extension_call_stack_marks: Vec<bool>,
     pub extension_index_patches: Vec<IndexPatch>,
+    pub extension_execution_context_facts: Vec<ExecutionContextFact>,
+    pending_block_execution_context: Option<BlockExecutionContext>,
     pub extension_host: Arc<dyn FactCollectorExtensionHost>,
     pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
     pub include_local_vars: bool,
@@ -65,6 +69,15 @@ pub struct FactCollector {
     pub yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
     pub proc_return_types_by_local: HashMap<String, RubyType>,
     direct_known_namespaces: HashSet<FullyQualifiedName>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockExecutionContext {
+    pub block_range: TextRange,
+    pub implicit_receiver: Vec<RubyConstant>,
+    pub implicit_receiver_kind: NamespaceKind,
+    pub method_definition_owner: Vec<RubyConstant>,
+    pub method_definition_kind: NamespaceKind,
 }
 
 pub trait FactCollectorExtensionHost: std::fmt::Debug + Send + Sync {
@@ -87,6 +100,7 @@ pub trait FactCollectorExtensionHost: std::fmt::Debug + Send + Sync {
             resolved_callees: Vec::new(),
             call_range,
             message_range,
+            frame_extension_ids: Vec::new(),
         }
     }
 }
@@ -165,8 +179,11 @@ impl FactCollector {
             analysis_diagnostics: Vec::new(),
             type_store: TypeStore::new(),
             extension_call_stack: Vec::new(),
+            extension_project_context: None,
             extension_call_stack_marks: Vec::new(),
             extension_index_patches: Vec::new(),
+            extension_execution_context_facts: Vec::new(),
+            pending_block_execution_context: None,
             extension_host,
             analysis_engine,
             include_local_vars: true,
@@ -183,6 +200,14 @@ impl FactCollector {
             proc_return_types_by_local: HashMap::new(),
             direct_known_namespaces: HashSet::new(),
         }
+    }
+
+    pub fn set_pending_block_execution_context(&mut self, context: BlockExecutionContext) {
+        assert!(
+            self.pending_block_execution_context.is_none(),
+            "INVARIANT VIOLATED: more than one block execution context was applied to the same call. This is a bug because extension conflicts must be resolved before AST traversal. Fix: validate and deterministically resolve extension execution contexts in the host."
+        );
+        self.pending_block_execution_context = Some(context);
     }
 
     pub fn without_analysis_method_return_resolution(mut self) -> Self {
@@ -208,14 +233,115 @@ impl FactCollector {
         self
     }
 
-    fn static_eval_block_namespace(&self, node: &CallNode) -> Option<Vec<RubyConstant>> {
-        if !matches!(node.name().as_slice(), b"class_eval" | b"module_eval") {
-            return None;
-        }
+    fn static_eval_block_context(
+        &self,
+        node: &CallNode,
+    ) -> Option<(Vec<RubyConstant>, NamespaceKind, NamespaceKind)> {
+        let (implicit_receiver_kind, method_definition_kind) = match node.name().as_slice() {
+            b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => {
+                (NamespaceKind::Singleton, NamespaceKind::Instance)
+            }
+            b"instance_eval" | b"instance_exec" => {
+                (NamespaceKind::Singleton, NamespaceKind::Singleton)
+            }
+            _ => return None,
+        };
         node.block()?;
-        let receiver = node.receiver()?;
-        let eval_ref = crate::mixin_ref_from_node(&receiver)?;
-        self.resolve_static_eval_namespace(&eval_ref.parts, eval_ref.absolute)
+        let namespace = match node.receiver() {
+            None => {
+                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
+                (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
+                    .then_some(namespace)?
+            }
+            Some(receiver) if receiver.as_self_node().is_some() => {
+                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
+                (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
+                    .then_some(namespace)?
+            }
+            Some(receiver) => {
+                let eval_ref = crate::mixin_ref_from_node(&receiver)?;
+                self.resolve_static_eval_namespace(&eval_ref.parts, eval_ref.absolute)?
+            }
+        };
+        Some((namespace, implicit_receiver_kind, method_definition_kind))
+    }
+
+    fn static_dynamic_definition_block_context(
+        &self,
+        node: &CallNode,
+    ) -> Option<(
+        Vec<RubyConstant>,
+        NamespaceKind,
+        Vec<RubyConstant>,
+        NamespaceKind,
+    )> {
+        node.block()?;
+        let (definition_namespace, definition_kind) =
+            self.scope_tracker.method_definition_context();
+        let (implicit_namespace, implicit_kind) = match node.receiver() {
+            None => {
+                let target_kind = match node.name().as_slice() {
+                    b"define_method"
+                        if !self.scope_tracker.execution_context_active()
+                            && self.scope_tracker.in_singleton() =>
+                    {
+                        NamespaceKind::Singleton
+                    }
+                    b"define_method" => NamespaceKind::Instance,
+                    b"define_singleton_method" => NamespaceKind::Singleton,
+                    _ => return None,
+                };
+                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
+                if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
+                    return None;
+                }
+                (namespace, target_kind)
+            }
+            Some(receiver) if node.name().as_slice() == b"define_singleton_method" => (
+                self.resolve_constant_receiver_namespace(&receiver)?,
+                NamespaceKind::Singleton,
+            ),
+            Some(receiver)
+                if matches!(
+                    node.name().as_slice(),
+                    b"send" | b"public_send" | b"__send__"
+                ) =>
+            {
+                let arguments = node.arguments()?;
+                let selector = arguments.arguments().iter().next()?;
+                let target_kind = if let Some(symbol) = selector.as_symbol_node() {
+                    match symbol.unescaped() {
+                        b"define_method" => NamespaceKind::Instance,
+                        b"define_singleton_method" => NamespaceKind::Singleton,
+                        _ => return None,
+                    }
+                } else if let Some(string) = selector.as_string_node() {
+                    match string.unescaped() {
+                        b"define_method" => NamespaceKind::Instance,
+                        b"define_singleton_method" => NamespaceKind::Singleton,
+                        _ => return None,
+                    }
+                } else {
+                    return None;
+                };
+                if node.name().as_slice() == b"public_send"
+                    && target_kind == NamespaceKind::Instance
+                {
+                    return None;
+                }
+                (
+                    self.resolve_constant_receiver_namespace(&receiver)?,
+                    target_kind,
+                )
+            }
+            Some(_) => return None,
+        };
+        Some((
+            implicit_namespace,
+            implicit_kind,
+            definition_namespace,
+            definition_kind,
+        ))
     }
 
     fn concern_class_methods_block_namespace(
@@ -268,8 +394,7 @@ impl FactCollector {
             return self
                 .direct_known_namespaces
                 .contains(&fqn)
-                .then(|| parts.to_vec())
-                .and_then(|candidate| namespace_suffix_for_push(&current_namespace, &candidate));
+                .then(|| parts.to_vec());
         }
 
         let mut search = current_namespace.clone();
@@ -278,7 +403,7 @@ impl FactCollector {
             candidate.extend(parts.iter().cloned());
             let fqn = FullyQualifiedName::namespace(candidate.clone());
             if self.direct_known_namespaces.contains(&fqn) {
-                return namespace_suffix_for_push(&current_namespace, &candidate);
+                return Some(candidate);
             }
             if search.is_empty() {
                 break;
@@ -290,7 +415,6 @@ impl FactCollector {
         self.direct_known_namespaces
             .contains(&fqn)
             .then(|| parts.to_vec())
-            .and_then(|candidate| namespace_suffix_for_push(&current_namespace, &candidate))
     }
 
     pub fn direct_range(&self, location: &ruby_prism::Location<'_>) -> TextRange {
@@ -439,13 +563,37 @@ impl FactCollector {
         documentation: Option<String>,
         return_type_label: Option<String>,
     ) {
+        self.direct_push_method_fact_with_signature_and_name_range(
+            namespace,
+            owner_kind,
+            method,
+            range,
+            range,
+            params,
+            documentation,
+            return_type_label,
+        );
+    }
+
+    pub fn direct_push_method_fact_with_signature_and_name_range(
+        &mut self,
+        namespace: Vec<RubyConstant>,
+        owner_kind: NamespaceKind,
+        method: RubyMethod,
+        range: TextRange,
+        name_range: TextRange,
+        params: Vec<MethodParamFact>,
+        documentation: Option<String>,
+        return_type_label: Option<String>,
+    ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
-        self.direct_facts
-            .symbols
-            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
+        self.direct_facts.symbols.push(
+            SymbolFact::new(fqn.clone(), SymbolKind::Method, range).with_name_range(name_range),
+        );
         self.direct_facts.methods.push(
             MethodFact::with_param_facts(fqn, owner, range, params)
+                .with_name_range(name_range)
                 .with_signature_metadata(documentation, return_type_label)
                 .with_visibility(self.scope_tracker.current_visibility()),
         );
@@ -653,13 +801,18 @@ impl FactCollector {
                 // Has explicit receiver - recursively infer its type
                 self.infer_type_from_value_with_locals(&receiver, local_types)
             } else {
-                // No receiver (implicit self) - use current class/module context
-                let namespace = self.scope_tracker.get_ns_stack();
+                // No receiver means `self`, which may differ from lexical
+                // constant scope inside eval- or extension-provided execution
+                // contexts.
+                let (namespace, kind) = self.scope_tracker.implicit_receiver_context();
                 if namespace.is_empty() {
                     return RubyType::Unknown;
                 }
                 let current_fqn = FullyQualifiedName::namespace(namespace);
-                RubyType::Class(current_fqn)
+                match kind {
+                    NamespaceKind::Instance => RubyType::Class(current_fqn),
+                    NamespaceKind::Singleton => RubyType::ClassReference(current_fqn),
+                }
             };
 
             if receiver_type == RubyType::Unknown {
@@ -923,6 +1076,15 @@ impl FactCollector {
             .map(|body| self.infer_type_from_value(&body))
             .unwrap_or_else(RubyType::nil_class);
         (return_type != RubyType::Unknown).then_some(return_type)
+    }
+
+    /// Infer the value returned by a call's block using the current lexical,
+    /// local, and execution-context state. Extension adapters may request this
+    /// framework-neutral operation for DSL-generated methods such as memoized
+    /// helpers; the adapter remains responsible for declaring that relationship.
+    pub fn infer_call_block_return_type(&self, call: &CallNode<'_>) -> Option<RubyType> {
+        let block = call.block()?.as_block_node()?;
+        self.infer_proc_body(block.body())
     }
 
     fn infer_proc_call_return_type(&self, call_node: &CallNode<'_>) -> Option<RubyType> {
@@ -1520,18 +1682,6 @@ fn build_variable_type_map(content: &str) -> HashMap<String, RubyType> {
     map
 }
 
-fn namespace_suffix_for_push(
-    current: &[RubyConstant],
-    target: &[RubyConstant],
-) -> Option<Vec<RubyConstant>> {
-    if current.is_empty() {
-        return Some(target.to_vec());
-    }
-    target
-        .starts_with(current)
-        .then(|| target[current.len()..].to_vec())
-}
-
 fn const_get_arg_constant(arg: &Node<'_>) -> Option<RubyConstant> {
     if let Some(symbol) = arg.as_symbol_node() {
         let name = String::from_utf8_lossy(symbol.unescaped()).to_string();
@@ -1785,7 +1935,66 @@ impl Visit<'_> for FactCollector {
 
     fn visit_call_node(&mut self, node: &CallNode) {
         self.process_call_node_entry(node);
-        if let Some(eval_namespace) = self.static_eval_block_namespace(node) {
+        let extension_context = self.pending_block_execution_context.take();
+        if let Some(context) = extension_context {
+            if let Some(receiver) = node.receiver() {
+                self.visit(&receiver);
+            }
+            if let Some(arguments) = node.arguments() {
+                self.visit_arguments_node(&arguments);
+            }
+            let block = node.block().expect(
+                "INVARIANT VIOLATED: extension execution context was applied to a call without a block. This is a bug because the host must validate the context against the current AST call. Fix: reject execution contexts whose call has no block.",
+            );
+            assert_eq!(
+                context.block_range,
+                self.direct_range(&block.location()),
+                "INVARIANT VIOLATED: extension execution context block range differs from the traversed block. This is a bug because a guest must not redirect execution semantics to unrelated source. Fix: validate the exact call and block ranges at the extension boundary."
+            );
+            self.scope_tracker.push_execution_context(
+                context.implicit_receiver,
+                context.implicit_receiver_kind,
+                context.method_definition_owner,
+                context.method_definition_kind,
+            );
+            self.block_param_type_stack.push(Vec::new());
+            self.visit(&block);
+            self.block_param_type_stack.pop().expect(
+                "INVARIANT VIOLATED: block parameter type stack underflow after extension execution context. This is a bug because each pushed block type frame must be popped exactly once. Fix: keep FactCollector::visit_call_node extension traversal balanced.",
+            );
+            self.scope_tracker.pop_execution_context();
+        } else if let Some((
+            implicit_namespace,
+            implicit_kind,
+            definition_namespace,
+            definition_kind,
+        )) = self.static_dynamic_definition_block_context(node)
+        {
+            if let Some(receiver) = node.receiver() {
+                self.visit(&receiver);
+            }
+            if let Some(arguments) = node.arguments() {
+                self.visit_arguments_node(&arguments);
+            }
+            let block = node.block().expect(
+                "INVARIANT VIOLATED: dynamic-definition block context lost its block. This is a bug because static_dynamic_definition_block_context required the same immutable Prism call to have a block. Fix: keep call traversal and context matching atomic.",
+            );
+            self.scope_tracker.push_execution_context(
+                implicit_namespace.clone(),
+                implicit_kind,
+                definition_namespace,
+                definition_kind,
+            );
+            self.push_direct_dynamic_definition_block_return_type(node, implicit_namespace);
+            self.block_param_type_stack.push(Vec::new());
+            self.visit(&block);
+            self.block_param_type_stack.pop().expect(
+                "INVARIANT VIOLATED: block parameter type stack underflow after dynamic-definition block. This is a bug because every pushed block type frame must be popped exactly once. Fix: keep FactCollector::visit_call_node dynamic-definition traversal balanced.",
+            );
+            self.scope_tracker.pop_execution_context();
+        } else if let Some((eval_namespace, implicit_kind, definition_kind)) =
+            self.static_eval_block_context(node)
+        {
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
             }
@@ -1793,7 +2002,12 @@ impl Visit<'_> for FactCollector {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_ns_scopes(eval_namespace);
+                self.scope_tracker.push_execution_context(
+                    eval_namespace.clone(),
+                    implicit_kind,
+                    eval_namespace,
+                    definition_kind,
+                );
                 self.block_param_type_stack.push(Vec::new());
                 self.visit(&block);
                 self.block_param_type_stack.pop().expect(
@@ -1801,7 +2015,7 @@ impl Visit<'_> for FactCollector {
                      This is a bug because each pushed block type frame must be popped exactly once. \
                      Fix: keep FactCollector::visit_call_node block traversal balanced.",
                 );
-                self.scope_tracker.pop_ns_scope();
+                self.scope_tracker.pop_execution_context();
             }
         } else if let Some(class_methods_namespace) =
             self.concern_class_methods_block_namespace(node)
@@ -1905,7 +2119,10 @@ impl Visit<'_> for FactCollector {
     }
 
     fn visit_def_node(&mut self, node: &DefNode) {
-        self.process_def_node_entry(node);
+        if !self.process_def_node_entry(node) {
+            visit_def_node(self, node);
+            return;
+        }
         visit_def_node(self, node);
         self.process_def_node_exit(node);
     }
@@ -2063,5 +2280,80 @@ impl Visit<'_> for FactCollector {
         self.process_global_variable_operator_write_node_entry(node);
         visit_global_variable_operator_write_node(self, node);
         self.process_global_variable_operator_write_node_exit(node);
+    }
+}
+
+#[cfg(test)]
+mod execution_context_tests {
+    use super::*;
+    use crate::core::{GeneratedOwnerId, SourceKind};
+    use crate::engine::SourceFileInput;
+    use std::path::PathBuf;
+    use tower_lsp::lsp_types::Url;
+
+    #[derive(Debug)]
+    struct SyntheticExecutionContextHost {
+        owner: RubyConstant,
+    }
+
+    impl FactCollectorExtensionHost for SyntheticExecutionContextHost {
+        fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) {
+            if node.name().as_slice() != b"describe" {
+                return;
+            }
+            let block = node.block().expect("test describe call must have a block");
+            visitor.set_pending_block_execution_context(BlockExecutionContext {
+                block_range: visitor.direct_range(&block.location()),
+                implicit_receiver: vec![self.owner],
+                implicit_receiver_kind: NamespaceKind::Instance,
+                method_definition_owner: vec![self.owner],
+                method_definition_kind: NamespaceKind::Instance,
+            });
+        }
+    }
+
+    #[test]
+    fn extension_context_rehomes_block_method_without_changing_lexical_namespace() {
+        let source = "module Lexical\n  describe do\n    def helper\n    end\n    helper\n    VALUE\n  end\nend\n";
+        let uri = Url::parse("file:///workspace/spec/context_spec.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/spec/context_spec.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let owner = RubyConstant::generated_owner(
+            GeneratedOwnerId::new("test-extension", uri.as_str(), "group:1:2")
+                .expect("test generated owner must be valid"),
+        );
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(SyntheticExecutionContextHost { owner }),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+        collector.visit(&parse.node());
+
+        let helper = collector
+            .direct_facts
+            .methods
+            .iter()
+            .find(|fact| fact.fqn.name() == "helper")
+            .expect("helper definition must be collected");
+        assert_eq!(helper.owner.namespace_parts(), vec![owner]);
+        assert!(
+            collector.direct_facts.methods.iter().all(|fact| {
+                fact.fqn.name() != "helper"
+                    || fact.owner.namespace_parts() != vec![RubyConstant::new("Lexical").unwrap()]
+            }),
+            "execution-owned method must not also leak onto the lexical module"
+        );
+        assert_eq!(
+            collector.scope_tracker.get_ns_stack(),
+            Vec::<RubyConstant>::new(),
+            "all lexical and execution frames must be balanced after traversal"
+        );
     }
 }

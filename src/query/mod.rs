@@ -42,9 +42,9 @@ pub use signature_help::{SignatureData, SignatureHelpData, SignatureParameterDat
 
 use parking_lot::RwLock;
 use ruby_analysis::engine::AnalysisEngine;
-use ruby_analysis::indexer::RubyDocument;
+use ruby_analysis::indexer::{RubyDocument, RubyPrismAnalyzer};
 use std::sync::Arc;
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{Position, Url};
 
 /// Protocol-facing query interface for analysis-backed LSP features.
 ///
@@ -57,6 +57,24 @@ pub struct EngineQuery {
 }
 
 impl EngineQuery {
+    pub(crate) fn analyzer_at_position(
+        &self,
+        uri: &Url,
+        content: &str,
+        position: Position,
+    ) -> RubyPrismAnalyzer {
+        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let (Some(document), Some(engine)) = (&self.doc, &self.analysis_engine) else {
+            return analyzer;
+        };
+        let document = document.read();
+        assert_eq!(
+            &document.uri, uri,
+            "INVARIANT VIOLATED: EngineQuery document URI differs from the analyzed request URI. This is a bug because execution-context facts are file-local. Fix: construct EngineQuery with the request's owning document."
+        );
+        analyzer_for_document(analyzer, &document, engine, position)
+    }
+
     /// Create an EngineQuery with document context and analysis engine access.
     pub fn with_doc_and_engine(
         doc: Arc<RwLock<RubyDocument>>,
@@ -95,6 +113,24 @@ impl EngineQuery {
     #[inline]
     pub fn analysis_engine(&self) -> Option<&Arc<RwLock<AnalysisEngine>>> {
         self.analysis_engine.as_ref()
+    }
+}
+
+pub(crate) fn analyzer_for_document(
+    analyzer: RubyPrismAnalyzer,
+    document: &RubyDocument,
+    engine: &Arc<RwLock<AnalysisEngine>>,
+    position: Position,
+) -> RubyPrismAnalyzer {
+    let byte_offset = document.position_to_analysis_offset(position);
+    let context = engine
+        .read()
+        .query()
+        .execution_context_at(document.analysis_file_id(), byte_offset)
+        .cloned();
+    match context {
+        Some(context) => analyzer.with_execution_context(context),
+        None => analyzer,
     }
 }
 

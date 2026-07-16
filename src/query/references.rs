@@ -9,7 +9,7 @@ use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use ruby_analysis::indexer::yard::YardTypeConverter;
-use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{Identifier, MethodReceiver};
 use ruby_prism::Visit;
 use std::path::Path;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ impl EngineQuery {
         position: Position,
         content: &str,
     ) -> Option<Vec<Location>> {
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier(position);
 

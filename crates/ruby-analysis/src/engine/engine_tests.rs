@@ -1,10 +1,12 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
-    ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SymbolFact, SymbolKind, TypeProvenance,
-    TypeSubject, UnresolvedGraphEdgeFact,
+    FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
+    GraphNodeKind, MethodCalleeResolution, MethodFact, ReferenceCandidate, RubyConstant,
+    RubyMethod, RubyType, SymbolFact, SymbolKind, TypeProvenance, TypeSubject,
+    UnresolvedGraphEdgeFact,
 };
 
 use super::*;
+use crate::ConstantLookupRequest;
 
 fn constant_subject(name: &str) -> TypeSubject {
     TypeSubject::Constant(FullyQualifiedName::constant(vec![
@@ -49,6 +51,41 @@ fn source_kind_updates_with_file() {
     });
 
     assert_eq!(engine.file(file_id).unwrap().kind, SourceKind::Gem);
+}
+
+#[test]
+fn method_rename_rejects_external_definition_even_with_exact_name_range() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = engine.register_file(SourceFileInput {
+        path: "gems/user.rb".into(),
+        content: "class User; def name; end; end".into(),
+        kind: SourceKind::Gem,
+    });
+    let user = FullyQualifiedName::namespace_with_kind(
+        vec![RubyConstant::new("User").unwrap()],
+        crate::core::NamespaceKind::Instance,
+    );
+    let method = RubyMethod::new("name").unwrap();
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            methods: vec![MethodFact::new(
+                FullyQualifiedName::method(user.namespace_parts(), method),
+                user,
+                crate::core::TextRange::new(file_id, 12, 25),
+            )
+            .with_name_range(crate::core::TextRange::new(file_id, 16, 20))],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert!(
+        AnalysisQuery::new(&engine)
+            .method_rename_target_at(file_id, 17)
+            .is_none(),
+        "dependency sources are navigation inputs, never editable rename truth"
+    );
 }
 
 #[test]
@@ -465,6 +502,11 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .all(|fact| fact.code != "unresolved-method"));
+    assert_eq!(
+        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(ref_file, 6),
+        vec![TextRange::new(def_file, 12, 20)],
+        "ordinary diagnostics-bearing method candidates must navigate through their resolved reference fact"
+    );
 }
 
 #[test]
@@ -666,4 +708,340 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
             .constant_definition_ranges(&[RubyConstant::new("Widget").unwrap()], &[],),
         vec![TextRange::new(implementation_file, 0, 37)]
     );
+}
+
+#[test]
+fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "spec/user_spec.rb",
+        "RSpec.describe User do; context 'nested' do; end; end",
+    );
+    let generated = |local_identity: &str| {
+        FullyQualifiedName::namespace(vec![RubyConstant::generated_owner(
+            GeneratedOwnerId::new(
+                "rspec-ruby",
+                "file:///workspace/spec/user_spec.rb",
+                local_identity,
+            )
+            .expect("test generated owner identity must be valid"),
+        )])
+    };
+    let parent = generated("group:0:0");
+    let child = generated("group:0:24");
+    let sibling = generated("group:1:0");
+    let helper = RubyMethod::new("helper").expect("test method must be valid");
+    let helper_fqn = FullyQualifiedName::method(parent.namespace_parts(), helper);
+    let helper_range = TextRange::new(file_id, 1, 7);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                parent.clone(),
+                SymbolKind::Class,
+                TextRange::new(file_id, 0, 10),
+            )],
+            graph_nodes: vec![
+                GraphNodeFact::new(
+                    parent.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 0, 10),
+                ),
+                GraphNodeFact::new(
+                    child.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 20, 30),
+                ),
+                GraphNodeFact::new(
+                    sibling.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 31, 40),
+                ),
+            ],
+            graph_edges: vec![GraphEdgeFact::new(
+                child.clone(),
+                parent.clone(),
+                GraphEdgeKind::Superclass,
+                TextRange::new(file_id, 20, 30),
+            )],
+            methods: vec![MethodFact::new(helper_fqn, parent.clone(), helper_range)],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let query = engine.query();
+    assert_eq!(
+        query
+            .resolve_method_callees(&parent, &helper)
+            .expect("parent helper must resolve")[0]
+            .definition_ranges,
+        vec![helper_range]
+    );
+    assert_eq!(
+        query
+            .resolve_method_callees(&child, &helper)
+            .expect("nested generated owner must inherit its parent helper")[0]
+            .definition_ranges,
+        vec![helper_range]
+    );
+    let sibling_callees = query
+        .resolve_method_callees(&sibling, &helper)
+        .expect("known sibling owner must produce a conservative receiver-only result");
+    assert_eq!(sibling_callees.len(), 1);
+    assert_eq!(sibling_callees[0].owner, sibling);
+    assert_eq!(
+        sibling_callees[0].resolution,
+        MethodCalleeResolution::ReceiverOnly
+    );
+    assert!(sibling_callees[0].definition_ranges.is_empty());
+    assert!(query
+        .constant_matches(&ConstantLookupRequest::new("", 100))
+        .is_empty());
+    assert!(query
+        .constant_rename_target(&parent.namespace_parts(), &[])
+        .is_none());
+
+    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    assert!(engine
+        .query()
+        .resolve_method_callees(&parent, &helper)
+        .is_none());
+    assert!(engine
+        .query()
+        .resolve_method_callees(&child, &helper)
+        .is_none());
+}
+
+#[test]
+fn execution_context_applications_resolve_independently_and_replace_per_file() {
+    let mut engine = AnalysisEngine::new();
+    let template_file = register_project_file(
+        &mut engine,
+        "spec/support/shared_examples.rb",
+        "shared_helper\nconsumer_helper",
+    );
+    let applications_file = register_project_file(
+        &mut engine,
+        "spec/shared_examples_spec.rb",
+        "consumer_helper\nconsumer_helper",
+    );
+    let namespace = |name: &str| {
+        FullyQualifiedName::namespace(vec![
+            RubyConstant::new(name).expect("test execution owner name must be valid")
+        ])
+    };
+    let template = namespace("SharedTemplate");
+    let first = namespace("FirstApplication");
+    let second = namespace("SecondApplication");
+    let shared = RubyMethod::new("shared_helper").expect("test method must be valid");
+    let consumer = RubyMethod::new("consumer_helper").expect("test method must be valid");
+    let first_only = RubyMethod::new("first_only").expect("test method must be valid");
+    let second_only = RubyMethod::new("second_only").expect("test method must be valid");
+    let shared_range = TextRange::new(template_file, 0, 13);
+    let first_range = TextRange::new(applications_file, 0, 15);
+    let second_range = TextRange::new(applications_file, 16, 31);
+    engine.replace_facts(
+        template_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                template.clone(),
+                GraphNodeKind::Class,
+                shared_range,
+            )],
+            methods: vec![MethodFact::new(
+                FullyQualifiedName::method(template.namespace_parts(), shared),
+                template.clone(),
+                shared_range,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    let application_facts = |include_second: bool| {
+        let mut nodes = vec![GraphNodeFact::new(
+            first.clone(),
+            GraphNodeKind::Class,
+            first_range,
+        )];
+        let mut edges = vec![GraphEdgeFact::new(
+            template.clone(),
+            first.clone(),
+            GraphEdgeKind::ExecutionContextApplication,
+            first_range,
+        )];
+        let first_consumer_fqn = FullyQualifiedName::method(first.namespace_parts(), consumer);
+        let mut methods = vec![
+            MethodFact::new(first_consumer_fqn.clone(), first.clone(), first_range),
+            MethodFact::new(
+                FullyQualifiedName::method(first.namespace_parts(), first_only),
+                first.clone(),
+                first_range,
+            ),
+        ];
+        let mut types = vec![TypeFact::new(
+            TypeSubject::MethodReturn(first_consumer_fqn),
+            RubyType::string(),
+            first_range,
+            TypeProvenance::Extension,
+        )];
+        if include_second {
+            nodes.push(GraphNodeFact::new(
+                second.clone(),
+                GraphNodeKind::Class,
+                second_range,
+            ));
+            edges.push(GraphEdgeFact::new(
+                template.clone(),
+                second.clone(),
+                GraphEdgeKind::ExecutionContextApplication,
+                second_range,
+            ));
+            let second_consumer_fqn =
+                FullyQualifiedName::method(second.namespace_parts(), consumer);
+            methods.extend([
+                MethodFact::new(second_consumer_fqn.clone(), second.clone(), second_range),
+                MethodFact::new(
+                    FullyQualifiedName::method(second.namespace_parts(), second_only),
+                    second.clone(),
+                    second_range,
+                ),
+            ]);
+            types.push(TypeFact::new(
+                TypeSubject::MethodReturn(second_consumer_fqn),
+                RubyType::integer(),
+                second_range,
+                TypeProvenance::Extension,
+            ));
+        }
+        FileFacts {
+            graph_nodes: nodes,
+            graph_edges: edges,
+            methods,
+            types,
+            ..Default::default()
+        }
+    };
+    engine.replace_facts(
+        applications_file,
+        application_facts(true),
+        ResolveMode::Immediate,
+    );
+
+    let query = engine.query();
+    let shared_callees = query
+        .resolve_method_callees(&template, &shared)
+        .expect("template-local helper must resolve");
+    assert_eq!(shared_callees.len(), 1);
+    assert_eq!(shared_callees[0].definition_ranges, vec![shared_range]);
+    let application_callees = query
+        .resolve_method_callees(&template, &consumer)
+        .expect("application helpers must resolve through the template");
+    assert_eq!(application_callees.len(), 2);
+    assert_eq!(application_callees[0].definition_ranges, vec![first_range]);
+    assert_eq!(application_callees[1].definition_ranges, vec![second_range]);
+    assert_eq!(
+        query.method_return_type_for_receiver(&template, &consumer),
+        Some(RubyType::union(vec![
+            RubyType::integer(),
+            RubyType::string()
+        ])),
+    );
+    let completion_names = query
+        .method_facts_matching(&template, "")
+        .into_iter()
+        .map(|fact| fact.fqn.name())
+        .collect::<Vec<_>>();
+    assert!(completion_names.contains(&"shared_helper".to_string()));
+    assert!(completion_names.contains(&"consumer_helper".to_string()));
+    assert!(completion_names.contains(&"first_only".to_string()));
+    assert!(completion_names.contains(&"second_only".to_string()));
+    assert!(matches!(
+        query.resolve_method_reference(&template, &consumer),
+        crate::MethodLookupResult::Ambiguous { .. }
+    ));
+    drop(query);
+
+    engine.replace_facts(
+        applications_file,
+        application_facts(false),
+        ResolveMode::Immediate,
+    );
+    let one = engine
+        .query()
+        .resolve_method_callees(&template, &consumer)
+        .expect("remaining application helper must resolve");
+    assert_eq!(one.len(), 1);
+    assert_eq!(one[0].definition_ranges, vec![first_range]);
+
+    engine.replace_facts(
+        applications_file,
+        FileFacts::default(),
+        ResolveMode::Immediate,
+    );
+    let removed = engine
+        .query()
+        .resolve_method_callees(&template, &consumer)
+        .expect("known template must retain receiver-only fallback");
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].resolution, MethodCalleeResolution::ReceiverOnly);
+    assert!(removed[0].definition_ranges.is_empty());
+}
+
+#[test]
+fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
+    use crate::core::{ExecutionContextFact, ExecutionScopeMode};
+
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "spec/nested_spec.rb",
+        "describe do\n  context do\n    helper\n  end\nend\n",
+    );
+    let owner = |local: &str| {
+        FullyQualifiedName::namespace(vec![RubyConstant::generated_owner(
+            GeneratedOwnerId::new("rspec-ruby", "file:///workspace/spec/nested_spec.rb", local)
+                .unwrap(),
+        )])
+    };
+    let outer = ExecutionContextFact {
+        range: TextRange::new(file_id, 9, 45),
+        lexical_namespace: FullyQualifiedName::namespace(Vec::new()),
+        implicit_receiver: owner("outer"),
+        method_definition_owner: owner("outer"),
+        lexical_scope: ExecutionScopeMode::Preserve,
+        local_scope: ExecutionScopeMode::Preserve,
+        extension_id: "rspec-ruby".to_string(),
+    };
+    let inner = ExecutionContextFact {
+        range: TextRange::new(file_id, 22, 39),
+        lexical_namespace: FullyQualifiedName::namespace(Vec::new()),
+        implicit_receiver: owner("inner"),
+        method_definition_owner: owner("inner"),
+        lexical_scope: ExecutionScopeMode::Preserve,
+        local_scope: ExecutionScopeMode::Preserve,
+        extension_id: "rspec-ruby".to_string(),
+    };
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            execution_contexts: vec![outer.clone(), inner.clone()],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(
+        engine.query().execution_context_at(file_id, 30),
+        Some(&inner)
+    );
+    assert_eq!(
+        engine.query().execution_context_at(file_id, 12),
+        Some(&outer)
+    );
+    assert_eq!(engine.query().execution_context_at(file_id, 5), None);
+
+    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    assert_eq!(engine.query().execution_context_at(file_id, 30), None);
 }

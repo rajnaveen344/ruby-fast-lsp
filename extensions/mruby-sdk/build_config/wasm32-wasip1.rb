@@ -1,6 +1,7 @@
 MRuby::Build.new do |conf|
   conf.toolchain :gcc
   conf.gembox "stdlib"
+  conf.gem File.expand_path("../vendor/mruby-json", __dir__)
 end
 
 MRuby::CrossBuild.new("wasm32-wasip1") do |conf|
@@ -17,13 +18,13 @@ MRuby::CrossBuild.new("wasm32-wasip1") do |conf|
     conf.cc.flags << "-mllvm"
     conf.cc.flags << "-wasm-enable-sjlj"
   end
-  conf.cc.flags << "-Oz"
+  conf.cc.flags << "-O3"
 
   conf.cxx.command = "#{toolchain}/bin/clang++"
   conf.cxx.flags << "--target=wasm32-wasip1"
   conf.cxx.defines << "MRB_USE_WASM_TRAP_EXCEPTION" if ENV["WASI_TRAP_EXCEPTIONS"] == "1"
   conf.cxx.flags << "-fwasm-exceptions"
-  conf.cxx.flags << "-Oz"
+  conf.cxx.flags << "-O3"
 
   conf.linker.command = "#{toolchain}/bin/clang"
   conf.linker.flags << "--target=wasm32-wasip1"
@@ -32,9 +33,10 @@ MRuby::CrossBuild.new("wasm32-wasip1") do |conf|
     conf.linker.flags << "-mllvm"
     conf.linker.flags << "-wasm-enable-sjlj"
   end
-  conf.linker.flags << "-Oz"
+  conf.linker.flags << "-O3"
   conf.archiver.command = "#{toolchain}/bin/llvm-ar"
 
   conf.enable_cxx_exception if ENV["WASI_USE_CXX_EXCEPTION"] == "1"
   conf.gembox "stdlib"
+  conf.gem File.expand_path("../vendor/mruby-json", __dir__)
 end

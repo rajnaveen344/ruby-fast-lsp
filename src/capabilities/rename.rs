@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{
 
 use crate::query::analysis_location::locations_for_ranges;
 use crate::server::RubyLanguageServer;
-use ruby_analysis::core::RubyConstant;
+use ruby_analysis::core::{RubyConstant, RubyMethod};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::{Identifier, RenameVisitor, RubyDocument, RubyPrismAnalyzer};
 
@@ -23,10 +23,15 @@ pub async fn handle_prepare_rename(
 ) -> Option<PrepareRenameResponse> {
     let uri = params.text_document.uri;
     let position = params.position;
-    let (content, version) = {
+    let (content, version, analysis_file_id, analysis_offset) = {
         let docs = server.docs.lock();
         let document = docs.get(&uri)?.read();
-        (document.content.clone(), document.version)
+        (
+            document.content.clone(),
+            document.version,
+            document.analysis_file_id(),
+            document.position_to_analysis_offset(position),
+        )
     };
 
     let doc = RubyDocument::new(uri.clone(), content.clone(), version);
@@ -40,6 +45,21 @@ pub async fn handle_prepare_rename(
     {
         return Some(PrepareRenameResponse::Range(range));
     }
+
+    let analysis_engine = server.analysis_engine_for_uri(&uri);
+    let engine = analysis_engine.read();
+    if let Some(target) =
+        AnalysisQuery::new(&engine).method_rename_target_at(analysis_file_id, analysis_offset)
+    {
+        let location = locations_for_ranges(&engine, target.ranges)
+            .into_iter()
+            .find(|location| location.uri == uri && range_contains(location.range, position))?;
+        return Some(PrepareRenameResponse::RangeWithPlaceholder {
+            range: location.range,
+            placeholder: target.current_name.to_string(),
+        });
+    }
+    drop(engine);
 
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
     let (identifier, _, ancestors, _, _) = analyzer.get_identifier(position);
@@ -71,11 +91,15 @@ pub async fn handle_rename(
     let new_name = params.new_name;
 
     // Get document content
-    let docs = server.docs.lock();
-    let doc_arc = docs.get(&uri)?.clone();
-    let document = doc_arc.read();
-    let content = document.content.clone();
-    drop(docs);
+    let (content, analysis_file_id, analysis_offset) = {
+        let docs = server.docs.lock();
+        let document = docs.get(&uri)?.read();
+        (
+            document.content.clone(),
+            document.analysis_file_id(),
+            document.position_to_analysis_offset(position),
+        )
+    };
 
     // Parse and traverse the AST to find all rename targets
     let doc = RubyDocument::new(uri.clone(), content.clone(), 0);
@@ -96,6 +120,34 @@ pub async fn handle_rename(
             .collect();
         changes.insert(uri, edits);
     } else {
+        if let Ok(new_method) = RubyMethod::new(&new_name) {
+            let analysis_engine = server.analysis_engine_for_uri(&uri);
+            let engine = analysis_engine.read();
+            if let Some(target) = AnalysisQuery::new(&engine).method_rename_target_for_name_at(
+                analysis_file_id,
+                analysis_offset,
+                new_method,
+            ) {
+                for location in locations_for_ranges(&engine, target.ranges) {
+                    changes
+                        .entry(location.uri)
+                        .or_insert_with(Vec::new)
+                        .push(TextEdit {
+                            new_text: new_name.clone(),
+                            range: location.range,
+                        });
+                }
+            }
+        }
+
+        if !changes.is_empty() {
+            return Some(WorkspaceEdit {
+                changes: Some(changes),
+                document_changes: None,
+                change_annotations: None,
+            });
+        }
+
         let new_constant = RubyConstant::new(&new_name).ok()?;
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
         let (identifier, _, ancestors, _, _) = analyzer.get_identifier(position);

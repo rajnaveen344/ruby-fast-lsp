@@ -41,6 +41,8 @@ const binary = path.join(extensionRoot, 'bin', platform, binaryName);
 const rspecPackage = path.join(extensionRoot, 'extensions', 'rspec-ruby');
 const railsPackage = path.join(extensionRoot, 'extensions', 'rails-ruby');
 const minitestPackage = path.join(extensionRoot, 'extensions', 'minitest-ruby');
+const sinatraPackage = path.join(extensionRoot, 'extensions', 'sinatra-rust');
+const cucumberPackage = path.join(extensionRoot, 'extensions', 'cucumber-rust');
 for (const required of [
     binary,
     path.join(extensionRoot, 'erb_html.js'),
@@ -48,7 +50,11 @@ for (const required of [
     path.join(extensionRoot, 'ruby_file_kinds.json'),
     path.join(rspecPackage, 'extension.toml'),
     path.join(railsPackage, 'extension.toml'),
-    path.join(minitestPackage, 'extension.toml')
+    path.join(railsPackage, 'target', 'wasm32-wasip1', 'release', 'ruby_fast_lsp_rails_extension.wasm'),
+    path.join(minitestPackage, 'extension.toml'),
+    path.join(minitestPackage, 'target', 'wasm32-wasip1', 'release', 'ruby_fast_lsp_minitest_extension.wasm'),
+    path.join(sinatraPackage, 'extension.toml'),
+    path.join(cucumberPackage, 'extension.toml')
 ]) {
     if (!fs.existsSync(required)) {
         fs.rmSync(temp, { recursive: true, force: true });
@@ -112,7 +118,7 @@ function finish(error) {
         process.stderr.write(`${error.message}\n${stderr}`);
         process.exitCode = 1;
     } else {
-        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, and Minitest plus packaged ERB HTML features on ${platformKey}.\n`);
+        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber plus packaged ERB HTML features on ${platformKey}.\n`);
     }
 }
 
@@ -147,6 +153,14 @@ function handleResponse(response) {
     const minitest = statuses.find(status => status.id === 'minitest-ruby');
     if (!minitest || minitest.status !== 'loaded') {
         return finish(new Error(`Bundled Minitest extension did not load: ${JSON.stringify(statuses)}`));
+    }
+    const sinatra = statuses.find(status => status.id === 'sinatra-rust');
+    if (!sinatra || sinatra.status !== 'loaded') {
+        return finish(new Error(`Bundled Sinatra extension did not load: ${JSON.stringify(statuses)}`));
+    }
+    const cucumber = statuses.find(status => status.id === 'cucumber-rust');
+    if (!cucumber || cucumber.status !== 'loaded') {
+        return finish(new Error(`Bundled Cucumber extension did not load: ${JSON.stringify(statuses)}`));
     }
     finish();
 }
@@ -183,7 +197,7 @@ child.stdin.write(frame({
         capabilities: {},
         initializationOptions: {
             extensionPath: extensionRoot,
-            extensionPackages: [rspecPackage, railsPackage, minitestPackage],
+            extensionPackages: [rspecPackage, railsPackage, minitestPackage, sinatraPackage, cucumberPackage],
             extensionDirs: [],
             extensionSettings: {},
             workspaceTrusted: false,

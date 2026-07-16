@@ -707,6 +707,7 @@ impl FakeEditor {
                 reference_candidates: visitor.reference_candidates,
                 diagnostic_candidates: visitor.diagnostic_candidates,
                 diagnostics: visitor.analysis_diagnostics,
+                execution_contexts: visitor.extension_execution_context_facts,
             };
             engine.replace_facts(
                 file_id,

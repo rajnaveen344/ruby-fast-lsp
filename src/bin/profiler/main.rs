@@ -23,6 +23,7 @@
 //!   --benchmark-iterations <n>  Measure editor operations after indexing
 //!   --check-budgets      Fail when a production budget is exceeded
 //!   --diagnostics-file <relative-path>  Open a file and print its user-visible diagnostics
+//!   --references-at <path:line:character>  Open a file and print references at an LSP position
 //!   --help               Show help
 
 mod sample_project;
@@ -73,6 +74,14 @@ struct Config {
     benchmark_iterations: Option<usize>,
     check_budgets: bool,
     diagnostics_files: Vec<PathBuf>,
+    reference_probes: Vec<ReferenceProbe>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReferenceProbe {
+    path: PathBuf,
+    line: u32,
+    character: u32,
 }
 
 fn parse_args() -> Config {
@@ -94,6 +103,7 @@ where
         benchmark_iterations: None,
         check_budgets: false,
         diagnostics_files: Vec::new(),
+        reference_probes: Vec::new(),
     };
 
     let mut i = 1;
@@ -166,6 +176,16 @@ where
                 config.diagnostics_files.push(PathBuf::from(&args[i + 1]));
                 i += 1;
             }
+            "--references-at" => {
+                assert!(
+                    i + 1 < args.len(),
+                    "INVARIANT VIOLATED: --references-at has no path and position. This is a bug because reference sampling requires path:line:character. Fix: pass --references-at spec/example_spec.rb:29:10."
+                );
+                config
+                    .reference_probes
+                    .push(parse_reference_probe(&args[i + 1]));
+                i += 1;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -181,6 +201,32 @@ where
     }
 
     config
+}
+
+fn parse_reference_probe(value: &str) -> ReferenceProbe {
+    let (path_and_line, character) = value.rsplit_once(':').unwrap_or_else(|| {
+        panic!("INVARIANT VIOLATED: --references-at `{value}` has no character component. This is a bug because profiler query positions must be explicit. Fix: use path:line:character with zero-indexed LSP coordinates.")
+    });
+    let (path, line) = path_and_line.rsplit_once(':').unwrap_or_else(|| {
+        panic!("INVARIANT VIOLATED: --references-at `{value}` has no line component. This is a bug because profiler query positions must be explicit. Fix: use path:line:character with zero-indexed LSP coordinates.")
+    });
+    let line = line.parse().unwrap_or_else(|error| {
+        panic!("INVARIANT VIOLATED: --references-at line `{line}` is invalid. This is a bug because LSP lines are unsigned integers. Fix: pass a zero-indexed numeric line. Error: {error}")
+    });
+    let character = character.parse().unwrap_or_else(|error| {
+        panic!("INVARIANT VIOLATED: --references-at character `{character}` is invalid. This is a bug because LSP characters are unsigned integers. Fix: pass a zero-indexed numeric character. Error: {error}")
+    });
+    let path = PathBuf::from(path);
+    assert!(
+        path.is_relative(),
+        "INVARIANT VIOLATED: --references-at path `{}` is absolute. This is a bug because profiler probes must remain inside the selected workspace. Fix: pass a workspace-relative path.",
+        path.display()
+    );
+    ReferenceProbe {
+        path,
+        line,
+        character,
+    }
 }
 
 fn print_help() {
@@ -201,6 +247,8 @@ OPTIONS:
     --check-budgets          Exit unsuccessfully when a production budget is exceeded
     --diagnostics-file <PATH>
                              Open a workspace-relative file through didOpen and print diagnostics as JSON; repeatable
+    --references-at <PATH:LINE:CHARACTER>
+                             Open a workspace-relative file and print resolved references as JSON; repeatable, zero-indexed
     -h, --help               Show this help message
 
 EXAMPLES:
@@ -262,8 +310,25 @@ fn main() -> anyhow::Result<()> {
 
     let benchmark_result = rt.block_on(async {
         let server = RubyLanguageServer::default();
-        server.add_workspace(workspace_uri.clone());
         configure_server(&server, config.extension_path.as_ref());
+        let discovered = server.add_workspace_folder(workspace_uri.clone())?;
+        anyhow::ensure!(
+            !discovered.is_empty(),
+            "workspace container discovered no Ruby projects: {}",
+            workspace_path.display()
+        );
+        let lsp_config = server.config.lock().clone();
+        server
+            .extension_registry
+            .configure_from_config_and_workspace_roots(
+                &lsp_config,
+                &server.workspace_root_paths(),
+            );
+        info!(
+            "Discovered {} isolated Ruby project(s): {:?}",
+            discovered.len(),
+            server.workspace_root_paths()
+        );
 
         let total_start = Instant::now();
 
@@ -271,18 +336,18 @@ fn main() -> anyhow::Result<()> {
             Phase::All => {
                 // Full indexing (includes type inference)
                 info!("=== PROFILING: Full Indexing (with type inference) ===");
-                run_full_indexing(&server, workspace_uri.clone()).await
+                run_full_indexing(&server).await
             }
             Phase::Index => {
                 // Index only (no type inference)
                 info!("=== PROFILING: Indexing Only (no type inference) ===");
-                run_indexing_only(&server, workspace_uri.clone()).await
+                run_indexing_only(&server).await
             }
             Phase::Infer => {
                 // Index first, then profile inference separately
                 info!("=== PROFILING: Type Inference Only ===");
                 info!("Step 1: Indexing (not profiled focus)...");
-                let indexing = run_indexing_only(&server, workspace_uri.clone()).await;
+                let indexing = run_indexing_only(&server).await;
 
                 info!("Step 2: Type Inference (profiled)...");
                 run_type_inference_only(&server).await;
@@ -293,9 +358,16 @@ fn main() -> anyhow::Result<()> {
         info!("=== TOTAL TIME: {:?} ===", total_start.elapsed());
 
         // Print stats
-        print_stats(&server, &workspace_uri);
+        print_stats(&server);
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "extension_status": server.extension_registry.status_reports(),
+            }))?
+        );
 
         sample_open_file_diagnostics(&server, &workspace_path, &config.diagnostics_files).await?;
+        sample_references(&server, &workspace_path, &config.reference_probes).await?;
 
         let benchmark_result = if let Some(iterations) = config.benchmark_iterations {
             assert!(
@@ -360,6 +432,55 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn sample_references(
+    server: &RubyLanguageServer,
+    workspace_path: &std::path::Path,
+    probes: &[ReferenceProbe],
+) -> anyhow::Result<()> {
+    for probe in probes {
+        let path = std::fs::canonicalize(workspace_path.join(&probe.path))?;
+        anyhow::ensure!(
+            path.starts_with(workspace_path),
+            "--references-at escapes the workspace: {}",
+            probe.path.display()
+        );
+        let uri = Url::from_file_path(&path)
+            .map_err(|()| anyhow::anyhow!("invalid references file path: {}", path.display()))?;
+        let content = fs::read_to_string(&path)?;
+        indexing::handle_did_open(
+            server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: content,
+                },
+            },
+        )
+        .await;
+        let position = Position {
+            line: probe.line,
+            character: probe.character,
+        };
+        let started = Instant::now();
+        let locations = references::find_references_at_position(server, &uri, position)
+            .await
+            .unwrap_or_default();
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "references_file": probe.path,
+                "position": position,
+                "elapsed_ns": u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                "count": locations.len(),
+                "locations": locations,
+            }))?
+        );
+    }
+    Ok(())
+}
+
 async fn sample_open_file_diagnostics(
     server: &RubyLanguageServer,
     workspace_path: &std::path::Path,
@@ -418,56 +539,78 @@ fn configure_server(server: &RubyLanguageServer, extension_path: Option<&PathBuf
             )
         });
         info!("Using extension path: {}", absolute.display());
+        let bundled_extensions = absolute.join("extensions");
+        assert!(
+            bundled_extensions.is_dir(),
+            "INVARIANT VIOLATED: profiler --extension-path has no bundled extensions directory. This is a bug because VS Code parity profiling must load the same framework guests as the installed editor package. Fix: pass the extracted or installed VS Code extension root. Missing: {}",
+            bundled_extensions.display()
+        );
         lsp_config.extension_path = Some(absolute.to_string_lossy().to_string());
+        lsp_config
+            .extension_dirs
+            .push(bundled_extensions.to_string_lossy().to_string());
     }
     server.extension_registry.configure_from_config(&lsp_config);
     *server.config.lock() = lsp_config;
 }
 
-async fn run_full_indexing(server: &RubyLanguageServer, workspace_uri: Url) -> Duration {
+async fn run_full_indexing(server: &RubyLanguageServer) -> Duration {
     let start = Instant::now();
-
-    match indexing::init_workspace(server, workspace_uri).await {
-        Ok(_) => {
-            info!("Full indexing completed in {:?}", start.elapsed());
-        }
-        Err(e) => {
-            panic!(
-                "INVARIANT VIOLATED: profiler workspace indexing failed. This is a bug because performance measurements require a complete semantic workspace. Fix: repair the corpus or indexing failure before benchmarking. Error: {e}"
-            );
-        }
-    }
+    run_registered_workspace_indexing(server).await;
+    info!("Full indexing completed in {:?}", start.elapsed());
     start.elapsed()
 }
 
-async fn run_indexing_only(server: &RubyLanguageServer, workspace_uri: Url) -> Duration {
+async fn run_indexing_only(server: &RubyLanguageServer) -> Duration {
     let start = Instant::now();
+    run_registered_workspace_indexing(server).await;
+    info!("Indexing completed in {:?}", start.elapsed());
+    start.elapsed()
+}
 
-    // We need to run indexing without type inference
-    // For now, just run full indexing - the profiler will show where time is spent
-    match indexing::init_workspace(server, workspace_uri).await {
-        Ok(_) => {
-            info!("Indexing completed in {:?}", start.elapsed());
-        }
-        Err(e) => {
+async fn run_registered_workspace_indexing(server: &RubyLanguageServer) {
+    let workspaces = server.list_workspaces();
+    assert!(
+        !workspaces.is_empty(),
+        "INVARIANT VIOLATED: profiler reached indexing without registered projects. This is a profiler lifecycle bug because workspace containers must be expanded before indexing. Fix: call add_workspace_folder before run_registered_workspace_indexing."
+    );
+    let mut tasks = tokio::task::JoinSet::new();
+    for workspace in workspaces {
+        let server = server.clone();
+        tasks.spawn(async move {
+            let uri = workspace.root_uri.clone();
+            let result = indexing::init_workspace(&server, uri.clone()).await;
+            (uri, result)
+        });
+    }
+    while let Some(joined) = tasks.join_next().await {
+        let (uri, result) = joined.expect(
+            "INVARIANT VIOLATED: profiler workspace indexing task panicked. This is a bug because a production measurement cannot omit one isolated project. Fix: inspect the indexing task panic and keep every discovered project in the gate.",
+        );
+        if let Err(error) = result {
             panic!(
-                "INVARIANT VIOLATED: profiler workspace indexing failed. This is a bug because performance measurements require a complete semantic workspace. Fix: repair the corpus or indexing failure before benchmarking. Error: {e}"
+                "INVARIANT VIOLATED: profiler project `{uri}` indexing failed. This is a bug because performance measurements require every isolated project to complete. Fix: repair the corpus or indexing failure before benchmarking. Error: {error}"
             );
         }
     }
-    start.elapsed()
 }
 
 async fn run_type_inference_only(server: &RubyLanguageServer) {
     let start = Instant::now();
     let inferred_count = server
-        .analysis_engine
-        .read()
-        .type_store()
-        .all_facts()
+        .list_workspaces()
         .into_iter()
-        .filter(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))
-        .count();
+        .map(|workspace| {
+            workspace
+                .analysis_engine
+                .read()
+                .type_store()
+                .all_facts()
+                .into_iter()
+                .filter(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))
+                .count()
+        })
+        .sum::<usize>();
     info!("Type inference completed in {:?}", start.elapsed());
     info!(
         "Analysis engine has {} method return type facts",
@@ -688,31 +831,7 @@ fn print_latency(name: &str, summary: LatencySummary, budget: Duration) {
     );
 }
 
-fn print_stats(server: &RubyLanguageServer, workspace_uri: &Url) {
-    let analysis_engine = server.analysis_engine_for_uri(workspace_uri);
-    let engine = analysis_engine.read();
-    let stats = engine.stats();
-
-    info!("=== ANALYSIS STATS ===");
-    info!("Files: {}", stats.files);
-    info!("Source bytes indexed: {}", stats.source_bytes);
-    info!("Symbols: {}", stats.symbols);
-    info!("Methods: {}", stats.methods);
-    info!("Reference candidates: {}", stats.reference_candidates);
-    info!(
-        "Reference candidates by kind: constants={}, methods={}, resolved={}",
-        stats.constant_reference_candidates,
-        stats.method_reference_candidates,
-        stats.resolved_reference_candidates
-    );
-    info!("Resolved references: {}", stats.references);
-    info!("Type facts: {}", stats.types);
-    info!("Diagnostic candidates: {}", stats.diagnostic_candidates);
-    info!("Diagnostics: {}", stats.diagnostics);
-    info!("Graph nodes: {}", stats.graph_nodes);
-    info!("Graph edges: {}", stats.graph_edges);
-    info!("Unresolved graph edges: {}", stats.unresolved_graph_edges);
-
+fn print_stats(server: &RubyLanguageServer) {
     info!("=== SHALLOW TYPE SIZES ===");
     info!(
         "FullyQualifiedName: {} bytes",
@@ -762,25 +881,52 @@ fn print_stats(server: &RubyLanguageServer, workspace_uri: &Url) {
         std::mem::size_of::<GraphEdgeFact>()
     );
 
-    let memory = engine.estimated_memory_stats();
-    let total = memory.total();
-    info!("=== ESTIMATED ENGINE HEAP ===");
-    info!("Estimated total: {:.1} MB", bytes_to_mb(total));
-    log_memory_bucket("names", memory.names, total);
-    log_memory_bucket("files", memory.files, total);
-    log_memory_bucket("symbols", memory.symbols, total);
-    log_memory_bucket("methods", memory.methods, total);
-    log_memory_bucket("types", memory.types, total);
-    log_memory_bucket("reference candidates", memory.reference_candidates, total);
-    log_memory_bucket("references", memory.references, total);
-    log_memory_bucket("diagnostics", memory.diagnostics, total);
-    log_memory_bucket("diagnostic candidates", memory.diagnostic_candidates, total);
-    log_memory_bucket("graph", memory.graph, total);
-    log_memory_bucket(
-        "unresolved graph edges",
-        memory.unresolved_graph_edges,
-        total,
-    );
+    for workspace in server.list_workspaces() {
+        let engine = workspace.analysis_engine.read();
+        let stats = engine.stats();
+        info!("=== ANALYSIS STATS: {} ===", workspace.root_path.display());
+        info!("Files: {}", stats.files);
+        info!("Source bytes indexed: {}", stats.source_bytes);
+        info!("Symbols: {}", stats.symbols);
+        info!("Methods: {}", stats.methods);
+        info!("Reference candidates: {}", stats.reference_candidates);
+        info!(
+            "Reference candidates by kind: constants={}, methods={}, resolved={}",
+            stats.constant_reference_candidates,
+            stats.method_reference_candidates,
+            stats.resolved_reference_candidates
+        );
+        info!("Resolved references: {}", stats.references);
+        info!("Type facts: {}", stats.types);
+        info!("Diagnostic candidates: {}", stats.diagnostic_candidates);
+        info!("Diagnostics: {}", stats.diagnostics);
+        info!("Graph nodes: {}", stats.graph_nodes);
+        info!("Graph edges: {}", stats.graph_edges);
+        info!("Unresolved graph edges: {}", stats.unresolved_graph_edges);
+
+        let memory = engine.estimated_memory_stats();
+        let total = memory.total();
+        info!(
+            "=== ESTIMATED ENGINE HEAP: {} ===",
+            workspace.root_path.display()
+        );
+        info!("Estimated total: {:.1} MB", bytes_to_mb(total));
+        log_memory_bucket("names", memory.names, total);
+        log_memory_bucket("files", memory.files, total);
+        log_memory_bucket("symbols", memory.symbols, total);
+        log_memory_bucket("methods", memory.methods, total);
+        log_memory_bucket("types", memory.types, total);
+        log_memory_bucket("reference candidates", memory.reference_candidates, total);
+        log_memory_bucket("references", memory.references, total);
+        log_memory_bucket("diagnostics", memory.diagnostics, total);
+        log_memory_bucket("diagnostic candidates", memory.diagnostic_candidates, total);
+        log_memory_bucket("graph", memory.graph, total);
+        log_memory_bucket(
+            "unresolved graph edges",
+            memory.unresolved_graph_edges,
+            total,
+        );
+    }
 }
 
 fn log_memory_bucket(name: &str, bytes: usize, total: usize) {
@@ -811,6 +957,35 @@ mod tests {
         assert_eq!(
             config.diagnostics_files,
             vec![PathBuf::from("lib/app.rb"), PathBuf::from("routes.rb")]
+        );
+    }
+
+    #[test]
+    fn reference_probes_parse_zero_indexed_positions_in_command_line_order() {
+        let config = parse_args_from([
+            "profiler",
+            "--workspace",
+            "/tmp/project",
+            "--references-at",
+            "spec/user_spec.rb:29:10",
+            "--references-at",
+            "lib/user.rb:4:2",
+        ]);
+
+        assert_eq!(
+            config.reference_probes,
+            vec![
+                ReferenceProbe {
+                    path: PathBuf::from("spec/user_spec.rb"),
+                    line: 29,
+                    character: 10,
+                },
+                ReferenceProbe {
+                    path: PathBuf::from("lib/user.rb"),
+                    line: 4,
+                    character: 2,
+                },
+            ]
         );
     }
 }

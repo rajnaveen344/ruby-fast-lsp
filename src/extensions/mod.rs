@@ -3,19 +3,24 @@ use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use log::warn;
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 use ruby_fast_lsp_extension_api::{
-    Argument, ArgumentValue, CallContext, DocumentContext, Extension, ExtensionEvent, IndexPatch,
-    Keyword, NamespaceKind as AbiNamespaceKind, ProcessRequest, ProcessResult, ProcessResultStatus,
+    Argument, ArgumentValue, BlockExecutionContextPatch, CallContext, DocumentContext,
+    ExecutionContextTarget, Extension, ExtensionEvent, GeneratedOwnerScope, IndexPatch, Keyword,
+    NamespaceKind as AbiNamespaceKind, ProcessRequest, ProcessResult, ProcessResultStatus,
     Receiver, ResolvedCall, ResolvedCallee, ResponsePatch, SourcePosition, SourceRange,
     WatchedFileChange, WatchedFileChangeKind,
 };
+
+mod project_context;
+pub(crate) use project_context::ProjectContextSeed;
 use ruby_prism::{CallNode, Node};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
@@ -29,13 +34,16 @@ use walkdir::WalkDir;
 
 use crate::config::RubyFastLspConfig;
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphNodeKind, MethodCalleeResolution, MethodFact, NamespaceKind,
+    ExecutionContextFact, ExecutionScopeMode, FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact,
+    GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodCalleeResolution, MethodFact, NamespaceKind,
     ReferenceCandidate, RubyConstant, RubyMethod, RubyType as AnalysisRubyType, SourceKind,
     SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
 use ruby_analysis::indexer as utils;
-use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
+use ruby_analysis::indexer::fact_collector::{
+    BlockExecutionContext, FactCollector, FactCollectorExtensionHost,
+};
 use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
 use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
 
@@ -66,9 +74,14 @@ impl std::fmt::Debug for ExtensionRegistryHandle {
 struct ExtensionRegistry {
     extensions: Vec<Arc<LoadedWasmExtension>>,
     tracked_call_names: BTreeSet<String>,
-    semantic_seeded_engines: Mutex<Vec<Weak<RwLock<ruby_analysis::engine::AnalysisEngine>>>>,
+    semantic_seeded_engines: Mutex<Vec<SeededExtensionEngine>>,
     load_config: ExtensionLoadConfig,
     discovery_fingerprint: [u8; 32],
+}
+
+struct SeededExtensionEngine {
+    engine: Weak<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    applicability_fingerprint: [u8; 32],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +96,35 @@ pub struct ExtensionStatusReport {
     pub watched_files: Vec<String>,
     pub process_commands: Vec<String>,
     pub indexed_call_names: Vec<String>,
+    #[serde(default)]
+    pub telemetry: ExtensionTelemetryReport,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtensionTelemetryReport {
+    pub guest_calls: u64,
+    pub lifecycle_calls: u64,
+    pub index_calls: u64,
+    pub event_calls: u64,
+    pub guest_failures: u64,
+    pub guest_traps: u64,
+    pub resource_limit_failures: u64,
+    pub disablements: u64,
+    pub rejected_outputs: u64,
+    pub patch_conflicts: u64,
+    pub emitted_index_patches: u64,
+    pub emitted_execution_contexts: u64,
+    pub emitted_response_patches: u64,
+    pub emitted_command_patches: u64,
+    pub emitted_process_requests: u64,
+    pub requested_reindex_files: u64,
+    pub total_guest_time_ns: u64,
+    pub max_guest_time_ns: u64,
+    pub project_instance_creations: u64,
+    pub project_instance_failures: u64,
+    pub total_project_instance_time_ns: u64,
+    pub max_project_instance_time_ns: u64,
+    pub project_instances: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -96,11 +138,50 @@ pub struct ExtensionStatusResponse {
 struct LoadedWasmExtension {
     metadata: ExtensionMetadata,
     extension: Mutex<ruby_fast_lsp_extension_wasm_host::WasmExtension>,
+    project_extensions: Mutex<BTreeMap<String, ruby_fast_lsp_extension_wasm_host::WasmExtension>>,
+    wasm_path: PathBuf,
+    activation_settings: Mutex<Option<serde_json::Value>>,
     status: Mutex<ExtensionStatus>,
     indexed_call_names: BTreeSet<String>,
     frame_call_names: BTreeSet<String>,
     semantic_targets: Vec<ExtensionMethodTarget>,
     watched_file_matcher: GlobSet,
+    applicability: Vec<ExtensionGemRequirement>,
+    project_context_delivery: ExtensionProjectContextDelivery,
+    telemetry: ExtensionTelemetry,
+}
+
+#[derive(Debug, Default)]
+struct ExtensionTelemetry {
+    guest_calls: AtomicU64,
+    lifecycle_calls: AtomicU64,
+    index_calls: AtomicU64,
+    event_calls: AtomicU64,
+    guest_failures: AtomicU64,
+    guest_traps: AtomicU64,
+    resource_limit_failures: AtomicU64,
+    disablements: AtomicU64,
+    rejected_outputs: AtomicU64,
+    patch_conflicts: AtomicU64,
+    emitted_index_patches: AtomicU64,
+    emitted_execution_contexts: AtomicU64,
+    emitted_response_patches: AtomicU64,
+    emitted_command_patches: AtomicU64,
+    emitted_process_requests: AtomicU64,
+    requested_reindex_files: AtomicU64,
+    total_guest_time_ns: AtomicU64,
+    max_guest_time_ns: AtomicU64,
+    project_instance_creations: AtomicU64,
+    project_instance_failures: AtomicU64,
+    total_project_instance_time_ns: AtomicU64,
+    max_project_instance_time_ns: AtomicU64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GuestCallKind {
+    Lifecycle,
+    Index,
+    Event,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -140,6 +221,156 @@ impl ExtensionStatus {
             Self::Failed { reason }
         }
     }
+}
+
+impl ExtensionTelemetry {
+    fn record_call(
+        &self,
+        kind: GuestCallKind,
+        elapsed: Duration,
+        output: Option<&ruby_fast_lsp_extension_api::ExtensionOutput>,
+        failure: Option<&str>,
+    ) {
+        saturating_increment(&self.guest_calls, 1);
+        match kind {
+            GuestCallKind::Lifecycle => saturating_increment(&self.lifecycle_calls, 1),
+            GuestCallKind::Index => saturating_increment(&self.index_calls, 1),
+            GuestCallKind::Event => saturating_increment(&self.event_calls, 1),
+        }
+        if let Some(reason) = failure {
+            self.record_guest_failure(reason);
+        }
+        if let Some(output) = output {
+            saturating_increment(
+                &self.emitted_index_patches,
+                u64::try_from(output.index_patches.len()).expect(
+                    "INVARIANT VIOLATED: index patch count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                ),
+            );
+            saturating_increment(
+                &self.emitted_execution_contexts,
+                u64::try_from(output.execution_contexts.len()).expect(
+                    "INVARIANT VIOLATED: execution-context count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                ),
+            );
+            saturating_increment(
+                &self.emitted_response_patches,
+                u64::try_from(output.response_patches.len()).expect(
+                    "INVARIANT VIOLATED: response patch count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                ),
+            );
+            saturating_increment(
+                &self.emitted_command_patches,
+                u64::try_from(output.command_patches.len()).expect(
+                    "INVARIANT VIOLATED: command patch count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                ),
+            );
+            saturating_increment(
+                &self.emitted_process_requests,
+                u64::try_from(output.process_requests.len()).expect(
+                    "INVARIANT VIOLATED: process request count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                ),
+            );
+            saturating_increment(
+                &self.requested_reindex_files,
+                u64::try_from(output.reindex_files.len()).expect(
+                    "INVARIANT VIOLATED: reindex file count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                ),
+            );
+        }
+        let elapsed_ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
+        saturating_increment(&self.total_guest_time_ns, elapsed_ns);
+        self.max_guest_time_ns
+            .fetch_max(elapsed_ns, Ordering::Relaxed);
+    }
+
+    fn record_disablement(&self) {
+        saturating_increment(&self.disablements, 1);
+    }
+
+    fn record_rejected_output(&self) {
+        saturating_increment(&self.rejected_outputs, 1);
+    }
+
+    fn record_patch_conflict(&self) {
+        saturating_increment(&self.patch_conflicts, 1);
+    }
+
+    fn record_guest_failure(&self, reason: &str) {
+        saturating_increment(&self.guest_failures, 1);
+        let reason = reason.to_ascii_lowercase();
+        let trapped = reason.contains("wasm trap")
+            || reason.contains("unreachable")
+            || reason.contains("fuel")
+            || reason.contains("wall-clock deadline");
+        if trapped {
+            saturating_increment(&self.guest_traps, 1);
+        }
+        let resource_limited = reason.contains("fuel")
+            || reason.contains("wall-clock deadline")
+            || (reason.contains("payload") && reason.contains("exceeds max"))
+            || (reason.contains("memory")
+                && (reason.contains("limit")
+                    || reason.contains("grow")
+                    || reason.contains("out of bounds")));
+        if resource_limited {
+            saturating_increment(&self.resource_limit_failures, 1);
+        }
+    }
+
+    fn record_project_instance_creation(&self, elapsed: Duration, failure: Option<&str>) {
+        saturating_increment(&self.project_instance_creations, 1);
+        if let Some(reason) = failure {
+            saturating_increment(&self.project_instance_failures, 1);
+            self.record_guest_failure(reason);
+        }
+        let elapsed_ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
+        saturating_increment(&self.total_project_instance_time_ns, elapsed_ns);
+        self.max_project_instance_time_ns
+            .fetch_max(elapsed_ns, Ordering::Relaxed);
+    }
+
+    fn report(&self, project_instances: usize) -> ExtensionTelemetryReport {
+        ExtensionTelemetryReport {
+            guest_calls: self.guest_calls.load(Ordering::Relaxed),
+            lifecycle_calls: self.lifecycle_calls.load(Ordering::Relaxed),
+            index_calls: self.index_calls.load(Ordering::Relaxed),
+            event_calls: self.event_calls.load(Ordering::Relaxed),
+            guest_failures: self.guest_failures.load(Ordering::Relaxed),
+            guest_traps: self.guest_traps.load(Ordering::Relaxed),
+            resource_limit_failures: self.resource_limit_failures.load(Ordering::Relaxed),
+            disablements: self.disablements.load(Ordering::Relaxed),
+            rejected_outputs: self.rejected_outputs.load(Ordering::Relaxed),
+            patch_conflicts: self.patch_conflicts.load(Ordering::Relaxed),
+            emitted_index_patches: self.emitted_index_patches.load(Ordering::Relaxed),
+            emitted_execution_contexts: self.emitted_execution_contexts.load(Ordering::Relaxed),
+            emitted_response_patches: self.emitted_response_patches.load(Ordering::Relaxed),
+            emitted_command_patches: self.emitted_command_patches.load(Ordering::Relaxed),
+            emitted_process_requests: self.emitted_process_requests.load(Ordering::Relaxed),
+            requested_reindex_files: self.requested_reindex_files.load(Ordering::Relaxed),
+            total_guest_time_ns: self.total_guest_time_ns.load(Ordering::Relaxed),
+            max_guest_time_ns: self.max_guest_time_ns.load(Ordering::Relaxed),
+            project_instance_creations: self
+                .project_instance_creations
+                .load(Ordering::Relaxed),
+            project_instance_failures: self.project_instance_failures.load(Ordering::Relaxed),
+            total_project_instance_time_ns: self
+                .total_project_instance_time_ns
+                .load(Ordering::Relaxed),
+            max_project_instance_time_ns: self
+                .max_project_instance_time_ns
+                .load(Ordering::Relaxed),
+            project_instances: u64::try_from(project_instances).expect(
+                "INVARIANT VIOLATED: project extension instance count does not fit in u64. This is a bug because process address space cannot contain that many Wasm instances. Fix: keep project instance accounting bounded by host memory limits.",
+            ),
+        }
+    }
+}
+
+fn saturating_increment(counter: &AtomicU64, amount: u64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        Some(current.saturating_add(amount))
+    });
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -192,6 +423,24 @@ struct ExtensionManifest {
     indexing: Option<ExtensionIndexingManifest>,
     watching: Option<ExtensionWatchingManifest>,
     process: Option<ExtensionProcessManifest>,
+    applicability: Option<ExtensionApplicabilityManifest>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ExtensionApplicabilityManifest {
+    locked_gems: Vec<ExtensionGemRequirementManifest>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ExtensionGemRequirementManifest {
+    name: String,
+    version: String,
+}
+
+#[derive(Clone, Debug)]
+struct ExtensionGemRequirement {
+    name: String,
+    version: VersionReq,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -203,9 +452,19 @@ struct ExtensionBuildManifest {
 struct ExtensionIndexingManifest {
     call_names: Vec<String>,
     #[serde(default)]
+    project_context: ExtensionProjectContextDelivery,
+    #[serde(default)]
     frame_call_names: Vec<String>,
     #[serde(default)]
     targets: Vec<ExtensionMethodTargetManifest>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum ExtensionProjectContextDelivery {
+    #[default]
+    PerCall,
+    Activation,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -416,20 +675,33 @@ impl ExtensionRegistryHandle {
     pub fn ensure_semantic_seed_facts(
         &self,
         engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
     ) {
-        self.inner.read().ensure_semantic_seed_facts(engine);
+        self.inner
+            .read()
+            .ensure_semantic_seed_facts(engine, project);
     }
 
     pub fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) {
         process_call_node_with_registry(self, visitor, node);
     }
 
-    pub fn document_symbols(&self, uri: &str, text: &str) -> Vec<DocumentSymbol> {
-        document_symbols_with_registry(self, uri, text)
+    pub fn document_symbols(
+        &self,
+        uri: &str,
+        text: &str,
+        project: Option<ruby_fast_lsp_extension_api::ProjectContext>,
+    ) -> Vec<DocumentSymbol> {
+        document_symbols_with_registry(self, uri, text, project)
     }
 
-    pub fn code_lenses(&self, uri: &str, text: &str) -> Vec<CodeLens> {
-        code_lenses_with_registry(self, uri, text)
+    pub fn code_lenses(
+        &self,
+        uri: &str,
+        text: &str,
+        project: Option<ruby_fast_lsp_extension_api::ProjectContext>,
+    ) -> Vec<CodeLens> {
+        code_lenses_with_registry(self, uri, text, project)
     }
 
     pub fn watcher_globs(&self) -> Vec<String> {
@@ -459,7 +731,7 @@ impl ExtensionRegistryHandle {
             ) {
                 Ok(validated) => validated,
                 Err(err) => {
-                    pending.loaded.fail(err.to_string());
+                    pending.loaded.reject(err.to_string());
                     continue;
                 }
             };
@@ -468,14 +740,15 @@ impl ExtensionRegistryHandle {
                 event: "process.completed".to_string(),
                 call: None,
                 document: None,
+                project: None,
                 settings: None,
                 files: None,
                 process_results: Some(vec![result]),
             };
-            let mut extension = pending.loaded.extension.lock();
-            match extension.handle_event(&event) {
+            match pending.loaded.handle_event_for_project(&event, None) {
                 Ok(output)
                     if output.index_patches.is_empty()
+                        && output.execution_contexts.is_empty()
                         && output.response_patches.is_empty()
                         && output.command_patches.is_empty()
                         && output.process_requests.is_empty() =>
@@ -488,20 +761,17 @@ impl ExtensionRegistryHandle {
                     ) {
                         Ok(uris) => reindex_uris.extend(uris),
                         Err(err) => {
-                            drop(extension);
-                            pending.loaded.fail(err.to_string());
+                            pending.loaded.reject(err.to_string());
                         }
                     }
                 }
                 Ok(_) => {
-                    drop(extension);
-                    pending.loaded.fail(format!(
+                    pending.loaded.reject(format!(
                         "extension `{}` returned output from `process.completed`; process completion callbacks may update private extension state only",
                         pending.loaded.metadata.id
                     ));
                 }
                 Err(err) => {
-                    drop(extension);
                     pending.loaded.fail(format!(
                         "extension `{}` process.completed failed: {err}",
                         pending.loaded.metadata.id
@@ -527,7 +797,9 @@ impl FactCollectorExtensionHost for ExtensionRegistryHandle {
     }
 
     fn resolved_call_for_stack(&self, visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
-        resolved_call_for_stack(visitor, node)
+        let mut call = resolved_call_for_stack(visitor, node);
+        call.frame_extension_ids = self.inner.read().frame_extension_ids(visitor, node);
+        call
     }
 }
 
@@ -623,6 +895,7 @@ impl ExtensionRegistry {
 
         if self.extensions.iter().any(|extension| {
             extension.is_loaded()
+                && extension.applies_to_source(visitor.extension_project_context.as_ref())
                 && extension
                     .semantic_targets
                     .iter()
@@ -633,14 +906,18 @@ impl ExtensionRegistry {
         }
 
         if self.extensions.iter().any(|extension| {
-            extension.is_loaded() && extension.frame_call_names.contains(method_name)
+            extension.is_loaded()
+                && extension.applies_to_source(visitor.extension_project_context.as_ref())
+                && extension.frame_call_names.contains(method_name)
         }) {
             return true;
         }
 
         if !visitor.extension_call_stack.is_empty()
             && self.extensions.iter().any(|extension| {
-                extension.is_loaded() && extension.can_run_inside_extension_frame(visitor, node)
+                extension.is_loaded()
+                    && extension.applies_to_source(visitor.extension_project_context.as_ref())
+                    && extension.can_run_inside_extension_frame(visitor, node)
             })
         {
             return true;
@@ -650,6 +927,44 @@ impl ExtensionRegistry {
             && ruby_fast_lsp_extension_rspec::extension()
                 .indexed_call_names()
                 .contains(&method_name)
+    }
+
+    fn frame_extension_ids(&self, visitor: &FactCollector, node: &CallNode) -> Vec<String> {
+        let method_name = utils::utf8_str(node.name().as_slice());
+        let active_frame_ids = visitor
+            .extension_call_stack
+            .iter()
+            .flat_map(|call| call.frame_extension_ids.iter())
+            .collect::<BTreeSet<_>>();
+        let explicitly_switches_receiver = node
+            .receiver()
+            .is_some_and(|receiver| receiver.as_self_node().is_none());
+        self.extensions
+            .iter()
+            .filter(|extension| {
+                if !extension.is_loaded()
+                    || !extension.applies_to_source(visitor.extension_project_context.as_ref())
+                {
+                    return false;
+                }
+                let inherits_frame = visitor.extension_call_stack.iter().any(|call| {
+                    call.frame_extension_ids
+                        .iter()
+                        .any(|id| id == &extension.metadata.id)
+                });
+                if !active_frame_ids.is_empty() && !inherits_frame && !explicitly_switches_receiver
+                {
+                    return false;
+                }
+                extension.semantically_matches_frame_call(visitor, node)
+                    || (inherits_frame
+                        && (extension.handles_call(method_name)
+                            || extension.frame_call_names.contains(method_name)))
+                    || (!extension.has_semantic_targets()
+                        && extension.frame_call_names.contains(method_name))
+            })
+            .map(|extension| extension.metadata.id.clone())
+            .collect()
     }
 
     fn status_reports(&self) -> Vec<ExtensionStatusReport> {
@@ -678,15 +993,21 @@ impl ExtensionRegistry {
     fn ensure_semantic_seed_facts(
         &self,
         engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
     ) {
+        let applicability_fingerprint = extension_applicability_fingerprint(project);
         let mut seeded_engines = self.semantic_seeded_engines.lock();
-        seeded_engines.retain(|seeded| seeded.strong_count() > 0);
-        if seeded_engines
-            .iter()
-            .filter_map(Weak::upgrade)
-            .any(|seeded| Arc::ptr_eq(&seeded, engine))
-        {
-            return;
+        seeded_engines.retain(|seeded| seeded.engine.strong_count() > 0);
+        if let Some(seeded) = seeded_engines.iter_mut().find(|seeded| {
+            seeded
+                .engine
+                .upgrade()
+                .is_some_and(|seeded_engine| Arc::ptr_eq(&seeded_engine, engine))
+        }) {
+            if seeded.applicability_fingerprint == applicability_fingerprint {
+                return;
+            }
+            seeded.applicability_fingerprint = applicability_fingerprint;
         }
 
         let mut engine_guard = engine.write();
@@ -698,7 +1019,7 @@ impl ExtensionRegistry {
         let range = TextRange::new(file_id, 0, 0);
         let mut facts = FileFacts::default();
         for extension in &self.extensions {
-            if !extension.is_loaded() {
+            if !extension.is_loaded() || !extension.applies_to(project) {
                 continue;
             }
             for target in &extension.semantic_targets {
@@ -717,16 +1038,38 @@ impl ExtensionRegistry {
         }
         engine_guard.replace_facts(file_id, facts, ResolveMode::Deferred);
         drop(engine_guard);
-        seeded_engines.push(Arc::downgrade(engine));
+        if !seeded_engines.iter().any(|seeded| {
+            seeded
+                .engine
+                .upgrade()
+                .is_some_and(|seeded_engine| Arc::ptr_eq(&seeded_engine, engine))
+        }) {
+            seeded_engines.push(SeededExtensionEngine {
+                engine: Arc::downgrade(engine),
+                applicability_fingerprint,
+            });
+        }
     }
+}
+
+fn extension_applicability_fingerprint(
+    project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
+) -> [u8; 32] {
+    let encoded = serde_json::to_vec(&project).expect(
+        "INVARIANT VIOLATED: typed project context failed serialization. This is a host ABI bug because ProjectContext derives Serialize. Fix: keep project applicability data inside extension-api domain types.",
+    );
+    Sha256::digest(encoded).into()
 }
 
 impl LoadedWasmExtension {
     fn new(
         metadata: ExtensionMetadata,
         extension: ruby_fast_lsp_extension_wasm_host::WasmExtension,
+        wasm_path: PathBuf,
         semantic_targets: Vec<ExtensionMethodTarget>,
         frame_call_names: BTreeSet<String>,
+        applicability: Vec<ExtensionGemRequirement>,
+        project_context_delivery: ExtensionProjectContextDelivery,
     ) -> Self {
         let indexed_call_names = extension
             .indexed_call_names()
@@ -741,11 +1084,17 @@ impl LoadedWasmExtension {
         Self {
             metadata,
             extension: Mutex::new(extension),
+            project_extensions: Mutex::new(BTreeMap::new()),
+            wasm_path,
+            activation_settings: Mutex::new(None),
             status: Mutex::new(ExtensionStatus::Discovered),
             indexed_call_names,
             frame_call_names,
             semantic_targets,
             watched_file_matcher,
+            applicability,
+            project_context_delivery,
+            telemetry: ExtensionTelemetry::default(),
         }
     }
 
@@ -754,20 +1103,49 @@ impl LoadedWasmExtension {
     }
 
     fn handle_lifecycle_event(&self, event_name: &str, settings: Option<serde_json::Value>) {
+        let started = Instant::now();
+        if matches!(event_name, "lifecycle.activate" | "settings.changed") {
+            *self.activation_settings.lock() = settings.clone();
+        }
         let event = ExtensionEvent {
             event: event_name.to_string(),
             call: None,
             document: None,
+            project: None,
             settings,
             files: None,
             process_results: None,
         };
-        let mut extension = self.extension.lock();
-        match extension.handle_event(&event) {
-            Ok(output)
+        let base_result = self.extension.lock().handle_event(&event);
+        let project_result = if lifecycle_output_is_empty(&base_result) {
+            let mut projects = self.project_extensions.lock();
+            projects.values_mut().try_for_each(|extension| {
+                extension
+                    .handle_event(&event)
+                    .and_then(require_empty_lifecycle_output)
+            })
+        } else {
+            Ok(())
+        };
+        let failure = base_result
+            .as_ref()
+            .err()
+            .map(ToString::to_string)
+            .or_else(|| project_result.as_ref().err().map(ToString::to_string));
+        self.telemetry.record_call(
+            GuestCallKind::Lifecycle,
+            started.elapsed(),
+            base_result.as_ref().ok(),
+            failure.as_deref(),
+        );
+        match (base_result, project_result) {
+            (Ok(output), Ok(()))
                 if output.index_patches.is_empty()
+                    && output.execution_contexts.is_empty()
                     && output.response_patches.is_empty()
-                    && output.command_patches.is_empty() =>
+                    && output.command_patches.is_empty()
+                    && output.process_requests.is_empty()
+                    && output.reindex_files.is_empty() =>
             {
                 let mut status = self.status.lock();
                 *status = match event_name {
@@ -778,22 +1156,166 @@ impl LoadedWasmExtension {
                     ),
                 };
             }
-            Ok(_) => self.fail(format!(
+            (Ok(_), Ok(())) => self.reject(format!(
                 "extension `{}` returned patches from `{event_name}`; lifecycle events must not mutate semantic or editor state",
                 self.metadata.id
             )),
-            Err(err) => self.fail(format!(
+            (Err(err), _) | (_, Err(err)) => self.fail(format!(
                 "extension `{}` {event_name} failed: {err}",
                 self.metadata.id
             )),
         }
+        if event_name == "lifecycle.deactivate" {
+            self.project_extensions.lock().clear();
+        }
+    }
+
+    fn index_call_output(
+        &self,
+        context: &CallContext,
+    ) -> anyhow::Result<ruby_fast_lsp_extension_api::ExtensionOutput> {
+        let (result, elapsed) = if let Some(project) = &context.project {
+            let mut extensions = self.project_extensions.lock();
+            if !extensions.contains_key(&project.project_uri) {
+                let creation_started = Instant::now();
+                let created = (|| {
+                    let mut extension =
+                        ruby_fast_lsp_extension_wasm_host::WasmExtension::from_file(
+                            self.metadata.id.clone(),
+                            &self.wasm_path,
+                        )?;
+                    let activation = ExtensionEvent {
+                        event: "lifecycle.activate".to_string(),
+                        call: None,
+                        document: None,
+                        project: Some(project.clone()),
+                        settings: self.activation_settings.lock().clone(),
+                        files: None,
+                        process_results: None,
+                    };
+                    require_empty_lifecycle_output(extension.handle_event(&activation)?)?;
+                    Ok::<_, anyhow::Error>(extension)
+                })();
+                let creation_failure = created.as_ref().err().map(ToString::to_string);
+                self.telemetry.record_project_instance_creation(
+                    creation_started.elapsed(),
+                    creation_failure.as_deref(),
+                );
+                extensions.insert(project.project_uri.clone(), created?);
+            }
+            let started = Instant::now();
+            let compact_context = (self.project_context_delivery
+                == ExtensionProjectContextDelivery::Activation)
+                .then(|| {
+                    let mut compact = context.clone();
+                    compact.project = None;
+                    compact
+                });
+            let guest_context = compact_context.as_ref().unwrap_or(context);
+            let result = extensions
+                .get_mut(&project.project_uri)
+                .expect(
+                    "INVARIANT VIOLATED: project Wasm instance disappeared immediately after insertion. This is a host registry bug because the instance map is locked for the entire operation. Fix: keep lookup and insertion under one project-extension lock.",
+                )
+                .index_call_output(guest_context);
+            (result, started.elapsed())
+        } else {
+            let started = Instant::now();
+            let result = self.extension.lock().index_call_output(context);
+            (result, started.elapsed())
+        };
+        let failure = result.as_ref().err().map(ToString::to_string);
+        self.telemetry.record_call(
+            GuestCallKind::Index,
+            elapsed,
+            result.as_ref().ok(),
+            failure.as_deref(),
+        );
+        result
+    }
+
+    fn handle_event_for_project(
+        &self,
+        event: &ExtensionEvent,
+        project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
+    ) -> anyhow::Result<ruby_fast_lsp_extension_api::ExtensionOutput> {
+        let (result, elapsed) = if let Some(project) = project {
+            let mut extensions = self.project_extensions.lock();
+            if !extensions.contains_key(&project.project_uri) {
+                let creation_started = Instant::now();
+                let created = (|| {
+                    let mut extension =
+                        ruby_fast_lsp_extension_wasm_host::WasmExtension::from_file(
+                            self.metadata.id.clone(),
+                            &self.wasm_path,
+                        )?;
+                    let activation = ExtensionEvent {
+                        event: "lifecycle.activate".to_string(),
+                        call: None,
+                        document: None,
+                        project: Some(project.clone()),
+                        settings: self.activation_settings.lock().clone(),
+                        files: None,
+                        process_results: None,
+                    };
+                    require_empty_lifecycle_output(extension.handle_event(&activation)?)?;
+                    Ok::<_, anyhow::Error>(extension)
+                })();
+                let creation_failure = created.as_ref().err().map(ToString::to_string);
+                self.telemetry.record_project_instance_creation(
+                    creation_started.elapsed(),
+                    creation_failure.as_deref(),
+                );
+                extensions.insert(project.project_uri.clone(), created?);
+            }
+            let started = Instant::now();
+            let result = extensions
+                .get_mut(&project.project_uri)
+                .expect(
+                    "INVARIANT VIOLATED: project Wasm instance disappeared immediately after insertion. This is a host registry bug because the instance map is locked for the entire event. Fix: keep lookup and insertion under one project-extension lock.",
+                )
+                .handle_event(event);
+            (result, started.elapsed())
+        } else {
+            let started = Instant::now();
+            let result = self.extension.lock().handle_event(event);
+            (result, started.elapsed())
+        };
+        let failure = result.as_ref().err().map(ToString::to_string);
+        self.telemetry.record_call(
+            GuestCallKind::Event,
+            elapsed,
+            result.as_ref().ok(),
+            failure.as_deref(),
+        );
+        result
     }
 
     fn fail(&self, reason: impl Into<String>) {
-        *self.status.lock() = ExtensionStatus::from_failure(reason);
+        let failure = ExtensionStatus::from_failure(reason);
+        let mut status = self.status.lock();
+        if matches!(
+            *status,
+            ExtensionStatus::Discovered | ExtensionStatus::Loaded
+        ) {
+            self.telemetry.record_disablement();
+            *status = failure;
+        }
+    }
+
+    fn reject(&self, reason: impl Into<String>) {
+        self.telemetry.record_rejected_output();
+        self.fail(reason);
+    }
+
+    fn reject_conflict(&self, reason: impl Into<String>) {
+        self.telemetry.record_rejected_output();
+        self.telemetry.record_patch_conflict();
+        self.fail(reason);
     }
 
     fn status_report(&self) -> ExtensionStatusReport {
+        let project_instances = self.project_extensions.lock().len();
         let status_guard = self.status.lock();
         let (status, last_error) = match &*status_guard {
             ExtensionStatus::Discovered => ("discovered", None),
@@ -813,11 +1335,48 @@ impl LoadedWasmExtension {
             watched_files: self.metadata.watched_files.clone(),
             process_commands: self.metadata.process_commands.clone(),
             indexed_call_names: self.indexed_call_names.iter().cloned().collect(),
+            telemetry: self.telemetry.report(project_instances),
         }
     }
 
     fn handles_call(&self, method_name: &str) -> bool {
         self.indexed_call_names.contains(method_name)
+    }
+
+    fn applies_to(&self, project: Option<&ruby_fast_lsp_extension_api::ProjectContext>) -> bool {
+        if self.applicability.is_empty() {
+            return true;
+        }
+        let Some(project) = project else {
+            return false;
+        };
+        if !project.lockfile_present || !project.locked_gems_complete {
+            return false;
+        }
+        self.applicability.iter().all(|required| {
+            project.locked_gems.iter().any(|locked| {
+                locked.name == required.name
+                    && Version::parse(&locked.version)
+                        .ok()
+                        .is_some_and(|version| required.version.matches(&version))
+            })
+        })
+    }
+
+    fn applies_to_source(
+        &self,
+        project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
+    ) -> bool {
+        if !self.applies_to(project) {
+            return false;
+        }
+        project.is_none_or(|project| {
+            matches!(
+                project.source_kind,
+                ruby_fast_lsp_extension_api::ProjectSourceKind::Project
+                    | ruby_fast_lsp_extension_api::ProjectSourceKind::Excluded
+            )
+        })
     }
 
     fn has_semantic_targets(&self) -> bool {
@@ -850,9 +1409,38 @@ impl LoadedWasmExtension {
         })
     }
 
+    fn semantically_matches_frame_call(&self, visitor: &FactCollector, node: &CallNode) -> bool {
+        if !self.has_semantic_targets() {
+            return self
+                .frame_call_names
+                .contains(utils::utf8_str(node.name().as_slice()));
+        }
+
+        let method_name = utils::utf8_str(node.name().as_slice());
+        let Ok(method) = RubyMethod::new(method_name) else {
+            return false;
+        };
+        let callees = resolved_core_callees_for_call(visitor, node);
+        self.semantic_targets.iter().any(|target| {
+            target.frame
+                && extension_target_owner_exists(visitor, target)
+                && target.method == method
+                && callees.iter().any(|callee| {
+                    callee.resolution != MethodCalleeResolution::ReceiverOnly
+                        && target.owner == callee.owner.namespace_parts()
+                        && Some(target.owner_kind) == callee.owner.namespace_kind()
+                        && target.method == callee.method
+                })
+        })
+    }
+
     fn can_run_inside_extension_frame(&self, visitor: &FactCollector, node: &CallNode) -> bool {
-        !visitor.extension_call_stack.is_empty()
-            && self.handles_call(utils::utf8_str(node.name().as_slice()))
+        self.handles_call(utils::utf8_str(node.name().as_slice()))
+            && visitor.extension_call_stack.iter().any(|call| {
+                call.frame_extension_ids
+                    .iter()
+                    .any(|id| id == &self.metadata.id)
+            })
     }
 }
 
@@ -950,45 +1538,73 @@ fn process_call_node_with_registry(
     }
 
     let ctx = call_context(visitor, node);
-    for patch in rspec.index_call(&ctx) {
-        apply_patch(visitor, patch);
+    let output = rspec.index_call_output(&ctx);
+    validate_index_patch_provenance(rspec.id(), &output.index_patches).expect(
+        "INVARIANT VIOLATED: bundled native extension spoofed index patch provenance. This is a bug because bundled and Wasm extensions must obey the same public trust contract. Fix: emit the compiled extension ID in every PatchSource.",
+    );
+    validate_index_patch_payloads(&output.index_patches).expect(
+        "INVARIANT VIOLATED: bundled native extension emitted an invalid index patch. This is a bug because native adapters must use the same validated ABI as Wasm guests. Fix: correct the extension payload.",
+    );
+    assert!(
+        ctx.project.is_some()
+            || !output
+                .index_patches
+                .iter()
+                .any(index_patch_requires_project_context),
+        "INVARIANT VIOLATED: bundled native extension emitted a project-generated owner without an owning ProjectContext. This is a guest bug because project-scoped semantic identity cannot be constructed outside a project. Fix: emit source-scoped owners or require project context."
+    );
+    validate_execution_contexts(rspec.id(), &ctx, &output.execution_contexts).expect(
+        "INVARIANT VIOLATED: bundled native extension emitted an invalid execution context. This is a bug because native adapters must use the same validated ABI as Wasm guests. Fix: correct the context ranges, owners, targets, or provenance.",
+    );
+    for patch in output.index_patches {
+        apply_patch(visitor, node, patch);
+    }
+    for context in output.execution_contexts {
+        apply_execution_context(visitor, context);
     }
 }
 
 pub fn document_symbols(uri: &str, text: &str) -> Vec<DocumentSymbol> {
-    document_symbols_with_registry(&EXTENSION_REGISTRY, uri, text)
+    document_symbols_with_registry(&EXTENSION_REGISTRY, uri, text, None)
 }
 
 fn document_symbols_with_registry(
     registry: &ExtensionRegistryHandle,
     uri: &str,
     text: &str,
+    project: Option<ruby_fast_lsp_extension_api::ProjectContext>,
 ) -> Vec<DocumentSymbol> {
     let mut symbols = Vec::new();
-    handle_response_event(registry, "request.document_symbol", uri, text, |patch| {
-        match response_patch_to_document_symbol(patch) {
+    handle_response_event(
+        registry,
+        "request.document_symbol",
+        uri,
+        text,
+        project,
+        |patch| match response_patch_to_document_symbol(patch) {
             Ok(Some(symbol)) => {
                 symbols.push(symbol);
                 Ok(())
             }
             Ok(None) => Ok(()),
             Err(err) => Err(err),
-        }
-    });
+        },
+    );
     symbols
 }
 
 pub fn code_lenses(uri: &str, text: &str) -> Vec<CodeLens> {
-    code_lenses_with_registry(&EXTENSION_REGISTRY, uri, text)
+    code_lenses_with_registry(&EXTENSION_REGISTRY, uri, text, None)
 }
 
 fn code_lenses_with_registry(
     registry: &ExtensionRegistryHandle,
     uri: &str,
     text: &str,
+    project: Option<ruby_fast_lsp_extension_api::ProjectContext>,
 ) -> Vec<CodeLens> {
     let mut lenses = Vec::new();
-    handle_response_event(registry, "request.code_lens", uri, text, |patch| {
+    handle_response_event(registry, "request.code_lens", uri, text, project, |patch| {
         match response_patch_to_code_lens(patch) {
             Ok(Some(lens)) => {
                 lenses.push(lens);
@@ -1006,15 +1622,25 @@ fn handle_response_event(
     event_name: &str,
     uri: &str,
     text: &str,
+    project: Option<ruby_fast_lsp_extension_api::ProjectContext>,
     mut handle_patch: impl FnMut(ResponsePatch) -> Result<(), String>,
 ) {
+    let required_capability = match event_name {
+        "request.document_symbol" => "document_symbol",
+        "request.code_lens" => "code_lens",
+        other => panic!(
+            "INVARIANT VIOLATED: unsupported response event `{other}` reached extension dispatch. This is a host bug because response events must map to an explicit manifest capability. Fix: add the event-to-capability mapping before dispatching it."
+        ),
+    };
     let event = ExtensionEvent {
         event: event_name.to_string(),
         call: None,
         document: Some(DocumentContext {
             uri: uri.to_string(),
             text: text.to_string(),
+            project: project.clone(),
         }),
+        project: None,
         settings: None,
         files: None,
         process_results: None,
@@ -1025,31 +1651,51 @@ fn handle_response_event(
         if !loaded.is_loaded() {
             continue;
         }
+        if !loaded
+            .metadata
+            .capabilities
+            .iter()
+            .any(|capability| capability == required_capability)
+        {
+            continue;
+        }
+        if !loaded.applies_to_source(project.as_ref()) {
+            continue;
+        }
 
-        let mut extension = loaded.extension.lock();
-        let extension_output = match extension.handle_event(&event) {
+        let extension_output = match loaded.handle_event_for_project(&event, project.as_ref()) {
             Ok(extension_output) => extension_output,
             Err(err) => {
-                let extension_id = extension.id().to_string();
                 warn!(
                     "Disabling Ruby Fast LSP extension `{}` after event `{}` failure: {}",
-                    extension_id, event_name, err
+                    loaded.metadata.id, event_name, err
                 );
                 let reason = err.to_string();
-                drop(extension);
                 loaded.fail(reason);
                 continue;
             }
         };
+        if let Err(spoofed_id) = validate_response_patch_provenance(
+            &loaded.metadata.id,
+            &extension_output.response_patches,
+        ) {
+            warn!(
+                "Disabling Ruby Fast LSP extension `{}` after response patch provenance spoofed `{}` for `{}`",
+                loaded.metadata.id, spoofed_id, event_name
+            );
+            loaded.reject(format!(
+                "extension `{}` emitted response patch provenance for `{spoofed_id}`",
+                loaded.metadata.id
+            ));
+            continue;
+        }
         for patch in extension_output.response_patches {
             if let Err(err) = handle_patch(patch) {
-                let extension_id = extension.id().to_string();
                 warn!(
                     "Disabling Ruby Fast LSP extension `{}` after invalid response patch for `{}`: {}",
-                    extension_id, event_name, err
+                    loaded.metadata.id, event_name, err
                 );
-                drop(extension);
-                loaded.fail(err);
+                loaded.reject(err);
                 break;
             }
         }
@@ -1090,20 +1736,20 @@ fn handle_watched_file_changes_with_registry(
             event: "files.changed".to_string(),
             call: None,
             document: None,
+            project: None,
             settings: None,
             files: Some(matched),
             process_results: None,
         };
-        let mut extension = loaded.extension.lock();
-        match extension.handle_event(&event) {
+        match loaded.handle_event_for_project(&event, None) {
             Ok(output)
                 if output.index_patches.is_empty()
+                    && output.execution_contexts.is_empty()
                     && output.response_patches.is_empty()
                     && output.command_patches.is_empty() =>
             {
                 if output.process_requests.len() > MAX_PROCESS_REQUESTS_PER_EVENT {
-                    drop(extension);
-                    loaded.fail(format!(
+                    loaded.reject(format!(
                         "extension `{}` returned {} process requests from `files.changed`, exceeding the limit of {MAX_PROCESS_REQUESTS_PER_EVENT}",
                         loaded.metadata.id,
                         output.process_requests.len()
@@ -1116,8 +1762,7 @@ fn handle_watched_file_changes_with_registry(
                     .iter()
                     .any(|request| !request_ids.insert(request.request_id.clone()))
                 {
-                    drop(extension);
-                    loaded.fail(format!(
+                    loaded.reject(format!(
                         "extension `{}` returned duplicate process request ids from `files.changed`",
                         loaded.metadata.id
                     ));
@@ -1132,14 +1777,12 @@ fn handle_watched_file_changes_with_registry(
                 }));
             }
             Ok(_) => {
-                drop(extension);
-                loaded.fail(format!(
+                loaded.reject(format!(
                     "extension `{}` returned patches from `files.changed`; watched-file events may update private extension state only",
                     loaded.metadata.id
                 ));
             }
             Err(err) => {
-                drop(extension);
                 loaded.fail(format!(
                     "extension `{}` files.changed failed: {err}",
                     loaded.metadata.id
@@ -1539,7 +2182,16 @@ fn process_wasm_call_node(
     let method_name = utils::utf8_str(node.name().as_slice());
     let extensions = registry.extensions();
     let mut emitted = Vec::new();
+    let mut emitted_contexts = Vec::new();
     let mut emitters = BTreeMap::new();
+    let active_frame_ids = visitor
+        .extension_call_stack
+        .iter()
+        .flat_map(|call| call.frame_extension_ids.iter())
+        .collect::<BTreeSet<_>>();
+    let explicitly_switches_receiver = node
+        .receiver()
+        .is_some_and(|receiver| receiver.as_self_node().is_none());
 
     for loaded in extensions {
         if !loaded.is_loaded() {
@@ -1548,86 +2200,295 @@ fn process_wasm_call_node(
         if !loaded.handles_call(method_name) {
             continue;
         }
+        let ctx = call_context(visitor, node);
+        if !loaded.applies_to_source(ctx.project.as_ref()) {
+            continue;
+        }
+        let owns_active_frame = active_frame_ids.contains(&loaded.metadata.id);
+        if !active_frame_ids.is_empty() && !owns_active_frame && !explicitly_switches_receiver {
+            continue;
+        }
         if loaded.has_semantic_targets()
             && !loaded.semantically_matches_call(visitor, node)
             && !loaded.can_run_inside_extension_frame(visitor, node)
         {
             continue;
         }
-        let mut extension = loaded.extension.lock();
-
-        let ctx = call_context(visitor, node);
-        let patches = match extension.index_call(&ctx) {
-            Ok(patches) => patches,
+        let output = match loaded.index_call_output(&ctx) {
+            Ok(output) => output,
             Err(err) => {
-                let extension_id = extension.id().to_string();
                 warn!(
                     "Disabling Ruby Fast LSP extension `{}` after indexing failure on `{}`: {}",
-                    extension_id, method_name, err
+                    loaded.metadata.id, method_name, err
                 );
                 let reason = err.to_string();
-                drop(extension);
                 loaded.fail(reason);
                 continue;
             }
         };
-        if patches.is_empty() {
+        if output.index_patches.is_empty() && output.execution_contexts.is_empty() {
             continue;
         }
-        if let Err(spoofed_id) = validate_index_patch_provenance(&loaded.metadata.id, &patches) {
-            drop(extension);
-            loaded.fail(format!(
+        if let Err(spoofed_id) =
+            validate_index_patch_provenance(&loaded.metadata.id, &output.index_patches)
+        {
+            loaded.reject(format!(
                 "extension `{}` emitted an index patch attributed to `{spoofed_id}`; patch provenance must match the loaded manifest id",
                 loaded.metadata.id
             ));
             continue;
         }
-        if let Err(err) = validate_index_patch_payloads(&patches) {
-            drop(extension);
-            loaded.fail(format!(
+        if let Err(err) = validate_index_patch_payloads(&output.index_patches) {
+            loaded.reject(format!(
                 "extension `{}` emitted an invalid index patch: {err}",
                 loaded.metadata.id
             ));
             continue;
         }
+        if ctx.project.is_none()
+            && output
+                .index_patches
+                .iter()
+                .any(index_patch_requires_project_context)
+        {
+            loaded.reject(format!(
+                "extension `{}` emitted a project-generated owner without an owning ProjectContext",
+                loaded.metadata.id
+            ));
+            continue;
+        }
+        if let Err(err) =
+            validate_execution_contexts(&loaded.metadata.id, &ctx, &output.execution_contexts)
+        {
+            loaded.reject(format!(
+                "extension `{}` emitted an invalid block execution context: {err}",
+                loaded.metadata.id
+            ));
+            continue;
+        }
         emitters.insert(loaded.metadata.id.clone(), Arc::clone(&loaded));
-        emitted.extend(patches);
+        emitted.extend(output.index_patches);
+        emitted_contexts.extend(output.execution_contexts);
     }
 
-    if emitted.is_empty() {
+    if emitted.is_empty() && emitted_contexts.is_empty() {
         return false;
     }
     let mut pending = emitted;
-    let patches = loop {
-        match resolve_index_patch_conflicts(pending.clone()) {
-            Ok(patches) => break patches,
-            Err(conflict) => {
-                let rejected_ids = conflict
-                    .extension_ids
-                    .iter()
-                    .cloned()
-                    .collect::<BTreeSet<_>>();
-                for extension_id in &conflict.extension_ids {
-                    let loaded = emitters.get(extension_id).expect(
+    let mut pending_contexts = emitted_contexts;
+    let (patches, contexts) = loop {
+        let conflict = match resolve_index_patch_conflicts(pending.clone()) {
+            Ok(patches) => match resolve_execution_context_conflicts(pending_contexts.clone()) {
+                Ok(contexts) => break (patches, contexts),
+                Err(conflict) => conflict,
+            },
+            Err(conflict) => conflict,
+        };
+        let rejected_ids = conflict
+            .extension_ids
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for extension_id in &conflict.extension_ids {
+            let loaded = emitters.get(extension_id).expect(
                         "INVARIANT VIOLATED: conflicting patch source has no emitting extension. This is a bug because provenance is validated before conflict resolution. Fix: keep emitter registration adjacent to accepted patch collection.",
                     );
-                    loaded.fail(conflict.message.clone());
-                }
-                warn!(
-                    "Rejecting conflicting extension index patches: {}",
-                    conflict.message
-                );
-                pending.retain(|patch| !rejected_ids.contains(index_patch_extension_id(patch)));
-                if pending.is_empty() {
-                    return false;
-                }
-            }
+            loaded.reject_conflict(conflict.message.clone());
+        }
+        warn!(
+            "Rejecting conflicting extension index patches: {}",
+            conflict.message
+        );
+        pending.retain(|patch| !rejected_ids.contains(index_patch_extension_id(patch)));
+        pending_contexts
+            .retain(|context| !rejected_ids.contains(context.source.extension_id.as_str()));
+        if pending.is_empty() && pending_contexts.is_empty() {
+            return false;
         }
     };
     for patch in patches {
-        apply_patch(visitor, patch);
+        apply_patch(visitor, node, patch);
+    }
+    for context in contexts {
+        apply_execution_context(visitor, context);
     }
     true
+}
+
+fn apply_execution_context(visitor: &mut FactCollector, context: BlockExecutionContextPatch) {
+    let source_identity = visitor.document.uri.as_str();
+    let project_identity = visitor
+        .extension_project_context
+        .as_ref()
+        .map(|project| project.project_uri.as_str());
+    let range = visitor
+        .document
+        .lsp_range_to_text_range(range_from_abi(context.block_range));
+    let mut owners = BTreeMap::new();
+
+    for owner in &context.generated_owners {
+        let identity = generated_owner_scope_identity(
+            owner.scope,
+            source_identity,
+            project_identity,
+            "execution-context owner",
+        );
+        let generated = GeneratedOwnerId::new(
+            &context.source.extension_id,
+            identity,
+            &owner.local_id,
+        )
+        .expect(
+            "INVARIANT VIOLATED: invalid generated owner reached extension context application. This is a bug because execution contexts must be validated before fact conversion. Fix: keep validation before apply_execution_context.",
+        );
+        let namespace = vec![RubyConstant::generated_owner(generated)];
+        let previous = owners.insert(
+            (owner.scope, owner.local_id.clone()),
+            (namespace, namespace_kind_from_abi(owner.owner_kind)),
+        );
+        assert!(
+            previous.is_none(),
+            "INVARIANT VIOLATED: duplicate generated owner reached extension context application. This is a bug because duplicate local identities must be rejected at the extension boundary. Fix: keep owner uniqueness validation before fact conversion."
+        );
+    }
+
+    for owner in &context.generated_owners {
+        let (namespace, owner_kind) = owners.get(&(owner.scope, owner.local_id.clone())).expect(
+            "INVARIANT VIOLATED: validated generated owner is absent during context application. This is a bug because the owner map is built from the same context. Fix: keep context conversion atomic.",
+        );
+        let instance_fqn = FullyQualifiedName::namespace(namespace.clone());
+        let graph_kind = match owner.declaration_kind {
+            ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Class => GraphNodeKind::Class,
+            ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Module => GraphNodeKind::Module,
+        };
+        let singleton_fqn = instance_fqn.to_singleton_namespace().expect(
+            "INVARIANT VIOLATED: generated owner could not convert to a singleton namespace. This is a bug because generated owners are namespace segments. Fix: construct generated owner graph nodes through FullyQualifiedName::namespace.",
+        );
+        for node in [
+            GraphNodeFact::new(instance_fqn.clone(), graph_kind, range),
+            GraphNodeFact::new(singleton_fqn, graph_kind, range),
+        ] {
+            if !visitor.direct_facts.graph_nodes.contains(&node) {
+                visitor.direct_facts.graph_nodes.push(node);
+            }
+        }
+        if let Some(parent) = &owner.parent {
+            let (parent_namespace, parent_kind) = resolve_execution_context_target(parent, &owners);
+            let source = FullyQualifiedName::namespace_with_kind(namespace.clone(), *owner_kind);
+            let target = FullyQualifiedName::namespace_with_kind(parent_namespace, parent_kind);
+            let edge = GraphEdgeFact::new(source, target, GraphEdgeKind::Superclass, range);
+            if !visitor.direct_facts.graph_edges.contains(&edge) {
+                visitor.direct_facts.graph_edges.push(edge);
+            }
+        }
+    }
+
+    let (implicit_receiver, implicit_receiver_kind) =
+        resolve_execution_context_target(&context.implicit_receiver, &owners);
+    let (method_definition_owner, method_definition_kind) =
+        resolve_execution_context_target(&context.method_definition_owner, &owners);
+    let implicit_receiver_fqn =
+        FullyQualifiedName::namespace_with_kind(implicit_receiver.clone(), implicit_receiver_kind);
+    let method_definition_owner_fqn = FullyQualifiedName::namespace_with_kind(
+        method_definition_owner.clone(),
+        method_definition_kind,
+    );
+    visitor
+        .extension_execution_context_facts
+        .push(ExecutionContextFact {
+            range,
+            lexical_namespace: FullyQualifiedName::namespace(visitor.scope_tracker.get_ns_stack()),
+            implicit_receiver: implicit_receiver_fqn,
+            method_definition_owner: method_definition_owner_fqn,
+            lexical_scope: ExecutionScopeMode::Preserve,
+            local_scope: ExecutionScopeMode::Preserve,
+            extension_id: context.source.extension_id,
+        });
+    visitor.set_pending_block_execution_context(BlockExecutionContext {
+        block_range: range,
+        implicit_receiver,
+        implicit_receiver_kind,
+        method_definition_owner,
+        method_definition_kind,
+    });
+}
+
+fn resolve_execution_context_target(
+    target: &ExecutionContextTarget,
+    owners: &BTreeMap<(GeneratedOwnerScope, String), (Vec<RubyConstant>, NamespaceKind)>,
+) -> (Vec<RubyConstant>, NamespaceKind) {
+    match target {
+        ExecutionContextTarget::Namespace {
+            namespace,
+            owner_kind,
+        } => (
+            extension_ruby_constants(namespace, "execution context namespace target"),
+            namespace_kind_from_abi(*owner_kind),
+        ),
+        ExecutionContextTarget::GeneratedOwner {
+            local_id,
+            owner_kind,
+        } => {
+            let (namespace, declared_kind) = owners
+                .get(&(GeneratedOwnerScope::Source, local_id.clone()))
+                .cloned()
+                .expect(
+                "INVARIANT VIOLATED: undeclared generated target reached context application. This is a bug because every context target must be validated before conversion. Fix: reject undeclared local IDs at the extension boundary.",
+            );
+            (
+                namespace,
+                owner_kind
+                    .map(namespace_kind_from_abi)
+                    .unwrap_or(declared_kind),
+            )
+        }
+        ExecutionContextTarget::ProjectGeneratedOwner {
+            local_id,
+            owner_kind,
+        } => {
+            let (namespace, declared_kind) = owners
+                .get(&(GeneratedOwnerScope::Project, local_id.clone()))
+                .cloned()
+                .expect(
+                    "INVARIANT VIOLATED: undeclared project-generated target reached context application. This is a bug because every context target must be validated before conversion. Fix: declare the project-scoped owner in the same execution context.",
+                );
+            (
+                namespace,
+                owner_kind
+                    .map(namespace_kind_from_abi)
+                    .unwrap_or(declared_kind),
+            )
+        }
+    }
+}
+
+fn generated_owner_scope_identity<'a>(
+    scope: GeneratedOwnerScope,
+    source_identity: &'a str,
+    project_identity: Option<&'a str>,
+    label: &str,
+) -> &'a str {
+    match scope {
+        GeneratedOwnerScope::Source => source_identity,
+        GeneratedOwnerScope::Project => project_identity.unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: {label} requested project-scoped identity without an owning project. This is a host validation bug because project-generated owners require ProjectContext. Fix: reject the patch before semantic application."
+            )
+        }),
+    }
+}
+
+fn extension_ruby_constants(parts: &[String], label: &str) -> Vec<RubyConstant> {
+    parts
+        .iter()
+        .map(|part| {
+            RubyConstant::new(part).unwrap_or_else(|err| {
+                panic!(
+                    "INVARIANT VIOLATED: validated {label} component `{part}` failed fact conversion: {err}. This is a bug because validation and conversion use the same RubyConstant contract. Fix: keep extension context validation before application."
+                )
+            })
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1654,6 +2515,14 @@ enum IndexPatchIdentity {
         target_kind: String,
         mixin: Vec<String>,
         kind: String,
+    },
+    ExecutionContextConnection {
+        template: Vec<String>,
+        application: Vec<String>,
+        start_line: u32,
+        start_character: u32,
+        end_line: u32,
+        end_character: u32,
     },
 }
 
@@ -1687,6 +2556,18 @@ impl IndexPatchIdentity {
                 "{} ({target_kind}) {kind} {}",
                 namespace.join("::"),
                 mixin.join("::")
+            ),
+            Self::ExecutionContextConnection {
+                template,
+                application,
+                start_line,
+                start_character,
+                end_line,
+                end_character,
+            } => format!(
+                "execution context {} -> {} at {start_line}:{start_character}-{end_line}:{end_character}",
+                template.join("::"),
+                application.join("::")
             ),
         }
     }
@@ -1742,6 +2623,74 @@ fn resolve_index_patch_conflicts(
     Ok(resolved)
 }
 
+fn resolve_execution_context_conflicts(
+    mut contexts: Vec<BlockExecutionContextPatch>,
+) -> Result<Vec<BlockExecutionContextPatch>, IndexPatchConflict> {
+    contexts.sort_by(|left, right| {
+        execution_context_range_key(left)
+            .cmp(&execution_context_range_key(right))
+            .then_with(|| left.source.extension_id.cmp(&right.source.extension_id))
+    });
+    let mut resolved = Vec::new();
+    let mut index = 0;
+    while index < contexts.len() {
+        let identity = execution_context_range_key(&contexts[index]);
+        let mut end = index + 1;
+        while end < contexts.len() && execution_context_range_key(&contexts[end]) == identity {
+            end += 1;
+        }
+        let group = &contexts[index..end];
+        if group
+            .iter()
+            .skip(1)
+            .any(|context| !execution_context_payload_eq(&group[0], context))
+        {
+            let extension_ids = group
+                .iter()
+                .map(|context| context.source.extension_id.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            return Err(IndexPatchConflict {
+                message: format!(
+                    "extensions {} emitted incompatible block execution contexts for call at {}:{}-{}:{}; conflicting runtime ownership is rejected deterministically",
+                    extension_ids.join(", "),
+                    identity.0,
+                    identity.1,
+                    identity.2,
+                    identity.3
+                ),
+                extension_ids,
+            });
+        }
+        resolved.push(group[0].clone());
+        index = end;
+    }
+    Ok(resolved)
+}
+
+fn execution_context_range_key(context: &BlockExecutionContextPatch) -> (u32, u32, u32, u32) {
+    (
+        context.call_range.start.line,
+        context.call_range.start.character,
+        context.call_range.end.line,
+        context.call_range.end.character,
+    )
+}
+
+fn execution_context_payload_eq(
+    left: &BlockExecutionContextPatch,
+    right: &BlockExecutionContextPatch,
+) -> bool {
+    left.call_range == right.call_range
+        && left.block_range == right.block_range
+        && left.generated_owners == right.generated_owners
+        && left.implicit_receiver == right.implicit_receiver
+        && left.method_definition_owner == right.method_definition_owner
+        && left.lexical_scope == right.lexical_scope
+        && left.local_scope == right.local_scope
+}
+
 fn index_patch_identity(patch: &IndexPatch) -> IndexPatchIdentity {
     match patch {
         IndexPatch::DefineNamespace(namespace) => IndexPatchIdentity::Declaration {
@@ -1759,7 +2708,7 @@ fn index_patch_identity(patch: &IndexPatch) -> IndexPatchIdentity {
             end_character: reference.location.end.character,
         },
         IndexPatch::DefineMethod(method) => IndexPatchIdentity::Method {
-            namespace: method.namespace.clone(),
+            namespace: patch_owner_identity(&method.namespace, method.owner_target.as_ref()),
             owner_kind: namespace_kind_name(method.owner_kind).to_string(),
             name: method.name.clone(),
         },
@@ -1767,9 +2716,13 @@ fn index_patch_identity(patch: &IndexPatch) -> IndexPatchIdentity {
             namespace: superclass.namespace.clone(),
         },
         IndexPatch::ApplyMixin(mixin) => IndexPatchIdentity::Mixin {
-            namespace: mixin.namespace.clone(),
+            namespace: patch_owner_identity(&mixin.namespace, mixin.owner_target.as_ref()),
             target_kind: namespace_kind_name(mixin.target_kind).to_string(),
-            mixin: mixin.mixin.clone(),
+            mixin: mixin
+                .mixin_target
+                .as_ref()
+                .map(|target| patch_owner_identity(&[], Some(target)))
+                .unwrap_or_else(|| mixin.mixin.clone()),
             kind: match mixin.kind {
                 ruby_fast_lsp_extension_api::MixinKind::Include => "include",
                 ruby_fast_lsp_extension_api::MixinKind::Prepend => "prepend",
@@ -1777,6 +2730,51 @@ fn index_patch_identity(patch: &IndexPatch) -> IndexPatchIdentity {
             }
             .to_string(),
         },
+        IndexPatch::ConnectExecutionContext(connection) => {
+            IndexPatchIdentity::ExecutionContextConnection {
+                template: patch_owner_identity(&[], Some(&connection.template)),
+                application: patch_owner_identity(&[], Some(&connection.application)),
+                start_line: connection.location.start.line,
+                start_character: connection.location.start.character,
+                end_line: connection.location.end.line,
+                end_character: connection.location.end.character,
+            }
+        }
+    }
+}
+
+fn patch_owner_identity(
+    namespace: &[String],
+    target: Option<&ExecutionContextTarget>,
+) -> Vec<String> {
+    match target {
+        None => namespace.to_vec(),
+        Some(ExecutionContextTarget::Namespace {
+            namespace,
+            owner_kind,
+        }) => {
+            let mut identity = vec![format!("@namespace:{}", namespace_kind_name(*owner_kind))];
+            identity.extend(namespace.iter().cloned());
+            identity
+        }
+        Some(ExecutionContextTarget::GeneratedOwner {
+            local_id,
+            owner_kind,
+        }) => {
+            vec![format!(
+                "@generated:{local_id}:{}",
+                owner_kind.map(namespace_kind_name).unwrap_or("fallback")
+            )]
+        }
+        Some(ExecutionContextTarget::ProjectGeneratedOwner {
+            local_id,
+            owner_kind,
+        }) => {
+            vec![format!(
+                "@project-generated:{local_id}:{}",
+                owner_kind.map(namespace_kind_name).unwrap_or("fallback")
+            )]
+        }
     }
 }
 
@@ -1784,6 +2782,13 @@ fn namespace_kind_name(kind: AbiNamespaceKind) -> &'static str {
     match kind {
         AbiNamespaceKind::Instance => "instance",
         AbiNamespaceKind::Singleton => "singleton",
+    }
+}
+
+fn namespace_kind_from_abi(kind: AbiNamespaceKind) -> NamespaceKind {
+    match kind {
+        AbiNamespaceKind::Instance => NamespaceKind::Instance,
+        AbiNamespaceKind::Singleton => NamespaceKind::Singleton,
     }
 }
 
@@ -1795,6 +2800,7 @@ fn index_patch_extension_id(patch: &IndexPatch) -> &str {
         IndexPatch::DefineMethod(method) => &method.source.extension_id,
         IndexPatch::SetSuperclass(superclass) => &superclass.source.extension_id,
         IndexPatch::ApplyMixin(mixin) => &mixin.source.extension_id,
+        IndexPatch::ConnectExecutionContext(connection) => &connection.source.extension_id,
     }
 }
 
@@ -1804,6 +2810,27 @@ fn validate_index_patch_provenance(
 ) -> Result<(), String> {
     if let Some(spoofed_id) = patches.iter().find_map(|patch| {
         let source_id = index_patch_extension_id(patch);
+        (source_id != expected_extension_id).then(|| source_id.to_string())
+    }) {
+        return Err(spoofed_id);
+    }
+    Ok(())
+}
+
+fn response_patch_extension_id(patch: &ResponsePatch) -> &str {
+    match patch {
+        ResponsePatch::Diagnostic(diagnostic) => &diagnostic.source.extension_id,
+        ResponsePatch::CodeLens(lens) => &lens.source.extension_id,
+        ResponsePatch::DocumentSymbol(symbol) => &symbol.source.extension_id,
+    }
+}
+
+fn validate_response_patch_provenance(
+    expected_extension_id: &str,
+    patches: &[ResponsePatch],
+) -> Result<(), String> {
+    if let Some(spoofed_id) = patches.iter().find_map(|patch| {
+        let source_id = response_patch_extension_id(patch);
         (source_id != expected_extension_id).then(|| source_id.to_string())
     }) {
         return Err(spoofed_id);
@@ -1836,9 +2863,22 @@ fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
                 RubyMethod::new(&method.name)
                     .map_err(|err| format!("invalid method name `{}`: {err}", method.name))?;
                 validate_extension_namespace(&method.namespace, "method namespace")?;
+                if let Some(target) = &method.owner_target {
+                    validate_patch_owner_target(
+                        target,
+                        &method.source.extension_id,
+                        "method owner",
+                    )?;
+                }
                 validate_source_range(method.location, "method location")?;
                 if method.params.iter().any(|param| param.name.is_empty()) {
                     return Err("method parameter names must not be empty".to_string());
+                }
+                if method.return_type.is_some() && method.return_type_source.is_some() {
+                    return Err(
+                        "method patch must use either `return_type` or `return_type_source`, not both"
+                            .to_string(),
+                    );
                 }
                 analysis_ruby_type_from_extension(method.return_type.as_ref())?;
             }
@@ -1855,8 +2895,49 @@ fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
             }
             IndexPatch::ApplyMixin(mixin) => {
                 validate_extension_namespace(&mixin.namespace, "mixin namespace")?;
-                validate_extension_namespace(&mixin.mixin, "mixin target")?;
+                if let Some(target) = &mixin.owner_target {
+                    validate_patch_owner_target(target, &mixin.source.extension_id, "mixin owner")?;
+                }
+                match &mixin.mixin_target {
+                    Some(target) => {
+                        if !mixin.mixin.is_empty() {
+                            return Err(
+                                "mixin patch must use either `mixin` or `mixin_target`, not both"
+                                    .to_string(),
+                            );
+                        }
+                        validate_patch_owner_target(
+                            target,
+                            &mixin.source.extension_id,
+                            "semantic mixin target",
+                        )?;
+                    }
+                    None => {
+                        if mixin.mixin.is_empty() {
+                            return Err(
+                                "mixin patch must provide `mixin` or `mixin_target`".to_string()
+                            );
+                        }
+                        validate_extension_namespace(&mixin.mixin, "mixin target")?;
+                    }
+                }
                 validate_source_range(mixin.location, "mixin location")?;
+            }
+            IndexPatch::ConnectExecutionContext(connection) => {
+                validate_patch_owner_target(
+                    &connection.template,
+                    &connection.source.extension_id,
+                    "execution context template",
+                )?;
+                validate_patch_owner_target(
+                    &connection.application,
+                    &connection.source.extension_id,
+                    "execution context application",
+                )?;
+                validate_source_range(
+                    connection.location,
+                    "execution context application location",
+                )?;
             }
         }
     }
@@ -1866,7 +2947,8 @@ fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
         | IndexPatch::DefineConstant(_)
         | IndexPatch::AddReference(_)
         | IndexPatch::DefineMethod(_)
-        | IndexPatch::ApplyMixin(_) => None,
+        | IndexPatch::ApplyMixin(_)
+        | IndexPatch::ConnectExecutionContext(_) => None,
     }) {
         let declares_class = patches.iter().any(|patch| match patch {
             IndexPatch::DefineNamespace(namespace) => {
@@ -1879,7 +2961,8 @@ fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
             | IndexPatch::AddReference(_)
             | IndexPatch::DefineMethod(_)
             | IndexPatch::SetSuperclass(_)
-            | IndexPatch::ApplyMixin(_) => false,
+            | IndexPatch::ApplyMixin(_)
+            | IndexPatch::ConnectExecutionContext(_) => false,
         });
         if !declares_class {
             return Err(format!(
@@ -1889,6 +2972,157 @@ fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn execution_target_requires_project(target: &ExecutionContextTarget) -> bool {
+    matches!(target, ExecutionContextTarget::ProjectGeneratedOwner { .. })
+}
+
+fn index_patch_requires_project_context(patch: &IndexPatch) -> bool {
+    match patch {
+        IndexPatch::DefineMethod(method) => method
+            .owner_target
+            .as_ref()
+            .is_some_and(execution_target_requires_project),
+        IndexPatch::ApplyMixin(mixin) => {
+            mixin
+                .owner_target
+                .as_ref()
+                .is_some_and(execution_target_requires_project)
+                || mixin
+                    .mixin_target
+                    .as_ref()
+                    .is_some_and(execution_target_requires_project)
+        }
+        IndexPatch::ConnectExecutionContext(connection) => {
+            execution_target_requires_project(&connection.template)
+                || execution_target_requires_project(&connection.application)
+        }
+        IndexPatch::DefineNamespace(_)
+        | IndexPatch::DefineConstant(_)
+        | IndexPatch::AddReference(_)
+        | IndexPatch::SetSuperclass(_) => false,
+    }
+}
+
+fn validate_patch_owner_target(
+    target: &ExecutionContextTarget,
+    extension_id: &str,
+    label: &str,
+) -> Result<(), String> {
+    match target {
+        ExecutionContextTarget::Namespace { namespace, .. } => {
+            if namespace.is_empty() {
+                return Err(format!("{label} namespace must not be empty"));
+            }
+            validate_extension_namespace(namespace, label)
+        }
+        ExecutionContextTarget::GeneratedOwner { local_id, .. } => {
+            GeneratedOwnerId::new(extension_id, "validation-source", local_id)
+                .map(|_| ())
+                .map_err(|err| format!("invalid {label} generated owner `{local_id}`: {err}"))
+        }
+        ExecutionContextTarget::ProjectGeneratedOwner { local_id, .. } => {
+            GeneratedOwnerId::new(extension_id, "validation-project", local_id)
+                .map(|_| ())
+                .map_err(|err| {
+                    format!("invalid {label} project-generated owner `{local_id}`: {err}")
+                })
+        }
+    }
+}
+
+fn validate_execution_contexts(
+    expected_extension_id: &str,
+    call: &CallContext,
+    contexts: &[BlockExecutionContextPatch],
+) -> Result<(), String> {
+    if contexts.len() > 1 {
+        return Err("an extension may emit at most one execution context for one call".to_string());
+    }
+    for context in contexts {
+        if context.source.extension_id != expected_extension_id {
+            return Err(format!(
+                "context provenance `{}` does not match loaded manifest id `{expected_extension_id}`",
+                context.source.extension_id
+            ));
+        }
+        if context.call_range != call.call_range {
+            return Err("context call_range must exactly match the current call".to_string());
+        }
+        let expected_block = call.block_range.ok_or_else(|| {
+            "execution context requires the current call to have a block".to_string()
+        })?;
+        if context.block_range != expected_block {
+            return Err("context block_range must exactly match the current block".to_string());
+        }
+        validate_source_range(context.call_range, "execution context call range")?;
+        validate_source_range(context.block_range, "execution context block range")?;
+        let mut declared = BTreeSet::new();
+        for owner in &context.generated_owners {
+            if owner.scope == GeneratedOwnerScope::Project && call.project.is_none() {
+                return Err(format!(
+                    "project-generated owner `{}` requires an owning ProjectContext",
+                    owner.local_id
+                ));
+            }
+            GeneratedOwnerId::new(expected_extension_id, "validation-source", &owner.local_id)
+                .map_err(|err| format!("invalid generated owner `{}`: {err}", owner.local_id))?;
+            if !declared.insert((owner.scope, owner.local_id.clone())) {
+                return Err(format!(
+                    "{:?} generated owner `{}` is declared more than once",
+                    owner.scope, owner.local_id
+                ));
+            }
+        }
+        for owner in &context.generated_owners {
+            if let Some(parent) = &owner.parent {
+                validate_execution_context_target(parent, &declared, "generated owner parent")?;
+            }
+        }
+        validate_execution_context_target(
+            &context.implicit_receiver,
+            &declared,
+            "implicit receiver",
+        )?;
+        validate_execution_context_target(
+            &context.method_definition_owner,
+            &declared,
+            "method-definition owner",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_execution_context_target(
+    target: &ExecutionContextTarget,
+    declared: &BTreeSet<(GeneratedOwnerScope, String)>,
+    label: &str,
+) -> Result<(), String> {
+    match target {
+        ExecutionContextTarget::Namespace { namespace, .. } => {
+            if namespace.is_empty() {
+                return Err(format!("{label} namespace must not be empty"));
+            }
+            validate_extension_namespace(namespace, label)
+        }
+        ExecutionContextTarget::GeneratedOwner { local_id, .. } => {
+            if !declared.contains(&(GeneratedOwnerScope::Source, local_id.clone())) {
+                return Err(format!(
+                    "{label} references undeclared generated owner `{local_id}`"
+                ));
+            }
+            Ok(())
+        }
+        ExecutionContextTarget::ProjectGeneratedOwner { local_id, .. } => {
+            if !declared.contains(&(GeneratedOwnerScope::Project, local_id.clone())) {
+                return Err(format!(
+                    "{label} references undeclared project-generated owner `{local_id}`"
+                ));
+            }
+            Ok(())
+        }
+    }
 }
 
 fn validate_extension_namespace(parts: &[String], label: &str) -> Result<(), String> {
@@ -2053,10 +3287,12 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
         (IndexPatch::DefineMethod(left), IndexPatch::DefineMethod(right)) => {
             left.name == right.name
                 && left.namespace == right.namespace
+                && left.owner_target == right.owner_target
                 && left.owner_kind == right.owner_kind
                 && left.visibility == right.visibility
                 && left.location == right.location
                 && left.params == right.params
+                && left.return_type_source == right.return_type_source
                 && extension_ruby_types_semantically_equal(
                     left.return_type.as_ref(),
                     right.return_type.as_ref(),
@@ -2070,10 +3306,16 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
         }
         (IndexPatch::ApplyMixin(left), IndexPatch::ApplyMixin(right)) => {
             left.namespace == right.namespace
+                && left.owner_target == right.owner_target
                 && left.target_kind == right.target_kind
                 && left.mixin == right.mixin
                 && left.absolute == right.absolute
                 && left.kind == right.kind
+                && left.location == right.location
+        }
+        (IndexPatch::ConnectExecutionContext(left), IndexPatch::ConnectExecutionContext(right)) => {
+            left.template == right.template
+                && left.application == right.application
                 && left.location == right.location
         }
         (IndexPatch::DefineNamespace(_), IndexPatch::DefineConstant(_))
@@ -2105,7 +3347,19 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
         | (IndexPatch::ApplyMixin(_), IndexPatch::DefineNamespace(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::DefineConstant(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::AddReference(_))
-        | (IndexPatch::ApplyMixin(_), IndexPatch::DefineMethod(_)) => false,
+        | (IndexPatch::ApplyMixin(_), IndexPatch::DefineMethod(_))
+        | (IndexPatch::ConnectExecutionContext(_), IndexPatch::DefineNamespace(_))
+        | (IndexPatch::ConnectExecutionContext(_), IndexPatch::DefineConstant(_))
+        | (IndexPatch::ConnectExecutionContext(_), IndexPatch::AddReference(_))
+        | (IndexPatch::ConnectExecutionContext(_), IndexPatch::DefineMethod(_))
+        | (IndexPatch::ConnectExecutionContext(_), IndexPatch::SetSuperclass(_))
+        | (IndexPatch::ConnectExecutionContext(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::DefineNamespace(_), IndexPatch::ConnectExecutionContext(_))
+        | (IndexPatch::DefineConstant(_), IndexPatch::ConnectExecutionContext(_))
+        | (IndexPatch::AddReference(_), IndexPatch::ConnectExecutionContext(_))
+        | (IndexPatch::DefineMethod(_), IndexPatch::ConnectExecutionContext(_))
+        | (IndexPatch::SetSuperclass(_), IndexPatch::ConnectExecutionContext(_))
+        | (IndexPatch::ApplyMixin(_), IndexPatch::ConnectExecutionContext(_)) => false,
     }
 }
 
@@ -2428,13 +3682,82 @@ fn load_wasm_extension(
         .and_then(|manifest| manifest.indexing.as_ref())
         .map(|indexing| indexing.frame_call_names.iter().cloned().collect())
         .unwrap_or_default();
+    let applicability = package
+        .manifest
+        .as_ref()
+        .map(parse_manifest_applicability)
+        .transpose()?
+        .unwrap_or_default();
+    let project_context_delivery = package
+        .manifest
+        .as_ref()
+        .and_then(|manifest| manifest.indexing.as_ref())
+        .map(|indexing| indexing.project_context)
+        .unwrap_or_default();
 
     Ok(Arc::new(LoadedWasmExtension::new(
         metadata,
         extension,
+        package.wasm_path,
         semantic_targets,
         frame_call_names,
+        applicability,
+        project_context_delivery,
     )))
+}
+
+fn require_empty_lifecycle_output(
+    output: ruby_fast_lsp_extension_api::ExtensionOutput,
+) -> anyhow::Result<()> {
+    if output.index_patches.is_empty()
+        && output.execution_contexts.is_empty()
+        && output.response_patches.is_empty()
+        && output.command_patches.is_empty()
+        && output.process_requests.is_empty()
+        && output.reindex_files.is_empty()
+    {
+        return Ok(());
+    }
+    Err(anyhow::anyhow!(
+        "lifecycle callback returned patches or requests"
+    ))
+}
+
+fn lifecycle_output_is_empty(
+    result: &anyhow::Result<ruby_fast_lsp_extension_api::ExtensionOutput>,
+) -> bool {
+    result.as_ref().is_ok_and(|output| {
+        output.index_patches.is_empty()
+            && output.execution_contexts.is_empty()
+            && output.response_patches.is_empty()
+            && output.command_patches.is_empty()
+            && output.process_requests.is_empty()
+            && output.reindex_files.is_empty()
+    })
+}
+
+fn parse_manifest_applicability(
+    manifest: &ExtensionManifest,
+) -> Result<Vec<ExtensionGemRequirement>, ExtensionLoadError> {
+    let Some(applicability) = &manifest.applicability else {
+        return Ok(Vec::new());
+    };
+    applicability
+        .locked_gems
+        .iter()
+        .map(|gem| {
+            let version = VersionReq::parse(&gem.version).map_err(|error| {
+                ExtensionLoadError::new(format!(
+                    "extension `{}` applicability for gem `{}` has invalid version requirement `{}`: {error}",
+                    manifest.id, gem.name, gem.version
+                ))
+            })?;
+            Ok(ExtensionGemRequirement {
+                name: gem.name.clone(),
+                version,
+            })
+        })
+        .collect()
 }
 
 fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), ExtensionLoadError> {
@@ -2451,11 +3774,46 @@ fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), ExtensionLoadEr
             ruby_fast_lsp_extension_api::ABI_VERSION
         )));
     }
-    if manifest.runtime != "mruby-wasm" {
+    if !matches!(manifest.runtime.as_str(), "wasm" | "mruby-wasm") {
         return Err(ExtensionLoadError::new(format!(
             "extension `{}` runtime `{}` is unsupported",
             manifest.id, manifest.runtime
         )));
+    }
+    if let Some(applicability) = &manifest.applicability {
+        if applicability.locked_gems.is_empty() {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{}` applicability.locked_gems must not be empty",
+                manifest.id
+            )));
+        }
+        let mut names = BTreeSet::new();
+        for gem in &applicability.locked_gems {
+            if gem.name.is_empty()
+                || gem.name.len() > 128
+                || !gem
+                    .name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+            {
+                return Err(ExtensionLoadError::new(format!(
+                    "extension `{}` applicability gem name `{}` is invalid",
+                    manifest.id, gem.name
+                )));
+            }
+            if !names.insert(gem.name.as_str()) {
+                return Err(ExtensionLoadError::new(format!(
+                    "extension `{}` applicability declares gem `{}` more than once",
+                    manifest.id, gem.name
+                )));
+            }
+            VersionReq::parse(&gem.version).map_err(|error| {
+                ExtensionLoadError::new(format!(
+                    "extension `{}` applicability for gem `{}` has invalid version requirement `{}`: {error}",
+                    manifest.id, gem.name, gem.version
+                ))
+            })?;
+        }
     }
     if let Some(server_version) = &manifest.server_version {
         validate_server_version(&manifest.id, server_version)?;
@@ -2812,6 +4170,7 @@ fn call_context(visitor: &FactCollector, node: &CallNode) -> CallContext {
         .map(|receiver| receiver_from_node(&receiver))
         .unwrap_or(Receiver::None);
     CallContext {
+        project: visitor.extension_project_context.clone(),
         method_name: utils::utf8_str(node.name().as_slice()).to_string(),
         receiver: receiver.clone(),
         arguments: node
@@ -2831,6 +4190,9 @@ fn call_context(visitor: &FactCollector, node: &CallNode) -> CallContext {
             .collect(),
         namespace_kind: namespace_kind_to_abi(visitor.scope_tracker.current_method_context()),
         call_range: source_range(visitor, &node.location()),
+        block_range: node
+            .block()
+            .map(|block| source_range(visitor, &block.location())),
         message_range: node
             .message_loc()
             .map(|loc| source_range(visitor, &loc))
@@ -2865,6 +4227,7 @@ pub fn resolved_call_for_stack(visitor: &FactCollector, node: &CallNode) -> Reso
             .message_loc()
             .map(|loc| source_range(visitor, &loc))
             .unwrap_or_else(|| source_range(visitor, &node.location())),
+        frame_extension_ids: Vec::new(),
     }
 }
 
@@ -3099,7 +4462,7 @@ fn argument_value_range(visitor: &FactCollector, node: &Node) -> SourceRange {
     }
 }
 
-fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
+fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) {
     match &patch {
         IndexPatch::DefineNamespace(namespace) => {
             let parts = namespace
@@ -3221,15 +4584,27 @@ fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
                 .push(ReferenceCandidate::resolved(range, target, None));
         }
         IndexPatch::DefineMethod(method) => {
-            let return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
+            let declared_return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
                 .expect("INVARIANT VIOLATED: extension return type reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.");
-            let namespace = method
-                .namespace
-                .iter()
-                .map(|part| RubyConstant::new(part).expect(
-                    "INVARIANT VIOLATED: extension method namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
-                ))
-                .collect::<Vec<_>>();
+            let inferred_return_type = match method.return_type_source {
+                Some(ruby_fast_lsp_extension_api::MethodReturnTypeSource::Block) => {
+                    visitor.infer_call_block_return_type(call)
+                }
+                None => None,
+            };
+            let return_type = inferred_return_type.clone().or(declared_return_type);
+            let (namespace, owner_kind) = resolved_patch_owner(
+                method.owner_target.as_ref(),
+                &method.namespace,
+                method.owner_kind,
+                &method.source.extension_id,
+                visitor.document.uri.as_str(),
+                visitor
+                    .extension_project_context
+                    .as_ref()
+                    .map(|project| project.project_uri.as_str()),
+                "method owner",
+            );
             let ruby_method = RubyMethod::new(&method.name).expect(
                 "INVARIANT VIOLATED: extension method name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
             );
@@ -3239,10 +4614,7 @@ fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
                 .lsp_range_to_text_range(range_from_abi(method.location));
             visitor.direct_push_method_fact_with_visibility(
                 fqn.namespace_parts(),
-                match method.owner_kind {
-                    AbiNamespaceKind::Instance => NamespaceKind::Instance,
-                    AbiNamespaceKind::Singleton => NamespaceKind::Singleton,
-                },
+                owner_kind,
                 ruby_method,
                 range,
                 match method.visibility {
@@ -3258,18 +4630,83 @@ fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
                 },
             );
             if let Some(return_type) = return_type {
-                visitor.type_store.add(TypeFact::new(
+                let type_fact = TypeFact::new(
                     TypeSubject::MethodReturn(fqn),
                     return_type,
                     range,
                     TypeProvenance::Extension,
-                ));
+                );
+                visitor.type_store.add(type_fact.clone());
+                if inferred_return_type.is_some()
+                    && !visitor.direct_facts.types.contains(&type_fact)
+                {
+                    visitor.direct_facts.types.push(type_fact);
+                }
             }
         }
         IndexPatch::SetSuperclass(_) => {}
         IndexPatch::ApplyMixin(_) => {}
+        IndexPatch::ConnectExecutionContext(_) => {}
     }
     visitor.extension_index_patches.push(patch);
+}
+
+fn resolved_patch_owner(
+    target: Option<&ExecutionContextTarget>,
+    fallback_namespace: &[String],
+    fallback_kind: AbiNamespaceKind,
+    extension_id: &str,
+    source_identity: &str,
+    project_identity: Option<&str>,
+    label: &str,
+) -> (Vec<RubyConstant>, NamespaceKind) {
+    match target {
+        None => (
+            extension_ruby_constants(fallback_namespace, label),
+            namespace_kind_from_abi(fallback_kind),
+        ),
+        Some(ExecutionContextTarget::Namespace {
+            namespace,
+            owner_kind,
+        }) => (
+            extension_ruby_constants(namespace, label),
+            namespace_kind_from_abi(*owner_kind),
+        ),
+        Some(ExecutionContextTarget::GeneratedOwner {
+            local_id,
+            owner_kind,
+        }) => {
+            let owner = GeneratedOwnerId::new(extension_id, source_identity, local_id).expect(
+                "INVARIANT VIOLATED: invalid generated patch owner reached application. This is a bug because semantic patch owners must be validated before conversion. Fix: keep validate_patch_owner_target before apply_patch.",
+            );
+            (
+                vec![RubyConstant::generated_owner(owner)],
+                owner_kind
+                    .map(namespace_kind_from_abi)
+                    .unwrap_or_else(|| namespace_kind_from_abi(fallback_kind)),
+            )
+        }
+        Some(ExecutionContextTarget::ProjectGeneratedOwner {
+            local_id,
+            owner_kind,
+        }) => {
+            let identity = generated_owner_scope_identity(
+                GeneratedOwnerScope::Project,
+                source_identity,
+                project_identity,
+                label,
+            );
+            let owner = GeneratedOwnerId::new(extension_id, identity, local_id).expect(
+                "INVARIANT VIOLATED: invalid project-generated patch owner reached application. This is a bug because semantic patch owners must be validated before conversion. Fix: keep validation before apply_patch.",
+            );
+            (
+                vec![RubyConstant::generated_owner(owner)],
+                owner_kind
+                    .map(namespace_kind_from_abi)
+                    .unwrap_or_else(|| namespace_kind_from_abi(fallback_kind)),
+            )
+        }
+    }
 }
 
 fn response_patch_to_document_symbol(
@@ -3460,6 +4897,94 @@ call_names = []
         .expect("test lifecycle manifest must be written");
     }
 
+    fn write_resource_limit_failure_package(destination: &Path) {
+        fs::create_dir_all(destination).expect("test package directory must be created");
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (data (i32.const 1024) "[]")
+              (func (export "alloc") (param $len i32) (result i32)
+                i32.const 4096)
+              (func (export "dealloc") (param $ptr i32) (param $len i32))
+              (func (export "abi_version") (result i32)
+                i32.const 1)
+              (func (export "indexed_call_names") (result i64)
+                i64.const 4398046511106)
+              (func (export "index_call") (param $ptr i32) (param $len i32) (result i64)
+                i64.const 4398046511106)
+              (func (export "handle_event") (param $ptr i32) (param $len i32) (result i64)
+                i64.const 262145)
+            )
+            "#,
+        )
+        .expect("test resource-limit Wasm must compile");
+        fs::write(destination.join("extension.wasm"), wasm)
+            .expect("test resource-limit Wasm must be written");
+        fs::write(
+            destination.join("extension.toml"),
+            r#"
+id = "resource-limit-failure"
+name = "Resource Limit Failure"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.0, <0.3.0"
+runtime = "wasm"
+wasm = "extension.wasm"
+capabilities = []
+permissions = []
+
+[indexing]
+call_names = []
+"#,
+        )
+        .expect("test resource-limit manifest must be written");
+    }
+
+    fn write_trap_failure_package(destination: &Path) {
+        fs::create_dir_all(destination).expect("test package directory must be created");
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (data (i32.const 1024) "[]")
+              (func (export "alloc") (param $len i32) (result i32)
+                i32.const 4096)
+              (func (export "dealloc") (param $ptr i32) (param $len i32))
+              (func (export "abi_version") (result i32)
+                i32.const 1)
+              (func (export "indexed_call_names") (result i64)
+                i64.const 4398046511106)
+              (func (export "index_call") (param $ptr i32) (param $len i32) (result i64)
+                i64.const 4398046511106)
+              (func (export "handle_event") (param $ptr i32) (param $len i32) (result i64)
+                unreachable)
+            )
+            "#,
+        )
+        .expect("test trap Wasm must compile");
+        fs::write(destination.join("extension.wasm"), wasm)
+            .expect("test trap Wasm must be written");
+        fs::write(
+            destination.join("extension.toml"),
+            r#"
+id = "trap-failure"
+name = "Trap Failure"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.0, <0.3.0"
+runtime = "wasm"
+wasm = "extension.wasm"
+capabilities = []
+permissions = []
+
+[indexing]
+call_names = []
+"#,
+        )
+        .expect("test trap manifest must be written");
+    }
+
     fn write_settings_failure_package(destination: &Path) {
         fs::create_dir_all(destination).expect("test package directory must be created");
         let wasm = wat::parse_str(
@@ -3593,6 +5118,13 @@ globs = ["config/routes.rb"]
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].id, "activation-failure");
         assert_eq!(reports[0].status, "failed");
+        assert_eq!(reports[0].telemetry.guest_calls, 1);
+        assert_eq!(reports[0].telemetry.lifecycle_calls, 1);
+        assert_eq!(reports[0].telemetry.index_calls, 0);
+        assert_eq!(reports[0].telemetry.event_calls, 0);
+        assert_eq!(reports[0].telemetry.guest_failures, 1);
+        assert_eq!(reports[0].telemetry.disablements, 1);
+        assert!(reports[0].telemetry.max_guest_time_ns <= reports[0].telemetry.total_guest_time_ns);
         assert!(
             reports[0]
                 .last_error
@@ -3602,6 +5134,61 @@ globs = ["config/routes.rb"]
              This is a bug because users cannot diagnose why an extension was disabled. \
              Fix: retain the activation error in extension status."
         );
+    }
+
+    #[test]
+    fn resource_limit_failure_is_visible_in_extension_telemetry() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join("resource-limit-failure");
+        write_resource_limit_failure_package(&package);
+
+        let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+            package_paths: vec![ConfiguredExtensionPath {
+                path: package,
+                source: ExtensionPathSource::InitializationOptions,
+            }],
+            ..ExtensionLoadConfig::default()
+        });
+
+        let report = &registry.status_reports()[0];
+        assert_eq!(report.status, "failed");
+        assert_eq!(report.telemetry.lifecycle_calls, 1);
+        assert_eq!(report.telemetry.guest_failures, 1);
+        assert_eq!(report.telemetry.resource_limit_failures, 1);
+        assert_eq!(report.telemetry.guest_traps, 0);
+        assert_eq!(report.telemetry.disablements, 1);
+        assert!(
+            report.last_error.as_deref().is_some_and(
+                |error| error.contains("output payload") && error.contains("exceeds max")
+            )
+        );
+    }
+
+    #[test]
+    fn guest_trap_is_visible_in_extension_telemetry() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join("trap-failure");
+        write_trap_failure_package(&package);
+
+        let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+            package_paths: vec![ConfiguredExtensionPath {
+                path: package,
+                source: ExtensionPathSource::InitializationOptions,
+            }],
+            ..ExtensionLoadConfig::default()
+        });
+
+        let report = &registry.status_reports()[0];
+        assert_eq!(report.status, "failed");
+        assert_eq!(report.telemetry.lifecycle_calls, 1);
+        assert_eq!(report.telemetry.guest_failures, 1);
+        assert_eq!(report.telemetry.guest_traps, 1);
+        assert_eq!(report.telemetry.resource_limit_failures, 0);
+        assert_eq!(report.telemetry.disablements, 1);
+        assert!(report
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("wasm trap") || error.contains("unreachable")));
     }
 
     #[test]
@@ -4080,6 +5667,53 @@ globs = ["config/routes.rb"]
     }
 
     #[test]
+    fn telemetry_classifies_calls_failures_rejections_and_conflicts_without_dimensions() {
+        let telemetry = ExtensionTelemetry::default();
+        telemetry.record_call(
+            GuestCallKind::Lifecycle,
+            Duration::from_nanos(3),
+            None,
+            None,
+        );
+        telemetry.record_call(
+            GuestCallKind::Index,
+            Duration::from_nanos(5),
+            None,
+            Some("failed to call extension: wasm trap: all fuel consumed"),
+        );
+        telemetry.record_call(
+            GuestCallKind::Event,
+            Duration::from_nanos(7),
+            None,
+            Some("extension output payload 9 bytes exceeds max 8 bytes"),
+        );
+        telemetry.record_rejected_output();
+        telemetry.record_patch_conflict();
+        telemetry.record_disablement();
+
+        let report = telemetry.report(2);
+        assert_eq!(report.guest_calls, 3);
+        assert_eq!(report.lifecycle_calls, 1);
+        assert_eq!(report.index_calls, 1);
+        assert_eq!(report.event_calls, 1);
+        assert_eq!(report.guest_failures, 2);
+        assert_eq!(report.guest_traps, 1);
+        assert_eq!(report.resource_limit_failures, 2);
+        assert_eq!(report.rejected_outputs, 1);
+        assert_eq!(report.patch_conflicts, 1);
+        assert_eq!(report.disablements, 1);
+        assert_eq!(report.total_guest_time_ns, 15);
+        assert_eq!(report.max_guest_time_ns, 7);
+        assert_eq!(report.project_instances, 2);
+
+        let serialized = serde_json::to_value(&report)
+            .expect("extension telemetry must remain serializable through the status contract");
+        assert!(serialized.get("guest_calls").is_some());
+        assert!(serialized.get("resource_limit_failures").is_some());
+        assert!(serialized.get("patch_conflicts").is_some());
+    }
+
+    #[test]
     fn initialization_options_do_not_load_direct_wasm_files() {
         let temp_dir = TempDir::new().expect("test temp dir must be created");
         let wasm_path = temp_dir.path().join("extension.wasm");
@@ -4143,7 +5777,7 @@ frame = true
     }
 
     #[test]
-    fn semantic_seed_facts_are_installed_in_every_isolated_project_engine() {
+    fn semantic_seed_facts_are_installed_only_in_every_applicable_isolated_project_engine() {
         let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
         let config = RubyFastLspConfig {
             extension_packages: vec![package.to_string_lossy().into_owned()],
@@ -4152,9 +5786,29 @@ frame = true
         let registry = ExtensionRegistryHandle::from_config(&config);
         let first = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
         let second = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+        let ineligible = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+        let project =
+            |project_uri: &str, version: &str| ruby_fast_lsp_extension_api::ProjectContext {
+                project_uri: project_uri.to_string(),
+                source_uri: format!("{project_uri}/spec/example_spec.rb"),
+                source_kind: ruby_fast_lsp_extension_api::ProjectSourceKind::Project,
+                workspace_trusted: true,
+                ruby_version: Some("3.3.0".to_string()),
+                lockfile_present: true,
+                locked_gems_complete: true,
+                locked_gems: vec![ruby_fast_lsp_extension_api::LockedGem {
+                    name: "rspec-core".to_string(),
+                    version: version.to_string(),
+                    source: ruby_fast_lsp_extension_api::LockedGemSource::Registry,
+                }],
+            };
+        let first_project = project("file:///umbrella/first", "3.12.0");
+        let second_project = project("file:///umbrella/second", "3.13.5");
+        let ineligible_project = project("file:///umbrella/future", "4.0.0");
 
-        registry.ensure_semantic_seed_facts(&first);
-        registry.ensure_semantic_seed_facts(&second);
+        registry.ensure_semantic_seed_facts(&first, Some(&first_project));
+        registry.ensure_semantic_seed_facts(&second, Some(&second_project));
+        registry.ensure_semantic_seed_facts(&ineligible, Some(&ineligible_project));
 
         for engine in [first, second] {
             let engine = engine.read();
@@ -4167,7 +5821,64 @@ frame = true
                                 && method.as_str() == "describe"
                     )
                 }),
-                "every isolated project engine must receive the RSpec.describe semantic target"
+                "every applicable isolated project engine must receive the RSpec.describe semantic target"
+            );
+        }
+        assert!(
+            ineligible.read().all_method_facts().is_empty(),
+            "an isolated project with an unsupported RSpec version must not receive semantic targets"
+        );
+    }
+
+    #[test]
+    fn extension_dispatch_skips_dependency_and_signature_sources_without_losing_applicability() {
+        let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
+        let registry = ExtensionRegistryHandle::from_config(&RubyFastLspConfig {
+            extension_packages: vec![package.to_string_lossy().into_owned()],
+            ..RubyFastLspConfig::default()
+        });
+        let extension = registry
+            .extensions()
+            .into_iter()
+            .find(|extension| extension.metadata.id == "rspec-ruby")
+            .expect("bundled RSpec extension must load for source policy testing");
+        let context = |source_kind| ruby_fast_lsp_extension_api::ProjectContext {
+            project_uri: "file:///workspace/app".to_string(),
+            source_uri: "file:///workspace/app/source.rb".to_string(),
+            source_kind,
+            workspace_trusted: true,
+            ruby_version: Some("3.3.0".to_string()),
+            lockfile_present: true,
+            locked_gems_complete: true,
+            locked_gems: vec![ruby_fast_lsp_extension_api::LockedGem {
+                name: "rspec-core".to_string(),
+                version: "3.13.6".to_string(),
+                source: ruby_fast_lsp_extension_api::LockedGemSource::Registry,
+            }],
+        };
+
+        for kind in [
+            ruby_fast_lsp_extension_api::ProjectSourceKind::Project,
+            ruby_fast_lsp_extension_api::ProjectSourceKind::Excluded,
+        ] {
+            let project = context(kind);
+            assert!(extension.applies_to(Some(&project)));
+            assert!(extension.applies_to_source(Some(&project)));
+        }
+        for kind in [
+            ruby_fast_lsp_extension_api::ProjectSourceKind::Gem,
+            ruby_fast_lsp_extension_api::ProjectSourceKind::Stdlib,
+            ruby_fast_lsp_extension_api::ProjectSourceKind::Stub,
+            ruby_fast_lsp_extension_api::ProjectSourceKind::Signature,
+        ] {
+            let project = context(kind);
+            assert!(
+                extension.applies_to(Some(&project)),
+                "locked-gem applicability must remain a project-level decision"
+            );
+            assert!(
+                !extension.applies_to_source(Some(&project)),
+                "extensions must not execute DSL hooks while indexing {kind:?} inputs"
             );
         }
     }
@@ -4518,6 +6229,7 @@ commands = ["standardrb"]
             IndexPatch::DefineMethod(ruby_fast_lsp_extension_api::DefineMethodPatch {
                 name: "factory".to_string(),
                 namespace: vec!["Widget".to_string()],
+                owner_target: None,
                 owner_kind: AbiNamespaceKind::Singleton,
                 visibility: ruby_fast_lsp_extension_api::MethodVisibility::Public,
                 location: SourceRange {
@@ -4532,6 +6244,7 @@ commands = ["standardrb"]
                 },
                 params: Vec::new(),
                 return_type,
+                return_type_source: None,
                 source: ruby_fast_lsp_extension_api::PatchSource {
                     extension_id: extension_id.to_string(),
                     macro_name: "factory".to_string(),
@@ -4563,7 +6276,9 @@ commands = ["standardrb"]
         let patch = |extension_id: &str| {
             IndexPatch::ApplyMixin(ruby_fast_lsp_extension_api::ApplyMixinPatch {
                 namespace: vec!["Widget".to_string()],
+                owner_target: None,
                 target_kind: AbiNamespaceKind::Instance,
+                mixin_target: None,
                 mixin: vec!["Shared".to_string()],
                 absolute: true,
                 kind: ruby_fast_lsp_extension_api::MixinKind::Include,
@@ -4590,6 +6305,416 @@ commands = ["standardrb"]
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(index_patch_extension_id(&resolved[0]), "a-extension");
+    }
+
+    fn execution_context_fixture(extension_id: &str) -> BlockExecutionContextPatch {
+        let call_range = SourceRange {
+            start: SourcePosition {
+                line: 2,
+                character: 2,
+            },
+            end: SourcePosition {
+                line: 6,
+                character: 5,
+            },
+        };
+        let block_range = SourceRange {
+            start: SourcePosition {
+                line: 2,
+                character: 20,
+            },
+            end: SourcePosition {
+                line: 6,
+                character: 5,
+            },
+        };
+        BlockExecutionContextPatch {
+            call_range,
+            block_range,
+            generated_owners: vec![ruby_fast_lsp_extension_api::GeneratedOwnerPatch {
+                local_id: "group:2:2".to_string(),
+                scope: ruby_fast_lsp_extension_api::GeneratedOwnerScope::Source,
+                declaration_kind: ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Class,
+                owner_kind: AbiNamespaceKind::Instance,
+                parent: None,
+            }],
+            implicit_receiver: ExecutionContextTarget::GeneratedOwner {
+                local_id: "group:2:2".to_string(),
+                owner_kind: None,
+            },
+            method_definition_owner: ExecutionContextTarget::GeneratedOwner {
+                local_id: "group:2:2".to_string(),
+                owner_kind: None,
+            },
+            lexical_scope: ruby_fast_lsp_extension_api::LexicalScopeMode::Preserve,
+            local_scope: ruby_fast_lsp_extension_api::LocalScopeMode::Preserve,
+            source: ruby_fast_lsp_extension_api::PatchSource {
+                extension_id: extension_id.to_string(),
+                macro_name: "describe".to_string(),
+            },
+        }
+    }
+
+    fn execution_call_fixture() -> CallContext {
+        let context = execution_context_fixture("rspec-ruby");
+        CallContext {
+            project: None,
+            method_name: "describe".to_string(),
+            receiver: Receiver::Constant(vec!["RSpec".to_string()]),
+            arguments: Vec::new(),
+            current_namespace: vec!["Lexical".to_string()],
+            namespace_kind: AbiNamespaceKind::Instance,
+            call_range: context.call_range,
+            block_range: Some(context.block_range),
+            message_range: context.call_range,
+            resolved_callees: Vec::new(),
+            enclosing_calls: Vec::new(),
+        }
+    }
+
+    fn rust_isolation_probe_context(project_uri: &str) -> CallContext {
+        let mut context = execution_call_fixture();
+        context.project = Some(ruby_fast_lsp_extension_api::ProjectContext {
+            project_uri: project_uri.to_string(),
+            source_uri: format!("{project_uri}/probe.rb"),
+            source_kind: ruby_fast_lsp_extension_api::ProjectSourceKind::Project,
+            workspace_trusted: true,
+            ruby_version: Some("3.3".to_string()),
+            lockfile_present: true,
+            locked_gems_complete: true,
+            locked_gems: vec![ruby_fast_lsp_extension_api::LockedGem {
+                name: "example-framework".to_string(),
+                version: "1.0.0".to_string(),
+                source: ruby_fast_lsp_extension_api::LockedGemSource::Registry,
+            }],
+        });
+        context.method_name = "isolation_probe".to_string();
+        context.receiver = Receiver::None;
+        context.block_range = None;
+        context.resolved_callees.clear();
+        context.enclosing_calls.clear();
+        context
+    }
+
+    #[test]
+    fn wasm_private_state_is_isolated_per_project_uri() {
+        let package_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/example-rust");
+        let artifact = package_path
+            .join("target/wasm32-wasip1/release/ruby_fast_lsp_example_rust_extension.wasm");
+        if !artifact.is_file() {
+            eprintln!(
+                "skipping project-state Wasm isolation test; run extensions/example-rust/build-and-test.sh"
+            );
+            return;
+        }
+        let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+            package_paths: vec![ConfiguredExtensionPath {
+                path: package_path,
+                source: ExtensionPathSource::InitializationOptions,
+            }],
+            ..ExtensionLoadConfig::default()
+        });
+        let registry = ExtensionRegistryHandle {
+            inner: Arc::new(RwLock::new(registry)),
+        };
+        let extension = registry
+            .extensions()
+            .iter()
+            .find(|extension| extension.metadata.id == "example-rust")
+            .expect("typed Rust acceptance extension must load")
+            .clone();
+
+        let project_a = rust_isolation_probe_context("file:///workspace/a");
+        let project_b = rust_isolation_probe_context("file:///workspace/b");
+        assert_eq!(
+            extension
+                .index_call_output(&project_a)
+                .expect("first project A probe must run")
+                .index_patches
+                .len(),
+            1
+        );
+        let project_a_context = project_a
+            .project
+            .clone()
+            .expect("project A probe must carry project context");
+        let project_b_context = project_b
+            .project
+            .clone()
+            .expect("project B probe must carry project context");
+        let symbols_a = registry.document_symbols(
+            "file:///workspace/a/probe.rb",
+            "isolation_probe\n",
+            Some(project_a_context.clone()),
+        );
+        assert_eq!(
+            symbols_a
+                .iter()
+                .filter(|symbol| symbol.name == "project-isolated-symbol")
+                .count(),
+            1,
+            "document responses must observe the same private project A Wasm instance as call hooks"
+        );
+        assert!(
+            registry
+                .document_symbols(
+                    "file:///workspace/b/probe.rb",
+                    "isolation_probe\n",
+                    Some(project_b_context.clone()),
+                )
+                .iter()
+                .all(|symbol| symbol.name != "project-isolated-symbol"),
+            "an untouched project B response must not observe project A guest state"
+        );
+        assert!(
+            extension
+                .index_call_output(&project_a)
+                .expect("second project A probe must run")
+                .index_patches
+                .is_empty(),
+            "the same project must observe its own guest state"
+        );
+        assert_eq!(
+            extension
+                .index_call_output(&project_b)
+                .expect("first project B probe must run")
+                .index_patches
+                .len(),
+            1,
+            "project B must receive a fresh Wasm heap instead of project A state"
+        );
+        assert!(
+            registry
+                .document_symbols(
+                    "file:///workspace/b/probe.rb",
+                    "isolation_probe\n",
+                    Some(project_b_context.clone()),
+                )
+                .iter()
+                .any(|symbol| symbol.name == "project-isolated-symbol"),
+            "project B document responses must use project B's now-initialized Wasm instance"
+        );
+        assert!(
+            registry
+                .code_lenses(
+                    "file:///workspace/b/probe.rb",
+                    "isolation_probe\n",
+                    Some(project_b_context),
+                )
+                .iter()
+                .any(|lens| lens
+                    .command
+                    .as_ref()
+                    .is_some_and(|command| command.title == "Project-isolated lens")),
+            "code lenses must use the same project-aware response dispatch as document symbols"
+        );
+        let telemetry = extension.status_report().telemetry;
+        assert_eq!(telemetry.project_instances, 2);
+        assert_eq!(telemetry.project_instance_creations, 2);
+        assert_eq!(telemetry.project_instance_failures, 0);
+        assert!(telemetry.max_project_instance_time_ns <= telemetry.total_project_instance_time_ns);
+        assert_eq!(
+            telemetry.guest_calls, 8,
+            "activation, three call hooks, three symbol requests, and one lens request must all be observed: {telemetry:?}"
+        );
+        assert_eq!(telemetry.lifecycle_calls, 1);
+        assert_eq!(telemetry.index_calls, 3);
+        assert_eq!(telemetry.event_calls, 4);
+        assert!(telemetry.emitted_index_patches >= 2);
+        assert!(telemetry.emitted_response_patches >= 3);
+        assert_eq!(telemetry.guest_failures, 0);
+        assert_eq!(telemetry.guest_traps, 0);
+        assert_eq!(telemetry.resource_limit_failures, 0);
+        assert_eq!(telemetry.disablements, 0);
+        assert_eq!(telemetry.rejected_outputs, 0);
+        assert_eq!(telemetry.patch_conflicts, 0);
+        assert!(telemetry.max_guest_time_ns <= telemetry.total_guest_time_ns);
+    }
+
+    #[test]
+    fn execution_context_validation_rejects_spoofed_ranges_and_undeclared_targets() {
+        let call = execution_call_fixture();
+        let valid = execution_context_fixture("rspec-ruby");
+        validate_execution_contexts("rspec-ruby", &call, std::slice::from_ref(&valid))
+            .expect("valid execution context must pass the guest boundary");
+
+        let mut spoofed = valid.clone();
+        spoofed.source.extension_id = "other-extension".to_string();
+        assert!(validate_execution_contexts("rspec-ruby", &call, &[spoofed])
+            .expect_err("spoofed provenance must be rejected")
+            .contains("provenance"));
+
+        let mut wrong_block = valid.clone();
+        wrong_block.block_range.start.character += 1;
+        assert!(
+            validate_execution_contexts("rspec-ruby", &call, &[wrong_block])
+                .expect_err("a guest must not redirect semantics to another block")
+                .contains("block_range")
+        );
+
+        let mut undeclared = valid;
+        undeclared.method_definition_owner = ExecutionContextTarget::GeneratedOwner {
+            local_id: "missing".to_string(),
+            owner_kind: None,
+        };
+        assert!(
+            validate_execution_contexts("rspec-ruby", &call, &[undeclared])
+                .expect_err("undeclared generated targets must be rejected")
+                .contains("undeclared")
+        );
+    }
+
+    #[test]
+    fn execution_context_validation_accepts_exact_namespace_targets_without_generated_owners() {
+        let call = execution_call_fixture();
+        let mut context = execution_context_fixture("sinatra-rust");
+        context.generated_owners.clear();
+        context.implicit_receiver = ExecutionContextTarget::Namespace {
+            namespace: vec!["Sinatra".to_string(), "Application".to_string()],
+            owner_kind: AbiNamespaceKind::Instance,
+        };
+        context.method_definition_owner = ExecutionContextTarget::Namespace {
+            namespace: vec!["Object".to_string()],
+            owner_kind: AbiNamespaceKind::Instance,
+        };
+        context.source.extension_id = "sinatra-rust".to_string();
+
+        validate_execution_contexts("sinatra-rust", &call, &[context]).expect(
+            "exact existing namespaces must not require an unrelated hidden-owner declaration",
+        );
+    }
+
+    #[test]
+    fn project_generated_execution_context_requires_project_and_validates_scope() {
+        let mut call = execution_call_fixture();
+        let mut context = execution_context_fixture("rspec-ruby");
+        context.generated_owners[0].scope =
+            ruby_fast_lsp_extension_api::GeneratedOwnerScope::Project;
+        context.implicit_receiver = ExecutionContextTarget::ProjectGeneratedOwner {
+            local_id: "group:2:2".to_string(),
+            owner_kind: Some(AbiNamespaceKind::Singleton),
+        };
+        context.method_definition_owner = ExecutionContextTarget::ProjectGeneratedOwner {
+            local_id: "group:2:2".to_string(),
+            owner_kind: Some(AbiNamespaceKind::Instance),
+        };
+
+        let error = validate_execution_contexts("rspec-ruby", &call, &[context.clone()])
+            .expect_err("project-generated context without project metadata must fail closed");
+        assert!(error.contains("ProjectContext"), "got: {error}");
+
+        call.project = rust_isolation_probe_context("file:///workspace/project").project;
+        validate_execution_contexts("rspec-ruby", &call, &[context])
+            .expect("project-generated context with matching declaration must validate");
+    }
+
+    #[test]
+    fn semantic_mixin_target_is_exclusive_with_ruby_namespace_target() {
+        let zero = SourcePosition {
+            line: 0,
+            character: 0,
+        };
+        let patch = |mixin: Vec<String>, mixin_target: Option<ExecutionContextTarget>| {
+            IndexPatch::ApplyMixin(ruby_fast_lsp_extension_api::ApplyMixinPatch {
+                namespace: Vec::new(),
+                owner_target: Some(ExecutionContextTarget::ProjectGeneratedOwner {
+                    local_id: "consumer".to_string(),
+                    owner_kind: Some(AbiNamespaceKind::Instance),
+                }),
+                target_kind: AbiNamespaceKind::Instance,
+                mixin_target,
+                mixin,
+                absolute: false,
+                kind: ruby_fast_lsp_extension_api::MixinKind::Include,
+                location: SourceRange {
+                    start: zero,
+                    end: zero,
+                },
+                source: ruby_fast_lsp_extension_api::PatchSource {
+                    extension_id: "test".to_string(),
+                    macro_name: "include_context".to_string(),
+                },
+            })
+        };
+        let semantic_target = Some(ExecutionContextTarget::ProjectGeneratedOwner {
+            local_id: "shared".to_string(),
+            owner_kind: Some(AbiNamespaceKind::Instance),
+        });
+
+        validate_index_patch_payloads(&[patch(Vec::new(), semantic_target.clone())])
+            .expect("an exact generated mixin target must validate");
+        let both =
+            validate_index_patch_payloads(&[patch(vec!["Shared".to_string()], semantic_target)])
+                .expect_err("mixin target representations must be mutually exclusive");
+        assert!(both.contains("either `mixin` or `mixin_target`"));
+        let neither = validate_index_patch_payloads(&[patch(Vec::new(), None)])
+            .expect_err("a mixin patch without a target must be rejected");
+        assert!(neither.contains("must provide"));
+    }
+
+    #[test]
+    fn execution_context_connection_validates_exact_targets_and_project_requirement() {
+        let location = SourceRange {
+            start: SourcePosition {
+                line: 4,
+                character: 2,
+            },
+            end: SourcePosition {
+                line: 4,
+                character: 29,
+            },
+        };
+        let patch = IndexPatch::ConnectExecutionContext(
+            ruby_fast_lsp_extension_api::ConnectExecutionContextPatch {
+                template: ExecutionContextTarget::ProjectGeneratedOwner {
+                    local_id: "shared-examples-runtime:auditable".to_string(),
+                    owner_kind: Some(AbiNamespaceKind::Singleton),
+                },
+                application: ExecutionContextTarget::GeneratedOwner {
+                    local_id: "example-group:1:0-8:3".to_string(),
+                    owner_kind: Some(AbiNamespaceKind::Instance),
+                },
+                location,
+                source: ruby_fast_lsp_extension_api::PatchSource {
+                    extension_id: "rspec-ruby".to_string(),
+                    macro_name: "it_behaves_like".to_string(),
+                },
+            },
+        );
+
+        validate_index_patch_payloads(std::slice::from_ref(&patch))
+            .expect("valid exact execution-context targets must pass the guest boundary");
+        assert!(
+            index_patch_requires_project_context(&patch),
+            "a project-generated execution template must fail closed without ProjectContext"
+        );
+
+        let mut invalid = patch;
+        let IndexPatch::ConnectExecutionContext(connection) = &mut invalid else {
+            panic!(
+                "INVARIANT VIOLATED: connection fixture changed variant. This is a test bug because target mutation requires ConnectExecutionContext. Fix: preserve the fixture variant."
+            );
+        };
+        connection.application = ExecutionContextTarget::GeneratedOwner {
+            local_id: "".to_string(),
+            owner_kind: Some(AbiNamespaceKind::Instance),
+        };
+        assert!(validate_index_patch_payloads(&[invalid])
+            .expect_err("empty generated application identity must be rejected")
+            .contains("invalid execution context application generated owner"));
+    }
+
+    #[test]
+    fn incompatible_execution_contexts_are_rejected_deterministically() {
+        let left = execution_context_fixture("z-extension");
+        let mut right = execution_context_fixture("a-extension");
+        right.generated_owners[0].owner_kind = AbiNamespaceKind::Singleton;
+
+        let err = resolve_execution_context_conflicts(vec![left, right])
+            .expect_err("one block cannot have competing runtime owners");
+
+        assert_eq!(err.extension_ids, vec!["a-extension", "z-extension"]);
+        assert!(err.message.contains("block execution contexts"));
     }
 
     #[test]
@@ -4937,7 +7062,9 @@ commands = ["standardrb"]
     fn extension_index_patch_provenance_must_match_manifest_identity() {
         let patch = IndexPatch::ApplyMixin(ruby_fast_lsp_extension_api::ApplyMixinPatch {
             namespace: vec!["Widget".to_string()],
+            owner_target: None,
             target_kind: AbiNamespaceKind::Instance,
+            mixin_target: None,
             mixin: vec!["Shared".to_string()],
             absolute: true,
             kind: ruby_fast_lsp_extension_api::MixinKind::Include,
@@ -4964,10 +7091,42 @@ commands = ["standardrb"]
     }
 
     #[test]
+    fn extension_response_patch_provenance_must_match_manifest_identity() {
+        let zero = SourcePosition {
+            line: 0,
+            character: 0,
+        };
+        let patch =
+            ResponsePatch::DocumentSymbol(ruby_fast_lsp_extension_api::DocumentSymbolPatch {
+                name: "Example".to_string(),
+                detail: None,
+                kind: "Method".to_string(),
+                range: SourceRange {
+                    start: zero,
+                    end: zero,
+                },
+                selection_range: SourceRange {
+                    start: zero,
+                    end: zero,
+                },
+                source: ruby_fast_lsp_extension_api::PatchSource {
+                    extension_id: "spoofed-extension".to_string(),
+                    macro_name: "symbol".to_string(),
+                },
+            });
+
+        let spoofed = validate_response_patch_provenance("loaded-extension", &[patch])
+            .expect_err("guest response provenance must not impersonate another extension");
+
+        assert_eq!(spoofed, "spoofed-extension");
+    }
+
+    #[test]
     fn invalid_extension_method_metadata_is_rejected_before_fact_conversion() {
         let patch = IndexPatch::DefineMethod(ruby_fast_lsp_extension_api::DefineMethodPatch {
             name: "generated".to_string(),
             namespace: vec!["Widget".to_string()],
+            owner_target: None,
             owner_kind: AbiNamespaceKind::Instance,
             visibility: ruby_fast_lsp_extension_api::MethodVisibility::Public,
             location: SourceRange {
@@ -4984,16 +7143,33 @@ commands = ["standardrb"]
             return_type: Some(ruby_fast_lsp_extension_api::RubyType::Named(
                 "not a Ruby type".to_string(),
             )),
+            return_type_source: None,
             source: ruby_fast_lsp_extension_api::PatchSource {
                 extension_id: "metadata-test".to_string(),
                 macro_name: "generated".to_string(),
             },
         });
 
-        let err = validate_index_patch_payloads(&[patch])
+        let err = validate_index_patch_payloads(&[patch.clone()])
             .expect_err("invalid extension return type must be rejected at guest boundary");
 
         assert!(err.contains("invalid named Ruby type"), "got: {err}");
+
+        let IndexPatch::DefineMethod(mut conflicting_return_source) = patch else {
+            panic!("INVARIANT VIOLATED: the method validation fixture changed patch variants. This is a test bug because the return-source invariant applies only to DefineMethod. Fix: keep this fixture as DefineMethod.");
+        };
+        conflicting_return_source.return_type = Some(ruby_fast_lsp_extension_api::RubyType::Named(
+            "Widget".to_string(),
+        ));
+        conflicting_return_source.return_type_source =
+            Some(ruby_fast_lsp_extension_api::MethodReturnTypeSource::Block);
+        let err =
+            validate_index_patch_payloads(&[IndexPatch::DefineMethod(conflicting_return_source)])
+                .expect_err("a method return must not have both explicit and inferred sources");
+        assert!(
+            err.contains("either `return_type` or `return_type_source`"),
+            "got: {err}"
+        );
     }
 
     #[test]

@@ -3,7 +3,9 @@ use crate::capabilities::debug::{
     MethodsParams, MethodsResponse, StatsParams, StatsResponse,
 };
 use crate::config::RubyFastLspConfig;
-use crate::extensions::{ExtensionRegistryHandle, ExtensionStatusParams, ExtensionStatusResponse};
+use crate::extensions::{
+    ExtensionRegistryHandle, ExtensionStatusParams, ExtensionStatusResponse, ProjectContextSeed,
+};
 use crate::handlers::{notification, request};
 use crate::query::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use anyhow::Result;
@@ -12,6 +14,7 @@ use parking_lot::{Mutex, RwLock};
 use ruby_analysis::core::{SourceFileId, SourceKind};
 use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::RubyDocument;
+use ruby_fast_lsp_extension_api::ProjectContext;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::exit;
@@ -87,23 +90,35 @@ pub struct Workspace {
     pub root_path: PathBuf,
     pub indexing_complete: Arc<AtomicBool>,
     pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    pub(crate) extension_project_context_seed: Arc<RwLock<ProjectContextSeed>>,
     workspace_folder_uris: Arc<RwLock<std::collections::HashSet<Url>>>,
 }
 
 impl Workspace {
     pub fn new(root_uri: Url) -> Self {
-        Self::for_workspace_folder(root_uri.clone(), root_uri)
+        Self::for_workspace_folder(root_uri.clone(), root_uri, false)
     }
 
-    fn for_workspace_folder(root_uri: Url, workspace_folder_uri: Url) -> Self {
+    fn for_workspace_folder(
+        root_uri: Url,
+        workspace_folder_uri: Url,
+        workspace_trusted: bool,
+    ) -> Self {
         let root_path = root_uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(root_uri.path()));
+        let extension_project_context_seed = Arc::new(RwLock::new(ProjectContextSeed::detect(
+            root_uri.to_string(),
+            &root_path,
+            workspace_trusted,
+            None,
+        )));
         Self {
             root_uri,
             root_path,
             indexing_complete: Arc::new(AtomicBool::new(false)),
             analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
+            extension_project_context_seed,
             workspace_folder_uris: Arc::new(RwLock::new(std::collections::HashSet::from([
                 workspace_folder_uri,
             ]))),
@@ -238,6 +253,69 @@ impl RubyLanguageServer {
         self.analysis_workspace_for_uri(uri)
             .map(|workspace| workspace.analysis_engine)
             .unwrap_or_else(|| self.analysis_engine.clone())
+    }
+
+    pub(crate) fn extension_project_context_for_uri(
+        &self,
+        uri: &Url,
+        source_kind: SourceKind,
+    ) -> Option<ProjectContext> {
+        self.analysis_workspace_for_uri(uri).map(|workspace| {
+            workspace
+                .extension_project_context_seed
+                .read()
+                .context(uri.to_string(), source_kind)
+        })
+    }
+
+    pub(crate) fn extension_project_context_for_document(
+        &self,
+        uri: &Url,
+    ) -> Option<ProjectContext> {
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+        let engine = self.analysis_engine_for_uri(uri);
+        let kind = {
+            let engine = engine.read();
+            engine
+                .file_id(&path)
+                .and_then(|file_id| engine.file(file_id).map(|file| file.kind))
+                .unwrap_or(SourceKind::Excluded)
+        };
+        self.extension_project_context_for_uri(uri, kind)
+    }
+
+    pub(crate) fn extension_project_context_seed_for_root(
+        &self,
+        root: &PathBuf,
+    ) -> Option<Arc<RwLock<ProjectContextSeed>>> {
+        self.workspaces
+            .read()
+            .iter()
+            .find(|workspace| &workspace.root_path == root)
+            .map(|workspace| workspace.extension_project_context_seed.clone())
+    }
+
+    pub(crate) fn set_extension_project_ruby_version(
+        &self,
+        root: &PathBuf,
+        ruby_version: Option<String>,
+    ) {
+        let Some(seed) = self.extension_project_context_seed_for_root(root) else {
+            return;
+        };
+        seed.write().ruby_version = ruby_version;
+    }
+
+    pub(crate) fn refresh_extension_project_dependencies_for_uri(&self, uri: &Url) {
+        let Some(workspace) = self.analysis_workspace_for_uri(uri) else {
+            return;
+        };
+        workspace
+            .extension_project_context_seed
+            .write()
+            .refresh_dependencies(&workspace.root_path);
     }
 
     /// Return the project semantic context for a URI. Project-owned paths win,
@@ -393,7 +471,8 @@ impl RubyLanguageServer {
                 return existing.clone();
             }
         }
-        let ws = Workspace::for_workspace_folder(root_uri, workspace_folder_uri);
+        let workspace_trusted = self.config.lock().workspace_trusted;
+        let ws = Workspace::for_workspace_folder(root_uri, workspace_folder_uri, workspace_trusted);
         self.workspaces.write().push(ws.clone());
         ws
     }

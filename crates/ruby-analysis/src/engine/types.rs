@@ -7,7 +7,8 @@ use crate::core::{
 use crate::engine::lookup_types::{ConstantHover, ConstantHoverKind, VariableTypeKind};
 use crate::engine::query::AnalysisQuery;
 use crate::engine::resolution::{
-    method_facts_in_chain, method_lookup_chain, method_missing_method, namespace_target_exists,
+    execution_context_application_targets, method_facts_in_chain, method_lookup_chain,
+    method_missing_method, namespace_target_exists,
 };
 
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
@@ -559,6 +560,27 @@ impl<'a> AnalysisQuery<'a> {
                 1 => return_types.pop(),
                 _ => Some(crate::core::RubyType::union(return_types)),
             };
+        }
+
+        let mut application_types =
+            execution_context_application_targets(self.engine, namespace_fqn)
+                .into_iter()
+                .filter_map(|application| {
+                    self.method_return_type_for_receiver_inner(
+                        &application,
+                        method,
+                        allow_private,
+                        protected_caller,
+                        seen,
+                    )
+                })
+                .collect::<Vec<_>>();
+        application_types.sort_by_key(ToString::to_string);
+        application_types.dedup();
+        match application_types.len() {
+            0 => {}
+            1 => return application_types.pop(),
+            _ => return Some(crate::core::RubyType::union(application_types)),
         }
 
         if *method != method_missing_method() {

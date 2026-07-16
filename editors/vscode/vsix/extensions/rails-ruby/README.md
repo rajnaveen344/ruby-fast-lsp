@@ -1,7 +1,10 @@
 # Rails Ruby extension
 
 This bundled Ruby Fast LSP extension contributes static Rails semantics through
-the public mruby extension SDK. It does not access server or engine internals.
+the public typed Rust guest SDK and bounded Wasm ABI. It retains the stable
+`rails-ruby` package identity and does not access server or engine internals.
+It activates only for an isolated project with complete lock data containing
+Rails `>= 6, < 9`; unsupported or unknown versions fail closed.
 
 The initial contract supports `belongs_to`, `has_one`, and `has_many`. Each
 association contributes a public reader and writer, a structured return type,
@@ -63,21 +66,10 @@ template contexts. Routes with `only` or `except` conservatively emit controller
 navigation but no helper set; `member`/`collection`, shallow routes, mounted
 engines, and the full Active Support inflector remain future route work.
 
-Run the source contract tests with:
+Run native typed-contract tests, build and checksum the Rust Wasm, retain the
+deterministic host fixture matrix, and exercise the actual package through the
+black-box LSP lifecycle with:
 
 ```bash
-ruby -Iextensions/mruby-sdk extensions/rails-ruby/test/rails_ruby_test.rb
-```
-
-Build the Wasm guest with the shared SDK builder:
-
-```bash
-extensions/mruby-sdk/scripts/build-wasm-docker.sh extensions/rails-ruby
-```
-
-Then exercise that artifact through the black-box LSP test with:
-
-```bash
-RUBY_FAST_LSP_TEST_BUILT_RAILS=1 \
-  cargo test -p ruby-fast-lsp-test-harness --test rails_extension
+extensions/rails-ruby/build-and-test.sh
 ```

@@ -12,12 +12,25 @@ impl IdentifierVisitor {
             return;
         }
 
-        let mut namespace_kind = utils::get_method_namespace_kind_simple(node.receiver().as_ref());
-        // Account for `class << self` context — get_method_namespace_kind_simple
-        // only checks for explicit `self.` receiver, not the singleton class scope
-        if self.scope_tracker.in_singleton() && namespace_kind == NamespaceKind::Instance {
-            namespace_kind = NamespaceKind::Singleton;
-        }
+        let (definition_namespace, namespace_kind) = match node.receiver() {
+            None => self.scope_tracker.method_definition_context(),
+            Some(receiver) if receiver.as_self_node().is_some() => {
+                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
+                if receiver_kind != NamespaceKind::Singleton {
+                    return;
+                }
+                (namespace, NamespaceKind::Singleton)
+            }
+            Some(_) => {
+                let mut kind = utils::get_method_namespace_kind_simple(node.receiver().as_ref());
+                // Account for `class << self` context — get_method_namespace_kind_simple
+                // only checks for explicit `self.` receiver, not the singleton class scope.
+                if self.scope_tracker.in_singleton() && kind == NamespaceKind::Instance {
+                    kind = NamespaceKind::Singleton;
+                }
+                (self.scope_tracker.get_ns_stack(), kind)
+            }
+        };
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let method = RubyMethod::new(name.as_str());
@@ -41,9 +54,15 @@ impl IdentifierVisitor {
         self.scope_tracker.push_scope_kind(scope_kind);
         self.scope_tracker
             .push_method_fqn(Some(FullyQualifiedName::method(
-                self.scope_tracker.get_ns_stack(),
+                definition_namespace.clone(),
                 method,
             )));
+        self.scope_tracker.push_execution_context(
+            definition_namespace.clone(),
+            namespace_kind,
+            definition_namespace.clone(),
+            namespace_kind,
+        );
 
         // Is position on method name
         let name_loc = node.name_loc();
@@ -57,12 +76,12 @@ impl IdentifierVisitor {
 
             self.set_result(
                 Some(Identifier::RubyMethod {
-                    namespace: self.scope_tracker.get_ns_stack(),
+                    namespace: definition_namespace.clone(),
                     receiver,
                     iden: method,
                 }),
                 Some(IdentifierType::MethodDef),
-                self.scope_tracker.get_ns_stack(),
+                definition_namespace,
                 Some(0),
             );
         }
@@ -80,6 +99,7 @@ impl IdentifierVisitor {
         );
 
         if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
+            self.scope_tracker.pop_execution_context();
             self.scope_tracker.pop_scope_kind();
             self.scope_tracker.pop_method_fqn();
         }

@@ -6,6 +6,7 @@
 
 pub mod diagnostic_candidate_store;
 pub mod diagnostic_store;
+pub mod execution_context;
 pub mod fqn_id;
 pub mod fully_qualified_name;
 pub mod graph_store;
@@ -24,6 +25,7 @@ pub use diagnostic_candidate_store::{
     DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticCandidateStore, RaiseArgCandidate,
 };
 pub use diagnostic_store::{DiagnosticFact, DiagnosticSeverity, DiagnosticStore};
+pub use execution_context::{ExecutionContextFact, ExecutionScopeMode};
 pub use fqn_id::{ConstLookupId, FqnId};
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 pub use graph_store::{
@@ -44,7 +46,7 @@ pub use reference_store::{
     StoredResolvedReferenceCandidate,
 };
 pub use ruby_method::RubyMethod;
-pub use ruby_namespace::RubyConstant;
+pub use ruby_namespace::{GeneratedOwnerId, RubyConstant};
 pub use ruby_type::RubyType;
 pub use source_file::SourceKind;
 pub use symbol_store::{StoredSymbolFact, SymbolFact, SymbolKind, SymbolStore};

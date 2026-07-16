@@ -1,0 +1,59 @@
+id = "cucumber-rust"
+name = "Cucumber Rust"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.6, <0.3.0"
+runtime = "wasm"
+wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_cucumber_extension.wasm"
+checksum_sha256 = "96ef16debb1c44222b474bb0cc7dc1e50ba6ab995bbe9b42fb968311ba305eed"
+capabilities = ["index.call"]
+permissions = []
+
+[applicability]
+locked_gems = [{ name = "cucumber", version = ">=9.0.0, <12.0.0" }]
+
+[build]
+output = "target/wasm32-wasip1/release/ruby_fast_lsp_cucumber_extension.wasm"
+
+[indexing]
+project_context = "activation"
+call_names = ["Given", "When", "Then", "And", "But", "Before", "After", "Around", "AfterStep", "BeforeAll", "AfterAll", "World"]
+frame_call_names = ["Given", "When", "Then", "And", "But", "Before", "After", "Around", "AfterStep", "BeforeAll", "AfterAll", "World"]
+targets = [
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "Given", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "When", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "Then", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "And", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "But", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "Before", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "After", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "Around", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "AfterStep", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "BeforeAll", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "AfterAll", frame = true },
+  { owner = ["Cucumber", "Glue", "Dsl"], owner_kind = "instance", method = "World", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "Given", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "When", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "Then", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "And", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "But", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "Before", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "After", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "Around", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "AfterStep", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "BeforeAll", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "AfterAll", frame = true },
+  { owner = ["Object"], owner_kind = "instance", method = "World", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "Given", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "When", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "Then", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "And", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "But", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "Before", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "After", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "Around", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "AfterStep", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "BeforeAll", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "AfterAll", frame = true },
+  { owner = ["Object"], owner_kind = "singleton", method = "World", frame = true },
+]

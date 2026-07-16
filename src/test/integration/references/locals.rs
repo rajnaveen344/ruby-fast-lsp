@@ -119,3 +119,56 @@ end
     )
     .await;
 }
+
+#[tokio::test]
+async fn references_local_captured_by_eval_and_exec_blocks() {
+    check(
+        r#"
+class MetaTarget
+end
+
+<ref>captured$0</ref> = "outside"
+MetaTarget.class_eval do
+  puts <ref>captured</ref>
+end
+MetaTarget.instance_exec do
+  puts <ref>captured</ref>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn all_static_execution_and_dynamic_definition_blocks_capture_outer_locals() {
+    check(
+        r#"
+class MetaTarget
+end
+
+<ref>captured$0</ref> = "outside"
+MetaTarget.module_eval do
+  puts <ref>captured</ref>
+end
+MetaTarget.class_exec do
+  puts <ref>captured</ref>
+end
+MetaTarget.module_exec do
+  puts <ref>captured</ref>
+end
+MetaTarget.instance_eval do
+  puts <ref>captured</ref>
+end
+MetaTarget.instance_exec do
+  puts <ref>captured</ref>
+end
+MetaTarget.send(:define_method, :generated) do
+  puts <ref>captured</ref>
+end
+MetaTarget.define_singleton_method(:generated_singleton) do
+  puts <ref>captured</ref>
+end
+"#,
+    )
+    .await;
+}

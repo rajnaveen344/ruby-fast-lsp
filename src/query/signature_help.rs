@@ -1,6 +1,6 @@
 use ruby_analysis::core::{FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind};
 use ruby_analysis::engine::AnalysisQuery;
-use ruby_analysis::indexer::{MethodReceiver, RubyPrismAnalyzer};
+use ruby_analysis::indexer::MethodReceiver;
 use ruby_analysis::inference::method::rbs_method_signatures_for_type;
 use ruby_analysis::inference::rbs::{RbsMethodSignature, RbsSignatureParameter};
 use tower_lsp::lsp_types::{Position, Url};
@@ -37,7 +37,7 @@ impl EngineQuery {
     ) -> Option<SignatureHelpData> {
         let document = self.doc.as_ref()?.read();
         let byte_offset = document.position_to_analysis_offset(position);
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let analyzer = self.analyzer_at_position(uri, content, position);
         let target = analyzer.get_signature_help_target(byte_offset)?;
         drop(document);
 

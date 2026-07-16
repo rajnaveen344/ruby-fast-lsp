@@ -17,7 +17,7 @@ use tower_lsp::lsp_types::{
     SymbolTag, Url,
 };
 
-use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
+use ruby_analysis::indexer::Identifier;
 
 use super::analysis_location::{location_for_range, lsp_ranges_for_ranges};
 use super::EngineQuery;
@@ -51,7 +51,7 @@ impl EngineQuery {
             position
         );
 
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content);
+        let analyzer = self.analyzer_at_position(uri, &content, position);
         let (identifier, _, ancestors, _scope_id, namespace_kind) =
             analyzer.get_identifier(position);
 

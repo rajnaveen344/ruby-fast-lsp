@@ -8,7 +8,9 @@ use crate::engine::lookup_types::{
     ConstantLookupRequest, ConstantMatch, MethodMatch, MixinUsage, MixinUsageKind,
 };
 use crate::engine::query::AnalysisQuery;
-use crate::engine::resolution::{method_lookup_chain, namespace_target_exists};
+use crate::engine::resolution::{
+    execution_context_application_targets, method_lookup_chain, namespace_target_exists,
+};
 
 impl<'a> AnalysisQuery<'a> {
     pub fn method_facts_matching(
@@ -22,14 +24,21 @@ impl<'a> AnalysisQuery<'a> {
 
         let mut facts = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for ancestor in method_lookup_chain(self.engine, namespace_fqn) {
-            for fact in self.engine.method_facts_matching_owner(&ancestor, partial) {
-                let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-                    continue;
-                };
-                let method_name = method.get_name();
-                if seen.insert(method_name) {
-                    facts.push(fact);
+        let mut lookup_roots = vec![namespace_fqn.clone()];
+        lookup_roots.extend(execution_context_application_targets(
+            self.engine,
+            namespace_fqn,
+        ));
+        for root in lookup_roots {
+            for ancestor in method_lookup_chain(self.engine, &root) {
+                for fact in self.engine.method_facts_matching_owner(&ancestor, partial) {
+                    let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+                        continue;
+                    };
+                    let method_name = method.get_name();
+                    if seen.insert(method_name) {
+                        facts.push(fact);
+                    }
                 }
             }
         }
@@ -47,7 +56,7 @@ impl<'a> AnalysisQuery<'a> {
                 matches!(
                     fact.kind,
                     SymbolKind::Class | SymbolKind::Module | SymbolKind::Constant
-                )
+                ) && !fact.fqn.has_generated_owner()
             })
             .filter(|fact| seen.insert(fact.fqn.namespace_parts()))
             .filter(|fact| Self::constant_matches_request(&fact.fqn, request))
@@ -294,6 +303,7 @@ impl<'a> AnalysisQuery<'a> {
             GraphEdgeKind::Prepend => Some(MixinUsageKind::Prepend),
             GraphEdgeKind::Extend => Some(MixinUsageKind::Extend),
             GraphEdgeKind::Superclass => None,
+            GraphEdgeKind::ExecutionContextApplication => None,
         }
     }
 }

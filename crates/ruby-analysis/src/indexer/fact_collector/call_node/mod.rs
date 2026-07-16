@@ -54,7 +54,8 @@ impl FactCollector {
         }
 
         if node.receiver().is_some() {
-            self.push_direct_send_define_method_fact(node);
+            self.push_direct_send_dynamic_method_fact(node);
+            self.push_direct_receiver_define_singleton_method_fact(node);
             return false;
         }
 
@@ -99,6 +100,10 @@ impl FactCollector {
                 self.push_direct_define_method_fact(node);
                 true
             }
+            b"define_singleton_method" => {
+                self.push_direct_define_singleton_method_fact(node);
+                true
+            }
             b"delegate" => {
                 self.push_direct_delegate_method_facts(node);
                 true
@@ -134,7 +139,7 @@ impl FactCollector {
         }
 
         for arg in arguments.arguments().iter() {
-            let Some((name, range)) = direct_attr_name_and_range(self, &arg) else {
+            let Some((name, range)) = direct_method_name_and_range(self, &arg) else {
                 continue;
             };
             let Ok(method) = RubyMethod::new(&name) else {
@@ -193,14 +198,68 @@ impl FactCollector {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        let namespace = self.scope_tracker.get_ns_stack();
-        let owner_kind = self.scope_tracker.current_macro_definition_context();
+        let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
+        if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
+            return;
+        }
+        let owner_kind = if !self.scope_tracker.execution_context_active()
+            && self.scope_tracker.in_singleton()
+        {
+            NamespaceKind::Singleton
+        } else {
+            NamespaceKind::Instance
+        };
         self.direct_push_method_fact(namespace.clone(), owner_kind, method, range, Vec::new());
         self.push_direct_define_method_return_type(namespace, method, range, node);
     }
 
-    fn push_direct_send_define_method_fact(&mut self, node: &CallNode) {
-        if node.name().as_slice() != b"send" {
+    fn push_direct_define_singleton_method_fact(&mut self, node: &CallNode) {
+        let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
+        if receiver_kind != NamespaceKind::Singleton || namespace.is_empty() {
+            return;
+        }
+        self.push_direct_define_singleton_method_for_namespace(node, namespace);
+    }
+
+    fn push_direct_receiver_define_singleton_method_fact(&mut self, node: &CallNode) {
+        if node.name().as_slice() != b"define_singleton_method" {
+            return;
+        }
+        let Some(receiver) = node.receiver() else {
+            return;
+        };
+        let Some(namespace) = self.resolve_constant_receiver_namespace(&receiver) else {
+            return;
+        };
+        self.push_direct_define_singleton_method_for_namespace(node, namespace);
+    }
+
+    fn push_direct_define_singleton_method_for_namespace(
+        &mut self,
+        node: &CallNode,
+        namespace: Vec<RubyConstant>,
+    ) {
+        let Some((name, range)) = define_method_name_and_range(self, node, 0) else {
+            return;
+        };
+        let Ok(method) = RubyMethod::new(&name) else {
+            return;
+        };
+        self.direct_push_method_fact(
+            namespace.clone(),
+            NamespaceKind::Singleton,
+            method,
+            range,
+            Vec::new(),
+        );
+        self.push_direct_define_method_return_type(namespace, method, range, node);
+    }
+
+    fn push_direct_send_dynamic_method_fact(&mut self, node: &CallNode) {
+        if !matches!(
+            node.name().as_slice(),
+            b"send" | b"public_send" | b"__send__"
+        ) {
             return;
         }
         let Some(arguments) = node.arguments() else {
@@ -213,9 +272,11 @@ impl FactCollector {
         else {
             return;
         };
-        if selector != "define_method" {
-            return;
-        }
+        let owner_kind = match selector.as_str() {
+            "define_method" if node.name().as_slice() != b"public_send" => NamespaceKind::Instance,
+            "define_singleton_method" => NamespaceKind::Singleton,
+            _ => return,
+        };
         let Some(receiver) = node.receiver() else {
             return;
         };
@@ -228,17 +289,11 @@ impl FactCollector {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        self.direct_push_method_fact(
-            namespace.clone(),
-            NamespaceKind::Instance,
-            method,
-            range,
-            Vec::new(),
-        );
+        self.direct_push_method_fact(namespace.clone(), owner_kind, method, range, Vec::new());
         self.push_direct_define_method_return_type(namespace, method, range, node);
     }
 
-    fn resolve_constant_receiver_namespace(
+    pub(super) fn resolve_constant_receiver_namespace(
         &self,
         receiver: &Node<'_>,
     ) -> Option<Vec<RubyConstant>> {
@@ -327,6 +382,42 @@ impl FactCollector {
         ));
     }
 
+    pub(super) fn push_direct_dynamic_definition_block_return_type(
+        &mut self,
+        node: &CallNode,
+        namespace: Vec<RubyConstant>,
+    ) {
+        let name_index = if matches!(
+            node.name().as_slice(),
+            b"send" | b"public_send" | b"__send__"
+        ) {
+            1
+        } else {
+            0
+        };
+        let Some((name, range)) = define_method_name_and_range(self, node, name_index) else {
+            return;
+        };
+        let Ok(method) = RubyMethod::new(&name) else {
+            return;
+        };
+        let subject = TypeSubject::MethodReturn(FullyQualifiedName::method(namespace, method));
+        if self
+            .type_store
+            .facts_for(&subject)
+            .iter()
+            .any(|fact| fact.range == range)
+        {
+            return;
+        }
+        let Some(return_type) = self.infer_call_block_return_type(node) else {
+            return;
+        };
+        let fact = TypeFact::new(subject, return_type, range, TypeProvenance::Inferred);
+        self.type_store.add(fact.clone());
+        self.direct_facts.types.push(fact);
+    }
+
     fn push_direct_alias_method_fact(&mut self, node: &CallNode) {
         let Some((new_name, old_name)) = call_two_symbol_or_string_args(self, node) else {
             return;
@@ -337,6 +428,27 @@ impl FactCollector {
         let Ok(old_method) = RubyMethod::new(&old_name) else {
             return;
         };
+
+        if let Some((_old_name, old_range)) = define_method_name_and_range(self, node, 1) {
+            self.reference_candidates.push(ReferenceCandidate::method(
+                old_range,
+                crate::core::MethodReferenceCandidate {
+                    owner: self.scope_tracker.get_ns_stack(),
+                    owner_kind: self.scope_tracker.current_macro_definition_context(),
+                    method: old_method,
+                    is_super: false,
+                    access: MethodReferenceAccess::Normal,
+                    caller: self.scope_tracker.current_method_fqn().cloned(),
+                    diagnostics: crate::core::MethodReferenceDiagnostics {
+                        diagnostic_range: old_range,
+                        receiver_label: None,
+                        diagnose_unresolved: false,
+                        allow_unindexed_owner: false,
+                        signature: crate::core::MethodCallSignatureCandidate::default(),
+                    },
+                },
+            ));
+        }
 
         let namespace = self.scope_tracker.get_ns_stack();
         let owner_kind = self.scope_tracker.current_macro_definition_context();
@@ -881,12 +993,9 @@ impl FactCollector {
 
     fn handle_no_receiver(
         &self,
-        current_namespace: &[RubyConstant],
+        _current_namespace: &[RubyConstant],
     ) -> (Vec<RubyConstant>, NamespaceKind) {
-        (
-            current_namespace.to_vec(),
-            self.scope_tracker.current_method_context(),
-        )
+        self.scope_tracker.implicit_receiver_context()
     }
 
     fn handle_receiver_node_with_info(
@@ -900,12 +1009,8 @@ impl FactCollector {
         Option<RubyType>,
     ) {
         if receiver_node.as_self_node().is_some() {
-            (
-                current_namespace.to_vec(),
-                NamespaceKind::Instance,
-                ReceiverInfo::SelfReceiver,
-                None,
-            )
+            let (namespace, kind) = self.scope_tracker.implicit_receiver_context();
+            (namespace, kind, ReceiverInfo::SelfReceiver, None)
         } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
             let name = utf8_str(constant_read.name().as_slice()).to_string();
             let (ns, kind, inferred) =
@@ -1090,11 +1195,15 @@ impl FactCollector {
                     self.infer_expression_receiver_type(&inner_receiver)
                 }
             } else {
-                let ns = self.scope_tracker.get_ns_stack();
+                let (ns, kind) = self.scope_tracker.implicit_receiver_context();
                 if ns.is_empty() {
                     None
                 } else {
-                    Some(RubyType::Class(FullyQualifiedName::constant(ns)))
+                    let fqn = FullyQualifiedName::constant(ns);
+                    Some(match kind {
+                        NamespaceKind::Instance => RubyType::Class(fqn),
+                        NamespaceKind::Singleton => RubyType::ClassReference(fqn),
+                    })
                 }
             }?;
 
@@ -1105,6 +1214,13 @@ impl FactCollector {
     }
 
     fn type_to_namespace_parts(&self, ruby_type: &RubyType) -> Option<Vec<RubyConstant>> {
+        match ruby_type {
+            RubyType::Class(fqn)
+            | RubyType::ClassReference(fqn)
+            | RubyType::Module(fqn)
+            | RubyType::ModuleReference(fqn) => return Some(fqn.namespace_parts()),
+            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Union(_) | RubyType::Unknown => {}
+        }
         let engine = self.analysis_engine.read();
         AnalysisQuery::new(&engine)
             .type_to_namespace(ruby_type)
@@ -1305,6 +1421,26 @@ fn direct_attr_name_and_range(
         return Some((
             String::from_utf8_lossy(symbol.unescaped()).to_string(),
             visitor.direct_range(&symbol.location()),
+        ));
+    }
+    if let Some(string) = node.as_string_node() {
+        return Some((
+            String::from_utf8_lossy(string.unescaped()).to_string(),
+            visitor.direct_range(&string.content_loc()),
+        ));
+    }
+    None
+}
+
+fn direct_method_name_and_range(
+    visitor: &FactCollector,
+    node: &Node<'_>,
+) -> Option<(String, crate::core::TextRange)> {
+    if let Some(symbol) = node.as_symbol_node() {
+        let location = symbol.value_loc().unwrap_or_else(|| symbol.location());
+        return Some((
+            String::from_utf8_lossy(symbol.unescaped()).to_string(),
+            visitor.direct_range(&location),
         ));
     }
     if let Some(string) = node.as_string_node() {

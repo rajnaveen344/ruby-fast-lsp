@@ -1,220 +1,17 @@
 # frozen_string_literal: true
 
+require "json"
+
 module RubyFastLspExtension
   ABI_VERSION = 1
 
   module Json
     def self.parse(input)
-      Parser.new(input).parse
+      ::JSON.parse(input)
     end
 
     def self.generate(value)
-      case value
-      when Hash
-        "{" + value.map { |key, item| generate(key.to_s) + ":" + generate(item) }.join(",") + "}"
-      when Array
-        "[" + value.map { |item| generate(item) }.join(",") + "]"
-      when String
-        generate_string(value)
-      when Numeric
-        value.to_s
-      when true
-        "true"
-      when false
-        "false"
-      when nil
-        "null"
-      else
-        raise "unsupported JSON value: #{value.class}"
-      end
-    end
-
-    def self.generate_string(value)
-      escaped = value.to_s.gsub("\\", "\\\\")
-      escaped = escaped.gsub("\"", "\\\"")
-      escaped = escaped.gsub("\n", "\\n")
-      escaped = escaped.gsub("\r", "\\r")
-      escaped = escaped.gsub("\t", "\\t")
-      "\"" + escaped + "\""
-    end
-
-    class Parser
-      def initialize(input)
-        @input = input
-        @index = 0
-      end
-
-      def parse
-        value = parse_value
-        skip_ws
-        raise "trailing JSON bytes at #{@index}" unless eof?
-
-        value
-      end
-
-      private
-
-      def parse_value
-        skip_ws
-        char = peek
-        case char
-        when "{"
-          parse_object
-        when "["
-          parse_array
-        when "\""
-          parse_string
-        when "t"
-          read_literal("true", true)
-        when "f"
-          read_literal("false", false)
-        when "n"
-          read_literal("null", nil)
-        else
-          parse_number
-        end
-      end
-
-      def parse_object
-        expect("{")
-        object = {}
-        skip_ws
-        return object if consume("}")
-
-        loop do
-          key = parse_string
-          skip_ws
-          expect(":")
-          object[key] = parse_value
-          skip_ws
-          return object if consume("}")
-          expect(",")
-        end
-      end
-
-      def parse_array
-        expect("[")
-        array = []
-        skip_ws
-        return array if consume("]")
-
-        loop do
-          array << parse_value
-          skip_ws
-          return array if consume("]")
-          expect(",")
-        end
-      end
-
-      def parse_string
-        expect("\"")
-        output = String.new
-        until eof?
-          char = next_char
-          return output if char == "\""
-
-          if char == "\\"
-            output << escaped_char
-          else
-            output << char
-          end
-        end
-        raise "unterminated JSON string"
-      end
-
-      def escaped_char
-        char = next_char
-        case char
-        when "\"", "\\", "/"
-          char
-        when "b"
-          "\b"
-        when "f"
-          "\f"
-        when "n"
-          "\n"
-        when "r"
-          "\r"
-        when "t"
-          "\t"
-        when "u"
-          code = @input[@index, 4]
-          @index += 4
-          value = code.to_i(16)
-          value < 128 ? value.chr : "?"
-        else
-          raise "invalid JSON escape: #{char}"
-        end
-      end
-
-      def parse_number
-        start = @index
-        @index += 1 if peek == "-"
-        read_digits
-        if peek == "."
-          @index += 1
-          read_digits
-        end
-        if peek == "e" || peek == "E"
-          @index += 1
-          @index += 1 if peek == "+" || peek == "-"
-          read_digits
-        end
-        raw = @input[start...@index]
-        raise "invalid JSON number at #{start}" if raw.nil? || raw.empty? || raw == "-"
-
-        raw.include?(".") || raw.include?("e") || raw.include?("E") ? raw.to_f : raw.to_i
-      end
-
-      def read_digits
-        raise "expected JSON digit at #{@index}" unless digit?(peek)
-
-        @index += 1 while digit?(peek)
-      end
-
-      def read_literal(text, value)
-        actual = @input[@index, text.length]
-        raise "expected JSON literal #{text} at #{@index}" unless actual == text
-
-        @index += text.length
-        value
-      end
-
-      def expect(char)
-        actual = next_char
-        raise "expected JSON char #{char}, got #{actual}" unless actual == char
-      end
-
-      def consume(char)
-        return false unless peek == char
-
-        @index += 1
-        true
-      end
-
-      def skip_ws
-        @index += 1 while [" ", "\n", "\r", "\t"].include?(peek)
-      end
-
-      def next_char
-        char = peek
-        raise "unexpected JSON end" if char.nil?
-
-        @index += 1
-        char
-      end
-
-      def peek
-        @input[@index]
-      end
-
-      def eof?
-        @index >= @input.length
-      end
-
-      def digit?(char)
-        char && char >= "0" && char <= "9"
-      end
+      ::JSON.generate(value)
     end
   end
 
@@ -238,7 +35,7 @@ module RubyFastLspExtension
   end
 
   class Extension
-    attr_reader :settings
+    attr_reader :settings, :project_context
 
     attr_reader :id
 
@@ -297,12 +94,16 @@ module RubyFastLspExtension
     end
 
     def index_call(raw_ctx)
+      index_call_output(raw_ctx)["index_patches"]
+    end
+
+    def index_call_output(raw_ctx)
       ctx = Context.new(raw_ctx)
       handler = @handlers[ctx.method_name]
-      return [] unless handler
+      return empty_output unless handler
 
       result = handler.call(ctx)
-      result || []
+      normalize_index_output(result)
     end
 
     def handle_event(raw_event)
@@ -310,6 +111,7 @@ module RubyFastLspExtension
       case event_name
       when "lifecycle.activate"
         @settings = raw_event["settings"] || raw_event[:settings]
+        @project_context = raw_event["project"] || raw_event[:project]
         @activation_handler.call(@settings) if @activation_handler
         empty_output
       when "settings.changed"
@@ -328,13 +130,7 @@ module RubyFastLspExtension
         reindex_files = @process_completed_handler ? (@process_completed_handler.call(results) || []) : []
         empty_output.merge("reindex_files" => reindex_files)
       when "index.call.enter"
-        {
-          "index_patches" => index_call(raw_event["call"] || raw_event[:call]),
-          "response_patches" => [],
-          "command_patches" => [],
-          "process_requests" => [],
-          "reindex_files" => []
-        }
+        index_call_output(raw_event["call"] || raw_event[:call])
       when "request.document_symbol"
         {
           "index_patches" => [],
@@ -362,10 +158,74 @@ module RubyFastLspExtension
     def empty_output
       {
         "index_patches" => [],
+        "execution_contexts" => [],
         "response_patches" => [],
         "command_patches" => [],
         "process_requests" => [],
         "reindex_files" => []
+      }
+    end
+
+    def index_output(index_patches: [], execution_contexts: [])
+      empty_output.merge(
+        "index_patches" => index_patches,
+        "execution_contexts" => execution_contexts
+      )
+    end
+
+    def normalize_index_output(output)
+      return empty_output if output.nil?
+      return index_output(index_patches: output) if output.is_a?(Array)
+
+      required = ["index_patches", "execution_contexts"]
+      missing = required.reject { |key| output.key?(key) }
+      raise "invalid index output; missing #{missing.join(', ')}" unless missing.empty?
+
+      empty_output.merge(output)
+    end
+
+    def block_execution_context(call_range:, block_range:, generated_owners:, implicit_receiver:, method_definition_owner:, source:, lexical_scope: :preserve, local_scope: :preserve)
+      {
+        "call_range" => call_range,
+        "block_range" => block_range,
+        "generated_owners" => generated_owners,
+        "implicit_receiver" => implicit_receiver,
+        "method_definition_owner" => method_definition_owner,
+        "lexical_scope" => camel(lexical_scope),
+        "local_scope" => camel(local_scope),
+        "source" => source
+      }
+    end
+
+    def generated_owner(local_id:, declaration_kind: :class, owner_kind: :instance, parent: nil, scope: :source)
+      owner = {
+        "local_id" => local_id.to_s,
+        "declaration_kind" => camel(declaration_kind),
+        "owner_kind" => camel(owner_kind),
+        "parent" => parent
+      }
+      owner["scope"] = camel(scope) unless scope.to_s == "source"
+      owner
+    end
+
+    def generated_owner_target(local_id, owner_kind: nil)
+      target = {"local_id" => local_id.to_s}
+      target["owner_kind"] = camel(owner_kind) if owner_kind
+      {"GeneratedOwner" => target}
+    end
+
+    def project_generated_owner_target(local_id, owner_kind: nil)
+      target = {"local_id" => local_id.to_s}
+      target["owner_kind"] = camel(owner_kind) if owner_kind
+      {"ProjectGeneratedOwner" => target}
+    end
+
+    def namespace_execution_target(namespace:, owner_kind: :instance)
+      {
+        "Namespace" => {
+          "namespace" => namespace,
+          "owner_kind" => camel(owner_kind)
+        }
       }
     end
 
@@ -383,17 +243,22 @@ module RubyFastLspExtension
       result || []
     end
 
-    def define_method(name:, namespace:, owner_kind:, location:, source:, visibility: :public, return_type: nil, params: [])
+    def define_method(name:, namespace:, owner_kind:, location:, source:, visibility: :public, return_type: nil, return_type_source: nil, params: [], owner_target: nil)
+      method = {
+        "name" => name.to_s,
+        "namespace" => namespace,
+        "owner_target" => owner_target,
+        "owner_kind" => camel(owner_kind),
+        "visibility" => camel(visibility),
+        "location" => location,
+        "params" => params.map { |param| method_param(param) },
+        "return_type" => return_type,
+        "source" => source
+      }
+      method["return_type_source"] = camel(return_type_source) if return_type_source
       {
         "DefineMethod" => {
-          "name" => name.to_s,
-          "namespace" => namespace,
-          "owner_kind" => camel(owner_kind),
-          "visibility" => camel(visibility),
-          "location" => location,
-          "params" => params.map { |param| method_param(param) },
-          "return_type" => return_type,
-          "source" => source
+          **method
         }
       }
     end
@@ -480,14 +345,29 @@ module RubyFastLspExtension
       }
     end
 
-    def apply_mixin(namespace:, mixin:, kind:, location:, source:, absolute: false, target_kind: :instance)
+    def apply_mixin(namespace:, kind:, location:, source:, mixin: nil, mixin_target: nil, absolute: false, target_kind: :instance, owner_target: nil)
+      if (!!mixin) == (!!mixin_target)
+        raise "apply_mixin requires exactly one of mixin or mixin_target"
+      end
+      patch = {
+        "namespace" => namespace,
+        "owner_target" => owner_target,
+        "target_kind" => camel(target_kind),
+        "mixin" => mixin || [],
+        "absolute" => absolute,
+        "kind" => camel(kind),
+        "location" => location,
+        "source" => source
+      }
+      patch["mixin_target"] = mixin_target if mixin_target
+      {"ApplyMixin" => patch}
+    end
+
+    def connect_execution_context(template:, application:, location:, source:)
       {
-        "ApplyMixin" => {
-          "namespace" => namespace,
-          "target_kind" => camel(target_kind),
-          "mixin" => mixin,
-          "absolute" => absolute,
-          "kind" => camel(kind),
+        "ConnectExecutionContext" => {
+          "template" => template,
+          "application" => application,
           "location" => location,
           "source" => source
         }
@@ -583,6 +463,10 @@ module RubyFastLspExtension
 
     def call_range
       fetch("call_range")
+    end
+
+    def block_range
+      fetch("block_range")
     end
 
     def message_range

@@ -190,6 +190,7 @@ impl<'a> AnalysisQuery<'a> {
                 }
                 GraphEdgeKind::Include | GraphEdgeKind::Prepend => {}
                 GraphEdgeKind::Extend => extended_by_edges.push(edge.clone()),
+                GraphEdgeKind::ExecutionContextApplication => {}
             }
         }
 
@@ -353,6 +354,7 @@ fn push_unresolved_supertype_entries(
             GraphEdgeKind::Include => TypeHierarchyRelation::Include,
             GraphEdgeKind::Prepend => TypeHierarchyRelation::Prepend,
             GraphEdgeKind::Extend => TypeHierarchyRelation::Extend,
+            GraphEdgeKind::ExecutionContextApplication => continue,
         };
         entries.push(TypeHierarchyEntry {
             fqn: FullyQualifiedName::constant(edge.target_parts.clone()),

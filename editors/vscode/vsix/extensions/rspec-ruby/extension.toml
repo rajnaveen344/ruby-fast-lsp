@@ -6,18 +6,40 @@ server_version = ">=0.2.3, <0.3.0"
 runtime = "mruby-wasm"
 entry = "extension.rb"
 wasm = "target/wasm32-wasip1/release/rspec-ruby.wasm"
-checksum_sha256 = "b3399c82471c5259e2065278efdca9a626252146824e8b4bf9ce276096a55dcc"
+checksum_sha256 = "c61a4dc1e902dde1a7a1ed9501af09477f7e39b17a0be2af6a47951e9a11ac41"
 capabilities = ["index.call", "document_symbol", "code_lens"]
 permissions = []
+
+[applicability]
+locked_gems = [{ name = "rspec-core", version = ">=3.0.0, <4.0.0" }]
 
 [build]
 output = "target/wasm32-wasip1/release/rspec-ruby.wasm"
 
 [indexing]
-call_names = ["describe", "context", "it", "example", "specify", "before", "after", "around", "let", "let!", "subject", "subject!", "include", "prepend", "extend"]
+project_context = "activation"
+call_names = ["describe", "context", "shared_context", "include_context", "shared_examples", "shared_examples_for", "include_examples", "it_behaves_like", "it_should_behave_like", "it", "example", "specify", "before", "after", "around", "let", "let!", "subject", "subject!", "include", "prepend", "extend"]
 
 [[indexing.targets]]
 owner = ["RSpec"]
 owner_kind = "singleton"
 method = "describe"
+frame = true
+
+[[indexing.targets]]
+owner = ["RSpec"]
+owner_kind = "singleton"
+method = "shared_context"
+frame = true
+
+[[indexing.targets]]
+owner = ["RSpec"]
+owner_kind = "singleton"
+method = "shared_examples"
+frame = true
+
+[[indexing.targets]]
+owner = ["RSpec"]
+owner_kind = "singleton"
+method = "shared_examples_for"
 frame = true

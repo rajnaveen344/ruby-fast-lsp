@@ -16,6 +16,12 @@ pub trait CompletionSemanticQuery {
         name: &str,
         file_id: crate::core::SourceFileId,
     ) -> Option<RubyType>;
+
+    fn implicit_receiver_at(
+        &self,
+        file_id: crate::core::SourceFileId,
+        byte_offset: u32,
+    ) -> Option<FullyQualifiedName>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,6 +185,17 @@ pub fn receiver_type_from_context(
 
         if let Some(ty) = infer_constructor_assignment_type(content, receiver_text) {
             return Some(ty);
+        }
+
+        if let Ok(method) = RubyMethod::new(receiver_text) {
+            let byte_offset = document.position_to_analysis_offset(receiver_position);
+            if let Some(owner) =
+                query.implicit_receiver_at(document.analysis_file_id(), byte_offset)
+            {
+                if let Some(return_type) = query.method_return_type_for_receiver(&owner, &method) {
+                    return Some(return_type);
+                }
+            }
         }
     }
 

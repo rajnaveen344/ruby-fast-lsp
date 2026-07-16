@@ -15,6 +15,10 @@ pub enum GraphEdgeKind {
     Include,
     Prepend,
     Extend,
+    /// A reusable execution template evaluated independently against one or
+    /// more runtime owners. This is not Ruby ancestry and must never enter the
+    /// ordinary MRO.
+    ExecutionContextApplication,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,10 +160,12 @@ pub struct GraphNode {
     includes: Vec<GraphEdgeId>,
     prepends: Vec<GraphEdgeId>,
     extends: Vec<GraphEdgeId>,
+    execution_context_applications: Vec<GraphEdgeId>,
     children: Vec<GraphEdgeId>,
     included_by: Vec<GraphEdgeId>,
     prepended_by: Vec<GraphEdgeId>,
     extended_by: Vec<GraphEdgeId>,
+    execution_context_templates: Vec<GraphEdgeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,6 +243,7 @@ impl SemanticGraph {
         ids.extend(node.includes.iter().copied());
         ids.extend(node.prepends.iter().copied());
         ids.extend(node.extends.iter().copied());
+        ids.extend(node.execution_context_applications.iter().copied());
         self.edges_by_ids(&ids)
     }
 
@@ -249,6 +256,7 @@ impl SemanticGraph {
         ids.extend(node.included_by.iter().copied());
         ids.extend(node.prepended_by.iter().copied());
         ids.extend(node.extended_by.iter().copied());
+        ids.extend(node.execution_context_templates.iter().copied());
         self.edges_by_ids(&ids)
     }
 
@@ -550,6 +558,9 @@ impl GraphNode {
             GraphEdgeKind::Include => self.includes.push(id),
             GraphEdgeKind::Prepend => self.prepends.push(id),
             GraphEdgeKind::Extend => self.extends.push(id),
+            GraphEdgeKind::ExecutionContextApplication => {
+                self.execution_context_applications.push(id)
+            }
         }
     }
 
@@ -559,6 +570,7 @@ impl GraphNode {
             GraphEdgeKind::Include => self.included_by.push(id),
             GraphEdgeKind::Prepend => self.prepended_by.push(id),
             GraphEdgeKind::Extend => self.extended_by.push(id),
+            GraphEdgeKind::ExecutionContextApplication => self.execution_context_templates.push(id),
         }
     }
 
@@ -572,6 +584,9 @@ impl GraphNode {
             GraphEdgeKind::Include => self.includes.retain(|id| *id != stale),
             GraphEdgeKind::Prepend => self.prepends.retain(|id| *id != stale),
             GraphEdgeKind::Extend => self.extends.retain(|id| *id != stale),
+            GraphEdgeKind::ExecutionContextApplication => self
+                .execution_context_applications
+                .retain(|id| *id != stale),
         }
     }
 
@@ -581,6 +596,9 @@ impl GraphNode {
             GraphEdgeKind::Include => self.included_by.retain(|id| *id != stale),
             GraphEdgeKind::Prepend => self.prepended_by.retain(|id| *id != stale),
             GraphEdgeKind::Extend => self.extended_by.retain(|id| *id != stale),
+            GraphEdgeKind::ExecutionContextApplication => {
+                self.execution_context_templates.retain(|id| *id != stale)
+            }
         }
     }
 
@@ -588,6 +606,7 @@ impl GraphNode {
         sort_edge_ids(edges, &mut self.includes);
         sort_edge_ids(edges, &mut self.prepends);
         sort_edge_ids(edges, &mut self.extends);
+        sort_edge_ids(edges, &mut self.execution_context_applications);
     }
 
     fn sort_incoming(&mut self, edges: &[Option<GraphEdge>]) {
@@ -595,6 +614,7 @@ impl GraphNode {
         sort_edge_ids(edges, &mut self.included_by);
         sort_edge_ids(edges, &mut self.prepended_by);
         sort_edge_ids(edges, &mut self.extended_by);
+        sort_edge_ids(edges, &mut self.execution_context_templates);
     }
 }
 
@@ -603,10 +623,12 @@ fn node_has_no_edges(node: &GraphNode) -> bool {
         && node.includes.is_empty()
         && node.prepends.is_empty()
         && node.extends.is_empty()
+        && node.execution_context_applications.is_empty()
         && node.children.is_empty()
         && node.included_by.is_empty()
         && node.prepended_by.is_empty()
         && node.extended_by.is_empty()
+        && node.execution_context_templates.is_empty()
 }
 
 fn sort_node_definitions(definitions: &mut [GraphNodeDefinition]) {

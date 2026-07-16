@@ -42,6 +42,7 @@ static void ensure_state(void) {
 
 static int64_t call_json_method(const char *method_name, const uint8_t *input, int32_t input_len) {
   ensure_state();
+  int arena = mrb_gc_arena_save(state);
   if (last_output != NULL) {
     free(last_output);
     last_output = NULL;
@@ -67,6 +68,7 @@ static int64_t call_json_method(const char *method_name, const uint8_t *input, i
     abort();
   }
   memcpy(last_output, output, (size_t)last_output_len);
+  mrb_gc_arena_restore(state, arena);
   return pack_ptr_len(last_output, last_output_len);
 }
 

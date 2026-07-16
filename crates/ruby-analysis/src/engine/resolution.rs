@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
-    MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, SymbolKind,
+    MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod,
+    SourceFileId, StoredMethodReferenceCandidate, StoredReferenceCandidateRef, SymbolKind,
     TextRange,
 };
 use crate::engine::query::AnalysisQuery;
@@ -14,6 +15,19 @@ pub(crate) type MethodLookupChainCache = HashMap<FullyQualifiedName, Vec<FullyQu
 pub struct ConstantRenameTarget {
     pub fqn: FullyQualifiedName,
     pub current_name: RubyConstant,
+    pub ranges: Vec<TextRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct MethodRenameIdentity {
+    owner: FullyQualifiedName,
+    method: RubyMethod,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodRenameTarget {
+    pub owner: FullyQualifiedName,
+    pub current_name: RubyMethod,
     pub ranges: Vec<TextRange>,
 }
 
@@ -46,6 +60,409 @@ impl MethodLookupResult {
 }
 
 impl<'a> AnalysisQuery<'a> {
+    /// Resolve a method declaration or call at a byte offset into a safe,
+    /// project-editable rename target.
+    ///
+    /// Method identity includes the namespace kind, so `User#name` and
+    /// `User.name` never share an edit set. Declarations without an exact name
+    /// token (aliases, delegates, generated macros, signatures, and external
+    /// sources) are deliberately rejected.
+    pub fn method_rename_target_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<MethodRenameTarget> {
+        let identity = self.method_rename_identity_at(file_id, byte_offset)?;
+        self.method_rename_target(identity, None)
+    }
+
+    pub fn method_rename_target_for_name_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+        new_name: RubyMethod,
+    ) -> Option<MethodRenameTarget> {
+        let identity = self.method_rename_identity_at(file_id, byte_offset)?;
+        self.method_rename_target(identity, Some(new_name))
+    }
+
+    fn method_rename_identity_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<MethodRenameIdentity> {
+        let mut identities = self
+            .engine
+            .method_facts_in_file(file_id)
+            .into_iter()
+            .filter(|fact| fact.name_range.contains_offset(file_id, byte_offset))
+            .filter_map(|fact| {
+                let FullyQualifiedName::Method(_, method) = fact.fqn else {
+                    return None;
+                };
+                Some(MethodRenameIdentity {
+                    owner: fact.owner,
+                    method,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for candidate in self
+            .engine
+            .reference_candidate_store()
+            .candidates_in_file(file_id)
+        {
+            if !candidate.range.contains_offset(file_id, byte_offset) {
+                continue;
+            }
+            let crate::core::StoredReferenceCandidateKind::Method {
+                owner,
+                owner_kind,
+                method,
+                is_super,
+                access,
+                caller,
+                diagnostics,
+            } = candidate.kind
+            else {
+                continue;
+            };
+            let candidate = StoredMethodReferenceCandidate {
+                range: candidate.range,
+                owner,
+                owner_kind,
+                method,
+                is_super,
+                access,
+                caller,
+                diagnostics,
+            };
+            identities.extend(self.method_candidate_rename_identities(&candidate));
+        }
+
+        identities.sort();
+        identities.dedup();
+        (identities.len() == 1).then(|| {
+            identities.pop().expect(
+                "INVARIANT VIOLATED: method rename identity disappeared after length validation. This is a bug because the local identity vector is not mutated between the check and pop. Fix: keep identity selection atomic.",
+            )
+        })
+    }
+
+    fn method_rename_target(
+        &self,
+        identity: MethodRenameIdentity,
+        new_name: Option<RubyMethod>,
+    ) -> Option<MethodRenameTarget> {
+        if identity.owner.has_generated_owner() {
+            return None;
+        }
+        if !method_name_is_refactorable(identity.method) {
+            return None;
+        }
+        if new_name.is_some_and(|new_name| new_name == identity.method) {
+            return None;
+        }
+        if new_name.is_some_and(|new_name| {
+            !method_name_is_refactorable(new_name)
+                || identity.method.as_str().ends_with('=') != new_name.as_str().ends_with('=')
+        }) {
+            return None;
+        }
+        if self.method_lookup_chain_is_incomplete_for_rename(&identity.owner) {
+            return None;
+        }
+        if let Some(new_name) = new_name {
+            let target_chain = method_lookup_chain(self.engine, &identity.owner);
+            let collision = target_chain.iter().any(|owner| {
+                self.engine
+                    .method_facts_matching_owner_name(&owner, &new_name)
+                    .into_iter()
+                    .any(|fact| {
+                        self.engine
+                            .file(fact.range.file_id)
+                            .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
+                    })
+            }) || self.engine.all_method_facts().into_iter().any(|fact| {
+                let FullyQualifiedName::Method(_, fact_method) = fact.fqn else {
+                    return false;
+                };
+                fact_method == new_name
+                    && self
+                        .engine
+                        .file(fact.range.file_id)
+                        .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
+                    && (target_chain.contains(&fact.owner)
+                        || method_lookup_chain(self.engine, &fact.owner).contains(&identity.owner))
+            });
+            if collision {
+                return None;
+            }
+        }
+
+        let method_fqn =
+            FullyQualifiedName::method(identity.owner.namespace_parts(), identity.method);
+        let all_method_facts = self.engine.method_facts_for(&method_fqn);
+        let declaration_facts = all_method_facts
+            .iter()
+            .filter(|fact| fact.owner == identity.owner)
+            .filter(|fact| {
+                self.engine
+                    .file(fact.range.file_id)
+                    .is_some_and(|file| file.kind != crate::core::SourceKind::Signature)
+            })
+            .collect::<Vec<_>>();
+        if declaration_facts.is_empty()
+            || declaration_facts.iter().any(|fact| {
+                !self
+                    .engine
+                    .file(fact.range.file_id)
+                    .is_some_and(|file| file.kind.is_editable())
+                    || fact
+                        .name_range
+                        .end_byte
+                        .checked_sub(fact.name_range.start_byte)
+                        != u32::try_from(identity.method.as_str().len()).ok()
+                    || fact.range == fact.name_range
+            })
+        {
+            return None;
+        }
+
+        // One Ruby declaration can materialize multiple semantic owners (for
+        // example `module_function`). Renaming only one of those identities
+        // would lie about the resulting program, so reject the coupled token.
+        let every_method_fact = self.engine.all_method_facts();
+        if declaration_facts.iter().any(|declaration| {
+            every_method_fact.iter().any(|other| {
+                other.owner != identity.owner
+                    && (other.name_range == declaration.name_range
+                        || other.range == declaration.range)
+            })
+        }) {
+            return None;
+        }
+
+        let mut ranges = declaration_facts
+            .into_iter()
+            .map(|fact| fact.name_range)
+            .collect::<Vec<_>>();
+        ranges.extend(
+            self.engine
+                .method_visibility_overrides_matching_owner_name(&identity.owner, &identity.method)
+                .into_iter()
+                .filter(|fact| {
+                    self.engine
+                        .file(fact.range.file_id)
+                        .is_some_and(|file| file.kind.is_editable())
+                })
+                .map(|fact| fact.range),
+        );
+
+        for candidate in self.engine.reference_candidate_store().iter_candidates() {
+            match candidate {
+                StoredReferenceCandidateRef::Method(candidate)
+                    if candidate.method == identity.method =>
+                {
+                    let targets = self.method_candidate_rename_identities(candidate);
+                    let caller_is_target = candidate.caller.is_some_and(|caller| {
+                        self.engine.fqn_for_id(caller).is_some_and(|caller| {
+                            matches!(
+                                caller,
+                                FullyQualifiedName::Method(parts, method)
+                                    if *method == identity.method
+                                        && parts.as_slice()
+                                            == identity.owner.namespace_parts_slice()
+                            )
+                        })
+                    });
+                    if candidate.is_super && (targets.contains(&identity) || caller_is_target) {
+                        return None;
+                    }
+                    if targets.contains(&identity) {
+                        if targets.len() != 1 {
+                            return None;
+                        }
+                        if let Some(new_name) = new_name {
+                            let mut collision_candidate = candidate.clone();
+                            collision_candidate.method = new_name;
+                            if !self
+                                .method_candidate_rename_identities(&collision_candidate)
+                                .is_empty()
+                            {
+                                return None;
+                            }
+                        }
+                        if self
+                            .engine
+                            .file(candidate.range.file_id)
+                            .is_some_and(|file| file.kind.is_editable())
+                        {
+                            ranges.push(candidate.range);
+                        }
+                    }
+                }
+                StoredReferenceCandidateRef::Resolved(candidate) => {
+                    let Some(target) = self.engine.fqn_for_id(candidate.target) else {
+                        panic!(
+                            "INVARIANT VIOLATED: resolved rename candidate points to a missing FQN. This is a bug because resolved candidates retain interned targets. Fix: retain interned names for the candidate lifetime."
+                        );
+                    };
+                    if target != &method_fqn {
+                        continue;
+                    }
+                    let mut owners = all_method_facts
+                        .iter()
+                        .map(|fact| fact.owner.clone())
+                        .collect::<Vec<_>>();
+                    owners.sort_by_key(ToString::to_string);
+                    owners.dedup();
+                    if owners != vec![identity.owner.clone()] {
+                        return None;
+                    }
+                    if self
+                        .engine
+                        .file(candidate.range.file_id)
+                        .is_some_and(|file| file.kind.is_editable())
+                    {
+                        ranges.push(candidate.range);
+                    }
+                }
+                StoredReferenceCandidateRef::Constant(_)
+                | StoredReferenceCandidateRef::Method(_) => {}
+            }
+        }
+
+        ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+        ranges.dedup();
+        Some(MethodRenameTarget {
+            owner: identity.owner,
+            current_name: identity.method,
+            ranges,
+        })
+    }
+
+    fn method_candidate_rename_identities(
+        &self,
+        candidate: &StoredMethodReferenceCandidate,
+    ) -> Vec<MethodRenameIdentity> {
+        let owner_lookup = self.engine.names.const_lookup(candidate.owner).expect(
+            "INVARIANT VIOLATED: method rename candidate points to a missing owner lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern method owners before storing candidates.",
+        );
+        let owner = FullyQualifiedName::namespace_with_kind(
+            owner_lookup.path.to_vec(),
+            candidate.owner_kind,
+        );
+        let callees = if candidate.is_super {
+            self.resolve_super_method_callee(&owner, &candidate.method)
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            match candidate.access {
+                MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
+                    .resolve_method_callees(&owner, &candidate.method)
+                    .unwrap_or_default(),
+                MethodReferenceAccess::ExplicitReceiver => {
+                    let protected = candidate
+                        .caller
+                        .and_then(|caller| self.engine.fqn_for_id(caller))
+                        .and_then(|caller| {
+                            let mut owners = self
+                                .engine
+                                .method_facts_for(caller)
+                                .into_iter()
+                                .map(|fact| fact.owner)
+                                .collect::<Vec<_>>();
+                            owners.sort_by_key(ToString::to_string);
+                            owners.dedup();
+                            let caller = if owners.len() == 1 {
+                                owners.pop().expect(
+                                    "INVARIANT VIOLATED: one method rename caller owner disappeared after length validation. This is a bug because caller selection must be atomic. Fix: keep the local owner vector unchanged before pop.",
+                                )
+                            } else {
+                                FullyQualifiedName::namespace(caller.namespace_parts())
+                            };
+                            self.resolve_protected_method_callees(
+                                &owner,
+                                &candidate.method,
+                                &caller,
+                            )
+                        });
+                    protected
+                        .or_else(|| self.resolve_public_method_callees(&owner, &candidate.method))
+                        .unwrap_or_default()
+                }
+            }
+        };
+
+        let mut identities = callees
+            .into_iter()
+            .filter(|callee| {
+                callee.resolution == crate::core::MethodCalleeResolution::Exact
+                    && callee.method == candidate.method
+                    && !callee.definition_ranges.is_empty()
+            })
+            .map(|callee| MethodRenameIdentity {
+                owner: callee.owner,
+                method: callee.method,
+            })
+            .collect::<Vec<_>>();
+        identities.sort();
+        identities.dedup();
+        identities
+    }
+
+    fn method_lookup_chain_is_incomplete_for_rename(&self, owner: &FullyQualifiedName) -> bool {
+        let unresolved_sources = self
+            .engine
+            .graph
+            .unresolved_edges()
+            .into_iter()
+            .filter_map(|edge| {
+                let lookup = self.engine.names.const_lookup(edge.target).expect(
+                    "INVARIANT VIOLATED: unresolved rename graph edge points to a missing lookup. This is a bug because graph edges retain interned targets. Fix: retain target lookups for the graph edge lifetime.",
+                );
+                if edge.kind == GraphEdgeKind::Superclass
+                    && lookup.absolute
+                    && lookup.path.len() == 1
+                    && lookup.path[0].as_str() == "Object"
+                {
+                    return None;
+                }
+                self.engine
+                    .names
+                    .fqn(edge.source)
+                    .map(FullyQualifiedName::namespace_parts)
+            })
+            .collect::<HashSet<_>>();
+        let mut pending = vec![owner.clone()];
+        let mut visited = HashSet::new();
+        while let Some(current) = pending.pop() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            if unresolved_sources.contains(&current.namespace_parts()) {
+                return true;
+            }
+            pending.extend(
+                self.engine
+                    .graph_edges_from(&current)
+                    .into_iter()
+                    .filter(|edge| {
+                        matches!(
+                            edge.kind,
+                            GraphEdgeKind::Superclass
+                                | GraphEdgeKind::Include
+                                | GraphEdgeKind::Prepend
+                                | GraphEdgeKind::Extend
+                        )
+                    })
+                    .map(|edge| edge.target),
+            );
+        }
+        false
+    }
+
     pub fn resolve_method_signature_facts(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -224,6 +641,40 @@ impl<'a> AnalysisQuery<'a> {
         }
 
         if callees.is_empty() {
+            for application in execution_context_application_targets(self.engine, namespace_fqn) {
+                let ancestor_chain = method_lookup_chain(self.engine, &application);
+                if let Some(callee) = method_callee_in_chain(
+                    self.engine,
+                    &ancestor_chain,
+                    method,
+                    MethodCalleeResolution::Exact,
+                    allow_private,
+                    protected_caller,
+                ) {
+                    callees.push(callee);
+                } else if !allow_private
+                    && private_method_in_chain(self.engine, &ancestor_chain, method)
+                {
+                    callees.push(receiver_only_callee(application, method));
+                } else if let Some(callee) =
+                    method_missing_callee_in_chain(self.engine, &ancestor_chain)
+                {
+                    method_missing_fallbacks.push(callee);
+                }
+            }
+            callees.sort_by_key(|callee| {
+                (
+                    callee.owner.to_string(),
+                    callee
+                        .definition_ranges
+                        .first()
+                        .map(|range| (range.file_id, range.start_byte, range.end_byte)),
+                )
+            });
+            callees.dedup();
+        }
+
+        if callees.is_empty() {
             if !method_missing_fallbacks.is_empty() {
                 return Some(method_missing_fallbacks);
             }
@@ -309,6 +760,35 @@ impl<'a> AnalysisQuery<'a> {
             }
         }
 
+        let mut application_facts = Vec::new();
+        let mut application_ambiguous = false;
+        for application in execution_context_application_targets(self.engine, namespace_fqn) {
+            match self.resolve_method_reference_with_chain_cache(&application, method, chain_cache)
+            {
+                MethodLookupResult::Unique(fact) => application_facts.push(fact),
+                MethodLookupResult::Ambiguous { .. } => application_ambiguous = true,
+                MethodLookupResult::Missing => {}
+            }
+        }
+        application_facts.sort_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+                fact.fqn.to_string(),
+            )
+        });
+        application_facts.dedup();
+        if application_ambiguous || application_facts.len() > 1 {
+            return MethodLookupResult::Ambiguous {
+                owner: namespace_fqn.clone(),
+                method: *method,
+            };
+        }
+        if let Some(fact) = application_facts.pop() {
+            return MethodLookupResult::Unique(fact);
+        }
+
         if *method != method_missing_method() {
             return self.resolve_method_reference_with_chain_cache(
                 namespace_fqn,
@@ -367,7 +847,7 @@ impl<'a> AnalysisQuery<'a> {
         let mut targets = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
-        let has_exact = method_callee_in_chain(
+        let base_has_exact = method_callee_in_chain(
             self.engine,
             &ancestor_chain,
             method,
@@ -376,43 +856,70 @@ impl<'a> AnalysisQuery<'a> {
             None,
         )
         .is_some();
+        let mut lookup_chains = vec![ancestor_chain];
+        if !base_has_exact {
+            lookup_chains.extend(
+                execution_context_application_targets(self.engine, namespace_fqn)
+                    .into_iter()
+                    .map(|application| method_lookup_chain(self.engine, &application)),
+            );
+        }
+        let has_exact = lookup_chains.iter().any(|chain| {
+            method_callee_in_chain(
+                self.engine,
+                chain,
+                method,
+                MethodCalleeResolution::Exact,
+                true,
+                None,
+            )
+            .is_some()
+        });
 
         if !has_exact {
-            if let Some(callee) = method_missing_callee_in_chain(self.engine, &ancestor_chain) {
-                let method_fqn =
-                    FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method);
-                return vec![method_fqn];
+            for chain in &lookup_chains {
+                if let Some(callee) = method_missing_callee_in_chain(self.engine, chain) {
+                    let method_fqn =
+                        FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method);
+                    if seen.insert(method_fqn.clone()) {
+                        targets.push(method_fqn);
+                    }
+                }
+            }
+            if !targets.is_empty() {
+                return targets;
             }
         }
 
-        for ancestor in ancestor_chain {
-            let has_method_fact = !self
-                .engine
-                .method_facts_matching_owner_name(&ancestor, method)
-                .is_empty();
-            if ancestor != *namespace_fqn
-                && ancestor.namespace_parts().is_empty()
-                && !has_method_fact
-            {
-                continue;
-            }
+        for ancestor_chain in &lookup_chains {
+            for ancestor in ancestor_chain {
+                let has_method_fact = !self
+                    .engine
+                    .method_facts_matching_owner_name(ancestor, method)
+                    .is_empty();
+                if ancestor != namespace_fqn
+                    && ancestor.namespace_parts().is_empty()
+                    && !has_method_fact
+                {
+                    continue;
+                }
 
-            let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
-            if seen.insert(method_fqn.clone()) {
-                targets.push(method_fqn);
+                let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
+                if seen.insert(method_fqn.clone()) {
+                    targets.push(method_fqn);
+                }
             }
         }
         for override_fact in self.engine.all_method_visibility_overrides() {
             if override_fact.method != *method {
                 continue;
             }
-            if !method_lookup_chain(self.engine, &override_fact.owner)
-                .iter()
-                .any(|ancestor| {
-                    ancestor.namespace_parts() == namespace_fqn.namespace_parts()
-                        && ancestor.namespace_kind() == namespace_fqn.namespace_kind()
+            if !lookup_chains.iter().any(|chain| {
+                chain.iter().any(|ancestor| {
+                    ancestor.namespace_parts() == override_fact.owner.namespace_parts()
+                        && ancestor.namespace_kind() == override_fact.owner.namespace_kind()
                 })
-            {
+            }) {
                 continue;
             }
             let method_fqn =
@@ -472,6 +979,9 @@ impl<'a> AnalysisQuery<'a> {
         context: &[RubyConstant],
     ) -> Option<ConstantRenameTarget> {
         let fqn = self.resolve_constant_in_context(parts, context)?;
+        if fqn.has_generated_owner() {
+            return None;
+        }
         let current_name = *fqn.namespace_parts_slice().last()?;
         let symbol_facts = self
             .engine
@@ -974,6 +1484,38 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
+fn method_name_is_refactorable(method: RubyMethod) -> bool {
+    !matches!(
+        method.as_str(),
+        "+" | "-"
+            | "*"
+            | "/"
+            | "%"
+            | "**"
+            | "+@"
+            | "-@"
+            | "<<"
+            | ">>"
+            | "&"
+            | "|"
+            | "^"
+            | "~"
+            | "<=>"
+            | "<"
+            | "<="
+            | ">"
+            | ">="
+            | "=="
+            | "==="
+            | "!="
+            | "=~"
+            | "!~"
+            | "[]"
+            | "[]="
+            | "`"
+    )
+}
+
 fn constant_reference_name_range(
     engine: &crate::AnalysisEngine,
     range: TextRange,
@@ -1291,6 +1833,19 @@ fn edges_from(
         .filter(|edge| edge.kind == kind)
         .cloned()
         .collect()
+}
+
+pub(super) fn execution_context_application_targets(
+    engine: &crate::AnalysisEngine,
+    template: &FullyQualifiedName,
+) -> Vec<FullyQualifiedName> {
+    let mut targets = edges_from(engine, template, GraphEdgeKind::ExecutionContextApplication)
+        .into_iter()
+        .map(|edge| edge.target)
+        .collect::<Vec<_>>();
+    targets.sort_by_key(ToString::to_string);
+    targets.dedup();
+    targets
 }
 
 fn method_callee_in_chain(

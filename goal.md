@@ -2,7 +2,25 @@
 
 ## Reusable Goal Text
 
-Elevate Ruby Fast LSP from its current estimated 6.5/10 completeness to a 9/10 direct competitor to Shopify Ruby LSP. Preserve Ruby Fast LSP's advantages in semantic analysis, method navigation, references, RBS/YARD inference, deterministic simulation, Rust performance, agent-first APIs, and sandboxed extensions while closing the everyday editor, Rails, template, packaging, and production-confidence gaps. Complete the versioned, deterministic, permission-bounded, and failure-isolated extension architecture before broad framework expansion; RSpec must use its public contracts as the reference implementation, and Rails and third-party extensions must use those same contracts without privileged access to engine stores or LSP server state. Work incrementally with strict TDD, keep the simulator as the primary comprehensive semantic verification system, run the complete local pre-push verification gate before every commit or push, and update this document whenever scope or measured readiness changes.
+Maintain and extend Ruby Fast LSP from its evidence-backed 9.0/10 completeness as a
+direct competitor to Shopify Ruby LSP. Preserve its advantages in semantic
+analysis, method navigation, references, RBS/YARD inference, deterministic
+simulation, Rust performance, agent-first APIs, and sandboxed extensions.
+Everyday LSP breadth, the initial Rails feature surface, ERB/project coverage,
+framework-neutral block execution, and current-platform packaging are
+substantially delivered. The core Ruby eval/exec audit and project-wide method
+refactoring policy, extension telemetry/load stress, and measured real-project
+production evidence are delivered. RSpec must remain the Ruby/mruby deep
+public-contract acceptance implementation. The
+official default framework set is Rails, Sinatra, RSpec, Minitest, and Cucumber;
+Rails, Sinatra, Minitest, and Cucumber are Rust-authored Wasm adapters behind
+the same validated ABI. No framework policy belongs inside `ruby-analysis`.
+All other framework
+integrations are external user-installable extensions. Work incrementally with
+strict TDD, keep the simulator as the primary comprehensive semantic
+verification system, verify representative real projects where integration
+behavior matters, run the complete local pre-push gate before every commit or
+push, and update this document whenever scope or measured readiness changes.
 
 ## Product Definition
 
@@ -16,25 +34,59 @@ The goal is not exact feature parity. Features should be implemented when they
 contribute materially to the replacement experience or strengthen Ruby Fast
 LSP's differentiation.
 
-## Baseline
+## Recalibrated Baseline
 
-Estimated state as of July 2026: **6.5/10 overall**.
+The July 2026 execution-context audit reset the estimate to **7.8/10 overall**.
+This table records that pre-remediation baseline, not the current rating.
 
 | Area                    | Current estimate | Current state                                                                     |
 | ----------------------- | ---------------: | --------------------------------------------------------------------------------- |
-| Semantic architecture   |              8.5 | Reusable core, engine, indexer, and inference boundaries are established.         |
-| Definition/navigation   |              8.0 | Strong method, constant, mixin, visibility, hierarchy, and dynamic-form coverage. |
-| References              |              8.0 | Method, constant, and local reference support with centralized resolution.        |
-| Type inference          |              7.5 | RBS/YARD, generic substitution, local flow tracking, and return propagation.      |
-| Diagnostics             |              7.0 | Ambitious semantic diagnostics; real-world compatibility still needs hardening.   |
-| LSP feature breadth     |              7.0 | Agent-critical features exist; several everyday editor features are missing.      |
-| Rails/framework support |              4.5 | Initial DSL handling and RSpec extension, but not a complete Rails experience.    |
-| Formatting/refactoring  |              3.5 | Far behind mature formatter, linter, quick-fix, and refactoring integration.      |
-| Editor/package polish   |              5.5 | npm and VSIX work, but packaging and version consistency need hardening.          |
-| Production evidence     |              6.0 | Strong simulator and tests; limited packaged-editor and long-term user evidence.  |
+| Semantic architecture   |              8.2 | Strong reusable boundaries; execution context dimensions still need separation.  |
+| Definition/navigation   |              8.4 | Broad engine-owned lookup, hierarchy, implementation, and dynamic-form coverage.  |
+| References              |              8.0 | Strong centralized resolution; framework scope leaks remain a correctness gap.    |
+| Type inference          |              7.8 | RBS/YARD, substitution, flow tracking, signature help, and return propagation.    |
+| Diagnostics             |              7.5 | Broad semantic coverage with strong tests; real-project precision needs evidence. |
+| Extension platform      |              7.0 | Advanced sandbox/lifecycle/facts; block execution contexts are foundational work. |
+| LSP feature breadth     |              8.3 | Everyday navigation, editing, formatting, highlights, selection, and testing UX.  |
+| Rails/framework support |              7.2 | High-value Rails features exist; DSL execution ownership is not yet faithful.     |
+| Formatting/refactoring  |              6.5 | Formatting, lint fixes, and constant rename exist; method rename remains limited. |
+| Editor/package polish   |              7.5 | VSIX/npm packaging and smoke gates work; broader release maturity is still needed. |
+| Production evidence     |              6.8 | Strong simulator/local gates and initial real smokes; measured history is limited. |
 
-The semantic foundation is the strongest part of the project. The primary gap
-is product completeness rather than a missing analysis architecture.
+The semantic foundation was already the strongest part of the project. The
+execution-context work described below has since implemented the missing split
+between lexical scope, implicit receiver, method-definition owner, and closure
+scope.
+
+## Current Goal and Critical Path
+
+The goal of **9/10 overall product readiness** and **9/10 extension-platform
+readiness** is achieved. Execution-context/RSpec work, the typed Rust SDK, four
+independent Rust/Wasm framework consumers, project/version isolation, bounded
+telemetry, multi-project stress, full workspace verification, optimized
+simulation, real-project evidence, and installed-artifact smoke support current
+estimates of **9.0/10 overall** and **9.0/10 for extensions**.
+
+Priority order beyond the achieved 9/10 baseline:
+
+1. Mature Test Explorer-style discovery/reporting beyond run/debug code lenses.
+2. Broaden real-corpus, version-manager, and large multi-project evidence.
+3. Improve third-party extension authoring, compatibility, and distribution.
+4. Add optional bounded runtime-backed framework knowledge where static facts
+   are insufficient.
+
+Completed on the current path: project-wide method rename is engine-owned,
+namespace-kind aware, lifecycle-safe, and deterministic. It supports ordinary
+project `def` declarations, reopened definitions, inherited calls, static
+reflection, alias source operands, and visibility modifiers. It fails closed
+for ambiguity, unresolved lookup chains, external/generated/macro declarations,
+operators, incompatible writer shapes, `super`-coupled override families, and
+ancestor/descendant destination collisions.
+
+Do not raise the rating because APIs or fixtures merely exist. Rating movement
+requires black-box query behavior, deterministic edit/removal lifecycle,
+packaged-artifact verification, simulator coverage, and representative
+real-workspace evidence.
 
 ## Existing Advantages to Preserve
 
@@ -53,22 +105,28 @@ is product completeness rather than a missing analysis architecture.
 Do not weaken semantic accuracy merely to copy a competing feature. Do not move
 reusable semantics back into LSP adapters.
 
-## Competitive Gaps
+## Remaining Competitive Gaps
 
-Shopify Ruby LSP currently has a broader complete-product experience, including:
+The major remaining replacement-readiness gaps are:
 
-- Signature help.
-- Document highlights and selection ranges.
-- Formatter and linter integrations.
-- Quick fixes and refactoring code actions.
-- ERB support and host-language request delegation.
-- Test Explorer, run, and debug workflows.
-- Mature Bundler, Ruby environment, and index configuration behavior.
-- A larger add-on ecosystem.
-- Automatic Rails integration and optional runtime introspection.
-- Rails routes, associations, validations, callbacks, generators, and
-  controller/view navigation.
-- Greater release history and real-world operational hardening.
+- Broader third-party and real-corpus evidence for the now-implemented semantic
+  execution-context contract beyond the five official packages.
+- Broader rename support for generated/macro declarations only where an
+  extension or core fact can prove every coupled declaration and call edit;
+  current policy intentionally rejects those cases rather than guessing.
+- Broader generated-semantics evidence across definition, references, hover,
+  completion, diagnostics, hierarchy, signature help, and symbols; rename stays
+  deliberately fail-closed unless every coupled generated edit is provable.
+- Mature Test Explorer-style discovery/reporting beyond run/debug code lenses.
+- Broader Ruby/Bundler/environment edge-case evidence across version managers
+  and large multi-project repositories.
+- Optional, bounded runtime-backed framework knowledge where static analysis is
+  insufficient, without making a running application mandatory.
+- A larger proven third-party extension ecosystem and smoother authoring,
+  compatibility, validation, and debugging experience.
+- Long-term latency, memory, diagnostic-precision, packaged-release, and
+  real-project stability history across more corpora and platforms.
+- Greater release history and operational hardening relative to mature tools.
 
 Official references:
 
@@ -80,9 +138,13 @@ Official references:
 Re-check these sources before each major planning cycle because the competing
 feature set will change.
 
+Milestone ratings below are readiness checkpoints, not additive scores. A
+completed feature list does not earn its checkpoint while an upstream semantic
+correctness or production-evidence requirement remains open.
+
 ## Milestone 1: Everyday LSP Completeness
 
-Target rating: **7.3/10**.
+Status: feature surface delivered. Historical checkpoint: **7.3/10**.
 
 Priority order:
 
@@ -125,7 +187,11 @@ Completion criteria:
 
 ## Milestone 2: Production Extension Platform
 
-Target rating: **7.7/10**.
+The pre-remediation extension-platform assessment was **7/10**. The current
+evidence-backed assessment is **9.0/10**. Semantic execution contexts, hidden
+owners, project/version isolation, typed Ruby/Rust authoring, all four planned
+Rust/Wasm framework adapters, bounded telemetry/load stress, and the final
+production audit are complete.
 
 Complete the extension architecture before expanding framework-specific support.
 RSpec remains the reference implementation, and Rails must be implementable
@@ -152,6 +218,10 @@ Implement and stabilize:
    black-box extension test harness.
 10. Stable hooks for declaration DSLs, document symbols, code lenses, semantic
     facts, watched files, and optional runtime-backed knowledge.
+11. Framework-neutral block execution contexts that independently preserve
+    lexical constant/closure scope while overriding implicit receiver and
+    method-definition ownership, including deterministic hidden owners and
+    nested owner inheritance.
 
 Architecture requirements:
 
@@ -195,28 +265,272 @@ Planned extension architecture:
    diagnostics, and the declaration relationships needed by Rails and other
    DSL-heavy libraries. New patch families require validation, deterministic
    conflict identity, provenance, lifecycle removal, and black-box query tests.
-6. RSpec is the bundled reference extension, while a separately packaged
-   example extension proves that an external author can use the SDK, build a
-   Wasm artifact, pass validation, and contribute semantic/editor behavior
-   without modifying the server. Rails must use only these same public paths.
+6. RSpec is the bundled Ruby/mruby reference extension, while a separately
+   packaged example extension proves that an external author can use the SDK,
+   build a Wasm artifact, pass validation, and contribute semantic/editor
+   behavior without modifying the server. Rails, Sinatra, Minitest, and
+   Cucumber are bundled Rust-authored adapters and must use only the same public
+   domain contracts and validated fact path.
 7. Optional runtime knowledge enters through permission-bounded process
    requests and versioned events. Runtime output becomes validated patches; it
    cannot bypass static indexing, mutate server state, or make core Ruby
    analysis depend on a running application.
 
+### Official bundled framework strategy
+
+The default distribution supports exactly five first-party framework families:
+
+| Framework | Implementation strategy | Acceptance role |
+| --- | --- | --- |
+| RSpec | Ruby/mruby Wasm extension | Deep public Ruby SDK, Wasm, generated-owner, and nested-context reference. |
+| Rails | Rust-authored extension adapter | Declaration-heavy framework proof: models, routes, jobs, concerns, views, and tests. |
+| Sinatra | Rust-authored extension adapter | Receiver-changing route/filter block proof, including classic and modular styles. |
+| Minitest | Rust-authored extension adapter | Core Ruby/Rails test discovery, run, debug, and spec-style context proof. |
+| Cucumber | Rust-authored extension adapter | World-object, step-definition, hook, and support-module execution-context proof. |
+
+All five ship with the product and activate only for the owning isolated project
+when its Gemfile/lockfile and supported gem versions make the integration
+applicable. Activation, settings, semantic targets, private state, and runtime
+knowledge must not leak between projects.
+
+“Rust-authored” does not mean “part of the semantic core.” Framework call names,
+inflection, conventions, version policy, and DSL interpretation stay outside
+`ruby-analysis`. The preferred final artifact is a Rust-to-Wasm extension
+package using the same manifest, capability, validation, lifecycle, resource,
+and fact-ingestion contracts as external guests. Add a typed Rust guest SDK for
+that purpose. A trusted native Rust fast path is permitted only if profiling
+proves Wasm inadequate and black-box parity demonstrates that it is an
+optimization of the same contract, not a second semantic implementation.
+
+The Rails and Minitest migrations followed the required order: execution
+contexts and the Rust guest SDK stabilized first, behavioral acceptance tests
+locked the output, and each package migrated independently without narrowing
+semantics. Preserve that parity evidence. RSpec remains Ruby-authored so the
+public Ruby SDK and mruby runtime are continuously exercised by a
+production-strength bundled guest.
+`extensions/example-dsl` remains the minimal copyable Ruby authoring template.
+
+Every other framework/gem integration is an external user-installable extension.
+External packages may be authored in Ruby, Rust, or another supported Wasm
+language, but receive no privileged engine/server API and do not become bundled
+merely because they are popular.
+
 Implementation order:
 
-1. Finish the general semantic patch vocabulary and its deterministic merge
-   rules.
-2. Prove every patch family through SDK serialization, invalid-input tests,
+1. Implement and validate the semantic block-execution-context contract before
+   adding more major framework guests.
+2. Audit core block forms of `class_eval`, `module_eval`, `class_exec`,
+   `module_exec`, `instance_eval`, `instance_exec`, `define_method`, and
+   `define_singleton_method` against separate lexical scope, implicit receiver,
+   method owner, and closure semantics.
+3. Retrofit RSpec as the acceptance implementation: isolated sibling groups,
+   nested inheritance, lexical constant preservation, group-owned methods and
+   mixins, query consistency, and stale-fact removal.
+4. Finish the remaining general semantic patch vocabulary and deterministic
+   merge rules.
+5. Prove every patch family through SDK serialization, invalid-input tests,
    actual-Wasm black-box tests, edit/reindex removal, and simulator coverage
    where it exercises reusable engine semantics.
-3. Complete lifecycle/reload and packaged-extension smoke coverage.
-4. Build Rails support exclusively on the stabilized public contracts.
+6. Complete lifecycle/reload and packaged-extension smoke coverage.
+7. Add the typed Rust guest SDK and a package-level parity harness over the same
+   public ABI used by the Ruby/mruby SDK.
+8. Implement Sinatra and Cucumber as Rust-authored acceptance adapters because
+   they exercise receiver-changing contexts distinct from RSpec.
+9. Migrate Rails and Minitest to Rust-authored adapters only after behavior and
+   packaged-artifact parity tests exist.
+10. Bundle and lockfile-activate exactly Rails, Sinatra, RSpec, Minitest, and
+    Cucumber; keep all remaining framework integrations external and
+    user-installable.
+
+### Workstreams required for 9/10
+
+#### 1. Semantic execution contexts and hidden owners
+
+- Represent lexical constant scope, implicit receiver, method-definition
+  owner, and closure/local scope independently.
+- Add deterministic, extension-provenance semantic owner identities for
+  anonymous/generated runtime classes and singletons.
+- Allow nested semantic owners to participate in ordinary engine inheritance,
+  mixin, method lookup, type, and reference resolution.
+- Keep hidden owners out of user-visible constants, completion, workspace
+  symbols, namespace trees, and rename unless a real Ruby declaration exists.
+- Validate context ranges, nesting, owner identity, provenance, depth, and
+  conflicts before traversal. Context stack push/pop must be balanced on every
+  exit path and use fail-fast invariant messages.
+
+#### 2. Core Ruby evaluation audit
+
+- Cover block forms of `class_eval`, `module_eval`, `class_exec`, `module_exec`,
+  `instance_eval`, `instance_exec`, `define_method`, and
+  `define_singleton_method` using the same four-context model.
+- Prove that method ownership and implicit `self` can change while lexical
+  constants and captured locals remain tied to the source block.
+- Model string-eval forms separately; never apply block lexical semantics to a
+  string merely because the method name is the same.
+- Track refinements (`refine`/`using`), dynamic constant APIs, callback hooks,
+  and `method_missing` proxies as explicit follow-up audits with conservative
+  unsupported behavior rather than guesses.
+
+#### 3. RSpec as the deep acceptance implementation
+
+- `RSpec.describe`, nested `describe`/`context`, and shared-group application
+  create or connect deterministic hidden example-group owners.
+- `def`, `let`, `subject`, and mixins belong to the nearest group; nested groups
+  inherit parent behavior; sibling groups remain isolated.
+- `it`, `before`, `after`, and `around` use an instance of the nearest group as
+  implicit receiver without creating sibling-visible method namespaces.
+- Constants still resolve through their source lexical namespace.
+- The real regression in `goshposh/server/spec/apps/api/auth2_spec.rb` must no
+  longer index `platform` as `GoshPosh::Platform#platform` or return unrelated
+  project-wide references.
+
+#### 4. Project-aware and version-aware extension context
+
+- Every relevant extension event must identify the owning isolated Ruby
+  project, source URI/kind, workspace trust, Ruby version, and locked framework
+  gem versions through bounded domain data.
+- A shared registry must never leak guest state, semantic targets, settings, or
+  cached runtime knowledge between projects with different Gemfiles or gem
+  versions.
+- Framework guests must declare and enforce applicability/version policy rather
+  than interpreting same-named calls from an unrelated library.
+- Multi-root routing continues to use the deepest project root and the owning
+  project's engine; extension APIs must not expose engine handles.
+
+#### 5. Complete incremental lifecycle
+
+Prove deterministic replacement/removal for:
+
+- edits that move, rename, nest, unnest, or remove a DSL frame;
+- file create/change/delete and watched generated sources;
+- project add/remove and open-document rehoming;
+- extension settings changes, package reload, disablement, and deactivation;
+- excluded interactive documents and close/reopen behavior;
+- cross-file generated relationships and bounded reindex requests.
+
+All stale hidden owners, methods, symbols, types, references, diagnostics, and
+graph edges must disappear through normal per-file `replace_facts`; no second
+semantic store or broad framework-specific cleanup path is allowed.
+
+#### 6. Query consistency matrix
+
+Accepted extension facts and execution contexts must produce one consistent
+semantic identity across:
+
+- definition, references, document highlights, hover, and completion;
+- signature help, inferred types, and semantic diagnostics;
+- call hierarchy, type hierarchy, and implementation lookup;
+- rename/prepare-rename policy;
+- document/workspace symbols and project-only namespace-tree filtering.
+
+A feature is not complete when goto-definition succeeds but references,
+diagnostics, or completion use a different owner. Hidden/generated owners must
+have an explicit editability and rename policy.
+
+#### 7. ABI, SDK, and third-party authoring maturity
+
+- Version the execution-context and project-context contracts with capability
+  negotiation and backward-compatible decoding where promised.
+- Validate every name, range, type, owner relationship, nesting limit, payload
+  limit, capability, and provenance field at the host boundary.
+- Add typed mruby SDK builders; extension authors must not construct undocumented
+  raw JSON shapes.
+- Add a typed Rust guest SDK that produces packageable Wasm guests through the
+  same ABI, validation, and lifecycle contracts; it must not expose native
+  engine or server handles.
+- Keep SDK docs, manifest docs, validators, native fixtures, deterministic
+  fixtures, and actual Ruby-authored Wasm behavior synchronized.
+- Provide actionable validation/failure messages and an external black-box test
+  harness that does not import server internals.
+- Typed WIT may replace JSON later, but a WIT migration is not itself required
+  for 9/10 if the versioned JSON ABI remains strict and testable.
+
+#### 8. Performance and observability
+
+- Measure per-extension invocation counts, latency distributions, rejected and
+  accepted patch counts, fuel/memory use, process requests, and disable reasons.
+- Report enough information through extension status/debug surfaces to identify
+  a slow or failing guest without enabling verbose global logs.
+- Establish cold-index, didOpen, didChange, query-latency, and memory budgets
+  from profiler baselines and representative real repositories.
+- Prove cancellation/deadline/backpressure behavior when many events target a
+  serialized guest.
+- Exercise large files, thousands of DSL calls, many isolated projects, and
+  multiple loaded guests. Semantic correctness that makes indexing or typing
+  impractical does not qualify for 9/10.
+
+#### 9. Ecosystem proof
+
+The public contract must be consumed by distinct semantic shapes, not only by
+many variants of declaration macros:
+
+- RSpec: Ruby/mruby deep generated-owner and nested execution-context acceptance
+  package.
+- Sinatra and Cucumber: Rust-authored receiver-changing execution-context
+  consumers.
+- Rails: Rust-authored declaration-heavy framework consumer.
+- Minitest: Rust-authored test discovery/execution consumer.
+- `extensions/example-dsl`: independent third-party authoring and packaging
+  proof using only documented public contracts.
+
+Do not bundle dozens of framework guests for 9/10. The five official families
+above are the bounded default support commitment and demonstrate unrelated
+semantic shapes. Everything else must prove the external installation path.
+
+#### 10. Dynamic behavior and distribution policy
+
+- Unsupported/dynamic arguments and runtime-generated behavior remain explicit
+  `Unknown`/unresolved states; extensions must not coerce them into guessed
+  semantic truth.
+- Runtime introspection remains optional, trusted, permission-bounded,
+  observable, and useful only as input to normal validated fact production.
+- Cross-extension execution-context conflicts require deterministic rejection
+  and isolation equivalent to existing semantic patch conflicts.
+- Publisher signing/provenance is required only if a public extension registry
+  enters the 9/10 product scope. Manifest checksums provide artifact integrity,
+  not publisher identity.
+
+### Rating checkpoints
+
+| Checkpoint | Expected extension rating |
+| --- | ---: |
+| Current sandbox/lifecycle/patch platform | 7.0 |
+| Execution contexts and hidden semantic owners | 7.8 |
+| Core eval audit and faithful RSpec retrofit | 8.2 |
+| Project/version isolation and complete incremental lifecycle | 8.5 |
+| Query consistency plus ABI/SDK maturity | 8.7 |
+| Measured performance, observability, and unrelated real consumers | 9.0 |
+
+Do not increase the rating because types or APIs exist. Increase it only after
+black-box behavior, lifecycle removal, deterministic replay, packaged-artifact
+smoke tests, and representative real-workspace verification pass.
+
+### Recommended next goal-session starting point
+
+Treat 9/10 as the maintained production baseline. Select a narrow remaining
+gap above, establish its user-visible acceptance criteria, and preserve the
+complete local package, simulator, stress, and real-project gates.
+
+The detailed semantic contract and RSpec model are documented in
+`extensions/README.md` and are normative for this milestone.
 
 Completion criteria:
 
+- The public ABI can establish a validated, deterministic block execution
+  context without exposing or mutating a core scope tracker.
+- Hidden semantic owners participate in engine MRO/method queries without
+  leaking into user-visible constants, symbols, namespace trees, or rename.
+- RSpec sibling/nested group tests prove isolation, inheritance, lexical
+  constant preservation, query consistency, and edit/reindex removal.
+- Core evaluation-form tests prove the receiver/definee/lexical/closure split
+  for supported block forms and explicitly distinguish string-eval behavior.
 - The bundled RSpec extension uses only supported public extension contracts.
+- Rails, Sinatra, Minitest, and Cucumber are bundled Rust-authored adapters using
+  the same public contracts and normal validated fact-ingestion path.
+- The five official packages activate only for applicable locked gem versions
+  in the owning isolated project and do not leak state across projects.
+- All non-official framework integrations remain externally installable and can
+  achieve equivalent semantic behavior without privileged APIs.
 - A minimal third-party example extension can add a DSL declaration, document
   symbol, code lens, and semantic patch without modifying the server.
 - Compatibility mismatch, checksum failure, permission denial, fuel exhaustion,
@@ -227,6 +541,12 @@ Completion criteria:
   semantic state and query results.
 - Extension status and failures are observable without polluting ordinary Ruby
   diagnostics.
+- Extension status/debug evidence includes bounded performance and patch
+  telemetry sufficient to identify a slow or conflicting guest.
+- Calls and private state are scoped to the correct isolated project and locked
+  framework version in multi-project workspaces.
+- At least one receiver-changing DSL and one declaration-heavy DSL pass through
+  the same public execution/fact contracts used by RSpec.
 - The packaged VSIX discovers and loads its bundled RSpec extension.
 - The public extension documentation is sufficient to build an extension
   without reading server internals.
@@ -244,11 +564,13 @@ work must preserve and extend these public seams:
 - Extension output enters analysis only as validated per-file facts through the
   normal engine replacement lifecycle; extensions never mutate engine or LSP
   state directly.
-- RSpec, Minitest, Rails, and the example DSL package must remain ordinary
-  consumers of the same public contracts. Framework-specific privileged hooks
-  are prohibited.
+- RSpec, Rails, Sinatra, Minitest, Cucumber, and the example DSL package must
+  remain ordinary consumers of the same public contracts. Framework-specific
+  privileged hooks are prohibited. RSpec remains Ruby/mruby; the other four
+  official framework adapters are Rust-authored, preferably Rust-to-Wasm.
 
-Remaining extension-platform work toward 9/10 is evolutionary:
+Remaining extension-platform work beyond 9/10 is evolutionary rather than a
+new architecture:
 
 1. Add a new semantic patch or event only when a real framework workflow cannot
    be expressed by the existing vocabulary, and keep it framework-neutral.
@@ -261,6 +583,8 @@ Remaining extension-platform work toward 9/10 is evolutionary:
    verify that developer paths cannot mask missing packaged assets.
 5. Treat runtime introspection as optional, trusted, permission-bounded input;
    static analysis must remain useful and deterministic without a running app.
+6. Preserve bounded patch/latency telemetry and multi-project load stress across
+   all five official packages in every release audit.
 
 Real-workspace acceptance is a release criterion, not optional polish. Each
 bundled framework guest must survive repeated calls across a large application,
@@ -276,7 +600,8 @@ architecture rationale and regression evidence.
 
 ## Milestone 3: Credible Rails Development
 
-Target rating: **8.1/10**.
+Status: high-value feature surface delivered on the completed Milestone 2
+execution-context foundation. Historical checkpoint: **8.1/10**.
 
 Build a first-class Rails extension supporting the highest-value workflows:
 
@@ -312,7 +637,8 @@ Completion criteria:
 
 ## Milestone 4: Templates and Ruby Project Coverage
 
-Target rating: **8.6/10**.
+Status: planned source/template coverage substantially delivered. Target
+checkpoint after upstream semantic correctness: **8.6/10**.
 
 Implement:
 
@@ -1642,3 +1968,465 @@ At the end of every goal session, record:
   ERB HTML behavior pass locally.
 - Rating remains **9.0/10**. This closes a genuine multi-service daily-workflow
   gap rather than relaxing the product definition.
+
+### July 2026: Real RSpec scope audit and readiness recalibration
+
+- Real-workspace evidence: on `goshposh/server`, a method declared inside
+  `RSpec.describe` was indexed as `GoshPosh::Platform#platform`. References then
+  returned hundreds of unrelated lexical-owner calls. This proves that call
+  frame tracking and generated method patches do not model RSpec's anonymous
+  example-group execution owner.
+- Root cause: the analyzer currently conflates lexical constant scope,
+  implicit receiver, method-definition owner, and closure/local scope. This is
+  also a core Ruby risk for `class_eval`, `module_eval`, `class_exec`,
+  `module_exec`, `instance_eval`, `instance_exec`, `define_method`, and
+  `define_singleton_method` block forms.
+- Architecture consequence: semantic block execution contexts and deterministic
+  hidden owners are now foundational extension contracts. They must be
+  implemented framework-neutrally before expanding RSpec, Sinatra, Cucumber,
+  FactoryBot, or similar guests. The normative contract and acceptance matrix
+  live in `extensions/README.md`.
+- Related production fixes remain valid: extension semantic targets are seeded
+  per isolated project engine; the mruby output ownership double-free and RSpec
+  unnamed-subject patch conflict are fixed; unchanged cold-indexed project
+  files reuse existing facts. The reported 125 KiB helper didOpen improved from
+  14.39 s to 5.10 ms in the real project, and packaged RSpec/Rails/Minitest
+  guests load successfully.
+- Rating is recalibrated from the previous **9.0/10 claim to 7.8/10 overall**
+  and **7.0/10 for the extension platform**. The earlier rating correctly
+  reflected feature breadth, performance budgets, packaging, and production
+  smoke evidence, but it overestimated semantic fidelity for receiver/definee-
+  changing Ruby DSLs. Reaching 9.0 again requires the critical path and rating
+  checkpoints defined above; ratings may move downward when stronger real-world
+  evidence invalidates an assumption.
+
+### July 2026: First framework-neutral execution-context slice
+
+- Red-first evidence: a method call inside `::MetaTarget.class_eval` nested
+  lexically under another module previously returned no definition because the
+  analyzer could not retain lexical constant scope while changing implicit
+  receiver ownership.
+- Core implementation: `ScopeTracker` now carries a balanced execution-context
+  frame with independent implicit-receiver and method-definition-owner fields.
+  Static `class_eval`/`module_eval` block traversal uses the target as the
+  runtime receiver/definee while leaving lexical namespace and closure scopes
+  unchanged. Entering a real nested Ruby class/module suspends the outer
+  execution context so ordinary Ruby ownership wins.
+- Query consistency: fact collection and identifier lookup now read the same
+  execution context for `def`, unqualified calls, and `self`, while ordinary
+  method definitions retain their previous instance/singleton policy.
+- Verification: the red regression is green; additional tests prove lexical
+  constant lookup, target-only method ownership, non-leakage diagnostics, and
+  nested-frame restoration. All 347 `ruby-analysis` tests and all 11 matching
+  class-eval integration/simulator tests pass.
+- Remaining boundary: this is a real core prerequisite, not completed RSpec
+  support. Deterministic hidden generated owners, nested owner inheritance,
+  extension ABI validation/conflict policy, Ruby/mruby SDK exposure, and the
+  RSpec sibling/nested/edit lifecycle matrix remain on the critical path. The
+  overall and extension-platform ratings therefore remain **7.8/10** and
+  **7.0/10**.
+
+### July 2026: Collision-proof hidden semantic owners
+
+- Core identity: `GeneratedOwnerId` now creates deterministic identities from
+  extension, source, and frame components with unambiguous length-prefixing.
+  The identity enters FQNs through a reserved NUL-prefixed namespace sentinel
+  that no source-level `RubyConstant::new` call can construct, making collision
+  with real Ruby declarations structurally impossible.
+- Engine behavior: generated owners reuse the ordinary graph, superclass/MRO,
+  method lookup, reference, and per-file replacement stores. Focused engine
+  coverage proves a nested generated owner inherits its parent helper, an
+  unrelated sibling receives only conservative receiver-only resolution, and
+  replacing the file removes all generated owner and method facts.
+- Projection policy: generated owners and their methods are filtered from
+  constant completion, workspace symbols, namespace trees (including external
+  mode), and constant rename. They remain available to semantic queries that
+  already know the internal owner identity.
+- Performance evidence: a red-first layout regression measured the first
+  tagged design at 16 bytes per `RubyConstant` versus the original 8-byte
+  `Ustr`. The final reserved-sentinel representation is back to 8 bytes, so
+  supporting rare generated owners does not double every namespace segment in
+  the index.
+- Verification: all 353 `ruby-analysis` tests pass, including deterministic
+  identity, collision separation, compact layout, hidden projections, MRO,
+  sibling isolation, rename rejection, and stale-fact removal.
+- Remaining boundary: the public extension ABI/SDK does not yet declare,
+  validate, conflict-resolve, or apply block execution contexts. RSpec has not
+  yet been moved onto generated owners, so the ratings remain **7.8/10** overall
+  and **7.0/10** for extensions.
+
+### July 2026: Project-aware extension runtime and cross-file RSpec contexts
+
+- Execution-context contract: the public ABI, host validation, fact collector,
+  engine facts, and query paths now carry independently validated lexical scope,
+  implicit receiver, method-definition owner, and local-scope behavior. RSpec
+  root/nested groups, hooks, and examples use hidden generated owners, while the
+  core Ruby evaluation/definition forms use the same framework-neutral model.
+- Typed authoring: `crates/extension-guest-sdk` exports a stateful typed Rust
+  guest through the bounded Wasm ABI. `extensions/example-rust` is a real
+  Rust-to-Wasm acceptance package with manifest/checksum validation, generated
+  execution contexts, semantic methods, response hooks, stale-fact removal, and
+  an external black-box LSP test.
+- Project context: call and document events carry bounded project/source/trust/
+  Ruby/lockfile metadata. Manifest gem-version applicability fails closed on
+  absent, incomplete, or unsupported lock data. Each extension uses a private
+  lazy Wasm instance per project URI, and index calls, document symbols, and
+  code lenses are proven to observe only that project's guest heap.
+- Response trust boundary: document response hooks now require their declared
+  manifest capability, enforce locked-version applicability, route through the
+  owning project instance, and reject response-patch provenance that does not
+  match the loaded manifest ID.
+- Cross-file RSpec semantics: generated owners have explicit source or project
+  scope. Named `RSpec.shared_context` declarations use deterministic identities
+  derived from extension ID, project URI, and logical context name;
+  `include_context` emits an exact generated-owner mixin target. Direct methods,
+  `let` helpers, and hook-defined methods navigate across files, sibling groups
+  without the include remain isolated, references do not collect the sibling,
+  declaration/include edits remove stale facts and edges, and the same context
+  name cannot cross Gemfile-owned projects.
+- Official applicability: the packaged RSpec guest declares
+  `rspec-core >= 3, < 4`. Black-box tests prove 3.13 activation and semantic/
+  response behavior, while 4.0 receives neither semantic targets nor response
+  patches and does not disable the installed package.
+- Packaged evidence: the real Ruby/mruby RSpec Wasm was rebuilt at checksum
+  `194a89349f818928b79b381a35305481b611788670ec8e44b4ab6511ee8663e1`
+  and copied into the VSIX staging tree. The current typed Rust Wasm checksum is
+  `6a45645724f08e297ca657aa1144eabb171b626192ec9cb0479cc1c177742c60`.
+  Source-contract, native parity, Wasm-host, Rust package, supported/unsupported
+  applicability, project isolation, and packaged RSpec LSP tests pass locally.
+- Remaining boundary: the rest of the RSpec query/type matrix,
+  Sinatra and Cucumber Rust consumers, Rails/Minitest Rust migrations,
+  extension telemetry/load stress, method rename policy, full simulator and
+  release gates, and updated representative real-project evidence remain. This
+  verified slice does not by itself justify the 9/10 product rating.
+
+### July 2026: Cross-file RSpec shared-example instantiation
+
+- Red-first packaged evidence: an actual mruby-Wasm test proved that
+  `RSpec.shared_examples` had no generated `let` owner and that a single shared
+  runtime owner would incorrectly select the last consuming group through Ruby
+  MRO when the template was applied more than once.
+- Public contract: `ConnectExecutionContextPatch` now connects a reusable
+  template receiver to one concrete runtime owner. It is validated,
+  provenance-checked, conflict-keyed by exact targets and source range,
+  project-context gated, serialized through the public ABI, converted through
+  the normal per-file fact path, and stored as the framework-neutral
+  `ExecutionContextApplication` graph relation.
+- Engine semantics: execution-context application edges never enter ordinary
+  Ruby MRO or hierarchy projections. Method lookup searches the template first
+  and then each application independently, returning all defensible callees;
+  reference-target and stale-replacement paths share the same relationship.
+- RSpec behavior: `shared_examples` and `shared_examples_for` create
+  project-scoped hidden template/runtime owners. `include_examples`,
+  `it_behaves_like`, and `it_should_behave_like` expose template helpers to the
+  consuming group and application helpers to the shared body. Definition-local
+  helpers, generated `let` methods, cross-file references, sibling isolation,
+  one and multiple applications, and application removal are covered through
+  the packaged Wasm black-box lifecycle test. Native Rust parity and Ruby SDK
+  source tests cover the same patch shape.
+- Artifact evidence: the rebuilt Ruby/mruby RSpec Wasm checksum is
+  `194a89349f818928b79b381a35305481b611788670ec8e44b4ab6511ee8663e1`
+  in both the source package and VSIX staging tree.
+- Block-return inference: `DefineMethodPatch` can now request the generic
+  `Block` return source instead of supplying a guessed type. The collector
+  infers the value under the active execution context, makes it available to
+  later expressions in the same traversal, and persists it through ordinary
+  per-file replacement. The packaged RSpec Wasm uses this for `let`, `let!`,
+  named/unnamed `subject`, and `subject!`; black-box navigation proves receiver
+  lookup and dot completion for both helpers, plus replacement of the stale
+  inferred type after an edit. Completion consults the engine-owned execution
+  context at the cursor before resolving a bare helper's return type; it does
+  not reconstruct RSpec scope in the LSP adapter. Ordinary resolved method
+  candidates now participate directly in exact definition lookup, so the
+  result does not depend on reparsing the expression in the LSP adapter.
+- Regression evidence: the Ruby source suite passes 24 cases / 92 assertions,
+  the actual mruby-Wasm host suite passes 11 cases, all 8 packaged RSpec LSP
+  scenarios pass, and `cargo test --workspace --quiet` is green locally. The
+  exact-definition path retains private/protected visibility, visibility-bypass
+  sends, and the rule that missing methods do not navigate to `method_missing`.
+- Diagnostic/refactoring evidence: a `FakeEditor` lifecycle test proves that an
+  unresolved-method diagnostic on a `let`-derived receiver follows the block's
+  inferred return type and disappears after an edit changes that return type.
+  A separate integration test proves that generated RSpec helpers do not bypass
+  the global project-wide method-rename policy: rename remains unavailable
+  until the engine has explicit ambiguity, alias, visibility, dynamic-send, and
+  external-source rules. This closes the RSpec-specific diagnostic/rename
+  matrix without pretending that project-wide method rename is implemented.
+- Remaining boundary: prove the generic execution model with Sinatra and
+  Cucumber Rust/Wasm adapters, migrate Rails and Minitest to Rust-authored
+  guests, then complete extension stress/telemetry, global method rename, and
+  the full production gates. The broader 9/10 rating remains unearned.
+
+### July 2026: Official Sinatra Rust/Wasm execution-context adapter
+
+- Independent framework proof: `extensions/sinatra-rust` is a typed
+  Rust-authored adapter compiled to Wasm through the public guest SDK. It does
+  not depend on server/indexer internals and places no Sinatra policy in
+  `ruby-analysis`.
+- Faithful scope split: route, filter, and error-handler blocks retain lexical
+  constants and closure locals while using the owning application instance as
+  their implicit receiver. `helpers do` uses the application class as `self`
+  while assigning `def` ownership to the application instance. Constant
+  arguments to `helpers` become ordinary include edges into that instance MRO.
+  Classic calls target `Sinatra::Application`; modular calls target the current
+  `Sinatra::Base` subclass.
+- Generic ABI correction: the real Wasm test exposed that host validation
+  incorrectly required every execution context to declare a hidden owner. The
+  validator now accepts contexts made entirely from exact existing namespaces,
+  while still rejecting every undeclared generated-owner target. This makes the
+  contract genuinely framework-neutral instead of RSpec-shaped.
+- Project/version policy: the manifest activates only for complete locked
+  Sinatra `>= 3, < 5` projects and fails closed for 5.0 without disabling the
+  installed package. The package uses the existing per-project Wasm isolation,
+  validation, resource-limit, conflict, and fact-replacement paths.
+- Black-box evidence: four real packaged-Wasm scenarios prove classic and
+  modular helper navigation, route/filter receiver lookup, lexical constant
+  lookup, references, hover, non-leakage into unrelated classes, helper-module
+  inclusion, stale-fact removal after edits, and unsupported-version behavior.
+  Four native guest tests prove the corresponding typed patch shapes and reject
+  unrelated same-named calls. The checksum-bound artifact is
+  `5135239e1481fadd8ae05723e163979c047f56fa2fa927d6335d36b92c6cc59c`.
+- Distribution wiring: current-platform VSIX assembly rebuilds and tests the
+  Sinatra guest, bundles its manifest/docs/Wasm, the VS Code adapter discovers
+  it with the other official packages, and packaged smoke requires it to load.
+  The current `0.2.6` darwin-arm64 VSIX was built from this checkout and its
+  extracted packaged binary initialized successfully with RSpec, Rails,
+  Minitest, Sinatra, and ERB host behavior. `cargo test --workspace --quiet` is
+  also green with 1,065 server tests, 357 analysis tests, every extension/host/
+  black-box suite, and one intentionally ignored profiler test. The optimized
+  56-test simulator is green with its required-shape audit and zero semantic
+  false-positive budget; formatting is clean, all distribution manifests match
+  `0.2.6`, and the packaged VSIX dependency audit reports zero vulnerabilities.
+- Remaining boundary: implement Cucumber through the same public contract,
+  migrate Rails and Minitest to Rust-authored guests, finish global method
+  rename and extension stress/telemetry, then rerun every production and
+  packaging gate. The 9/10 rating remains unearned.
+
+### July 2026: Official Cucumber Rust/Wasm World adapter
+
+- Runtime fidelity: `extensions/cucumber-rust` models the per-scenario World as
+  a project-scoped hidden class owner. `Given`/`When`/`Then` and scenario hooks
+  preserve lexical constants, closure locals, and source `def` ownership while
+  switching only their implicit receiver to World. `World(SomeModule)` adds
+  cross-file mixins to that owner; `World { factory }` deliberately retains its
+  ordinary lexical execution context.
+- Public-contract isolation: the guest depends only on `extension-api` and the
+  typed Rust guest SDK, uses ordinary generated-owner/context/mixin patches,
+  and contains every Cucumber DSL name and policy outside `ruby-analysis`.
+- Applicability: complete lock data for Cucumber `>= 9, < 12` is required. The
+  current 11.1.1 path is covered and 12.0 fails closed without disabling the
+  installed package.
+- Evidence: three native contract tests and three actual packaged-Wasm tests
+  prove cross-file World helpers in steps and hooks, references, lexical
+  constants, non-leakage, stale mixin removal, World-factory isolation, and
+  unsupported-version behavior. The checksum-bound Wasm is
+  `96ef16debb1c44222b474bb0cc7dc1e50ba6ab995bbe9b42fb968311ba305eed`.
+- Distribution wiring: VSIX assembly rebuilds/tests and bundles Cucumber, the
+  VS Code adapter discovers it as an official package, and packaged smoke now
+  requires it to load with RSpec, Rails, Minitest, and Sinatra. The refreshed
+  full workspace suite is green, the optimized 56-test simulator is green, and
+  the extracted darwin-arm64 `0.2.6` VSIX initialized its packaged binary with
+  all five official guests plus ERB host behavior. Packaging also reports zero
+  npm vulnerabilities.
+- Remaining boundary: finish the core eval audit and project-wide method rename,
+  extension stress/telemetry, final real-workspace evidence, and the complete
+  9/10 audit. The product rating remains unearned until those gates close.
+
+### July 2026: Official Minitest Rust/Wasm migration and spec contexts
+
+- Compatibility-preserving migration: `extensions/minitest-ruby` retains its
+  stable package ID and VS Code command IDs but now compiles a Rust-authored
+  adapter through the typed guest SDK and ordinary bounded Wasm ABI. The old
+  mruby source/runtime and artifact are removed from source and distribution.
+- Existing behavior retained: conventional `*Test` classes, `def test_*`, and
+  Rails-style `test "…"` declarations retain synthetic symbols, exact Run and
+  Debug lenses, UTF-16 ranges, `didChange` removal, structured terminal argv,
+  and real `rdbg` launch behavior. Files outside `test/`/`*_test.rb` receive no
+  Minitest response patches.
+- Spec execution fidelity: an exactly resolved outer `Kernel`/`Object`
+  `describe` creates a source-scoped hidden subclass of `Minitest::Spec`.
+  Nested groups inherit their parent, siblings remain isolated, group bodies
+  preserve lexical constants/locals, implicit calls use the generated class,
+  and `def` owns instance methods. `it`, `specify`, hooks, `let`, and `subject`
+  execute against the owning group instance; helpers use ordinary generated
+  method facts and block-return inference. Spec groups/examples also contribute
+  discovery and Run/Debug lenses.
+- Applicability: the package requires complete owning-project lock data with
+  Minitest `>= 5, < 7`; the current 5.27/6.0 paths pass and 7.0 fails closed
+  without disabling the healthy installed package.
+- Evidence: seven native Rust tests prove discovery, UTF-16 response ranges,
+  generated-owner shape, helper typing, and unresolved-root rejection. Four
+  actual-Wasm black-box LSP tests prove TDD/Rails parity, spec nested
+  inheritance, sibling non-leakage, lexical constant lookup, generated-helper
+  navigation, edit/removal lifecycle, file filtering, and unsupported-version
+  behavior. The checksum-bound Wasm is
+  `7f09fe7c6a02f8bef0eba652cdb23a90ec22aba489852f65e3808039499e76d6`.
+- Production gates: `cargo test --workspace --quiet` is green with 1,065 server
+  tests, 357 analysis tests, and every extension/host/black-box suite. The
+  optimized 56-test simulator is green with zero semantic-diagnostic
+  false-positive budget. Current-platform VSIX assembly rebuilds and tests
+  Sinatra, Cucumber, and Minitest, reports zero npm vulnerabilities, and the
+  extracted darwin-arm64 `0.2.6` artifact initializes with all five official
+  guests plus packaged ERB host behavior.
+- Rating at this checkpoint supported **8.5/10 overall** and **8.7/10 for the
+  extension platform**. The subsequent Rails migration raises the current
+  estimate separately below. The 9/10 claim remains blocked by the core
+  eval/exec audit, project-wide method rename, bounded
+  extension telemetry/load stress, and the final real-workspace/release audit.
+
+### July 2026: Official Rails Rust/Wasm parity migration
+
+- Compatibility-preserving migration: `extensions/rails-ruby` retains its
+  package ID, manifest capabilities, patch identities, controller command, and
+  user-visible semantics, but now compiles through the typed Rust guest SDK and
+  the same bounded Wasm ABI as Sinatra, Minitest, and Cucumber. The obsolete
+  mruby source/runtime/artifact is removed; deterministic WAT/JSON host fixtures
+  remain as an independent ABI-ingestion matrix.
+- Full behavior port: Active Record associations and precise `class_name`/
+  `polymorphic` handling, callbacks and validations, resource/named/nested
+  routes, typed path/url helpers, controller/action references, Active Job
+  entry points, concern MRO flow, and controller-to-view lenses all emit the
+  same ordinary typed patches. Rails inflection and conventions remain entirely
+  inside the guest; method lookup, MRO, references, types, and stale removal
+  remain engine-owned.
+- Applicability: complete owning-project lock data with Rails `>= 6, < 9` is
+  required. Actual package tests cover Rails 6.1.7 and 8.1.3; 9.0 fails closed
+  without disabling the healthy installed package.
+- Evidence: eight native Rust tests cover every patch family and conservative
+  dynamic behavior. Eight deterministic host-contract LSP tests retain the
+  previous fact-ingestion matrix. Three actual Rust-Wasm black-box tests prove
+  associations/options/types, private callback navigation and references,
+  routes/helpers/nested frames, controller/action navigation, Active Job,
+  concerns, view lenses, isolated version activation, and edit/removal
+  lifecycle. The checksum-bound Wasm is
+  `edd80fb7d9a27f8434f64cf1954543ad4708a1f91220d9fac9251af54726b133`.
+- Production gates: strict package Clippy is clean. The full workspace is green
+  with 1,065 server tests, 357 analysis tests, all official guest/native/host/
+  actual-Wasm suites, and one intentionally ignored profiler test. The
+  optimized 56-test simulator remains green with zero semantic-diagnostic
+  false-positive budget. Current-platform VSIX assembly rebuilds/tests all four
+  Rust guests, reports zero npm vulnerabilities, and the extracted darwin-arm64
+  `0.2.6` artifact initializes with all five official packages plus ERB host
+  behavior.
+- Rating: completing the exact official framework implementation strategy and
+  packaged parity supports **8.6/10 overall** and **8.8/10 for extensions**.
+  The 9/10 claim still requires the core eval/exec audit, project-wide method
+  rename, bounded extension telemetry/load stress, real-workspace refresh, and
+  final criterion-by-criterion production audit.
+
+### July 2026: Core eval/exec and dynamic-definition audit completed
+
+- Red-first correction: a `define_method` block inside a class resolved an
+  implicit helper to the class singleton instead of the defined instance. The
+  same defect affected explicit `send(:define_method)`, receiver-form
+  `define_singleton_method`, and `define_method` inside `instance_eval`.
+- Framework-neutral model: dynamic-definition blocks now receive their actual
+  target instance/singleton while retaining source lexical constants, captured
+  locals, and nested Ruby `def` ownership. Direct, static `send`/`__send__`,
+  `const_get`, singleton-class, and inferred-return paths use the same balanced
+  execution-context stack and ordinary per-file type/fact replacement.
+- Deeper eval correction: review proved that the previous eval frame leaked the
+  block's class-object receiver into the body of a `def` declared by
+  `class_eval`/`class_exec`. Execution frames now survive ordinary nested blocks
+  but suspend at real class/module and method boundaries. Declared method bodies
+  receive a separate runtime frame for their actual instance/singleton owner,
+  while constants remain lexical. This also prevents RSpec group-class `self`
+  from leaking into group-owned instance method bodies.
+- Coverage: all six eval/exec block names plus `define_method` and
+  `define_singleton_method` now have navigation coverage across receiver,
+  definee, lexical-constant, and closure-local dimensions. Tests distinguish
+  direct block execution from later method execution, cover unqualified nested
+  eval calls, singleton-class definitions, reflective singleton definitions,
+  diagnostics, inferred hover types, edit/removal lifecycle, and all three
+  string-eval names as an explicit non-synthesizing boundary.
+- Independent simulator evidence: define-method fixtures now contain implicit
+  calls that must resolve against the generated method receiver. This exposed
+  and fixed a cursor-query mismatch for `const_get(...).send(:define_method)`;
+  the identifier visitor now reconstructs the same static receiver chain as
+  fact collection.
+- Verification: `cargo test --workspace --quiet` is green with 1,088 server
+  tests, 358 analysis tests, every official native/host/actual-Wasm suite, and
+  one intentionally ignored profiler test. The optimized 56-test simulator is
+  green, including deterministic edit sequences and its zero semantic-
+  diagnostic false-positive budget. Current-platform VSIX assembly rebuilt the
+  native darwin-arm64 server and all four Rust guests, reran every packaged
+  actual-Wasm test, reported zero npm vulnerabilities, and produced a 499-file,
+  24.21 MB artifact whose extracted binary initialized with RSpec, Rails,
+  Minitest, Sinatra, Cucumber, and packaged ERB host behavior.
+- Rating: closing the foundational execution audit supported **8.7/10 overall**
+  and **8.9/10 for extensions** at that checkpoint. Project-wide method rename
+  is completed below.
+
+### July 2026: Project-wide method rename completed
+
+- Engine contract: `MethodFact` retains an exact declaration-name range and
+  rename identity includes the namespace kind, keeping instance and singleton
+  methods distinct. Eligibility, collision analysis, source ownership, MRO,
+  ambiguity, and edit ranges live in `ruby-analysis::engine`; the LSP adapter
+  only converts byte ranges to UTF-16 workspace edits.
+- Supported behavior: ordinary project `def` declarations, reopened
+  definitions, inherited calls, independent overrides, instance/singleton
+  identity, private/protected visibility modifiers, static `send`/`__send__`,
+  alias source operands, prepare-rename, rename-from-reference, UTF-16, and
+  document replacement lifecycle.
+- Fail-closed policy: external/signature-only truth, generated or macro-backed
+  declarations, unresolved lookup edges, ambiguous resolution, operator
+  syntax, reader/writer shape changes, `super`-coupled override families, and
+  destination collisions across both ancestor and descendant lookup chains do
+  not produce edits. General find-references behavior remains unchanged by
+  visibility-only coupling metadata.
+- Red/green evidence: the initial cross-file `User#display_name` test failed
+  because no method rename path existed. Sixteen focused `FakeEditor` tests and
+  an engine external-source test now cover supported edits and deterministic
+  rejection. The full workspace gate is green with 1,104 server tests, 359
+  analysis tests, 42 extension API tests, and every remaining workspace suite.
+  The optimized 56-test simulator is green in 3.14 seconds. Current-platform
+  VSIX assembly rebuilt the changed darwin-arm64 server and all four Rust
+  guests, reran their packaged black-box suites, found zero npm
+  vulnerabilities, and produced a 499-file, 24.23 MB archive whose extracted
+  binary initialized all five official packages plus ERB host behavior.
+- Rating: this closes the principal refactoring gap and supports **8.8/10
+  overall** while extension readiness remains **8.9/10**. Remaining blockers
+  are bounded extension telemetry/load stress, refreshed real `goshposh`
+  precision/performance evidence, packaged release verification, and the final
+  criterion-by-criterion 9/10 audit.
+
+### July 2026: Extension telemetry, coexistence stress, and real-project evidence
+
+- Observability: extension status now reports bounded call/lifecycle counts,
+  emitted patch families, rejection/conflict/disablement and resource-failure
+  counts, total/maximum guest latency, and isolated project-instance creation.
+  Concurrent failures count only the first disablement transition.
+- Payload/runtime correction: official manifests may deliver immutable
+  `ProjectContext` once through activation. The RSpec mruby guest uses a
+  deterministic vendored C JSON implementation, optimized Wasm compilation,
+  balanced GC arenas, and the independent 500 ms wall deadline. Its checksum is
+  `c61a4dc1e902dde1a7a1ed9501af09477f7e39b17a0be2af6a47951e9a11ac41`.
+- Cross-framework isolation: host-derived frame-owner IDs ensure implicit calls
+  inside an RSpec or Minitest execution frame reach only that frame's guest.
+  Explicit non-self receivers remain eligible for ordinary cross-extension
+  dispatch. A project locking both frameworks no longer disables either guest
+  or merges their generated owners.
+- Repeatable stress: all five actual packaged Wasm guests survived twelve edit
+  cycles across six isolated projects, including a 101-gem padded RSpec lock,
+  RSpec/Minitest coexistence, and unsupported framework versions. The 40.8 s
+  gate reported zero traps, resource failures, rejected outputs, conflicts, or
+  disablements; every applicable project constructed one reusable instance.
+- Real evidence: the dependency-complete `goshposh/server` corpus indexed 3,065
+  files/43.4 MB with all five guests in 30.79 s and 170.0 MB estimated engine
+  heap. RSpec processed 6,148 calls in 3.36 s total with a 4.90 ms maximum,
+  versus 39.0 s guest time and 55.7 s cold indexing before native JSON and
+  activation context. Opening the probed spec reused cold facts in 9.80 ms;
+  `platform` references returned exactly one RSpec-group use rather than the
+  631 unrelated calls produced without extensions.
+- Final audit: root tests passed 1,108 cases; the remaining workspace suites,
+  including 359 analysis tests and every actual-Wasm black-box suite, passed.
+  The optimized 56-case simulator passed in 3.10 s. Deterministic profiling met
+  every latency/memory budget (772.64 ms cold index, 638 us p95 edit, 5.9 MB
+  heap). A freshly rebuilt 0.2.6 VSIX passed extracted-package smoke, loaded all
+  five official guests plus ERB behavior, was uninstalled/reinstalled in VS
+  Code, and the separately packed npm CLI completed a real initialize handshake.
+- Rating: this evidence closes the final production gates and establishes
+  **9.0/10 overall** and **9.0/10 for extensions**. Remaining gaps are maturity,
+  ecosystem, and broader longitudinal evidence rather than missing foundational
+  daily workflows.

@@ -16,7 +16,13 @@ use wasmtime_wasi::{p1, WasiCtxBuilder};
 const DEFAULT_MAX_INPUT_BYTES: usize = 64 * 1024;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 256 * 1024;
 const DEFAULT_MAX_MEMORY_BYTES: usize = 32 * 1024 * 1024;
-const DEFAULT_FUEL_PER_CALL: u64 = 100_000_000;
+// The public ABI permits 64 KiB inputs. mruby's JSON decoder legitimately
+// consumes more than 100M Wasm instructions for project contexts containing a
+// production-sized lockfile, so the fuel ceiling must cover the full accepted
+// payload rather than only the tiny fixtures used by most extension tests.
+// The independent epoch deadline still interrupts every guest boundary after
+// 500 ms, including guests that consume no fuel efficiently.
+const DEFAULT_FUEL_PER_CALL: u64 = 1_000_000_000;
 const DEFAULT_WALL_TIMEOUT: Duration = Duration::from_millis(500);
 const EPOCH_TICK: Duration = Duration::from_millis(5);
 
@@ -282,16 +288,22 @@ impl WasmExtension {
     }
 
     pub fn index_call(&mut self, ctx: &CallContext) -> Result<Vec<IndexPatch>> {
+        self.index_call_output(ctx)
+            .map(|output| output.index_patches)
+    }
+
+    pub fn index_call_output(&mut self, ctx: &CallContext) -> Result<ExtensionOutput> {
         if self.handle_event.is_some() {
             let event = ExtensionEvent {
                 event: "index.call.enter".to_string(),
                 call: Some(ctx.clone()),
                 document: None,
+                project: None,
                 settings: None,
                 files: None,
                 process_results: None,
             };
-            return self.handle_event(&event).map(|output| output.index_patches);
+            return self.handle_event(&event);
         }
 
         let input = serde_json::to_vec(ctx).context("failed to encode CallContext JSON")?;
@@ -308,7 +320,13 @@ impl WasmExtension {
             self.index_call
                 .call(&mut self.store, (ptr, input.len() as i32)),
             "failed to call extension index_call",
-        )?;
+        )
+        .map_err(|error| {
+            anyhow!(
+                "extension index_call input was {} bytes: {error:#}",
+                input.len()
+            )
+        })?;
         self.free_guest_bytes(ptr as u32, input.len() as u32, "index_call input")?;
 
         let (output, out_ptr, out_len) = read_packed_bytes(
@@ -320,13 +338,14 @@ impl WasmExtension {
         self.free_guest_bytes(out_ptr, out_len, "index_call output")?;
         let patches = serde_json::from_slice(&output)
             .context("extension returned invalid IndexPatch JSON")?;
-        Ok(patches)
+        Ok(ExtensionOutput::index_patches(patches))
     }
 
     pub fn handle_event(&mut self, event: &ExtensionEvent) -> Result<ExtensionOutput> {
         let Some(handle_event) = self.handle_event.clone() else {
             return Ok(ExtensionOutput {
                 index_patches: Vec::new(),
+                execution_contexts: Vec::new(),
                 response_patches: Vec::new(),
                 command_patches: Vec::new(),
                 process_requests: Vec::new(),
@@ -346,7 +365,8 @@ impl WasmExtension {
         let packed = map_guest_call(
             handle_event.call(&mut self.store, (ptr, input.len() as i32)),
             "failed to call extension handle_event",
-        )?;
+        )
+        .map_err(|error| anyhow!("extension event input was {} bytes: {error:#}", input.len()))?;
         self.free_guest_bytes(ptr as u32, input.len() as u32, "handle_event input")?;
 
         let (output, out_ptr, out_len) = read_packed_bytes(
@@ -494,8 +514,9 @@ fn unpack_ptr_len(packed: i64) -> Result<(u32, u32)> {
 mod tests {
     use super::*;
     use ruby_fast_lsp_extension_api::{
-        Argument, ArgumentValue, DocumentContext, NamespaceKind, Receiver, SourcePosition,
-        SourceRange,
+        Argument, ArgumentValue, CalleeResolution, DocumentContext, ExecutionContextTarget,
+        LockedGem, LockedGemSource, NamespaceKind, ProjectContext, ProjectSourceKind, Receiver,
+        ResolvedCall, ResolvedCallee, SourcePosition, SourceRange,
     };
 
     #[test]
@@ -521,6 +542,7 @@ mod tests {
                 event: "index.call.enter".to_string(),
                 call: Some(let_context()),
                 document: None,
+                project: None,
                 settings: None,
                 files: None,
                 process_results: None,
@@ -550,6 +572,13 @@ mod tests {
         assert_eq!(
             ext.indexed_call_names(),
             &[
+                "shared_context".to_string(),
+                "shared_examples".to_string(),
+                "shared_examples_for".to_string(),
+                "include_context".to_string(),
+                "include_examples".to_string(),
+                "it_behaves_like".to_string(),
+                "it_should_behave_like".to_string(),
                 "describe".to_string(),
                 "context".to_string(),
                 "it".to_string(),
@@ -579,7 +608,8 @@ mod tests {
                 | IndexPatch::AddReference(_)
                 | IndexPatch::DefineMethod(_)
                 | IndexPatch::SetSuperclass(_)
-                | IndexPatch::ApplyMixin(_) => None,
+                | IndexPatch::ApplyMixin(_)
+                | IndexPatch::ConnectExecutionContext(_) => None,
             })
             .expect(
                 "INVARIANT VIOLATED: rspec let did not emit user helper DefineMethod. \
@@ -590,6 +620,50 @@ mod tests {
         assert_eq!(method.namespace, &["User".to_string()]);
         assert_eq!(method.source.extension_id, "rspec-ruby");
         assert_eq!(method.source.macro_name, "let");
+        assert_eq!(
+            method.return_type_source,
+            Some(ruby_fast_lsp_extension_api::MethodReturnTypeSource::Block)
+        );
+
+        let output = ext.index_call_output(&root_describe_context()).expect(
+            "INVARIANT VIOLATED: actual RSpec Wasm failed to return its execution context. This is a bug because the bundled artifact must exercise the same public event contract as the Ruby source. Fix: rebuild the mruby Wasm after SDK or guest changes.",
+        );
+        let context = output.execution_contexts.first().expect(
+            "INVARIANT VIOLATED: actual RSpec Wasm omitted the describe execution context. This is a bug because source-only tests cannot prove packaged generated-owner behavior. Fix: keep handle_event returning index_call_output.",
+        );
+        assert!(matches!(
+            context.implicit_receiver,
+            ExecutionContextTarget::GeneratedOwner {
+                owner_kind: Some(NamespaceKind::Singleton),
+                ..
+            }
+        ));
+        assert!(matches!(
+            context.method_definition_owner,
+            ExecutionContextTarget::GeneratedOwner {
+                owner_kind: Some(NamespaceKind::Instance),
+                ..
+            }
+        ));
+
+        let shared_output = ext.index_call_output(&root_shared_context()).expect(
+            "INVARIANT VIOLATED: actual RSpec Wasm failed to return its project-scoped shared context. This is a packaged guest bug because shared contexts require stable cross-file identity. Fix: rebuild the mruby Wasm after SDK or guest changes.",
+        );
+        let shared = shared_output
+            .execution_contexts
+            .first()
+            .expect("actual RSpec Wasm must emit a shared_context execution owner");
+        assert_eq!(
+            shared.generated_owners[0].scope,
+            ruby_fast_lsp_extension_api::GeneratedOwnerScope::Project
+        );
+        assert_eq!(
+            shared.method_definition_owner,
+            ExecutionContextTarget::ProjectGeneratedOwner {
+                local_id: "shared-context:authenticated".to_string(),
+                owner_kind: None,
+            }
+        );
 
         for _ in 0..64 {
             let repeated = ext.index_call(&let_context()).expect(
@@ -619,7 +693,9 @@ mod tests {
                     uri: "file:///spec/user_spec.rb".to_string(),
                     text: "\nRSpec.describe User do\n  it \"returns name\" do\n  end\nend\n"
                         .to_string(),
+                    project: None,
                 }),
+                project: None,
                 settings: None,
                 files: None,
                 process_results: None,
@@ -635,7 +711,9 @@ mod tests {
                 document: Some(DocumentContext {
                     uri: "file:///spec/other_spec.rb".to_string(),
                     text: "RSpec.describe Other do\nend\n".to_string(),
+                    project: None,
                 }),
+                project: None,
                 settings: None,
                 files: None,
                 process_results: None,
@@ -644,6 +722,44 @@ mod tests {
                 "INVARIANT VIOLATED: repeated mruby events corrupted guest allocation state. This is a bug because response hooks execute for every matching document. Fix: keep host/guest output ownership single-sourced.",
             );
         assert_eq!(repeated.response_patches.len(), 1);
+    }
+
+    #[test]
+    fn typed_rust_wasm_guest_returns_execution_context_and_generated_method() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../extensions/example-rust/target/wasm32-wasip1/release/ruby_fast_lsp_example_rust_extension.wasm",
+        );
+        if !path.exists() {
+            eprintln!(
+                "skipping real Rust Wasm test; build first with the command in extensions/example-rust/README.md"
+            );
+            return;
+        }
+
+        let mut extension = WasmExtension::from_file("example-rust", &path).expect(
+            "INVARIANT VIOLATED: typed Rust SDK artifact failed to load through Wasmtime. This is an SDK bug because generated exports must match the public host ABI. Fix: keep export_extension! synchronized with WasmExtension.",
+        );
+        assert_eq!(
+            extension.indexed_call_names(),
+            &[
+                "scope".to_string(),
+                "property".to_string(),
+                "isolation_probe".to_string()
+            ]
+        );
+
+        let scope = example_scope_context();
+        let scope_output = extension.index_call_output(&scope).expect(
+            "INVARIANT VIOLATED: typed Rust guest failed to return scope output. This is an SDK bug because handle_event must decode and encode ExtensionOutput. Fix: keep typed event dispatch synchronized with extension-api.",
+        );
+        assert_eq!(scope_output.execution_contexts.len(), 1);
+
+        let property_output = extension
+            .index_call_output(&example_property_context(&scope))
+            .expect(
+                "INVARIANT VIOLATED: typed Rust guest failed to return property output. This is an SDK bug because nested CallContext values must survive Wasm serialization. Fix: preserve enclosing calls in typed decoding.",
+            );
+        assert_eq!(property_output.index_patches.len(), 1);
     }
 
     #[test]
@@ -792,6 +908,7 @@ mod tests {
 
     fn let_context() -> CallContext {
         CallContext {
+            project: None,
             method_name: "let".to_string(),
             receiver: Receiver::None,
             arguments: vec![Argument {
@@ -802,6 +919,7 @@ mod tests {
             current_namespace: vec!["User".to_string()],
             namespace_kind: NamespaceKind::Singleton,
             call_range: range(),
+            block_range: Some(range()),
             message_range: range(),
             resolved_callees: Vec::new(),
             enclosing_calls: vec![ruby_fast_lsp_extension_api::ResolvedCall {
@@ -816,6 +934,121 @@ mod tests {
                 }],
                 call_range: range(),
                 message_range: range(),
+                frame_extension_ids: vec!["rspec-ruby".to_string()],
+            }],
+        }
+    }
+
+    fn root_describe_context() -> CallContext {
+        CallContext {
+            project: None,
+            method_name: "describe".to_string(),
+            receiver: Receiver::Constant(vec!["RSpec".to_string()]),
+            arguments: Vec::new(),
+            current_namespace: vec!["Lexical".to_string()],
+            namespace_kind: NamespaceKind::Singleton,
+            call_range: range(),
+            block_range: Some(range()),
+            message_range: range(),
+            resolved_callees: vec![ruby_fast_lsp_extension_api::ResolvedCallee {
+                owner: vec!["RSpec".to_string()],
+                owner_kind: NamespaceKind::Singleton,
+                method: "describe".to_string(),
+                resolution: ruby_fast_lsp_extension_api::CalleeResolution::Exact,
+            }],
+            enclosing_calls: Vec::new(),
+        }
+    }
+
+    fn root_shared_context() -> CallContext {
+        let mut context = root_describe_context();
+        context.project = Some(ProjectContext {
+            project_uri: "file:///workspace".to_string(),
+            source_uri: "file:///workspace/spec/support/shared.rb".to_string(),
+            source_kind: ProjectSourceKind::Project,
+            workspace_trusted: true,
+            ruby_version: Some("3.3".to_string()),
+            lockfile_present: true,
+            locked_gems_complete: true,
+            locked_gems: vec![LockedGem {
+                name: "rspec-core".to_string(),
+                version: "3.13.1".to_string(),
+                source: LockedGemSource::Registry,
+            }],
+        });
+        context.method_name = "shared_context".to_string();
+        context.arguments = vec![Argument {
+            keyword: None,
+            value: ArgumentValue::String("authenticated".to_string()),
+            range: range(),
+        }];
+        context.resolved_callees = vec![ResolvedCallee {
+            owner: vec!["RSpec".to_string()],
+            owner_kind: NamespaceKind::Singleton,
+            method: "shared_context".to_string(),
+            resolution: CalleeResolution::Exact,
+        }];
+        context
+    }
+
+    fn example_scope_context() -> CallContext {
+        CallContext {
+            project: Some(ProjectContext {
+                project_uri: "file:///workspace".to_string(),
+                source_uri: "file:///workspace/example.rb".to_string(),
+                source_kind: ProjectSourceKind::Project,
+                workspace_trusted: true,
+                ruby_version: Some("3.3".to_string()),
+                lockfile_present: true,
+                locked_gems_complete: true,
+                locked_gems: vec![LockedGem {
+                    name: "example-framework".to_string(),
+                    version: "1.0.0".to_string(),
+                    source: LockedGemSource::Registry,
+                }],
+            }),
+            method_name: "scope".to_string(),
+            receiver: Receiver::Constant(vec!["ExampleDsl".to_string()]),
+            arguments: Vec::new(),
+            current_namespace: Vec::new(),
+            namespace_kind: NamespaceKind::Instance,
+            call_range: range(),
+            block_range: Some(range()),
+            message_range: range(),
+            resolved_callees: vec![ResolvedCallee {
+                owner: vec!["ExampleDsl".to_string()],
+                owner_kind: NamespaceKind::Singleton,
+                method: "scope".to_string(),
+                resolution: CalleeResolution::Exact,
+            }],
+            enclosing_calls: Vec::new(),
+        }
+    }
+
+    fn example_property_context(scope: &CallContext) -> CallContext {
+        CallContext {
+            project: scope.project.clone(),
+            method_name: "property".to_string(),
+            receiver: Receiver::None,
+            arguments: vec![Argument {
+                keyword: None,
+                value: ArgumentValue::Symbol("generated_name".to_string()),
+                range: range(),
+            }],
+            current_namespace: Vec::new(),
+            namespace_kind: NamespaceKind::Instance,
+            call_range: range(),
+            block_range: None,
+            message_range: range(),
+            resolved_callees: Vec::new(),
+            enclosing_calls: vec![ResolvedCall {
+                method_name: scope.method_name.clone(),
+                receiver: scope.receiver.clone(),
+                arguments: scope.arguments.clone(),
+                resolved_callees: scope.resolved_callees.clone(),
+                call_range: scope.call_range,
+                message_range: scope.message_range,
+                frame_extension_ids: vec!["rspec-ruby".to_string()],
             }],
         }
     }

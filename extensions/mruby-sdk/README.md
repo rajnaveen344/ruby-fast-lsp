@@ -74,7 +74,12 @@ extensions/mruby-sdk/scripts/build-wasm-docker.sh extensions/example-dsl
 
 The builder reads the package ID and output path from `extension.toml`, bundles
 the SDK/source/runtime, generates a package-specific mruby bytecode symbol, and
-links the common JSON ABI shim. It contains no RSpec- or server-specific code.
+links the common JSON ABI shim. The Wasm build uses the vendored, MIT-licensed
+`mruby-json` C implementation for ABI parsing/serialization; ordinary CRuby
+source tests use the standard `json` library. Host and target mruby builds use
+the same gem set, and optimized builds retain the 500 ms host deadline and
+per-call fuel/memory/payload limits. It contains no RSpec- or server-specific
+code.
 
 Validate the result with:
 

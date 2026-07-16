@@ -8,7 +8,7 @@ use log::info;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::engine::AnalysisQuery;
-use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
+use ruby_analysis::indexer::Identifier;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::{locations_for_ranges, non_empty_locations};
@@ -26,7 +26,7 @@ impl EngineQuery {
         position: Position,
         content: &str,
     ) -> Option<Vec<Location>> {
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier(position);
 

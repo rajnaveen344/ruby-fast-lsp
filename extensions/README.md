@@ -57,6 +57,11 @@ sequenceDiagram
 - `crates/extension-rspec`: native Rust extension used as the in-process fallback/reference implementation.
 - `extensions/mruby-sdk`: tiny Ruby DSL for authoring patch-based extensions.
 - `extensions/rspec-ruby`: Ruby-authored RSpec extension package compiled to mruby Wasm.
+- `extensions/rails-ruby`: Rust-authored Rails adapter compiled to Wasm while
+  retaining its stable package ID.
+- `extensions/sinatra-rust`, `extensions/minitest-ruby`, and
+  `extensions/cucumber-rust`: Rust-authored official framework adapters using
+  the same typed guest SDK and bounded Wasm ABI.
 - `extensions/example-dsl`: independent, copyable third-party package and
   public-contract acceptance fixture.
 - `crates/lsp-test-harness`: reusable black-box `FakeEditor` crate for extension
@@ -252,6 +257,226 @@ matches the host contract: extensions return valid patches or fail loudly.
 
 Extensions describe facts. Core validates and owns index state.
 
+## Semantic Execution Contexts
+
+The patch vocabulary describes generated declarations, methods, types, mixins,
+inheritance, references, and Ruby blocks whose runtime receiver or
+method-definition owner differs from lexical constant scope. The execution
+context contract is implemented and exercised by the bundled RSpec, Sinatra,
+and Cucumber guests plus the typed Rust acceptance guest. The remaining
+framework/query matrix and migrations still block the final readiness claim.
+
+Ruby analysis must keep these contexts independent:
+
+| Context | Meaning |
+| --- | --- |
+| Lexical constant scope | Namespace used to resolve constants written in the source. |
+| Implicit receiver | Object or type that receives an unqualified method call. |
+| Method-definition owner | Class, module, or singleton that receives a `def` inside the block. |
+| Closure/local scope | Locals and block parameters captured from surrounding source. |
+
+Ordinary blocks usually preserve all four contexts. Evaluation APIs and DSLs
+can separate them. For example, an RSpec example-group block written inside
+`GoshPosh::Platform` keeps that lexical constant scope, while RSpec evaluates
+the block against an anonymous `RSpec::Core::ExampleGroup` subclass. Methods
+declared by `def`, `let`, and `subject`, mixins, and implicit calls therefore
+belong to that generated group, not to `GoshPosh::Platform`.
+
+The existing `current_namespace` and `namespace_kind` call context is not a
+substitute for this model. It describes the parser's current lexical owner and
+currently causes methods from an RSpec group to leak into the surrounding
+class/module. `frame_call_names` tracks nested DSL calls but does not change
+the semantic environment used while traversing the frame's block.
+
+The framework-neutral core slice exists in `ScopeTracker`: a balanced
+execution-context frame can independently override the implicit receiver and
+method-definition owner while retaining the source lexical namespace and local
+closure scopes. Static evaluation/definition forms and validated extension
+contexts use this frame, including lexically nested calls to an absolute target.
+
+Collision-proof hidden owner identity now exists in the analysis core.
+`GeneratedOwnerId` is encoded as an impossible-for-source-Ruby namespace
+sentinel, so it reuses ordinary FQN, graph, MRO, method, reference, and per-file
+replacement machinery without colliding with a real constant. Generated owners
+and their methods are excluded from constant completion, workspace symbols,
+namespace trees, and rename. Parent graph edges support nested-owner inheritance
+while unrelated generated owners remain isolated. The representation retains
+the original compact `RubyConstant`/`Ustr` size. The extension host validates
+and constructs source-scoped identities from extension/document/frame
+provenance and project-scoped identities from extension/project/logical-owner
+provenance.
+
+### Required framework-neutral contract
+
+The versioned ABI exposes `BlockExecutionContextPatch`, generated-owner
+declarations, and exact semantic targets. The domain contract expresses:
+
+- the exact call and block range to which the context applies;
+- a deterministic, extension-provenance semantic owner identity;
+- the implicit receiver type used for unqualified method lookup;
+- the method-definition owner and whether definitions are instance or
+  singleton methods;
+- whether lexical constant lookup and closure capture are preserved;
+- an optional parent semantic owner for nested DSL inheritance;
+- whether the generated owner is hidden from ordinary constant completion,
+  workspace symbols, namespace trees, and rename.
+
+The host must validate the context before entering the block. The fact
+collector pushes it for the block traversal and pops it on every exit path.
+Accepted declarations, mixins, references, and graph edges still become
+ordinary per-file facts and enter the engine only through `replace_facts`.
+Extensions do not perform method lookup or mutate scope trackers directly.
+
+Source-scoped owner identity is stable for the same extension, source file, and
+DSL frame. Project-scoped owner identity is stable for the same extension,
+isolated project, and logical name, allowing cross-file relationships without
+guest-global semantic state. Both are deterministic across indexing order,
+isolated between unrelated frames/projects, and removed through ordinary
+per-file replacement. A synthetic owner is semantic identity, not an invented
+user-visible Ruby constant.
+
+### RSpec execution model
+
+RSpec is the acceptance implementation for the contract:
+
+```text
+lexical source namespace: GoshPosh::Platform
+
+RSpec.describe PlatformApp        -> generated ExampleGroup A
+  def platform                    -> A#platform
+  let(:user)                      -> A#user
+  include SpecHelpers             -> A includes SpecHelpers
+
+  context "authenticated"         -> generated ExampleGroup B < A
+    it "works"                    -> implicit self is an instance of B
+```
+
+`describe`, `context`, and shared-group application must create or connect
+semantic group owners as RSpec does. Example and hook blocks (`it`, `before`,
+`after`, and `around`) use the nearest group's instance receiver without
+creating a sibling-visible method namespace. Constants inside all of these
+blocks continue to use the Ruby lexical scope from the source.
+
+Named `shared_context` declarations use project-scoped hidden module owners.
+`include_context` emits an exact generated-owner mixin edge into the consuming
+group. This supports direct methods, `let` helpers, and hook-defined methods
+across files without allowing a same-named shared context or private guest state
+to leak into another Gemfile-owned project. Removing either the declaration
+facts or the include call removes visibility through normal file replacement.
+
+Named `shared_examples`/`shared_examples_for` declarations use a separate
+project-scoped template owner. `include_examples`, `it_behaves_like`, and
+`it_should_behave_like` mix template helpers into the consuming group and emit
+an explicit execution-context application relationship. This relationship is
+not Ruby ancestry: the engine searches the template normally first, then each
+application independently. A single application therefore exposes its group
+helpers inside the shared body, while multiple applications return every
+defensible definition instead of selecting the last indexed group through MRO.
+Application edits remove the relationship through ordinary per-file replacement.
+
+Acceptance coverage must prove:
+
+- sibling groups cannot see or reference each other's methods;
+- nested groups inherit parent methods and mixins;
+- methods do not leak into the surrounding lexical module/class;
+- constants retain lexical Ruby lookup while implicit calls use the generated
+  receiver;
+- references, hover, completion, diagnostics, and rename use the same owner;
+- edits and frame removal delete every stale generated fact;
+- native fixtures and the actual Ruby-authored Wasm package behave identically.
+
+### Core Ruby audit
+
+This separation is also a core Ruby requirement, not only an extension feature.
+The implemented audit covers `class_eval`, `module_eval`, `class_exec`,
+`module_exec`, `instance_eval`, `instance_exec`, `define_method`, and
+`define_singleton_method`. Eval/exec block expressions use the target runtime
+receiver and definition owner while preserving lexical constants and captured
+locals. A `def` declared there receives the target owner, but its body later
+runs with that method's instance/singleton receiver; the outer eval receiver
+must not leak into the method body. Dynamic-definition blocks instead are the
+eventual method bodies, so their implicit receiver is the defined target while
+their lexical constants, closure locals, and nested `def` ownership remain
+source-scoped. `class << self` and static `send`/`__send__` plus `const_get`
+chains retain their distinct singleton semantics. String-eval forms are an
+explicit unsupported boundary and never reuse block-form facts.
+
+Refinements (`refine`/`using`), dynamic constant APIs (`const_set`, `autoload`,
+and `const_missing`), callback hooks, and `method_missing` proxies remain
+separate semantic audits. Arbitrary runtime metaprogramming is not expected to
+be perfectly knowable statically; unsupported/dynamic states must stay
+explicit and conservative rather than being guessed.
+
+### Sinatra execution model
+
+The bundled `sinatra-rust` adapter is the first unrelated Rust/Wasm consumer of
+the execution-context contract. It follows Sinatra's two documented scopes:
+
+- route, filter, and error-handler blocks preserve lexical constant/local scope
+  while using the owning application instance as their implicit receiver;
+- `helpers do` preserves lexical constant/local scope, uses the application
+  class as `self`, and assigns `def` declarations to the application instance;
+- `helpers SomeModule` contributes an ordinary include edge to the application
+  instance MRO;
+- classic top-level calls target `Sinatra::Application`, while modular calls
+  target the current `Sinatra::Base` subclass.
+
+The adapter depends only on `extension-api` and `extension-guest-sdk`, is
+applicable only to locked Sinatra `>= 3, < 5` projects, and uses no Sinatra
+policy in `ruby-analysis`. Its black-box Wasm matrix covers definition,
+references, hover, lexical constant preservation, non-leakage, helper modules,
+edit/removal lifecycle, classic/modular ownership, and unsupported-version
+fail-closed behavior.
+
+### Cucumber execution model
+
+The bundled `cucumber-rust` adapter models Cucumber-Ruby's per-scenario World
+as a project-scoped hidden owner. English step definitions and scenario hooks
+preserve source lexical/local scope and Ruby `def` ownership while switching
+their implicit receiver to that World. `World(SomeModule)` emits ordinary
+mixins into the World MRO across files; a `World { factory }` block intentionally
+retains ordinary lexical execution because Cucumber calls it only to construct
+the scenario object. Applicability requires locked Cucumber `>= 9, < 12`.
+
+The packaged-Wasm matrix covers steps, hooks, cross-file helper modules,
+references, lexical constants, non-leakage, edit/removal lifecycle, factory
+isolation, and unsupported-version behavior. Cucumber-specific names and World
+policy remain entirely in the guest.
+
+### Minitest execution model
+
+The bundled `minitest-ruby` package retains its compatibility ID but is a
+Rust-authored Wasm adapter. A resolved outer `Kernel`/`Object` `describe` call
+creates a source-scoped hidden subclass of `Minitest::Spec`; nested `describe`
+frames create child subclasses. The outer frame must resolve exactly before
+the guest trusts unqualified nested DSL calls, preventing unrelated methods
+named `describe` from changing semantic ownership.
+
+Group blocks preserve lexical constants and captured locals, use the generated
+class as implicit receiver, and define `def` methods on group instances.
+`it`, `specify`, `before`, `after`, `let`, and `subject` blocks use the owning
+group instance as receiver/definee. `let` and `subject` use ordinary generated
+method patches with block-return inference. The same guest provides TDD,
+Rails-style, and spec-style symbols plus Run/Debug lenses. Applicability
+requires locked Minitest `>= 5, < 7`; unsupported versions fail closed.
+
+### Readiness assessment
+
+The extension platform is beyond its original **7/10** design-discovery state
+and now earns **9/10**. Execution contexts, source/project hidden
+owners, project/version applicability, private Wasm instance isolation, typed
+Ruby and Rust authoring, cross-file RSpec contexts, independent Sinatra and
+Minitest execution scopes, and Cucumber World semantics now have black-box
+evidence. The official framework migration, core eval audit, project-wide method
+rename, bounded telemetry/load stress, and installed production gates are
+complete.
+
+A literal 10/10 is not credible for a static Ruby analyzer because arbitrary
+runtime code can always manufacture behavior. The production target is 9/10:
+correct and deterministic for supported static semantics, explicit and
+conservative for dynamic cases, and extensible without framework-specific core
+hooks.
+
 ## Extension State Model
 
 Extensions can maintain private state, but only the LSP server owns Ruby facts.
@@ -290,9 +515,11 @@ host validates and merges the relationship deterministically, then converts it
 to ordinary `Superclass` graph facts; engine MRO and hierarchy queries remain
 the only semantic authority.
 
-## Roadmap to 9/10 Extension Infra
+## Roadmap Beyond 9/10 Extension Infra
 
-Current rating: 8.7/10.
+Current evidence-backed rating: 9.0/10. The packaged-release and
+criterion-by-criterion product audit are complete; further work targets 9.5+
+maturity rather than another foundational semantic primitive.
 
 What is done:
 
@@ -309,6 +536,12 @@ What is done:
   wall-clock execution at every guest call boundary. Failures are recoverable
   and disable only that extension; deadline failures are observable as `slow`.
 - Recoverable failure path for bad response patches and guest failures.
+- Project/version-aware private Wasm instances, activation-time immutable
+  project context, and frame-owner provenance for overlapping DSL ecosystems.
+- Bounded status telemetry for latency, patch volume, conflicts, rejections,
+  traps, resource failures, disablements, and per-project instance creation.
+- Repeatable six-project stress coverage for all five official guests,
+  including an RSpec+Minitest overlap and unsupported versions.
 - Full test suite green for current scope.
 
 What remains to reach 9.5+/10:

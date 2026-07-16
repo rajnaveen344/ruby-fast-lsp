@@ -266,20 +266,42 @@ fi
 # Bundle core server-loaded extension packages.
 echo "Bundling Ruby Fast LSP extensions..."
 rm -rf "$EXTENSION_DIR/extensions"
+if [ "$SKIP_BUILDS" = false ]; then
+    "$ROOT_DIR/extensions/sinatra-rust/build-and-test.sh"
+    "$ROOT_DIR/extensions/cucumber-rust/build-and-test.sh"
+    "$ROOT_DIR/extensions/minitest-ruby/build-and-test.sh"
+    "$ROOT_DIR/extensions/rails-ruby/build-and-test.sh"
+fi
 mkdir -p "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release"
 cp "$ROOT_DIR/extensions/rspec-ruby/extension.toml" "$EXTENSION_DIR/extensions/rspec-ruby/"
 cp "$ROOT_DIR/extensions/rspec-ruby/README.md" "$EXTENSION_DIR/extensions/rspec-ruby/"
 cp \
     "$ROOT_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/rspec-ruby.wasm" \
     "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/"
-mkdir -p "$EXTENSION_DIR/extensions/rails-ruby"
+mkdir -p "$EXTENSION_DIR/extensions/rails-ruby/target/wasm32-wasip1/release"
 cp "$ROOT_DIR/extensions/rails-ruby/extension.toml" "$EXTENSION_DIR/extensions/rails-ruby/"
 cp "$ROOT_DIR/extensions/rails-ruby/README.md" "$EXTENSION_DIR/extensions/rails-ruby/"
-cp "$ROOT_DIR/extensions/rails-ruby/extension.wasm" "$EXTENSION_DIR/extensions/rails-ruby/"
-mkdir -p "$EXTENSION_DIR/extensions/minitest-ruby"
+cp \
+    "$ROOT_DIR/extensions/rails-ruby/target/wasm32-wasip1/release/ruby_fast_lsp_rails_extension.wasm" \
+    "$EXTENSION_DIR/extensions/rails-ruby/target/wasm32-wasip1/release/"
+mkdir -p "$EXTENSION_DIR/extensions/minitest-ruby/target/wasm32-wasip1/release"
 cp "$ROOT_DIR/extensions/minitest-ruby/extension.toml" "$EXTENSION_DIR/extensions/minitest-ruby/"
 cp "$ROOT_DIR/extensions/minitest-ruby/README.md" "$EXTENSION_DIR/extensions/minitest-ruby/"
-cp "$ROOT_DIR/extensions/minitest-ruby/extension.wasm" "$EXTENSION_DIR/extensions/minitest-ruby/"
+cp \
+    "$ROOT_DIR/extensions/minitest-ruby/target/wasm32-wasip1/release/ruby_fast_lsp_minitest_extension.wasm" \
+    "$EXTENSION_DIR/extensions/minitest-ruby/target/wasm32-wasip1/release/"
+mkdir -p "$EXTENSION_DIR/extensions/sinatra-rust/target/wasm32-wasip1/release"
+cp "$ROOT_DIR/extensions/sinatra-rust/extension.toml" "$EXTENSION_DIR/extensions/sinatra-rust/"
+cp "$ROOT_DIR/extensions/sinatra-rust/README.md" "$EXTENSION_DIR/extensions/sinatra-rust/"
+cp \
+    "$ROOT_DIR/extensions/sinatra-rust/target/wasm32-wasip1/release/ruby_fast_lsp_sinatra_extension.wasm" \
+    "$EXTENSION_DIR/extensions/sinatra-rust/target/wasm32-wasip1/release/"
+mkdir -p "$EXTENSION_DIR/extensions/cucumber-rust/target/wasm32-wasip1/release"
+cp "$ROOT_DIR/extensions/cucumber-rust/extension.toml" "$EXTENSION_DIR/extensions/cucumber-rust/"
+cp "$ROOT_DIR/extensions/cucumber-rust/README.md" "$EXTENSION_DIR/extensions/cucumber-rust/"
+cp \
+    "$ROOT_DIR/extensions/cucumber-rust/target/wasm32-wasip1/release/ruby_fast_lsp_cucumber_extension.wasm" \
+    "$EXTENSION_DIR/extensions/cucumber-rust/target/wasm32-wasip1/release/"
 
 # Navigate to extension directory and package
 cd "$EXTENSION_DIR"

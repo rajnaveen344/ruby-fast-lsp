@@ -386,3 +386,51 @@ end
     ])
     .await;
 }
+
+#[tokio::test]
+async fn class_eval_method_does_not_leak_to_lexical_class() {
+    check(
+        r#"
+class MetaTarget
+end
+
+class LexicalOwner
+  ::MetaTarget.class_eval do
+    def patched
+      "patched"
+    end
+  end
+end
+
+MetaTarget.new.<warn none code="unresolved-method">patched</warn>
+LexicalOwner.new.<warn code="unresolved-method">patched</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn dynamic_definition_blocks_diagnose_against_runtime_receiver() {
+    check(
+        r#"
+class MetaTarget
+  def instance_helper
+    "instance"
+  end
+
+  def self.singleton_helper
+    "singleton"
+  end
+
+  define_method(:instance_generated) do
+    <warn none code="unresolved-method">instance_helper</warn>
+  end
+end
+
+MetaTarget.define_singleton_method(:singleton_generated) do
+  <warn none code="unresolved-method">singleton_helper</warn>
+end
+"#,
+    )
+    .await;
+}

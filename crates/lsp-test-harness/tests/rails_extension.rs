@@ -27,15 +27,37 @@ fn rails_package_with_response(
             package.join("extension.toml"),
         )
         .expect("rails extension manifest must be copied");
-        std::fs::copy(source.join("extension.wasm"), package.join("extension.wasm")).expect(
-            "built rails Wasm is required; run the mruby SDK builder before setting RUBY_FAST_LSP_TEST_BUILT_RAILS=1",
+        let artifact_dir = package.join("target/wasm32-wasip1/release");
+        std::fs::create_dir_all(&artifact_dir)
+            .expect("built Rails fixture artifact directory must be created");
+        std::fs::copy(
+            source.join(
+                "target/wasm32-wasip1/release/ruby_fast_lsp_rails_extension.wasm",
+            ),
+            artifact_dir.join("ruby_fast_lsp_rails_extension.wasm"),
+        )
+        .expect(
+            "built Rails Rust Wasm is required; run extensions/rails-ruby/build-and-test.sh before setting RUBY_FAST_LSP_TEST_BUILT_RAILS=1",
         );
         return (temp, package);
     }
     let manifest = std::fs::read_to_string(source.join("extension.toml"))
         .expect("rails extension manifest must be readable")
         .lines()
-        .filter(|line| !line.starts_with("checksum_sha256"))
+        .filter(|line| {
+            !line.starts_with("checksum_sha256")
+                && *line != "[applicability]"
+                && !line.starts_with("locked_gems =")
+        })
+        .map(|line| {
+            if line.starts_with("wasm =") {
+                "wasm = \"extension.wasm\""
+            } else if line.starts_with("output =") {
+                "output = \"extension.wasm\""
+            } else {
+                line
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n");
     std::fs::write(package.join("extension.toml"), format!("{manifest}\n"))

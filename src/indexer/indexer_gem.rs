@@ -60,8 +60,8 @@ impl IndexerGem {
     }
 
     /// Set the file processor for indexing
-    pub fn set_file_processor(&mut self) {
-        self.file_processor = Some(FileProcessor::new());
+    pub fn set_file_processor(&mut self, file_processor: FileProcessor) {
+        self.file_processor = Some(file_processor);
     }
 
     // ========================================================================

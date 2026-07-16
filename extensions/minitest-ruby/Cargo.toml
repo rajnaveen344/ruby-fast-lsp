@@ -1,0 +1,13 @@
+[package]
+name = "ruby-fast-lsp-minitest-extension"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ruby-fast-lsp-extension-api = { path = "../../crates/extension-api" }
+ruby-fast-lsp-extension-guest-sdk = { path = "../../crates/extension-guest-sdk" }

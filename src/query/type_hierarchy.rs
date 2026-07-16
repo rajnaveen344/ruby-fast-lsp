@@ -26,7 +26,7 @@ use ruby_analysis::engine::{
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 
-use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
+use ruby_analysis::indexer::Identifier;
 
 use super::analysis_location::location_for_range;
 use super::EngineQuery;
@@ -64,7 +64,7 @@ impl EngineQuery {
         );
 
         // Use analyzer to find identifier at position before locking analysis state.
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content);
+        let analyzer = self.analyzer_at_position(uri, &content, position);
         let (identifier, _, ancestors, _scope_id, _namespace_kind) =
             analyzer.get_identifier(position);
 

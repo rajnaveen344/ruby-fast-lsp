@@ -11,7 +11,7 @@ use generators::HoverContext;
 pub use generators::HoverInfo;
 
 use crate::query::EngineQuery;
-use ruby_analysis::indexer::{identifier_to_hover_target, HoverTarget, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{identifier_to_hover_target, HoverTarget};
 use tower_lsp::lsp_types::{Position, Url};
 
 impl EngineQuery {
@@ -30,7 +30,7 @@ impl EngineQuery {
         content: &str,
     ) -> Option<HoverInfo> {
         // Step 1: Get identifier at position using existing analyzer
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier_opt, identifier_type, namespace, scope_id, namespace_kind) =
             analyzer.get_identifier(position);
 

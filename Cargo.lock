@@ -2119,9 +2119,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruby-fast-lsp-cucumber-extension"
+version = "0.1.0"
+dependencies = [
+ "ruby-fast-lsp-extension-api",
+ "ruby-fast-lsp-extension-guest-sdk",
+]
+
+[[package]]
+name = "ruby-fast-lsp-example-rust-extension"
+version = "0.1.0"
+dependencies = [
+ "ruby-fast-lsp-extension-api",
+ "ruby-fast-lsp-extension-guest-sdk",
+]
+
+[[package]]
 name = "ruby-fast-lsp-extension-api"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ruby-fast-lsp-extension-guest-sdk"
+version = "0.1.0"
+dependencies = [
+ "ruby-fast-lsp-extension-api",
  "serde",
  "serde_json",
 ]
@@ -2144,6 +2169,30 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wat",
+]
+
+[[package]]
+name = "ruby-fast-lsp-minitest-extension"
+version = "0.1.0"
+dependencies = [
+ "ruby-fast-lsp-extension-api",
+ "ruby-fast-lsp-extension-guest-sdk",
+]
+
+[[package]]
+name = "ruby-fast-lsp-rails-extension"
+version = "0.1.0"
+dependencies = [
+ "ruby-fast-lsp-extension-api",
+ "ruby-fast-lsp-extension-guest-sdk",
+]
+
+[[package]]
+name = "ruby-fast-lsp-sinatra-extension"
+version = "0.1.0"
+dependencies = [
+ "ruby-fast-lsp-extension-api",
+ "ruby-fast-lsp-extension-guest-sdk",
 ]
 
 [[package]]

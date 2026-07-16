@@ -339,6 +339,17 @@ pub async fn handle_did_change_watched_files(
     server: &RubyLanguageServer,
     mut params: DidChangeWatchedFilesParams,
 ) {
+    for change in &params.changes {
+        if change
+            .uri
+            .to_file_path()
+            .ok()
+            .and_then(|path| path.file_name().map(|name| name == "Gemfile.lock"))
+            .unwrap_or(false)
+        {
+            server.refresh_extension_project_dependencies_for_uri(&change.uri);
+        }
+    }
     let workspace_trusted = server.config.lock().workspace_trusted;
     let reindex_uris = server
         .extension_registry

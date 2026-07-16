@@ -278,6 +278,12 @@ impl FullyQualifiedName {
         }
     }
 
+    pub fn has_generated_owner(&self) -> bool {
+        self.namespace_parts_slice()
+            .iter()
+            .any(RubyConstant::is_generated_owner)
+    }
+
     pub fn is_empty(&self) -> bool {
         match self {
             FullyQualifiedName::Namespace(ns, _) => ns.is_empty(),

@@ -1,0 +1,52 @@
+id = "sinatra-rust"
+name = "Sinatra Rust"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.6, <0.3.0"
+runtime = "wasm"
+wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_sinatra_extension.wasm"
+checksum_sha256 = "5135239e1481fadd8ae05723e163979c047f56fa2fa927d6335d36b92c6cc59c"
+capabilities = ["index.call"]
+permissions = []
+
+[applicability]
+locked_gems = [{ name = "sinatra", version = ">=3.0.0, <5.0.0" }]
+
+[build]
+output = "target/wasm32-wasip1/release/ruby_fast_lsp_sinatra_extension.wasm"
+
+[indexing]
+project_context = "activation"
+call_names = ["get", "head", "post", "put", "patch", "delete", "options", "link", "unlink", "before", "after", "error", "not_found", "helpers"]
+frame_call_names = ["get", "head", "post", "put", "patch", "delete", "options", "link", "unlink", "before", "after", "error", "not_found", "helpers"]
+targets = [
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "get", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "get", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "head", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "head", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "post", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "post", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "put", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "put", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "patch", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "patch", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "delete", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "delete", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "options", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "options", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "link", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "link", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "unlink", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "unlink", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "before", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "before", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "after", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "after", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "error", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "error", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "not_found", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "not_found", frame = true },
+  { owner = ["Sinatra", "Base"], owner_kind = "singleton", method = "helpers", frame = true },
+  { owner = ["Sinatra", "Delegator"], owner_kind = "instance", method = "helpers", frame = true },
+  { owner = ["Sinatra"], owner_kind = "singleton", method = "helpers", frame = true },
+]

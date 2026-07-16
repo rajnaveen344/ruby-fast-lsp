@@ -2,7 +2,7 @@
 //!
 //! Examples: obj.method, Class.new, arr.length
 
-use crate::test::harness::{check, check_multi_file};
+use crate::test::harness::{check, check_multi_file, FakeEditor};
 
 // =============================================================================
 // Simple Method Calls
@@ -329,6 +329,127 @@ MetaTarget.new.patched<hover label="String">
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn define_method_infers_block_return_using_target_instance_receiver() {
+    check(
+        r#"
+class MetaTarget
+  # @return [String]
+  def target_helper
+    "target"
+  end
+
+  define_method(:patched) do
+    target_helper
+  end
+end
+
+MetaTarget.new.patched<hover label="String">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn define_singleton_method_infers_block_return_using_target_singleton_receiver() {
+    check(
+        r#"
+class MetaTarget
+  # @return [String]
+  def self.target_helper
+    "target"
+  end
+end
+
+MetaTarget.define_singleton_method(:patched) do
+  target_helper
+end
+
+MetaTarget.patched<hover label="String">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn define_method_inferred_return_is_replaced_after_edit() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "dynamic.rb",
+            r#"class MetaTarget
+  define_method(:patched) do
+    "string"
+  end
+end
+
+MetaTarget.new.patched
+"#,
+        )
+        .await;
+    editor
+        .check(
+            "dynamic.rb",
+            r#"class MetaTarget
+  define_method(:patched) do
+    "string"
+  end
+end
+
+MetaTarget.new.patched<hover label="String">
+"#,
+        )
+        .await;
+
+    editor
+        .set(
+            "dynamic.rb",
+            r#"class MetaTarget
+  define_method(:patched) do
+    1
+  end
+end
+
+MetaTarget.new.patched
+"#,
+        )
+        .await;
+    editor
+        .check(
+            "dynamic.rb",
+            r#"class MetaTarget
+  define_method(:patched) do
+    1
+  end
+end
+
+MetaTarget.new.patched<hover label="Integer">
+"#,
+        )
+        .await;
+
+    editor
+        .set(
+            "dynamic.rb",
+            r#"class MetaTarget
+end
+
+MetaTarget.new.patched
+"#,
+        )
+        .await;
+    editor
+        .check(
+            "dynamic.rb",
+            r#"class MetaTarget
+end
+
+MetaTarget.new.patched<hover label="?">
+"#,
+        )
+        .await;
 }
 
 #[tokio::test]

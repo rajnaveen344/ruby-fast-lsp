@@ -455,5 +455,6 @@ fn graph_edge_kind_label(kind: GraphEdgeKind) -> &'static str {
         GraphEdgeKind::Include => "include",
         GraphEdgeKind::Extend => "extend",
         GraphEdgeKind::Prepend => "prepend",
+        GraphEdgeKind::ExecutionContextApplication => "execution-context-application",
     }
 }
