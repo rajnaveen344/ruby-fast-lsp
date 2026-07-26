@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+pub mod runtime;
+
+use runtime::{JrubyConfig, RuntimeSelectionConfig};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LinterKind {
@@ -91,6 +94,10 @@ pub struct RubyFastLspConfig {
     #[serde(rename = "rubyVersion")]
     pub ruby_version: String,
 
+    pub runtime: RuntimeSelectionConfig,
+
+    pub jruby: JrubyConfig,
+
     #[serde(rename = "extensionPath")]
     pub extension_path: Option<String>,
 
@@ -139,6 +146,8 @@ impl Default for RubyFastLspConfig {
     fn default() -> Self {
         Self {
             ruby_version: "auto".to_string(),
+            runtime: RuntimeSelectionConfig::default(),
+            jruby: JrubyConfig::default(),
             extension_path: None,
             extension_packages: Vec::new(),
             extension_dirs: Vec::new(),
@@ -157,6 +166,15 @@ impl Default for RubyFastLspConfig {
 }
 
 impl RubyFastLspConfig {
+    pub fn validate_runtime_configuration(&self) -> Result<(), String> {
+        self.runtime
+            .validate()
+            .map_err(|error| format!("invalid runtime selection: {error:?}"))?;
+        self.jruby
+            .validate()
+            .map_err(|error| format!("invalid JRuby configuration: {error:?}"))
+    }
+
     /// Apply log level from configuration
     pub fn apply_log_level(&self) {
         let level = match self.log_level.as_str() {

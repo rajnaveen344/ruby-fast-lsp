@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -7,12 +7,13 @@ use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
     ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateStore,
     DiagnosticFact, DiagnosticStore, ExecutionContextFact, FqnId, FullyQualifiedName,
-    GraphEdgeFact, GraphNodeFact, MethodFact, MethodStore, MethodVisibilityOverrideFact,
-    ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact,
-    ReferenceStore, RubyConstant, SemanticGraph, SourceFileId, SourceKind, StoredGraphEdgeFact,
-    StoredGraphNodeFact, StoredMethodFact, StoredReferenceCandidate, StoredSymbolFact,
-    StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolKind, SymbolStore, TextRange, TypeFact,
-    TypeResolution, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
+    GraphEdgeFact, GraphNodeFact, MethodAvailability, MethodFact, MethodStore,
+    MethodVisibilityOverrideFact, ReferenceCandidate, ReferenceCandidateKind,
+    ReferenceCandidateStore, ReferenceFact, ReferenceStore, RubyConstant, SemanticGraph,
+    SourceFileId, SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact, StoredMethodFact,
+    StoredReferenceCandidate, StoredSymbolFact, StoredUnresolvedGraphEdgeFact, SymbolFact,
+    SymbolKind, SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore, TypeSubject,
+    UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
@@ -829,13 +830,16 @@ impl AnalysisEngine {
         let Some(owner_id) = self.names.fqn_id(owner) else {
             return Vec::new();
         };
-        self.facts
+        let mut facts = self
+            .facts
             .definitions
             .methods
             .facts_matching_owner(owner_id, partial)
             .into_iter()
             .map(|fact| self.expand_method_fact(fact))
-            .collect()
+            .collect::<Vec<_>>();
+        retain_effective_method_availability(&mut facts);
+        facts
     }
 
     pub fn method_facts_matching_owner_name(
@@ -846,13 +850,16 @@ impl AnalysisEngine {
         let Some(owner_id) = self.names.fqn_id(owner) else {
             return Vec::new();
         };
-        self.facts
+        let mut facts = self
+            .facts
             .definitions
             .methods
             .facts_matching_owner_name(owner_id, method)
             .into_iter()
             .map(|fact| self.expand_method_fact(fact))
-            .collect()
+            .collect::<Vec<_>>();
+        retain_effective_method_availability(&mut facts);
+        facts
     }
 
     pub fn method_visibility_overrides_matching_owner_name(
@@ -887,13 +894,14 @@ impl AnalysisEngine {
     }
 
     pub fn method_names_for_owner(&self, owner: &FullyQualifiedName) -> Vec<&'static str> {
-        let Some(owner_id) = self.names.fqn_id(owner) else {
-            return Vec::new();
-        };
-        self.facts
-            .definitions
-            .methods
-            .method_names_for_owner(owner_id)
+        let mut names = self
+            .method_facts_matching_owner(owner, "")
+            .into_iter()
+            .map(|fact| effective_method_name(&fact).as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 
     pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
@@ -1055,6 +1063,7 @@ impl AnalysisEngine {
                     is_super,
                     access,
                     caller,
+                    preferred_definition_range,
                     diagnostics,
                 } => {
                     let root = self
@@ -1072,6 +1081,7 @@ impl AnalysisEngine {
                         is_super,
                         access,
                         caller,
+                        preferred_definition_range,
                         diagnostics,
                     )
                 }
@@ -1119,6 +1129,7 @@ impl AnalysisEngine {
                     param_facts: fact.param_facts,
                     delegate_receiver: fact.delegate_receiver,
                     visibility: fact.visibility,
+                    availability: fact.availability,
                     documentation: fact.documentation,
                     return_type_label: fact.return_type_label,
                 }
@@ -1207,6 +1218,7 @@ impl AnalysisEngine {
             param_facts: fact.param_facts,
             delegate_receiver: fact.delegate_receiver,
             visibility: fact.visibility,
+            availability: fact.availability,
             documentation: fact.documentation,
             return_type_label: fact.return_type_label,
         }
@@ -1347,6 +1359,45 @@ fn source_hash(source: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
     hasher.finish()
+}
+
+fn retain_effective_method_availability(facts: &mut Vec<MethodFact>) {
+    let absent = facts
+        .iter()
+        .filter(|fact| matches!(fact.availability, MethodAvailability::Absent { .. }))
+        .map(effective_method_name)
+        .collect::<HashSet<_>>();
+    let unavailable = facts
+        .iter()
+        .filter(|fact| matches!(fact.availability, MethodAvailability::Unavailable { .. }))
+        .map(effective_method_name)
+        .collect::<HashSet<_>>();
+    facts.retain(|fact| {
+        let method = effective_method_name(fact);
+        if absent.contains(&method) {
+            return false;
+        }
+        if unavailable.contains(&method) {
+            return matches!(fact.availability, MethodAvailability::Unavailable { .. });
+        }
+        true
+    });
+}
+
+fn effective_method_name(fact: &MethodFact) -> crate::core::RubyMethod {
+    match &fact.fqn {
+        FullyQualifiedName::Method(_, method) => *method,
+        FullyQualifiedName::Namespace(_, _)
+        | FullyQualifiedName::Constant(_)
+        | FullyQualifiedName::LocalVariable(_)
+        | FullyQualifiedName::InstanceVariable(_)
+        | FullyQualifiedName::ClassVariable(_)
+        | FullyQualifiedName::GlobalVariable(_) => panic!(
+            "INVARIANT VIOLATED: method store returned a non-method FQN. \
+             This is a bug because availability composition is defined only for method identities. \
+             Fix: construct MethodFact with FullyQualifiedName::Method before engine insertion."
+        ),
+    }
 }
 
 #[cfg(test)]

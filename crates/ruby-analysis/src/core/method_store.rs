@@ -25,6 +25,29 @@ pub enum MethodVisibility {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MethodAvailability {
+    Available,
+    Unavailable { reason: String },
+    Absent { reason: String },
+}
+
+impl Default for MethodAvailability {
+    fn default() -> Self {
+        Self::Available
+    }
+}
+
+impl MethodAvailability {
+    pub fn reason(&self) -> Option<&String> {
+        match self {
+            Self::Available => None,
+            Self::Unavailable { reason } => Some(reason),
+            Self::Absent { reason } => Some(reason),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodParamFact {
     pub name: String,
     pub kind: MethodParamKind,
@@ -70,6 +93,7 @@ pub struct MethodFact {
     pub param_facts: Vec<MethodParamFact>,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
+    pub availability: MethodAvailability,
     pub documentation: Option<String>,
     pub return_type_label: Option<String>,
 }
@@ -85,6 +109,7 @@ impl MethodFact {
             param_facts: Vec::new(),
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
+            availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
         }
@@ -119,6 +144,7 @@ impl MethodFact {
             param_facts,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
+            availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
         }
@@ -139,6 +165,7 @@ impl MethodFact {
             param_facts: Vec::new(),
             delegate_receiver: Some(delegate_receiver),
             visibility: MethodVisibility::Public,
+            availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
         }
@@ -146,6 +173,21 @@ impl MethodFact {
 
     pub fn with_visibility(mut self, visibility: MethodVisibility) -> Self {
         self.visibility = visibility;
+        self
+    }
+
+    pub fn with_availability(mut self, availability: MethodAvailability) -> Self {
+        if let MethodAvailability::Unavailable { reason } | MethodAvailability::Absent { reason } =
+            &availability
+        {
+            assert!(
+                !reason.trim().is_empty(),
+                "INVARIANT VIOLATED: unavailable method fact has an empty reason. \
+                 This is a bug because unsupported-runtime-api diagnostics must explain the runtime limitation. \
+                 Fix: provide a non-empty @unavailable reason in the owning stub declaration."
+            );
+        }
+        self.availability = availability;
         self
     }
 
@@ -209,6 +251,7 @@ pub struct StoredMethodFact {
     pub param_facts: Vec<MethodParamFact>,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
+    pub availability: MethodAvailability,
     pub documentation: Option<String>,
     pub return_type_label: Option<String>,
 }
@@ -225,6 +268,7 @@ impl StoredMethodFact {
             param_facts: Vec::new(),
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
+            availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
         }
@@ -248,6 +292,7 @@ impl StoredMethodFact {
             param_facts,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
+            availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
         }
@@ -556,6 +601,11 @@ fn method_fact_heap_bytes(fact: &StoredMethodFact) -> usize {
                         .unwrap_or(0)
             })
             .sum::<usize>()
+        + fact
+            .availability
+            .reason()
+            .map(string_heap_bytes)
+            .unwrap_or(0)
         + fact
             .documentation
             .as_ref()

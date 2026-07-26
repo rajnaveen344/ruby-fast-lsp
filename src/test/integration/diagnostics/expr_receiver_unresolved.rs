@@ -12,7 +12,13 @@
 //! because `Class#new` isn't in the user index. Tests scope assertions tightly
 //! around the calls under test to avoid colliding with that pre-existing noise.
 
-use crate::test::harness::{check, check_multi_file};
+use crate::indexer::file_processor::FileProcessor;
+use crate::test::harness::{check, check_multi_file, FakeEditor};
+use ruby_analysis::core::{
+    FullyQualifiedName, MethodAvailability, NamespaceKind, RubyConstant, RubyMethod, SourceKind,
+};
+use ruby_analysis::engine::AnalysisQuery;
+use tower_lsp::lsp_types::{NumberOrString, Url};
 
 #[tokio::test]
 async fn expr_receiver_known_type_unknown_method_warns() {
@@ -81,6 +87,251 @@ record = DynamicRecord.new
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn default_basic_object_stub_method_missing_does_not_hide_missing_calls() {
+    let mut editor = FakeEditor::new().await;
+    let stub_uri =
+        Url::parse("file:///ruby-fast-lsp-stubs/basic_object.rb").expect("stub URI must be valid");
+    FileProcessor::new()
+        .collect_file_facts_as(
+            &stub_uri,
+            r#"
+class BasicObject
+  def method_missing(name, *args)
+  end
+end
+
+class Object < BasicObject
+end
+"#,
+            editor.server(),
+            SourceKind::Stub,
+        )
+        .expect("default BasicObject stub must index");
+
+    editor
+        .open(
+            "jruby_import.rb",
+            "java_import java.util.concurrent.TimeUnit\n",
+        )
+        .await;
+
+    let diagnostics = editor.diagnostics("jruby_import.rb").await;
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code
+                == Some(NumberOrString::String("unresolved-method".to_string()))
+                && diagnostic.message.contains("java_import")
+        }),
+        "the default raising BasicObject#method_missing stub must not prove that `java_import` exists: {diagnostics:?}"
+    );
+}
+
+#[tokio::test]
+async fn jruby_9_2_runtime_source_outranks_java_import_overlay_navigation() {
+    let mut editor = FakeEditor::new().await;
+    let overlay_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("support")
+        .join("jruby")
+        .join("stubs");
+    let common_path = overlay_root.join("common").join("runtime.rb");
+    let overlay_path = overlay_root.join("9.2").join("runtime.rb");
+    let common_uri = Url::from_file_path(&common_path)
+        .expect("shared JRuby overlay path must convert to a file URI");
+    let overlay_uri = Url::from_file_path(&overlay_path)
+        .expect("JRuby 9.2 overlay path must convert to a file URI");
+    let common = std::fs::read_to_string(&common_path)
+        .expect("shared JRuby overlay must be readable for black-box testing");
+    let overlay = std::fs::read_to_string(&overlay_path)
+        .expect("JRuby 9.2 overlay must be readable for black-box testing");
+    FileProcessor::new()
+        .collect_file_facts_as(&common_uri, &common, editor.server(), SourceKind::Stub)
+        .expect("shared JRuby overlay must index through the ordinary fact path");
+    FileProcessor::new()
+        .collect_file_facts_as(&overlay_uri, &overlay, editor.server(), SourceKind::Stub)
+        .expect("JRuby 9.2 overlay must index through the ordinary fact path");
+    let runtime_uri = Url::parse("file:///ruby-fast-lsp-runtime/jruby/core_ext/object.rb")
+        .expect("runtime fixture URI must be valid");
+    FileProcessor::new()
+        .collect_file_facts_as(
+            &runtime_uri,
+            "class Object\n  private\n  def java_import(*import_classes)\n    import_classes.flatten.each { |import_class| import_class }\n  end\nend\n",
+            editor.server(),
+            SourceKind::Stdlib,
+        )
+        .expect("JRuby runtime implementation source must use the ordinary fact path");
+
+    editor
+        .open(
+            "jruby_import_supported.rb",
+            "java_import java.util.concurrent.TimeUnit\n",
+        )
+        .await;
+
+    let diagnostics = editor.diagnostics("jruby_import_supported.rb").await;
+    assert!(
+        diagnostics.iter().all(|diagnostic| {
+            diagnostic.code
+                != Some(NumberOrString::String("unresolved-method".to_string()))
+                || !diagnostic.message.contains("java_import")
+        }),
+        "JRuby's java_import declaration must suppress only its own unresolved-method diagnostic: {diagnostics:?}"
+    );
+
+    let definitions = editor.goto_def_at("jruby_import_supported.rb", 0, 5).await;
+    assert_eq!(
+        definitions.iter().map(|location| &location.uri).collect::<Vec<_>>(),
+        vec![&runtime_uri],
+        "goto-definition for java_import must prefer the selected runtime implementation over bundled declaration stubs: {definitions:?}; common overlay: {common_uri}; series overlay: {overlay_uri}"
+    );
+}
+
+#[tokio::test]
+async fn unavailable_runtime_stub_method_emits_actionable_diagnostic() {
+    let mut editor = FakeEditor::new().await;
+    let stub_uri = Url::parse("file:///ruby-fast-lsp-stubs/jruby-9.2-unavailable.rb")
+        .expect("stub URI must be valid");
+    FileProcessor::new()
+        .collect_file_facts_as(
+            &stub_uri,
+            r#"
+module Process
+  # @unavailable JRuby does not implement process forking on the JVM.
+  def self.fork
+  end
+end
+"#,
+            editor.server(),
+            SourceKind::Stub,
+        )
+        .expect("unavailable runtime stub must index");
+    let process = RubyConstant::new("Process").expect("Process must be a valid Ruby constant");
+    let fork = FullyQualifiedName::method(
+        vec![process],
+        RubyMethod::new("fork").expect("fork must be a valid Ruby method"),
+    );
+    let engine = editor.server().analysis_engine.read();
+    let facts = AnalysisQuery::new(&engine).methods_for_fqn(&fork);
+    assert!(
+        facts.iter().any(|fact| {
+            fact.owner
+                == FullyQualifiedName::namespace_with_kind(vec![process], NamespaceKind::Singleton)
+                && matches!(fact.availability, MethodAvailability::Unavailable { .. })
+        }),
+        "@unavailable must survive parsing and fact replacement: {facts:?}"
+    );
+    drop(engine);
+
+    editor.open("jruby_unavailable.rb", "Process.fork\n").await;
+
+    let diagnostics = editor.diagnostics("jruby_unavailable.rb").await;
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code
+                == Some(NumberOrString::String(
+                    "unsupported-runtime-api".to_string(),
+                ))
+                && diagnostic.message.contains("process forking")
+        }),
+        "a resolved but unavailable runtime API must produce its specific diagnostic rather than unresolved-method noise: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| {
+            diagnostic.code
+                != Some(NumberOrString::String("unresolved-method".to_string()))
+        }),
+        "an unavailable method is known and must not also be reported as unresolved: {diagnostics:?}"
+    );
+
+    FileProcessor::new()
+        .collect_file_facts_as(
+            &stub_uri,
+            "module Process\n  def self.fork\n  end\nend\n",
+            editor.server(),
+            SourceKind::Stub,
+        )
+        .expect("replacing the runtime stub must use the ordinary file lifecycle");
+    let diagnostics_after_replacement = editor.diagnostics("jruby_unavailable.rb").await;
+    assert!(
+        diagnostics_after_replacement.iter().all(|diagnostic| {
+            diagnostic.code
+                != Some(NumberOrString::String(
+                    "unsupported-runtime-api".to_string(),
+                ))
+        }),
+        "replacing the owning stub must remove stale availability metadata: {diagnostics_after_replacement:?}"
+    );
+}
+
+#[tokio::test]
+async fn absent_runtime_overlay_masks_and_restores_compatible_baseline_method() {
+    let mut editor = FakeEditor::new().await;
+    let baseline_uri = Url::parse("file:///ruby-fast-lsp-stubs/mri-2.5-object-space.rb")
+        .expect("baseline stub URI must be valid");
+    let overlay_uri = Url::parse("file:///ruby-fast-lsp-stubs/jruby-9.2-absent.rb")
+        .expect("overlay stub URI must be valid");
+    FileProcessor::new()
+        .collect_file_facts_as(
+            &baseline_uri,
+            "module ObjectSpace\n  def self.dump(object)\n  end\nend\n",
+            editor.server(),
+            SourceKind::Stub,
+        )
+        .expect("MRI compatibility baseline must index");
+    FileProcessor::new()
+        .collect_file_facts_as(
+            &overlay_uri,
+            r#"
+module ObjectSpace
+  # @absent JRuby 9.2 does not expose MRI's ObjectSpace.dump API.
+  def self.dump(object)
+  end
+end
+"#,
+            editor.server(),
+            SourceKind::Stub,
+        )
+        .expect("JRuby absent-method overlay must index");
+    editor
+        .open("jruby_absent.rb", "ObjectSpace.dump(nil)\n")
+        .await;
+
+    let diagnostics = editor.diagnostics("jruby_absent.rb").await;
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == Some(NumberOrString::String("unresolved-method".to_string()))
+                && diagnostic.message.contains("dump")
+        }),
+        "an @absent overlay must mask the compatible baseline from method lookup: {diagnostics:?}"
+    );
+    assert!(
+        editor
+            .goto_def_at("jruby_absent.rb", 0, 15)
+            .await
+            .is_empty(),
+        "an absent runtime API must not remain navigable through the MRI baseline"
+    );
+
+    FileProcessor::new()
+        .collect_file_facts_as(&overlay_uri, "", editor.server(), SourceKind::Stub)
+        .expect("clearing the overlay file must replace its facts");
+    let restored_diagnostics = editor.diagnostics("jruby_absent.rb").await;
+    assert!(
+        restored_diagnostics.iter().all(|diagnostic| {
+            diagnostic.code != Some(NumberOrString::String("unresolved-method".to_string()))
+        }),
+        "removing the @absent owner must restore the compatible baseline: {restored_diagnostics:?}"
+    );
+    assert!(
+        editor
+            .goto_def_at("jruby_absent.rb", 0, 15)
+            .await
+            .iter()
+            .any(|location| location.uri == baseline_uri),
+        "baseline navigation must return after the absent overlay is removed"
+    );
 }
 
 #[tokio::test]

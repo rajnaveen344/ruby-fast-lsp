@@ -48,6 +48,13 @@ for PLATFORM in $PLATFORMS; do
   # Copy binary into npm package
   mkdir -p "$NPM_DIR/$PLATFORM/bin"
   cp "$ROOT_DIR/target/$TARGET/release/$BIN_NAME" "$NPM_DIR/$PLATFORM/bin/$BIN_NAME"
+  rm -rf "$NPM_DIR/$PLATFORM/jruby-decompiler"
+  cp -R "$ROOT_DIR/support/jruby/decompiler" "$NPM_DIR/$PLATFORM/jruby-decompiler"
+  CFR_SHA256=$(shasum -a 256 "$NPM_DIR/$PLATFORM/jruby-decompiler/cfr-0.152.jar" | awk '{print $1}')
+  if [ "$CFR_SHA256" != "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2" ]; then
+    echo "Bundled CFR checksum mismatch for $PLATFORM: $CFR_SHA256"
+    exit 1
+  fi
 
   echo "    -> $NPM_DIR/$PLATFORM/bin/$BIN_NAME"
 done

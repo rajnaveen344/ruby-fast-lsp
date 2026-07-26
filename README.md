@@ -99,6 +99,18 @@ Keep this in your user-level Claude Code settings. This repository does not carr
 1. Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=naveenraj.ruby-fast-lsp).
 2. Open a Ruby project. The server starts automatically and indexes your workspace.
 
+The bottom-right Ruby runtime item follows the owning project of the active
+Ruby file. Click it to select an exact runtime, switch that project to Auto,
+inspect all project runtimes, or select the linter and formatter. Selections are
+stored privately per VS Code workspace and never require `settings.json`.
+
+**Save Runtime to .ruby-version** writes the exact effective runtime into the
+active Ruby project after confirmation and switches that project to Auto. This
+is the repository-persistent option for teams and multi-project workspaces. Auto
+resolves exact `.ruby-version` and `.tool-versions` identities against the
+server's bounded installed-runtime catalog; if the exact installation is
+missing or ambiguous, Ruby Fast LSP does not substitute a nearby version.
+
 ### Cursor, Windsurf, and Other VS Code Forks
 
 Editors based on VS Code that use the [Open VSX Registry](https://open-vsx.org/) can install the extension from:
@@ -118,20 +130,13 @@ Configure your editor's LSP client to connect via stdio with language ID `ruby`.
 ## RuboCop and Standard diagnostics
 
 External lint diagnostics are opt-in and run when a Ruby document is opened or
-saved. They never run in the `didChange` typing path. In VS Code, set
-`rubyFastLsp.linter` to `rubocop` or `standard`.
+saved. They never run in the `didChange` typing path. In VS Code, run
+**Ruby Fast LSP: Select Linter** and choose RuboCop, Standard, or Disabled.
 
 By default the server executes `bundle exec rubocop` or
 `bundle exec standardrb` in the workspace root and sends the current editor
-buffer over stdin. To use a binstub or another Ruby environment, configure a
-structured argv array—no shell parsing is performed:
-
-```json
-{
-  "rubyFastLsp.linter": "rubocop",
-  "rubyFastLsp.linterCommand": ["bin/rubocop"]
-}
-```
+buffer over stdin. The owning project's Bundler environment is the only VS Code
+execution path; the extension does not expose arbitrary command configuration.
 
 Linter failures and timeouts are logged without replacing syntax or semantic
 diagnostics. A successful lint report is merged with Ruby Fast LSP diagnostics.
@@ -144,20 +149,12 @@ applied.
 
 VS Code can format the current unsaved Ruby buffer with RuboCop's safe
 `--autocorrect` mode or Standard's `--fix` mode. Formatting is opt-in and
-independent from lint diagnostics:
-
-```json
-{
-  "rubyFastLsp.formatter": "standard",
-  "rubyFastLsp.formatterCommand": ["bin/standardrb"]
-}
-```
-
-When `formatterCommand` is empty, the server runs `bundle exec rubocop` or
-`bundle exec standardrb` in the workspace root. Commands receive the current
+independent from lint diagnostics. Run **Ruby Fast LSP: Select Formatter** and
+choose RuboCop, Standard, or Disabled. The server runs `bundle exec rubocop` or
+`bundle exec standardrb` in the owning project. Commands receive the current
 buffer through stdin. Unchanged output produces no edit; startup failures,
-timeouts, invalid UTF-8, empty output for a non-empty source, and abnormal exits
-are reported without changing the document or semantic index.
+timeouts, invalid UTF-8, empty output for a non-empty source, and abnormal
+exits are reported without changing the document or semantic index.
 
 ERB templates are not sent to Ruby formatters or linters. HTML formatting is
 also intentionally disabled because whole-document edits could overwrite
@@ -180,23 +177,19 @@ and document highlights. Ruby regions are blanked one UTF-16 code unit at a
 time, so HTML results cannot target embedded Ruby. Formatting, diagnostics,
 links, colors, and rename are not currently delegated to the HTML service.
 
-## Indexing configuration
+## Project indexing
 
-Project indexing accepts workspace-relative glob patterns and explicit gem
-selection. Standard Ruby files are indexed by default. `includedPatterns` can
-add nonstandard Ruby entry points such as `bin/console`; `excludedPatterns`
-always win, and `.git` is never traversed. Explicitly included gems augment
-dependencies inferred from source, while excluded gems are omitted even when
-they are direct or transitive dependencies.
+Project indexing is automatic and deterministic. Standard Ruby files are
+indexed by default, default-external trees are excluded, and `.git` is never
+traversed. Dependencies come from the owning project's exact Bundler context.
 
 Workspace folders are Ruby project containers. A root `Gemfile` owns the whole
 folder. Without one, Ruby Fast LSP discovers the nearest nested Gemfiles, stops
 below each discovered root, and gives every project an isolated semantic
 engine, Bundler environment, diagnostics state, and extension fact lifecycle.
 Git repositories do not define semantic boundaries; `.git` is only pruned from
-discovery. For an umbrella repository with a root Gemfile, `projectRoots` can
-declare non-overlapping workspace-relative service roots explicitly. Open files
-outside discovered projects remain available through the orphan engine.
+discovery. Open files outside discovered projects remain available through the
+orphan engine.
 
 Source ownership is explicit:
 
@@ -204,16 +197,15 @@ Source ownership is explicit:
   They contribute references and diagnostics and appear in workspace-symbol
   search.
 - `vendor`, `.bundle`, `.ruby-lsp`, `.ruby-fast-lsp`, `node_modules`, `tmp`,
-  `log`, and `coverage` trees are external by default. An `includedPatterns`
-  entry can opt in a specific file or subtree; an `excludedPatterns` match still
-  wins. Opening one of these files provides interactive semantic analysis but
+  `log`, and `coverage` trees are external. Opening one of these files provides
+  interactive semantic analysis but
   does not silently promote it into workspace symbols, rename edits, external
   linting, or project semantic diagnostics; edits retain that ownership and
   closing the file removes its interactive-only facts.
 - Generated Ruby in an ordinary project path is treated as project source
-  because path names cannot reliably prove ownership. Exclude it explicitly if
-  it must be read-only. Extension-generated declarations inherit the ownership
-  of their source file and are removed through that file's reindex lifecycle.
+  because path names cannot reliably prove ownership. Extension-generated
+  declarations inherit the ownership of their source file and are removed
+  through that file's reindex lifecycle.
 - Bundler/RubyGems dependencies, stdlib, and bundled stubs remain available for
   navigation and inference but do not contribute project diagnostics,
   workspace-symbol results, or rename edits.
@@ -229,9 +221,8 @@ Native and generated declarations have three supported static paths:
 - Ruby and RBI declaration files are indexed as ordinary Ruby. This is the
   preferred path when a generator can emit navigable method bodies or RBI
   stubs.
-- RBS files under `sig/` are discovered automatically. Additional `.rbs` files
-  may be selected with `includedPatterns`; `excludedPatterns` still wins. RBS
-  classes, modules, methods, constructors, attributes, constants, visibility,
+- RBS files under `sig/` are discovered automatically. RBS classes, modules,
+  methods, constructors, attributes, constants, visibility,
   mixins, inheritance, parameter labels, and structured return types become
   engine-owned signature facts. Calls can navigate into a signature and use it
   for signature help and hover. When matching Ruby implementation facts exist,
@@ -247,35 +238,16 @@ be reconstructed safely from the binary alone. Generate or check in RBS/RBI, or
 ship a Ruby Fast LSP extension. RBS interfaces, type aliases, and method aliases
 are currently parsed but do not yet become navigation declarations.
 
-The default source policy covers the common Ruby entry points advertised by
+The source policy covers the common Ruby entry points advertised by
 Shopify Ruby LSP: `.rb`, `.rake`, `.gemspec`, `.ru`, `.thor`, `.jbuilder`,
 `.rbi`, `.podspec`, and related Ruby DSL extensions; conventional files such as
 `Gemfile`, `Rakefile`, `Thorfile`, `Fastfile`, `Dangerfile`, `Podfile`, and
 `.simplecov`; and `.erb`, `.rhtml`, and `.rhtm` templates. VS Code language
 association, filesystem watchers, and server discovery are checked against the
-canonical list in `editors/vscode/vsix/ruby_file_kinds.json`.
-
-```json
-{
-  "rubyFastLsp.indexing": {
-    "projectRoots": ["services/billing", "services/identity"],
-    "includedPatterns": ["bin/*"],
-    "excludedPatterns": ["vendor/**/*", "tmp/**/*.rb"],
-    "includedGems": ["rails"],
-    "excludedGems": ["debug"]
-  }
-}
-```
-
-The VS Code extension restarts the language server when this setting changes so
-that excluded files cannot leave stale semantic facts behind. Other LSP clients
-should send the same `indexing` object in initialization options and restart the
-server after changing it. Invalid glob patterns abort workspace indexing with an
-actionable error instead of silently applying a partial policy. Explicit
-project roots must exist, remain inside the workspace, and not overlap. For
-closed files, watcher create/change events replace facts through the normal
-engine write path and delete events remove stale facts; open buffers remain
-owned by the document lifecycle.
+canonical list in `editors/vscode/vsix/ruby_file_kinds.json`. For closed files,
+watcher create/change events replace facts through the normal engine write path
+and delete events remove stale facts; open buffers remain owned by the document
+lifecycle.
 
 ## Test discovery and execution
 
@@ -304,8 +276,6 @@ Trusted workspaces can discover manifest packages automatically from
 `.ruby-fast-lsp/extensions/*/extension.toml` and
 `ruby_fast_lsp/**/extension.toml`. VS Code passes its Restricted Mode trust
 state to the server; project-local Wasm never loads from an untrusted workspace.
-Set `rubyFastLsp.projectExtensionsEnabled` to `false` to disable automatic local
-discovery even in trusted workspaces.
 
 Configured and bundled `extensionPackages`/`extensionDirs` have highest
 precedence, followed by project-local packages and then environment/development

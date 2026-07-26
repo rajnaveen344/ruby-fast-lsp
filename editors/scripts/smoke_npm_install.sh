@@ -13,6 +13,7 @@ case "$(uname -s)-$(uname -m)" in
   *) echo "Unsupported npm smoke-test platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
 
+"$ROOT_DIR/editors/scripts/build_npm.sh" --current-only
 node "$ROOT_DIR/editors/check_package_versions.js"
 npm pack "$ROOT_DIR/editors/npm/$PLATFORM" --pack-destination "$TEMP_DIR" >/dev/null
 npm pack "$ROOT_DIR/editors/npm/ruby-fast-lsp" --pack-destination "$TEMP_DIR" >/dev/null

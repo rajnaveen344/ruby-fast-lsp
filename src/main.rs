@@ -56,6 +56,14 @@ async fn main() -> Result<()> {
         "ruby-fast-lsp/extensions/status",
         RubyLanguageServer::handle_extension_status,
     )
+    .custom_method(
+        "ruby-fast-lsp/runtime/discover",
+        RubyLanguageServer::handle_runtime_discover,
+    )
+    .custom_method(
+        "ruby-fast-lsp/runtime/status",
+        RubyLanguageServer::handle_runtime_status,
+    )
     .finish();
 
     info!("Ruby LSP server initialized, waiting for client connections");

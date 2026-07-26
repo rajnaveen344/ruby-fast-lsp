@@ -54,6 +54,10 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
     info!("Initializing workspace: {:?}", workspace_path);
 
     let mut coordinator = IndexingCoordinator::new(workspace_path, server.config.lock().clone());
+    #[cfg(test)]
+    if let Some(root) = server.user_cache_root_for_tests() {
+        coordinator.set_user_cache_root_for_tests(root);
+    }
     coordinator.set_extension_registry(server.extension_registry.clone());
     coordinator.run_complete_indexing(server).await?;
 
@@ -537,7 +541,7 @@ async fn append_external_linter_diagnostics(
         Ok(linter_diagnostics) => diagnostics.extend(linter_diagnostics),
         Err(error) => log::warn!(
             "External linter diagnostics unavailable for {}: {error:#}. \
-             Check rubyFastLsp.linterCommand and the workspace bundle.",
+             Ensure the selected linter is available through the owning project's bundle.",
             file_path.display()
         ),
     }

@@ -10,6 +10,7 @@
   "os": ["win32"],
   "cpu": ["x64"],
   "files": [
-    "bin/ruby-fast-lsp.exe"
+    "bin/ruby-fast-lsp.exe",
+    "jruby-decompiler/**"
   ]
 }

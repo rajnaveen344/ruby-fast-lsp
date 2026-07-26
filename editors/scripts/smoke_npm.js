@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const {
+    runPackagedJrubyNavigationSmoke
+} = require('./smoke_jruby_navigation');
 
 const root = path.resolve(__dirname, '../..');
 const platformKey = `${process.platform}-${process.arch}`;
@@ -32,6 +36,27 @@ if (wrapperArgument) {
     wrapper = path.join(root, 'editors/npm/ruby-fast-lsp/bin/ruby-fast-lsp');
     moduleRoot = path.join(temp, 'node_modules');
 }
+const cfrJar = path.join(
+    moduleRoot,
+    '@ruby-fast',
+    `lsp-${packageDir}`,
+    'jruby-decompiler',
+    'cfr-0.152.jar'
+);
+const cfrLicense = path.join(
+    moduleRoot,
+    '@ruby-fast',
+    `lsp-${packageDir}`,
+    'jruby-decompiler',
+    'LICENSE-CFR'
+);
+if (!fs.existsSync(cfrJar) || !fs.existsSync(cfrLicense)) {
+    throw new Error(`npm platform package is missing CFR or its license: ${cfrJar}`);
+}
+const cfrSha256 = crypto.createHash('sha256').update(fs.readFileSync(cfrJar)).digest('hex');
+if (cfrSha256 !== 'f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2') {
+    throw new Error(`npm platform CFR checksum mismatch: ${cfrSha256}`);
+}
 const child = spawn(process.execPath, [wrapper, '--stdio'], {
     cwd: temp,
     env: { ...process.env, NODE_PATH: moduleRoot },
@@ -40,6 +65,7 @@ const child = spawn(process.execPath, [wrapper, '--stdio'], {
 let stdout = Buffer.alloc(0);
 let stderr = '';
 let settled = false;
+let navigationStarted = false;
 let timer;
 
 function finish(error) {
@@ -52,14 +78,16 @@ function finish(error) {
         process.stderr.write(`${error.message}\n${stderr}`);
         process.exitCode = 1;
     } else {
-        process.stdout.write(`npm wrapper initialized Ruby Fast LSP on ${platformKey}.\n`);
+        process.stdout.write(`npm wrapper initialized Ruby Fast LSP and verified JRuby implementation navigation on ${platformKey}.\n`);
     }
 }
 
 child.stderr.on('data', chunk => { stderr += chunk.toString(); });
 child.on('error', error => finish(error));
 child.on('exit', code => {
-    if (!settled) finish(new Error(`npm wrapper exited before initialize response with status ${code}`));
+    if (!settled && !navigationStarted) {
+        finish(new Error(`npm wrapper exited before initialize response with status ${code}`));
+    }
 });
 child.stdout.on('data', chunk => {
     stdout = Buffer.concat([stdout, chunk]);
@@ -74,7 +102,17 @@ child.stdout.on('data', chunk => {
     if (response.id !== 1 || !response.result?.capabilities) {
         return finish(new Error(`Unexpected initialize response: ${JSON.stringify(response)}`));
     }
-    finish();
+    navigationStarted = true;
+    if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+    }
+    runPackagedJrubyNavigationSmoke({
+        command: process.execPath,
+        args: [wrapper, '--stdio'],
+        env: { NODE_PATH: moduleRoot },
+        label: 'Packaged npm Ruby Fast LSP'
+    }).then(() => finish()).catch(error => finish(error));
 });
 
 const request = JSON.stringify({

@@ -51,6 +51,7 @@ impl ProjectContextSeed {
                 SourceKind::Stdlib => ProjectSourceKind::Stdlib,
                 SourceKind::Stub => ProjectSourceKind::Stub,
                 SourceKind::Signature => ProjectSourceKind::Signature,
+                SourceKind::External => ProjectSourceKind::Signature,
                 SourceKind::Excluded => ProjectSourceKind::Excluded,
             },
             workspace_trusted: self.workspace_trusted,

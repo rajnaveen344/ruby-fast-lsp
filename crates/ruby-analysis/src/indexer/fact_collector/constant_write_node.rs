@@ -1,5 +1,5 @@
 use crate::core::{
-    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
+    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeSubject,
 };
 use log::{error, trace};
 use ruby_prism::ConstantWriteNode;
@@ -34,21 +34,32 @@ impl FactCollector {
             )
             .with_name_range(self.direct_range(&node.name_loc())),
         );
-        let inferred_type = self.infer_assignment_type_from_value(&node.value());
-        self.direct_push_assignment_type(
+    }
+
+    pub fn process_constant_write_node_exit(&mut self, node: &ConstantWriteNode) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let constant = RubyConstant::new(&constant_name).unwrap_or_else(|error| {
+            panic!(
+                "INVARIANT VIOLATED: constant write name became invalid between visitor entry and exit: {error}. \
+                 This is a bug because Prism exposes the same constant name for the balanced traversal. \
+                 Fix: keep constant validation and traversal lifecycle synchronized."
+            )
+        });
+        let mut namespace = self.scope_tracker.get_ns_stack();
+        namespace.push(constant);
+        let fqn = FullyQualifiedName::constant(namespace);
+        let (inferred_type, provenance) = self.assignment_type_and_provenance(&node.value());
+        self.direct_push_type(
             TypeSubject::Constant(fqn.clone()),
             inferred_type.clone(),
             &node.name_loc(),
+            provenance,
         );
         self.type_store.add(TypeFact::new(
-            TypeSubject::Constant(fqn.clone()),
-            inferred_type.clone(),
+            TypeSubject::Constant(fqn),
+            inferred_type,
             self.document.prism_location_to_text_range(&node.location()),
-            TypeProvenance::Assignment,
+            provenance,
         ));
-    }
-
-    pub fn process_constant_write_node_exit(&mut self, _node: &ConstantWriteNode) {
-        // No-op for now
     }
 }

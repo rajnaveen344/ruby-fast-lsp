@@ -4,6 +4,12 @@ use crate::inference::RubyType;
 use tower_lsp::lsp_types::Position;
 
 pub trait CompletionSemanticQuery {
+    fn constant_type_in_context(
+        &self,
+        path: &[RubyConstant],
+        current_namespace: &[RubyConstant],
+    ) -> Option<RubyType>;
+
     fn method_return_type_for_receiver(
         &self,
         namespace: &FullyQualifiedName,
@@ -47,9 +53,13 @@ pub fn receiver_type_from_context(
 ) -> Option<RubyType> {
     if let Some(Identifier::RubyMethod {
         receiver: MethodReceiver::Constant(recv_parts),
+        namespace,
         ..
     }) = identifier
     {
+        if let Some(ruby_type) = query.constant_type_in_context(recv_parts, namespace) {
+            return Some(ruby_type);
+        }
         let fqn = FullyQualifiedName::constant(recv_parts.clone());
         return Some(RubyType::ClassReference(fqn));
     }
@@ -72,11 +82,18 @@ pub fn receiver_type_from_context(
                 inner_receiver,
                 method_name,
             },
+        namespace,
         ..
     }) = identifier
     {
-        let inner_type =
-            resolve_method_receiver_type(query, document, content, position, inner_receiver);
+        let inner_type = resolve_method_receiver_type(
+            query,
+            document,
+            content,
+            position,
+            inner_receiver,
+            namespace,
+        );
         if let Some(inner_type) = inner_type {
             if method_name == "new" {
                 if let RubyType::ClassReference(fqn) = &inner_type {
@@ -255,12 +272,15 @@ fn resolve_method_receiver_type(
     content: &str,
     position: Position,
     receiver: &MethodReceiver,
+    current_namespace: &[RubyConstant],
 ) -> Option<RubyType> {
     match receiver {
-        MethodReceiver::Constant(parts) => {
-            let fqn = FullyQualifiedName::constant(parts.clone());
-            Some(RubyType::ClassReference(fqn))
-        }
+        MethodReceiver::Constant(parts) => query
+            .constant_type_in_context(parts, current_namespace)
+            .or_else(|| {
+                let fqn = FullyQualifiedName::constant(parts.clone());
+                Some(RubyType::ClassReference(fqn))
+            }),
         MethodReceiver::LocalVariable(name) => {
             if let Some(scope_id) = document
                 .find_scope_for_variable_at(name, position)
@@ -284,8 +304,14 @@ fn resolve_method_receiver_type(
             inner_receiver,
             method_name,
         } => {
-            let inner_type =
-                resolve_method_receiver_type(query, document, content, position, inner_receiver)?;
+            let inner_type = resolve_method_receiver_type(
+                query,
+                document,
+                content,
+                position,
+                inner_receiver,
+                current_namespace,
+            )?;
             if method_name == "new" {
                 if let RubyType::ClassReference(fqn) = &inner_type {
                     return Some(RubyType::Class(fqn.clone()));

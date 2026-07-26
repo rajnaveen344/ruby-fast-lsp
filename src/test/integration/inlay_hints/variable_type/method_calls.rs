@@ -580,16 +580,16 @@ b<hint label="Integer"> = 2.abs"#,
         .await;
 }
 
-/// Matches the user's exact scenario from the screenshot
+/// Repeated indexing preserves a user-defined method's inferred nil return.
 #[tokio::test]
 async fn generic_types_survive_reindex_with_class() {
     use crate::test::harness::FakeEditor;
 
     let mut editor = FakeEditor::new().await;
     let code = r#"class UserA
-  def namea -> NilClass
-  end def namea
-end class UserA
+  def namea
+  end
+end
 
 a = UserA.new.namea
 
@@ -603,9 +603,9 @@ b = 2.abs"#;
         .check(
             "test.rb",
             r#"class UserA
-  def namea -> NilClass
-  end def namea
-end class UserA
+  def namea<hint label="NilClass">
+  end
+end
 
 a<hint label="NilClass"> = UserA.new.namea
 
@@ -621,9 +621,9 @@ b<hint label="Integer"> = 2.abs"#,
         .check(
             "test.rb",
             r#"class UserA
-  def namea -> NilClass
-  end def namea
-end class UserA
+  def namea<hint label="NilClass">
+  end
+end
 
 a<hint label="NilClass"> = UserA.new.namea
 
@@ -639,9 +639,9 @@ b<hint label="Integer"> = 2.abs"#,
         .check(
             "test.rb",
             r#"class UserA
-  def namea -> NilClass
-  end def namea
-end class UserA
+  def namea<hint label="NilClass">
+  end
+end
 
 a<hint label="NilClass"> = UserA.new.namea
 

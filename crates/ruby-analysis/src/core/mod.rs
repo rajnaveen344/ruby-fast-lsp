@@ -34,8 +34,8 @@ pub use graph_store::{
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use method_store::{
-    MethodFact, MethodParamFact, MethodParamKind, MethodStore, MethodVisibilityOverrideFact,
-    StoredMethodFact,
+    MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, MethodStore,
+    MethodVisibilityOverrideFact, StoredMethodFact,
 };
 pub use reference_store::{
     ConstLookup, ConstantPath, KeywordArgCandidate, MethodCallSignatureCandidate,

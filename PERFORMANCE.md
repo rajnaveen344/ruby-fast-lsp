@@ -151,3 +151,41 @@ probe on the RSpec-group `platform` helper returned exactly its single use at
 line 1912; the extension-free control returned 631 unrelated project calls.
 This is representative production evidence, not a project-specific semantic
 test suite.
+
+### JRuby GoshPosh admin acceptance
+
+The 2026-07-26 release-profile run used
+`/Users/naveenraj/goshposh/admin`, JRuby 9.2.21.0 (Ruby compatibility 2.5),
+and JDK 17. Its isolated classpath contained 138 artifacts, 59,824 selected
+Java classes, and 679 deterministic duplicate-class records. The classpath
+fingerprint was
+`9b04dc48255c837b85513b13fcaea4e95379f796f435e821a424058aeb76f302`.
+The selected `jruby.jar`, CFR 0.152, and OpenJDK `src.zip` SHA-256 values were,
+respectively,
+`04ea9921630ee03915fd7b50a0c6fd638301e7d9f72d13982a8711c3991e6660`,
+`f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2`,
+and
+`6c41e630f42a41028c3affd51410136182e3944015f525a7b2af95ca906fc751`.
+
+Cold indexing completed in 221.793 s for 16,581 files and 86,410,779 source
+bytes. The final engine held 362,834 symbols, 136,423 methods, 239,014
+reference candidates, 212,098 resolved references, 129,235 type facts, and an
+estimated 242.9 MB heap. Unchanged-file reuse took 25.6-81.6 microseconds and
+the complete didOpen waterfall took 96.5-214.8 microseconds. The recorded
+definition queries took 0.019-0.741 ms.
+
+Go to Definition on `java_import` opened the selected JRuby runtime's
+checksum-verified embedded `jruby/java/core_ext/object.rb` implementation.
+`TimeUnit` and `ConcurrentHashMap`, including imported alias uses, opened exact
+OpenJDK source. `TimeUnit.valueOf(String)` has descriptor
+`(Ljava/lang/String;)Ljava/util/concurrent/TimeUnit;`; both OpenJDK source and
+CFR omit that compiler-generated enum helper, so the generated signature is
+the proven per-member fallback and records why no implementation range exists.
+The representative `ConcurrentHashMap()` constructor descriptor is `()V` and
+its class/constructor navigation uses exact OpenJDK source.
+
+The only diagnostics in
+`lib/platform/monitoring/db_server_heartbeat_listener_java.rb` were the missing
+`com.mongodb.event.ServerMonitorListener` import and its alias. The `admin`
+classpath contains no MongoDB driver artifact; the sibling `server` project
+was correctly not consulted.

@@ -1,11 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
-    MethodParamFact, MethodParamKind, MethodVisibilityOverrideFact, NamespaceKind, RubyConstant,
-    RubyMethod, RubyType, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact,
-    TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
+    MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, MethodVisibilityOverrideFact,
+    NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact, SymbolKind,
+    TextRange, TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
 use ruby_prism::{
     visit_alias_method_node, visit_call_node, visit_class_node,
@@ -31,6 +31,7 @@ use ruby_prism::{
     SingletonClassNode, Visit,
 };
 
+use super::constant_path_is_absolute;
 use super::yard::{YardMethodDoc, YardParser};
 
 #[derive(Debug, Clone, Default)]
@@ -60,6 +61,7 @@ pub struct AnalysisIndexer {
     module_function_mode_stack: Vec<bool>,
     visibility_stack: Vec<MethodVisibility>,
     known_namespaces: HashSet<FullyQualifiedName>,
+    known_constant_types: HashMap<FullyQualifiedName, RubyType>,
     source: Option<String>,
     facts: AnalysisIndex,
 }
@@ -73,6 +75,14 @@ impl AnalysisIndexer {
         file_id: SourceFileId,
         known_namespaces: HashSet<FullyQualifiedName>,
     ) -> Self {
+        Self::with_known_semantics(file_id, known_namespaces, HashMap::new())
+    }
+
+    pub fn with_known_semantics(
+        file_id: SourceFileId,
+        known_namespaces: HashSet<FullyQualifiedName>,
+        known_constant_types: HashMap<FullyQualifiedName, RubyType>,
+    ) -> Self {
         Self {
             file_id,
             namespace_stack: Vec::new(),
@@ -82,6 +92,7 @@ impl AnalysisIndexer {
             module_function_mode_stack: Vec::new(),
             visibility_stack: vec![MethodVisibility::Public],
             known_namespaces,
+            known_constant_types,
             source: None,
             facts: AnalysisIndex::default(),
         }
@@ -207,11 +218,12 @@ impl AnalysisIndexer {
         self.facts
             .graph_nodes
             .push(GraphNodeFact::new(fqn.clone(), kind, range));
+        let constant_fqn = FullyQualifiedName::constant(fqn.namespace_parts());
         self.facts.types.push(TypeFact::new(
-            TypeSubject::Constant(FullyQualifiedName::constant(fqn.namespace_parts())),
+            TypeSubject::Constant(constant_fqn.clone()),
             match kind {
-                GraphNodeKind::Class => RubyType::ClassReference(fqn.clone()),
-                GraphNodeKind::Module => RubyType::ModuleReference(fqn.clone()),
+                GraphNodeKind::Class => RubyType::ClassReference(constant_fqn.clone()),
+                GraphNodeKind::Module => RubyType::ModuleReference(constant_fqn),
             },
             range,
             TypeProvenance::Inferred,
@@ -233,10 +245,19 @@ impl AnalysisIndexer {
         parts: &[RubyConstant],
         absolute: bool,
     ) -> Option<FullyQualifiedName> {
+        self.resolve_namespace_from(parts, absolute, &self.namespace_stack)
+    }
+
+    fn resolve_namespace_from(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
         let mut search = if absolute {
             Vec::new()
         } else {
-            self.namespace_stack.clone()
+            lexical_context.to_vec()
         };
 
         loop {
@@ -926,6 +947,110 @@ impl AnalysisIndexer {
         )
     }
 
+    fn resolve_constant_value_type_from(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<RubyType> {
+        let mut search = if absolute {
+            Vec::new()
+        } else {
+            lexical_context.to_vec()
+        };
+
+        loop {
+            let mut probe = search.clone();
+            probe.extend(parts.iter().cloned());
+            let constant = FullyQualifiedName::constant(probe);
+            let subject = TypeSubject::Constant(constant.clone());
+            if let Some(fact) = self
+                .facts
+                .types
+                .iter()
+                .rev()
+                .find(|fact| fact.subject == subject)
+            {
+                return Some(fact.ruby_type.clone());
+            }
+            if let Some(ruby_type) = self.known_constant_types.get(&constant) {
+                return Some(ruby_type.clone());
+            }
+            if absolute || search.is_empty() {
+                break;
+            }
+            search.pop();
+        }
+
+        None
+    }
+
+    fn resolve_declaration_constant_value_type_from(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<RubyType> {
+        let mut candidates = Vec::new();
+        let mut exact = if absolute {
+            Vec::new()
+        } else {
+            lexical_context.to_vec()
+        };
+        exact.extend(parts.iter().cloned());
+        candidates.push(exact);
+        if !absolute && parts.len() > 1 && !lexical_context.is_empty() {
+            candidates.push(parts.to_vec());
+        }
+
+        candidates.into_iter().find_map(|candidate| {
+            let constant = FullyQualifiedName::constant(candidate);
+            let subject = TypeSubject::Constant(constant.clone());
+            self.facts
+                .types
+                .iter()
+                .rev()
+                .find(|fact| fact.subject == subject)
+                .map(|fact| fact.ruby_type.clone())
+                .or_else(|| self.known_constant_types.get(&constant).cloned())
+        })
+    }
+
+    fn assignment_type(&self, node: &Node<'_>) -> Option<RubyType> {
+        if let Some(call) = node.as_call_node() {
+            if call.name().as_slice() == b"freeze" && call.arguments().is_none() {
+                return call
+                    .receiver()
+                    .and_then(|receiver| self.assignment_type(&receiver));
+            }
+            if call.name().as_slice() == b"new" {
+                let receiver = call.receiver()?;
+                let (parts, absolute) = constant_parts_and_absolute(&receiver)?;
+                return self
+                    .resolve_constant_value_type_from(&parts, absolute, &self.namespace_stack)
+                    .and_then(|ruby_type| match ruby_type {
+                        RubyType::ClassReference(target) => Some(RubyType::Class(target)),
+                        RubyType::Class(_)
+                        | RubyType::Module(_)
+                        | RubyType::ModuleReference(_)
+                        | RubyType::Array(_)
+                        | RubyType::Hash(_, _)
+                        | RubyType::Union(_)
+                        | RubyType::Unknown => None,
+                    })
+                    .or_else(|| literal_type(node));
+            }
+        }
+
+        if let Some((parts, absolute)) = constant_parts_and_absolute(node) {
+            return self
+                .resolve_constant_value_type_from(&parts, absolute, &self.namespace_stack)
+                .or_else(|| literal_type(node));
+        }
+
+        literal_type(node)
+    }
+
     fn push_type_fact(
         &mut self,
         subject: TypeSubject,
@@ -949,8 +1074,42 @@ impl AnalysisIndexer {
 
 impl Visit<'_> for AnalysisIndexer {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {
-        let Some(parts) = self.push_namespace_from_node(&node.constant_path()) else {
-            return;
+        let lexical_context = self.namespace_stack.clone();
+        let reopened_target = constant_parts_and_absolute(&node.constant_path())
+            .and_then(|(parts, absolute)| {
+                self.resolve_declaration_constant_value_type_from(
+                    &parts,
+                    absolute,
+                    &lexical_context,
+                )
+            })
+            .and_then(|ruby_type| match ruby_type {
+                RubyType::ClassReference(target) => target.to_instance_namespace(),
+                RubyType::Class(_)
+                | RubyType::Module(_)
+                | RubyType::ModuleReference(_)
+                | RubyType::Array(_)
+                | RubyType::Hash(_, _)
+                | RubyType::Union(_)
+                | RubyType::Unknown => None,
+            });
+        let (parts, previous_namespace) = if let Some(target) = &reopened_target {
+            let parts = target.namespace_parts().to_vec();
+            assert!(
+                !parts.is_empty(),
+                "INVARIANT VIOLATED: a resolved class alias target has an empty namespace. \
+                 This is a bug because a Ruby class object must have a constant identity. \
+                 Fix: reject root namespace values before class alias reopening."
+            );
+            let previous = std::mem::replace(&mut self.namespace_stack, parts.clone());
+            self.module_function_mode_stack.push(false);
+            self.visibility_stack.push(MethodVisibility::Public);
+            (parts, Some(previous))
+        } else {
+            let Some(parts) = self.push_namespace_from_node(&node.constant_path()) else {
+                return;
+            };
+            (parts, None)
         };
 
         let fqn = FullyQualifiedName::namespace(self.namespace_stack.clone());
@@ -960,33 +1119,52 @@ impl Visit<'_> for AnalysisIndexer {
             &node.constant_path().location(),
             node.name().as_slice(),
         );
-        self.push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range, name_range);
+        let has_explicit_superclass = node.superclass().is_some();
+        let superclass = node.superclass().and_then(|superclass| {
+            let (parts, absolute) = constant_parts_and_absolute(&superclass)?;
+            let super_range = self.range(&superclass.location());
+            let target = self.resolve_namespace_from(&parts, absolute, &lexical_context);
+            Some((parts, absolute, super_range, target))
+        });
+        if reopened_target.is_none() {
+            self.push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range, name_range);
+        }
 
-        if let Some(superclass) = node.superclass() {
-            if let Some((parts, absolute)) = constant_parts_and_absolute(&superclass) {
-                let super_range = self.range(&superclass.location());
-                self.push_edge(
+        if let Some((parts, absolute, super_range, target)) = superclass {
+            if let Some(target) = target {
+                self.facts.graph_edges.push(GraphEdgeFact::new(
                     fqn.clone(),
-                    &parts,
-                    absolute,
+                    target.clone(),
                     GraphEdgeKind::Superclass,
                     super_range,
-                );
-                if let Some(source_singleton) = fqn.to_singleton_namespace() {
-                    if let Some(target) = self
-                        .resolve_namespace(&parts, absolute)
-                        .and_then(|target| target.to_singleton_namespace())
-                    {
-                        self.facts.graph_edges.push(GraphEdgeFact::new(
-                            source_singleton,
-                            target,
-                            GraphEdgeKind::Superclass,
-                            super_range,
-                        ));
-                    }
+                ));
+                if let (Some(source_singleton), Some(target_singleton)) = (
+                    fqn.to_singleton_namespace(),
+                    target.to_singleton_namespace(),
+                ) {
+                    self.facts.graph_edges.push(GraphEdgeFact::new(
+                        source_singleton,
+                        target_singleton,
+                        GraphEdgeKind::Superclass,
+                        super_range,
+                    ));
                 }
+            } else {
+                self.facts
+                    .unresolved_graph_edges
+                    .push(UnresolvedGraphEdgeFact::new(
+                        fqn.clone(),
+                        parts,
+                        absolute,
+                        FullyQualifiedName::namespace(lexical_context),
+                        GraphEdgeKind::Superclass,
+                        super_range,
+                    ));
             }
-        } else if class_implicitly_inherits_object(&fqn) {
+        } else if reopened_target.is_none()
+            && !has_explicit_superclass
+            && class_implicitly_inherits_object(&fqn)
+        {
             let object = RubyConstant::new("Object").expect(
                 "INVARIANT VIOLATED: Object is not a valid Ruby constant. \
                  This is a bug because Ruby's implicit class superclass must be representable. \
@@ -1004,12 +1182,60 @@ impl Visit<'_> for AnalysisIndexer {
         self.scope_stack.push(ScopeKind::Instance);
         visit_class_node(self, node);
         self.scope_stack.pop();
-        self.pop_namespace_parts(&parts);
+        if let Some(previous) = previous_namespace {
+            self.module_function_mode_stack.pop().expect(
+                "INVARIANT VIOLATED: analysis indexer module_function mode stack underflow after an aliased class reopening. \
+                 This is a bug because every aliased namespace frame owns one module_function flag. \
+                 Fix: keep aliased class visitor enter/exit balanced.",
+            );
+            self.visibility_stack.pop().expect(
+                "INVARIANT VIOLATED: analysis indexer visibility stack underflow after an aliased class reopening. \
+                 This is a bug because every aliased namespace frame owns one visibility flag. \
+                 Fix: keep aliased class visitor enter/exit balanced.",
+            );
+            self.namespace_stack = previous;
+        } else {
+            self.pop_namespace_parts(&parts);
+        }
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode<'_>) {
-        let Some(parts) = self.push_namespace_from_node(&node.constant_path()) else {
-            return;
+        let lexical_context = self.namespace_stack.clone();
+        let reopened_target = constant_parts_and_absolute(&node.constant_path())
+            .and_then(|(parts, absolute)| {
+                self.resolve_declaration_constant_value_type_from(
+                    &parts,
+                    absolute,
+                    &lexical_context,
+                )
+            })
+            .and_then(|ruby_type| match ruby_type {
+                RubyType::ModuleReference(target) => target.to_instance_namespace(),
+                RubyType::Class(_)
+                | RubyType::ClassReference(_)
+                | RubyType::Module(_)
+                | RubyType::Array(_)
+                | RubyType::Hash(_, _)
+                | RubyType::Union(_)
+                | RubyType::Unknown => None,
+            });
+        let (parts, previous_namespace) = if let Some(target) = &reopened_target {
+            let parts = target.namespace_parts().to_vec();
+            assert!(
+                !parts.is_empty(),
+                "INVARIANT VIOLATED: a resolved module alias target has an empty namespace. \
+                 This is a bug because a Ruby module object must have a constant identity. \
+                 Fix: reject root namespace values before module alias reopening."
+            );
+            let previous = std::mem::replace(&mut self.namespace_stack, parts.clone());
+            self.module_function_mode_stack.push(false);
+            self.visibility_stack.push(MethodVisibility::Public);
+            (parts, Some(previous))
+        } else {
+            let Some(parts) = self.push_namespace_from_node(&node.constant_path()) else {
+                return;
+            };
+            (parts, None)
         };
 
         let fqn = FullyQualifiedName::namespace(self.namespace_stack.clone());
@@ -1019,12 +1245,28 @@ impl Visit<'_> for AnalysisIndexer {
             &node.constant_path().location(),
             node.name().as_slice(),
         );
-        self.push_namespace_facts(fqn, GraphNodeKind::Module, range, name_range);
+        if reopened_target.is_none() {
+            self.push_namespace_facts(fqn, GraphNodeKind::Module, range, name_range);
+        }
 
         self.scope_stack.push(ScopeKind::Instance);
         visit_module_node(self, node);
         self.scope_stack.pop();
-        self.pop_namespace_parts(&parts);
+        if let Some(previous) = previous_namespace {
+            self.module_function_mode_stack.pop().expect(
+                "INVARIANT VIOLATED: analysis indexer module_function mode stack underflow after an aliased module reopening. \
+                 This is a bug because every aliased namespace frame owns one module_function flag. \
+                 Fix: keep aliased module visitor enter/exit balanced.",
+            );
+            self.visibility_stack.pop().expect(
+                "INVARIANT VIOLATED: analysis indexer visibility stack underflow after an aliased module reopening. \
+                 This is a bug because every aliased namespace frame owns one visibility flag. \
+                 Fix: keep aliased module visitor enter/exit balanced.",
+            );
+            self.namespace_stack = previous;
+        } else {
+            self.pop_namespace_parts(&parts);
+        }
     }
 
     fn visit_def_node(&mut self, node: &DefNode<'_>) {
@@ -1075,6 +1317,23 @@ impl Visit<'_> for AnalysisIndexer {
                 )
             })
             .collect::<Vec<_>>();
+        let availability = match yard_doc.as_ref() {
+            Some(doc) => match (&doc.unavailable, &doc.absent) {
+                (Some(reason), None) => MethodAvailability::Unavailable {
+                    reason: reason.clone(),
+                },
+                (None, Some(reason)) => MethodAvailability::Absent {
+                    reason: reason.clone(),
+                },
+                (None, None) => MethodAvailability::Available,
+                (Some(_), Some(_)) => panic!(
+                    "INVARIANT VIOLATED: method `{method}` is marked both @unavailable and @absent. \
+                     This is a bug because a runtime API cannot simultaneously exist-but-fail and not exist. \
+                     Fix: retain exactly one availability annotation in the owning stub."
+                ),
+            },
+            None => MethodAvailability::Available,
+        };
         self.facts.symbols.push(
             SymbolFact::new(fqn.clone(), SymbolKind::Method, range).with_name_range(name_range),
         );
@@ -1087,6 +1346,7 @@ impl Visit<'_> for AnalysisIndexer {
                         .as_ref()
                         .and_then(YardMethodDoc::format_return_type),
                 )
+                .with_availability(availability.clone())
                 .with_visibility(self.current_visibility()),
         );
         if node.receiver().is_none()
@@ -1110,6 +1370,7 @@ impl Visit<'_> for AnalysisIndexer {
                             .as_ref()
                             .and_then(YardMethodDoc::format_return_type),
                     )
+                    .with_availability(availability)
                     .with_visibility(self.current_visibility()),
             );
         }
@@ -1195,7 +1456,7 @@ impl Visit<'_> for AnalysisIndexer {
             );
             self.push_type_fact(
                 TypeSubject::Constant(fqn),
-                literal_type(&node.value()),
+                self.assignment_type(&node.value()),
                 node.name_loc(),
             );
         }
@@ -1225,7 +1486,7 @@ impl Visit<'_> for AnalysisIndexer {
             );
             self.push_type_fact(
                 TypeSubject::Constant(fqn),
-                literal_type(&node.value()),
+                self.assignment_type(&node.value()),
                 target.location(),
             );
         }
@@ -1689,7 +1950,7 @@ fn constant_parts_and_absolute(node: &Node<'_>) -> Option<(Vec<RubyConstant>, bo
             .map(|constant| (vec![constant], false));
     }
     if let Some(path) = node.as_constant_path_node() {
-        let absolute = path.parent().is_none();
+        let absolute = constant_path_is_absolute(&path);
         return constant_path_parts(&path).map(|parts| (parts, absolute));
     }
     None
@@ -2174,6 +2435,160 @@ mod tests {
                         RubyConstant::new("User").unwrap(),
                     ]))
         }));
+    }
+
+    #[test]
+    fn class_reopening_through_a_constant_alias_keeps_the_original_owner_identity() {
+        let index = AnalysisIndexer::new(file()).index_source(
+            "module Types\n\
+             \x20 class Original\n\
+             \x20 end\n\
+             \x20 Alias = Original\n\
+             \x20 class Alias\n\
+             \x20   def from_alias\n\
+             \x20   end\n\
+             \x20 end\n\
+             end\n",
+        );
+
+        let types = RubyConstant::new("Types").unwrap();
+        let original = RubyConstant::new("Original").unwrap();
+        let alias = RubyConstant::new("Alias").unwrap();
+        let expected_method = FullyQualifiedName::method(
+            vec![types.clone(), original.clone()],
+            RubyMethod::new("from_alias").unwrap(),
+        );
+        let shadow_class = FullyQualifiedName::namespace(vec![types, alias]);
+
+        assert!(
+            index.methods.iter().any(|fact| fact.fqn == expected_method),
+            "methods declared through a class-object alias must retain the original class identity"
+        );
+        assert!(
+            !index
+                .graph_nodes
+                .iter()
+                .any(|fact| fact.fqn == shadow_class),
+            "a class-object alias must not become a second graph class"
+        );
+    }
+
+    #[test]
+    fn class_reopening_through_a_known_cross_file_alias_keeps_the_original_owner_identity() {
+        let types = RubyConstant::new("Types").unwrap();
+        let original = RubyConstant::new("Original").unwrap();
+        let alias = RubyConstant::new("Alias").unwrap();
+        let original_fqn = FullyQualifiedName::namespace(vec![types.clone(), original.clone()]);
+        let alias_fqn = FullyQualifiedName::constant(vec![types.clone(), alias.clone()]);
+        let known_namespaces = HashSet::from([
+            original_fqn.clone(),
+            original_fqn.to_singleton_namespace().unwrap(),
+        ]);
+        let known_constant_types =
+            HashMap::from([(alias_fqn, RubyType::ClassReference(original_fqn))]);
+
+        let index =
+            AnalysisIndexer::with_known_semantics(file(), known_namespaces, known_constant_types)
+                .index_source(
+                    "module Types\n\
+             \x20 class Alias\n\
+             \x20   def from_other_file\n\
+             \x20   end\n\
+             \x20 end\n\
+             end\n",
+                );
+
+        let expected_method = FullyQualifiedName::method(
+            vec![types.clone(), original],
+            RubyMethod::new("from_other_file").unwrap(),
+        );
+        let shadow_class = FullyQualifiedName::namespace(vec![types, alias]);
+        assert!(index.methods.iter().any(|fact| fact.fqn == expected_method));
+        assert!(!index
+            .graph_nodes
+            .iter()
+            .any(|fact| fact.fqn == shadow_class));
+    }
+
+    #[test]
+    fn nested_class_declaration_does_not_reopen_a_same_named_lexical_ancestor() {
+        let io_streams = RubyConstant::new("IOStreams").unwrap();
+        let writer = RubyConstant::new("Writer").unwrap();
+        let outer_writer = FullyQualifiedName::namespace(vec![io_streams.clone(), writer.clone()]);
+        let outer_writer_constant =
+            FullyQualifiedName::constant(vec![io_streams.clone(), writer.clone()]);
+        let known_namespaces = HashSet::from([
+            FullyQualifiedName::namespace(vec![io_streams.clone()]),
+            outer_writer.clone(),
+            outer_writer.to_singleton_namespace().unwrap(),
+        ]);
+        let known_constant_types = HashMap::from([(
+            outer_writer_constant,
+            RubyType::ClassReference(outer_writer.clone()),
+        )]);
+
+        let index =
+            AnalysisIndexer::with_known_semantics(file(), known_namespaces, known_constant_types)
+                .index_source(
+                    "module IOStreams\n\
+                     \x20 module Gzip\n\
+                     \x20   class Writer < IOStreams::Writer\n\
+                     \x20     def output_stream\n\
+                     \x20       super\n\
+                     \x20     end\n\
+                     \x20   end\n\
+                     \x20 end\n\
+                     end\n",
+                );
+
+        let nested_writer = FullyQualifiedName::namespace(vec![
+            io_streams,
+            RubyConstant::new("Gzip").unwrap(),
+            writer,
+        ]);
+        assert!(
+            index
+                .graph_nodes
+                .iter()
+                .any(|fact| fact.fqn == nested_writer),
+            "a simple class declaration must define its exact lexical child even when an outer constant has the same name"
+        );
+        assert!(index.graph_edges.iter().any(|fact| {
+            fact.source == nested_writer
+                && fact.target == outer_writer
+                && fact.kind == GraphEdgeKind::Superclass
+        }));
+        assert!(
+            index
+                .graph_edges
+                .iter()
+                .all(|fact| fact.source != fact.target),
+            "declaration lookup must never collapse a subclass onto its superclass"
+        );
+    }
+
+    #[test]
+    fn module_reopening_through_a_constant_alias_keeps_the_original_owner_identity() {
+        let index = AnalysisIndexer::new(file()).index_source(
+            "module Original\n\
+             end\n\
+             Alias = Original\n\
+             module Alias\n\
+             \x20 def from_alias\n\
+             \x20 end\n\
+             end\n",
+        );
+        let original = RubyConstant::new("Original").unwrap();
+        let alias = RubyConstant::new("Alias").unwrap();
+        let expected_method =
+            FullyQualifiedName::method(vec![original], RubyMethod::new("from_alias").unwrap());
+        let shadow_module = FullyQualifiedName::namespace(vec![alias]);
+
+        assert!(index.methods.iter().any(|fact| fact.fqn == expected_method));
+        assert!(!index
+            .graph_nodes
+            .iter()
+            .any(|fact| fact.fqn == shadow_module));
     }
 
     #[test]

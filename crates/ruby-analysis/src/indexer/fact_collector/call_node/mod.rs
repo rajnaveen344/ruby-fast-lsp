@@ -312,7 +312,7 @@ impl FactCollector {
             let mut candidate = search.clone();
             candidate.extend(receiver_ref.parts.iter().cloned());
             let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.direct_known_namespaces.contains(&fqn) {
+            if self.namespace_is_known(&fqn) {
                 return Some(candidate);
             }
             if receiver_ref.absolute || search.is_empty() {
@@ -322,9 +322,7 @@ impl FactCollector {
         }
 
         let fqn = FullyQualifiedName::namespace(receiver_ref.parts.clone());
-        self.direct_known_namespaces
-            .contains(&fqn)
-            .then_some(receiver_ref.parts)
+        self.namespace_is_known(&fqn).then_some(receiver_ref.parts)
     }
 
     fn resolve_const_get_receiver_namespace(
@@ -347,9 +345,7 @@ impl FactCollector {
         let mut namespace = self.resolve_constant_receiver_namespace(&base_receiver)?;
         namespace.push(constant);
         let fqn = FullyQualifiedName::namespace(namespace.clone());
-        self.direct_known_namespaces
-            .contains(&fqn)
-            .then_some(namespace)
+        self.namespace_is_known(&fqn).then_some(namespace)
     }
 
     fn push_direct_define_method_return_type(
@@ -439,6 +435,7 @@ impl FactCollector {
                     is_super: false,
                     access: MethodReferenceAccess::Normal,
                     caller: self.scope_tracker.current_method_fqn().cloned(),
+                    preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: old_range,
                         receiver_label: None,
@@ -855,6 +852,7 @@ impl FactCollector {
                     is_super: false,
                     access,
                     caller: self.scope_tracker.current_method_fqn().cloned(),
+                    preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: message_range,
                         receiver_label,
@@ -980,6 +978,7 @@ impl FactCollector {
                 is_super: false,
                 access: MethodReferenceAccess::Normal,
                 caller: self.scope_tracker.current_method_fqn().cloned(),
+                preferred_definition_range: None,
                 diagnostics: crate::core::MethodReferenceDiagnostics {
                     diagnostic_range: range,
                     receiver_label: None,
@@ -1093,7 +1092,23 @@ impl FactCollector {
             });
             if let Some(ref ruby_type) = value_type {
                 if let Some(namespace) = self.type_to_namespace_parts(ruby_type) {
-                    return (namespace, NamespaceKind::Instance, value_type);
+                    let kind = match ruby_type {
+                        RubyType::ClassReference(_) | RubyType::ModuleReference(_) => {
+                            NamespaceKind::Singleton
+                        }
+                        RubyType::Class(_) | RubyType::Module(_) => NamespaceKind::Instance,
+                        RubyType::Array(_)
+                        | RubyType::Hash(_, _)
+                        | RubyType::Union(_)
+                        | RubyType::Unknown => {
+                            let engine = self.analysis_engine.read();
+                            AnalysisQuery::new(&engine)
+                                .type_to_namespace(ruby_type)
+                                .and_then(|fqn| fqn.namespace_kind())
+                                .unwrap_or(NamespaceKind::Instance)
+                        }
+                    };
+                    return (namespace, kind, value_type);
                 }
             }
             let mut receiver_namespace = current_namespace.to_vec();
@@ -1143,7 +1158,18 @@ impl FactCollector {
         let inferred = self.infer_expression_receiver_type(receiver_node);
         if let Some(ref resolved_type) = inferred {
             if let Some(ns) = self.type_to_namespace_parts(resolved_type) {
-                return (ns, NamespaceKind::Instance, Some(resolved_type.clone()));
+                let kind = match resolved_type {
+                    RubyType::ClassReference(_) | RubyType::ModuleReference(_) => {
+                        NamespaceKind::Singleton
+                    }
+                    RubyType::Class(_)
+                    | RubyType::Module(_)
+                    | RubyType::Array(_)
+                    | RubyType::Hash(_, _)
+                    | RubyType::Union(_)
+                    | RubyType::Unknown => NamespaceKind::Instance,
+                };
+                return (ns, kind, Some(resolved_type.clone()));
             }
         }
 
@@ -1157,6 +1183,18 @@ impl FactCollector {
     fn infer_expression_receiver_type(&self, receiver_node: &Node) -> Option<RubyType> {
         if !self.infer_expression_receivers {
             return None;
+        }
+
+        let expression_subject =
+            TypeSubject::Expression(self.direct_range(&receiver_node.location()));
+        if let Some(fact) = self
+            .direct_facts
+            .types
+            .iter()
+            .rev()
+            .find(|fact| fact.subject == expression_subject)
+        {
+            return Some(fact.ruby_type.clone());
         }
 
         if let Some(local_var) = receiver_node.as_local_variable_read_node() {

@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::{
     ConstLookupId, DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FqnId,
-    FullyQualifiedName, GraphEdgeKind, MethodCallSignatureCandidate, MethodFact, NamespaceKind,
-    RaiseArgCandidate, ReferenceFact, RubyConstant, RubyMethod, RubyType, SourceFileId,
-    StoredReferenceCandidateKind, StoredReferenceCandidateRef, TextRange,
+    FullyQualifiedName, GraphEdgeKind, MethodAvailability, MethodCallSignatureCandidate,
+    MethodFact, NamespaceKind, RaiseArgCandidate, ReferenceFact, RubyConstant, RubyMethod,
+    RubyType, SourceFileId, StoredReferenceCandidateKind, StoredReferenceCandidateRef, TextRange,
 };
 use crate::engine::diagnostic_helpers::{
     arity_mismatch, closest_keyword, levenshtein, suggestion_threshold, MethodArity,
@@ -142,6 +142,12 @@ impl AnalysisEngine {
                         if resolved_method == candidate.method {
                             if let Some(diagnostics) = candidate.diagnostics.as_deref() {
                                 if let Some(fact) = fact {
+                                    self.push_unavailable_method_diagnostic(
+                                        fact,
+                                        &candidate.method,
+                                        diagnostics.diagnostic_range,
+                                        &mut unresolved_constants,
+                                    );
                                     self.push_signature_diagnostics(
                                         fact,
                                         &candidate.method,
@@ -248,6 +254,7 @@ impl AnalysisEngine {
                 .into_iter()
                 .filter(|fact| fact.code != "unresolved-constant")
                 .filter(|fact| fact.code != "unresolved-method")
+                .filter(|fact| fact.code != "unsupported-runtime-api")
                 .filter(|fact| fact.code != "wrong-arity")
                 .filter(|fact| fact.code != "unknown-kwarg")
                 .filter(|fact| fact.code != "missing-kwarg")
@@ -324,6 +331,7 @@ impl AnalysisEngine {
                     is_super,
                     access,
                     caller,
+                    preferred_definition_range: _,
                     diagnostics,
                 } => {
                     let owner_lookup = self.names.const_lookup(owner).expect(
@@ -359,6 +367,12 @@ impl AnalysisEngine {
                         if resolved_method == method {
                             if let Some(diagnostics) = diagnostics.as_deref() {
                                 if let Some(fact) = fact {
+                                    self.push_unavailable_method_diagnostic(
+                                        fact,
+                                        &method,
+                                        diagnostics.diagnostic_range,
+                                        &mut unresolved,
+                                    );
                                     self.push_signature_diagnostics(
                                         fact,
                                         &method,
@@ -452,6 +466,7 @@ impl AnalysisEngine {
             .into_iter()
             .filter(|fact| fact.code != "unresolved-constant")
             .filter(|fact| fact.code != "unresolved-method")
+            .filter(|fact| fact.code != "unsupported-runtime-api")
             .filter(|fact| fact.code != "wrong-arity")
             .filter(|fact| fact.code != "unknown-kwarg")
             .filter(|fact| fact.code != "missing-kwarg")
@@ -516,6 +531,31 @@ impl AnalysisEngine {
             );
         }
         false
+    }
+
+    fn push_unavailable_method_diagnostic(
+        &self,
+        fact: &MethodFact,
+        method: &crate::core::RubyMethod,
+        diagnostic_range: TextRange,
+        diagnostics_by_file: &mut HashMap<SourceFileId, Vec<DiagnosticFact>>,
+    ) {
+        let MethodAvailability::Unavailable { reason } = &fact.availability else {
+            return;
+        };
+        diagnostics_by_file
+            .entry(diagnostic_range.file_id)
+            .or_default()
+            .push(DiagnosticFact::new(
+                diagnostic_range,
+                crate::core::DiagnosticSeverity::Warning,
+                "unsupported-runtime-api",
+                format!(
+                    "Runtime API `{}` is unavailable: {}",
+                    method.as_str(),
+                    reason
+                ),
+            ));
     }
 
     fn push_signature_diagnostics(

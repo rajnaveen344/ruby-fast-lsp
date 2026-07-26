@@ -66,6 +66,20 @@ pub fn resolve_receiver_type(
         }
         MethodReceiver::Constant(path) => {
             if let Some(query) = context.query {
+                if let Some(resolved) =
+                    query.resolve_constant_in_context(path, context.current_namespace)
+                {
+                    let resolved_constant =
+                        FullyQualifiedName::constant(resolved.namespace_parts().to_vec());
+                    if let Some(ruby_type) = query.constant_value_type(&resolved_constant) {
+                        return ruby_type;
+                    }
+                    if let Some(ruby_type) =
+                        query.constant_reference_type(resolved.namespace_parts_slice())
+                    {
+                        return ruby_type;
+                    }
+                }
                 if let Some(ruby_type) = query.constant_reference_type(path) {
                     return ruby_type;
                 }
@@ -91,12 +105,6 @@ pub fn resolve_receiver_type(
             inner_receiver,
             method_name,
         } => {
-            if method_name == "new" {
-                if let MethodReceiver::Constant(path) = inner_receiver.as_ref() {
-                    return RubyType::Class(FullyQualifiedName::constant(path.clone()));
-                }
-            }
-
             let inner_type = resolve_receiver_type(inner_receiver, context);
             if inner_type == RubyType::Unknown {
                 return RubyType::Unknown;
@@ -115,6 +123,13 @@ fn resolve_constant_receiver(
     context: &ReceiverResolutionContext<'_, '_>,
 ) -> Option<FullyQualifiedName> {
     if let Some(query) = context.query {
+        if let Some(resolved) = query.resolve_constant_in_context(path, context.current_namespace) {
+            let resolved_constant =
+                FullyQualifiedName::constant(resolved.namespace_parts().to_vec());
+            if let Some(ruby_type) = query.constant_value_type(&resolved_constant) {
+                return query.type_to_namespace(&ruby_type);
+            }
+        }
         return Some(query.resolve_constant_receiver(path, context.current_namespace));
     }
 
@@ -172,12 +187,6 @@ fn method_call_receiver_type(
     method_name: &str,
     context: &ReceiverResolutionContext<'_, '_>,
 ) -> Option<RubyType> {
-    if method_name == "new" {
-        if let MethodReceiver::Constant(path) = inner_receiver {
-            return Some(RubyType::Class(FullyQualifiedName::constant(path.clone())));
-        }
-    }
-
     let inner_namespace = resolve_receiver_to_namespace(inner_receiver, context)?;
     if method_name == "new" && inner_namespace.namespace_kind() == Some(NamespaceKind::Singleton) {
         return Some(RubyType::Class(FullyQualifiedName::constant(

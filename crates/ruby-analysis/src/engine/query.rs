@@ -109,7 +109,10 @@ impl<'a> AnalysisQuery<'a> {
                 }
                 match candidate.kind {
                     StoredReferenceCandidateKind::Resolved { target, .. } => {
-                        self.engine.fqn_for_id(target).cloned()
+                        self.engine
+                            .fqn_for_id(target)
+                            .cloned()
+                            .map(|target| (target, None))
                     }
                     StoredReferenceCandidateKind::Method {
                         owner,
@@ -118,6 +121,7 @@ impl<'a> AnalysisQuery<'a> {
                         is_super,
                         access,
                         caller,
+                        preferred_definition_range,
                         diagnostics,
                     } => {
                         let owner = self.engine.names.const_lookup(owner).expect(
@@ -137,9 +141,12 @@ impl<'a> AnalysisQuery<'a> {
                                     *resolved_method == method
                                 })
                                 .map(|(resolved_owner, resolved_method, _)| {
-                                    FullyQualifiedName::method(
-                                        resolved_owner.namespace_parts(),
-                                        resolved_method,
+                                    (
+                                        FullyQualifiedName::method(
+                                            resolved_owner.namespace_parts(),
+                                            resolved_method,
+                                        ),
+                                        preferred_definition_range,
                                     )
                                 });
                         }
@@ -152,9 +159,12 @@ impl<'a> AnalysisQuery<'a> {
                                     *resolved_method == method
                                 })
                                 .map(|(resolved_owner, resolved_method, _)| {
-                                    FullyQualifiedName::method(
-                                        resolved_owner.namespace_parts(),
-                                        resolved_method,
+                                    (
+                                        FullyQualifiedName::method(
+                                            resolved_owner.namespace_parts(),
+                                            resolved_method,
+                                        ),
+                                        preferred_definition_range,
                                     )
                                 });
                         }
@@ -208,24 +218,34 @@ impl<'a> AnalysisQuery<'a> {
                         (exact_targets.len() == 1)
                             .then(|| exact_targets.pop())
                             .flatten()
+                            .map(|target| (target, preferred_definition_range))
                     }
                     StoredReferenceCandidateKind::Constant { .. } => None,
                 }
             })
             .collect::<Vec<_>>();
-        targets.sort_by_key(ToString::to_string);
+        targets.sort_by_key(|(target, preferred)| {
+            (
+                target.to_string(),
+                preferred.map(|range| (range.file_id, range.start_byte, range.end_byte)),
+            )
+        });
         targets.dedup();
         if targets.len() != 1 {
             return Vec::new();
         }
 
-        let mut ranges = match &targets[0] {
-            FullyQualifiedName::Method(_, _) => self
-                .engine
-                .method_facts_for(&targets[0])
-                .into_iter()
-                .map(|fact| fact.range)
-                .collect::<Vec<_>>(),
+        let (target, preferred_definition_range) = &targets[0];
+        let mut ranges = match target {
+            FullyQualifiedName::Method(_, _) => {
+                let facts = self.engine.method_facts_for(target);
+                if let Some(preferred) = preferred_definition_range {
+                    if facts.iter().any(|fact| fact.range == *preferred) {
+                        return vec![*preferred];
+                    }
+                }
+                facts.into_iter().map(|fact| fact.range).collect::<Vec<_>>()
+            }
             FullyQualifiedName::Namespace(_, _)
             | FullyQualifiedName::Constant(_)
             | FullyQualifiedName::LocalVariable(_)
@@ -233,11 +253,39 @@ impl<'a> AnalysisQuery<'a> {
             | FullyQualifiedName::ClassVariable(_)
             | FullyQualifiedName::GlobalVariable(_) => self
                 .engine
-                .symbol_facts_for(&targets[0])
+                .symbol_facts_for(target)
                 .into_iter()
                 .map(|fact| fact.range)
                 .collect::<Vec<_>>(),
         };
+        let winning_precedence = ranges
+            .iter()
+            .map(|range| {
+                self.engine
+                    .file(range.file_id)
+                    .expect(
+                        "INVARIANT VIOLATED: definition range references an unregistered source file. \
+                         This is a bug because definition precedence requires stable source metadata. \
+                         Fix: register sources before inserting symbol or method facts.",
+                    )
+                    .kind
+                    .definition_precedence()
+            })
+            .min();
+        if let Some(winning_precedence) = winning_precedence {
+            ranges.retain(|range| {
+                self.engine
+                    .file(range.file_id)
+                    .expect(
+                        "INVARIANT VIOLATED: definition range disappeared during precedence filtering. \
+                         This is a bug because definition queries hold an immutable engine borrow. \
+                         Fix: keep file registration stable for the duration of an analysis query.",
+                    )
+                    .kind
+                    .definition_precedence()
+                    == winning_precedence
+            });
+        }
         ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
         ranges.dedup();
         ranges

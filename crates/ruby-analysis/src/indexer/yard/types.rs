@@ -256,6 +256,14 @@ pub struct YardMethodDoc {
     /// Note: Currently parsed but not displayed.
     /// Reserved for future diagnostics support.
     pub deprecated: Option<String>,
+    /// Reason this declaration is known but unavailable in the selected runtime.
+    /// Runtime stub overlays use this to replace a compatible baseline method
+    /// without treating the method as absent.
+    pub unavailable: Option<String>,
+    /// Reason a compatibility-baseline declaration is absent in the selected
+    /// runtime. Unlike `unavailable`, an absent method does not participate in
+    /// lookup or completion.
+    pub absent: Option<String>,
 }
 
 impl YardMethodDoc {

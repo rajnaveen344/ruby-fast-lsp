@@ -2,6 +2,7 @@ use crate::core::NamespaceKind;
 use ruby_prism::{ConstantPathNode, Location as PrismLocation, Node};
 use tower_lsp::lsp_types::Location as LspLocation;
 
+use crate::constant_path_is_absolute;
 use crate::core::{FullyQualifiedName, RubyConstant};
 
 use crate::RubyDocument;
@@ -58,9 +59,7 @@ pub fn mixin_ref_from_node(node: &Node) -> Option<MixinRef> {
     } else if let Some(n) = node.as_constant_path_node() {
         let mut parts = vec![];
         collect_namespaces(&n, &mut parts);
-        // A ConstantPathNode is absolute if its `parent` is `None`,
-        // which corresponds to a `::` at the beginning.
-        let absolute = n.parent().is_none();
+        let absolute = constant_path_is_absolute(&n);
         Some(MixinRef { parts, absolute })
     } else {
         None

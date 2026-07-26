@@ -18,29 +18,31 @@ use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::{
     analysis_ruby_type_from_extension, ExtensionRegistryHandle, ProjectContextSeed,
 };
+use crate::runtime::jruby::imports::JrubyImportProvider;
+use crate::runtime::jruby::source_navigation::java_source_navigation_facts_with_declaration;
 use crate::server::RubyLanguageServer;
-use anyhow::Result;
-use log::{debug, info};
+use anyhow::{anyhow, Context, Result};
+use log::{debug, info, warn};
 use ruby_analysis::core::{
     FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
     GraphNodeKind, MethodFact, MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
-    NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
-    SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, RubyType, SourceKind,
+    SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
 use ruby_analysis::engine::{
     AnalysisEngine, AnalysisQuery, FileFacts, ResolveMode, SemanticChange,
 };
-use ruby_analysis::indexer::fact_collector::FactCollector;
+use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{is_erb_path, mask_erb, AnalysisIndexer};
 use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
 use ruby_fast_lsp_extension_api::{
-    IndexPatch, MixinKind, NamespaceDeclarationKind, ProjectContext, SourceRange,
+    IndexPatch, MixinKind, NamespaceDeclarationKind, ProjectContext, ResolvedCall, SourceRange,
 };
-use ruby_prism::Visit;
+use ruby_prism::{CallNode, Visit};
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -63,6 +65,39 @@ enum FileResolution {
     Deferred,
 }
 
+/// Server-owned composition of built-in runtime semantics and public Wasm
+/// extensions. Runtime providers may add ordinary facts, while the extension
+/// registry remains the sole owner of extension frame tracking and resolved
+/// call payloads.
+#[derive(Debug)]
+struct ProjectFactCollectorHost {
+    extension_registry: ExtensionRegistryHandle,
+    jruby_import_provider: Option<Arc<JrubyImportProvider>>,
+}
+
+impl FactCollectorExtensionHost for ProjectFactCollectorHost {
+    fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode<'_>) {
+        if let Some(provider) = &self.jruby_import_provider {
+            provider.process_call_node(visitor, node);
+        }
+        self.extension_registry.process_call_node(visitor, node);
+    }
+
+    fn should_track_enclosing_call(&self, visitor: &FactCollector, node: &CallNode<'_>) -> bool {
+        self.extension_registry
+            .should_track_enclosing_call(visitor, node)
+    }
+
+    fn resolved_call_for_stack(
+        &self,
+        visitor: &FactCollector,
+        node: &CallNode<'_>,
+    ) -> ResolvedCall {
+        self.extension_registry
+            .resolved_call_for_stack(visitor, node)
+    }
+}
+
 fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
     if is_erb_path(uri.path()) {
         let mut source = mask_erb(content).source().to_string();
@@ -75,6 +110,14 @@ fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
     }
 }
 
+fn extend_unique<T: PartialEq>(target: &mut Vec<T>, source: Vec<T>) {
+    for value in source {
+        if !target.contains(&value) {
+            target.push(value);
+        }
+    }
+}
+
 // ============================================================================
 // FileProcessor
 // ============================================================================
@@ -84,6 +127,7 @@ fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
 pub struct FileProcessor {
     extension_registry: ExtensionRegistryHandle,
     extension_project_context_seed: Option<Arc<parking_lot::RwLock<ProjectContextSeed>>>,
+    jruby_import_provider: Option<Arc<JrubyImportProvider>>,
 }
 
 impl FileProcessor {
@@ -91,6 +135,7 @@ impl FileProcessor {
         Self {
             extension_registry: ExtensionRegistryHandle::from_environment(),
             extension_project_context_seed: None,
+            jruby_import_provider: None,
         }
     }
 
@@ -98,6 +143,7 @@ impl FileProcessor {
         Self {
             extension_registry,
             extension_project_context_seed: None,
+            jruby_import_provider: None,
         }
     }
 
@@ -107,6 +153,18 @@ impl FileProcessor {
     ) -> Self {
         self.extension_project_context_seed = Some(seed);
         self
+    }
+
+    pub(crate) fn with_jruby_import_provider(mut self, provider: Arc<JrubyImportProvider>) -> Self {
+        self.jruby_import_provider = Some(provider);
+        self
+    }
+
+    fn fact_collector_host(&self) -> Arc<dyn FactCollectorExtensionHost> {
+        Arc::new(ProjectFactCollectorHost {
+            extension_registry: self.extension_registry.clone(),
+            jruby_import_provider: self.jruby_import_provider.clone(),
+        })
     }
 
     /// Process a file: parse, collect facts and reference candidates, and return diagnostics.
@@ -215,6 +273,7 @@ impl FileProcessor {
         // 1. Parse ONLY ONCE
         let analysis_source = analysis_source(uri, content);
         let analysis_engine = server.analysis_engine_for_uri(uri);
+        self.ensure_jruby_navigation_inputs(content, &analysis_engine)?;
         let parse_result = ruby_prism::parse(analysis_source.as_bytes());
         let node = parse_result.node();
         let source_kind = self.analysis_source_kind_for_uri(server, uri);
@@ -280,7 +339,7 @@ impl FileProcessor {
         let visitor_start = Instant::now();
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
-            Arc::new(self.extension_registry.clone()),
+            self.fact_collector_host(),
             analysis_engine.clone(),
         );
         visitor.extension_project_context = extension_project_context.clone();
@@ -291,6 +350,7 @@ impl FileProcessor {
         let updated_document = visitor.document.clone();
         let mut direct_facts = direct_facts_seed;
         merge_execution_context_direct_facts(&visitor.direct_facts, &mut direct_facts);
+        merge_runtime_direct_facts(&visitor.direct_facts, &mut direct_facts);
         add_extension_analysis_facts(
             &analysis_engine,
             &updated_document,
@@ -303,15 +363,7 @@ impl FileProcessor {
         let mut type_facts = direct_facts.types;
         let visitor_type_facts = visitor.type_store.all_facts();
         rehome_execution_context_type_facts(&visitor_type_facts, &mut type_facts);
-        let existing_type_subjects = type_facts
-            .iter()
-            .map(|fact| fact.subject.clone())
-            .collect::<HashSet<_>>();
-        type_facts.extend(
-            visitor_type_facts
-                .into_iter()
-                .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
-        );
+        merge_precise_visitor_type_facts(visitor_type_facts, &mut type_facts);
         let replace_start = Instant::now();
         replace_file_analysis(
             &analysis_engine,
@@ -383,6 +435,141 @@ impl FileProcessor {
             diagnostics,
             semantic_change,
         })
+    }
+
+    fn ensure_jruby_navigation_inputs(
+        &self,
+        content: &str,
+        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+    ) -> Result<()> {
+        let Some(provider) = &self.jruby_import_provider else {
+            return Ok(());
+        };
+        let Some(cache_root) = provider.signature_cache_root() else {
+            return Ok(());
+        };
+        let class_names = provider
+            .static_navigation_class_names(content)
+            .map_err(|message| {
+                anyhow!("failed to resolve static JRuby Java dependencies: {message}")
+            })?;
+        if class_names.is_empty() {
+            return Ok(());
+        }
+        std::fs::create_dir_all(cache_root).with_context(|| {
+            format!(
+                "failed to create isolated JRuby signature cache {}",
+                cache_root.display()
+            )
+        })?;
+
+        for class_name in class_names {
+            let Some((internal_name, signature)) =
+                provider.generated_signature(&class_name).map_err(|error| {
+                    anyhow!("failed to generate signature for Java class `{class_name}`: {error:?}")
+                })?
+            else {
+                continue;
+            };
+            let signature_path = cache_root.join(format!("{internal_name}.rb"));
+            let signature_parent = signature_path.parent().expect(
+                "INVARIANT VIOLATED: generated JRuby signature path has no parent. \
+                 This is a bug because validated JVM names always produce a cache-relative path. \
+                 Fix: retain the isolated cache root and validated internal class name.",
+            );
+            std::fs::create_dir_all(signature_parent).with_context(|| {
+                format!(
+                    "failed to create JRuby signature directory {}",
+                    signature_parent.display()
+                )
+            })?;
+            if !std::fs::read_to_string(&signature_path).is_ok_and(|existing| existing == signature)
+            {
+                std::fs::write(&signature_path, &signature).with_context(|| {
+                    format!(
+                        "failed to materialize JRuby signature {}",
+                        signature_path.display()
+                    )
+                })?;
+            }
+            let signature_uri = Url::from_file_path(&signature_path).map_err(|_| {
+                anyhow!(
+                    "generated JRuby signature is not a valid file URI: {}",
+                    signature_path.display()
+                )
+            })?;
+            let signature_already_indexed =
+                analysis_engine.read().file_id(&signature_path).is_some();
+            if !signature_already_indexed {
+                self.collect_file_facts_as_with_resolution(
+                    &signature_uri,
+                    &signature,
+                    analysis_engine.clone(),
+                    SourceKind::Signature,
+                    false,
+                    None,
+                )?;
+            }
+
+            if provider.has_registered_navigation_class(&internal_name) {
+                continue;
+            }
+            let resolved_sources = match provider
+                .resolved_navigation_implementations(&internal_name)
+            {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    warn!(
+                        "Java implementation source unavailable for {} during interactive indexing: {:?}; using generated signature fallback",
+                        internal_name, error
+                    );
+                    Vec::new()
+                }
+            };
+            if resolved_sources.is_empty() {
+                continue;
+            }
+            let declaration = provider.class_declaration(&internal_name).expect(
+                "INVARIANT VIOLATED: interactive Java implementation resolved for a class absent \
+                 from its owning catalog. This is a bug because resolution starts from that exact \
+                 catalog declaration. Fix: keep provider catalog and resolver transactionally paired.",
+            );
+            for (index, resolved) in resolved_sources.into_iter().enumerate() {
+                let mut engine = analysis_engine.write();
+                let file_id = engine.register_file(ruby_analysis::engine::SourceFileInput {
+                    path: resolved.path,
+                    content: resolved.content,
+                    kind: SourceKind::External,
+                });
+                provider.register_method_navigation_ranges(
+                    &internal_name,
+                    &resolved.location,
+                    file_id,
+                );
+                let query = AnalysisQuery::new(&engine);
+                let mut facts = FileFacts {
+                    symbols: query.symbol_facts_in_file(file_id),
+                    methods: query.method_facts_in_file(file_id),
+                    method_visibility_overrides: query.method_visibility_overrides_in_file(file_id),
+                    types: query.type_facts_in_file(file_id),
+                    graph_nodes: query.graph_nodes_in_file(file_id),
+                    graph_edges: query.graph_edges_in_file(file_id),
+                    diagnostics: query.diagnostic_facts_in_file(file_id),
+                    ..FileFacts::default()
+                };
+                let new_facts = java_source_navigation_facts_with_declaration(
+                    &declaration.class,
+                    &resolved.location,
+                    file_id,
+                    index == 0,
+                );
+                extend_unique(&mut facts.symbols, new_facts.symbols);
+                extend_unique(&mut facts.methods, new_facts.methods);
+                extend_unique(&mut facts.types, new_facts.types);
+                engine.replace_facts(file_id, facts, ResolveMode::Immediate);
+            }
+        }
+        Ok(())
     }
 
     // ========================================================================
@@ -612,16 +799,20 @@ impl FileProcessor {
 
         let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
-            Arc::new(self.extension_registry.clone()),
+            self.fact_collector_host(),
             analysis_engine.clone(),
         );
         fact_collector.extension_project_context = extension_project_context.clone();
-        if !resolve_references {
-            let direct_known_namespaces = known_namespaces
-                .cloned()
-                .unwrap_or_else(|| collect_known_namespaces(&analysis_engine));
-            fact_collector = fact_collector.with_direct_known_namespaces(direct_known_namespaces);
-        }
+        let mut direct_known_namespaces = known_namespaces
+            .cloned()
+            .unwrap_or_else(|| collect_known_namespaces(&analysis_engine));
+        direct_known_namespaces.extend(
+            direct_facts_seed
+                .graph_nodes
+                .iter()
+                .map(|fact| fact.fqn.clone()),
+        );
+        fact_collector = fact_collector.with_direct_known_namespaces(direct_known_namespaces);
         fact_collector.visit(&node);
 
         let mut direct_facts = if resolve_references {
@@ -631,6 +822,7 @@ impl FileProcessor {
         };
         if resolve_references {
             merge_execution_context_direct_facts(&fact_collector.direct_facts, &mut direct_facts);
+            merge_runtime_direct_facts(&fact_collector.direct_facts, &mut direct_facts);
         }
         add_extension_analysis_facts(
             &analysis_engine,
@@ -718,7 +910,8 @@ fn collect_direct_facts(
     let known_namespaces = known_namespaces
         .cloned()
         .unwrap_or_else(|| collect_known_namespaces(analysis_engine));
-    AnalysisIndexer::with_known_namespaces(file_id, known_namespaces)
+    let known_constant_types = collect_known_constant_types(analysis_engine, file_id);
+    AnalysisIndexer::with_known_semantics(file_id, known_namespaces, known_constant_types)
         .index_node_with_source(node, content)
 }
 
@@ -796,6 +989,131 @@ fn merge_execution_context_direct_facts(
     }
 }
 
+fn merge_runtime_direct_facts(
+    runtime_aware: &ruby_analysis::indexer::AnalysisIndex,
+    merged: &mut ruby_analysis::indexer::AnalysisIndex,
+) {
+    let runtime_types = runtime_aware
+        .types
+        .iter()
+        .filter(|fact| fact.provenance == TypeProvenance::Runtime)
+        .cloned()
+        .collect::<Vec<_>>();
+    let runtime_constants = runtime_types
+        .iter()
+        .filter_map(|fact| match &fact.subject {
+            TypeSubject::Constant(fqn) => Some(fqn.clone()),
+            TypeSubject::Local { .. }
+            | TypeSubject::InstanceVariable { .. }
+            | TypeSubject::ClassVariable { .. }
+            | TypeSubject::GlobalVariable(_)
+            | TypeSubject::MethodReturn(_)
+            | TypeSubject::Parameter { .. }
+            | TypeSubject::Expression(_) => None,
+        })
+        .collect::<HashSet<_>>();
+    let shadowed_runtime_reopenings = merged
+        .graph_nodes
+        .iter()
+        .filter(|fact| {
+            runtime_constants
+                .iter()
+                .any(|constant| constant.namespace_parts() == fact.fqn.namespace_parts())
+                && !runtime_aware.graph_nodes.iter().any(|runtime_fact| {
+                    runtime_fact.fqn == fact.fqn && runtime_fact.range == fact.range
+                })
+        })
+        .map(|fact| (fact.fqn.clone(), fact.range))
+        .collect::<Vec<_>>();
+    merged.graph_nodes.retain(|fact| {
+        !shadowed_runtime_reopenings
+            .iter()
+            .any(|(fqn, range)| *fqn == fact.fqn && *range == fact.range)
+    });
+    merged.symbols.retain(|fact| {
+        !shadowed_runtime_reopenings
+            .iter()
+            .any(|(fqn, range)| *fqn == fact.fqn && *range == fact.range)
+    });
+    merged.types.retain(|fact| {
+        !shadowed_runtime_reopenings.iter().any(|(fqn, range)| {
+            fact.range == *range
+                && matches!(
+                    &fact.subject,
+                    TypeSubject::Constant(constant)
+                        if constant.namespace_parts() == fqn.namespace_parts()
+                )
+        })
+    });
+    merged.graph_edges.retain(|edge| {
+        !shadowed_runtime_reopenings.iter().any(|(fqn, range)| {
+            edge.source == *fqn
+                && edge.range.file_id == range.file_id
+                && range.start_byte <= edge.range.start_byte
+                && edge.range.end_byte <= range.end_byte
+        })
+    });
+    merged.unresolved_graph_edges.retain(|edge| {
+        !shadowed_runtime_reopenings.iter().any(|(fqn, range)| {
+            edge.source == *fqn
+                && edge.range.file_id == range.file_id
+                && range.start_byte <= edge.range.start_byte
+                && edge.range.end_byte <= range.end_byte
+        })
+    });
+
+    let runtime_methods = runtime_types
+        .iter()
+        .filter_map(|fact| match &fact.subject {
+            TypeSubject::MethodReturn(fqn) => Some(fqn.clone()),
+            TypeSubject::Constant(_)
+            | TypeSubject::Local { .. }
+            | TypeSubject::InstanceVariable { .. }
+            | TypeSubject::ClassVariable { .. }
+            | TypeSubject::GlobalVariable(_)
+            | TypeSubject::Parameter { .. }
+            | TypeSubject::Expression(_) => None,
+        })
+        .collect::<HashSet<_>>();
+    for method in runtime_aware
+        .methods
+        .iter()
+        .filter(|fact| runtime_methods.contains(&fact.fqn))
+    {
+        merged
+            .methods
+            .retain(|fact| fact.range != method.range || fact.fqn.name() != method.fqn.name());
+        merged.methods.push(method.clone());
+    }
+    for symbol in runtime_aware.symbols.iter().filter(|fact| {
+        fact.kind == AnalysisSymbolKind::Method && runtime_methods.contains(&fact.fqn)
+    }) {
+        merged.symbols.retain(|fact| {
+            fact.kind != AnalysisSymbolKind::Method
+                || fact.range != symbol.range
+                || fact.fqn.name() != symbol.fqn.name()
+        });
+        merged.symbols.push(symbol.clone());
+    }
+    for symbol in runtime_aware
+        .symbols
+        .iter()
+        .filter(|fact| runtime_constants.contains(&fact.fqn))
+    {
+        if !merged.symbols.contains(symbol) {
+            merged.symbols.push(symbol.clone());
+        }
+    }
+    for runtime_type in runtime_types {
+        merged.types.retain(|fact| {
+            fact.provenance != TypeProvenance::Runtime
+                || fact.range != runtime_type.range
+                || fact.subject != runtime_type.subject
+        });
+        merged.types.push(runtime_type);
+    }
+}
+
 fn rehome_execution_context_type_facts(extension_aware: &[TypeFact], merged: &mut Vec<TypeFact>) {
     for generated in extension_aware
         .iter()
@@ -807,6 +1125,58 @@ fn rehome_execution_context_type_facts(extension_aware: &[TypeFact], merged: &mu
                 || !same_type_subject_slot(&fact.subject, &generated.subject)
         });
     }
+}
+
+fn merge_precise_visitor_type_facts(visitor_facts: Vec<TypeFact>, merged: &mut Vec<TypeFact>) {
+    let existing_type_subjects = merged
+        .iter()
+        .map(|fact| fact.subject.clone())
+        .collect::<HashSet<_>>();
+    for visitor_fact in visitor_facts {
+        if visitor_fact.provenance != TypeProvenance::Runtime {
+            if !existing_type_subjects.contains(&visitor_fact.subject) {
+                merged.push(visitor_fact);
+            }
+            continue;
+        }
+        let matching_slot_indexes = merged
+            .iter()
+            .enumerate()
+            .filter_map(|(index, fact)| {
+                (fact.subject == visitor_fact.subject
+                    && assignment_ranges_identify_same_write(fact.range, visitor_fact.range))
+                .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if matching_slot_indexes.is_empty() {
+            if merged
+                .iter()
+                .all(|fact| fact.subject != visitor_fact.subject)
+            {
+                merged.push(visitor_fact);
+            }
+            continue;
+        }
+        if visitor_fact.ruby_type == RubyType::Unknown {
+            continue;
+        }
+        if matching_slot_indexes
+            .iter()
+            .any(|index| merged[*index].ruby_type == visitor_fact.ruby_type)
+        {
+            continue;
+        }
+        for index in matching_slot_indexes.into_iter().rev() {
+            merged.remove(index);
+        }
+        merged.push(visitor_fact);
+    }
+}
+
+fn assignment_ranges_identify_same_write(left: TextRange, right: TextRange) -> bool {
+    left.file_id == right.file_id
+        && ((left.start_byte <= right.start_byte && right.end_byte <= left.end_byte)
+            || (right.start_byte <= left.start_byte && left.end_byte <= right.end_byte))
 }
 
 fn type_subject_has_generated_owner(subject: &TypeSubject) -> bool {
@@ -1000,6 +1370,51 @@ mod tests {
     }
 
     #[test]
+    fn precise_runtime_aware_assignment_replaces_the_same_less_precise_write() {
+        let file_id = ruby_analysis::core::SourceFileId(8);
+        let subject = TypeSubject::Constant(FullyQualifiedName::try_from("RICH").unwrap());
+        let direct_name_range = TextRange::new(file_id, 0, 4);
+        let visitor_assignment_range = TextRange::new(file_id, 0, 24);
+        let earlier = RubyType::Class(FullyQualifiedName::try_from("RichFixture").unwrap());
+        let precise =
+            RubyType::Class(FullyQualifiedName::try_from("Java::Fixtures::RichFixture").unwrap());
+        let mut merged = vec![TypeFact::new(
+            subject.clone(),
+            earlier,
+            direct_name_range,
+            TypeProvenance::Assignment,
+        )];
+
+        merge_precise_visitor_type_facts(
+            vec![TypeFact::new(
+                subject.clone(),
+                precise.clone(),
+                visitor_assignment_range,
+                TypeProvenance::Runtime,
+            )],
+            &mut merged,
+        );
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].subject, subject);
+        assert_eq!(merged[0].ruby_type, precise);
+
+        merge_precise_visitor_type_facts(
+            vec![TypeFact::new(
+                merged[0].subject.clone(),
+                RubyType::Unknown,
+                visitor_assignment_range,
+                TypeProvenance::Runtime,
+            )],
+            &mut merged,
+        );
+        assert_eq!(
+            merged[0].ruby_type, precise,
+            "a later unknown fact must never erase an existing precise type"
+        );
+    }
+
+    #[test]
     fn file_processor_handles_shebang_source_without_crashing() {
         let server = RubyLanguageServer::default();
         let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
@@ -1011,6 +1426,47 @@ mod tests {
             .expect("shebang-bearing Ruby entry points must index successfully");
 
         assert_eq!(result.semantic_change, SemanticChange::InitialIndex);
+    }
+
+    #[test]
+    fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
+        let server = RubyLanguageServer::default();
+        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let declaration_uri = Url::parse("file:///project/types.rb").unwrap();
+        let reopening_uri = Url::parse("file:///project/reopening.rb").unwrap();
+
+        processor
+            .process_file_current_file_resolution_forced(
+                &declaration_uri,
+                "module Types\n  class Original\n  end\n  Alias = Original\nend\n",
+                &server,
+            )
+            .unwrap();
+        processor
+            .process_file_current_file_resolution_forced(
+                &reopening_uri,
+                "module Types\n  class Alias\n    def from_other_file\n    end\n  end\nend\n",
+                &server,
+            )
+            .unwrap();
+
+        let expected = FullyQualifiedName::method(
+            vec![
+                RubyConstant::new("Types").unwrap(),
+                RubyConstant::new("Original").unwrap(),
+            ],
+            RubyMethod::new("from_other_file").unwrap(),
+        );
+        let shadow = FullyQualifiedName::method(
+            vec![
+                RubyConstant::new("Types").unwrap(),
+                RubyConstant::new("Alias").unwrap(),
+            ],
+            RubyMethod::new("from_other_file").unwrap(),
+        );
+        let engine = server.analysis_engine.read();
+        assert_eq!(engine.method_facts_for(&expected).len(), 1);
+        assert!(engine.method_facts_for(&shadow).is_empty());
     }
 
     #[test]
@@ -1046,6 +1502,38 @@ fn collect_known_namespaces(
 ) -> HashSet<FullyQualifiedName> {
     let engine = analysis_engine.read();
     AnalysisQuery::new(&engine).known_namespace_fqns()
+}
+
+fn collect_known_constant_types(
+    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+    current_file: ruby_analysis::core::SourceFileId,
+) -> HashMap<FullyQualifiedName, RubyType> {
+    let engine = analysis_engine.read();
+    let mut candidates = HashMap::<FullyQualifiedName, Option<RubyType>>::new();
+    for fact in engine
+        .type_store()
+        .all_facts()
+        .into_iter()
+        .filter(|fact| fact.range.file_id != current_file)
+    {
+        let TypeSubject::Constant(constant) = fact.subject else {
+            continue;
+        };
+        match candidates.entry(constant) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(Some(fact.ruby_type));
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if entry.get().as_ref() != Some(&fact.ruby_type) {
+                    entry.insert(None);
+                }
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .filter_map(|(constant, ruby_type)| ruby_type.map(|ruby_type| (constant, ruby_type)))
+        .collect()
 }
 
 fn add_extension_analysis_facts(

@@ -3,6 +3,8 @@ members = [
     ".",
     "crates/rbs-parser",
     "crates/lsp-test-harness",
+    "crates/jvm-metadata",
+    "crates/jruby-support",
     "crates/ruby-analysis",
     "crates/extension-api",
     "crates/extension-guest-sdk",
@@ -50,6 +52,7 @@ tower-lsp = "0.20.0"
 tokio = { version = "1.32.0", features = ["full"] }
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.107"
+serde_yaml = "0.9.34"
 log = "0.4.20"
 env_logger = "0.10.0"
 anyhow = "1.0.75"
@@ -60,6 +63,8 @@ sha2 = "0.10.9"
 ruby-fast-lsp-extension-api = { path = "crates/extension-api" }
 ruby-fast-lsp-extension-rspec = { path = "crates/extension-rspec" }
 ruby-fast-lsp-extension-wasm-host = { path = "crates/extension-wasm-host" }
+ruby-fast-lsp-jvm-metadata = { path = "crates/jvm-metadata" }
+ruby-fast-lsp-jruby-support = { path = "crates/jruby-support" }
 
 # Ruby parsing and analysis
 ruby-prism = "1.4.0"
@@ -88,6 +93,7 @@ rayon = "1.10"
 tar = "0.4"
 zstd = "0.13"
 globset = "0.4"
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 
 # Platform-specific dependencies for parent process monitoring
 [target.'cfg(unix)'.dependencies]

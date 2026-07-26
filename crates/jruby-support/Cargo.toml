@@ -1,0 +1,9 @@
+[package]
+name = "ruby-fast-lsp-jruby-support"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Runtime-neutral JRuby compatibility and Java interop semantics"
+
+[dependencies]
+ruby-fast-lsp-jvm-metadata = { path = "../jvm-metadata" }

@@ -16,7 +16,7 @@ use crate::inference::r#type::literal::LiteralAnalyzer;
 use crate::inference::RubyType;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 use crate::RubyDocument;
-use crate::{collect_namespaces, control_flow, utf8_str, ScopeTracker};
+use crate::{control_flow, utf8_str, ScopeTracker};
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -123,6 +123,18 @@ impl FactCollector {
         self.analysis_diagnostics.push(DiagnosticFact::new(
             range,
             DiagnosticSeverity::Warning,
+            code,
+            message,
+        ));
+    }
+
+    pub fn push_error_diagnostic(&mut self, range: TextRange, code: &'static str, message: String) {
+        if !self.diagnostics_enabled {
+            return;
+        }
+        self.analysis_diagnostics.push(DiagnosticFact::new(
+            range,
+            DiagnosticSeverity::Error,
             code,
             message,
         ));
@@ -391,10 +403,7 @@ impl FactCollector {
         let current_namespace = self.scope_tracker.get_ns_stack();
         if absolute {
             let fqn = FullyQualifiedName::namespace(parts.to_vec());
-            return self
-                .direct_known_namespaces
-                .contains(&fqn)
-                .then(|| parts.to_vec());
+            return self.namespace_is_known(&fqn).then(|| parts.to_vec());
         }
 
         let mut search = current_namespace.clone();
@@ -402,7 +411,7 @@ impl FactCollector {
             let mut candidate = search.clone();
             candidate.extend(parts.iter().cloned());
             let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.direct_known_namespaces.contains(&fqn) {
+            if self.namespace_is_known(&fqn) {
                 return Some(candidate);
             }
             if search.is_empty() {
@@ -412,9 +421,7 @@ impl FactCollector {
         }
 
         let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.direct_known_namespaces
-            .contains(&fqn)
-            .then(|| parts.to_vec())
+        self.namespace_is_known(&fqn).then(|| parts.to_vec())
     }
 
     pub fn direct_range(&self, location: &ruby_prism::Location<'_>) -> TextRange {
@@ -465,11 +472,12 @@ impl FactCollector {
         self.direct_facts
             .graph_nodes
             .push(GraphNodeFact::new(fqn.clone(), kind, range));
+        let constant_fqn = FullyQualifiedName::constant(fqn.namespace_parts());
         self.direct_facts.types.push(TypeFact::new(
-            TypeSubject::Constant(FullyQualifiedName::constant(fqn.namespace_parts())),
+            TypeSubject::Constant(constant_fqn.clone()),
             match kind {
-                GraphNodeKind::Class => RubyType::ClassReference(fqn.clone()),
-                GraphNodeKind::Module => RubyType::ModuleReference(fqn.clone()),
+                GraphNodeKind::Class => RubyType::ClassReference(constant_fqn.clone()),
+                GraphNodeKind::Module => RubyType::ModuleReference(constant_fqn),
             },
             range,
             TypeProvenance::Inferred,
@@ -491,10 +499,19 @@ impl FactCollector {
         parts: &[RubyConstant],
         absolute: bool,
     ) -> Option<FullyQualifiedName> {
+        self.direct_resolve_namespace_from(parts, absolute, &self.scope_tracker.get_ns_stack())
+    }
+
+    pub fn direct_resolve_namespace_from(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
         let mut search = if absolute {
             Vec::new()
         } else {
-            self.scope_tracker.get_ns_stack()
+            lexical_context.to_vec()
         };
 
         loop {
@@ -512,6 +529,77 @@ impl FactCollector {
 
         let fqn = FullyQualifiedName::namespace(parts.to_vec());
         self.direct_known_namespaces.contains(&fqn).then_some(fqn)
+    }
+
+    pub fn namespace_is_known(&self, fqn: &FullyQualifiedName) -> bool {
+        if self.direct_known_namespaces.contains(fqn) {
+            return true;
+        }
+        let engine = self.analysis_engine.read();
+        !crate::engine::AnalysisQuery::new(&engine)
+            .graph_nodes_for(fqn)
+            .is_empty()
+    }
+
+    pub fn resolve_constant_value_type_from(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<(FullyQualifiedName, RubyType)> {
+        let mut search = if absolute {
+            Vec::new()
+        } else {
+            lexical_context.to_vec()
+        };
+        let engine = self.analysis_engine.read();
+        let query = crate::engine::AnalysisQuery::new(&engine);
+
+        loop {
+            let mut probe = search.clone();
+            probe.extend(parts.iter().cloned());
+            let constant = FullyQualifiedName::constant(probe);
+            if let Some(ruby_type) = self
+                .direct_constant_value_type(&constant)
+                .or_else(|| query.constant_value_type(&constant))
+            {
+                return Some((constant, ruby_type));
+            }
+            if absolute || search.is_empty() {
+                break;
+            }
+            search.pop();
+        }
+
+        None
+    }
+
+    pub fn resolve_declaration_constant_value_type_from(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<(FullyQualifiedName, RubyType)> {
+        let mut candidates = Vec::new();
+        let mut exact = if absolute {
+            Vec::new()
+        } else {
+            lexical_context.to_vec()
+        };
+        exact.extend(parts.iter().cloned());
+        candidates.push(exact);
+        if !absolute && parts.len() > 1 && !lexical_context.is_empty() {
+            candidates.push(parts.to_vec());
+        }
+
+        let engine = self.analysis_engine.read();
+        let query = crate::engine::AnalysisQuery::new(&engine);
+        candidates.into_iter().find_map(|candidate| {
+            let constant = FullyQualifiedName::constant(candidate);
+            self.direct_constant_value_type(&constant)
+                .or_else(|| query.constant_value_type(&constant))
+                .map(|ruby_type| (constant, ruby_type))
+        })
     }
 
     pub fn direct_push_edge(
@@ -586,6 +674,31 @@ impl FactCollector {
         documentation: Option<String>,
         return_type_label: Option<String>,
     ) {
+        self.direct_push_method_fact_with_signature_name_range_and_availability(
+            namespace,
+            owner_kind,
+            method,
+            range,
+            name_range,
+            params,
+            documentation,
+            return_type_label,
+            crate::core::MethodAvailability::Available,
+        );
+    }
+
+    pub fn direct_push_method_fact_with_signature_name_range_and_availability(
+        &mut self,
+        namespace: Vec<RubyConstant>,
+        owner_kind: NamespaceKind,
+        method: RubyMethod,
+        range: TextRange,
+        name_range: TextRange,
+        params: Vec<MethodParamFact>,
+        documentation: Option<String>,
+        return_type_label: Option<String>,
+        availability: crate::core::MethodAvailability,
+    ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
         self.direct_facts.symbols.push(
@@ -595,6 +708,7 @@ impl FactCollector {
             MethodFact::with_param_facts(fqn, owner, range, params)
                 .with_name_range(name_range)
                 .with_signature_metadata(documentation, return_type_label)
+                .with_availability(availability)
                 .with_visibility(self.scope_tracker.current_visibility()),
         );
     }
@@ -666,6 +780,16 @@ impl FactCollector {
         ruby_type: RubyType,
         location: &ruby_prism::Location<'_>,
     ) {
+        self.direct_push_type(subject, ruby_type, location, TypeProvenance::Assignment);
+    }
+
+    pub fn direct_push_type(
+        &mut self,
+        subject: TypeSubject,
+        ruby_type: RubyType,
+        location: &ruby_prism::Location<'_>,
+        provenance: TypeProvenance,
+    ) {
         if ruby_type == RubyType::Unknown {
             return;
         }
@@ -673,8 +797,46 @@ impl FactCollector {
             subject,
             ruby_type,
             self.direct_range(location),
-            TypeProvenance::Assignment,
+            provenance,
         ));
+    }
+
+    pub fn assignment_type_and_provenance(&self, value: &Node<'_>) -> (RubyType, TypeProvenance) {
+        let value_range = self.direct_range(&value.location());
+        if let Some(runtime_fact) = self.direct_facts.types.iter().rev().find(|fact| {
+            fact.subject == TypeSubject::Expression(value_range)
+                && fact.provenance == TypeProvenance::Runtime
+        }) {
+            return (runtime_fact.ruby_type.clone(), TypeProvenance::Runtime);
+        }
+        (
+            self.infer_assignment_type_from_value(value),
+            TypeProvenance::Assignment,
+        )
+    }
+
+    pub fn direct_push_expression_type(
+        &mut self,
+        node: &Node<'_>,
+        ruby_type: RubyType,
+        provenance: TypeProvenance,
+    ) {
+        if ruby_type == RubyType::Unknown {
+            return;
+        }
+        let range = self.direct_range(&node.location());
+        let subject = TypeSubject::Expression(range);
+        if self
+            .direct_facts
+            .types
+            .iter()
+            .any(|fact| fact.subject == subject && fact.ruby_type == ruby_type)
+        {
+            return;
+        }
+        let fact = TypeFact::new(subject, ruby_type, range, provenance);
+        self.type_store.add(fact.clone());
+        self.direct_facts.types.push(fact);
     }
 
     pub fn infer_variable_type_cached(&self, var_name: &str) -> Option<RubyType> {
@@ -700,6 +862,16 @@ impl FactCollector {
         value_node: &Node,
         local_types: &HashMap<String, RubyType>,
     ) -> RubyType {
+        let expression_subject = TypeSubject::Expression(self.direct_range(&value_node.location()));
+        if let Some(fact) = self
+            .direct_facts
+            .types
+            .iter()
+            .rev()
+            .find(|fact| fact.subject == expression_subject)
+        {
+            return fact.ruby_type.clone();
+        }
         if let Some(statements) = value_node.as_statements_node() {
             return statements
                 .body()
@@ -735,20 +907,20 @@ impl FactCollector {
             return literal_type;
         }
 
-        // 2. Constant read: `User` → ClassReference(User)
-        if let Some(const_node) = value_node.as_constant_read_node() {
-            let name = String::from_utf8_lossy(const_node.name().as_slice()).to_string();
-            if let Ok(fqn) = FullyQualifiedName::try_from(name.as_str()) {
-                return RubyType::ClassReference(fqn);
+        // 2. Constant read/path: resolve against the active lexical namespace before
+        // projecting the class object. This also preserves the target identity when
+        // one constant aliases another class/module object.
+        if let Some(reference) = crate::mixin_ref_from_node(value_node) {
+            let lexical_context = self.scope_tracker.get_ns_stack();
+            if let Some((_constant, ruby_type)) = self.resolve_constant_value_type_from(
+                &reference.parts,
+                reference.absolute,
+                &lexical_context,
+            ) {
+                return ruby_type;
             }
-        }
-
-        // 3. Constant path: `MyApp::User` → ClassReference(MyApp::User)
-        if let Some(path_node) = value_node.as_constant_path_node() {
-            if let Some(path_str) = Self::flatten_constant_path(&path_node) {
-                if let Ok(fqn) = FullyQualifiedName::try_from(path_str.as_str()) {
-                    return RubyType::ClassReference(fqn);
-                }
+            if let Some(fqn) = self.constant_reference_type(value_node) {
+                return RubyType::ClassReference(fqn);
             }
         }
 
@@ -1137,6 +1309,16 @@ impl FactCollector {
     }
 
     pub fn infer_assignment_type_from_value(&self, value_node: &Node) -> RubyType {
+        let expression_subject = TypeSubject::Expression(self.direct_range(&value_node.location()));
+        if let Some(fact) = self
+            .direct_facts
+            .types
+            .iter()
+            .rev()
+            .find(|fact| fact.subject == expression_subject)
+        {
+            return fact.ruby_type.clone();
+        }
         if self.resolve_analysis_method_returns {
             return self.infer_type_from_value(value_node);
         }
@@ -1348,22 +1530,25 @@ impl FactCollector {
     }
 
     fn constant_reference_type(&self, node: &Node) -> Option<FullyQualifiedName> {
-        if let Some(const_node) = node.as_constant_read_node() {
-            let name = String::from_utf8_lossy(const_node.name().as_slice()).to_string();
-            let constant = RubyConstant::new(&name).ok()?;
-            return Some(FullyQualifiedName::constant(vec![constant]));
+        let reference = crate::mixin_ref_from_node(node)?;
+        if let Some(namespace) = self.direct_resolve_namespace(&reference.parts, reference.absolute)
+        {
+            return Some(namespace);
         }
-        if let Some(path_node) = node.as_constant_path_node() {
-            let mut parts = Vec::new();
-            collect_namespaces(&path_node, &mut parts);
-            if parts.is_empty() {
-                None
-            } else {
-                Some(FullyQualifiedName::constant(parts))
-            }
+        let lexical_context = self.scope_tracker.get_ns_stack();
+        let engine = self.analysis_engine.read();
+        if let Some(resolved) = crate::engine::AnalysisQuery::new(&engine)
+            .resolve_constant_in_context(&reference.parts, &lexical_context)
+        {
+            return Some(resolved);
+        }
+        let mut parts = if reference.absolute {
+            Vec::new()
         } else {
-            None
-        }
+            lexical_context
+        };
+        parts.extend(reference.parts);
+        Some(FullyQualifiedName::constant(parts))
     }
 
     fn const_get_reference_type(&self, call: &CallNode<'_>) -> Option<RubyType> {
@@ -1510,24 +1695,6 @@ impl FactCollector {
             Some(ty.clone())
         } else {
             None
-        }
-    }
-
-    /// Helper to flatten a ConstantPathNode into a string (e.g., "Module::Class")
-    fn flatten_constant_path(node: &ConstantPathNode) -> Option<String> {
-        let mut parts = Vec::new();
-        collect_namespaces(node, &mut parts);
-
-        if parts.is_empty() {
-            None
-        } else {
-            // Join parts with "::"
-            let path_str = parts
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join("::");
-            Some(path_str)
         }
     }
 
@@ -2101,13 +2268,19 @@ impl Visit<'_> for FactCollector {
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode) {
-        self.process_module_node_entry(node);
+        if !self.process_module_node_entry(node) {
+            visit_module_node(self, node);
+            return;
+        }
         visit_module_node(self, node);
         self.process_module_node_exit(node);
     }
 
     fn visit_class_node(&mut self, node: &ClassNode) {
-        self.process_class_node_entry(node);
+        if !self.process_class_node_entry(node) {
+            visit_class_node(self, node);
+            return;
+        }
         visit_class_node(self, node);
         self.process_class_node_exit(node);
     }
@@ -2354,6 +2527,137 @@ mod execution_context_tests {
             collector.scope_tracker.get_ns_stack(),
             Vec::<RubyConstant>::new(),
             "all lexical and execution frames must be balanced after traversal"
+        );
+    }
+
+    #[test]
+    fn recovered_invalid_namespace_does_not_unbalance_an_enclosing_method_context() {
+        let source = "def outer\n  def self.forName(module, name); end\nend\n";
+        let uri = Url::parse("file:///workspace/lib/recovered.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/recovered.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        assert_eq!(
+            collector.scope_tracker.get_ns_stack(),
+            Vec::<RubyConstant>::new()
+        );
+        assert!(!collector.scope_tracker.execution_context_active());
+    }
+
+    #[test]
+    fn qualified_class_superclass_uses_predeclaration_lexical_context() {
+        let source = "class BigDecimal\n  def to_s\n    \"base\"\n  end\nend\n\nmodule SitemapGenerator\nend\n\nclass SitemapGenerator::BigDecimal < BigDecimal\n  alias_method :original_to_s, :to_s\nend\n";
+        let uri = Url::parse("file:///workspace/core_ext/big_decimal.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/core_ext/big_decimal.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let source = FullyQualifiedName::namespace(vec![
+            RubyConstant::new("SitemapGenerator").unwrap(),
+            RubyConstant::new("BigDecimal").unwrap(),
+        ]);
+        let target = FullyQualifiedName::namespace(vec![RubyConstant::new("BigDecimal").unwrap()]);
+        assert!(
+            collector
+                .direct_facts
+                .graph_edges
+                .iter()
+                .any(|edge| edge.kind == GraphEdgeKind::Superclass
+                    && edge.source == source
+                    && edge.target == target),
+            "the qualified class must inherit the pre-existing lexical BigDecimal"
+        );
+        assert!(
+            collector
+                .direct_facts
+                .graph_edges
+                .iter()
+                .all(|edge| edge.kind != GraphEdgeKind::Superclass
+                    || edge.source != source
+                    || edge.target != source),
+            "declaring the class must not make it its own superclass"
+        );
+    }
+
+    #[test]
+    fn class_reopening_through_a_constant_alias_keeps_the_original_owner_identity() {
+        let source = "module Types\n\
+                          class Original\n\
+                          end\n\
+                          Alias = Original\n\
+                          class Alias\n\
+                            def from_alias\n\
+                            end\n\
+                          end\n\
+                        end\n";
+        let uri = Url::parse("file:///workspace/lib/constant_alias.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/constant_alias.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let method = collector
+            .direct_facts
+            .methods
+            .iter()
+            .find(|fact| fact.fqn.name() == "from_alias")
+            .expect("method in aliased class reopening must be collected");
+        assert_eq!(
+            method.owner,
+            FullyQualifiedName::namespace(vec![
+                RubyConstant::new("Types").unwrap(),
+                RubyConstant::new("Original").unwrap(),
+            ]),
+            "class Alias must reopen the class object stored in Alias"
+        );
+        assert!(
+            collector.direct_facts.graph_nodes.iter().all(|fact| {
+                fact.fqn
+                    != FullyQualifiedName::namespace(vec![
+                        RubyConstant::new("Types").unwrap(),
+                        RubyConstant::new("Alias").unwrap(),
+                    ])
+            }),
+            "a value constant alias must not become a second class identity"
         );
     }
 }

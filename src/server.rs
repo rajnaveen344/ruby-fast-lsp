@@ -2,12 +2,16 @@ use crate::capabilities::debug::{
     AncestorsParams, AncestorsResponse, ListCommandsResponse, LookupParams, LookupResponse,
     MethodsParams, MethodsResponse, StatsParams, StatsResponse,
 };
-use crate::config::RubyFastLspConfig;
+use crate::config::{runtime::SelectedRuntimeDescriptor, RubyFastLspConfig};
 use crate::extensions::{
     ExtensionRegistryHandle, ExtensionStatusParams, ExtensionStatusResponse, ProjectContextSeed,
 };
 use crate::handlers::{notification, request};
 use crate::query::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
+use crate::runtime::catalog::{
+    DiscoveredRuntime, ProjectRuntimeStatus, RuntimeCatalog, RuntimeDiscoverParams, RuntimeStatus,
+    RuntimeStatusParams,
+};
 use anyhow::Result;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
@@ -90,6 +94,8 @@ pub struct Workspace {
     pub root_path: PathBuf,
     pub indexing_complete: Arc<AtomicBool>,
     pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    pub effective_runtime: Arc<RwLock<Option<SelectedRuntimeDescriptor>>>,
+    pub runtime_classpath_fingerprint_sha256: Arc<RwLock<Option<String>>>,
     pub(crate) extension_project_context_seed: Arc<RwLock<ProjectContextSeed>>,
     workspace_folder_uris: Arc<RwLock<std::collections::HashSet<Url>>>,
 }
@@ -118,6 +124,8 @@ impl Workspace {
             root_path,
             indexing_complete: Arc::new(AtomicBool::new(false)),
             analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
+            effective_runtime: Arc::new(RwLock::new(None)),
+            runtime_classpath_fingerprint_sha256: Arc::new(RwLock::new(None)),
             extension_project_context_seed,
             workspace_folder_uris: Arc::new(RwLock::new(std::collections::HashSet::from([
                 workspace_folder_uri,
@@ -143,6 +151,7 @@ pub struct RubyLanguageServer {
     /// semantic owner behind.
     external_document_projects: Arc<RwLock<HashMap<Url, Url>>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
+    discovered_runtimes: Arc<tokio::sync::OnceCell<Vec<DiscoveredRuntime>>>,
     pub extension_registry: ExtensionRegistryHandle,
     pub extension_watch_dynamic_registration: Arc<AtomicBool>,
     pub extension_watch_registration: Arc<tokio::sync::Mutex<Vec<String>>>,
@@ -155,6 +164,8 @@ pub struct RubyLanguageServer {
     pub parent_process_id: Arc<Mutex<Option<u32>>>,
     #[cfg(test)]
     published_diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
+    #[cfg(test)]
+    user_cache_root_override: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl RubyLanguageServer {
@@ -168,6 +179,7 @@ impl RubyLanguageServer {
             analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
             external_document_projects: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(Mutex::new(config)),
+            discovered_runtimes: Arc::new(tokio::sync::OnceCell::new()),
             extension_registry,
             extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
             extension_watch_registration: Arc::new(tokio::sync::Mutex::new(Vec::new())),
@@ -177,6 +189,8 @@ impl RubyLanguageServer {
             parent_process_id: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            user_cache_root_override: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -308,6 +322,36 @@ impl RubyLanguageServer {
         seed.write().ruby_version = ruby_version;
     }
 
+    pub(crate) fn set_runtime_classpath_fingerprint(
+        &self,
+        root: &PathBuf,
+        fingerprint: Option<String>,
+    ) {
+        if let Some(workspace) = self
+            .workspaces
+            .read()
+            .iter()
+            .find(|workspace| &workspace.root_path == root)
+        {
+            *workspace.runtime_classpath_fingerprint_sha256.write() = fingerprint;
+        }
+    }
+
+    pub(crate) fn set_effective_runtime(
+        &self,
+        root: &PathBuf,
+        runtime: Option<SelectedRuntimeDescriptor>,
+    ) {
+        if let Some(workspace) = self
+            .workspaces
+            .read()
+            .iter()
+            .find(|workspace| &workspace.root_path == root)
+        {
+            *workspace.effective_runtime.write() = runtime;
+        }
+    }
+
     pub(crate) fn refresh_extension_project_dependencies_for_uri(&self, uri: &Url) {
         let Some(workspace) = self.analysis_workspace_for_uri(uri) else {
             return;
@@ -366,6 +410,12 @@ impl RubyLanguageServer {
 
     pub fn release_external_document_project(&self, uri: &Url) {
         self.external_document_projects.write().remove(uri);
+    }
+
+    pub(crate) fn release_external_documents_for_project(&self, project_root_uri: &Url) {
+        self.external_document_projects
+            .write()
+            .retain(|_, retained_root| retained_root != project_root_uri);
     }
 
     /// Snapshot every active project engine plus the orphan engine.
@@ -533,6 +583,16 @@ impl RubyLanguageServer {
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_user_cache_root_for_tests(&self, root: PathBuf) {
+        *self.user_cache_root_override.lock() = Some(root);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn user_cache_root_for_tests(&self) -> Option<PathBuf> {
+        self.user_cache_root_override.lock().clone()
+    }
+
     /// Request the client to refresh inlay hints
     pub async fn refresh_inlay_hints(&self) {
         if let Some(client) = &self.client {
@@ -606,6 +666,163 @@ impl RubyLanguageServer {
         request::handle_extension_status(self, params).await
     }
 
+    /// Handle `ruby-fast-lsp/runtime/discover` without exposing editor policy
+    /// or mutating any project runtime selection.
+    pub async fn handle_runtime_discover(
+        &self,
+        _params: RuntimeDiscoverParams,
+    ) -> LspResult<RuntimeCatalog> {
+        Ok(crate::runtime::catalog::runtime_catalog_for_projects(
+            self.workspace_root_paths(),
+            self.discovered_runtimes().await,
+        ))
+    }
+
+    async fn discovered_runtimes(&self) -> Vec<DiscoveredRuntime> {
+        self.discovered_runtimes
+            .get_or_init(crate::runtime::catalog::discover_runtimes)
+            .await
+            .clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_discovered_runtimes_for_tests(&self, runtimes: Vec<DiscoveredRuntime>) {
+        self.discovered_runtimes.set(runtimes).expect(
+            "INVARIANT VIOLATED: test runtime catalog was initialized more than once. This is a bug because each test server must own one immutable discovery snapshot. Fix: create a fresh RubyLanguageServer per runtime test.",
+        );
+    }
+
+    pub(crate) async fn resolve_auto_runtime(
+        &self,
+        project_root: &std::path::Path,
+    ) -> Result<Option<SelectedRuntimeDescriptor>> {
+        let Some(marker) = crate::runtime::catalog::project_runtime_marker(project_root)? else {
+            return Ok(None);
+        };
+        let runtime = crate::runtime::catalog::select_runtime_for_marker(
+            &marker,
+            &self.discovered_runtimes().await,
+        )?;
+        let Some(runtime) = runtime else {
+            warn!(
+                "Project runtime marker `{marker}` has no exact installed runtime for {}",
+                project_root.display()
+            );
+            return Ok(None);
+        };
+        if runtime.support_status != crate::runtime::catalog::RuntimeSupportStatus::Supported {
+            return Err(anyhow::anyhow!(
+                "project runtime marker `{marker}` selects unsupported {}",
+                runtime.display_name
+            ));
+        }
+        Ok(Some(runtime.into()))
+    }
+
+    pub async fn handle_runtime_status(
+        &self,
+        params: RuntimeStatusParams,
+    ) -> LspResult<RuntimeStatus> {
+        let config = self.config.lock().clone();
+        let mut projects = self
+            .list_workspaces()
+            .into_iter()
+            .filter(|workspace| {
+                params
+                    .project_root
+                    .as_ref()
+                    .is_none_or(|root| root == &workspace.root_path)
+            })
+            .map(|workspace| {
+                let root = workspace.root_path.to_string_lossy();
+                let selection = config
+                    .runtime
+                    .selection_for_project(&root, &config.ruby_version);
+                let (
+                    mode,
+                    implementation,
+                    family,
+                    engine_version,
+                    compatibility_version,
+                    executable,
+                    java_home,
+                    stub_overlay,
+                ) = match selection {
+                    crate::config::runtime::EffectiveRuntimeSelection::Explicit(runtime) => {
+                        let stub_overlay = (runtime.implementation
+                            == crate::runtime::catalog::RuntimeImplementation::Jruby)
+                            .then(|| runtime.family.clone());
+                        (
+                            "explicit".to_string(),
+                            Some(runtime.implementation),
+                            Some(runtime.family),
+                            Some(runtime.engine_version),
+                            Some(runtime.compatibility_version),
+                            Some(runtime.executable),
+                            runtime.java_home,
+                            stub_overlay,
+                        )
+                    }
+                    crate::config::runtime::EffectiveRuntimeSelection::Auto => {
+                        if let Some(runtime) = workspace.effective_runtime.read().clone() {
+                            let stub_overlay = (runtime.implementation
+                                == crate::runtime::catalog::RuntimeImplementation::Jruby)
+                                .then(|| runtime.family.clone());
+                            (
+                                "auto".to_string(),
+                                Some(runtime.implementation),
+                                Some(runtime.family),
+                                Some(runtime.engine_version),
+                                Some(runtime.compatibility_version),
+                                Some(runtime.executable),
+                                runtime.java_home,
+                                stub_overlay,
+                            )
+                        } else {
+                            ("auto".to_string(), None, None, None, None, None, None, None)
+                        }
+                    }
+                    crate::config::runtime::EffectiveRuntimeSelection::LegacyMriCompatibility {
+                        major,
+                        minor,
+                    } => {
+                        let compatibility = format!("{major}.{minor}");
+                        (
+                            "legacy".to_string(),
+                            Some(crate::runtime::catalog::RuntimeImplementation::Mri),
+                            Some(compatibility.clone()),
+                            None,
+                            Some(compatibility),
+                            None,
+                            None,
+                            None,
+                        )
+                    }
+                };
+                ProjectRuntimeStatus {
+                    root: workspace.root_path,
+                    mode,
+                    implementation,
+                    family,
+                    engine_version,
+                    compatibility_version,
+                    executable,
+                    java_home,
+                    stub_overlay,
+                    classpath_fingerprint_sha256: workspace
+                        .runtime_classpath_fingerprint_sha256
+                        .read()
+                        .clone(),
+                    indexing_complete: workspace
+                        .indexing_complete
+                        .load(std::sync::atomic::Ordering::Acquire),
+                }
+            })
+            .collect::<Vec<_>>();
+        projects.sort_by(|left, right| left.root.cmp(&right.root));
+        Ok(RuntimeStatus { projects })
+    }
+
     /// Invalidate namespace tree cache with debouncing (300ms delay)
     pub fn invalidate_namespace_tree_cache_debounced(&self) {
         let server = self.clone();
@@ -649,12 +866,15 @@ impl Default for RubyLanguageServer {
             analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
             external_document_projects: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
+            discovered_runtimes: Arc::new(tokio::sync::OnceCell::new()),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
             reindex_timer: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            user_cache_root_override: Arc::new(Mutex::new(None)),
             extension_registry: ExtensionRegistryHandle::from_environment(),
             extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
             extension_watch_registration: Arc::new(tokio::sync::Mutex::new(Vec::new())),
@@ -1082,5 +1302,136 @@ impl LanguageServer for RubyLanguageServer {
         params: TextDocumentPositionParams,
     ) -> LspResult<Option<PrepareRenameResponse>> {
         request::handle_prepare_rename(self, params).await
+    }
+}
+
+#[cfg(test)]
+mod runtime_status_tests {
+    use super::*;
+    use crate::config::runtime::{
+        ProjectRuntimeSelection, RuntimeMode, RuntimeSelection, RuntimeSelectionConfig,
+        SelectedRuntimeDescriptor,
+    };
+    use crate::runtime::catalog::{
+        DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation, RuntimeStatusParams,
+        RuntimeSupportStatus,
+    };
+
+    #[tokio::test]
+    async fn runtime_status_reports_server_owned_project_identity_and_classpath() {
+        let fixture = tempfile::tempdir().unwrap();
+        let admin = fixture.path().join("admin");
+        let server_project = fixture.path().join("server");
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::create_dir_all(&server_project).unwrap();
+        let language_server = RubyLanguageServer::default();
+        let admin_workspace =
+            language_server.add_workspace(Url::from_directory_path(&admin).unwrap());
+        language_server.add_workspace(Url::from_directory_path(&server_project).unwrap());
+        *language_server.config.lock() = RubyFastLspConfig {
+            runtime: RuntimeSelectionConfig {
+                mode: RuntimeMode::Auto,
+                projects: vec![ProjectRuntimeSelection {
+                    root: admin.to_string_lossy().to_string(),
+                    selection: RuntimeSelection::Explicit(SelectedRuntimeDescriptor {
+                        implementation: RuntimeImplementation::Jruby,
+                        family: "9.2".to_string(),
+                        engine_version: "9.2.21.0".to_string(),
+                        compatibility_version: "2.5".to_string(),
+                        executable: fixture.path().join("jruby/bin/jruby"),
+                        discovery_source: RuntimeDiscoverySource::Rvm,
+                        java_home: Some(fixture.path().join("jdk")),
+                    }),
+                }],
+            },
+            ..RubyFastLspConfig::default()
+        };
+        language_server.set_runtime_classpath_fingerprint(&admin, Some("a".repeat(64)));
+        admin_workspace
+            .indexing_complete
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        let status = language_server
+            .handle_runtime_status(RuntimeStatusParams {
+                project_root: Some(admin.clone()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(status.projects.len(), 1);
+        let status = &status.projects[0];
+        assert_eq!(status.root, admin);
+        assert_eq!(status.mode, "explicit");
+        assert_eq!(status.implementation, Some(RuntimeImplementation::Jruby));
+        assert_eq!(status.family.as_deref(), Some("9.2"));
+        assert_eq!(status.engine_version.as_deref(), Some("9.2.21.0"));
+        assert_eq!(status.compatibility_version.as_deref(), Some("2.5"));
+        assert_eq!(status.stub_overlay.as_deref(), Some("9.2"));
+        assert_eq!(
+            status.classpath_fingerprint_sha256.as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        assert!(status.indexing_complete);
+
+        let auto_runtime = SelectedRuntimeDescriptor {
+            implementation: RuntimeImplementation::Mri,
+            family: "3.3".to_string(),
+            engine_version: "3.3.11".to_string(),
+            compatibility_version: "3.3".to_string(),
+            executable: fixture.path().join("ruby-3.3.11/bin/ruby"),
+            discovery_source: RuntimeDiscoverySource::Rbenv,
+            java_home: None,
+        };
+        language_server.set_effective_runtime(&server_project, Some(auto_runtime));
+        let auto = language_server
+            .handle_runtime_status(RuntimeStatusParams {
+                project_root: Some(server_project),
+            })
+            .await
+            .unwrap();
+        let auto = &auto.projects[0];
+        assert_eq!(auto.mode, "auto");
+        assert_eq!(auto.implementation, Some(RuntimeImplementation::Mri));
+        assert_eq!(auto.engine_version.as_deref(), Some("3.3.11"));
+        assert_eq!(
+            auto.executable,
+            Some(fixture.path().join("ruby-3.3.11/bin/ruby"))
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_runtime_resolves_exact_project_marker_through_server_catalog() {
+        let fixture = tempfile::tempdir().unwrap();
+        let admin = fixture.path().join("admin");
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::write(admin.join(".ruby-version"), "jruby-9.2.21.0\n").unwrap();
+        let executable = fixture.path().join("jruby-9.2.21.0/bin/jruby");
+        let java_home = fixture.path().join("jdk-17");
+        let language_server = RubyLanguageServer::default();
+        language_server.add_workspace(Url::from_directory_path(&admin).unwrap());
+        language_server.set_discovered_runtimes_for_tests(vec![DiscoveredRuntime {
+            implementation: RuntimeImplementation::Jruby,
+            implementation_label: "JRuby".to_string(),
+            family: "9.2".to_string(),
+            family_label: "JRuby 9.2 (Ruby 2.5)".to_string(),
+            compatibility_version: "2.5".to_string(),
+            compatibility_label: "Ruby 2.5".to_string(),
+            engine_version: "9.2.21.0".to_string(),
+            display_name: "JRuby 9.2.21.0 (Ruby 2.5)".to_string(),
+            executable: executable.clone(),
+            discovery_source: RuntimeDiscoverySource::Rvm,
+            support_status: RuntimeSupportStatus::Supported,
+            java_home: Some(java_home.clone()),
+        }]);
+
+        let resolved = language_server
+            .resolve_auto_runtime(&admin)
+            .await
+            .unwrap()
+            .expect("the exact installed JRuby marker must resolve");
+        assert_eq!(resolved.engine_version, "9.2.21.0");
+        assert_eq!(resolved.compatibility_version, "2.5");
+        assert_eq!(resolved.executable, executable);
+        assert_eq!(resolved.java_home, Some(java_home));
     }
 }

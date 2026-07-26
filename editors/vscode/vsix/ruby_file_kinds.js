@@ -10,6 +10,8 @@ function fileWatcherPatterns(includedPatterns = []) {
     return [
         `**/*.{${extensions.join(',')}}`,
         `**/{${RUBY_FILENAMES.join(',')}}`,
+        '**/{Gemfile.lock,Jarfile,Jars.lock}',
+        '**/*.{jar,jmod,java}',
         ...includedPatterns.filter((pattern) => typeof pattern === 'string' && pattern.length > 0)
     ];
 }

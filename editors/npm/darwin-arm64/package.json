@@ -10,6 +10,7 @@
   "os": ["darwin"],
   "cpu": ["arm64"],
   "files": [
-    "bin/ruby-fast-lsp"
+    "bin/ruby-fast-lsp",
+    "jruby-decompiler/**"
   ]
 }

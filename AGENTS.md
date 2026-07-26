@@ -165,8 +165,25 @@ Project indexing supports workspace-relative `includedPatterns` and
 Ruby files remain the default; included patterns may add nonstandard source
 names, exclusions always win, and `.git` is never traversed. Included gems
 augment statically inferred roots, while excluded gems win over direct and
-transitive requirements. The VS Code extension restarts the server after this
-configuration changes so removed sources cannot leave stale engine facts.
+transitive requirements. Clients that expose these engine-level overrides must
+restart the server after changing them so removed sources cannot leave stale
+engine facts.
+
+The VS Code Settings page exposes only `rubyFastLsp.logLevel`. Runtime
+selection, linter selection, formatter selection, and Ruby Index external-type
+visibility are editor commands backed by private workspace state; they must not
+be serialized into user `settings.json`. The adapter sends deterministic server
+defaults for indexing policy, JRuby attachments, extension settings, custom
+tool argv, and project-local extension enablement. Keep internal initialization
+transport fields out of the contributed configuration schema.
+The bottom-right runtime status follows the active document's deepest owning
+project and opens the project runtime workflow. An explicit runtime selection
+persists privately for the VS Code workspace. Saving it to `.ruby-version` is a
+separate confirmed project write that switches the project to Auto; the server,
+not the editor, resolves that exact marker against one bounded discovered
+runtime catalog shared by the isolated project coordinators. Never let the
+editor reconstruct implementation/compatibility mappings or silently choose a
+nearby runtime.
 
 An editor workspace folder is a project container, not necessarily one Ruby
 project. A root `Gemfile` owns the folder. Without one, discover the nearest
@@ -193,7 +210,52 @@ Git dependency has no normal Bundler checkout but has an extracted
 `vendor/cache/<repository>-<revision>` source, parse its `GIT` lockfile section
 without executing the cached gemspec and index only its `lib` tree as
 `SourceKind::Gem` in that project's engine. Never promote a vendor cache into a
-project root or editable project truth.
+project root or editable project truth. A locked registry dependency may use
+the exact platform-qualified `.gem` archive in that same project's
+`vendor/cache` only when no exact installed name/version/platform source is
+available. Gem selection is per lockfile identity and explicit source kind:
+Bundler-installed exact source first; registry locks may then use an exact
+active-Ruby installation and finally an exact project archive; Git locks may
+use only an exact Bundler checkout or matching extracted Git cache; path locks
+require Bundler's exact path source. Never choose the highest unrelated global
+version or substitute registry, Git, and path sources for one another.
+Bundler lockfiles may contain both `ruby` and `java` variants for the same
+registry gem. These are valid platform alternatives, not conflicting source
+identities: select the `java` identity for JRuby and the non-Java identity for
+other engines, while retaining exact version/source matching and rejecting
+genuinely ambiguous variants.
+Explicit `includedGems` is the sole unlocked exception and may select the
+active Ruby's highest installed version by deliberate user request. Validate a
+project archive's package metadata against the lockfile, extract only declared
+require paths without executing package code, and index them as
+`SourceKind::Gem`. Extraction belongs in the user cache under a
+canonical-project identity and archive checksum; never write generated
+extraction state into the Ruby project or share semantic ownership across
+isolated projects.
+
+Bundled core Ruby stubs are language semantics and must be indexed independently
+of runtime stdlib discovery. If the owning project's Ruby executable or version
+cannot be detected, use the bundled Ruby 3.0 core stubs as a conservative
+fallback and skip only runtime-dependent stdlib modules. Missing runtimes must
+never turn universal core constants such as `Thread` into false unresolved
+diagnostics.
+Explicit `rubyVersion` configuration wins over automatic detection. RVM,
+rbenv, and asdf `.ruby-version` markers must retain implementation prefixes
+such as `jruby-` and `truffleruby-`; use those markers to select the matching
+runtime executable and map its compatibility version to bundled core stubs.
+JRuby support is a built-in runtime concern, not a framework extension or
+editor concern. Compose the matching MRI compatibility stubs with a versioned
+JRuby delta that can add, override, mark unavailable, or mask declarations.
+For implementation navigation of JRuby's Ruby-authored runtime APIs, verify the
+selected `jruby.jar` checksum and materialize only the bounded
+`jruby/java/core_ext/{kernel,module,object}.rb` allowlist into the isolated user
+cache. Index those files as runtime/stdlib implementation source so they
+outrank compatibility stubs and signatures; never extract the archive broadly
+or treat runtime source as project-owned.
+Each isolated project owns its exact JDK/JAR classpath and generated Java proxy
+facts. Bounded static classfile metadata may produce ordinary external
+signature facts; never execute artifacts, merge project catalogs, or make
+decompiled method bodies semantic truth.
 
 Full-document formatting is available through opt-in RuboCop or Standard
 integration. It consumes the current unsaved buffer over stdin, uses RuboCop's
@@ -268,9 +330,12 @@ per-file replacement as `SourceKind::Signature`. Signature files are
 non-editable and diagnostic-free. Engine method/constant navigation must prefer
 matching Ruby implementations while signature help and missing implementation
 types may use the RBS overlay. Watched RBS create/change/delete and parse failure
-must replace or clear facts deterministically. DSL/runtime-generated APIs must
-continue through public extension patches and optional bounded reindex requests;
-never add binary introspection or a second semantic store.
+must replace or clear facts deterministically. Framework DSL/runtime-generated
+APIs must continue through public extension patches and optional bounded
+reindex requests; never add runtime reflection, decompiler-derived semantic
+truth, or a second semantic store. Built-in runtime providers such as JRuby may
+read bounded static declaration metadata, but must project it through the same
+validated, file-owned fact lifecycle rather than a privileged semantic store.
 
 Ruby source may begin with a shebang. `ruby-prism` 1.4.0's comment iterator can
 segfault on raw leading `#!` input in optimized builds. All server/indexer Prism

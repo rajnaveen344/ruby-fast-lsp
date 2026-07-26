@@ -76,6 +76,10 @@ static RAISE_REGEX: LazyLock<Regex> =
 /// Groups: 1=reason
 static DEPRECATED_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"@deprecated\s*(.*)").expect("Invalid deprecated regex"));
+static UNAVAILABLE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@unavailable\s*(.*)").expect("Invalid unavailable regex"));
+static ABSENT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@absent\s*(.*)").expect("Invalid absent regex"));
 
 // =============================================================================
 // Helper Types
@@ -273,7 +277,13 @@ impl YardParser {
 
         let doc = Self::parse_lines(&comment_lines, true);
 
-        if doc.has_type_info() || doc.description.is_some() {
+        if doc.has_type_info()
+            || doc.description.is_some()
+            || doc.deprecated.is_some()
+            || doc.unavailable.is_some()
+            || doc.absent.is_some()
+            || !doc.raises.is_empty()
+        {
             Some(doc)
         } else {
             None
@@ -496,6 +506,18 @@ impl YardParser {
         } else if let Some(caps) = DEPRECATED_REGEX.captures(line) {
             let reason = non_empty_string(caps.get(1).map(|m| m.as_str().trim()));
             doc.deprecated = Some(reason.unwrap_or_else(|| "Deprecated".to_string()));
+        } else if let Some(caps) = UNAVAILABLE_REGEX.captures(line) {
+            let reason = non_empty_string(caps.get(1).map(|m| m.as_str().trim()));
+            doc.unavailable =
+                Some(reason.unwrap_or_else(|| {
+                    "This API is unavailable in the selected runtime.".to_string()
+                }));
+        } else if let Some(caps) = ABSENT_REGEX.captures(line) {
+            let reason = non_empty_string(caps.get(1).map(|m| m.as_str().trim()));
+            doc.absent =
+                Some(reason.unwrap_or_else(|| {
+                    "This API is absent from the selected runtime.".to_string()
+                }));
         }
         // @example tags are intentionally skipped (multi-line, complex)
     }
@@ -775,6 +797,41 @@ mod tests {
         let doc = YardParser::parse(comment);
 
         assert_eq!(doc.deprecated, Some("Use new_method instead".to_string()));
+    }
+
+    #[test]
+    fn test_parse_unavailable() {
+        let comment = "# @unavailable JRuby does not implement process forking on the JVM.";
+        let doc = YardParser::parse(comment);
+
+        assert_eq!(
+            doc.unavailable,
+            Some("JRuby does not implement process forking on the JVM.".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_unavailable_without_description_or_type_tags() {
+        let source =
+            "module Process\n  # @unavailable Not supported here.\n  def self.fork\n  end\nend\n";
+        let method_start = source
+            .find("def self.fork")
+            .expect("test method must exist");
+        let doc = YardParser::extract_from_source(source, method_start)
+            .expect("@unavailable alone must retain method metadata");
+
+        assert_eq!(doc.unavailable, Some("Not supported here.".to_string()));
+    }
+
+    #[test]
+    fn test_parse_absent() {
+        let comment = "# @absent JRuby does not expose ObjectSpace.dump.";
+        let doc = YardParser::parse(comment);
+
+        assert_eq!(
+            doc.absent,
+            Some("JRuby does not expose ObjectSpace.dump.".to_string())
+        );
     }
 
     #[test]

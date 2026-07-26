@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 *.vsix
+jruby-stubs/
+jruby-decompiler/
 
 # Binary folders (binaries will be copied at build time)
 bin/*/ruby-fast-lsp*

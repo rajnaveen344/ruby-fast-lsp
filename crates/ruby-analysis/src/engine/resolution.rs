@@ -5,7 +5,7 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
     MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod,
     SourceFileId, StoredMethodReferenceCandidate, StoredReferenceCandidateRef, SymbolKind,
-    TextRange,
+    TextRange, TypeSubject,
 };
 use crate::engine::query::AnalysisQuery;
 
@@ -122,6 +122,7 @@ impl<'a> AnalysisQuery<'a> {
                 is_super,
                 access,
                 caller,
+                preferred_definition_range,
                 diagnostics,
             } = candidate.kind
             else {
@@ -135,6 +136,7 @@ impl<'a> AnalysisQuery<'a> {
                 is_super,
                 access,
                 caller,
+                preferred_definition_range,
                 diagnostics,
             };
             identities.extend(self.method_candidate_rename_identities(&candidate));
@@ -790,11 +792,19 @@ impl<'a> AnalysisQuery<'a> {
         }
 
         if *method != method_missing_method() {
-            return self.resolve_method_reference_with_chain_cache(
+            let fallback = self.resolve_method_reference_with_chain_cache(
                 namespace_fqn,
                 &method_missing_method(),
                 chain_cache,
             );
+            if matches!(
+                &fallback,
+                MethodLookupResult::Unique(fact)
+                    if default_basic_object_method_missing_fact(self.engine, fact)
+            ) {
+                return MethodLookupResult::Missing;
+            }
+            return fallback;
         }
 
         MethodLookupResult::Missing
@@ -951,6 +961,12 @@ impl<'a> AnalysisQuery<'a> {
         );
         let resolved = resolve_constant_fqn(self.engine, path, false, &current_fqn)
             .unwrap_or_else(|| FullyQualifiedName::constant(path.to_vec()));
+        let resolved_constant = FullyQualifiedName::constant(resolved.namespace_parts().to_vec());
+        if let Some(receiver_type) = self.constant_value_type(&resolved_constant) {
+            if let Some(namespace) = self.type_to_namespace(&receiver_type) {
+                return namespace;
+            }
+        }
 
         FullyQualifiedName::namespace_with_kind(
             resolved.namespace_parts(),
@@ -1055,6 +1071,39 @@ impl<'a> AnalysisQuery<'a> {
         let fqn = self
             .resolve_constant_in_context(parts, context)
             .unwrap_or_else(|| FullyQualifiedName::constant(parts.to_vec()));
+        let mut runtime_targets = self
+            .engine
+            .type_facts_for(&TypeSubject::Constant(fqn.clone()))
+            .into_iter()
+            .filter(|fact| fact.provenance == crate::core::TypeProvenance::Runtime)
+            .filter_map(|fact| match fact.ruby_type {
+                crate::core::RubyType::ClassReference(target)
+                | crate::core::RubyType::ModuleReference(target)
+                    if target != fqn =>
+                {
+                    Some(target)
+                }
+                crate::core::RubyType::ClassReference(_)
+                | crate::core::RubyType::ModuleReference(_)
+                | crate::core::RubyType::Class(_)
+                | crate::core::RubyType::Module(_)
+                | crate::core::RubyType::Array(_)
+                | crate::core::RubyType::Hash(_, _)
+                | crate::core::RubyType::Union(_)
+                | crate::core::RubyType::Unknown => None,
+            })
+            .collect::<Vec<_>>();
+        runtime_targets.sort_by_key(ToString::to_string);
+        runtime_targets.dedup();
+        if runtime_targets.len() == 1 {
+            let implementation_ranges = self.symbol_definition_ranges(
+                &runtime_targets[0],
+                &[SymbolKind::Class, SymbolKind::Module, SymbolKind::Constant],
+            );
+            if !implementation_ranges.is_empty() {
+                return implementation_ranges;
+            }
+        }
         self.symbol_definition_ranges(
             &fqn,
             &[SymbolKind::Class, SymbolKind::Module, SymbolKind::Constant],
@@ -2117,13 +2166,52 @@ fn method_missing_callee_in_chain(
     ancestor_chain: &[FullyQualifiedName],
 ) -> Option<ResolvedMethodCallee> {
     let method_missing = method_missing_method();
-    method_callee_in_chain(
+    let callee = method_callee_in_chain(
         engine,
         ancestor_chain,
         &method_missing,
         MethodCalleeResolution::MethodMissing,
         true,
         None,
+    )?;
+    if default_basic_object_method_missing_callee(engine, &callee) {
+        return None;
+    }
+    Some(callee)
+}
+
+fn default_basic_object_method_missing_fact(
+    engine: &crate::AnalysisEngine,
+    fact: &MethodFact,
+) -> bool {
+    fact.owner == basic_object_instance_fqn()
+        && method_name_from_fact(fact) == method_missing_method()
+        && engine
+            .file(fact.range.file_id)
+            .is_some_and(|file| file.kind == crate::core::SourceKind::Stub)
+}
+
+fn default_basic_object_method_missing_callee(
+    engine: &crate::AnalysisEngine,
+    callee: &ResolvedMethodCallee,
+) -> bool {
+    callee.owner == basic_object_instance_fqn()
+        && !callee.definition_ranges.is_empty()
+        && callee.definition_ranges.iter().all(|range| {
+            engine
+                .file(range.file_id)
+                .is_some_and(|file| file.kind == crate::core::SourceKind::Stub)
+        })
+}
+
+fn basic_object_instance_fqn() -> FullyQualifiedName {
+    FullyQualifiedName::namespace_with_kind(
+        vec![RubyConstant::new("BasicObject").expect(
+            "INVARIANT VIOLATED: `BasicObject` is not a valid Ruby constant. \
+             This is a bug because Ruby core class names must be valid constants. \
+             Fix: update RubyConstant validation to accept core Ruby class names.",
+        )],
+        crate::core::NamespaceKind::Instance,
     )
 }
 

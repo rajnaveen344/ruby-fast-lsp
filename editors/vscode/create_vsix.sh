@@ -263,6 +263,44 @@ else
     echo "Stubs will not be included in the VSIX package"
 fi
 
+# Stage the runtime-owned JRuby delta assets. These remain uncompressed because
+# the server indexes only the selected series and needs stable navigation URIs
+# inside the installed extension.
+echo "Bundling JRuby runtime stubs..."
+JRUBY_STUB_SOURCE="$ROOT_DIR/support/jruby/stubs"
+JRUBY_STUB_TARGET="$EXTENSION_DIR/jruby-stubs"
+if [ ! -d "$JRUBY_STUB_SOURCE" ]; then
+    echo "Error: missing JRuby runtime stubs at $JRUBY_STUB_SOURCE"
+    exit 1
+fi
+rm -rf "$JRUBY_STUB_TARGET"
+cp -R "$JRUBY_STUB_SOURCE" "$JRUBY_STUB_TARGET"
+for jruby_stub_series in common 9.0 9.1 9.2 9.3 9.4 10.0 10.1; do
+    if [ ! -f "$JRUBY_STUB_TARGET/$jruby_stub_series/runtime.rb" ]; then
+        echo "Error: JRuby $jruby_stub_series runtime overlay was not staged"
+        exit 1
+    fi
+done
+
+# Stage the checksum-pinned implementation-navigation decompiler. The server
+# resolves this path relative to its packaged binary and verifies the SHA-256
+# again before every accepted process.
+echo "Bundling JRuby Java decompiler..."
+JRUBY_DECOMPILER_SOURCE="$ROOT_DIR/support/jruby/decompiler"
+JRUBY_DECOMPILER_TARGET="$EXTENSION_DIR/jruby-decompiler"
+if [ ! -f "$JRUBY_DECOMPILER_SOURCE/cfr-0.152.jar" ] || [ ! -f "$JRUBY_DECOMPILER_SOURCE/LICENSE-CFR" ]; then
+    echo "Error: missing pinned CFR decompiler artifact or license"
+    exit 1
+fi
+rm -rf "$JRUBY_DECOMPILER_TARGET"
+cp -R "$JRUBY_DECOMPILER_SOURCE" "$JRUBY_DECOMPILER_TARGET"
+CFR_EXPECTED_SHA256="f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2"
+CFR_ACTUAL_SHA256=$(shasum -a 256 "$JRUBY_DECOMPILER_TARGET/cfr-0.152.jar" | awk '{print $1}')
+if [ "$CFR_ACTUAL_SHA256" != "$CFR_EXPECTED_SHA256" ]; then
+    echo "Error: staged CFR checksum mismatch: expected $CFR_EXPECTED_SHA256, got $CFR_ACTUAL_SHA256"
+    exit 1
+fi
+
 # Bundle core server-loaded extension packages.
 echo "Bundling Ruby Fast LSP extensions..."
 rm -rf "$EXTENSION_DIR/extensions"

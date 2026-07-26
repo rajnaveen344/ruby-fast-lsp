@@ -6,7 +6,7 @@ use ruby_prism::ModuleNode;
 use super::FactCollector;
 
 impl FactCollector {
-    pub fn process_module_node_entry(&mut self, node: &ModuleNode) {
+    pub fn process_module_node_entry(&mut self, node: &ModuleNode) -> bool {
         let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 
         if self
@@ -15,7 +15,7 @@ impl FactCollector {
             .is_err()
         {
             error!("Error creating namespace for module");
-            return;
+            return false;
         }
 
         let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
@@ -32,6 +32,7 @@ impl FactCollector {
             body_range,
             Some(module_name),
         );
+        true
     }
 
     pub fn process_module_node_exit(&mut self, _node: &ModuleNode) {

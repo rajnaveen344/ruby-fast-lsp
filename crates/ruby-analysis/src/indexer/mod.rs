@@ -42,8 +42,9 @@ pub use receiver_resolution::{
 pub use rename::RenameVisitor;
 pub use ruby_document::RubyDocument;
 pub use scope_tracker::{
-    build_constant_path_name, collect_namespaces, get_method_namespace_kind, mixin_ref_from_node,
-    utf8_str, LocalScopeKind, MixinRef, ScopeFrame, ScopeTracker,
+    build_constant_path_name, collect_namespaces, constant_path_is_absolute,
+    get_method_namespace_kind, mixin_ref_from_node, utf8_str, LocalScopeKind, MixinRef, ScopeFrame,
+    ScopeTracker,
 };
 pub use selection_ranges::selection_range_chains;
 pub use semantic_tokens::{TokenVisitor, TOKEN_MODIFIERS, TOKEN_TYPES};

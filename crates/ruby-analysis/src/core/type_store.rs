@@ -76,6 +76,7 @@ pub enum TypeProvenance {
     Flow,
     Rbs,
     Yard,
+    Runtime,
     Extension,
     Inferred,
 }
@@ -439,8 +440,9 @@ fn provenance_rank(provenance: TypeProvenance) -> u8 {
         TypeProvenance::Flow => 2,
         TypeProvenance::Rbs => 3,
         TypeProvenance::Yard => 4,
-        TypeProvenance::Extension => 5,
-        TypeProvenance::Inferred => 6,
+        TypeProvenance::Runtime => 5,
+        TypeProvenance::Extension => 6,
+        TypeProvenance::Inferred => 7,
     }
 }
 

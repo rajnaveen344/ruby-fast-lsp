@@ -1,0 +1,12 @@
+[package]
+name = "ruby-fast-lsp-jvm-metadata"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Bounded, deterministic JVM class and archive declaration metadata"
+
+[dependencies]
+sha2 = "0.10.9"
+tree-sitter = "0.25"
+tree-sitter-java = "0.23.5"
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }

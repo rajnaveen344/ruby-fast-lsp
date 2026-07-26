@@ -4,7 +4,9 @@
 //! All helper functions and business logic should be in `helpers.rs`.
 
 use crate::capabilities::{self, indexing};
+use crate::config::runtime::EffectiveRuntimeSelection;
 use crate::config::RubyFastLspConfig;
+use crate::runtime::catalog::RuntimeImplementation;
 use crate::server::RubyLanguageServer;
 use crate::utils::detect_system_ruby_version;
 use log::{debug, info, warn};
@@ -54,9 +56,18 @@ pub async fn handle_initialize(
     // participate in deterministic discovery.
     let config = match params.initialization_options {
         Some(init_options) => match serde_json::from_value::<RubyFastLspConfig>(init_options) {
-            Ok(config) => {
+            Ok(config) if config.validate_runtime_configuration().is_ok() => {
                 debug!("Received configuration: {:?}", config);
                 config
+            }
+            Ok(config) => {
+                warn!(
+                    "Rejected invalid runtime initialization configuration: {}",
+                    config.validate_runtime_configuration().expect_err(
+                        "invalid configuration branch must retain its validation error"
+                    )
+                );
+                RubyFastLspConfig::default()
             }
             Err(err) => {
                 warn!(
@@ -339,6 +350,21 @@ pub async fn handle_did_change_watched_files(
     server: &RubyLanguageServer,
     mut params: DidChangeWatchedFilesParams,
 ) {
+    let config = server.config.lock().clone();
+    let mut runtime_rebuilds = server
+        .list_workspaces()
+        .into_iter()
+        .filter(|workspace| {
+            params.changes.iter().any(|change| {
+                change.uri.to_file_path().is_ok_and(|path| {
+                    jruby_classpath_change_requires_rebuild(&workspace.root_path, &path, &config)
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    runtime_rebuilds.sort_by(|left, right| left.root_path.cmp(&right.root_path));
+    runtime_rebuilds.dedup_by(|left, right| left.root_path == right.root_path);
+
     for change in &params.changes {
         if change
             .uri
@@ -366,7 +392,93 @@ pub async fn handle_did_change_watched_files(
             typ: FileChangeType::CHANGED,
         }));
     refresh_extension_watch_registration(server).await;
-    indexing::handle_watched_files_changed(server, params).await;
+    params.changes.retain(|change| {
+        let Ok(path) = change.uri.to_file_path() else {
+            return true;
+        };
+        !runtime_rebuilds.iter().any(|workspace| {
+            jruby_classpath_change_requires_rebuild(&workspace.root_path, &path, &config)
+        })
+    });
+    if !params.changes.is_empty() {
+        indexing::handle_watched_files_changed(server, params).await;
+    }
+    for workspace in runtime_rebuilds {
+        rebuild_runtime_owned_project_state(server, workspace).await;
+    }
+}
+
+fn jruby_classpath_change_requires_rebuild(
+    project_root: &std::path::Path,
+    changed_path: &std::path::Path,
+    config: &RubyFastLspConfig,
+) -> bool {
+    if !changed_path.starts_with(project_root) {
+        return false;
+    }
+    let root = project_root.to_string_lossy();
+    if !matches!(
+        config
+            .runtime
+            .selection_for_project(&root, &config.ruby_version),
+        EffectiveRuntimeSelection::Explicit(runtime)
+            if runtime.implementation == RuntimeImplementation::Jruby
+    ) {
+        return false;
+    }
+    if changed_path.file_name().is_some_and(|name| {
+        matches!(
+            name.to_str(),
+            Some("Gemfile.lock" | "Jarfile" | "Jars.lock")
+        )
+    }) {
+        return true;
+    }
+    changed_path
+        .extension()
+        .is_some_and(|extension| matches!(extension.to_str(), Some("jar" | "jmod" | "java")))
+}
+
+async fn rebuild_runtime_owned_project_state(
+    server: &RubyLanguageServer,
+    workspace: crate::server::Workspace,
+) {
+    let open_documents = server
+        .docs
+        .lock()
+        .values()
+        .filter_map(|document| {
+            let document = document.read();
+            let path = document.uri.to_file_path().ok()?;
+            path.starts_with(&workspace.root_path)
+                .then(|| TextDocumentItem {
+                    uri: document.uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: document.version,
+                    text: document.content.clone(),
+                })
+        })
+        .collect::<Vec<_>>();
+    info!(
+        "Rebuilding runtime-owned semantic state for project {}",
+        workspace.root_path.display()
+    );
+    server.release_external_documents_for_project(&workspace.root_uri);
+    *workspace.analysis_engine.write() = ruby_analysis::engine::AnalysisEngine::new();
+    workspace.indexing_complete.store(false, Ordering::Release);
+    let rebuild = indexing::init_workspace(server, workspace.root_uri.clone()).await;
+    for text_document in open_documents {
+        indexing::handle_did_open(server, DidOpenTextDocumentParams { text_document }).await;
+    }
+    match rebuild {
+        Ok(()) => {
+            workspace.indexing_complete.store(true, Ordering::Release);
+        }
+        Err(error) => warn!(
+            "Runtime rebuild failed for project {}: {error}",
+            workspace.root_path.display()
+        ),
+    }
 }
 
 /// Add or remove workspace folders at runtime in response to
@@ -475,11 +587,31 @@ pub async fn handle_did_change_configuration(
             if let Ok(mut config) =
                 serde_json::from_value::<RubyFastLspConfig>(ruby_fast_lsp_settings.clone())
             {
+                if let Err(error) = config.validate_runtime_configuration() {
+                    warn!("Rejected invalid runtime configuration update: {error}");
+                    return;
+                }
+                let previous_config = server.config.lock().clone();
                 preserve_initialization_only_config(
                     &mut config,
-                    &server.config.lock(),
+                    &previous_config,
                     ruby_fast_lsp_settings,
                 );
+                let runtime_changed_workspaces = server
+                    .list_workspaces()
+                    .into_iter()
+                    .filter(|workspace| {
+                        let root = workspace.root_path.to_string_lossy();
+                        previous_config
+                            .runtime
+                            .selection_for_project(&root, &previous_config.ruby_version)
+                            != config
+                                .runtime
+                                .selection_for_project(&root, &config.ruby_version)
+                            || previous_config.jruby.project_config(&root)
+                                != config.jruby.project_config(&root)
+                    })
+                    .collect::<Vec<_>>();
                 info!("Updated configuration: {:?}", config);
 
                 // Apply log level immediately (works without restart)
@@ -508,6 +640,10 @@ pub async fn handle_did_change_configuration(
                     "Configuration updated with Ruby version: {:?}",
                     ruby_version
                 );
+
+                for workspace in runtime_changed_workspaces {
+                    rebuild_runtime_owned_project_state(server, workspace).await;
+                }
             } else {
                 warn!("Failed to parse configuration from settings");
             }
@@ -622,6 +758,37 @@ pub async fn handle_shutdown(server: &RubyLanguageServer) -> LspResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::runtime::{
+        ProjectRuntimeSelection, RuntimeMode, RuntimeSelection, RuntimeSelectionConfig,
+        SelectedRuntimeDescriptor,
+    };
+    use crate::runtime::catalog::RuntimeDiscoverySource;
+    use ruby_analysis::core::SourceKind;
+    use ruby_analysis::engine::SourceFileInput;
+    use std::io::{Cursor, Write};
+    use std::path::PathBuf;
+    use zip::write::SimpleFileOptions;
+
+    fn decode_hex(source: &str) -> Vec<u8> {
+        let digits = source
+            .bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect::<Vec<_>>();
+        digits
+            .chunks_exact(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect()
+    }
+
+    fn write_jar(path: &std::path::Path, entry: &str, contents: &[u8]) {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(entry, SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(contents).unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+        std::fs::write(path, bytes).unwrap();
+    }
 
     #[test]
     fn extension_watch_registration_is_sorted_typed_lsp_registration() {
@@ -642,5 +809,279 @@ mod tests {
                 ]
             }))
         );
+    }
+
+    #[test]
+    fn only_owning_jruby_classpath_inputs_trigger_runtime_rebuilds() {
+        let project = PathBuf::from("/repo/admin");
+        let mut config = RubyFastLspConfig {
+            runtime: RuntimeSelectionConfig {
+                mode: RuntimeMode::Auto,
+                projects: vec![ProjectRuntimeSelection {
+                    root: project.to_string_lossy().to_string(),
+                    selection: RuntimeSelection::Explicit(SelectedRuntimeDescriptor {
+                        implementation: RuntimeImplementation::Jruby,
+                        family: "9.2".to_string(),
+                        engine_version: "9.2.21.0".to_string(),
+                        compatibility_version: "2.5".to_string(),
+                        executable: PathBuf::from("/runtimes/jruby-9.2.21.0/bin/jruby"),
+                        discovery_source: RuntimeDiscoverySource::Rvm,
+                        java_home: Some(PathBuf::from("/jdk/17")),
+                    }),
+                }],
+            },
+            ..RubyFastLspConfig::default()
+        };
+
+        for changed in [
+            "Gemfile.lock",
+            "Jarfile",
+            "Jars.lock",
+            "lib/jars/runtime.jar",
+            "src/main/java/com/example/Runtime.java",
+        ] {
+            assert!(
+                jruby_classpath_change_requires_rebuild(&project, &project.join(changed), &config),
+                "{changed} must rebuild the owning JRuby runtime state"
+            );
+        }
+        assert!(!jruby_classpath_change_requires_rebuild(
+            &project,
+            PathBuf::from("/repo/server/lib/jars/runtime.jar").as_path(),
+            &config
+        ));
+        assert!(!jruby_classpath_change_requires_rebuild(
+            &project,
+            &project.join("lib/application.rb"),
+            &config
+        ));
+
+        config.runtime.projects[0].selection =
+            RuntimeSelection::Explicit(SelectedRuntimeDescriptor {
+                implementation: RuntimeImplementation::Mri,
+                family: "3.3".to_string(),
+                engine_version: "3.3.11".to_string(),
+                compatibility_version: "3.3".to_string(),
+                executable: PathBuf::from("/runtimes/ruby-3.3.11/bin/ruby"),
+                discovery_source: RuntimeDiscoverySource::Rvm,
+                java_home: None,
+            });
+        assert!(!jruby_classpath_change_requires_rebuild(
+            &project,
+            &project.join("lib/jars/runtime.jar"),
+            &config
+        ));
+    }
+
+    #[tokio::test]
+    async fn classpath_change_clears_external_facts_and_reopens_project_documents_on_failure() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("admin");
+        std::fs::create_dir_all(project.join("lib/jars")).unwrap();
+        std::fs::write(project.join("Gemfile"), "").unwrap();
+        let source_path = project.join("app.rb");
+        let source = "VALUE = Java::ComExample::Runtime.new\n";
+        std::fs::write(&source_path, source).unwrap();
+        let project_uri = Url::from_directory_path(&project).unwrap();
+        let source_uri = Url::from_file_path(&source_path).unwrap();
+        let external_path = fixture.path().join("cache/Runtime.java");
+        std::fs::create_dir_all(external_path.parent().unwrap()).unwrap();
+        std::fs::write(&external_path, "package com.example; class Runtime {}\n").unwrap();
+        let external_uri = Url::from_file_path(&external_path).unwrap();
+
+        let server = RubyLanguageServer::default();
+        let workspace = server.add_workspace(project_uri);
+        *server.config.lock() = RubyFastLspConfig {
+            runtime: RuntimeSelectionConfig {
+                mode: RuntimeMode::Auto,
+                projects: vec![ProjectRuntimeSelection {
+                    root: project.to_string_lossy().to_string(),
+                    selection: RuntimeSelection::Explicit(SelectedRuntimeDescriptor {
+                        implementation: RuntimeImplementation::Jruby,
+                        family: "9.2".to_string(),
+                        engine_version: "9.2.21.0".to_string(),
+                        compatibility_version: "2.5".to_string(),
+                        executable: fixture.path().join("missing-jruby/bin/jruby"),
+                        discovery_source: RuntimeDiscoverySource::Rvm,
+                        java_home: Some(fixture.path().join("missing-jdk")),
+                    }),
+                }],
+            },
+            ..RubyFastLspConfig::default()
+        };
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: source_uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: source.to_string(),
+                },
+            },
+        )
+        .await;
+        workspace
+            .analysis_engine
+            .write()
+            .register_file(SourceFileInput {
+                path: external_path.clone(),
+                content: "package com.example; class Runtime {}\n".to_string(),
+                kind: SourceKind::External,
+            });
+        server.retain_external_document_project(&external_uri, &workspace);
+        assert!(workspace
+            .analysis_engine
+            .read()
+            .file_id(&external_path)
+            .is_some());
+
+        handle_did_change_watched_files(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: Url::from_file_path(project.join("lib/jars/runtime.jar")).unwrap(),
+                    typ: FileChangeType::DELETED,
+                }],
+            },
+        )
+        .await;
+
+        let engine = workspace.analysis_engine.read();
+        assert!(
+            engine.file_id(&external_path).is_none(),
+            "runtime rebuild must remove stale external implementation facts"
+        );
+        assert!(
+            engine.file_id(&source_path).is_some(),
+            "open project documents must be restored even when runtime setup fails closed"
+        );
+        drop(engine);
+        assert!(
+            server.analysis_workspace_for_uri(&external_uri).is_none(),
+            "runtime rebuild must release retained provenance for stale external documents"
+        );
+        assert!(!workspace.indexing_complete.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn changed_winning_jar_replaces_decompiled_navigation_without_stale_facts() {
+        use crate::config::runtime::ProjectJrubyConfig;
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("admin");
+        let jruby_home = fixture.path().join("jruby-9.2.21.0");
+        let java_home = fixture.path().join("jdk");
+        let jar_path = project.join("lib/rich.jar");
+        let source_path = project.join("imports.rb");
+        std::fs::create_dir_all(project.join("lib")).unwrap();
+        std::fs::create_dir_all(jruby_home.join("bin")).unwrap();
+        std::fs::create_dir_all(java_home.join("bin")).unwrap();
+        std::fs::create_dir_all(java_home.join("jmods")).unwrap();
+        std::fs::write(project.join("Gemfile"), "").unwrap();
+        std::fs::write(jruby_home.join("bin/jruby"), "#!/bin/sh\nprintf '[]\\n'\n").unwrap();
+        let permissions = std::os::unix::fs::PermissionsExt::from_mode(0o755);
+        std::fs::set_permissions(jruby_home.join("bin/jruby"), permissions).unwrap();
+        std::fs::write(java_home.join("release"), "JAVA_VERSION=\"17.0.12\"\n").unwrap();
+        let real_java = [
+            std::env::var_os("JAVA_HOME")
+                .map(PathBuf::from)
+                .map(|home| home.join("bin/java")),
+            Some(PathBuf::from("/opt/homebrew/opt/openjdk/bin/java")),
+            Some(PathBuf::from("/usr/local/opt/openjdk/bin/java")),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|candidate| candidate.is_file())
+        .expect("JRuby decompiler lifecycle test requires a real JDK java executable");
+        symlink(real_java, java_home.join("bin/java")).unwrap();
+        let rich_class = decode_hex(include_str!(
+            "../../crates/jvm-metadata/fixtures/rich_fixture.class.hex"
+        ));
+        write_jar(&jar_path, "fixtures/RichFixture.class", &rich_class);
+        let source = "java_import fixtures.RichFixture\n\
+                      RICH = RichFixture.new(nil)\n\
+                      VALUE = RICH.java_send(:run, [])\n";
+        std::fs::write(&source_path, source).unwrap();
+
+        let project_root = format!("{}/", project.to_string_lossy());
+        let mut config = RubyFastLspConfig {
+            runtime: RuntimeSelectionConfig {
+                mode: RuntimeMode::Auto,
+                projects: vec![ProjectRuntimeSelection {
+                    root: project_root.clone(),
+                    selection: RuntimeSelection::Explicit(SelectedRuntimeDescriptor {
+                        implementation: RuntimeImplementation::Jruby,
+                        family: "9.2".to_string(),
+                        engine_version: "9.2.21.0".to_string(),
+                        compatibility_version: "2.5".to_string(),
+                        executable: jruby_home.join("bin/jruby"),
+                        discovery_source: RuntimeDiscoverySource::Rvm,
+                        java_home: Some(java_home),
+                    }),
+                }],
+            },
+            ..RubyFastLspConfig::default()
+        };
+        config.jruby.projects = vec![ProjectJrubyConfig {
+            root: project_root,
+            additional_classpath: vec!["lib/rich.jar".to_string()],
+            additional_sources: Vec::new(),
+        }];
+
+        let server = RubyLanguageServer::default();
+        *server.config.lock() = config;
+        server.set_user_cache_root_for_tests(fixture.path().join("cache"));
+        let project_uri = Url::from_directory_path(&project).unwrap();
+        let workspace = server.add_workspace(project_uri.clone());
+        indexing::init_workspace(&server, project_uri)
+            .await
+            .expect("initial JRuby fixture workspace must index");
+        let initial_files = workspace
+            .analysis_engine
+            .read()
+            .files()
+            .map(|file| (file.kind, file.path.clone()))
+            .collect::<Vec<_>>();
+        assert!(
+            initial_files.iter().any(|(kind, path)| {
+                *kind == SourceKind::External
+                    && std::fs::read_to_string(path).is_ok_and(|source| {
+                        source.contains("return List.of(prefix + values.length);")
+                    })
+            }),
+            "initial runtime index must contain the decompiled implementation: {initial_files:?}"
+        );
+
+        let replacement = decode_hex(include_str!(
+            "../../crates/jvm-metadata/fixtures/minimal_class.hex"
+        ));
+        write_jar(&jar_path, "com/example/Demo.class", &replacement);
+        handle_did_change_watched_files(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: Url::from_file_path(&jar_path).unwrap(),
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        )
+        .await;
+
+        let engine = workspace.analysis_engine.read();
+        assert!(
+            !engine.files().any(|file| {
+                matches!(file.kind, SourceKind::External | SourceKind::Signature)
+                    && file.path.to_string_lossy().contains("RichFixture")
+            }),
+            "changing the winning artifact must remove stale source, decompiled, and signature facts"
+        );
+        assert!(
+            engine.file_id(&source_path).is_some(),
+            "the project source must be reindexed after the runtime rebuild"
+        );
+        assert!(workspace.indexing_complete.load(Ordering::Acquire));
     }
 }

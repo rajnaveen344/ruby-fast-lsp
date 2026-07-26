@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const AdmZip = require(path.resolve(__dirname, '../vscode/vsix/node_modules/adm-zip'));
+const {
+    runPackagedJrubyNavigationSmoke
+} = require('./smoke_jruby_navigation');
 
 const platformKey = `${process.platform}-${process.arch}`;
 const vsixPlatforms = {
@@ -43,11 +47,20 @@ const railsPackage = path.join(extensionRoot, 'extensions', 'rails-ruby');
 const minitestPackage = path.join(extensionRoot, 'extensions', 'minitest-ruby');
 const sinatraPackage = path.join(extensionRoot, 'extensions', 'sinatra-rust');
 const cucumberPackage = path.join(extensionRoot, 'extensions', 'cucumber-rust');
+const cfrJar = path.join(extensionRoot, 'jruby-decompiler', 'cfr-0.152.jar');
 for (const required of [
     binary,
     path.join(extensionRoot, 'erb_html.js'),
     path.join(extensionRoot, 'ruby_file_kinds.js'),
     path.join(extensionRoot, 'ruby_file_kinds.json'),
+    path.join(extensionRoot, 'runtime_selector.js'),
+    path.join(extensionRoot, 'configuration_state.js'),
+    cfrJar,
+    path.join(extensionRoot, 'jruby-decompiler', 'LICENSE-CFR'),
+    path.join(extensionRoot, 'jruby-decompiler', 'README.md'),
+    ...['common', '9.0', '9.1', '9.2', '9.3', '9.4', '10.0', '10.1'].map(
+        series => path.join(extensionRoot, 'jruby-stubs', series, 'runtime.rb')
+    ),
     path.join(rspecPackage, 'extension.toml'),
     path.join(railsPackage, 'extension.toml'),
     path.join(railsPackage, 'target', 'wasm32-wasip1', 'release', 'ruby_fast_lsp_rails_extension.wasm'),
@@ -61,11 +74,25 @@ for (const required of [
         throw new Error(`Packaged VSIX is missing required path: ${required}`);
     }
 }
+const cfrSha256 = crypto.createHash('sha256').update(fs.readFileSync(cfrJar)).digest('hex');
+if (cfrSha256 !== 'f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2') {
+    fs.rmSync(temp, { recursive: true, force: true });
+    throw new Error(`Packaged CFR checksum mismatch: ${cfrSha256}`);
+}
 if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
 
 const { createErbHtmlDocument } = require(path.join(extensionRoot, 'erb_html.js'));
 const fileKinds = require(path.join(extensionRoot, 'ruby_file_kinds.js'));
 const packagedManifest = require(path.join(extensionRoot, 'package.json'));
+const packagedSettings = Object.keys(packagedManifest.contributes.configuration.properties);
+const packagedCommands = new Set(
+    packagedManifest.contributes.commands.map(command => command.command)
+);
+if (JSON.stringify(packagedSettings) !== JSON.stringify(['rubyFastLsp.logLevel']) ||
+    !packagedCommands.has('ruby-fast-lsp.runtime.configure')) {
+    fs.rmSync(temp, { recursive: true, force: true });
+    throw new Error('Packaged VSIX runtime controls or minimal Settings surface drifted');
+}
 const packagedRuby = packagedManifest.contributes.languages.find(language => language.id === 'ruby');
 const packagedErbLanguage = packagedManifest.contributes.languages.find(language => language.id === 'erb');
 if (JSON.stringify(packagedRuby?.extensions) !== JSON.stringify(fileKinds.RUBY_EXTENSIONS) ||
@@ -101,6 +128,7 @@ let stdout = Buffer.alloc(0);
 let stderr = '';
 let settled = false;
 let initialized = false;
+let navigationStarted = false;
 let timer;
 
 function frame(message) {
@@ -118,7 +146,7 @@ function finish(error) {
         process.stderr.write(`${error.message}\n${stderr}`);
         process.exitCode = 1;
     } else {
-        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber plus packaged ERB HTML features on ${platformKey}.\n`);
+        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber, packaged ERB HTML features, and verified JRuby implementation navigation on ${platformKey}.\n`);
     }
 }
 
@@ -162,13 +190,21 @@ function handleResponse(response) {
     if (!cucumber || cucumber.status !== 'loaded') {
         return finish(new Error(`Bundled Cucumber extension did not load: ${JSON.stringify(statuses)}`));
     }
-    finish();
+    navigationStarted = true;
+    if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+    }
+    runPackagedJrubyNavigationSmoke({
+        command: binary,
+        label: 'Packaged VSIX Ruby Fast LSP'
+    }).then(() => finish()).catch(error => finish(error));
 }
 
 child.stderr.on('data', chunk => { stderr += chunk.toString(); });
 child.on('error', error => finish(error));
 child.on('exit', code => {
-    if (!settled) {
+    if (!settled && !navigationStarted) {
         finish(new Error(`Packaged Ruby Fast LSP exited before ${initialized ? 'extension status' : 'initialize'} response with status ${code}`));
     }
 });

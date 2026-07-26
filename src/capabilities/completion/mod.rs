@@ -1,7 +1,9 @@
 pub mod snippets;
 pub mod variable;
 
-use ruby_analysis::core::{FullyQualifiedName, NamespaceKind, RubyMethod, SourceFileId};
+use ruby_analysis::core::{
+    FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, SourceFileId,
+};
 use tower_lsp::lsp_types::{
     CompletionContext, CompletionResponse, CompletionTriggerKind, Position, Url,
 };
@@ -250,20 +252,14 @@ pub async fn find_completion_at_position(
         );
 
         if let Some(receiver_type) = receiver_type {
-            // Determine namespace kind from the receiver
-            // Constant receivers (Foo.bar) use singleton methods
-            // Variable/expression receivers (obj.bar) use instance methods
-            let kind = if let Some(Identifier::RubyMethod { receiver, .. }) = &partial_name {
-                match receiver {
-                    MethodReceiver::Constant(_) => NamespaceKind::Singleton,
-                    _ => NamespaceKind::Instance,
-                }
-            } else if matches!(
+            // Ruby constants may contain either a class/module object or an ordinary
+            // value. The resolved type, not the syntactic capitalization, owns the
+            // singleton-vs-instance completion decision.
+            let kind = if matches!(
                 receiver_type,
                 ruby_analysis::inference::RubyType::ClassReference(_)
+                    | ruby_analysis::inference::RubyType::ModuleReference(_)
             ) {
-                // Dot-trigger on a constant (e.g., "UserA.") — partial_name is None
-                // but the text-based receiver detection found a ClassReference
                 NamespaceKind::Singleton
             } else {
                 NamespaceKind::Instance
@@ -323,6 +319,20 @@ struct ServerCompletionSemanticQuery {
 }
 
 impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
+    fn constant_type_in_context(
+        &self,
+        path: &[RubyConstant],
+        current_namespace: &[RubyConstant],
+    ) -> Option<RubyType> {
+        let engine = self.analysis_engine.read();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        let resolved = query.resolve_constant_in_context(path, current_namespace)?;
+        let constant = FullyQualifiedName::constant(resolved.namespace_parts().to_vec());
+        query
+            .constant_value_type(&constant)
+            .or_else(|| query.constant_reference_type(resolved.namespace_parts_slice()))
+    }
+
     fn method_return_type_for_receiver(
         &self,
         namespace: &FullyQualifiedName,

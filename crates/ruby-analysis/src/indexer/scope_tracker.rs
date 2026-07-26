@@ -63,7 +63,10 @@ struct ExecutionContextFrame {
 
 #[derive(Debug, Clone)]
 pub enum ScopeFrame {
-    Namespace(Vec<RubyConstant>),
+    Namespace {
+        parts: Vec<RubyConstant>,
+        absolute: bool,
+    },
     Singleton,
 }
 
@@ -174,19 +177,40 @@ impl ScopeTracker {
     }
 
     pub fn push_ns_scope(&mut self, ns: RubyConstant) {
-        self.frames.push(ScopeFrame::Namespace(vec![ns]));
+        self.frames.push(ScopeFrame::Namespace {
+            parts: vec![ns],
+            absolute: false,
+        });
         self.module_function_mode_stack.push(false);
         self.visibility_stack.push(MethodVisibility::Public);
     }
 
     pub fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
-        self.frames.push(ScopeFrame::Namespace(namespaces));
+        self.frames.push(ScopeFrame::Namespace {
+            parts: namespaces,
+            absolute: false,
+        });
+        self.module_function_mode_stack.push(false);
+        self.visibility_stack.push(MethodVisibility::Public);
+    }
+
+    pub fn push_absolute_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
+        assert!(
+            !namespaces.is_empty(),
+            "INVARIANT VIOLATED: absolute namespace frame is empty. \
+             This is a bug because an absolute class/module target must contain at least one Ruby constant. \
+             Fix: validate the resolved namespace before pushing an absolute frame."
+        );
+        self.frames.push(ScopeFrame::Namespace {
+            parts: namespaces,
+            absolute: true,
+        });
         self.module_function_mode_stack.push(false);
         self.visibility_stack.push(MethodVisibility::Public);
     }
 
     pub fn pop_ns_scope(&mut self) {
-        if matches!(self.frames.last(), Some(ScopeFrame::Namespace(_))) {
+        if matches!(self.frames.last(), Some(ScopeFrame::Namespace { .. })) {
             self.frames.pop();
             self.module_function_mode_stack.pop().expect(
                 "INVARIANT VIOLATED: module_function mode stack underflow. \
@@ -202,14 +226,19 @@ impl ScopeTracker {
     }
 
     pub fn get_ns_stack(&self) -> Vec<RubyConstant> {
-        self.frames
-            .iter()
-            .filter_map(|frame| match frame {
-                ScopeFrame::Namespace(constants) => Some(constants.clone()),
-                ScopeFrame::Singleton => None,
-            })
-            .flatten()
-            .collect()
+        let mut namespaces = Vec::new();
+        for frame in &self.frames {
+            match frame {
+                ScopeFrame::Namespace { parts, absolute } => {
+                    if *absolute {
+                        namespaces.clear();
+                    }
+                    namespaces.extend(parts.iter().cloned());
+                }
+                ScopeFrame::Singleton => {}
+            }
+        }
+        namespaces
     }
 
     pub fn push_namespace_from_constant_path(
@@ -441,11 +470,20 @@ pub fn mixin_ref_from_node(node: &Node) -> Option<MixinRef> {
         collect_namespaces(&n, &mut parts);
         return Some(MixinRef {
             parts,
-            absolute: n.parent().is_none(),
+            absolute: constant_path_is_absolute(&n),
         });
     }
 
     None
+}
+
+pub fn constant_path_is_absolute(path: &ConstantPathNode) -> bool {
+    match path.parent() {
+        None => true,
+        Some(parent) => parent
+            .as_constant_path_node()
+            .is_some_and(|parent_path| constant_path_is_absolute(&parent_path)),
+    }
 }
 
 pub fn build_constant_path_name(node: &Node) -> String {
@@ -493,6 +531,33 @@ mod tests {
 
         assert_eq!(tracker.get_ns_stack(), vec![a, b, c]);
         assert_eq!(tracker.current_method_context(), NamespaceKind::Singleton);
+    }
+
+    #[test]
+    fn nested_root_constant_path_is_absolute() {
+        let parse = ruby_prism::parse(b"::Faraday::Middleware");
+        let program = parse
+            .node()
+            .as_program_node()
+            .expect("test source must parse as a program");
+        let node = program
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .expect("test source must contain one statement");
+
+        let reference = mixin_ref_from_node(&node).expect("constant path must be recognized");
+
+        assert!(reference.absolute, "leading :: must remain absolute");
+        assert_eq!(
+            reference
+                .parts
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["Faraday", "Middleware"]
+        );
     }
 
     #[test]

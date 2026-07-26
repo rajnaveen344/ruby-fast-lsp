@@ -71,6 +71,7 @@ pub enum ReferenceCandidateKind {
         is_super: bool,
         access: MethodReferenceAccess,
         caller: Option<FullyQualifiedName>,
+        preferred_definition_range: Option<TextRange>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     },
     Resolved {
@@ -113,6 +114,7 @@ pub struct MethodReferenceCandidate {
     pub is_super: bool,
     pub access: MethodReferenceAccess,
     pub caller: Option<FullyQualifiedName>,
+    pub preferred_definition_range: Option<TextRange>,
     pub diagnostics: MethodReferenceDiagnostics,
 }
 
@@ -149,6 +151,7 @@ pub struct StoredMethodReferenceCandidate {
     pub is_super: bool,
     pub access: MethodReferenceAccess,
     pub caller: Option<FqnId>,
+    pub preferred_definition_range: Option<TextRange>,
     pub diagnostics: Option<Box<MethodReferenceDiagnostics>>,
 }
 
@@ -188,6 +191,7 @@ pub enum StoredReferenceCandidateKind {
         is_super: bool,
         access: MethodReferenceAccess,
         caller: Option<FqnId>,
+        preferred_definition_range: Option<TextRange>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     },
     Resolved {
@@ -212,6 +216,7 @@ impl StoredReferenceCandidate {
         is_super: bool,
         access: MethodReferenceAccess,
         caller: Option<FqnId>,
+        preferred_definition_range: Option<TextRange>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     ) -> Self {
         Self {
@@ -223,6 +228,7 @@ impl StoredReferenceCandidate {
                 is_super,
                 access,
                 caller,
+                preferred_definition_range,
                 diagnostics,
             },
         }
@@ -278,6 +284,7 @@ impl ReferenceCandidate {
                 is_super: candidate.is_super,
                 access: candidate.access,
                 caller: candidate.caller,
+                preferred_definition_range: candidate.preferred_definition_range,
                 diagnostics: Some(Box::new(candidate.diagnostics)),
             },
         }
@@ -305,6 +312,7 @@ impl ReferenceCandidate {
                 is_super: false,
                 access: MethodReferenceAccess::Normal,
                 caller,
+                preferred_definition_range: None,
                 diagnostics: None,
             },
         }
@@ -363,6 +371,7 @@ impl ReferenceCandidateStore {
                     is_super,
                     access,
                     caller,
+                    preferred_definition_range,
                     diagnostics,
                 } => methods.push(StoredMethodReferenceCandidate {
                     range: candidate.range,
@@ -372,6 +381,7 @@ impl ReferenceCandidateStore {
                     is_super,
                     access,
                     caller,
+                    preferred_definition_range,
                     diagnostics,
                 }),
                 StoredReferenceCandidateKind::Resolved { target, caller } => {
@@ -421,6 +431,7 @@ impl ReferenceCandidateStore {
                         is_super: candidate.is_super,
                         access: candidate.access,
                         caller: candidate.caller,
+                        preferred_definition_range: candidate.preferred_definition_range,
                         diagnostics: candidate.diagnostics.clone(),
                     },
                 },
@@ -455,6 +466,7 @@ impl ReferenceCandidateStore {
                     is_super: candidate.is_super,
                     access: candidate.access,
                     caller: candidate.caller,
+                    preferred_definition_range: candidate.preferred_definition_range,
                     diagnostics: candidate.diagnostics.clone(),
                 },
             }));

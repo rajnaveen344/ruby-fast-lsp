@@ -36,6 +36,7 @@ impl FactCollector {
                 is_super: false,
                 access: MethodReferenceAccess::Normal,
                 caller: self.scope_tracker.current_method_fqn().cloned(),
+                preferred_definition_range: None,
                 diagnostics: MethodReferenceDiagnostics {
                     diagnostic_range: old_range,
                     receiver_label: None,

@@ -5,6 +5,19 @@ const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
 const { registerErbHtmlProviders } = require('./erb_html');
 const { fileWatcherPatterns } = require('./ruby_file_kinds');
 const {
+    runtimeStatusForDocument,
+    runtimeStatusItem,
+    runtimeStatusPresentation,
+    runtimeVersionMarker,
+    selectRuntime
+} = require('./runtime_selector');
+const {
+    STATE_KEYS,
+    readEditorState,
+    serverConfiguration,
+    updateRuntime
+} = require('./configuration_state');
+const {
     debugConfiguration,
     minitestInvocation,
     railsViewRelativePaths,
@@ -15,6 +28,7 @@ const {
 let outputChannel;
 
 let client;
+let editorState;
 
 /**
  * Extract zipped stubs to the extension's stubs directory on first run.
@@ -216,11 +230,9 @@ class RubyIndexProvider {
         try {
             if (!element) {
                 // Root level - get namespace tree from LSP server
-                const config = vscode.workspace.getConfiguration('rubyFastLsp');
-                const showExternalTypes = config.get('showExternalTypes', false);
                 const response = await client.sendRequest('ruby/namespaceTree', {
                     uri: vscode.window.activeTextEditor?.document.uri.toString() || '',
-                    show_external_types: showExternalTypes
+                    show_external_types: editorState.showExternalTypes
                 });
 
                 if (response && (response.modules || response.classes)) {
@@ -674,6 +686,36 @@ function debugTest(name, invocation, cwd) {
     return vscode.debug.startDebugging(undefined, debugConfiguration(name, invocation, cwd));
 }
 
+async function selectExternalTool(kind, current) {
+    const selected = await vscode.window.showQuickPick(
+        [
+            {
+                label: 'Disabled',
+                description: 'Do not run an external tool',
+                id: 'none',
+                picked: current === 'none'
+            },
+            {
+                label: 'RuboCop',
+                description: 'Use bundle exec rubocop from the owning Ruby project',
+                id: 'rubocop',
+                picked: current === 'rubocop'
+            },
+            {
+                label: 'Standard',
+                description: 'Use bundle exec standardrb from the owning Ruby project',
+                id: 'standard',
+                picked: current === 'standard'
+            }
+        ],
+        {
+            title: `Ruby Fast LSP: Select ${kind}`,
+            placeHolder: `Choose the ${kind.toLowerCase()} for Ruby projects`
+        }
+    );
+    return selected?.id;
+}
+
 function activate(context) {
     // Create single output channel for both extension and LSP server logs
     outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP');
@@ -687,22 +729,15 @@ function activate(context) {
     extractZippedStubs(context.extensionPath);
 
     const config = vscode.workspace.getConfiguration('rubyFastLsp');
+    editorState = readEditorState(context.workspaceState, config);
     const extensionPackages = getBundledExtensionPackages(context.extensionPath);
-    const initializationOptions = {
-        rubyVersion: config.get('rubyVersion', 'auto'),
-        stubsPath: config.get('stubsPath', ''),
+    const initializationOptions = serverConfiguration({
+        editorState,
+        logLevel: config.get('logLevel', 'info'),
         extensionPath: context.extensionPath,
         extensionPackages,
-        extensionDirs: [],
-        extensionSettings: config.get('extensionSettings', {}),
-        workspaceTrusted: vscode.workspace.isTrusted,
-        projectExtensionsEnabled: config.get('projectExtensionsEnabled', true),
-        linter: config.get('linter', 'none'),
-        linterCommand: config.get('linterCommand', []),
-        formatter: config.get('formatter', 'none'),
-        formatterCommand: config.get('formatterCommand', []),
-        indexing: config.get('indexing', {})
-    };
+        workspaceTrusted: vscode.workspace.isTrusted
+    });
 
     const serverOptions = {
         command: getServerPath(),
@@ -721,8 +756,7 @@ function activate(context) {
             { scheme: 'file', language: 'erb' }
         ],
         synchronize: {
-            fileEvents: watchedFileEvents,
-            configurationSection: 'rubyFastLsp'
+            fileEvents: watchedFileEvents
         },
         initializationOptions,
         outputChannel: outputChannel
@@ -738,6 +772,58 @@ function activate(context) {
     // Create status bar item for indexing progress
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     context.subscriptions.push(statusBarItem);
+
+    const runtimeStatusBarItem = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right,
+        100
+    );
+    runtimeStatusBarItem.command = 'ruby-fast-lsp.runtime.configure';
+    context.subscriptions.push(runtimeStatusBarItem);
+    let activeRuntimeProjectRoot;
+    let activeRuntimeStatus;
+    let runtimeStatusRefreshGeneration = 0;
+    const refreshRuntimeStatusBar = async () => {
+        const generation = ++runtimeStatusRefreshGeneration;
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || !['ruby', 'erb'].includes(editor.document.languageId)) {
+            activeRuntimeProjectRoot = undefined;
+            activeRuntimeStatus = undefined;
+            runtimeStatusBarItem.hide();
+            return;
+        }
+        runtimeStatusBarItem.text = '$(sync~spin) Ruby runtime';
+        runtimeStatusBarItem.tooltip = 'Ruby Fast LSP is determining the owning project runtime';
+        runtimeStatusBarItem.show();
+        if (!client || client.state !== 2) {
+            return;
+        }
+        try {
+            const response = await client.sendRequest('ruby-fast-lsp/runtime/status', {});
+            if (generation !== runtimeStatusRefreshGeneration) {
+                return;
+            }
+            const projects = Array.isArray(response?.projects) ? response.projects : [];
+            const status = runtimeStatusForDocument(projects, editor.document.uri.fsPath);
+            activeRuntimeProjectRoot = status?.root;
+            activeRuntimeStatus = status;
+            if (!status) {
+                runtimeStatusBarItem.text = '$(ruby) No Ruby project';
+                runtimeStatusBarItem.tooltip = 'The active document is not owned by a discovered Ruby project';
+                return;
+            }
+            const presentation = runtimeStatusPresentation(status);
+            runtimeStatusBarItem.text = presentation.text;
+            runtimeStatusBarItem.tooltip = presentation.tooltip;
+        } catch (error) {
+            if (generation !== runtimeStatusRefreshGeneration) {
+                return;
+            }
+            activeRuntimeProjectRoot = undefined;
+            activeRuntimeStatus = undefined;
+            runtimeStatusBarItem.text = '$(warning) Runtime unavailable';
+            runtimeStatusBarItem.tooltip = `Ruby Fast LSP runtime status failed: ${error.message}`;
+        }
+    };
 
     // Listen for progress notifications from the LSP server
     client.onNotification('$/progress', (params) => {
@@ -755,6 +841,7 @@ function activate(context) {
             } else if (value.kind === 'end') {
                 statusBarItem.text = `$(check) Ruby Fast LSP: ${value.message || 'Ready'}`;
                 outputChannel.appendLine(`[Ruby Fast LSP] ${value.message || 'Ready'}`);
+                void refreshRuntimeStatusBar();
                 // Hide the status bar after a brief delay
                 setTimeout(() => {
                     statusBarItem.hide();
@@ -766,48 +853,13 @@ function activate(context) {
     // Handle configuration changes
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(async event => {
-            if (event.affectsConfiguration('rubyFastLsp')) {
-                // Notify the server about configuration changes
-                if (client) {
-                    const newConfig = vscode.workspace.getConfiguration('rubyFastLsp');
-                    const indexing = newConfig.get('indexing', {});
-                    initializationOptions.extensionSettings = newConfig.get('extensionSettings', {});
-                    initializationOptions.projectExtensionsEnabled = newConfig.get('projectExtensionsEnabled', true);
-                    if (event.affectsConfiguration('rubyFastLsp.indexing')) {
-                        initializationOptions.indexing = indexing;
-                        watchedFileEvents.forEach((watcher) => watcher.dispose());
-                        watchedFileEvents = fileWatcherPatterns(indexing.includedPatterns || [])
-                            .map((pattern) => vscode.workspace.createFileSystemWatcher(pattern));
-                        context.subscriptions.push(...watchedFileEvents);
-                        clientOptions.synchronize.fileEvents = watchedFileEvents;
-                        await client.restart();
-                        return;
-                    }
-                    client.sendNotification('workspace/didChangeConfiguration', {
-                        settings: {
-                            rubyFastLsp: {
-                                rubyVersion: newConfig.get('rubyVersion', 'auto'),
-                                stubsPath: newConfig.get('stubsPath', ''),
-                                logLevel: newConfig.get('logLevel', 'info'),
-                                linter: newConfig.get('linter', 'none'),
-                                linterCommand: newConfig.get('linterCommand', []),
-                                formatter: newConfig.get('formatter', 'none'),
-                                formatterCommand: newConfig.get('formatterCommand', []),
-                                indexing,
-                                extensionPackages,
-                                extensionDirs: [],
-                                extensionSettings: initializationOptions.extensionSettings,
-                                workspaceTrusted: vscode.workspace.isTrusted,
-                                projectExtensionsEnabled: initializationOptions.projectExtensionsEnabled
-                            }
-                        }
-                    });
-                }
-
-                // Refresh tree if showExternalTypes changed
-                if (event.affectsConfiguration('rubyFastLsp.showExternalTypes')) {
-                    indexProvider.refresh();
-                }
+            if (event.affectsConfiguration('rubyFastLsp.logLevel') && client) {
+                initializationOptions.logLevel = vscode.workspace
+                    .getConfiguration('rubyFastLsp')
+                    .get('logLevel', 'info');
+                client.sendNotification('workspace/didChangeConfiguration', {
+                    settings: { rubyFastLsp: initializationOptions }
+                });
             }
         })
     );
@@ -947,11 +999,9 @@ function activate(context) {
         if (namespaces.length === 0) {
             // Fetch fresh data
             try {
-                const config = vscode.workspace.getConfiguration('rubyFastLsp');
-                const showExternalTypes = config.get('showExternalTypes', false);
                 const response = await client.sendRequest('ruby/namespaceTree', {
                     uri: vscode.window.activeTextEditor?.document.uri.toString() || '',
-                    show_external_types: showExternalTypes
+                    show_external_types: editorState.showExternalTypes
                 });
                 if (response && (response.modules || response.classes)) {
                     const allNamespaces = [...(response.modules || []), ...(response.classes || [])];
@@ -1108,25 +1158,220 @@ function activate(context) {
 
     // Register toggle external types command
     const toggleExternalTypesCommand = vscode.commands.registerCommand('rubyIndex.toggleExternalTypes', async () => {
-        const config = vscode.workspace.getConfiguration('rubyFastLsp');
-        const currentValue = config.get('showExternalTypes', false);
-        await config.update('showExternalTypes', !currentValue, vscode.ConfigurationTarget.Workspace);
-        const newValue = !currentValue;
+        editorState.showExternalTypes = !editorState.showExternalTypes;
+        await context.workspaceState.update(
+            STATE_KEYS.showExternalTypes,
+            editorState.showExternalTypes
+        );
         vscode.window.showInformationMessage(
-            newValue
+            editorState.showExternalTypes
                 ? 'Ruby Index: Now showing external types (core, stdlib, gems)'
                 : 'Ruby Index: Now showing only project types'
         );
         indexProvider.refresh();
     });
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand);
+    const selectRuntimeCommand = vscode.commands.registerCommand(
+        'ruby-fast-lsp.runtime.select',
+        async () => selectRuntime({
+            window: vscode.window,
+            client,
+            preferredProjectRoot: activeRuntimeProjectRoot,
+            applySelection: async selection => {
+                editorState.runtime = updateRuntime(editorState.runtime, selection);
+                await context.workspaceState.update(STATE_KEYS.runtime, editorState.runtime);
+                initializationOptions.runtime = editorState.runtime;
+                await client.restart();
+                await refreshRuntimeStatusBar();
+            }
+        })
+    );
+    const runtimeStatusCommand = vscode.commands.registerCommand(
+        'ruby-fast-lsp.runtime.status',
+        async () => {
+            const status = await client.sendRequest('ruby-fast-lsp/runtime/status', {});
+            const projects = Array.isArray(status?.projects) ? status.projects : [];
+            if (projects.length === 0) {
+                await vscode.window.showInformationMessage(
+                    'Ruby Fast LSP has no registered Ruby projects.'
+                );
+                return;
+            }
+            await vscode.window.showQuickPick(projects.map(runtimeStatusItem), {
+                title: 'Ruby Fast LSP: Effective Runtime Status',
+                placeHolder: 'Project, runtime, JDK, overlay, classpath, and indexing state'
+            });
+        }
+    );
+
+    const applyAutoRuntime = async projectRoot => {
+        editorState.runtime = updateRuntime(editorState.runtime, {
+            projectRoot,
+            mode: 'auto'
+        });
+        await context.workspaceState.update(STATE_KEYS.runtime, editorState.runtime);
+        initializationOptions.runtime = editorState.runtime;
+        await client.restart();
+        await refreshRuntimeStatusBar();
+    };
+
+    const saveRuntimeMarker = async status => {
+        if (!vscode.workspace.isTrusted) {
+            await vscode.window.showErrorMessage(
+                'Trust this workspace before writing its .ruby-version file.'
+            );
+            return;
+        }
+        const marker = runtimeVersionMarker(status);
+        if (!marker || !status.root) {
+            await vscode.window.showErrorMessage(
+                'The active project has no exact effective runtime to save.'
+            );
+            return;
+        }
+        const markerUri = vscode.Uri.file(path.join(status.root, '.ruby-version'));
+        let existing;
+        try {
+            existing = Buffer.from(await vscode.workspace.fs.readFile(markerUri))
+                .toString('utf8')
+                .trim();
+        } catch (error) {
+            if (error?.code !== 'FileNotFound') {
+                outputChannel.appendLine(
+                    `[Ruby Fast LSP] Unable to read ${markerUri.fsPath}: ${error.message}`
+                );
+            }
+        }
+        if (existing !== marker) {
+            const confirmation = await vscode.window.showWarningMessage(
+                `Save ${marker} to ${markerUri.fsPath}?`,
+                {
+                    modal: true,
+                    detail: existing
+                        ? `This replaces the current value: ${existing}`
+                        : 'This creates a project-owned runtime marker that can be shared with the repository.'
+                },
+                'Save Runtime'
+            );
+            if (confirmation !== 'Save Runtime') {
+                return;
+            }
+            await vscode.workspace.fs.writeFile(markerUri, Buffer.from(`${marker}\n`, 'utf8'));
+        }
+        await applyAutoRuntime(status.root);
+        await vscode.window.showInformationMessage(
+            `Saved ${marker} for ${path.basename(status.root)} and switched it to Auto.`
+        );
+    };
+
+    const configureRuntimeCommand = vscode.commands.registerCommand(
+        'ruby-fast-lsp.runtime.configure',
+        async () => {
+            const project = activeRuntimeStatus?.root
+                ? path.basename(activeRuntimeStatus.root)
+                : 'active Ruby project';
+            const actions = [
+                {
+                    label: '$(settings-gear) Change Runtime…',
+                    description: `Select an exact runtime for ${project}`,
+                    id: 'change'
+                },
+                {
+                    label: '$(refresh) Use Auto Detection',
+                    description: `Resolve ${project} from its project markers and environment`,
+                    id: 'auto'
+                },
+                {
+                    label: '$(list-flat) Show All Project Runtimes',
+                    description: 'Inspect runtime, JDK, overlay, and classpath status',
+                    id: 'status'
+                },
+                {
+                    label: '$(checklist) Select Linter…',
+                    description: 'Disabled, RuboCop, or Standard',
+                    id: 'linter'
+                },
+                {
+                    label: '$(wand) Select Formatter…',
+                    description: 'Disabled, RuboCop, or Standard',
+                    id: 'formatter'
+                }
+            ];
+            if (runtimeVersionMarker(activeRuntimeStatus || {})) {
+                actions.splice(1, 0, {
+                    label: '$(save) Save Runtime to .ruby-version',
+                    description: 'Persist the exact runtime in the owning project',
+                    id: 'save'
+                });
+            }
+            const action = await vscode.window.showQuickPick(actions, {
+                title: `Ruby Fast LSP: Configure ${project}`,
+                placeHolder: 'Choose a project runtime action'
+            });
+            if (!action) {
+                return;
+            }
+            if (action.id === 'change') {
+                await vscode.commands.executeCommand('ruby-fast-lsp.runtime.select');
+            } else if (action.id === 'save') {
+                await saveRuntimeMarker(activeRuntimeStatus);
+            } else if (action.id === 'auto') {
+                if (!activeRuntimeProjectRoot) {
+                    await vscode.window.showErrorMessage(
+                        'The active document is not owned by a discovered Ruby project.'
+                    );
+                    return;
+                }
+                await applyAutoRuntime(activeRuntimeProjectRoot);
+            } else if (action.id === 'status') {
+                await vscode.commands.executeCommand('ruby-fast-lsp.runtime.status');
+            } else if (action.id === 'linter') {
+                await vscode.commands.executeCommand('ruby-fast-lsp.linter.select');
+            } else if (action.id === 'formatter') {
+                await vscode.commands.executeCommand('ruby-fast-lsp.formatter.select');
+            }
+        }
+    );
+
+    const selectLinterCommand = vscode.commands.registerCommand(
+        'ruby-fast-lsp.linter.select',
+        async () => {
+            const selected = await selectExternalTool('Linter', editorState.linter);
+            if (selected === undefined) {
+                return;
+            }
+            editorState.linter = selected;
+            await context.workspaceState.update(STATE_KEYS.linter, selected);
+            initializationOptions.linter = selected;
+            client.sendNotification('workspace/didChangeConfiguration', {
+                settings: { rubyFastLsp: initializationOptions }
+            });
+        }
+    );
+    const selectFormatterCommand = vscode.commands.registerCommand(
+        'ruby-fast-lsp.formatter.select',
+        async () => {
+            const selected = await selectExternalTool('Formatter', editorState.formatter);
+            if (selected === undefined) {
+                return;
+            }
+            editorState.formatter = selected;
+            await context.workspaceState.update(STATE_KEYS.formatter, selected);
+            initializationOptions.formatter = selected;
+            client.sendNotification('workspace/didChangeConfiguration', {
+                settings: { rubyFastLsp: initializationOptions }
+            });
+        }
+    );
+
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {
         // Auto-refresh index tree when client is ready
         setTimeout(() => {
             indexProvider.refresh();
+            void refreshRuntimeStatusBar();
         }, 1000); // Small delay to ensure everything is settled
     }).catch(error => {
         outputChannel.appendLine(`[Ruby Index] LSP client failed to start: ${error}`);
@@ -1135,6 +1380,7 @@ function activate(context) {
     // Auto-refresh when active editor changes
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(() => {
+            void refreshRuntimeStatusBar();
             if (['ruby', 'erb'].includes(vscode.window.activeTextEditor?.document.languageId)) {
                 indexProvider.refresh();
             }

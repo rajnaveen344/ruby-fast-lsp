@@ -1,6 +1,6 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, MethodParamFact, MethodParamKind, NamespaceKind, RubyMethod,
-    TypeFact, TypeProvenance, TypeSubject,
+    FullyQualifiedName, GraphEdgeKind, MethodAvailability, MethodParamFact, MethodParamKind,
+    NamespaceKind, RubyMethod, TypeFact, TypeProvenance, TypeSubject,
 };
 use crate::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use log::warn;
@@ -125,7 +125,24 @@ impl FactCollector {
                 )
             })
             .collect();
-        self.direct_push_method_fact_with_signature_and_name_range(
+        let availability = match yard_doc.as_ref() {
+            Some(doc) => match (&doc.unavailable, &doc.absent) {
+                (Some(reason), None) => MethodAvailability::Unavailable {
+                    reason: reason.clone(),
+                },
+                (None, Some(reason)) => MethodAvailability::Absent {
+                    reason: reason.clone(),
+                },
+                (None, None) => MethodAvailability::Available,
+                (Some(_), Some(_)) => panic!(
+                    "INVARIANT VIOLATED: method `{method}` is marked both @unavailable and @absent. \
+                     This is a bug because a runtime API cannot simultaneously exist-but-fail and not exist. \
+                     Fix: retain exactly one availability annotation in the owning stub."
+                ),
+            },
+            None => MethodAvailability::Available,
+        };
+        self.direct_push_method_fact_with_signature_name_range_and_availability(
             namespace_parts.clone(),
             actual_namespace_kind,
             method,
@@ -136,12 +153,13 @@ impl FactCollector {
             yard_doc
                 .as_ref()
                 .and_then(YardMethodDoc::format_return_type),
+            availability.clone(),
         );
         if node.receiver().is_none()
             && actual_namespace_kind == NamespaceKind::Instance
             && self.scope_tracker.module_function_mode_enabled()
         {
-            self.direct_push_method_fact_with_signature_and_name_range(
+            self.direct_push_method_fact_with_signature_name_range_and_availability(
                 namespace_parts.clone(),
                 NamespaceKind::Singleton,
                 method,
@@ -164,6 +182,7 @@ impl FactCollector {
                 yard_doc
                     .as_ref()
                     .and_then(YardMethodDoc::format_return_type),
+                availability,
             );
         }
 

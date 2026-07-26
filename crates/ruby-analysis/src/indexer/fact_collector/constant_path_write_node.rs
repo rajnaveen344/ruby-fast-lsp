@@ -1,6 +1,6 @@
 use crate::collect_namespaces;
 use crate::core::{
-    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
+    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeSubject,
 };
 use log::error;
 use ruby_prism::ConstantPathWriteNode;
@@ -60,17 +60,18 @@ impl FactCollector {
                 ),
             ),
         );
-        let inferred_type = self.infer_assignment_type_from_value(&node.value());
-        self.direct_push_assignment_type(
+        let (inferred_type, provenance) = self.assignment_type_and_provenance(&node.value());
+        self.direct_push_type(
             TypeSubject::Constant(fqn.clone()),
             inferred_type.clone(),
             &constant_path.location(),
+            provenance,
         );
         self.type_store.add(TypeFact::new(
             TypeSubject::Constant(fqn.clone()),
             inferred_type.clone(),
             self.document.prism_location_to_text_range(&node.location()),
-            TypeProvenance::Assignment,
+            provenance,
         ));
     }
 

@@ -18,11 +18,13 @@
 //!   --workspace <path>   Path to Ruby workspace (default: built-in sample project)
 //!   --memory             Enable dhat memory profiling (outputs dhat-heap.json)
 //!   --phase <name>       Profile specific phase: index, infer, all (default: all)
+//!   --config <path>      Canonical Ruby Fast LSP JSON configuration
 //!   --extension-path <p>  VS Code extension path for bundled stubs
 //!   --hold-seconds <n>   Keep process alive after profiling for external memory tools
 //!   --benchmark-iterations <n>  Measure editor operations after indexing
 //!   --check-budgets      Fail when a production budget is exceeded
 //!   --diagnostics-file <relative-path>  Open a file and print its user-visible diagnostics
+//!   --definition-at <path:line:character>  Open a file and print definitions at an LSP position
 //!   --references-at <path:line:character>  Open a file and print references at an LSP position
 //!   --help               Show help
 
@@ -67,6 +69,7 @@ enum Phase {
 
 struct Config {
     workspace: Option<PathBuf>,
+    config_path: Option<PathBuf>,
     extension_path: Option<PathBuf>,
     memory_profiling: bool,
     phase: Phase,
@@ -74,6 +77,7 @@ struct Config {
     benchmark_iterations: Option<usize>,
     check_budgets: bool,
     diagnostics_files: Vec<PathBuf>,
+    definition_probes: Vec<ReferenceProbe>,
     reference_probes: Vec<ReferenceProbe>,
 }
 
@@ -96,6 +100,7 @@ where
     let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
     let mut config = Config {
         workspace: None,
+        config_path: None,
         extension_path: None,
         memory_profiling: false,
         phase: Phase::All,
@@ -103,6 +108,7 @@ where
         benchmark_iterations: None,
         check_budgets: false,
         diagnostics_files: Vec::new(),
+        definition_probes: Vec::new(),
         reference_probes: Vec::new(),
     };
 
@@ -117,6 +123,16 @@ where
             }
             "--memory" | "-m" => {
                 config.memory_profiling = true;
+            }
+            "--config" => {
+                assert!(
+                    i + 1 < args.len(),
+                    "INVARIANT VIOLATED: profiler --config has no path. This is a bug because a \
+                     configured profiling run requires an explicit JSON file. Fix: pass \
+                     --config /path/to/ruby-fast-lsp.json."
+                );
+                config.config_path = Some(PathBuf::from(&args[i + 1]));
+                i += 1;
             }
             "--extension-path" => {
                 if i + 1 < args.len() {
@@ -186,6 +202,16 @@ where
                     .push(parse_reference_probe(&args[i + 1]));
                 i += 1;
             }
+            "--definition-at" => {
+                assert!(
+                    i + 1 < args.len(),
+                    "INVARIANT VIOLATED: --definition-at has no path and position. This is a bug because definition sampling requires path:line:character. Fix: pass --definition-at lib/example.rb:4:10."
+                );
+                config
+                    .definition_probes
+                    .push(parse_position_probe("--definition-at", &args[i + 1]));
+                i += 1;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -204,22 +230,26 @@ where
 }
 
 fn parse_reference_probe(value: &str) -> ReferenceProbe {
+    parse_position_probe("--references-at", value)
+}
+
+fn parse_position_probe(flag: &str, value: &str) -> ReferenceProbe {
     let (path_and_line, character) = value.rsplit_once(':').unwrap_or_else(|| {
-        panic!("INVARIANT VIOLATED: --references-at `{value}` has no character component. This is a bug because profiler query positions must be explicit. Fix: use path:line:character with zero-indexed LSP coordinates.")
+        panic!("INVARIANT VIOLATED: {flag} `{value}` has no character component. This is a bug because profiler query positions must be explicit. Fix: use path:line:character with zero-indexed LSP coordinates.")
     });
     let (path, line) = path_and_line.rsplit_once(':').unwrap_or_else(|| {
-        panic!("INVARIANT VIOLATED: --references-at `{value}` has no line component. This is a bug because profiler query positions must be explicit. Fix: use path:line:character with zero-indexed LSP coordinates.")
+        panic!("INVARIANT VIOLATED: {flag} `{value}` has no line component. This is a bug because profiler query positions must be explicit. Fix: use path:line:character with zero-indexed LSP coordinates.")
     });
     let line = line.parse().unwrap_or_else(|error| {
-        panic!("INVARIANT VIOLATED: --references-at line `{line}` is invalid. This is a bug because LSP lines are unsigned integers. Fix: pass a zero-indexed numeric line. Error: {error}")
+        panic!("INVARIANT VIOLATED: {flag} line `{line}` is invalid. This is a bug because LSP lines are unsigned integers. Fix: pass a zero-indexed numeric line. Error: {error}")
     });
     let character = character.parse().unwrap_or_else(|error| {
-        panic!("INVARIANT VIOLATED: --references-at character `{character}` is invalid. This is a bug because LSP characters are unsigned integers. Fix: pass a zero-indexed numeric character. Error: {error}")
+        panic!("INVARIANT VIOLATED: {flag} character `{character}` is invalid. This is a bug because LSP characters are unsigned integers. Fix: pass a zero-indexed numeric character. Error: {error}")
     });
     let path = PathBuf::from(path);
     assert!(
         path.is_relative(),
-        "INVARIANT VIOLATED: --references-at path `{}` is absolute. This is a bug because profiler probes must remain inside the selected workspace. Fix: pass a workspace-relative path.",
+        "INVARIANT VIOLATED: {flag} path `{}` is absolute. This is a bug because profiler probes must remain inside the selected workspace. Fix: pass a workspace-relative path.",
         path.display()
     );
     ReferenceProbe {
@@ -240,6 +270,7 @@ OPTIONS:
     -w, --workspace <PATH>   Path to Ruby workspace (default: built-in sample project)
     -m, --memory             Enable dhat memory profiling (outputs dhat-heap.json)
     -p, --phase <PHASE>      Profile specific phase: index, infer, all (default: all)
+    --config <PATH>          Load canonical Ruby Fast LSP JSON configuration
     --extension-path <PATH>  VS Code extension path for bundled stubs
     --hold-seconds <N>       Keep process alive after profiling for external memory tools
     --benchmark-iterations <N>
@@ -247,6 +278,8 @@ OPTIONS:
     --check-budgets          Exit unsuccessfully when a production budget is exceeded
     --diagnostics-file <PATH>
                              Open a workspace-relative file through didOpen and print diagnostics as JSON; repeatable
+    --definition-at <PATH:LINE:CHARACTER>
+                             Open a workspace-relative file and print definitions as JSON; repeatable, zero-indexed
     --references-at <PATH:LINE:CHARACTER>
                              Open a workspace-relative file and print resolved references as JSON; repeatable, zero-indexed
     -h, --help               Show this help message
@@ -310,7 +343,11 @@ fn main() -> anyhow::Result<()> {
 
     let benchmark_result = rt.block_on(async {
         let server = RubyLanguageServer::default();
-        configure_server(&server, config.extension_path.as_ref());
+        configure_server(
+            &server,
+            config.config_path.as_ref(),
+            config.extension_path.as_ref(),
+        );
         let discovered = server.add_workspace_folder(workspace_uri.clone())?;
         anyhow::ensure!(
             !discovered.is_empty(),
@@ -367,6 +404,7 @@ fn main() -> anyhow::Result<()> {
         );
 
         sample_open_file_diagnostics(&server, &workspace_path, &config.diagnostics_files).await?;
+        sample_definitions(&server, &workspace_path, &config.definition_probes).await?;
         sample_references(&server, &workspace_path, &config.reference_probes).await?;
 
         let benchmark_result = if let Some(iterations) = config.benchmark_iterations {
@@ -481,6 +519,55 @@ async fn sample_references(
     Ok(())
 }
 
+async fn sample_definitions(
+    server: &RubyLanguageServer,
+    workspace_path: &std::path::Path,
+    probes: &[ReferenceProbe],
+) -> anyhow::Result<()> {
+    for probe in probes {
+        let path = std::fs::canonicalize(workspace_path.join(&probe.path))?;
+        anyhow::ensure!(
+            path.starts_with(workspace_path),
+            "--definition-at escapes the workspace: {}",
+            probe.path.display()
+        );
+        let uri = Url::from_file_path(&path)
+            .map_err(|()| anyhow::anyhow!("invalid definition file path: {}", path.display()))?;
+        let content = fs::read_to_string(&path)?;
+        indexing::handle_did_open(
+            server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: content,
+                },
+            },
+        )
+        .await;
+        let position = Position {
+            line: probe.line,
+            character: probe.character,
+        };
+        let started = Instant::now();
+        let locations = definitions::find_definition_at_position(server, uri.clone(), position)
+            .await
+            .unwrap_or_default();
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "definition_file": probe.path,
+                "position": position,
+                "elapsed_ns": u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                "count": locations.len(),
+                "locations": locations,
+            }))?
+        );
+    }
+    Ok(())
+}
+
 async fn sample_open_file_diagnostics(
     server: &RubyLanguageServer,
     workspace_path: &std::path::Path,
@@ -527,8 +614,14 @@ async fn sample_open_file_diagnostics(
     Ok(())
 }
 
-fn configure_server(server: &RubyLanguageServer, extension_path: Option<&PathBuf>) {
-    let mut lsp_config = RubyFastLspConfig::default();
+fn configure_server(
+    server: &RubyLanguageServer,
+    config_path: Option<&PathBuf>,
+    extension_path: Option<&PathBuf>,
+) {
+    let mut lsp_config = config_path
+        .map(|path| load_profiler_config(path))
+        .unwrap_or_default();
     if let Some(path) = extension_path {
         let absolute = std::fs::canonicalize(path).unwrap_or_else(|error| {
             panic!(
@@ -552,6 +645,61 @@ fn configure_server(server: &RubyLanguageServer, extension_path: Option<&PathBuf
     }
     server.extension_registry.configure_from_config(&lsp_config);
     *server.config.lock() = lsp_config;
+}
+
+fn load_profiler_config(path: &PathBuf) -> RubyFastLspConfig {
+    const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+    let absolute = std::fs::canonicalize(path).unwrap_or_else(|error| {
+        panic!(
+            "INVARIANT VIOLATED: profiler --config path cannot be canonicalized. This is a bug \
+             because production evidence must record one exact configuration file. Fix: pass an \
+             existing readable JSON file. Path: {}. Error: {error}",
+            path.display()
+        )
+    });
+    let metadata = std::fs::metadata(&absolute).unwrap_or_else(|error| {
+        panic!(
+            "INVARIANT VIOLATED: profiler --config metadata is unreadable. This is a bug because \
+             configuration input must be bounded before reading. Fix: make the file readable. \
+             Path: {}. Error: {error}",
+            absolute.display()
+        )
+    });
+    assert!(
+        metadata.is_file() && metadata.len() <= MAX_CONFIG_BYTES,
+        "INVARIANT VIOLATED: profiler --config must be a regular JSON file no larger than 1 MiB. \
+         This is a bug because profiler configuration must remain bounded. Fix: pass a small \
+         canonical configuration file. Path: {}, bytes: {}",
+        absolute.display(),
+        metadata.len()
+    );
+    let bytes = std::fs::read(&absolute).unwrap_or_else(|error| {
+        panic!(
+            "INVARIANT VIOLATED: profiler --config cannot be read. This is a bug because the \
+             selected evidence configuration must be reproducible. Fix: make the file readable. \
+             Path: {}. Error: {error}",
+            absolute.display()
+        )
+    });
+    let config: RubyFastLspConfig = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        panic!(
+            "INVARIANT VIOLATED: profiler --config is not canonical Ruby Fast LSP JSON. This is a \
+             bug because measurements cannot silently use defaults after malformed input. Fix: \
+             correct the JSON configuration. Path: {}. Error: {error}",
+            absolute.display()
+        )
+    });
+    config
+        .validate_runtime_configuration()
+        .unwrap_or_else(|error| {
+            panic!(
+                "INVARIANT VIOLATED: profiler --config runtime selection is invalid. This is a \
+                 bug because evidence must use a defensible runtime identity. Fix: correct the \
+                 runtime/JRuby project configuration. Path: {}. Error: {error}",
+                absolute.display()
+            )
+        });
+    config
 }
 
 async fn run_full_indexing(server: &RubyLanguageServer) -> Duration {
@@ -961,6 +1109,53 @@ mod tests {
     }
 
     #[test]
+    fn canonical_configuration_path_is_collected_without_editor_translation() {
+        let config = parse_args_from([
+            "profiler",
+            "--workspace",
+            "/tmp/project",
+            "--config",
+            "/tmp/ruby-fast-lsp.json",
+        ]);
+
+        assert_eq!(
+            config.config_path,
+            Some(PathBuf::from("/tmp/ruby-fast-lsp.json"))
+        );
+    }
+
+    #[test]
+    fn loads_and_validates_bounded_canonical_configuration() {
+        let fixture = tempfile::tempdir().expect("profiler config fixture must be created");
+        let path = fixture.path().join("config.json");
+        std::fs::write(
+            &path,
+            br#"{
+                "runtime": {
+                    "mode": "auto",
+                    "projects": [{
+                        "root": "/workspace/admin",
+                        "selection": {
+                            "implementation": "jruby",
+                            "family": "9.2",
+                            "engineVersion": "9.2.21.0",
+                            "compatibilityVersion": "2.5",
+                            "executable": "/runtimes/jruby/bin/jruby",
+                            "discoverySource": "rvm",
+                            "javaHome": "/jdks/17"
+                        }
+                    }]
+                }
+            }"#,
+        )
+        .expect("profiler config fixture must be written");
+
+        let config = load_profiler_config(&path);
+        assert_eq!(config.runtime.projects.len(), 1);
+        assert_eq!(config.runtime.projects[0].root, "/workspace/admin");
+    }
+
+    #[test]
     fn reference_probes_parse_zero_indexed_positions_in_command_line_order() {
         let config = parse_args_from([
             "profiler",
@@ -984,6 +1179,35 @@ mod tests {
                     path: PathBuf::from("lib/user.rb"),
                     line: 4,
                     character: 2,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn definition_probes_parse_zero_indexed_positions_in_command_line_order() {
+        let config = parse_args_from([
+            "profiler",
+            "--workspace",
+            "/tmp/project",
+            "--definition-at",
+            "lib/runtime.rb:1:12",
+            "--definition-at",
+            "lib/runtime.rb:14:45",
+        ]);
+
+        assert_eq!(
+            config.definition_probes,
+            vec![
+                ReferenceProbe {
+                    path: PathBuf::from("lib/runtime.rb"),
+                    line: 1,
+                    character: 12,
+                },
+                ReferenceProbe {
+                    path: PathBuf::from("lib/runtime.rb"),
+                    line: 14,
+                    character: 45,
                 },
             ]
         );

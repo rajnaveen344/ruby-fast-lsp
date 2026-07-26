@@ -9,7 +9,7 @@
 
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
-use crate::indexer::version::ruby_version::RubyVersion;
+use crate::indexer::version::ruby_version::{RubyImplementation, RubyVersion};
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use crate::utils::stub_loader::find_stubs_directory;
@@ -17,7 +17,7 @@ use anyhow::Result;
 use log::{debug, info, warn};
 use rayon::prelude::*;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tower_lsp::lsp_types::Url;
 
@@ -84,13 +84,17 @@ impl IndexerStdlib {
 
         self.discover_stdlib_paths();
 
+        // Core Ruby classes are language semantics, not optional runtime libraries.
+        // Keep them available even when the selected Ruby executable is missing or
+        // its stdlib paths cannot be discovered.
+        self.index_core_stubs(analysis_engine.clone()).await?;
+
         if self.stdlib_paths.is_empty() {
-            warn!("No stdlib paths found, skipping stdlib indexing");
+            warn!(
+                "No runtime stdlib paths found; bundled core stubs remain indexed, skipping required stdlib modules"
+            );
             return Ok(());
         }
-
-        // Index core stubs first (if available)
-        self.index_core_stubs(analysis_engine.clone()).await?;
 
         // Index required stdlib modules
         self.index_required_modules(server, analysis_engine).await?;
@@ -108,13 +112,19 @@ impl IndexerStdlib {
         &self,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) -> Result<()> {
-        let Some(version) = &self.ruby_version else {
-            return Ok(());
-        };
+        let version = self
+            .ruby_version
+            .map(|version| version.to_tuple())
+            .unwrap_or_else(|| {
+                warn!(
+                    "Ruby runtime version unavailable; using Ruby 3.0 core stubs as a conservative language fallback"
+                );
+                (3, 0)
+            });
 
         // Try to load from extension path first
         if let Some(ref ext_path) = self.extension_path {
-            if let Some(stubs_dir) = find_stubs_directory(ext_path, version.to_tuple()) {
+            if let Some(stubs_dir) = find_stubs_directory(ext_path, version) {
                 let stub_files = utils::collect_ruby_files(&stubs_dir);
                 if stub_files.is_empty() {
                     warn!("No stub files found in: {:?}", stubs_dir);
@@ -145,6 +155,7 @@ impl IndexerStdlib {
                     }
                 });
 
+                self.index_jruby_overlay_stubs(analysis_engine.clone());
                 analysis_engine.write().resolve();
 
                 info!("Indexed {} core stub files", stub_files.len());
@@ -153,7 +164,7 @@ impl IndexerStdlib {
         }
 
         // Fall back to finding stubs relative to executable (development path)
-        let Some(stubs_path) = self.find_core_stubs_path(version.to_tuple()) else {
+        let Some(stubs_path) = self.find_core_stubs_path(version) else {
             return Ok(());
         };
 
@@ -180,10 +191,93 @@ impl IndexerStdlib {
                 }
             }
         });
+        self.index_jruby_overlay_stubs(analysis_engine.clone());
         analysis_engine.write().resolve();
         info!("Indexed {} core stub files", stub_files.len());
 
         Ok(())
+    }
+
+    fn index_jruby_overlay_stubs(
+        &self,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) {
+        let Some(version) = self.ruby_version else {
+            return;
+        };
+        if version.implementation != RubyImplementation::JRuby {
+            return;
+        }
+        let Some(series) = jruby_series_for_compatibility(version.to_tuple()) else {
+            warn!(
+                "No JRuby stub overlay supports Ruby compatibility version {}.{}; JRuby-specific APIs remain unavailable",
+                version.major, version.minor
+            );
+            return;
+        };
+
+        let packaged_root = self
+            .extension_path
+            .as_ref()
+            .map(|extension_path| extension_path.join("jruby-stubs"));
+        let development_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("support")
+            .join("jruby")
+            .join("stubs");
+        let root_has_selected_overlay =
+            |root: &Path| root.join("common").is_dir() || root.join(series).is_dir();
+        let root = packaged_root
+            .filter(|root| root_has_selected_overlay(root))
+            .unwrap_or(development_root);
+
+        let mut directories = Vec::new();
+        for component in ["common", series] {
+            let directory = root.join(component);
+            if directory.is_dir() {
+                directories.push(directory);
+            }
+        }
+
+        let processor = &self.file_processor;
+        let mut indexed = 0usize;
+        for directory in directories {
+            let files = utils::collect_ruby_files(&directory);
+            files.par_iter().for_each(|path| {
+                let content = std::fs::read_to_string(path).unwrap_or_else(|error| {
+                    panic!(
+                        "INVARIANT VIOLATED: discovered JRuby stub `{}` could not be read: {error}. \
+                         This is a bug because stub discovery must only return readable regular files. \
+                         Fix: validate packaged stub files before indexing.",
+                        path.display()
+                    )
+                });
+                let uri = Url::from_file_path(path).unwrap_or_else(|()| {
+                    panic!(
+                        "INVARIANT VIOLATED: JRuby stub path `{}` could not become a file URI. \
+                         This is a bug because indexed stub paths must be absolute filesystem paths. \
+                         Fix: canonicalize the JRuby stub root before discovery.",
+                        path.display()
+                    )
+                });
+                processor
+                    .collect_file_facts_as_deferred_resolution_in_engine(
+                        &uri,
+                        &content,
+                        analysis_engine.clone(),
+                        ruby_analysis::core::SourceKind::Stub,
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "INVARIANT VIOLATED: JRuby stub `{}` failed semantic indexing: {error}. \
+                             This is a bug because bundled overlays must be valid Ruby source. \
+                             Fix: correct the overlay or its stub composition tests.",
+                            path.display()
+                        )
+                    });
+            });
+            indexed += files.len();
+        }
+        info!("Indexed {indexed} JRuby {series} overlay stub files");
     }
 
     /// Index only the required stdlib modules
@@ -420,5 +514,344 @@ impl IndexerStdlib {
 
     pub fn file_processor(&self) -> &FileProcessor {
         &self.file_processor
+    }
+}
+
+fn jruby_series_for_compatibility(version: (u8, u8)) -> Option<&'static str> {
+    match version {
+        (2, 2) => Some("9.0"),
+        (2, 3) => Some("9.1"),
+        (2, 5) => Some("9.2"),
+        (2, 6) => Some("9.3"),
+        (3, 1) => Some("9.4"),
+        (3, 4) => Some("10.0"),
+        (4, 0) => Some("10.1"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parking_lot::RwLock;
+    use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyMethod};
+    use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
+    use ruby_analysis::method_store::MethodVisibility;
+    use std::fs;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    #[test]
+    fn every_supported_jruby_series_has_a_parseable_explicit_overlay() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("support/jruby/stubs");
+        let common = fs::read_to_string(root.join("common/runtime.rb"))
+            .expect("shared JRuby runtime overlay must exist");
+        assert!(
+            ruby_prism::parse(common.as_bytes())
+                .errors()
+                .next()
+                .is_none(),
+            "shared JRuby runtime overlay must parse"
+        );
+        for series in ruby_fast_lsp_jruby_support::JrubySeries::SUPPORTED {
+            let compatibility = series.ruby_compatibility();
+            assert_eq!(
+                jruby_series_for_compatibility((
+                    u8::try_from(compatibility.major).unwrap(),
+                    u8::try_from(compatibility.minor).unwrap()
+                )),
+                Some(series.overlay_name())
+            );
+            let path = root.join(series.overlay_name()).join("runtime.rb");
+            let source = fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!(
+                    "supported {} overlay is missing at {}: {error}",
+                    series.label(),
+                    path.display()
+                )
+            });
+            assert!(
+                ruby_prism::parse(source.as_bytes())
+                    .errors()
+                    .next()
+                    .is_none(),
+                "{} overlay must parse",
+                series.label()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn every_supported_jruby_series_composes_its_exact_runtime_overlay() {
+        let repository_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("support/jruby/stubs");
+        for series in ruby_fast_lsp_jruby_support::JrubySeries::SUPPORTED {
+            let compatibility = series.ruby_compatibility();
+            let major = u8::try_from(compatibility.major).unwrap();
+            let minor = u8::try_from(compatibility.minor).unwrap();
+            let extension = TempDir::new().unwrap();
+            let core = extension
+                .path()
+                .join("stubs")
+                .join(format!("rubystubs{major}{minor}"));
+            let common = extension.path().join("jruby-stubs/common");
+            let selected = extension
+                .path()
+                .join("jruby-stubs")
+                .join(series.overlay_name());
+            fs::create_dir_all(&core).unwrap();
+            fs::create_dir_all(&common).unwrap();
+            fs::create_dir_all(&selected).unwrap();
+            fs::write(core.join("object.rb"), "class Object\nend\n").unwrap();
+            fs::copy(
+                repository_root.join("common/runtime.rb"),
+                common.join("runtime.rb"),
+            )
+            .unwrap();
+            fs::copy(
+                repository_root
+                    .join(series.overlay_name())
+                    .join("runtime.rb"),
+                selected.join("runtime.rb"),
+            )
+            .unwrap();
+
+            let mut indexer = IndexerStdlib::new(
+                FileProcessor::new(),
+                Some(RubyVersion::new_with_implementation(
+                    major,
+                    minor,
+                    RubyImplementation::JRuby,
+                )),
+            );
+            indexer.set_extension_path(extension.path().to_path_buf());
+            let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+            indexer.index_core_stubs(engine.clone()).await.unwrap();
+
+            let java_import = FullyQualifiedName::method(
+                vec![RubyConstant::new("Object").unwrap()],
+                RubyMethod::new("java_import").unwrap(),
+            );
+            let jruby_version =
+                FullyQualifiedName::constant(vec![RubyConstant::new("JRUBY_VERSION").unwrap()]);
+            let engine = engine.read();
+            assert!(
+                !AnalysisQuery::new(&engine)
+                    .methods_for_fqn(&java_import)
+                    .is_empty(),
+                "{} must compose the shared JRuby java_import contract",
+                series.label()
+            );
+            assert!(
+                !AnalysisQuery::new(&engine)
+                    .symbols_for_fqn(&jruby_version)
+                    .is_empty(),
+                "{} must compose JRUBY_VERSION",
+                series.label()
+            );
+            assert!(
+                engine.file_id(&selected.join("runtime.rb")).is_some(),
+                "{} must index its exact selected overlay file",
+                series.label()
+            );
+            assert!(
+                engine
+                    .files()
+                    .filter(|file| file.path.ends_with("jruby-stubs/common/runtime.rb"))
+                    .count()
+                    == 1,
+                "{} must compose the common overlay exactly once",
+                series.label()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_runtime_still_loads_default_core_stubs() {
+        let extension = TempDir::new().expect("test extension directory must be created");
+        let stubs = extension.path().join("stubs").join("rubystubs30");
+        fs::create_dir_all(&stubs).expect("test stub directory must be created");
+        fs::write(
+            stubs.join("thread.rb"),
+            "class Thread\n  def self.new\n  end\nend\n",
+        )
+        .expect("Thread stub must be written");
+
+        let mut indexer = IndexerStdlib::new(FileProcessor::new(), None);
+        indexer.set_extension_path(extension.path().to_path_buf());
+        let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+
+        indexer
+            .index_core_stubs(engine.clone())
+            .await
+            .expect("bundled core stubs must remain usable without a detected runtime");
+
+        let thread = FullyQualifiedName::namespace(vec![
+            RubyConstant::new("Thread").expect("Thread must be a valid Ruby constant")
+        ]);
+        assert!(
+            !AnalysisQuery::new(&engine.read())
+                .symbols_for_fqn(&thread)
+                .is_empty(),
+            "Thread must resolve from default bundled core stubs when runtime detection fails"
+        );
+    }
+
+    #[tokio::test]
+    async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
+        let extension = TempDir::new().expect("test extension directory must be created");
+        let stubs = extension.path().join("stubs").join("rubystubs25");
+        let jruby_overlay = extension.path().join("jruby-stubs").join("9.2");
+        let jruby_common = extension.path().join("jruby-stubs").join("common");
+        fs::create_dir_all(&stubs).expect("MRI stub directory must be created");
+        fs::create_dir_all(&jruby_overlay).expect("JRuby overlay directory must be created");
+        fs::create_dir_all(&jruby_common).expect("JRuby common directory must be created");
+        fs::write(stubs.join("object.rb"), "class Object\nend\n")
+            .expect("Object stub must be written");
+        fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("support/jruby/stubs/9.2/runtime.rb"),
+            jruby_overlay.join("runtime.rb"),
+        )
+        .expect("repository JRuby 9.2 overlay must be copied into the isolated test extension");
+        fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("support/jruby/stubs/common/runtime.rb"),
+            jruby_common.join("runtime.rb"),
+        )
+        .expect("repository JRuby common overlay must be copied into the isolated test extension");
+        fs::write(
+            stubs.join("process.rb"),
+            "module Process\n  def self.fork\n  end\nend\n",
+        )
+        .expect("Process baseline stub must be written");
+        fs::write(
+            stubs.join("object_space.rb"),
+            "module ObjectSpace\n  def self.dump(object)\n  end\nend\n",
+        )
+        .expect("ObjectSpace baseline stub must be written");
+
+        let method = FullyQualifiedName::method(
+            vec![RubyConstant::new("Object").expect("Object must be a valid Ruby constant")],
+            RubyMethod::new("java_import").expect("java_import must be a valid Ruby method"),
+        );
+
+        let mut jruby_indexer = IndexerStdlib::new(
+            FileProcessor::new(),
+            Some(RubyVersion::new_with_implementation(
+                2,
+                5,
+                RubyImplementation::JRuby,
+            )),
+        );
+        jruby_indexer.set_extension_path(extension.path().to_path_buf());
+        let jruby_engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+        jruby_indexer
+            .index_core_stubs(jruby_engine.clone())
+            .await
+            .expect("JRuby core and overlay stubs must index");
+        assert!(
+            !AnalysisQuery::new(&jruby_engine.read())
+                .methods_for_fqn(&method)
+                .is_empty(),
+            "JRuby 9.2 must expose Object#java_import from its implementation overlay"
+        );
+        let required_instance_methods = [
+            ("Object", "java_import", MethodVisibility::Private),
+            ("Object", "java_kind_of?", MethodVisibility::Public),
+            ("Module", "java_alias", MethodVisibility::Private),
+            ("Module", "include_package", MethodVisibility::Private),
+            ("Kernel", "java_package", MethodVisibility::Public),
+            ("Kernel", "to_java", MethodVisibility::Public),
+            ("Kernel", "java_signature", MethodVisibility::Public),
+            ("Kernel", "java_implements", MethodVisibility::Public),
+            ("JavaProxy", "java_send", MethodVisibility::Public),
+            ("JavaProxy", "java_method", MethodVisibility::Public),
+            ("JavaProxyMethods", "java_class", MethodVisibility::Public),
+            ("JavaProxyMethods", "java_object", MethodVisibility::Public),
+            ("JavaProxyMethods", "synchronized", MethodVisibility::Public),
+            ("Class", "java_class", MethodVisibility::Public),
+            ("String", "to_java_bytes", MethodVisibility::Public),
+        ];
+        let jruby_engine_guard = jruby_engine.read();
+        let query = AnalysisQuery::new(&jruby_engine_guard);
+        for (owner_name, method_name, visibility) in required_instance_methods {
+            let owner_part =
+                RubyConstant::new(owner_name).expect("test owner must be a valid Ruby constant");
+            let owner = FullyQualifiedName::namespace(vec![owner_part]);
+            let method_fqn = FullyQualifiedName::method(
+                vec![owner_part],
+                RubyMethod::new(method_name).expect("test method must be a valid Ruby method"),
+            );
+            assert!(
+                query.methods_for_fqn(&method_fqn).iter().any(|fact| {
+                    fact.owner == owner && fact.visibility == visibility
+                }),
+                "JRuby 9.2 overlay must declare {owner_name}#{method_name} with {visibility:?} visibility"
+            );
+        }
+        for constant_name in [
+            "JRUBY_VERSION",
+            "JRUBY_REVISION",
+            "Java",
+            "JavaUtilities",
+            "JavaProxyMethods",
+            "JavaProxy",
+            "ConcreteJavaProxy",
+            "ArrayJavaProxy",
+        ] {
+            let constant = RubyConstant::new(constant_name)
+                .expect("test constant must be a valid Ruby constant");
+            let namespace = FullyQualifiedName::namespace(vec![constant]);
+            let value = FullyQualifiedName::constant(vec![constant]);
+            assert!(
+                !query.symbols_for_fqn(&namespace).is_empty()
+                    || !query.symbols_for_fqn(&value).is_empty(),
+                "JRuby 9.2 overlay must declare runtime constant {constant_name}"
+            );
+        }
+        let process = RubyConstant::new("Process").expect("Process must be a valid Ruby constant");
+        let fork = RubyMethod::new("fork").expect("fork must be a valid Ruby method");
+        let effective_fork_facts = jruby_engine_guard.method_facts_matching_owner_name(
+            &FullyQualifiedName::singleton_namespace(vec![process]),
+            &fork,
+        );
+        assert_eq!(
+            effective_fork_facts.len(),
+            1,
+            "the JRuby overlay must replace the compatible baseline declaration instead of making Process.fork ambiguous: {effective_fork_facts:?}"
+        );
+        assert!(
+            matches!(
+                effective_fork_facts[0].availability,
+                ruby_analysis::core::MethodAvailability::Unavailable { .. }
+            ),
+            "Process.fork must remain known but explicitly unavailable under JRuby 9.2"
+        );
+        let object_space =
+            RubyConstant::new("ObjectSpace").expect("ObjectSpace must be a valid Ruby constant");
+        let dump = RubyMethod::new("dump").expect("dump must be a valid Ruby method");
+        assert!(
+            jruby_engine_guard
+                .method_facts_matching_owner_name(
+                    &FullyQualifiedName::singleton_namespace(vec![object_space]),
+                    &dump,
+                )
+                .is_empty(),
+            "JRuby 9.2's absent ObjectSpace.dump marker must mask the MRI 2.5 baseline"
+        );
+        drop(jruby_engine_guard);
+
+        let mut mri_indexer =
+            IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(2, 5)));
+        mri_indexer.set_extension_path(extension.path().to_path_buf());
+        let mri_engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+        mri_indexer
+            .index_core_stubs(mri_engine.clone())
+            .await
+            .expect("MRI core stubs must index");
+        assert!(
+            AnalysisQuery::new(&mri_engine.read())
+                .methods_for_fqn(&method)
+                .is_empty(),
+            "MRI must not receive JRuby-only methods"
+        );
     }
 }

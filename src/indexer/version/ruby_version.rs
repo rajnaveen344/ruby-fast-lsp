@@ -1,3 +1,4 @@
+use ruby_fast_lsp_jruby_support::JrubySeries;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
@@ -144,23 +145,16 @@ impl RubyVersion {
 
     /// Map JRuby version to compatible MRI version
     fn map_jruby_to_mri(jruby_major: u8, jruby_minor: u8) -> Option<(u8, u8)> {
-        match (jruby_major, jruby_minor) {
-            // JRuby 10.x -> Ruby 3.4
-            (10, _) => Some((3, 4)),
-            // JRuby 9.4.x -> Ruby 3.1
-            (9, 4) => Some((3, 1)),
-            // JRuby 9.3.x -> Ruby 2.6
-            (9, 3) => Some((2, 6)),
-            // JRuby 9.2.x -> Ruby 2.5
-            (9, 2) => Some((2, 5)),
-            // JRuby 9.1.x -> Ruby 2.3
-            (9, 1) => Some((2, 3)),
-            // JRuby 9.0.x -> Ruby 2.2
-            (9, 0) => Some((2, 2)),
-            // JRuby 1.7.x -> Ruby 1.9
-            (1, 7) => Some((1, 9)),
-            _ => None,
+        if (jruby_major, jruby_minor) == (1, 7) {
+            return Some((1, 9));
         }
+        let compatibility = JrubySeries::for_family(u16::from(jruby_major), u16::from(jruby_minor))
+            .ok()?
+            .ruby_compatibility();
+        Some((
+            u8::try_from(compatibility.major).ok()?,
+            u8::try_from(compatibility.minor).ok()?,
+        ))
     }
 
     /// Map TruffleRuby version to compatible MRI version
@@ -203,7 +197,25 @@ impl RubyVersion {
 
     /// Parse a full version string like "3.0.0" into a RubyVersion (ignoring patch)
     pub fn from_full_version(version_str: &str) -> Option<Self> {
-        Self::parse(version_str)
+        if let Some(version) = version_str.strip_prefix("jruby-") {
+            let engine = Self::parse(version)?;
+            let (major, minor) = Self::map_jruby_to_mri(engine.major, engine.minor)?;
+            return Some(Self::new_with_implementation(
+                major,
+                minor,
+                RubyImplementation::JRuby,
+            ));
+        }
+        if let Some(version) = version_str.strip_prefix("truffleruby-") {
+            let engine = Self::parse(version)?;
+            let (major, minor) = Self::map_truffleruby_to_mri(engine.major, engine.minor)?;
+            return Some(Self::new_with_implementation(
+                major,
+                minor,
+                RubyImplementation::TruffleRuby,
+            ));
+        }
+        Self::parse(version_str.strip_prefix("ruby-").unwrap_or(version_str))
     }
 }
 
@@ -255,6 +267,32 @@ mod tests {
     }
 
     #[test]
+    fn test_jruby_version_manager_identifier_parsing() {
+        assert_eq!(
+            RubyVersion::from_full_version("jruby-9.2.21.0"),
+            Some(RubyVersion::new_with_implementation(
+                2,
+                5,
+                RubyImplementation::JRuby
+            ))
+        );
+        assert_eq!(
+            RubyVersion::from_full_version("jruby-10.1.0.0"),
+            Some(RubyVersion::new_with_implementation(
+                4,
+                0,
+                RubyImplementation::JRuby
+            )),
+            "JRuby 10.1 implements Ruby 4.0 and must not reuse the JRuby 10.0/Ruby 3.4 baseline"
+        );
+        assert_eq!(
+            RubyVersion::from_full_version("jruby-10.2.0.0"),
+            None,
+            "unknown future JRuby series must fail closed until their compatibility baseline is supported"
+        );
+    }
+
+    #[test]
     fn test_truffleruby_version_parsing() {
         let truffle_output =
             "truffleruby 23.1.1, like ruby 3.2.2, GraalVM CE Native [x86_64-darwin]";
@@ -286,6 +324,8 @@ mod tests {
     #[test]
     fn test_jruby_version_mapping() {
         assert_eq!(RubyVersion::map_jruby_to_mri(10, 0), Some((3, 4)));
+        assert_eq!(RubyVersion::map_jruby_to_mri(10, 1), Some((4, 0)));
+        assert_eq!(RubyVersion::map_jruby_to_mri(10, 2), None);
         assert_eq!(RubyVersion::map_jruby_to_mri(9, 4), Some((3, 1)));
         assert_eq!(RubyVersion::map_jruby_to_mri(9, 3), Some((2, 6)));
         assert_eq!(RubyVersion::map_jruby_to_mri(9, 2), Some((2, 5)));

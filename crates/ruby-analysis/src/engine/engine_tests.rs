@@ -1,7 +1,7 @@
 use crate::core::{
     FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
-    GraphNodeKind, MethodCalleeResolution, MethodFact, ReferenceCandidate, RubyConstant,
-    RubyMethod, RubyType, SymbolFact, SymbolKind, TypeProvenance, TypeSubject,
+    GraphNodeKind, MethodCalleeResolution, MethodFact, NamespaceKind, ReferenceCandidate,
+    RubyConstant, RubyMethod, RubyType, SymbolFact, SymbolKind, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
 
@@ -422,6 +422,193 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
 }
 
 #[test]
+fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_removal() {
+    let mut engine = AnalysisEngine::new();
+    let signature_file = engine.register_file(SourceFileInput {
+        path: PathBuf::from("signatures/java/list.rb"),
+        content: "def get(index); end\ndef get(key); end".to_string(),
+        kind: SourceKind::Signature,
+    });
+    let implementation_file = engine.register_file(SourceFileInput {
+        path: PathBuf::from("/external/java/util/List.java"),
+        content: "Object get(int index) { return values[index]; }\nString get(String key) { return key; }"
+            .to_string(),
+        kind: SourceKind::External,
+    });
+    let source_file = register_project_file(
+        &mut engine,
+        "app/use_list.rb",
+        "list.java_send(:get, [Java::int], 0)",
+    );
+    let owner = FullyQualifiedName::namespace(
+        ["Java", "JavaUtil", "List"]
+            .into_iter()
+            .map(|part| RubyConstant::new(part).unwrap())
+            .collect::<Vec<_>>(),
+    );
+    let method = RubyMethod::new("get").unwrap();
+    let method_fqn = FullyQualifiedName::method(owner.namespace_parts(), method);
+    let signature_range = TextRange::new(signature_file, 0, 19);
+    let int_range = TextRange::new(implementation_file, 0, 47);
+    let string_range = TextRange::new(implementation_file, 48, 87);
+    engine.replace_facts(
+        signature_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                signature_range,
+            )],
+            methods: vec![MethodFact::new(
+                method_fqn.clone(),
+                FullyQualifiedName::namespace_with_kind(
+                    owner.namespace_parts(),
+                    NamespaceKind::Instance,
+                ),
+                signature_range,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.replace_facts(
+        implementation_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(implementation_file, 0, 87),
+            )],
+            methods: vec![
+                MethodFact::new(
+                    method_fqn.clone(),
+                    FullyQualifiedName::namespace_with_kind(
+                        owner.namespace_parts(),
+                        NamespaceKind::Instance,
+                    ),
+                    int_range,
+                ),
+                MethodFact::new(
+                    method_fqn,
+                    FullyQualifiedName::namespace_with_kind(
+                        owner.namespace_parts(),
+                        NamespaceKind::Instance,
+                    ),
+                    string_range,
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    let reference_range = TextRange::new(source_file, 16, 20);
+    engine.replace_facts(
+        source_file,
+        FileFacts {
+            reference_candidates: vec![ReferenceCandidate::method(
+                reference_range,
+                crate::core::MethodReferenceCandidate {
+                    owner: owner.namespace_parts(),
+                    owner_kind: NamespaceKind::Instance,
+                    method,
+                    is_super: false,
+                    access: crate::core::MethodReferenceAccess::VisibilityBypass,
+                    caller: None,
+                    preferred_definition_range: Some(int_range),
+                    diagnostics: crate::core::MethodReferenceDiagnostics {
+                        diagnostic_range: reference_range,
+                        receiver_label: Some(owner.to_string()),
+                        diagnose_unresolved: false,
+                        allow_unindexed_owner: false,
+                        signature: crate::core::MethodCallSignatureCandidate::default(),
+                    },
+                },
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(
+        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
+        vec![int_range],
+        "a verified JVM overload range must outrank same-named methods and signatures"
+    );
+
+    engine.replace_facts(
+        implementation_file,
+        FileFacts::default(),
+        ResolveMode::Immediate,
+    );
+    assert_eq!(
+        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
+        vec![signature_range],
+        "a removed preferred declaration must not leave a stale location and must fall back normally"
+    );
+}
+
+#[test]
+fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
+    let mut engine = AnalysisEngine::new();
+    let import_file = register_project_file(
+        &mut engine,
+        "lib/runtime.rb",
+        "java_import java.util.concurrent.TimeUnit",
+    );
+    let implementation_file = engine.register_file(SourceFileInput {
+        path: PathBuf::from("/external/java/util/concurrent/TimeUnit.java"),
+        content: "public enum TimeUnit {}".to_string(),
+        kind: SourceKind::External,
+    });
+    let alias = FullyQualifiedName::constant(vec![RubyConstant::new("TimeUnit").unwrap()]);
+    let proxy = FullyQualifiedName::constant(
+        ["Java", "JavaUtilConcurrent", "TimeUnit"]
+            .into_iter()
+            .map(|part| RubyConstant::new(part).unwrap())
+            .collect::<Vec<_>>(),
+    );
+    let import_range = TextRange::new(import_file, 12, 41);
+    let implementation_range = TextRange::new(implementation_file, 0, 23);
+    engine.replace_facts(
+        import_file,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                alias.clone(),
+                SymbolKind::Constant,
+                import_range,
+            )],
+            types: vec![crate::core::TypeFact::new(
+                TypeSubject::Constant(alias),
+                RubyType::ClassReference(proxy.clone()),
+                import_range,
+                TypeProvenance::Runtime,
+            )],
+            ..FileFacts::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.replace_facts(
+        implementation_file,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                proxy,
+                SymbolKind::Class,
+                implementation_range,
+            )],
+            ..FileFacts::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(
+        AnalysisQuery::new(&engine)
+            .constant_definition_ranges(&[RubyConstant::new("TimeUnit").unwrap()], &[]),
+        vec![implementation_range],
+        "a runtime import alias must navigate to the implementation class instead of its import statement"
+    );
+}
+
+#[test]
 fn method_candidate_resolves_when_method_definition_arrives_later() {
     let mut engine = AnalysisEngine::new();
     let ref_file = register_project_file(&mut engine, "app/use_user.rb", "user.name");
@@ -456,6 +643,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
                     is_super: false,
                     access: crate::core::MethodReferenceAccess::ExplicitReceiver,
                     caller: None,
+                    preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: TextRange::new(ref_file, 5, 9),
                         receiver_label: Some("User".to_string()),
