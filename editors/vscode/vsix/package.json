@@ -195,6 +195,10 @@
       {
         "command": "ruby-fast-lsp.formatter.select",
         "title": "Ruby Fast LSP: Select Formatter"
+      },
+      {
+        "command": "ruby-fast-lsp.debug.revealDefinition",
+        "title": "Ruby Fast LSP: Reveal Definition (timed)"
       }
     ],
     "menus": {
@@ -227,6 +231,12 @@
         "key": "ctrl+shift+r",
         "mac": "cmd+shift+r",
         "when": "view.rubyIndex.visible"
+      },
+      {
+        "command": "ruby-fast-lsp.debug.revealDefinition",
+        "key": "f12",
+        "mac": "f12",
+        "when": "editorTextFocus && (editorLangId == ruby || editorLangId == erb) && !isInEmbeddedEditor"
       }
     ]
   },

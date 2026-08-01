@@ -774,9 +774,9 @@ function activate(context) {
         middleware: {
             provideDefinition: async (document, position, token, next) => {
                 const startedAt = Date.now();
-                outputChannel.appendLine(
-                    `[CLIENT] definition provider invoked ${document.uri.fsPath}:${position.line}:${position.character}`
-                );
+                    outputChannel.appendLine(
+                        `[CLIENT] definition provider invoked at ${new Date().toISOString()} ${document.uri.fsPath}:${position.line}:${position.character}`
+                    );
                 try {
                     const result = await next(document, position, token);
                     const count = Array.isArray(result)
@@ -1171,6 +1171,18 @@ function activate(context) {
         }
     );
 
+    // Timed F12: log keypress before VS Code gathers definition providers so we
+    // can split editor delay from language-client/server delay.
+    const timedRevealDefinitionCommand = vscode.commands.registerCommand(
+        'ruby-fast-lsp.debug.revealDefinition',
+        async () => {
+            outputChannel.appendLine(
+                `[CLIENT] F12 keypress at ${new Date().toISOString()}`
+            );
+            await vscode.commands.executeCommand('editor.action.revealDefinition');
+        }
+    );
+
     const runRspecCommand = vscode.commands.registerCommand('ruby-fast-lsp.rspec.run',
         (uriStr, _line, target) => {
             try {
@@ -1505,7 +1517,7 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, indexingStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, timedRevealDefinitionCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, indexingStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {
