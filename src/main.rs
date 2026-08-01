@@ -11,9 +11,22 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Initialize the logger with trace level enabled (actual filtering is done via log::set_max_level)
-    // This allows runtime log level changes without restarting the server
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
+    // Initialize the logger with millisecond timestamps so client/server
+    // stall captures can be correlated without second-rounding ambiguity.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
+        .format(|buf, record| {
+            use std::io::Write;
+            let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
+            writeln!(
+                buf,
+                "[{} {} {}] {}",
+                ts,
+                record.level(),
+                record.target(),
+                record.args()
+            )
+        })
+        .init();
 
     // Start with info level - can be changed at runtime via configuration
     log::set_max_level(log::LevelFilter::Info);

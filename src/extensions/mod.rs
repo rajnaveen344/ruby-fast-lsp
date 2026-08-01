@@ -939,7 +939,8 @@ impl ExtensionRegistryHandle {
             return Ok(Vec::new());
         }
         let registry = self.clone();
-        indexing_resources
+        let admit_start = std::time::Instant::now();
+        let result = indexing_resources
             .run_with_resources(
                 "extension code lenses",
                 IndexingWorkSpec::new(
@@ -950,9 +951,29 @@ impl ExtensionRegistryHandle {
                     0,
                 ),
                 None,
-                move || registry.code_lenses(&uri, &text, project),
+                move || {
+                    let compute_start = std::time::Instant::now();
+                    let lenses = registry.code_lenses(&uri, &text, project);
+                    (
+                        lenses,
+                        compute_start.elapsed(),
+                        uri,
+                    )
+                },
             )
-            .await
+            .await?;
+        let (lenses, compute_elapsed, uri) = result;
+        let total_elapsed = admit_start.elapsed();
+        let admit_elapsed = total_elapsed.saturating_sub(compute_elapsed);
+        log::info!(
+            "[PERF][codeLens extension] file={} admit_wait={:?} compute={:?} lenses={} total={:?}",
+            uri,
+            admit_elapsed,
+            compute_elapsed,
+            lenses.len(),
+            total_elapsed
+        );
+        Ok(lenses)
     }
 
     fn has_loaded_capability(&self, capability: &str) -> bool {

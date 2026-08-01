@@ -756,16 +756,17 @@ impl RubyLanguageServer {
     }
 
     /// Optional 1s reactor heartbeat for diagnosing slow goto clicks.
-    /// Enable with `RUBY_FAST_LSP_REACTOR_HEARTBEAT=1`. Continuing ticks with no
+    /// Enabled by default while chasing request-dispatch stalls; set
+    /// `RUBY_FAST_LSP_REACTOR_HEARTBEAT=0` to disable. Continuing ticks with no
     /// request log mean the client held the request; missing ticks mean the
     /// reactor stalled. Process-wide once so FakeEditor suites do not spawn
     /// overlapping tickers.
     pub fn start_reactor_heartbeat(&self) {
         use std::sync::Once;
         static START: Once = Once::new();
-        let enabled = std::env::var_os("RUBY_FAST_LSP_REACTOR_HEARTBEAT")
-            .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
-        if !enabled {
+        let disabled = std::env::var_os("RUBY_FAST_LSP_REACTOR_HEARTBEAT")
+            .is_some_and(|value| value == "0" || value.eq_ignore_ascii_case("false"));
+        if disabled {
             return;
         }
         START.call_once(|| {
