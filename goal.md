@@ -49,6 +49,12 @@ A developer opening a multi-service folder should observe:
   milliseconds without waiting for workspace indexing.
 - Project-source Go to Definition becomes available within five seconds on the
   reference `goshposh` workspace, even while dependencies continue indexing.
+- After project navigation is ready, caret-driven Document Highlight,
+  Go to Definition, hover, and sibling interactive requests on a large open
+  file remain fast: highlight must use same-document work only and must not
+  block the LSP request loop behind a project-wide reference walk. Measured
+  on `goshposh` `server/lib/api_app.rb`, a ~10.5 s full-project highlight
+  stalled F12 until it finished even though goto itself completed in ~1–2 ms.
 - The Ruby project containing the active file becomes useful first.
 - Other projects index with bounded CPU, memory, and disk pressure.
 - Switching the active editor immediately shows that file's owning project and
@@ -1483,6 +1489,31 @@ Record separate baselines for:
 Do not accept a faster all-project total that makes the active project slower
 or creates excessive peak memory and disk contention.
 
+### Interactive request latency (document highlight)
+
+VS Code requests `textDocument/documentHighlight` whenever the caret sits on a
+symbol in the active editor. That path is interactive and concurrent with
+Go to Definition, hover, folding, semantic tokens, and CodeLens.
+
+Measured on `/Users/naveenraj/goshposh` `server/lib/api_app.rb` (2026-08-01):
+
+1. Caret on a method name triggered document highlight.
+2. The handler ran project-wide `find_references` (~10.5 s) and kept one
+   same-file hit.
+3. That synchronous work blocked tower-lsp's request-poll loop
+   (`buffer_unordered`), so F12's definition request waited on the wire until
+   highlight finished even though goto itself completed in ~1–2 ms.
+4. CodeAction / Full document sync / CodeLens were not the stall (linter none;
+   flush 0 ms; CodeLens ~30 ms).
+
+Required direction:
+
+- Document Highlight must use same-document reference lookup only.
+- Multi-second or project-wide reference work must stay off the async
+  request-poll path so one feature cannot stall sibling interactive requests.
+- Re-measure caret-on-symbol then F12 on `api_app.rb` after the fix; goto must
+  no longer wait behind highlight.
+
 ### Bounded, prioritized scheduler
 
 - Replace one-unbounded-task-per-project startup with a bounded scheduler.
@@ -1776,6 +1807,12 @@ least:
   decrease when bounded concurrency replaces unbounded startup.
 - A ready project's definition, hover, completion, and edit latency remain
   within their existing budgets while sibling indexing is active.
+- Document Highlight on a ready project file stays within the interactive
+  budget (same order as same-file navigation: **500 ms** p95) using
+  same-document reference lookup only. It must not compute project-wide
+  references and then discard cross-file hits, and it must not run multi-second
+  synchronous work on the tower-lsp request-poll path where it stalls goto,
+  hover, folding, tokens, and CodeLens.
 - A one-project source edit performs no semantic replacement in sibling
   engines.
 - Status snapshot application is monotonic and constant-time in the number of
@@ -1946,6 +1983,17 @@ Next work, in order:
    Gem cache-key preparation now uses one combined Prism traversal rather than
    three independent parses. Broad borrowed file-type facts were measured and
    rejected; do not repeat that shape.
+   Schema-14 `ResolvePassStats` instrumentation is accepted and records final
+   resolve cache hit/miss cardinalities plus coarse subphase timings; keep it
+   for future profiles. A cache-hit fast path inside
+   `resolve_reference_candidates` was measured and rejected: resolve-phase
+   median improved about 6.6%, but warm semantic completion, dependency
+   navigation, project navigation, and wall all regressed. Evidence is in
+   `support/performance/resolve-pass-cache-cardinality-2026-08-01.json` and
+   `support/performance/resolve-cache-hit-fast-path-rejection-2026-08-01.json`.
+   Do not retry hit-path micro-optimizations there without a new profile showing
+   resolve dominates the remaining semantic gap; prefer dependency rebinding /
+   phase overlap / fact-collection targets next.
    Select the next distinct target from the recorded v282 profile. The v283
    profile belongs to the reverted lazy-context experiment and is useful only
    as rejection evidence. Do not repeat the regressing shared local

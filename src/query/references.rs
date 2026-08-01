@@ -7,6 +7,8 @@ use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
+use ruby_analysis::core::SourceFileId;
+use ruby_analysis::core::TextRange;
 use ruby_analysis::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use ruby_analysis::indexer::yard::YardTypeConverter;
 use ruby_analysis::indexer::{Identifier, MethodReceiver};
@@ -38,6 +40,33 @@ impl EngineQuery {
             namespace_kind,
             position,
             content,
+        )
+    }
+
+    /// Same-document highlight locations for the symbol at `position`.
+    ///
+    /// Resolves identity the same way as find-references, then collects only
+    /// ranges in the open file. Does not run project-wide
+    /// `method_reference_ranges*` (or its full-workspace private-source scan).
+    pub fn find_document_highlight_locations_at_position(
+        &self,
+        uri: &Url,
+        position: Position,
+        content: &str,
+    ) -> Option<Vec<Location>> {
+        let file_id = self.doc.as_ref()?.read().analysis_file_id();
+        let analyzer = self.analyzer_at_position(uri, content, position);
+        let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
+            analyzer.get_identifier(position);
+        let identifier = identifier_opt?;
+
+        self.find_document_highlights_for_identifier(
+            &identifier,
+            &ancestors,
+            namespace_kind,
+            position,
+            content,
+            file_id,
         )
     }
 
@@ -432,6 +461,214 @@ impl EngineQuery {
         }
     }
 
+    fn find_document_highlights_for_identifier(
+        &self,
+        identifier: &Identifier,
+        ancestors: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+        content: &str,
+        file_id: SourceFileId,
+    ) -> Option<Vec<Location>> {
+        match identifier {
+            Identifier::RubyConstant { namespace: _, iden } => {
+                self.same_file_constant_highlight_locations(iden, ancestors, file_id)
+            }
+            Identifier::RubyMethod {
+                namespace: _,
+                receiver,
+                iden,
+            } => self.same_file_method_highlight_locations(
+                receiver,
+                iden,
+                ancestors,
+                namespace_kind,
+                position,
+                content,
+                file_id,
+            ),
+            Identifier::RubyInstanceVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::instance_variable(name.clone()) {
+                    self.same_file_fqn_highlight_locations(&fqn, file_id)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyClassVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::class_variable(name.clone()) {
+                    self.same_file_fqn_highlight_locations(&fqn, file_id)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyGlobalVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::global_variable(name.clone()) {
+                    self.same_file_fqn_highlight_locations(&fqn, file_id)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyLocalVariable { name, .. } => {
+                // Locals are already document-scoped via VariableScopes.
+                self.find_local_variable_references(name, position)
+            }
+            Identifier::YardType { type_name, .. } => {
+                if let Some(fqn) = YardTypeConverter::parse_type_name_to_fqn_public(type_name) {
+                    self.same_file_fqn_highlight_locations(&fqn, file_id)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn same_file_constant_highlight_locations(
+        &self,
+        constant_path: &[RubyConstant],
+        ancestors: &[RubyConstant],
+        file_id: SourceFileId,
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.read();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        let ranges = query
+            .constant_reference_ranges(constant_path, ancestors)
+            .into_iter()
+            .filter(|range| range.file_id == file_id)
+            .collect::<Vec<_>>();
+        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
+            &engine, ranges,
+        )))
+    }
+
+    fn same_file_fqn_highlight_locations(
+        &self,
+        fqn: &FullyQualifiedName,
+        file_id: SourceFileId,
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.read();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        let ranges = same_file_reference_ranges(&query, fqn, file_id);
+        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
+            &engine, ranges,
+        )))
+    }
+
+    fn same_file_method_highlight_locations(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+        ancestors: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+        content: &str,
+        file_id: SourceFileId,
+    ) -> Option<Vec<Location>> {
+        // `def initialize` is indexed as `new` (singleton) — map accordingly
+        if method.as_str() == "initialize" {
+            if let Ok(new_method) = RubyMethod::new("new") {
+                let namespace_fqn = FullyQualifiedName::namespace_with_kind(
+                    ancestors.to_vec(),
+                    NamespaceKind::Singleton,
+                );
+                return self.same_file_method_target_highlight_locations(
+                    &namespace_fqn,
+                    &new_method,
+                    file_id,
+                    MethodHighlightMode::AllTargets,
+                );
+            }
+        }
+
+        match receiver {
+            MethodReceiver::Constant(receiver_ns) => {
+                let namespace_fqn = {
+                    let engine = self.analysis_engine()?.read();
+                    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+                    query.resolve_constant_receiver(receiver_ns, ancestors)
+                };
+                self.same_file_method_target_highlight_locations(
+                    &namespace_fqn,
+                    method,
+                    file_id,
+                    MethodHighlightMode::AllTargets,
+                )
+            }
+            MethodReceiver::Super => {
+                let namespace_fqn =
+                    FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
+                self.same_file_method_target_highlight_locations(
+                    &namespace_fqn,
+                    method,
+                    file_id,
+                    MethodHighlightMode::SuperOnly,
+                )
+            }
+            MethodReceiver::None => {
+                let namespace_fqn =
+                    FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
+                self.same_file_method_target_highlight_locations(
+                    &namespace_fqn,
+                    method,
+                    file_id,
+                    MethodHighlightMode::AllTargets,
+                )
+            }
+            MethodReceiver::SelfReceiver => {
+                let namespace_fqn =
+                    FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
+                self.same_file_method_target_highlight_locations(
+                    &namespace_fqn,
+                    method,
+                    file_id,
+                    MethodHighlightMode::AllTargets,
+                )
+            }
+            _ => {
+                let resolved_ns = self.resolve_receiver_to_namespace(
+                    receiver,
+                    ancestors,
+                    namespace_kind,
+                    position,
+                )?;
+                let _ = content;
+                self.same_file_method_target_highlight_locations(
+                    &resolved_ns,
+                    method,
+                    file_id,
+                    MethodHighlightMode::AllTargets,
+                )
+            }
+        }
+    }
+
+    fn same_file_method_target_highlight_locations(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        file_id: SourceFileId,
+        mode: MethodHighlightMode,
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.read();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        let targets = match mode {
+            MethodHighlightMode::AllTargets => query.method_reference_targets(namespace_fqn, method),
+            MethodHighlightMode::SuperOnly => query
+                .super_method_reference_target(namespace_fqn, method)
+                .into_iter()
+                .collect(),
+        };
+        let mut ranges = Vec::new();
+        for target in targets {
+            ranges.extend(same_file_reference_ranges(&query, &target, file_id));
+        }
+        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
+            &engine, ranges,
+        )))
+    }
+
     fn method_reference_locations_for_namespace_from_analysis(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -576,4 +813,22 @@ impl EngineQuery {
         doc_arc.write().variable_scopes = collector.document.variable_scopes;
         Some(())
     }
+}
+
+enum MethodHighlightMode {
+    AllTargets,
+    SuperOnly,
+}
+
+fn same_file_reference_ranges(
+    query: &ruby_analysis::engine::AnalysisQuery<'_>,
+    fqn: &FullyQualifiedName,
+    file_id: SourceFileId,
+) -> Vec<TextRange> {
+    query
+        .references_for_fqn(fqn)
+        .iter()
+        .map(|fact| fact.range)
+        .filter(|range| range.file_id == file_id)
+        .collect()
 }

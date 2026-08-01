@@ -767,10 +767,13 @@ function activate(context) {
         },
         initializationOptions,
         outputChannel: outputChannel,
-        // Split slow-goto blame: log when VS Code invokes our provider vs when
-        // the language client finishes waiting on the server. Delay before the
-        // "provider invoked" line is editor/extension-host; delay between that
-        // and the server "request received" line is client transport/queue.
+        // Split slow-goto blame across: F12 → provider invoke → sendRequest
+        // enter → pending full-doc flush → wire send → server received →
+        // provider finished. Capture C showed ~6s with healthy reactor
+        // heartbeats and no server LSP traffic after provider invoke, so the
+        // next measurement must prove where the client blocks before the
+        // definition request is written (Full sync flush is the prime suspect:
+        // every sendRequest awaits sendPendingFullTextDocumentChanges).
         middleware: {
             provideDefinition: async (document, position, token, next) => {
                 const startedAt = Date.now();
@@ -794,6 +797,34 @@ function activate(context) {
                     );
                     throw error;
                 }
+            },
+            didChange: async (event, next) => {
+                // Full sync only queues here; the flush happens inside the next
+                // sendRequest/sendNotification. Log queueing so a silent gap
+                // can be matched to a pending 400KB+ api_app.rb body.
+                outputChannel.appendLine(
+                    `[CLIENT] didChange queued at ${new Date().toISOString()} ${event.document.uri.fsPath} version=${event.document.version} chars=${event.document.getText().length}`
+                );
+                return next(event);
+            },
+            sendRequest: async (type, param, token, next) => {
+                const method = typeof type === 'string' ? type : type?.method;
+                const startedAt = Date.now();
+                outputChannel.appendLine(
+                    `[CLIENT] sendRequest middleware enter ${method} at ${new Date().toISOString()}`
+                );
+                try {
+                    const result = await next(type, param, token);
+                    outputChannel.appendLine(
+                        `[CLIENT] sendRequest middleware done ${method} in ${Date.now() - startedAt}ms`
+                    );
+                    return result;
+                } catch (error) {
+                    outputChannel.appendLine(
+                        `[CLIENT] sendRequest middleware failed ${method} in ${Date.now() - startedAt}ms: ${error}`
+                    );
+                    throw error;
+                }
             }
         }
     };
@@ -804,6 +835,49 @@ function activate(context) {
         serverOptions,
         clientOptions
     );
+
+    // sendPendingFullTextDocumentChanges runs BEFORE middleware.sendRequest.
+    // Wrap it so a Full-sync flush wait is visible as its own span.
+    const originalFlushPending = client.sendPendingFullTextDocumentChanges.bind(client);
+    client.sendPendingFullTextDocumentChanges = async function flushPendingWithTiming(connection) {
+        const startedAt = Date.now();
+        outputChannel.appendLine(
+            `[CLIENT] flushPendingFullTextDocumentChanges enter at ${new Date().toISOString()}`
+        );
+        try {
+            const result = await originalFlushPending(connection);
+            outputChannel.appendLine(
+                `[CLIENT] flushPendingFullTextDocumentChanges done in ${Date.now() - startedAt}ms`
+            );
+            return result;
+        } catch (error) {
+            outputChannel.appendLine(
+                `[CLIENT] flushPendingFullTextDocumentChanges failed in ${Date.now() - startedAt}ms: ${error}`
+            );
+            throw error;
+        }
+    };
+
+    const originalSendRequest = client.sendRequest.bind(client);
+    client.sendRequest = async function sendRequestWithTiming(type, ...params) {
+        const method = typeof type === 'string' ? type : type?.method;
+        const startedAt = Date.now();
+        outputChannel.appendLine(
+            `[CLIENT] sendRequest enter ${method} at ${new Date().toISOString()}`
+        );
+        try {
+            const result = await originalSendRequest(type, ...params);
+            outputChannel.appendLine(
+                `[CLIENT] sendRequest done ${method} in ${Date.now() - startedAt}ms`
+            );
+            return result;
+        } catch (error) {
+            outputChannel.appendLine(
+                `[CLIENT] sendRequest failed ${method} in ${Date.now() - startedAt}ms: ${error}`
+            );
+            throw error;
+        }
+    };
 
     const runtimeStatusBarItem = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,

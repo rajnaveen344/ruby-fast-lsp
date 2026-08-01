@@ -2,10 +2,10 @@ use crate::capabilities::formatting::full_document_range;
 use crate::config::LinterKind;
 use crate::linter::fix_document;
 use crate::server::RubyLanguageServer;
-use log::warn;
+use log::{info, warn};
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, Diagnostic, TextEdit,
     WorkspaceEdit,
@@ -15,16 +15,32 @@ pub async fn handle_code_actions(
     server: &RubyLanguageServer,
     params: CodeActionParams,
 ) -> Option<Vec<CodeActionOrCommand>> {
+    let total_start = Instant::now();
+    let uri_path = params.text_document.uri.path().to_string();
+    let diagnostic_count = params.context.diagnostics.len();
+
     if params
         .context
         .only
         .as_ref()
         .is_some_and(|kinds| !kinds.iter().any(|kind| *kind == CodeActionKind::QUICKFIX))
     {
+        info!(
+            "[PERF][codeAction waterfall] file={} total={:?} path=skip_non_quickfix diagnostics={}",
+            uri_path,
+            total_start.elapsed(),
+            diagnostic_count
+        );
         return None;
     }
     let config = server.config.lock().clone();
     if config.linter == LinterKind::None {
+        info!(
+            "[PERF][codeAction waterfall] file={} total={:?} path=skip_linter_none diagnostics={}",
+            uri_path,
+            total_start.elapsed(),
+            diagnostic_count
+        );
         return None;
     }
     let matching = params
@@ -34,6 +50,13 @@ pub async fn handle_code_actions(
         .filter(|diagnostic| is_correctable_linter_diagnostic(diagnostic, config.linter))
         .collect::<Vec<_>>();
     if matching.is_empty() {
+        info!(
+            "[PERF][codeAction waterfall] file={} total={:?} path=skip_no_correctable linter={:?} diagnostics={}",
+            uri_path,
+            total_start.elapsed(),
+            config.linter,
+            diagnostic_count
+        );
         return None;
     }
 
@@ -46,6 +69,14 @@ pub async fn handle_code_actions(
         .map(|workspace| workspace.root_path)
         .or_else(|| file_path.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| Path::new(".").to_path_buf());
+    let fix_start = Instant::now();
+    info!(
+        "[PERF][codeAction] starting linter fix_document file={} linter={:?} correctable={} content_chars={}",
+        uri_path,
+        config.linter,
+        matching.len(),
+        content.len()
+    );
     let fixed = match fix_document(
         &config,
         server.indexing_resources.clone(),
@@ -63,16 +94,41 @@ pub async fn handle_code_actions(
                  No workspace edit was returned.",
                 file_path.display()
             );
+            info!(
+                "[PERF][codeAction waterfall] file={} total={:?} path=fix_error fix={:?} linter={:?} correctable={}",
+                uri_path,
+                total_start.elapsed(),
+                fix_start.elapsed(),
+                config.linter,
+                matching.len()
+            );
             return None;
         }
     };
+    let fix_elapsed = fix_start.elapsed();
     if fixed == content {
+        info!(
+            "[PERF][codeAction waterfall] file={} total={:?} path=fix_noop fix={:?} linter={:?} correctable={}",
+            uri_path,
+            total_start.elapsed(),
+            fix_elapsed,
+            config.linter,
+            matching.len()
+        );
         return None;
     }
 
     let edit = TextEdit::new(full_document_range(&content), fixed);
     let mut changes = HashMap::new();
     changes.insert(uri, vec![edit]);
+    info!(
+        "[PERF][codeAction waterfall] file={} total={:?} path=fix_edit fix={:?} linter={:?} correctable={}",
+        uri_path,
+        total_start.elapsed(),
+        fix_elapsed,
+        config.linter,
+        matching.len()
+    );
     Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
         title: format!(
             "Fix safe {} offenses",

@@ -78,3 +78,40 @@ async fn highlights_refresh_after_document_change() {
     assert_eq!(highlights.len(), 2);
     assert_eq!(highlights[1].range.start, Position::new(2, 5));
 }
+
+#[tokio::test]
+async fn highlights_method_calls_in_current_document_only_despite_sibling_callers() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "main.rb",
+            "module Helpers\n  def label\n    \"main\"\n  end\nend\n\nclass Main\n  include Helpers\n\n  def call\n    label\n    label\n  end\nend\n",
+        )
+        .await;
+
+    // Many sibling files also call `label`. The old project-wide highlight path
+    // paid for every file; same-document highlights must ignore them.
+    for index in 0..40 {
+        editor
+            .open(
+                &format!("caller_{index}.rb"),
+                "class Other\n  include Helpers\n  def run\n    label\n  end\nend\n",
+            )
+            .await;
+    }
+
+    let highlights = editor.document_highlights_at("main.rb", 10, 5).await;
+    let ranges = highlights
+        .into_iter()
+        .map(|highlight| highlight.range)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        ranges,
+        vec![
+            Range::new(Position::new(10, 4), Position::new(10, 9)),
+            Range::new(Position::new(11, 4), Position::new(11, 9)),
+        ],
+        "document highlight must stay in main.rb and not surface sibling callers"
+    );
+}
