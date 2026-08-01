@@ -85,7 +85,12 @@ impl FactCollector {
 
         // Extract YARD documentation from comments preceding the method
         let method_start_offset = node.location().start_offset();
-        let yard_doc = YardParser::extract_from_source(&self.document.content, method_start_offset);
+        let method_start_line = self.document.offset_to_position(method_start_offset).line;
+        let yard_doc = YardParser::extract_from_source_at_line(
+            &self.document.content,
+            method_start_offset,
+            method_start_line,
+        );
 
         // Extract parameter info with positions for inlay hints
         let params = self.extract_method_params(node);
@@ -278,6 +283,7 @@ impl FactCollector {
             // Infer return type from method body using TypeTracker
             let mut tracker = TypeTracker::new(self.document.content.as_bytes());
             tracker = tracker.with_analysis_engine(self.analysis_engine.clone());
+            tracker = tracker.with_analysis_query_cache(self.analysis_query_cache.clone());
             tracker = tracker.with_local_method_returns(self.local_method_returns_for_tracker());
             tracker = tracker.with_local_superclasses(self.local_superclasses_for_tracker());
             tracker = tracker.with_yield_param_types(self.yield_param_types_by_method.clone());
@@ -504,21 +510,8 @@ impl FactCollector {
         &self,
     ) -> std::collections::HashMap<FullyQualifiedName, RubyType> {
         self.type_store
-            .all_facts()
-            .into_iter()
-            .filter_map(|fact| match fact.subject {
-                TypeSubject::MethodReturn(fqn) if fact.ruby_type != RubyType::Unknown => {
-                    Some((fqn, fact.ruby_type))
-                }
-                TypeSubject::Constant(_)
-                | TypeSubject::Local { .. }
-                | TypeSubject::InstanceVariable { .. }
-                | TypeSubject::ClassVariable { .. }
-                | TypeSubject::GlobalVariable(_)
-                | TypeSubject::MethodReturn(_)
-                | TypeSubject::Parameter { .. }
-                | TypeSubject::Expression(_) => None,
-            })
+            .known_method_return_types()
+            .map(|(fqn, ruby_type)| (fqn.clone(), ruby_type.clone()))
             .collect()
     }
 

@@ -86,7 +86,6 @@ static ABSENT_REGEX: LazyLock<Regex> =
 // =============================================================================
 
 /// Information about a comment line for position tracking
-/// Information about a comment line for position tracking
 #[derive(Debug, Clone)]
 pub struct CommentLineInfo<'a> {
     pub content: &'a str,
@@ -263,14 +262,40 @@ impl YardParser {
     /// Extract YARD documentation from comments preceding a method definition.
     /// Includes position information for each @param tag for diagnostics.
     pub fn extract_from_source(content: &str, method_start_offset: usize) -> Option<YardMethodDoc> {
-        let content_before = &content[..method_start_offset];
-        let lines_before: Vec<&str> = content_before.lines().collect();
+        assert!(
+            method_start_offset <= content.len() && content.is_char_boundary(method_start_offset),
+            "INVARIANT VIOLATED: YARD method offset is outside the source or not on a UTF-8 boundary. This is a bug because parser locations must be valid source byte offsets. Fix: pass the exact method location from the parse tree."
+        );
+        let method_start_line = u32::try_from(
+            content[..method_start_offset]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count(),
+        )
+        .expect(
+            "INVARIANT VIOLATED: YARD method line exceeded u32. This is a bug because editor protocol positions use u32 line numbers. Fix: reject or segment files with more than u32::MAX lines.",
+        );
+        Self::extract_from_source_at_line(content, method_start_offset, method_start_line)
+    }
 
-        if lines_before.is_empty() {
+    /// Extract YARD documentation when the caller already owns the method's
+    /// zero-indexed line. This avoids rebuilding every preceding source line
+    /// for each method in a file and visits only the attached comment block.
+    pub fn extract_from_source_at_line(
+        content: &str,
+        method_start_offset: usize,
+        method_start_line: u32,
+    ) -> Option<YardMethodDoc> {
+        assert!(
+            method_start_offset <= content.len() && content.is_char_boundary(method_start_offset),
+            "INVARIANT VIOLATED: YARD method offset is outside the source or not on a UTF-8 boundary. This is a bug because parser locations must be valid source byte offsets. Fix: pass the exact method location from the parse tree."
+        );
+        let content_before = &content[..method_start_offset];
+        if content_before.is_empty() {
             return None;
         }
 
-        let comment_lines = Self::collect_preceding_comments(&lines_before);
+        let comment_lines = Self::collect_preceding_comments(content_before, method_start_line);
         if comment_lines.is_empty() {
             return None;
         }
@@ -291,18 +316,20 @@ impl YardParser {
     }
 
     /// Collect comment lines immediately preceding a method definition.
-    fn collect_preceding_comments<'a>(lines_before: &[&'a str]) -> Vec<CommentLineInfo<'a>> {
-        let mut comment_lines: Vec<CommentLineInfo<'a>> = Vec::new();
-        let mut i = lines_before.len() - 1;
+    fn collect_preceding_comments(
+        content_before: &str,
+        method_start_line: u32,
+    ) -> Vec<CommentLineInfo<'_>> {
+        let mut comment_lines = Vec::new();
+        let mut line_number = if content_before.ends_with('\n') {
+            method_start_line.checked_sub(1).expect(
+                "INVARIANT VIOLATED: source before a line-zero method ended with a newline. This is a bug because the supplied method line disagrees with its byte offset. Fix: derive both values from the same parsed source document.",
+            )
+        } else {
+            method_start_line
+        };
 
-        // Skip trailing whitespace lines
-        while i > 0 && lines_before[i].trim().is_empty() {
-            i -= 1;
-        }
-
-        // Collect comment lines (bottom-up)
-        loop {
-            let original_line = lines_before[i];
+        for original_line in content_before.lines().rev() {
             let trimmed = original_line.trim();
 
             if trimmed.starts_with('#') {
@@ -312,7 +339,7 @@ impl YardParser {
 
                 comment_lines.push(CommentLineInfo {
                     content,
-                    line_number: i as u32,
+                    line_number,
                     content_start_char: (leading_ws + hash_and_space) as u32,
                     line_length: original_line.len() as u32,
                 });
@@ -320,10 +347,10 @@ impl YardParser {
                 break;
             }
 
-            if i == 0 {
+            if line_number == 0 {
                 break;
             }
-            i -= 1;
+            line_number -= 1;
         }
 
         comment_lines.reverse();
@@ -873,6 +900,30 @@ end
         assert_eq!(doc.params[1].name, "age");
         assert_eq!(doc.params[1].types, vec!["Integer"]);
         assert_eq!(doc.returns.len(), 1);
+    }
+
+    #[test]
+    fn test_line_aware_extraction_matches_public_path() {
+        let sources = [
+            "# @param name [String] description\ndef call(name)\nend\n",
+            "module Example\r\n  # Description 😀\r\n\r\n  # @return [String] value\r\n  def call\r\n  end\r\nend\r\n",
+            "  # @deprecated use new_call\n  def call\n  end\n",
+        ];
+
+        for source in sources {
+            let method_start = source.find("def call").expect("fixture method must exist");
+            let method_line = u32::try_from(
+                source[..method_start]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count(),
+            )
+            .expect("fixture line must fit u32");
+            assert_eq!(
+                YardParser::extract_from_source_at_line(source, method_start, method_line),
+                YardParser::extract_from_source(source, method_start)
+            );
+        }
     }
 
     #[test]

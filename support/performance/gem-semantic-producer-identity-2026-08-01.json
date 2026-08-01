@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Prove that persistent gem dependency facts cannot survive a semantic analyzer implementation change while independently keyed Java and Wasm products remain reusable.",
+  "real_world_failure": {
+    "workspace": "/Users/naveenraj/goshposh",
+    "observation": "A cache populated by an older analyzer state loaded successfully under a newer analyzer build but produced semantic fingerprints different from a fresh-cache rebuild.",
+    "stale_cache_semantic_export_manifest_sha256": "7153b725b0faba8e63dac2cb5163e4b9d322f646b054a88b6f3bf9fae4aa760b",
+    "stale_cache_project_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "3e0e3171f5b845346c4f09422fafc265",
+      "/Users/naveenraj/goshposh/server-devops-5441": "8930cb6fce670e611b2bb8240339938e"
+    },
+    "fresh_rebuild_project_fingerprints_before_fix": {
+      "/Users/naveenraj/goshposh/server": "1b65a68a6e4cca852d612331ea13108d",
+      "/Users/naveenraj/goshposh/server-devops-5441": "902fc33c5ca6900b16d17ca1b8210125"
+    },
+    "fresh_rebuild_then_replay_before_fix": {
+      "semantic_export_manifest_sha256": "2b3aa58e9787b057316ab14e5ba6401b206b7c6523d3303a75d654b047dc45e4",
+      "cold": {
+        "id": "v226",
+        "jsonl_sha256": "110d081d823228e5159b5d3c0ad9c6783809435636e9def47448f0fef1b1f87f",
+        "log_sha256": "e2f493f8c1fc8a8004a2d1e61a6b2eeb268513a194b88f9e0aa00489a5e0b5fb",
+        "profiler_wall_ms": 27140.3905,
+        "process_real_seconds": 32.71,
+        "peak_rss_bytes": 2025177088,
+        "gem_producers": 512,
+        "java_producers": 168,
+        "wasm_producers": 5
+      },
+      "fresh_process_warm": {
+        "id": "v227",
+        "jsonl_sha256": "614c9f2ba79e5504e4af2069f3901c498c29047684e50b03092dda973de0b4ae",
+        "log_sha256": "8b691a10055f143b2e0207b654783cb16fca52eebc183427618e93781e77e70a",
+        "profiler_wall_ms": 14083.777125,
+        "process_real_seconds": 16.96,
+        "peak_rss_bytes": 1743519744,
+        "gem_hits": 607,
+        "java_hits": 358,
+        "wasm_hits": 5
+      },
+      "result": "The fresh rebuild and its immediate replay were exact, isolating the mismatch to acceptance of older analyzer products rather than current cold/warm nondeterminism."
+    },
+    "root_cause": "The key included a manually maintained schema, package version, parser version, Cargo.lock checksum, semantic seed, runtime-provider fingerprint, dependency closure, and source checksums, but it did not derive identity from the analyzer source that constructs reusable facts. Semantic code changed while version and schema remained unchanged."
+  },
+  "implementation": {
+    "gem_dependency_product_schema": 5,
+    "persistent_payload_schema": 5,
+    "semantic_producer_identity": "SHA-256 over framed, normalized relative paths and bytes of the complete crates/ruby-analysis/src tree plus src/indexer/file_processor.rs, src/runtime/jruby/imports.rs, and src/runtime/jruby/java_catalog.rs",
+    "build_contract": "build.rs emits rerun-if-changed ownership for every producer tree/file and generates a [u8; 32] identity in Cargo OUT_DIR; the manifest cache ID and serialized key both contain that identity.",
+    "scope": "Only semantic gem-fact producer code participates. Unrelated editor, status, and scheduler sources do not invalidate gem products."
+  },
+  "red_green": {
+    "red": "dependency_product::tests::manifest_identity_changes_with_semantic_producer_source failed to compile because GemDependencyManifest had no semantic producer identity input.",
+    "green": {
+      "dependency_product_tests": 4,
+      "persistent_cache_tests": 12,
+      "failures": 0,
+      "cargo_fmt_check": "passed",
+      "git_diff_check": "passed"
+    },
+    "regression_contract": "Two manifests with identical seed, runtime, closure, source path, and source bytes but different semantic producer hashes have different cache IDs; a payload encoded for the first is rejected by the second."
+  },
+  "controlled_workload": {
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "profiler_executable_sha256": "4252de1bef31984313f92e78113c79570e7f72c7a40c6f361aef15f542619ed5",
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "runtime": "jruby-9.2.21.0"
+  },
+  "stale_cache_replacement_run": {
+    "id": "v228",
+    "jsonl_sha256": "0bd37bd780e63c4a646d55fd80c73a8ab06bbf6c1689037e8d4ac4b42ee78d6d",
+    "log_sha256": "5c7a2f2d4314209de3f0c29783f4957f0d0f3e62b8a44e5f1d0f29c03ede2f05",
+    "profiler_wall_ms": 20564.431959,
+    "process_real_seconds": 24.43,
+    "user_cpu_seconds": 47.46,
+    "system_cpu_seconds": 4.37,
+    "peak_rss_bytes": 1818836992,
+    "persistent_gem_products": {
+      "lookups": 607,
+      "hits": 95,
+      "misses": 512,
+      "producers": 512,
+      "publications": 512,
+      "explanation": "The 512 distinct stale identities missed. The 95 hits are same-run cross-project sharing after the first owner published an identical new product."
+    },
+    "persistent_java_products": {
+      "lookups": 358,
+      "hits": 358,
+      "producers": 0
+    },
+    "persistent_wasm_products": {
+      "lookups": 5,
+      "hits": 5,
+      "producers": 0
+    },
+    "same_file_project_navigation_ms": 489,
+    "live_dependency_navigation_ms": 1486,
+    "resource_panics": 0
+  },
+  "fresh_process_replay": {
+    "id": "v229",
+    "jsonl_sha256": "776d3ef03d0299436974aedd452db482534c762b0b85f092f0bbe7cacd72a211",
+    "log_sha256": "e40c4b232b7bb77ccb1db218e03c7b82179b4b207ed4b3c5fd44faa467e99e29",
+    "profiler_wall_ms": 13867.153708,
+    "process_real_seconds": 17.03,
+    "user_cpu_seconds": 33.15,
+    "system_cpu_seconds": 3.53,
+    "peak_rss_bytes": 1723908096,
+    "persistent_gem_products": {
+      "lookups": 607,
+      "hits": 607,
+      "misses": 0,
+      "producers": 0
+    },
+    "persistent_java_products": {
+      "lookups": 358,
+      "hits": 358,
+      "producers": 0
+    },
+    "persistent_wasm_products": {
+      "lookups": 5,
+      "hits": 5,
+      "producers": 0
+    },
+    "resource_panics": 0
+  },
+  "correctness_shared_by_rebuild_and_replay": {
+    "semantic_export_manifest_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "d6e4c41c80b5cfe42c7857473508ad22",
+      "/Users/naveenraj/goshposh/server-devops-5441": "56f0644224a1538eeca3f6b40029f0ae"
+    },
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "result": "exact match"
+  },
+  "decision": "Accepted. Persisted gem facts now fail closed across semantic producer changes, rebuild once under bounded single-flight ownership, and replay with byte-for-byte equivalent semantic output in a fresh process."
+}

@@ -8,7 +8,7 @@ use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::{FullyQualifiedName, SymbolKind};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::yard::YardParser;
-use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::{locations_for_ranges, non_empty_locations};
@@ -138,6 +138,104 @@ fn static_send_symbol_at_position(content: &str, position: Position) -> bool {
         || line.contains(".__send__(:")
         || line.contains(".send(\"")
         || line.contains(".__send__(\"")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct DefinitionNavigationDemandKeys {
+    pub(crate) project_key: Option<String>,
+    pub(crate) dependency_key: Option<String>,
+}
+
+pub(crate) fn definition_navigation_demand_keys(
+    uri: &Url,
+    position: Position,
+    content: &str,
+) -> Option<DefinitionNavigationDemandKeys> {
+    let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+    let (identifier, _, ancestors, _, _) = analyzer.get_identifier(position);
+    let (project_constant, dependency_constant) = match identifier? {
+        Identifier::RubyConstant { iden, .. } => (iden.last().cloned(), iden.first().cloned()),
+        Identifier::RubyMethod {
+            namespace,
+            receiver,
+            ..
+        } => match receiver {
+            MethodReceiver::Constant(parts) => (parts.last().cloned(), parts.first().cloned()),
+            MethodReceiver::None | MethodReceiver::SelfReceiver | MethodReceiver::Super => {
+                (namespace.last().cloned(), namespace.first().cloned())
+            }
+            MethodReceiver::LocalVariable(_)
+            | MethodReceiver::InstanceVariable(_)
+            | MethodReceiver::ClassVariable(_)
+            | MethodReceiver::GlobalVariable(_)
+            | MethodReceiver::MethodCall { .. }
+            | MethodReceiver::Literal(_)
+            | MethodReceiver::Expression => (ancestors.last().cloned(), ancestors.first().cloned()),
+        },
+        Identifier::YardType { type_name, .. } => {
+            let mut parts = type_name.split("::").filter(|part| !part.is_empty());
+            let first = parts.next().map(ToString::to_string);
+            let last = parts.last().or(first.as_deref()).map(ToString::to_string);
+            return normalized_definition_navigation_keys(last.as_deref(), first.as_deref());
+        }
+        Identifier::RubyLocalVariable { .. }
+        | Identifier::RubyInstanceVariable { .. }
+        | Identifier::RubyClassVariable { .. }
+        | Identifier::RubyGlobalVariable { .. } => return None,
+    };
+    normalized_definition_navigation_keys(
+        project_constant
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        dependency_constant
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+    )
+}
+
+fn normalized_definition_navigation_keys(
+    project_name: Option<&str>,
+    dependency_name: Option<&str>,
+) -> Option<DefinitionNavigationDemandKeys> {
+    let project_key = project_name
+        .map(crate::navigation_demand::normalize_navigation_key)
+        .filter(|key| !key.is_empty());
+    let dependency_key = dependency_name
+        .map(crate::navigation_demand::normalize_navigation_key)
+        .filter(|key| !key.is_empty());
+    (project_key.is_some() || dependency_key.is_some()).then_some(DefinitionNavigationDemandKeys {
+        project_key,
+        dependency_key,
+    })
+}
+
+#[cfg(test)]
+mod navigation_demand_tests {
+    use super::*;
+
+    #[test]
+    fn constant_definition_request_exposes_exact_project_and_dependency_keys() {
+        let source = "GoshPosh::Platform::Users::UserPmm.by_username(name)\n";
+        let uri = Url::parse("file:///project/caller.rb").unwrap();
+
+        let demand = definition_navigation_demand_keys(&uri, Position::new(0, 35), source).unwrap();
+
+        assert_eq!(demand.project_key.as_deref(), Some("userpmm"));
+        assert_eq!(demand.dependency_key.as_deref(), Some("goshposh"));
+    }
+
+    #[test]
+    fn constant_receiver_method_request_prioritizes_its_owning_constant() {
+        let source = "BSON::ObjectId.new\n";
+        let uri = Url::parse("file:///project/caller.rb").unwrap();
+
+        let demand = definition_navigation_demand_keys(&uri, Position::new(0, 16), source).unwrap();
+
+        assert_eq!(demand.project_key.as_deref(), Some("objectid"));
+        assert_eq!(demand.dependency_key.as_deref(), Some("bson"));
+    }
 }
 
 // Private helpers

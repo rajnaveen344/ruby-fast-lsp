@@ -23,6 +23,13 @@ const {
     railsViewRelativePaths,
     rspecInvocation
 } = require('./test_commands');
+const {
+    createIndexingStatusSession,
+    indexingStatusBarCommand,
+    indexingStatusQuickPickItems,
+    indexingStatusQuickPickPlaceholder,
+    indexingStatusRequestParams
+} = require('./indexing_status');
 
 // Create output channel for logging
 let outputChannel;
@@ -769,10 +776,6 @@ function activate(context) {
         clientOptions
     );
 
-    // Create status bar item for indexing progress
-    const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    context.subscriptions.push(statusBarItem);
-
     const runtimeStatusBarItem = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,
         100
@@ -782,6 +785,52 @@ function activate(context) {
     let activeRuntimeProjectRoot;
     let activeRuntimeStatus;
     let runtimeStatusRefreshGeneration = 0;
+    const indexingStatusSession = createIndexingStatusSession();
+    let runtimeProjects;
+    let clientRestartPromise;
+    const acceptIndexingSnapshot = snapshot => indexingStatusSession.accept(snapshot);
+    const renderActiveRuntimeStatus = () => {
+        if (!activeRuntimeStatus?.root) {
+            return;
+        }
+        const indexingStatus = indexingStatusSession.snapshot();
+        const indexing = indexingStatus.projects.find(
+            project => project.root === activeRuntimeStatus.root
+        );
+        if (indexing) {
+            activeRuntimeStatus = { ...activeRuntimeStatus, indexing };
+        }
+        const presentation = runtimeStatusPresentation(activeRuntimeStatus);
+        runtimeStatusBarItem.text = presentation.text;
+        runtimeStatusBarItem.command = indexingStatusBarCommand(
+            activeRuntimeStatus.indexing
+        );
+        runtimeStatusBarItem.tooltip = indexingStatus.aggregate
+            ? `${presentation.tooltip}\n\nWorkspace: ${indexingStatus.aggregate.ready} ready, ${indexingStatus.aggregate.active} active, ${indexingStatus.aggregate.queued} queued, ${indexingStatus.aggregate.failed} failed`
+            : presentation.tooltip;
+    };
+    const renderCachedRuntimeStatus = editor => {
+        if (!Array.isArray(runtimeProjects)) {
+            return false;
+        }
+        const indexingStatus = indexingStatusSession.snapshot();
+        const projects = runtimeProjects.map(project => ({
+            ...project,
+            indexing: indexingStatus.projects.find(indexing => indexing.root === project.root)
+                || project.indexing
+        }));
+        const status = runtimeStatusForDocument(projects, editor.document.uri.fsPath);
+        activeRuntimeProjectRoot = status?.root;
+        activeRuntimeStatus = status;
+        if (!status) {
+            runtimeStatusBarItem.text = '$(ruby) No Ruby project';
+            runtimeStatusBarItem.tooltip = 'The active document is not owned by a discovered Ruby project';
+            runtimeStatusBarItem.command = 'ruby-fast-lsp.runtime.configure';
+            return true;
+        }
+        renderActiveRuntimeStatus();
+        return true;
+    };
     const refreshRuntimeStatusBar = async () => {
         const generation = ++runtimeStatusRefreshGeneration;
         const editor = vscode.window.activeTextEditor;
@@ -791,29 +840,28 @@ function activate(context) {
             runtimeStatusBarItem.hide();
             return;
         }
-        runtimeStatusBarItem.text = '$(sync~spin) Ruby runtime';
-        runtimeStatusBarItem.tooltip = 'Ruby Fast LSP is determining the owning project runtime';
+        if (!renderCachedRuntimeStatus(editor)) {
+            runtimeStatusBarItem.text = '$(sync~spin) Ruby Fast LSP';
+            runtimeStatusBarItem.tooltip = 'Ruby Fast LSP is determining the owning project';
+        }
         runtimeStatusBarItem.show();
         if (!client || client.state !== 2) {
             return;
         }
         try {
-            const response = await client.sendRequest('ruby-fast-lsp/runtime/status', {});
+            const [response, indexingResponse] = await Promise.all([
+                client.sendRequest('ruby-fast-lsp/runtime/status', {}),
+                client.sendRequest(
+                    'ruby-fast-lsp/indexing/status',
+                    indexingStatusRequestParams(editor)
+                )
+            ]);
             if (generation !== runtimeStatusRefreshGeneration) {
                 return;
             }
-            const projects = Array.isArray(response?.projects) ? response.projects : [];
-            const status = runtimeStatusForDocument(projects, editor.document.uri.fsPath);
-            activeRuntimeProjectRoot = status?.root;
-            activeRuntimeStatus = status;
-            if (!status) {
-                runtimeStatusBarItem.text = '$(ruby) No Ruby project';
-                runtimeStatusBarItem.tooltip = 'The active document is not owned by a discovered Ruby project';
-                return;
-            }
-            const presentation = runtimeStatusPresentation(status);
-            runtimeStatusBarItem.text = presentation.text;
-            runtimeStatusBarItem.tooltip = presentation.tooltip;
+            acceptIndexingSnapshot(indexingResponse);
+            runtimeProjects = Array.isArray(response?.projects) ? response.projects : [];
+            renderCachedRuntimeStatus(editor);
         } catch (error) {
             if (generation !== runtimeStatusRefreshGeneration) {
                 return;
@@ -822,33 +870,49 @@ function activate(context) {
             activeRuntimeStatus = undefined;
             runtimeStatusBarItem.text = '$(warning) Runtime unavailable';
             runtimeStatusBarItem.tooltip = `Ruby Fast LSP runtime status failed: ${error.message}`;
+            runtimeStatusBarItem.command = 'ruby-fast-lsp.runtime.configure';
         }
     };
 
-    // Listen for progress notifications from the LSP server
-    client.onNotification('$/progress', (params) => {
-        if (params.token === 'indexing') {
-            const value = params.value;
-            if (value.kind === 'begin') {
-                statusBarItem.text = `$(sync~spin) ${value.title}: ${value.message || 'Starting...'}`;
-                statusBarItem.show();
-                outputChannel.appendLine(`[Ruby Fast LSP] ${value.title}: ${value.message || 'Starting...'}`);
-            } else if (value.kind === 'report') {
-                const message = value.message || 'Processing...';
-                const percentage = value.percentage !== undefined ? ` (${value.percentage}%)` : '';
-                statusBarItem.text = `$(sync~spin) ${message}${percentage}`;
-                outputChannel.appendLine(`[Ruby Fast LSP] ${message}${percentage}`);
-            } else if (value.kind === 'end') {
-                statusBarItem.text = `$(check) Ruby Fast LSP: ${value.message || 'Ready'}`;
-                outputChannel.appendLine(`[Ruby Fast LSP] ${value.message || 'Ready'}`);
-                void refreshRuntimeStatusBar();
-                // Hide the status bar after a brief delay
-                setTimeout(() => {
-                    statusBarItem.hide();
-                }, 3000);
+    const restartClientWithFreshIndexingStatus = () => {
+        if (clientRestartPromise) {
+            return clientRestartPromise;
+        }
+        indexingStatusSession.suspendForRestart();
+        runtimeStatusRefreshGeneration += 1;
+        runtimeProjects = undefined;
+        activeRuntimeProjectRoot = undefined;
+        activeRuntimeStatus = undefined;
+        runtimeStatusBarItem.text = '$(sync~spin) Ruby Fast LSP';
+        runtimeStatusBarItem.tooltip = 'Ruby Fast LSP is restarting';
+        runtimeStatusBarItem.show();
+        clientRestartPromise = (async () => {
+            try {
+                await client.restart();
+            } finally {
+                indexingStatusSession.completeRestart();
+                clientRestartPromise = undefined;
+            }
+        })();
+        return clientRestartPromise;
+    };
+
+    const indexingStatusNotification = client.onNotification(
+        'ruby-fast-lsp/indexing/statusChanged',
+        (snapshot) => {
+            if (!acceptIndexingSnapshot(snapshot)) {
+                return;
+            }
+            const editor = vscode.window.activeTextEditor;
+            if (editor && ['ruby', 'erb'].includes(editor.document.languageId)) {
+                renderCachedRuntimeStatus(editor);
             }
         }
-    });
+    );
+    context.subscriptions.push(
+        indexingStatusNotification,
+        { dispose: () => indexingStatusSession.dispose() }
+    );
 
     // Handle configuration changes
     context.subscriptions.push(
@@ -868,7 +932,8 @@ function activate(context) {
         vscode.workspace.onDidGrantWorkspaceTrust(async () => {
             initializationOptions.workspaceTrusted = true;
             if (client) {
-                await client.restart();
+                await restartClientWithFreshIndexingStatus();
+                await refreshRuntimeStatusBar();
             }
         })
     );
@@ -1181,7 +1246,7 @@ function activate(context) {
                 editorState.runtime = updateRuntime(editorState.runtime, selection);
                 await context.workspaceState.update(STATE_KEYS.runtime, editorState.runtime);
                 initializationOptions.runtime = editorState.runtime;
-                await client.restart();
+                await restartClientWithFreshIndexingStatus();
                 await refreshRuntimeStatusBar();
             }
         })
@@ -1203,6 +1268,46 @@ function activate(context) {
             });
         }
     );
+    const indexingStatusCommand = vscode.commands.registerCommand(
+        'ruby-fast-lsp.indexing.status',
+        async () => {
+            if (!client || client.state !== 2) {
+                await vscode.window.showWarningMessage(
+                    'Ruby Fast LSP is not ready to report project indexing status.'
+                );
+                return;
+            }
+            const [response, runtimeResponse] = await Promise.all([
+                client.sendRequest(
+                    'ruby-fast-lsp/indexing/status',
+                    indexingStatusRequestParams(vscode.window.activeTextEditor)
+                ),
+                client.sendRequest('ruby-fast-lsp/runtime/status', {})
+            ]);
+            acceptIndexingSnapshot(response);
+            runtimeProjects = Array.isArray(runtimeResponse?.projects)
+                ? runtimeResponse.projects
+                : [];
+            const snapshot = indexingStatusSession.snapshot();
+            const items = indexingStatusQuickPickItems(
+                snapshot,
+                activeRuntimeProjectRoot,
+                runtimeProjects
+            );
+            if (items.length === 0) {
+                await vscode.window.showInformationMessage(
+                    'Ruby Fast LSP has no registered Ruby projects.'
+                );
+                return;
+            }
+            await vscode.window.showQuickPick(items, {
+                title: 'Ruby Fast LSP: Project Indexing Status',
+                placeHolder: indexingStatusQuickPickPlaceholder(snapshot),
+                matchOnDescription: true,
+                matchOnDetail: true
+            });
+        }
+    );
 
     const applyAutoRuntime = async projectRoot => {
         editorState.runtime = updateRuntime(editorState.runtime, {
@@ -1211,7 +1316,7 @@ function activate(context) {
         });
         await context.workspaceState.update(STATE_KEYS.runtime, editorState.runtime);
         initializationOptions.runtime = editorState.runtime;
-        await client.restart();
+        await restartClientWithFreshIndexingStatus();
         await refreshRuntimeStatusBar();
     };
 
@@ -1287,6 +1392,11 @@ function activate(context) {
                     id: 'status'
                 },
                 {
+                    label: '$(server-process) Show Project Indexing',
+                    description: 'Inspect authoritative phase, progress, timing, and failures',
+                    id: 'indexing'
+                },
+                {
                     label: '$(checklist) Select Linter…',
                     description: 'Disabled, RuboCop, or Standard',
                     id: 'linter'
@@ -1325,6 +1435,8 @@ function activate(context) {
                 await applyAutoRuntime(activeRuntimeProjectRoot);
             } else if (action.id === 'status') {
                 await vscode.commands.executeCommand('ruby-fast-lsp.runtime.status');
+            } else if (action.id === 'indexing') {
+                await vscode.commands.executeCommand('ruby-fast-lsp.indexing.status');
             } else if (action.id === 'linter') {
                 await vscode.commands.executeCommand('ruby-fast-lsp.linter.select');
             } else if (action.id === 'formatter') {
@@ -1364,7 +1476,7 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, indexingStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {

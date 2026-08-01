@@ -1,0 +1,108 @@
+{
+  "schema_version": 2,
+  "evidence_kind": "multi-root-m0-sanitized-aggregate",
+  "recorded_at": "2026-07-27",
+  "workspace": "/Users/naveenraj/goshposh",
+  "projects": 67,
+  "build": {
+    "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
+    "source_worktree_dirty": true,
+    "tracked_diff_sha256": "484c945de3ff2f10bbd08b9e58ff808d15d1bfe0bd4f4bdaf65e409139fca7f9",
+    "profiler_executable_sha256": "31595435557dac39a63dd61951714f07b833e149ac359a0e124db274603bc4c5"
+  },
+  "dataset_fingerprint_sha256": "3c6835b7166c67e44bc0a563ba62d3289c76b732fd2263e9578e9103da12c836",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "scheduler": {
+    "concurrency_limit": 2,
+    "active_at_end": 0,
+    "queued_at_end": 0
+  },
+  "wall_ms": 331851.945042,
+  "readiness_ms": {
+    "project_navigation": {
+      "samples": 67,
+      "min": 662,
+      "p50": 62225,
+      "p95": 88029,
+      "max": 326022
+    },
+    "dependency_navigation": {
+      "samples": 67,
+      "min": 10236,
+      "p50": 64073,
+      "p95": 88271,
+      "max": 330466
+    },
+    "semantic_complete": {
+      "samples": 67,
+      "min": 10244,
+      "p50": 64074,
+      "p95": 88271,
+      "max": 331851
+    }
+  },
+  "phase_sum_ms": {
+    "runtime": 29156.829209,
+    "discovery": 28135.773209,
+    "core": 9983.524204,
+    "project": 18443.477047,
+    "dependencies": 566410.579037,
+    "resolve": 9985.670751,
+    "publish": 9993.00983
+  },
+  "engine": {
+    "files": 63310,
+    "source_bytes": 480674555,
+    "estimated_heap_bytes": 1417167866
+  },
+  "process": {
+    "user_cpu_ms": 513937.479,
+    "system_cpu_ms": 25337.138,
+    "peak_rss_bytes": 2003828736,
+    "input_blocks": 0,
+    "output_blocks": 0
+  },
+  "process_local_core_templates": {
+    "entries": 1,
+    "lookups": 67,
+    "hits": 65,
+    "joined_flights": 1,
+    "misses": 1,
+    "producers": 1,
+    "failures": 0
+  },
+  "slowest_projects": [
+    {
+      "project": "server-devops-5441",
+      "total_ms": 243544.818791,
+      "project_ms": 8100.276042,
+      "dependencies_ms": 227013.979625
+    },
+    {
+      "project": "server",
+      "total_ms": 237236.793125,
+      "project_ms": 7977.940958,
+      "dependencies_ms": 222547.430083
+    },
+    {
+      "project": "admin",
+      "total_ms": 84215.653791,
+      "project_ms": 1321.643916,
+      "dependencies_ms": 72228.91575
+    }
+  ],
+  "limitations": [
+    "All projects used background priority; a separate active-document priority run is required.",
+    "macOS getrusage reported zero block-I/O counters, so physical disk-read evidence remains unavailable.",
+    "This sanitized aggregate omits per-project paths and individual source fingerprints; the aggregate dataset fingerprint covers the complete sorted project evidence."
+  ],
+  "raw_evidence": {
+    "jsonl": "/tmp/ruby-fast-lsp-goshposh-m0-schema2-20260727.jsonl",
+    "log": "/tmp/ruby-fast-lsp-goshposh-m0-schema2-20260727.log"
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "focused-server-dependency-symbolized-profile",
+  "recorded_at": "2026-07-27",
+  "project": "/Users/naveenraj/goshposh/server",
+  "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "method": {
+    "profiler": "samply",
+    "sample_rate_hz": 100,
+    "release_debug_info": true,
+    "release_symbols_stripped": false,
+    "presymbolicated_sidecar": true,
+    "scope": "one isolated server project, cold indexing",
+    "attribution_note": "Inclusive stacks were inspected after excluding samples whose actual leaf was a blocking kernel/thread wait. Percentages are diagnostic attribution, not additive phase timers."
+  },
+  "runs": [
+    {
+      "label": "initial-symbolized",
+      "profiler_executable_sha256": "9619bdd47467989a1fc508a32d40044e51d77dbd22b3005c7f9bccd17418b944",
+      "tracked_diff_sha256": "e5cdbf50cceca989c4a5f31d1f7ea43c33da23d1421906bc8b4234271e2c6b4e",
+      "total_ms": 132259,
+      "dependencies_ms": 120860,
+      "project_ms": 7226,
+      "user_cpu_ms": 185240,
+      "system_cpu_ms": 8696,
+      "peak_rss_bytes": 1025192755,
+      "engine": {
+        "files": 16396,
+        "source_bytes": 102656605,
+        "estimated_heap_bytes": 350552676
+      },
+      "dominant_observation": "Per-file engine-wide known-namespace rebuilding and cloning dominated the first profile; graph replacement and contextual MRO/method lookup were the next material costs."
+    },
+    {
+      "label": "shared-known-namespace-snapshot",
+      "profiler_executable_sha256": "4738ebd5e51c677819f538e6def6ab350806c3b33019eb0ece39702902abd1a9",
+      "tracked_diff_sha256": "5ae14531ad0222aa2e00e1beed4e62db232c8f8f338d4f0a307404f4e91103bb",
+      "total_ms": 67460,
+      "dependencies_ms": 55836,
+      "project_ms": 7343,
+      "user_cpu_ms": 110471,
+      "system_cpu_ms": 6967,
+      "peak_rss_bytes": 993735475,
+      "engine": {
+        "files": 16396,
+        "source_bytes": 102656605,
+        "estimated_heap_bytes": 350703707
+      }
+    },
+    {
+      "label": "stable-extension-applicability",
+      "total_ms": 55010,
+      "dependencies_ms": 38395,
+      "project_ms": 12307,
+      "user_cpu_ms": 92004,
+      "system_cpu_ms": 5719,
+      "peak_rss_bytes": 1047317709,
+      "engine": {
+        "files": 16396,
+        "source_bytes": 102656605,
+        "estimated_heap_bytes": 350580034
+      },
+      "dominant_observation": "Extension semantic seed/fingerprint attribution fell below one percent after excluding per-document source identity and bypassing framework extension dispatch for dependency sources."
+    },
+    {
+      "label": "indexed-graph-node-definition-ownership",
+      "profiler_executable_sha256": "25d1aef0fd9af2d10d30c9c521d5e8623d290c928f52e11a1e53c99fffcc1bfe",
+      "tracked_diff_sha256": "4ecd45b703892404d3c5ba430a28b81640a4fbb22bd8defa86690c4bc617b358",
+      "total_ms": 40383,
+      "dependencies_ms": 29206,
+      "project_ms": 6848,
+      "resolve_publish_ms": 3245,
+      "user_cpu_ms": 77394,
+      "system_cpu_ms": 5259,
+      "peak_rss_bytes": 782971699,
+      "engine": {
+        "files": 16396,
+        "source_bytes": 102656605,
+        "estimated_heap_bytes": 350525668
+      },
+      "active_stack_observations": {
+        "fact_collector_visit_inclusive_percent": 57.77,
+        "method_lookup_chain_inclusive_percent": 35.64,
+        "build_mro_inclusive_percent": 34.84,
+        "file_read_exclusive_percent": 3.38
+      },
+      "dominant_observation": "The remaining measured dependency cost is contextual FactCollector traversal and repeated MRO/method lookup. A parse-only cache is not the highest-value next product."
+    },
+    {
+      "label": "exact-resolved-callee-return-type",
+      "profiler_executable_sha256": "bdb1d53ba58650e746bc938943be4679a0915ed07270ce6d38a8e2805d989a80",
+      "tracked_diff_sha256": "4c92a9fce4819dea7651f2b0cb4315b33fb40b3e653c2e73c961d8a08b8cff67",
+      "total_ms": 32346,
+      "dependencies_ms": 21252,
+      "project_ms": 6683,
+      "resolve_publish_ms": 3197,
+      "user_cpu_ms": 68064,
+      "system_cpu_ms": 4996,
+      "peak_rss_bytes": 1031389184,
+      "engine": {
+        "files": 16396,
+        "source_bytes": 102656605,
+        "estimated_heap_bytes": 350774048
+      },
+      "dominant_observation": "Once method lookup has selected an exact callee, querying that declaration's return type directly avoids reconstructing its owner MRO."
+    },
+    {
+      "label": "revision-bound-method-return-query-cache",
+      "profiler_executable_sha256": "7d66184fcae6399801aca8cfe9140320e9e42c4c228a0c1011d0bb9b848cb186",
+      "tracked_diff_sha256": "22de0de1185bb9764fe96883eba8ea1c805f8560d56f8d2a13b282adee51fb2f",
+      "total_ms": 31407,
+      "dependencies_ms": 20812,
+      "project_ms": 6384,
+      "resolve_publish_ms": 3279,
+      "user_cpu_ms": 67357,
+      "system_cpu_ms": 4921,
+      "peak_rss_bytes": 1069875200,
+      "engine": {
+        "files": 16396,
+        "source_bytes": 102656605,
+        "estimated_heap_bytes": 350676556
+      },
+      "dominant_observation": "A collector-local query cache tied to one engine identity and semantic revision gives a small additional win and cannot survive semantic replacement."
+    },
+    {
+      "label": "top-level-object-fallback-cache",
+      "profiler_executable_sha256": "a5301b521b7d75d005e304ebd76b07a3b6011e0f31a005f54b87c5fecdc8963c",
+      "tracked_diff_sha256": "761ed1f4f05b2d14f74ab78bcd695279a1cf45e79180d62268ea8e637fde74a0",
+      "profile_archive_sha256": "e6a06329519826d689ea048f719afe17112b2a0c32c19e94e6890b2f3d75f8bb",
+      "total_ms": 23512,
+      "dependencies_ms": 15564,
+      "project_ms": 5258,
+      "resolve_publish_ms": 1623,
+      "user_cpu_ms": 56961,
+      "system_cpu_ms": 4660,
+      "peak_rss_bytes": 1066516480,
+      "engine": {
+        "files": 16396,
+        "source_bytes": 102656605,
+        "estimated_heap_bytes": 350649479
+      },
+      "dominant_observation": "Caching only the revision-invalidated top-level/Object fallback chain removes the repeated dominant fallback construction without retaining arbitrary receiver MROs. It is accepted because dependency wall time improved by 25.2 percent versus the preceding run while engine heap and peak RSS remained effectively flat."
+    }
+  ],
+  "rejected_experiments": [
+    {
+      "label": "unbounded-engine-wide-mro-cache",
+      "total_ms": 27044,
+      "dependencies_ms": 18457,
+      "peak_rss_bytes": 1235091456,
+      "estimated_heap_bytes": 411637782,
+      "reason": "Rejected because retaining arbitrary lookup chains added roughly 61 MB of estimated engine heap and raised peak RSS to 1.235 GB."
+    },
+    {
+      "label": "eight-megabyte-engine-wide-mro-cache",
+      "total_ms": 28634,
+      "dependencies_ms": 18167,
+      "peak_rss_bytes": 1093894144,
+      "estimated_heap_bytes": 359549562,
+      "reason": "Rejected because the bounded general cache retained substantially more memory than the narrow fallback product without a defensible final-resolution benefit."
+    }
+  ],
+  "comparison": {
+    "latest_accepted_run": "top-level-object-fallback-cache",
+    "total_wall_reduction_percent": 82.2,
+    "dependency_wall_reduction_percent": 87.1,
+    "user_cpu_reduction_percent": 69.3,
+    "peak_rss_change_percent": 4.0,
+    "cold_dependency_target_ms": 15000,
+    "target_met": false
+  },
+  "raw_local_evidence": [
+    "/tmp/ruby-fast-lsp-server-dependencies-cpu-20260727.json.gz",
+    "/tmp/ruby-fast-lsp-server-dependencies-cpu-20260727.json.syms.json",
+    "/tmp/ruby-fast-lsp-server-graph-new-file-fix-20260727.json.gz",
+    "/tmp/ruby-fast-lsp-server-graph-new-file-fix-20260727.json.syms.json",
+    "/tmp/ruby-fast-lsp-server-callee-return-20260727.json.gz",
+    "/tmp/ruby-fast-lsp-server-query-cache-20260727.json.gz",
+    "/tmp/ruby-fast-lsp-server-top-level-fallback-cache-final-20260727.json.gz",
+    "/tmp/ruby-fast-lsp-server-top-level-fallback-cache-final-20260727.json.syms.json"
+  ]
+}

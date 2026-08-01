@@ -1,0 +1,199 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove redundant Prism parses while deciding whether one immutable gem product depends on the owning JRuby catalog.",
+  "profile_basis": {
+    "profile": "/tmp/ruby-fast-lsp-semantic-seed-v282-symbolized-profile.json.gz",
+    "symbols": "/tmp/ruby-fast-lsp-semantic-seed-v282-symbolized-profile.json.syms.json",
+    "application_cpu_us": 30453046,
+    "prepare_required_gem_manifest_blocking_percent": 8.67,
+    "source_semantics_depend_on_jruby_catalog_percent": 1.55,
+    "finding": "The predicate independently parsed and traversed the same source for static imports, proxy references, and remaining JRuby DSL calls. A plain source therefore paid three Prism parses before returning false."
+  },
+  "change": {
+    "scope": "source_semantics_depend_on_jruby_catalog now performs one Prism parse and one existing StaticNavigationVisitor traversal.",
+    "preserved_semantics": "The combined visitor retains every static dependency form, dotted and canonical Java proxy form, and java_package/java_alias/java_send/java_method/to_java marker used by the previous visitors.",
+    "ownership": "The predicate still changes only the exact immutable gem-product cache key. Project AnalysisEngine ownership, source provenance, catalog composition, diagnostics, and dependency selection are unchanged."
+  },
+  "red_green": {
+    "red_command": "cargo test gem_semantic_prefilter_parses_each_source_once --lib -- --nocapture",
+    "red_failure": "Expected one parse, observed three.",
+    "green_commands": [
+      "cargo test gem_semantic_prefilter_parses_each_source_once --lib -- --nocapture",
+      "cargo test runtime::jruby::imports::tests:: --lib",
+      "cargo test ordinary_gem_products_ignore_unrelated_jruby_classpaths_but_java_gems_do_not --lib"
+    ],
+    "green_results": {
+      "jruby_import_tests": 21,
+      "focused_cache_identity_tests": 1,
+      "failures": 0
+    }
+  },
+  "test_determinism": {
+    "observed_failure": "The two RVM marker tests concurrently mutated process-global HOME and one selected the developer's real RVM wrapper.",
+    "fix": "A test-only mutex now serializes and restores HOME around both tests.",
+    "proof": "cargo test indexer::indexer_gem::tests:: --lib passed 31/31 in the ordinary parallel harness."
+  },
+  "controlled_ab": {
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "scheduler_concurrency": 2,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "baseline_executable": "/tmp/ruby-fast-lsp-profiler-semantic-seed-fingerprint",
+    "baseline_executable_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
+    "candidate_executable": "/tmp/ruby-fast-lsp-profiler-one-pass-jruby-gem-prefilter",
+    "candidate_executable_sha256": "24fe6d7a18a8a1e886c7734f310c9f37e6864c0af2a82544549938d84c762f88",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "cache_method": "Each executable used its own fully warm checksum-keyed gem-product directory, swapped below the same cache root between interleaved runs. Runtime, JAR, extracted source, generated source-map paths, and absolute provenance remained identical.",
+    "excluded_run": {
+      "candidate_path": "/tmp/ruby-fast-lsp-one-pass-candidate-1.jsonl",
+      "reason": "The semantic-producer checksum correctly invalidated the old product generation, causing 512 persistent misses and rebuilds. This is cold invalidation evidence, not a warm A/B sample."
+    },
+    "baseline_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-one-pass-baseline-2.jsonl",
+        "wall_ms": 13456.714667,
+        "user_cpu_ms": 24222.413,
+        "system_cpu_ms": 2865.502,
+        "peak_rss_bytes": 1419444224,
+        "active_project_navigation_ms": 5432,
+        "active_dependency_navigation_ms": 11793,
+        "active_semantic_complete_ms": 11831,
+        "live_project_probe_ms": 358,
+        "live_dependency_probe_ms": 1389
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-one-pass-baseline-3.jsonl",
+        "wall_ms": 12797.168791,
+        "user_cpu_ms": 23627.129,
+        "system_cpu_ms": 2633.046,
+        "peak_rss_bytes": 1488388096,
+        "active_project_navigation_ms": 5229,
+        "active_dependency_navigation_ms": 11243,
+        "active_semantic_complete_ms": 11277,
+        "live_project_probe_ms": 358,
+        "live_dependency_probe_ms": 1330
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-one-pass-baseline-4.jsonl",
+        "wall_ms": 12988.893167,
+        "user_cpu_ms": 23846.803,
+        "system_cpu_ms": 2772.386,
+        "peak_rss_bytes": 1382039552,
+        "active_project_navigation_ms": 5377,
+        "active_dependency_navigation_ms": 11559,
+        "active_semantic_complete_ms": 11597,
+        "live_project_probe_ms": 354,
+        "live_dependency_probe_ms": 1361
+      }
+    ],
+    "candidate_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-one-pass-candidate-2.jsonl",
+        "wall_ms": 12485.243542,
+        "user_cpu_ms": 23406.622,
+        "system_cpu_ms": 2532.099,
+        "peak_rss_bytes": 1670529024,
+        "active_project_navigation_ms": 5217,
+        "active_dependency_navigation_ms": 10977,
+        "active_semantic_complete_ms": 11011,
+        "live_project_probe_ms": 357,
+        "live_dependency_probe_ms": 1310
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-one-pass-candidate-3.jsonl",
+        "wall_ms": 12468.093834,
+        "user_cpu_ms": 23274.079,
+        "system_cpu_ms": 2586.107,
+        "peak_rss_bytes": 1683619840,
+        "active_project_navigation_ms": 5052,
+        "active_dependency_navigation_ms": 10952,
+        "active_semantic_complete_ms": 10986,
+        "live_project_probe_ms": 358,
+        "live_dependency_probe_ms": 1234
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-one-pass-candidate-4.jsonl",
+        "wall_ms": 12939.712292,
+        "user_cpu_ms": 23802.638,
+        "system_cpu_ms": 2792.916,
+        "peak_rss_bytes": 1329463296,
+        "active_project_navigation_ms": 5157,
+        "active_dependency_navigation_ms": 11371,
+        "active_semantic_complete_ms": 11428,
+        "live_project_probe_ms": 357,
+        "live_dependency_probe_ms": 1253
+      }
+    ],
+    "median": {
+      "baseline": {
+        "wall_ms": 12988.893167,
+        "user_cpu_ms": 23846.803,
+        "system_cpu_ms": 2772.386,
+        "peak_rss_bytes": 1419444224,
+        "active_project_navigation_ms": 5377,
+        "active_dependency_navigation_ms": 11559,
+        "active_semantic_complete_ms": 11597,
+        "live_project_probe_ms": 358,
+        "live_dependency_probe_ms": 1361
+      },
+      "candidate": {
+        "wall_ms": 12485.243542,
+        "user_cpu_ms": 23406.622,
+        "system_cpu_ms": 2586.107,
+        "peak_rss_bytes": 1670529024,
+        "active_project_navigation_ms": 5157,
+        "active_dependency_navigation_ms": 10977,
+        "active_semantic_complete_ms": 11011,
+        "live_project_probe_ms": 357,
+        "live_dependency_probe_ms": 1253
+      }
+    },
+    "change_percent": {
+      "wall_ms": -3.878,
+      "user_cpu_ms": -1.846,
+      "system_cpu_ms": -6.719,
+      "peak_rss_bytes": 17.689,
+      "active_project_navigation_ms": -4.092,
+      "active_dependency_navigation_ms": -5.035,
+      "active_semantic_complete_ms": -5.053,
+      "live_project_probe_ms": -0.279,
+      "live_dependency_probe_ms": -7.935
+    },
+    "maximum_candidate_peak_rss_bytes": 1683619840,
+    "minimum_candidate_rss_ceiling_headroom_bytes": 93226598
+  },
+  "correctness": {
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
+      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+    },
+    "semantic_export_manifest_sha256_all_six_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
+    "persistent_gem_hits_per_run": 607,
+    "persistent_gem_lookups_per_run": 607,
+    "persistent_java_hits_per_run": 168,
+    "persistent_java_lookups_per_run": 168,
+    "panicked_resource_tasks": 0,
+    "resource_leaks_at_end": 0,
+    "workspace_gate": "cargo test --workspace passed, including 408 ruby-analysis tests, 1350 root tests, all extension crates, black-box package tests, and doc tests."
+  },
+  "packaging": {
+    "command": "./editors/vscode/create_vsix.sh --current-platform-only",
+    "vsix": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "d1e05d3df5a5ac96fd5b95f3e5f06b9864f77b843f6ee7c6180d959a1f8f022c",
+    "packaged_native_sha256": "cc120df4a30436bab3fb80afbe721185495f09534c3c77e03f0d3b21076a70fa",
+    "installed_native_sha256": "cc120df4a30436bab3fb80afbe721185495f09534c3c77e03f0d3b21076a70fa",
+    "installed_extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "smoke": "The extracted VSIX initialized its packaged binary with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber guests, ERB HTML support, and JRuby implementation navigation on darwin-arm64."
+  },
+  "decision": "Accepted. One combined Prism traversal removes two redundant cache-key parses per ordinary gem source. Three valid interleaved fully warm pairs preserve exact semantic fingerprints, the complete semantic export manifest, isolated provenance, and 607/607 gem plus 168/168 Java cache hits. Median terminal wall improves 3.878%, user CPU 1.846%, active project readiness 4.092%, active dependency readiness 5.035%, and active semantic completion 5.053%. Candidate RSS remains below the fixed ceiling in every run with at least 93.2 MB headroom. Active project readiness is now 5.157 seconds, still 157 ms above the five-second target; active semantic completion is 11.011 seconds and remains the largest unmet readiness budget."
+}

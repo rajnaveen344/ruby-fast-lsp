@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-31",
+  "dataset_fingerprint_sha256": "8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "target": "aarch64-macos"
+  },
+  "change": {
+    "summary": "Resolve independent checksum-keyed Java artifact products in the governed Rayon pool, then compose them sequentially in exact classpath order.",
+    "correctness": [
+      "Artifact identity validation remains per exact path, checksum, kind, JDK feature, and parser limits.",
+      "Indexed parallel collection preserves the original artifact vector order.",
+      "Final duplicate-class selection remains sequential and first-classpath-entry-wins.",
+      "A focused regression proves deterministic winner and shadowed provenance."
+    ]
+  },
+  "resource_policy": {
+    "scheduler_concurrency": 2,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "isolated_cold_cache_comparison": {
+    "before": {
+      "profiler_executable_sha256": "ce43906012d0969b0c2eb2c3ac2703380e0e6a277f9ae306a1701f255eb7d48e",
+      "active_java_catalog_ms": 6225,
+      "project_definition_first_success_ms": 9433,
+      "bson_definition_first_success_ms": 14628,
+      "active_project_semantic_complete_ms": 31018,
+      "all_projects_semantic_complete_ms": 56880,
+      "internal_peak_rss_bytes": 1833238528
+    },
+    "after": {
+      "profiler_executable_sha256": "52b481b9f151d846cb590ae348ecc2a24c6deeda0200330a5e970cd67a9f46a5",
+      "active_java_catalog_ms": 4312,
+      "project_definition_first_success_ms": 7229,
+      "bson_definition_first_success_ms": 12864,
+      "active_project_semantic_complete_ms": 29137,
+      "all_projects_semantic_complete_ms": 54443,
+      "internal_peak_rss_bytes": 1472462848,
+      "persistent_gem_hits": 95,
+      "persistent_gem_producers": 509,
+      "persistent_java_hits": 190,
+      "persistent_java_producers": 168,
+      "peak_governed_cpu_lanes": 6,
+      "peak_governed_tasks": 2,
+      "peak_governed_transient_memory_bytes": 536870912,
+      "peak_governed_io_slots": 2
+    },
+    "delta": {
+      "active_java_catalog_percent": -30.7,
+      "project_definition_percent": -23.4,
+      "bson_definition_percent": -12.1,
+      "active_semantic_complete_percent": -6.1,
+      "all_projects_complete_percent": -4.3,
+      "internal_peak_rss_percent": -19.7
+    }
+  },
+  "fresh_process_warm_cache": {
+    "first_run": {
+      "project_definition_first_success_ms": 3836,
+      "bson_definition_first_success_ms": 8841,
+      "active_project_semantic_complete_ms": 19913,
+      "all_projects_semantic_complete_ms": 27817,
+      "internal_peak_rss_bytes": 1909997568
+    },
+    "repeat": {
+      "project_definition_first_success_ms": 3741,
+      "bson_definition_first_success_ms": 8726,
+      "active_project_semantic_complete_ms": 19588,
+      "all_projects_semantic_complete_ms": 27932,
+      "internal_peak_rss_bytes": 1997160448
+    },
+    "cache_evidence": {
+      "gem_hits": 604,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_producers": 0
+    },
+    "assessment": "Catalog lookup is approximately 0.34-0.38 seconds per project and terminal wall improves relative to the paired pre-change warm run, but strict warm navigation and semantic-completion budgets remain open. Warm peak RSS varies materially between fresh processes and is not used to override the accepted cold-cache resource comparison."
+  },
+  "decision": {
+    "parallel_artifact_resolution": "accepted",
+    "performance_goal_complete": false,
+    "next_bottlenecks": [
+      "Approximately 1.18 seconds of JRuby classpath discovery before catalog work",
+      "Approximately 4.9-5.6 seconds of active project fact collection",
+      "Persistent gem product deserialization and isolated-engine rebinding",
+      "First full semantic resolution and sibling completion"
+    ]
+  }
+}

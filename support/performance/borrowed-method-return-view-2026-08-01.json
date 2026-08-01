@@ -1,0 +1,152 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove repeated expansion and cloning of every unrelated TypeFact while each method collector seeds its local known-return context, without reintroducing the rejected shared mutable return map.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "profiler_executable_sha256": "d2746888ae8e1fabd69a081218492633da34b128c696befbf87d86f4ae0c7794",
+  "tracked_diff_sha256": "8de087af418cdb0dcf122d399558eecffe135d448a5719d60a7e5a051dec4ebc",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "before_profile": "/tmp/ruby-fast-lsp-file-bucket-splice-v139-profile.json.gz",
+    "before_profile_sha256": "f9abad49e7b825303f572a2306caa752aac9a884024be787f3beb61f11025138",
+    "before_presymbolicated_sidecar_sha256": "eec0933a69605131a806cd44a6bfe8f0031911005c0de85ecaf24bfb4f3a7c5a",
+    "after_profile": "/tmp/ruby-fast-lsp-borrowed-method-returns-v145-symbolized-profile.json.gz",
+    "after_profile_sha256": "8c70071804e1c47a7cd2229618d50afa2a4959045cca21de30c0ab93615280e9",
+    "after_presymbolicated_sidecar_sha256": "2545c3bf3974af0bae85673eb9d014b3b69a5c9b6e09be23bdb72732ded4f44a",
+    "before_application_cpu_samples": 36630755,
+    "after_application_cpu_samples": 34854241,
+    "type_store_all_facts_before_inclusive_percent": 3.75,
+    "type_store_all_facts_direct_under_process_def_node_entry_percent": 3.67,
+    "observation": "FactCollector rebuilt an independent per-method return map for deterministic local inference, but did so by expanding and cloning the complete TypeStore before filtering to known MethodReturn subjects."
+  },
+  "change": {
+    "implementation": "TypeStore exposes a borrowed known_method_return_types domain iterator in fact-arena order. It exhaustively filters subject variants and Unknown values before FactCollector clones only the FQN and RubyType pairs it actually needs.",
+    "determinism": "Arena order matches the previous all_facts order, preserving duplicate-key overwrite behavior when each collector builds its independent local map.",
+    "rejected_alternative": "A shared local method-return map previously regressed the same workspace to a 23.721-second median and remains rejected.",
+    "semantic_boundary": "The API is a typed borrowed domain view, not a public store getter or index-ID exposure; inference and method/MRO policy remain unchanged."
+  },
+  "baseline": {
+    "evidence": "support/performance/file-owned-index-splice-2026-08-01.json",
+    "repeat_median": {
+      "wall_ms": 15054.693625,
+      "peak_rss_bytes": 1708523520,
+      "user_cpu_ms": 30935.778,
+      "active_semantic_complete_ms": 12972,
+      "project_navigation_ms": 381,
+      "dependency_navigation_ms": 1509
+    }
+  },
+  "final_accepted_result": {
+    "raw_local_evidence": [
+      {
+        "id": "v146",
+        "jsonl": "/tmp/ruby-fast-lsp-safe-store-v146.jsonl",
+        "jsonl_sha256": "cb9122889e0e2b1378ab6483126044d1ec32a5a514343c17ee1f64bcc6b5a8bd",
+        "log_sha256": "b3998017f4b69d8aa523787f98707a4b02da19ef895fb1d8da4f076475f394d2",
+        "wall_ms": 14697.774625,
+        "peak_rss_bytes": 1575665664,
+        "user_cpu_ms": 28881.722,
+        "active_semantic_complete_ms": 12603,
+        "project_navigation_ms": 491,
+        "dependency_navigation_ms": 1410
+      },
+      {
+        "id": "v147",
+        "jsonl": "/tmp/ruby-fast-lsp-safe-store-v147.jsonl",
+        "jsonl_sha256": "23fed4184d9976b7523c2a8b4493dfb68b166855ee7215f13eacbf3113c238fa",
+        "log_sha256": "6a66e55ea6e45ce8f2c16b787543f281a0bf0f570a02323e58730dd92bd583bf",
+        "wall_ms": 14283.796875,
+        "peak_rss_bytes": 1722417152,
+        "user_cpu_ms": 28429.246,
+        "active_semantic_complete_ms": 12119,
+        "project_navigation_ms": 349,
+        "dependency_navigation_ms": 1455
+      },
+      {
+        "id": "v148",
+        "jsonl": "/tmp/ruby-fast-lsp-safe-store-v148.jsonl",
+        "jsonl_sha256": "4e5ed5d8f487aa39348c79059469b01497b6203c8b88e39b78a259ab34de0de5",
+        "log_sha256": "64f3578ab94f556a292bcf8b97380dcd3fa8d27b810e70cdc3accbf2a630e424",
+        "wall_ms": 14430.331291,
+        "peak_rss_bytes": 1661566976,
+        "user_cpu_ms": 28885.457,
+        "active_semantic_complete_ms": 12217,
+        "project_navigation_ms": 357,
+        "dependency_navigation_ms": 1466
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 14430.331291,
+      "peak_rss_bytes": 1661566976,
+      "user_cpu_ms": 28881.722,
+      "active_semantic_complete_ms": 12217,
+      "project_navigation_ms": 357,
+      "dependency_navigation_ms": 1455
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "comparison_to_file_owned_baseline_percent": {
+    "terminal_wall": -4.147,
+    "peak_rss": -2.748,
+    "user_cpu": -6.640,
+    "active_semantic_complete": -5.820,
+    "project_navigation": -6.299,
+    "dependency_navigation": -3.579
+  },
+  "comparison_to_previous_checkpoint_percent": {
+    "terminal_wall": -13.288,
+    "peak_rss": -5.424,
+    "user_cpu": -13.687,
+    "active_semantic_complete": -12.947,
+    "project_navigation": -5.305,
+    "dependency_navigation": -4.715,
+    "peak_rss_change_from_full_ahead": 2.863,
+    "peak_rss_headroom_bytes": 115279462
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "ruby_analysis_tests": 400,
+    "ruby_analysis_failures": 0,
+    "focused_borrowed_view_test": 1,
+    "focused_mixed_store_ordering_test": 1,
+    "manifest_equal_across_all_repeats_and_historical_checkpoint": true
+  },
+  "packaging": {
+    "extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "vsix": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "a76ecd2b7fda369f0c23eeae1307da85a0b3e2bb5906ed1f6958fa6db0a14d4c",
+    "packaged_binary_sha256": "f41bf9bb667465fd1fd67560a55d6ec8b9f02b1f4548e07d79f518ac38714c9f",
+    "installed_binary_sha256": "f41bf9bb667465fd1fd67560a55d6ec8b9f02b1f4548e07d79f518ac38714c9f",
+    "smoke": "passed for Rails, RSpec, Minitest, Sinatra, Cucumber, ERB host features, and verified JRuby implementation navigation"
+  },
+  "decision": "Accepted. The exact safe checkout crosses the 15-second warm two-project workspace target with a 14.430-second median while preserving semantic identity, exact navigation, cache reuse, bounded resources, and RSS headroom. Active-project semantic completion is still 12.217 seconds versus the five-second target, so the production goal remains incomplete."
+}

@@ -1,0 +1,207 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove a measured per-method YARD allocation hotspot, then recover and reduce multi-root memory by storing each interned semantic name exactly once.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "profiler_executable_sha256": "4fa3682b04eff80a30c8b257e1c92d550b791a3c76e0bfb3e6508e0e4d8ae034",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "change": {
+    "yard": "Fact collection passes the method line already owned by SourceDocument and scans only the immediately preceding comment block in reverse. The public offset-only API retains exact validation and behavior without allocating every preceding source line for every method.",
+    "name_registry": "Replace a HashMap-owned semantic name plus a second Vec-owned clone with one insertion-ordered IndexSet value. FqnId and ConstLookupId remain checked u32 insertion indices; lookup, clone, shrink, and deterministic insertion semantics are unchanged.",
+    "semantic_boundary": "Both changes are internal representation and traversal optimizations. They preserve complete project/dependency inputs, source kinds, per-file replacement, isolated engines, exact lookup, diagnostics, and semantic output identity."
+  },
+  "baseline": {
+    "evidence": "support/performance/extension-project-context-delivery-2026-08-01.json",
+    "repeat_median": {
+      "wall_ms": 18621.3322705,
+      "peak_rss_bytes": 1743716352,
+      "user_cpu_ms": 39573.61,
+      "active_semantic_complete_ms": 15756,
+      "project_navigation_ms": 571,
+      "dependency_navigation_ms": 1605.5,
+      "minitest_guest_time_ms": 153.5926725
+    },
+    "estimated_name_registry_mb_per_project": [54.4, 54.3]
+  },
+  "yard_only_candidate": {
+    "raw_local_evidence": [
+      {
+        "id": "v87",
+        "jsonl": "/tmp/ruby-fast-lsp-yard-line-scan-v87.jsonl",
+        "log": "/tmp/ruby-fast-lsp-yard-line-scan-v87.log",
+        "wall_ms": 17714.35,
+        "peak_rss_bytes": 1924890624,
+        "user_cpu_ms": 36328.195,
+        "active_semantic_complete_ms": 15030,
+        "project_navigation_ms": 542,
+        "dependency_navigation_ms": 1686
+      },
+      {
+        "id": "v88",
+        "jsonl": "/tmp/ruby-fast-lsp-yard-line-scan-v88.jsonl",
+        "log": "/tmp/ruby-fast-lsp-yard-line-scan-v88.log",
+        "wall_ms": 17432.349666,
+        "peak_rss_bytes": 1748107264,
+        "user_cpu_ms": 36439.581,
+        "active_semantic_complete_ms": 14668,
+        "project_navigation_ms": 402,
+        "dependency_navigation_ms": 1512
+      },
+      {
+        "id": "v89",
+        "jsonl": "/tmp/ruby-fast-lsp-yard-line-scan-v89.jsonl",
+        "log": "/tmp/ruby-fast-lsp-yard-line-scan-v89.log",
+        "wall_ms": 17587.759208,
+        "peak_rss_bytes": 1840152576,
+        "user_cpu_ms": 36423.445,
+        "active_semantic_complete_ms": 14698,
+        "project_navigation_ms": 402,
+        "dependency_navigation_ms": 1797
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 17587.759208,
+      "peak_rss_bytes": 1840152576,
+      "user_cpu_ms": 36423.445,
+      "active_semantic_complete_ms": 14698,
+      "project_navigation_ms": 402,
+      "dependency_navigation_ms": 1686
+    },
+    "decision": "Not accepted alone. CPU and latency improved materially, but median peak RSS exceeded the fixed comparison ceiling. The YARD change proceeded only with the measured single-owned name registry below."
+  },
+  "accepted_result": {
+    "cache_warming_run_excluded": {
+      "id": "v90",
+      "reason": "The representation change altered the dependency seed identity and correctly rebuilt 512 persistent gem products. The subsequent three fresh-process runs used the resulting fully warm cache."
+    },
+    "raw_local_evidence": [
+      {
+        "id": "v91",
+        "jsonl": "/tmp/ruby-fast-lsp-indexset-names-v91.jsonl",
+        "log": "/tmp/ruby-fast-lsp-indexset-names-v91.log",
+        "wall_ms": 17358.697209,
+        "peak_rss_bytes": 1740079104,
+        "user_cpu_ms": 36357.16,
+        "active_semantic_complete_ms": 14679,
+        "project_navigation_ms": 395,
+        "dependency_navigation_ms": 1524,
+        "minitest_guest_time_ms": 150.629006
+      },
+      {
+        "id": "v92",
+        "jsonl": "/tmp/ruby-fast-lsp-indexset-names-v92.jsonl",
+        "log": "/tmp/ruby-fast-lsp-indexset-names-v92.log",
+        "wall_ms": 17225.752916,
+        "peak_rss_bytes": 1641480192,
+        "user_cpu_ms": 36306.891,
+        "active_semantic_complete_ms": 14402,
+        "project_navigation_ms": 397,
+        "dependency_navigation_ms": 1469,
+        "minitest_guest_time_ms": 150.389467
+      },
+      {
+        "id": "v93",
+        "jsonl": "/tmp/ruby-fast-lsp-indexset-names-v93.jsonl",
+        "log": "/tmp/ruby-fast-lsp-indexset-names-v93.log",
+        "wall_ms": 17272.847917,
+        "peak_rss_bytes": 1601519616,
+        "user_cpu_ms": 36189.95,
+        "active_semantic_complete_ms": 14594,
+        "project_navigation_ms": 400,
+        "dependency_navigation_ms": 1459,
+        "minitest_guest_time_ms": 150.17924
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 17272.847917,
+      "peak_rss_bytes": 1641480192,
+      "user_cpu_ms": 36306.891,
+      "active_semantic_complete_ms": 14594,
+      "project_navigation_ms": 397,
+      "dependency_navigation_ms": 1469,
+      "minitest_guest_time_ms": 150.389467
+    },
+    "estimated_name_registry_mb_per_project": [25.1, 24.9],
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "manifest_hash_equal_to_baseline_and_all_candidates": true,
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "rejected_followup": {
+    "change": "Move each owned project source buffer into its Rayon worker instead of retaining the batch input and cloning the complete String for collection.",
+    "raw_local_evidence": [
+      "/tmp/ruby-fast-lsp-owned-batch-v94.jsonl",
+      "/tmp/ruby-fast-lsp-owned-batch-v95.jsonl",
+      "/tmp/ruby-fast-lsp-owned-batch-v96.jsonl"
+    ],
+    "repeat_median": {
+      "wall_ms": 17478.038125,
+      "peak_rss_bytes": 1754808320,
+      "user_cpu_ms": 36300.498,
+      "active_semantic_complete_ms": 14715,
+      "project_navigation_ms": 421,
+      "dependency_navigation_ms": 1594
+    },
+    "comparison_to_accepted_result_percent": {
+      "terminal_wall": 1.188,
+      "peak_rss": 6.904,
+      "user_cpu": -0.018,
+      "active_semantic_complete": 0.829,
+      "project_navigation": 6.045,
+      "dependency_navigation": 8.509
+    },
+    "semantic_manifest_unchanged": true,
+    "decision": "Rejected and reverted. Removing the source clone did not reduce visitor CPU, regressed measured wall/readiness/RSS, and therefore did not justify changing the deterministic batch ownership path."
+  },
+  "comparison_to_accepted_baseline": {
+    "terminal_wall_change_percent": -7.242,
+    "peak_rss_change_percent": -5.863,
+    "user_cpu_change_percent": -8.255,
+    "active_semantic_complete_change_percent": -7.375,
+    "project_navigation_change_percent": -30.473,
+    "dependency_navigation_change_percent": -8.502,
+    "minitest_guest_time_change_percent": -2.086,
+    "estimated_name_registry_change_percent": -54.002,
+    "peak_rss_change_from_full_ahead_percent": 1.62,
+    "peak_rss_headroom_bytes": 135366246
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "ruby_analysis_tests": 393,
+    "ruby_analysis_failures": 0,
+    "root_library_tests": 1318,
+    "root_library_failures": 0,
+    "yard_tests": 31,
+    "yard_failures": 0,
+    "fact_collector_tests": 7,
+    "fact_collector_failures": 0
+  },
+  "decision": "Accepted together. The line-aware YARD scan removes the measured all-preceding-lines allocation, and the single-owned name registry cuts its estimated aggregate footprint by about 54%. Across three exact warm fresh processes, semantic fingerprints and the complete exported manifest remain identical, all persistent products are hits, navigation stays inside its warm budgets, terminal wall improves 7.242%, user CPU improves 8.255%, and median peak RSS remains 135.4 MB below the fixed ceiling. The 15-second workspace and five-second active-semantic targets remain open."
+}

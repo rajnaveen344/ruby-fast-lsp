@@ -2,14 +2,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
+    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
     MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod,
     SourceFileId, StoredMethodReferenceCandidate, StoredReferenceCandidateRef, SymbolKind,
     TextRange, TypeSubject,
 };
 use crate::engine::query::AnalysisQuery;
+use crate::engine::state::EffectiveMethodFactMatch;
+use crate::engine::types::{AnalysisQueryCache, MethodReturnQueryAccess};
 
-pub(crate) type MethodLookupChainCache = HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>;
+pub(crate) type MethodLookupChainCache = HashMap<FullyQualifiedName, Vec<FqnId>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstantRenameTarget {
@@ -565,12 +567,42 @@ impl<'a> AnalysisQuery<'a> {
         self.resolve_method_callees_inner(namespace_fqn, method, true, None)
     }
 
+    pub fn resolve_method_callees_cached(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        cache: &AnalysisQueryCache,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        cache.method_callees(
+            self.engine.query_cache_identity(),
+            namespace_fqn,
+            *method,
+            MethodReturnQueryAccess::Private,
+            || self.resolve_method_callees(namespace_fqn, method),
+        )
+    }
+
     pub fn resolve_public_method_callees(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
         self.resolve_method_callees_inner(namespace_fqn, method, false, None)
+    }
+
+    pub fn resolve_public_method_callees_cached(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        cache: &AnalysisQueryCache,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        cache.method_callees(
+            self.engine.query_cache_identity(),
+            namespace_fqn,
+            *method,
+            MethodReturnQueryAccess::Public,
+            || self.resolve_public_method_callees(namespace_fqn, method),
+        )
     }
 
     pub fn resolve_protected_method_callees(
@@ -580,6 +612,22 @@ impl<'a> AnalysisQuery<'a> {
         caller_namespace_fqn: &FullyQualifiedName,
     ) -> Option<Vec<ResolvedMethodCallee>> {
         self.resolve_method_callees_inner(namespace_fqn, method, false, Some(caller_namespace_fqn))
+    }
+
+    pub fn resolve_protected_method_callees_cached(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        caller_namespace_fqn: &FullyQualifiedName,
+        cache: &AnalysisQueryCache,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        cache.method_callees(
+            self.engine.query_cache_identity(),
+            namespace_fqn,
+            *method,
+            MethodReturnQueryAccess::Protected(caller_namespace_fqn.clone()),
+            || self.resolve_protected_method_callees(namespace_fqn, method, caller_namespace_fqn),
+        )
     }
 
     fn resolve_method_callees_inner(
@@ -724,38 +772,28 @@ impl<'a> AnalysisQuery<'a> {
             return MethodLookupResult::Missing;
         }
 
-        let ancestor_chain = chain_cache
-            .entry(namespace_fqn.clone())
-            .or_insert_with(|| method_lookup_chain(self.engine, namespace_fqn))
-            .clone();
+        let ancestor_chain =
+            method_lookup_chain_for_reference_cached(self.engine, namespace_fqn, chain_cache);
 
-        for ancestor in &ancestor_chain {
-            let mut facts = self
+        for owner_id in ancestor_chain.iter().copied() {
+            match self
                 .engine
-                .method_facts_matching_owner_name(ancestor, method);
-
-            facts.sort_by_key(|fact| {
-                (
-                    fact.range.file_id,
-                    fact.range.start_byte,
-                    fact.range.end_byte,
-                    fact.fqn.to_string(),
-                )
-            });
-            facts.dedup();
-
-            match facts.len() {
-                0 => continue,
-                1 => {
-                    return MethodLookupResult::Unique(facts.pop().expect(
-                        "INVARIANT VIOLATED: method fact count changed after len check. \
-                         This is a bug because no code mutates facts between len and pop. \
-                         Fix: keep method fact vector local and immutable between checks.",
-                    ));
+                .effective_method_fact_matching_owner_id(owner_id, method)
+            {
+                EffectiveMethodFactMatch::Missing => continue,
+                EffectiveMethodFactMatch::Unique(fact) => {
+                    return MethodLookupResult::Unique(fact);
                 }
-                _ => {
+                EffectiveMethodFactMatch::Ambiguous => {
                     return MethodLookupResult::Ambiguous {
-                        owner: ancestor.clone(),
+                        owner: self
+                            .engine
+                            .names
+                            .fqn(owner_id)
+                            .expect(
+                                "INVARIANT VIOLATED: cached method-chain owner ID is absent from the name registry. This is a bug because resolution-local chain IDs originate from that same immutable registry. Fix: invalidate all resolution-local chain caches whenever names can change.",
+                            )
+                            .clone(),
                         method: *method,
                     };
                 }
@@ -818,27 +856,13 @@ impl<'a> AnalysisQuery<'a> {
         let Some(callee) = self.resolve_super_method_callee(namespace_fqn, method) else {
             return MethodLookupResult::Missing;
         };
-        let mut facts = self
+        match self
             .engine
-            .method_facts_matching_owner_name(&callee.owner, method);
-        facts.sort_by_key(|fact| {
-            (
-                fact.range.file_id,
-                fact.range.start_byte,
-                fact.range.end_byte,
-                fact.fqn.to_string(),
-            )
-        });
-        facts.dedup();
-
-        match facts.len() {
-            0 => MethodLookupResult::Missing,
-            1 => MethodLookupResult::Unique(facts.pop().expect(
-                "INVARIANT VIOLATED: super method fact count changed after len check. \
-                 This is a bug because no code mutates facts between len and pop. \
-                 Fix: keep method fact vector local and immutable between checks.",
-            )),
-            _ => MethodLookupResult::Ambiguous {
+            .effective_method_fact_matching_owner_name(&callee.owner, method)
+        {
+            EffectiveMethodFactMatch::Missing => MethodLookupResult::Missing,
+            EffectiveMethodFactMatch::Unique(fact) => MethodLookupResult::Unique(fact),
+            EffectiveMethodFactMatch::Ambiguous => MethodLookupResult::Ambiguous {
                 owner: callee.owner,
                 method: *method,
             },
@@ -1760,16 +1784,15 @@ pub(super) fn method_lookup_chain(
             if chain.is_empty() {
                 chain.push(fqn.clone());
             }
-            return chain;
+            chain
         } else {
-            let chain = vec![
+            vec![
                 fqn.clone(),
                 FullyQualifiedName::namespace_with_kind(
                     Vec::new(),
                     crate::core::NamespaceKind::Instance,
                 ),
-            ];
-            return chain;
+            ]
         }
     } else {
         let mut chain = Vec::new();
@@ -1792,7 +1815,48 @@ pub(super) fn method_lookup_chain(
     }
 }
 
+pub(super) fn method_lookup_chain_for_reference_cached<'cache>(
+    engine: &crate::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    chain_cache: &'cache mut MethodLookupChainCache,
+) -> &'cache [FqnId] {
+    chain_cache
+        .entry(fqn.clone())
+        .or_insert_with(|| {
+            method_lookup_chain(engine, fqn)
+                .into_iter()
+                // An uninterned fallback namespace cannot own graph or method
+                // facts because both stores are keyed exclusively by FqnId.
+                // Omitting it is therefore the exact ID-domain equivalent of
+                // the previous owner lookup returning Missing.
+                .filter_map(|fqn| engine.names.fqn_id(&fqn))
+                .collect()
+        })
+        .as_slice()
+}
+
 fn append_top_level_instance_fallback(
+    engine: &crate::AnalysisEngine,
+    chain: &mut Vec<FullyQualifiedName>,
+    visited: &mut std::collections::HashSet<FullyQualifiedName>,
+) {
+    let fallback = engine
+        .cached_top_level_method_lookup_chain()
+        .unwrap_or_else(|| {
+            let mut fallback = Vec::new();
+            let mut fallback_visited = std::collections::HashSet::new();
+            compute_top_level_instance_fallback(engine, &mut fallback, &mut fallback_visited);
+            engine.cache_top_level_method_lookup_chain(fallback.clone());
+            fallback
+        });
+    for fqn in fallback {
+        if visited.insert(fqn.clone()) {
+            chain.push(fqn);
+        }
+    }
+}
+
+fn compute_top_level_instance_fallback(
     engine: &crate::AnalysisEngine,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,

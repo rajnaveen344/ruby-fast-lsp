@@ -66,20 +66,14 @@ pub fn rbs_method_exists_for_type(
     let method_name = method.as_str();
 
     for class_name in rbs_class_names_for_type(receiver_type) {
-        if crate::inference::rbs::get_rbs_class_methods(&class_name, is_singleton)
-            .iter()
-            .any(|method_info| method_info.name == method_name)
-        {
+        if crate::inference::rbs::rbs_class_method_exists(&class_name, method_name, is_singleton) {
             return true;
         }
     }
 
     if is_singleton {
         for rbs_class in ["Class", "Module"] {
-            if crate::inference::rbs::get_rbs_class_methods(rbs_class, false)
-                .iter()
-                .any(|method_info| method_info.name == method_name)
-            {
+            if crate::inference::rbs::rbs_class_method_exists(rbs_class, method_name, false) {
                 return true;
             }
         }

@@ -6,6 +6,7 @@ license = "MIT"
 description = "Bounded, deterministic JVM class and archive declaration metadata"
 
 [dependencies]
+serde = { version = "1.0.188", features = ["derive", "rc"] }
 sha2 = "0.10.9"
 tree-sitter = "0.25"
 tree-sitter-java = "0.23.5"

@@ -134,10 +134,10 @@ mod tests {
         let template = "😀你好 <%= Account.find(1) %>\n";
         let embedded = mask_erb(template);
         let offset = template.find("Account").unwrap();
-        let document = SourceDocument::new(template.to_string(), SourceFileId(7));
+        let document = SourceDocument::new(template, SourceFileId(7));
 
         assert_eq!(embedded.source().len(), template.len());
-        assert_eq!(document.offset_to_line_character(offset), (0, 9));
+        assert_eq!(document.offset_to_line_character(template, offset), (0, 9));
         assert!(embedded.is_ruby_offset(offset));
         assert!(!embedded.is_ruby_offset(0));
     }

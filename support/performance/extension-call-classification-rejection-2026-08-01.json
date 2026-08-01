@@ -1,0 +1,249 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Test whether sharing extension call-name classification between index-patch dispatch and enclosing-frame tracking improves the v195 FactCollector call-node hot path without violating the fixed memory ceiling.",
+  "profile_rationale": {
+    "source_profile": "/tmp/ruby-fast-lsp-no-text-fallback-v195-symbolized-profile.json.gz",
+    "process_call_node_entry_inclusive_percent": 15.07,
+    "extension_process_call_node_with_registry_inclusive_percent": 1.73,
+    "extension_should_track_enclosing_call_inclusive_percent": 1.82,
+    "observation": "Every Ruby call reached both extension operations, and both independently tested the same deterministic tracked_call_names set."
+  },
+  "red_green_probe": {
+    "temporary_test": "untracked_calls_probe_extension_dispatch_once_per_call",
+    "red": "Three untracked Ruby calls produced six tracked-call-name probes.",
+    "green": "Both candidate designs produced three probes by sharing one classification result.",
+    "correctness": [
+      "407/407 ruby-analysis tests passed",
+      "65/65 server extension tests passed",
+      "34/34 lsp-test-harness packaged and third-party extension tests passed"
+    ],
+    "final_state": "The production change and temporary probe were removed after both candidates failed the controlled memory/CPU acceptance gate."
+  },
+  "configuration": {
+    "workspace": "/Users/naveenraj/goshposh",
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "baseline_profiler_sha256": "3b722509dc189ec15c7fccc5d84a9be7cd5e875c81e98a41e0c00390c79fd975"
+  },
+  "rejected_registry_snapshot": {
+    "design": "Acquire one ExtensionRegistry read guard, prefilter once, process Wasm/native patches, classify the frame, and construct its resolved payload against that same snapshot.",
+    "candidate_profiler_sha256": "3c762992a55a7f7c4a7a66f030183952cb74837f1401d4914a52321a08c7e8fe",
+    "baseline_runs": [
+      {
+        "id": "v196",
+        "jsonl_sha256": "74164a726f9c93bbd2a7d997cc7f1f6d6cdd422307084b2813a9c6fdd893a90b",
+        "log_sha256": "2c9d5814b9b313910ae41ac486c3f44d66ea871b2e7516b1f9ad0364d0890fd6",
+        "wall_ms": 14134.7265,
+        "peak_rss_bytes": 2022146048,
+        "user_cpu_ms": 26876.307,
+        "active_semantic_complete_ms": 11916,
+        "project_navigation_ms": 489,
+        "dependency_navigation_ms": 1478
+      },
+      {
+        "id": "v198",
+        "jsonl_sha256": "9dc86766734eec94ec87ef511df4f71b355df41c3e460e84996ed147b1dacbfb",
+        "log_sha256": "2cdfbc3be0d1fb72bdc040234ae019e060919bf2f4855e63e97c28790150530f",
+        "wall_ms": 13668.013667,
+        "peak_rss_bytes": 1596719104,
+        "user_cpu_ms": 26868.43,
+        "active_semantic_complete_ms": 11486,
+        "project_navigation_ms": 356,
+        "dependency_navigation_ms": 1355
+      },
+      {
+        "id": "v200",
+        "jsonl_sha256": "c5daa4aabdc4cbdb6cee2d4460ca7b75710776ee9a524b6b48128447853ee561",
+        "log_sha256": "4bafe20446ce89e52e27f475b42d8bcb2ff55739288693c7cac9d914bd6dcddd",
+        "wall_ms": 13717.521875,
+        "peak_rss_bytes": 1648705536,
+        "user_cpu_ms": 26841.415,
+        "active_semantic_complete_ms": 11568,
+        "project_navigation_ms": 353,
+        "dependency_navigation_ms": 1349
+      }
+    ],
+    "candidate_runs": [
+      {
+        "id": "v197",
+        "jsonl_sha256": "5c113c1a17446053117ca925fc7a2dc9bd742f1c4d13dda30c845a168c008aec",
+        "log_sha256": "0652b4f135a3b73258ab6e48ecf00ae95e6abd32cc34a54bc10b55d06b4376a0",
+        "wall_ms": 13457.721042,
+        "peak_rss_bytes": 2066055168,
+        "user_cpu_ms": 26799.298,
+        "active_semantic_complete_ms": 11320,
+        "project_navigation_ms": 355,
+        "dependency_navigation_ms": 1340
+      },
+      {
+        "id": "v199",
+        "jsonl_sha256": "d9951c200945b1c225ff2710fc7ccd54ddbb75bd2acd97576675219a9855fa67",
+        "log_sha256": "8e7aa68929ab148c818e12ef24e694882dcbe0025bdbbcb402b4d09417782223",
+        "wall_ms": 13565.056709,
+        "peak_rss_bytes": 1941913600,
+        "user_cpu_ms": 26710.411,
+        "active_semantic_complete_ms": 11411,
+        "project_navigation_ms": 351,
+        "dependency_navigation_ms": 1303
+      },
+      {
+        "id": "v201",
+        "jsonl_sha256": "e11a006dc3b6a6808ac6acb96681b80e4266d6c4d966075ed702b90eee74e47f",
+        "log_sha256": "3d36a0acc1ca6b0cb5dec305a3df699c09c9a66416ef63ea49a5387a89e992cc",
+        "wall_ms": 13549.885333,
+        "peak_rss_bytes": 2056404992,
+        "user_cpu_ms": 26874.748,
+        "active_semantic_complete_ms": 11464,
+        "project_navigation_ms": 355,
+        "dependency_navigation_ms": 1338
+      }
+    ],
+    "baseline_median": {
+      "wall_ms": 13717.521875,
+      "peak_rss_bytes": 1648705536,
+      "user_cpu_ms": 26868.43,
+      "active_semantic_complete_ms": 11568,
+      "project_navigation_ms": 356,
+      "dependency_navigation_ms": 1355
+    },
+    "candidate_median": {
+      "wall_ms": 13549.885333,
+      "peak_rss_bytes": 2056404992,
+      "user_cpu_ms": 26799.298,
+      "active_semantic_complete_ms": 11411,
+      "project_navigation_ms": 355,
+      "dependency_navigation_ms": 1338
+    },
+    "candidate_change_percent": {
+      "terminal_wall": -1.222,
+      "peak_rss": 24.728,
+      "user_cpu": -0.257,
+      "active_semantic_complete": -1.357,
+      "project_navigation": -0.281,
+      "dependency_navigation": -1.255
+    },
+    "reason": "Rejected. Every candidate run exceeded the fixed 1.777 GB peak-RSS ceiling, and median RSS regressed 24.728%. A small readiness improvement cannot buy unbounded multi-root memory."
+  },
+  "rejected_short_lived_prefilter": {
+    "design": "Share only the tracked-call-name prefilter result. Release that guard before guest processing, preserve the original extension-vector snapshot and short registry reads, then classify a frame without probing the name again.",
+    "candidate_profiler_sha256": "53de416317c0567f467d08b2127b21144bb27d73e444c2ec67ad208e8bed4d51",
+    "baseline_runs": [
+      {
+        "id": "v202",
+        "jsonl_sha256": "2479ac8ffffefbb09c9a77a28fe73a3d1b0ddf884cb465e45f4d31cb3c29cf0f",
+        "log_sha256": "a69defb633f68c4bc51097960f6a4392ada3b3a5b5d4f0d4da79009f02aebce8",
+        "wall_ms": 14129.433291,
+        "peak_rss_bytes": 1683243008,
+        "user_cpu_ms": 26808.044,
+        "active_semantic_complete_ms": 12018,
+        "project_navigation_ms": 490,
+        "dependency_navigation_ms": 1416
+      },
+      {
+        "id": "v204",
+        "jsonl_sha256": "03f1c8c13d724d5970dfe5338ec85b5b95b949aa00aee5971bf4df0b7f55ac23",
+        "log_sha256": "39e26dec67355cb122430bfe02b23b36394195b416d4032195f20ea0b95dcdbb",
+        "wall_ms": 13642.023416,
+        "peak_rss_bytes": 1652391936,
+        "user_cpu_ms": 26905.565,
+        "active_semantic_complete_ms": 11521,
+        "project_navigation_ms": 353,
+        "dependency_navigation_ms": 1297
+      },
+      {
+        "id": "v206",
+        "jsonl_sha256": "3445421fddf442e6de399defa7801eb7c1fadc350efb81829fb2e0718afe1a83",
+        "log_sha256": "9ea5af045f4dff0bfd99168a58a041501f140f8c26bf84f9b1ea995b76ed29b1",
+        "wall_ms": 13714.081958,
+        "peak_rss_bytes": 1665581056,
+        "user_cpu_ms": 26850.523,
+        "active_semantic_complete_ms": 11607,
+        "project_navigation_ms": 359,
+        "dependency_navigation_ms": 1328
+      }
+    ],
+    "candidate_runs": [
+      {
+        "id": "v203",
+        "jsonl_sha256": "1e595f20fd24741a245baed5081caaa91dbf7a0c79eb4ecb7c42b180dcbcf772",
+        "log_sha256": "80842d583dabd2e75f0a903a03bf1b4ccdca2ba77b332f9b4d276f7c880c5258",
+        "wall_ms": 13620.912042,
+        "peak_rss_bytes": 1647804416,
+        "user_cpu_ms": 26881.318,
+        "active_semantic_complete_ms": 11563,
+        "project_navigation_ms": 361,
+        "dependency_navigation_ms": 1318
+      },
+      {
+        "id": "v205",
+        "jsonl_sha256": "56990f88858123a724ead4910708c8f3b389bb07fec8ce6a1de340880b799064",
+        "log_sha256": "d30ab141a6d6ec028e0b29435da1c5cf7813ee2a38ef0d35b87aff1657882724",
+        "wall_ms": 13556.485791,
+        "peak_rss_bytes": 1818083328,
+        "user_cpu_ms": 26949.163,
+        "active_semantic_complete_ms": 11483,
+        "project_navigation_ms": 357,
+        "dependency_navigation_ms": 1337
+      },
+      {
+        "id": "v207",
+        "jsonl_sha256": "3303cb5c33d0b3e4c96eaf0ca05a9056eeb0f7187d4388bd9708ac80f2093e27",
+        "log_sha256": "644600b6e3f0ab917791107d3be0ca28212e741f8d5f4092a05627265b1ebe18",
+        "wall_ms": 13537.934,
+        "peak_rss_bytes": 1751072768,
+        "user_cpu_ms": 26815.455,
+        "active_semantic_complete_ms": 11461,
+        "project_navigation_ms": 354,
+        "dependency_navigation_ms": 1273
+      }
+    ],
+    "baseline_median": {
+      "wall_ms": 13714.081958,
+      "peak_rss_bytes": 1665581056,
+      "user_cpu_ms": 26850.523,
+      "active_semantic_complete_ms": 11607,
+      "project_navigation_ms": 359,
+      "dependency_navigation_ms": 1328
+    },
+    "candidate_median": {
+      "wall_ms": 13556.485791,
+      "peak_rss_bytes": 1751072768,
+      "user_cpu_ms": 26881.318,
+      "active_semantic_complete_ms": 11483,
+      "project_navigation_ms": 357,
+      "dependency_navigation_ms": 1318
+    },
+    "candidate_change_percent": {
+      "terminal_wall": -1.149,
+      "peak_rss": 5.133,
+      "user_cpu": 0.115,
+      "active_semantic_complete": -1.068,
+      "project_navigation": -0.557,
+      "dependency_navigation": -0.753
+    },
+    "highest_candidate_peak_rss_bytes": 1818083328,
+    "ceiling_overage_bytes": 41236890,
+    "reason": "Rejected. Median RSS regressed 5.133%, one candidate exceeded the hard ceiling by 41.2 MB, and median CPU regressed 0.115%. The wall improvement does not satisfy the correctness-first memory budget."
+  },
+  "shared_correctness": {
+    "semantic_export_manifest_sha256_all_twelve_runs": "6bdb1000c83120b1f2a3a62b54f54a40a0a6529e1acce764b586fb5fcc498b32",
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "c3d9ee7694347372cda26b762ea383c0",
+      "/Users/naveenraj/goshposh/server-devops-5441": "d7776e8174da7ee439ceb9706a5c694b"
+    },
+    "gem_hits_per_run": 607,
+    "java_hits_per_run": 358,
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "decision": "rejected_and_reverted",
+  "next_step": "Do not merge extension patch dispatch and frame classification merely to share tracked_call_names lookup. Select a different v195 hot path with a design that improves CPU and preserves the fixed multi-root RSS ceiling."
+}

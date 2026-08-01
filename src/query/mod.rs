@@ -21,7 +21,7 @@ pub mod call_hierarchy;
 mod code_lens;
 mod completion;
 mod debug;
-mod definition;
+pub(crate) mod definition;
 pub mod diagnostics;
 mod hover;
 mod implementation;

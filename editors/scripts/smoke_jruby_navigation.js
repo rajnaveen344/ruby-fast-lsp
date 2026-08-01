@@ -99,7 +99,17 @@ function createFixture(parent) {
     fs.writeFileSync(javaSourceFile, javaSource);
     fs.writeFileSync(
         jrubyExecutable,
-        process.platform === 'win32' ? '' : '#!/bin/sh\nprintf \'[]\\n\'\n'
+        process.platform === 'win32'
+            ? ''
+            : [
+                '#!/bin/sh',
+                'case "$*" in',
+                '  *"print RUBY_ENGINE"*) printf \'%s\' \'jruby\' ;;',
+                '  *"RUBY_FAST_LSP_GEM_DISCOVERY"*) printf \'%s\\n\' \'RUBY_FAST_LSP_GEM_DISCOVERY={"source":"bundler","gems":[]}\' ;;',
+                '  *) printf \'[]\\n\' ;;',
+                'esac',
+                ''
+            ].join('\n')
     );
     if (process.platform !== 'win32') fs.chmodSync(jrubyExecutable, 0o755);
 
@@ -174,7 +184,7 @@ function runPackagedJrubyNavigationSmoke(options) {
     const childEnv = {
         ...process.env,
         ...env,
-        RUST_LOG: 'error',
+        RUST_LOG: process.env.RUBY_FAST_LSP_SMOKE_LOG || 'error',
         RUBY_FAST_LSP_CACHE_DIR: cacheRoot
     };
     delete childEnv.RUBY_FAST_LSP_CFR_JAR;
@@ -416,6 +426,24 @@ function runPackagedJrubyNavigationSmoke(options) {
             ) {
                 indexingEnded = true;
                 openAndRequestDefinition();
+                return;
+            }
+            if (message.method === 'ruby-fast-lsp/indexing/statusChanged') {
+                const projectStatus = message.params?.projects?.find(project =>
+                    typeof project?.root === 'string' &&
+                    path.resolve(project.root) === path.resolve(fixture.project)
+                );
+                if (!projectStatus) return;
+                if (projectStatus.phase === 'failed' || projectStatus.phase === 'cancelled') {
+                    cleanup(new Error(
+                        `${label} reported ${projectStatus.phase} indexing status: ${projectStatus.failure || 'no failure detail'}`
+                    ));
+                    return;
+                }
+                if (projectStatus.phase === 'ready' && !indexingEnded) {
+                    indexingEnded = true;
+                    openAndRequestDefinition();
+                }
                 return;
             }
             if (definitionRequestIds.has(message.id)) {

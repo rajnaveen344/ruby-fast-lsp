@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::file_owned_index::place_appended_file_facts;
 use super::memory_estimate::{
     map_table_bytes, ruby_type_heap_bytes, type_subject_heap_bytes, vec_payload_bytes,
 };
@@ -123,7 +124,7 @@ pub enum TypeResolution {
 }
 
 /// Append-only type fact store.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TypeStore {
     facts: Vec<Option<StoredTypeFact>>,
     free_facts: Vec<TypeFactId>,
@@ -131,6 +132,21 @@ pub struct TypeStore {
     subject_ids: HashMap<TypeSubject, TypeSubjectId>,
     facts_by_subject: HashMap<TypeSubjectId, Vec<TypeFactId>>,
     facts_by_file: HashMap<SourceFileId, Vec<TypeFactId>>,
+    file_owned_indexes_ordered: bool,
+}
+
+impl Default for TypeStore {
+    fn default() -> Self {
+        Self {
+            facts: Vec::new(),
+            free_facts: Vec::new(),
+            subjects: Vec::new(),
+            subject_ids: HashMap::new(),
+            facts_by_subject: HashMap::new(),
+            facts_by_file: HashMap::new(),
+            file_owned_indexes_ordered: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -145,6 +161,11 @@ impl TypeStore {
     }
 
     pub fn add(&mut self, fact: TypeFact) {
+        // Append-only collectors preserve insertion order, not the file order
+        // required by the replacement splice fast path. Once both APIs are
+        // mixed, replacements must restore each touched bucket with a full
+        // stable sort instead of assuming the existing prefix is ordered.
+        self.file_owned_indexes_ordered = false;
         let file_id = fact.range.file_id;
         let subject = self.intern_subject(fact.subject);
         let id = self.insert_fact(StoredTypeFact {
@@ -167,12 +188,63 @@ impl TypeStore {
             .unwrap_or_default()
     }
 
+    /// Return the latest non-unknown type and its source range without
+    /// materializing every fact for the subject. Ordering matches the
+    /// deterministic range precedence used by callers that previously called
+    /// `facts_for(...).max_by_key(...)`.
+    pub fn latest_non_unknown_type_with_range(
+        &self,
+        subject: &TypeSubject,
+    ) -> Option<(&RubyType, TextRange)> {
+        let subject_id = self.subject_ids.get(subject).copied()?;
+        self.facts_by_subject
+            .get(&subject_id)?
+            .iter()
+            .filter_map(|id| self.fact(*id))
+            .filter(|fact| fact.ruby_type != RubyType::Unknown)
+            .max_by_key(|fact| {
+                (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                )
+            })
+            .map(|fact| (&fact.ruby_type, fact.range))
+    }
+
     pub fn all_facts(&self) -> Vec<TypeFact> {
         self.facts
             .iter()
             .filter_map(|fact| fact.as_ref())
             .map(|fact| self.expand_fact(fact))
             .collect()
+    }
+
+    /// Borrow each known method-return type in fact-arena order.
+    ///
+    /// This is a domain view rather than a store exposure: callers that only
+    /// need method returns must not materialize and clone unrelated type facts.
+    /// Arena order matches `all_facts`, preserving deterministic duplicate-key
+    /// overwrite behavior when a caller collects the iterator into a map.
+    pub fn known_method_return_types(
+        &self,
+    ) -> impl Iterator<Item = (&FullyQualifiedName, &RubyType)> {
+        self.facts.iter().filter_map(|stored| {
+            let fact = stored.as_ref()?;
+            if fact.ruby_type == RubyType::Unknown {
+                return None;
+            }
+            match self.subject(fact.subject) {
+                TypeSubject::MethodReturn(fqn) => Some((fqn, &fact.ruby_type)),
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => None,
+            }
+        })
     }
 
     pub fn fact_count(&self) -> usize {
@@ -219,8 +291,13 @@ impl TypeStore {
                  Fix: partition facts by SourceFileId before replacing."
             );
             let key = self.intern_subject(fact.subject);
-            if !touched_subjects.contains(&key) {
-                touched_subjects.push(key);
+            if let Some((_, appended_count)) = touched_subjects
+                .iter_mut()
+                .find(|(touched, _)| *touched == key)
+            {
+                *appended_count += 1;
+            } else {
+                touched_subjects.push((key, 1));
             }
             let id = self.insert_fact(StoredTypeFact {
                 subject: key,
@@ -231,9 +308,29 @@ impl TypeStore {
             self.facts_by_subject.entry(key).or_default().push(id);
             self.facts_by_file.entry(file_id).or_default().push(id);
         }
-        for subject in touched_subjects {
+        for (subject, appended_count) in touched_subjects {
             if let Some(ids) = self.facts_by_subject.get_mut(&subject) {
-                sort_type_ids(&self.facts, ids);
+                if self.file_owned_indexes_ordered {
+                    place_appended_file_facts(
+                        ids,
+                        appended_count,
+                        file_id,
+                        |id| {
+                            self.facts[id.0]
+                                .as_ref()
+                                .expect(
+                                    "INVARIANT VIOLATED: type index points to missing fact. \
+                                     This is a bug because indexes must be removed before arena facts. \
+                                     Fix: remove stale ids from every TypeStore index.",
+                                )
+                                .range
+                                .file_id
+                        },
+                        |appended| sort_type_ids(&self.facts, appended),
+                    );
+                } else {
+                    sort_type_ids(&self.facts, ids);
+                }
                 ids.shrink_to_fit();
             }
         }
@@ -448,7 +545,7 @@ fn provenance_rank(provenance: TypeProvenance) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use crate::{FullyQualifiedName, RubyConstant};
+    use crate::{FullyQualifiedName, RubyConstant, RubyMethod};
 
     use super::*;
 
@@ -460,6 +557,13 @@ mod tests {
         TypeSubject::Constant(FullyQualifiedName::constant(vec![
             RubyConstant::new(name).unwrap()
         ]))
+    }
+
+    fn method_return_subject(owner: &str, name: &str) -> TypeSubject {
+        TypeSubject::MethodReturn(FullyQualifiedName::method(
+            vec![RubyConstant::new(owner).unwrap()],
+            RubyMethod::new(name).unwrap(),
+        ))
     }
 
     #[test]
@@ -503,6 +607,86 @@ mod tests {
     }
 
     #[test]
+    fn latest_non_unknown_type_with_range_returns_only_the_winning_fact() {
+        let subject = constant_subject("VALUE");
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            subject.clone(),
+            RubyType::string(),
+            TextRange::new(file(), 0, 8),
+            TypeProvenance::Assignment,
+        ));
+        store.add(TypeFact::new(
+            subject.clone(),
+            RubyType::Unknown,
+            TextRange::new(file(), 30, 38),
+            TypeProvenance::Inferred,
+        ));
+        store.add(TypeFact::new(
+            subject.clone(),
+            RubyType::integer(),
+            TextRange::new(file(), 20, 28),
+            TypeProvenance::Assignment,
+        ));
+
+        let (ruby_type, range) = store
+            .latest_non_unknown_type_with_range(&subject)
+            .expect("the latest known type must be returned");
+        assert_eq!(*ruby_type, RubyType::integer());
+        assert_eq!(range, TextRange::new(file(), 20, 28));
+        assert!(store
+            .latest_non_unknown_type_with_range(&constant_subject("MISSING"))
+            .is_none());
+    }
+
+    #[test]
+    fn known_method_return_types_borrows_only_known_returns_in_arena_order() {
+        let first = method_return_subject("First", "call");
+        let unknown = method_return_subject("Unknown", "call");
+        let second = method_return_subject("Second", "call");
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            first.clone(),
+            RubyType::string(),
+            TextRange::new(SourceFileId(1), 0, 8),
+            TypeProvenance::Inferred,
+        ));
+        store.add(TypeFact::new(
+            constant_subject("IGNORED"),
+            RubyType::integer(),
+            TextRange::new(SourceFileId(1), 10, 18),
+            TypeProvenance::Assignment,
+        ));
+        store.add(TypeFact::new(
+            unknown,
+            RubyType::Unknown,
+            TextRange::new(SourceFileId(1), 20, 28),
+            TypeProvenance::Inferred,
+        ));
+        store.add(TypeFact::new(
+            second.clone(),
+            RubyType::integer(),
+            TextRange::new(SourceFileId(2), 0, 8),
+            TypeProvenance::Inferred,
+        ));
+
+        let returns = store.known_method_return_types().collect::<Vec<_>>();
+        let TypeSubject::MethodReturn(first_fqn) = first else {
+            panic!("test method subject must be a method return")
+        };
+        let TypeSubject::MethodReturn(second_fqn) = second else {
+            panic!("test method subject must be a method return")
+        };
+        assert_eq!(
+            returns,
+            vec![
+                (&first_fqn, &RubyType::string()),
+                (&second_fqn, &RubyType::integer()),
+            ]
+        );
+    }
+
+    #[test]
     fn replace_file_removes_stale_facts_for_same_file_only() {
         let subject = constant_subject("VALUE");
         let other_subject = constant_subject("OTHER");
@@ -542,6 +726,43 @@ mod tests {
             TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
             other => panic!("expected other file fact to survive, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn replace_file_restores_order_after_append_only_additions() {
+        let subject = constant_subject("VALUE");
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            subject.clone(),
+            RubyType::string(),
+            TextRange::new(SourceFileId(3), 0, 8),
+            TypeProvenance::Assignment,
+        ));
+        store.add(TypeFact::new(
+            subject.clone(),
+            RubyType::integer(),
+            TextRange::new(SourceFileId(1), 0, 8),
+            TypeProvenance::Assignment,
+        ));
+
+        store.replace_file(
+            SourceFileId(2),
+            [TypeFact::new(
+                subject.clone(),
+                RubyType::boolean(),
+                TextRange::new(SourceFileId(2), 0, 8),
+                TypeProvenance::Assignment,
+            )],
+        );
+
+        assert_eq!(
+            store
+                .facts_for(&subject)
+                .into_iter()
+                .map(|fact| fact.range.file_id)
+                .collect::<Vec<_>>(),
+            vec![SourceFileId(1), SourceFileId(2), SourceFileId(3)]
+        );
     }
 
     #[test]

@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-31",
+  "purpose": "Prove that parallel project-file collection produces the same complete semantic result across fresh processes, then bound the retained file-fact batch below the accepted multi-root RSS ceiling.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "accepted_project_batch_size": 512,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "change": {
+    "stable_result_identity": "Profiler schema 9 records one path-independent 128-bit semantic-result fingerprint per isolated project. It covers exact declaration and reference ranges, resolved targets, graph state, types, diagnostics, execution contexts, and source kind while excluding engine-local IDs and physical paths.",
+    "immutable_parallel_context": "Every bounded batch is pre-registered in deterministic path order. Workers retain complete file-owned facts without mutating the engine; facts enter the ordinary per-file deferred replacement lifecycle sequentially in path order after every worker finishes.",
+    "jruby_replay": "Catalog-sensitive replay uses the same parallel collect-then-ordered-replace lifecycle before exact JRuby materialization and final resolution.",
+    "memory_bound": "The fixed exhaustive batch was reduced from 1024 to 512 files because complete retained facts are now part of the bounded transient working set. This adds checkpoints but preserves the exact ordinary fact path and keeps both measured repeats under the existing 10% RSS ceiling."
+  },
+  "rejected_intermediate": {
+    "project_batch_size": 1024,
+    "raw_local_evidence": [
+      {
+        "id": "v56",
+        "jsonl": "/tmp/ruby-fast-lsp-deterministic-project-batches-two-project-warm-v56-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-deterministic-project-batches-two-project-warm-v56-20260731.log",
+        "wall_ms": 21193.203792,
+        "peak_rss_bytes": 1869021184
+      },
+      {
+        "id": "v57",
+        "jsonl": "/tmp/ruby-fast-lsp-deterministic-project-batches-two-project-warm-v57-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-deterministic-project-batches-two-project-warm-v57-20260731.log",
+        "wall_ms": 20973.721625,
+        "peak_rss_bytes": 1929838592
+      }
+    ],
+    "semantic_fingerprints_matched": true,
+    "reason": "Both repeats exceeded the explicit 1776846438-byte RSS ceiling, so deterministic output alone was insufficient for acceptance."
+  },
+  "accepted_result": {
+    "raw_local_evidence": [
+      {
+        "id": "v58",
+        "jsonl": "/tmp/ruby-fast-lsp-deterministic-project-batches-512-two-project-warm-v58-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-deterministic-project-batches-512-two-project-warm-v58-20260731.log",
+        "wall_ms": 21648.422667,
+        "peak_rss_bytes": 1733476352,
+        "project_user_pmm_ms": 690,
+        "dependency_bson_object_id_ms": 1768,
+        "active_semantic_complete_ms": 17418,
+        "all_project_semantic_complete_ms": 21648
+      },
+      {
+        "id": "v59",
+        "jsonl": "/tmp/ruby-fast-lsp-deterministic-project-batches-512-two-project-warm-v59-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-deterministic-project-batches-512-two-project-warm-v59-20260731.log",
+        "wall_ms": 21694.43275,
+        "peak_rss_bytes": 1765687296,
+        "project_user_pmm_ms": 662,
+        "dependency_bson_object_id_ms": 1820,
+        "active_semantic_complete_ms": 17002,
+        "all_project_semantic_complete_ms": 21694
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 21671.4277085,
+      "peak_rss_bytes": 1749581824,
+      "project_user_pmm_ms": 676,
+      "dependency_bson_object_id_ms": 1794,
+      "active_semantic_complete_ms": 17210,
+      "all_project_semantic_complete_ms": 21671
+    },
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server-devops-5441": "747314dce38d54fb4a0e68fb31774b21",
+      "/Users/naveenraj/goshposh/server": "8010f53aacc369e8fa7339b50e144d72"
+    },
+    "fingerprints_equal_across_fresh_processes": true,
+    "engine_counts_equal_across_fresh_processes": true,
+    "engine_files": 35600,
+    "engine_source_bytes": 221249866,
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "exact_semantic_probes_passed": true
+  },
+  "comparison": {
+    "accepted_provider_handoff_evidence": "support/performance/jruby-provider-batch-handoff-2026-07-31.json",
+    "terminal_wall_change_percent": 3.147,
+    "active_semantic_complete_change_percent": 0.829,
+    "project_navigation_change_percent": 11.093,
+    "dependency_navigation_change_percent": 8.137,
+    "peak_rss_change_percent": 0.7,
+    "deterministic_1024_terminal_wall_change_percent": 2.789,
+    "deterministic_1024_peak_rss_change_percent": -7.889,
+    "full_ahead_peak_rss_baseline_bytes": 1615314944,
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "peak_rss_change_from_full_ahead_percent": 8.312,
+    "peak_rss_headroom_bytes": 27264614
+  },
+  "correctness": {
+    "dataset_and_project_source_fingerprints_unchanged": true,
+    "runtime_classpath_fingerprints_unchanged": true,
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "parallel_fresh_engine_regression_repeats": 4,
+    "ruby_analysis_tests": 391,
+    "ruby_analysis_failures": 0,
+    "root_library_tests": 1315,
+    "root_library_failures": 0,
+    "profiler_tests": 12,
+    "profiler_failures": 0
+  },
+  "decision": "Accepted. The fixed 512-file product policy produces identical complete semantic fingerprints and aggregate engine counts across fresh processes, exact project and dependency navigation, complete persistent-product hits, no panics, and no resource leaks. Median RSS is 8.312% above the full-ahead baseline and remains 27.3 MB below the explicit ceiling. The 3.147% wall regression versus the prior accepted slice is the measured cost of deterministic ordered replacement and the smaller memory-bound checkpoint. This still does not close the 15-second exhaustive-workspace or five-second active-semantic targets, and cold/incremental/failure/installed-VSIX acceptance remains open."
+}

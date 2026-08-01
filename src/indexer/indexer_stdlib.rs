@@ -7,28 +7,220 @@
 //! VS Code extension on first activation. The LSP server reads from the
 //! extracted directories with proper file:// URIs.
 
-use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::version::ruby_version::{RubyImplementation, RubyVersion};
-use crate::server::RubyLanguageServer;
 use crate::utils;
 use crate::utils::stub_loader::find_stubs_directory;
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use log::{debug, info, warn};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use std::time::SystemTime;
 use tower_lsp::lsp_types::Url;
 
 // ============================================================================
 // IndexerStdlib
 // ============================================================================
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct RuntimeExecutableIdentity {
+    byte_length: u64,
+    modified: SystemTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct RuntimeStdlibPathKey {
+    executable: PathBuf,
+    executable_identity: RuntimeExecutableIdentity,
+    java_home: Option<PathBuf>,
+}
+
+impl RuntimeStdlibPathKey {
+    pub(crate) fn new(executable: &Path, java_home: Option<&Path>) -> Result<Self> {
+        let executable = std::fs::canonicalize(executable).with_context(|| {
+            format!(
+                "failed to canonicalize selected Ruby executable {} for stdlib discovery",
+                executable.display()
+            )
+        })?;
+        let executable_identity = runtime_executable_identity(&executable)?;
+        let java_home = java_home
+            .map(|path| {
+                let canonical = std::fs::canonicalize(path).with_context(|| {
+                    format!(
+                        "failed to canonicalize selected Java home {} for stdlib discovery",
+                        path.display()
+                    )
+                })?;
+                if !canonical.is_dir() {
+                    return Err(anyhow!(
+                        "selected Java home is not a directory: {}",
+                        canonical.display()
+                    ));
+                }
+                Ok(canonical)
+            })
+            .transpose()?;
+        Ok(Self {
+            executable,
+            executable_identity,
+            java_home,
+        })
+    }
+
+    pub(crate) fn discover(&self) -> Result<RuntimeStdlibPaths> {
+        let before = runtime_executable_identity(&self.executable)?;
+        if before != self.executable_identity {
+            return Err(anyhow!(
+                "selected Ruby executable changed before stdlib discovery: {}",
+                self.executable.display()
+            ));
+        }
+
+        let mut command = std::process::Command::new(&self.executable);
+        command.args([
+            "--disable-gems",
+            "-e",
+            "STDOUT.write($LOAD_PATH.map { |path| File.expand_path(path) + \"\\0\" }.join)",
+        ]);
+        for name in [
+            "RUBYLIB",
+            "RUBYOPT",
+            "GEM_HOME",
+            "GEM_PATH",
+            "BUNDLE_GEMFILE",
+            "BUNDLE_PATH",
+            "BUNDLE_BIN_PATH",
+            "BUNDLE_WITH",
+            "BUNDLE_WITHOUT",
+        ] {
+            command.env_remove(name);
+        }
+        if let Some(java_home) = self.java_home.as_ref() {
+            command.env("JAVA_HOME", java_home);
+        }
+        let output = command.output().with_context(|| {
+            format!(
+                "failed to query exact Ruby runtime load path from {}",
+                self.executable.display()
+            )
+        })?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "exact Ruby runtime {} failed while reporting its stdlib load path (status {}): {}",
+                self.executable.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let after = runtime_executable_identity(&self.executable)?;
+        if after != self.executable_identity {
+            return Err(anyhow!(
+                "selected Ruby executable changed during stdlib discovery: {}",
+                self.executable.display()
+            ));
+        }
+
+        let mut paths = Vec::new();
+        let mut seen = HashSet::new();
+        for encoded_path in output.stdout.split(|byte| *byte == 0) {
+            if encoded_path.is_empty() {
+                continue;
+            }
+            let path_text = std::str::from_utf8(encoded_path).with_context(|| {
+                format!(
+                    "exact Ruby runtime {} returned a non-UTF-8 load path",
+                    self.executable.display()
+                )
+            })?;
+            let path = PathBuf::from(path_text);
+            if !path.is_dir() {
+                debug!(
+                    "Ignoring missing exact-runtime load path from {}: {}",
+                    self.executable.display(),
+                    path.display()
+                );
+                continue;
+            }
+            let path = std::fs::canonicalize(&path).with_context(|| {
+                format!(
+                    "failed to canonicalize exact-runtime stdlib path {} from {}",
+                    path.display(),
+                    self.executable.display()
+                )
+            })?;
+            if seen.insert(path.clone()) {
+                debug!("Found exact-runtime stdlib path: {:?}", path);
+                paths.push(path);
+            }
+        }
+
+        info!(
+            "Discovered {} stdlib paths from exact runtime {}",
+            paths.len(),
+            self.executable.display()
+        );
+        Ok(RuntimeStdlibPaths { paths })
+    }
+}
+
+fn runtime_executable_identity(path: &Path) -> Result<RuntimeExecutableIdentity> {
+    let metadata = std::fs::metadata(path).with_context(|| {
+        format!(
+            "failed to read selected Ruby executable metadata from {}",
+            path.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(anyhow!(
+            "selected Ruby executable is not a regular file: {}",
+            path.display()
+        ));
+    }
+    Ok(RuntimeExecutableIdentity {
+        byte_length: metadata.len(),
+        modified: metadata.modified().with_context(|| {
+            format!(
+                "failed to read selected Ruby executable modification time from {}",
+                path.display()
+            )
+        })?,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeStdlibPaths {
+    paths: Vec<PathBuf>,
+}
+
+impl RuntimeStdlibPaths {
+    pub(crate) fn paths(&self) -> &[PathBuf] {
+        &self.paths
+    }
+
+    pub(crate) fn estimated_weight_bytes(&self) -> u64 {
+        self.paths.iter().fold(256u64, |total, path| {
+            total
+                .checked_add(u64::try_from(path.as_os_str().len()).expect(
+                    "INVARIANT VIOLATED: a runtime stdlib path length does not fit u64. This is a bug because an in-memory path cannot exceed the process address space. Fix: inspect runtime load-path product accounting.",
+                ))
+                .expect(
+                    "INVARIANT VIOLATED: runtime stdlib path-product weight overflowed u64. This is a bug because retained entry count and path storage are bounded. Fix: inspect runtime load-path product accounting.",
+                )
+        })
+    }
+}
+
 /// Handles standard library indexing
 pub struct IndexerStdlib {
     file_processor: FileProcessor,
     ruby_version: Option<RubyVersion>,
+    runtime_executable: Option<PathBuf>,
+    runtime_java_home: Option<PathBuf>,
+    runtime_stdlib_paths: Option<RuntimeStdlibPaths>,
     stdlib_paths: Vec<PathBuf>,
     required_modules: HashSet<String>,
     /// Optional path to the VS Code extension directory (for loading zipped stubs)
@@ -40,6 +232,9 @@ impl IndexerStdlib {
         Self {
             file_processor,
             ruby_version,
+            runtime_executable: None,
+            runtime_java_home: None,
+            runtime_stdlib_paths: None,
             stdlib_paths: Vec::new(),
             required_modules: HashSet::new(),
             extension_path: None,
@@ -49,6 +244,31 @@ impl IndexerStdlib {
     /// Set the extension path for loading zipped stubs
     pub fn set_extension_path(&mut self, path: PathBuf) {
         self.extension_path = Some(path);
+    }
+
+    /// Select the exact runtime whose standard-library load path is authoritative.
+    pub fn set_selected_runtime(&mut self, executable: PathBuf, java_home: Option<PathBuf>) {
+        assert!(
+            executable.is_absolute(),
+            "INVARIANT VIOLATED: selected Ruby executable is not absolute: {}. This is a bug because project runtime resolution must produce one exact executable identity. Fix: validate and canonicalize the runtime catalog entry before configuring stdlib discovery.",
+            executable.display()
+        );
+        assert!(
+            java_home.as_ref().is_none_or(|path| path.is_absolute()),
+            "INVARIANT VIOLATED: selected Java home is not absolute: {:?}. This is a bug because JRuby subprocesses must inherit one exact JDK identity. Fix: validate and canonicalize Java home before configuring stdlib discovery.",
+            java_home
+        );
+        self.runtime_executable = Some(executable);
+        self.runtime_java_home = java_home;
+    }
+
+    pub(crate) fn set_runtime_stdlib_paths(&mut self, paths: RuntimeStdlibPaths) {
+        assert!(
+            paths.paths().iter().all(|path| path.is_absolute()),
+            "INVARIANT VIOLATED: cached runtime stdlib product contains a relative path: {:?}. This is a bug because shared runtime products must retain canonical external provenance. Fix: canonicalize every exact-runtime load path before publication.",
+            paths.paths()
+        );
+        self.runtime_stdlib_paths = Some(paths);
     }
 
     // ========================================================================
@@ -76,13 +296,12 @@ impl IndexerStdlib {
     /// Index standard library based on Ruby version and required modules
     pub async fn index_stdlib(
         &mut self,
-        server: &RubyLanguageServer,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) -> Result<()> {
         let start = Instant::now();
         info!("Starting stdlib indexing");
 
-        self.discover_stdlib_paths();
+        self.discover_stdlib_paths()?;
 
         // Core Ruby classes are language semantics, not optional runtime libraries.
         // Keep them available even when the selected Ruby executable is missing or
@@ -97,7 +316,7 @@ impl IndexerStdlib {
         }
 
         // Index required stdlib modules
-        self.index_required_modules(server, analysis_engine).await?;
+        self.index_required_modules(analysis_engine).await?;
 
         info!("Stdlib indexing completed in {:?}", start.elapsed());
         Ok(())
@@ -108,7 +327,14 @@ impl IndexerStdlib {
     /// Stubs are loaded from the extension's stubs directory (stubs/rubystubsXY/).
     /// In production, these are extracted from zip files by the VS Code extension
     /// on first activation.
-    async fn index_core_stubs(
+    pub(crate) async fn index_core_stubs(
+        &self,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
+        self.index_core_stubs_blocking(analysis_engine)
+    }
+
+    pub(crate) fn index_core_stubs_blocking(
         &self,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) -> Result<()> {
@@ -125,7 +351,8 @@ impl IndexerStdlib {
         // Try to load from extension path first
         if let Some(ref ext_path) = self.extension_path {
             if let Some(stubs_dir) = find_stubs_directory(ext_path, version) {
-                let stub_files = utils::collect_ruby_files(&stubs_dir);
+                let mut stub_files = utils::collect_ruby_files(&stubs_dir);
+                stub_files.sort();
                 if stub_files.is_empty() {
                     warn!("No stub files found in: {:?}", stubs_dir);
                     return Ok(());
@@ -137,26 +364,8 @@ impl IndexerStdlib {
                     stubs_dir
                 );
 
-                let processor = &self.file_processor;
-                stub_files.par_iter().for_each(|path| {
-                    if let Ok(content) = std::fs::read_to_string(path) {
-                        if let Ok(uri) = Url::from_file_path(path) {
-                            if let Err(e) = processor
-                                .collect_file_facts_as_deferred_resolution_in_engine(
-                                    &uri,
-                                    &content,
-                                    analysis_engine.clone(),
-                                    ruby_analysis::core::SourceKind::Stub,
-                                )
-                            {
-                                warn!("Failed to index stub {:?}: {}", path, e);
-                            }
-                        }
-                    }
-                });
-
-                self.index_jruby_overlay_stubs(analysis_engine.clone());
-                analysis_engine.write().resolve();
+                self.index_stub_files_deterministically(&stub_files, analysis_engine.clone())?;
+                self.index_jruby_overlay_stubs(analysis_engine.clone())?;
 
                 info!("Indexed {} core stub files", stub_files.len());
                 return Ok(());
@@ -170,50 +379,121 @@ impl IndexerStdlib {
 
         info!("Indexing core stubs from directory: {:?}", stubs_path);
 
-        let stub_files = utils::collect_ruby_files(&stubs_path);
+        let mut stub_files = utils::collect_ruby_files(&stubs_path);
+        stub_files.sort();
         if stub_files.is_empty() {
             warn!("No stub files found in: {:?}", stubs_path);
             return Ok(());
         }
 
-        let processor = &self.file_processor;
-        stub_files.par_iter().for_each(|path| {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                if let Ok(uri) = Url::from_file_path(path) {
-                    if let Err(e) = processor.collect_file_facts_as_deferred_resolution_in_engine(
-                        &uri,
-                        &content,
-                        analysis_engine.clone(),
-                        ruby_analysis::core::SourceKind::Stub,
-                    ) {
-                        warn!("Failed to index stub {:?}: {}", path, e);
-                    }
-                }
-            }
-        });
-        self.index_jruby_overlay_stubs(analysis_engine.clone());
-        analysis_engine.write().resolve();
+        self.index_stub_files_deterministically(&stub_files, analysis_engine.clone())?;
+        self.index_jruby_overlay_stubs(analysis_engine.clone())?;
         info!("Indexed {} core stub files", stub_files.len());
 
+        Ok(())
+    }
+
+    fn index_stub_files_deterministically(
+        &self,
+        stub_files: &[PathBuf],
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
+        let sources = stub_files
+            .par_iter()
+            .map(|path| {
+                let content = std::fs::read_to_string(path)
+                    .with_context(|| format!("failed to read bundled stub {}", path.display()))?;
+                let uri = Url::from_file_path(path).map_err(|()| {
+                    anyhow::anyhow!(
+                        "bundled stub path is not a valid file URI: {}",
+                        path.display()
+                    )
+                })?;
+                Ok((path.clone(), uri, content))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Every collector observes the same immutable pre-batch engine and
+        // namespace snapshot. Core-stub files are independent declaration
+        // inputs: allowing one sibling's inferred types or declarations to
+        // become another sibling's input makes both the output and its cache
+        // identity depend on Rayon scheduling. Declarations and aliases within
+        // each file remain visible through the collector's local overlay.
+        let known_namespaces = std::sync::Arc::new({
+            let engine = analysis_engine.read();
+            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+        });
+        let templates = sources
+            .par_iter()
+            .map(|(_, uri, content)| {
+                self.file_processor
+                    .collect_project_neutral_file_template_without_insertion(
+                        uri,
+                        content,
+                        analysis_engine.clone(),
+                        ruby_analysis::core::SourceKind::Stub,
+                        known_namespaces.clone(),
+                    )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut engine = analysis_engine.write();
+        for ((path, _, _), template) in sources.iter().zip(templates) {
+            let file_id = engine.file_id(path).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: deterministic stub collection lost registered file {}. This is a bug because both direct staging passes register every source before template collection. Fix: preserve the file registration lifecycle through batch commit.",
+                    path.display()
+                )
+            });
+            engine.replace_facts(
+                file_id,
+                template.instantiate(file_id),
+                ruby_analysis::engine::ResolveMode::Deferred,
+            );
+        }
+        engine.resolve();
+        Ok(())
+    }
+
+    pub(crate) fn index_runtime_stdlib_deferred_blocking(
+        &mut self,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
+        self.index_runtime_stdlib_blocking_with_resolution(analysis_engine, false)
+    }
+
+    fn index_runtime_stdlib_blocking_with_resolution(
+        &mut self,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        resolve: bool,
+    ) -> Result<()> {
+        let start = Instant::now();
+        self.discover_stdlib_paths()?;
+        if self.stdlib_paths.is_empty() {
+            warn!("No runtime stdlib paths found; skipping required stdlib modules");
+            return Ok(());
+        }
+        self.index_required_modules_blocking_with_resolution(analysis_engine, resolve)?;
+        info!("Runtime stdlib indexing completed in {:?}", start.elapsed());
         Ok(())
     }
 
     fn index_jruby_overlay_stubs(
         &self,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    ) {
+    ) -> Result<()> {
         let Some(version) = self.ruby_version else {
-            return;
+            return Ok(());
         };
         if version.implementation != RubyImplementation::JRuby {
-            return;
+            return Ok(());
         }
         let Some(series) = jruby_series_for_compatibility(version.to_tuple()) else {
             warn!(
                 "No JRuby stub overlay supports Ruby compatibility version {}.{}; JRuby-specific APIs remain unavailable",
                 version.major, version.minor
             );
-            return;
+            return Ok(());
         };
 
         let packaged_root = self
@@ -238,53 +518,36 @@ impl IndexerStdlib {
             }
         }
 
-        let processor = &self.file_processor;
         let mut indexed = 0usize;
         for directory in directories {
-            let files = utils::collect_ruby_files(&directory);
-            files.par_iter().for_each(|path| {
-                let content = std::fs::read_to_string(path).unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: discovered JRuby stub `{}` could not be read: {error}. \
-                         This is a bug because stub discovery must only return readable regular files. \
-                         Fix: validate packaged stub files before indexing.",
-                        path.display()
-                    )
-                });
-                let uri = Url::from_file_path(path).unwrap_or_else(|()| {
-                    panic!(
-                        "INVARIANT VIOLATED: JRuby stub path `{}` could not become a file URI. \
-                         This is a bug because indexed stub paths must be absolute filesystem paths. \
-                         Fix: canonicalize the JRuby stub root before discovery.",
-                        path.display()
-                    )
-                });
-                processor
-                    .collect_file_facts_as_deferred_resolution_in_engine(
-                        &uri,
-                        &content,
-                        analysis_engine.clone(),
-                        ruby_analysis::core::SourceKind::Stub,
-                    )
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "INVARIANT VIOLATED: JRuby stub `{}` failed semantic indexing: {error}. \
-                             This is a bug because bundled overlays must be valid Ruby source. \
-                             Fix: correct the overlay or its stub composition tests.",
-                            path.display()
-                        )
-                    });
-            });
+            let mut files = utils::collect_ruby_files(&directory);
+            files.sort();
+            self.index_stub_files_deterministically(&files, analysis_engine.clone())?;
             indexed += files.len();
         }
         info!("Indexed {indexed} JRuby {series} overlay stub files");
+        Ok(())
     }
 
     /// Index only the required stdlib modules
     async fn index_required_modules(
         &self,
-        server: &RubyLanguageServer,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
+        self.index_required_modules_blocking(analysis_engine)
+    }
+
+    fn index_required_modules_blocking(
+        &self,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
+        self.index_required_modules_blocking_with_resolution(analysis_engine, true)
+    }
+
+    fn index_required_modules_blocking_with_resolution(
+        &self,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        resolve: bool,
     ) -> Result<()> {
         if self.required_modules.is_empty() {
             debug!("No required stdlib modules to index");
@@ -294,51 +557,123 @@ impl IndexerStdlib {
         let total = self.required_modules.len();
         info!("Indexing {} required stdlib modules", total);
 
-        let mut indexed_count = 0;
-
-        for (current, module_name) in self.required_modules.iter().enumerate() {
-            IndexingCoordinator::send_progress_report(
-                server,
-                "Indexing Stdlib".to_string(),
-                current + 1,
-                total,
-            )
-            .await;
-
-            let Some(files) = self.find_module_files(module_name) else {
+        let mut module_names = self.required_modules.iter().collect::<Vec<_>>();
+        module_names.sort();
+        let mut files = Vec::new();
+        for module_name in module_names {
+            let Some(module_files) = self.find_module_files(module_name) else {
                 debug!("Stdlib module '{}' not found", module_name);
                 continue;
             };
-
             debug!(
                 "Indexing stdlib module '{}' ({} files)",
                 module_name,
-                files.len()
+                module_files.len()
             );
+            files.extend(module_files);
+        }
+        files.sort();
+        files.dedup();
 
-            let processor = &self.file_processor;
-            files.par_iter().for_each(|path| {
-                if let Ok(content) = std::fs::read_to_string(path) {
-                    if let Ok(uri) = Url::from_file_path(path) {
-                        if let Err(e) = processor
-                            .collect_file_facts_as_deferred_resolution_in_engine(
-                                &uri,
-                                &content,
-                                analysis_engine.clone(),
-                                ruby_analysis::core::SourceKind::Stdlib,
-                            )
-                        {
-                            warn!("Failed to index stdlib file {:?}: {}", path, e);
-                        }
-                    }
-                }
+        // Core stubs are language semantics installed independently of runtime
+        // discovery. A runtime probe must never change their ownership merely
+        // because an injected load path aliases the packaged stub directory.
+        // Other ownership collisions are invalid: one physical file cannot be
+        // both project/dependency truth and runtime stdlib truth in one engine.
+        files.retain(|path| {
+            let engine = analysis_engine.read();
+            let Some(file_id) = engine.file_id(path) else {
+                return true;
+            };
+            let file = engine.file(file_id).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: stdlib collision lookup found file id {:?} for {} without a registered source file. This is a bug because file-path and file-record ownership must be updated atomically. Fix: preserve the AnalysisEngine file lifecycle.",
+                    file_id,
+                    path.display()
+                )
             });
+            match file.kind {
+                ruby_analysis::core::SourceKind::Stub => {
+                    debug!(
+                        "Skipping runtime stdlib alias of bundled core stub: {}",
+                        path.display()
+                    );
+                    false
+                }
+                ruby_analysis::core::SourceKind::Stdlib => true,
+                ruby_analysis::core::SourceKind::Project
+                | ruby_analysis::core::SourceKind::Excluded
+                | ruby_analysis::core::SourceKind::Signature
+                | ruby_analysis::core::SourceKind::External
+                | ruby_analysis::core::SourceKind::Gem => panic!(
+                    "INVARIANT VIOLATED: runtime stdlib path {} is already owned as {:?}. This is a bug because one physical source cannot have contradictory semantic provenance in one project engine. Fix: correct exact runtime load-path discovery or source registration before stdlib collection.",
+                    path.display(),
+                    file.kind
+                ),
+            }
+        });
 
-            indexed_count += files.len();
+        let sources = files
+            .par_iter()
+            .map(|path| {
+                let content = std::fs::read_to_string(path)
+                    .with_context(|| format!("failed to read runtime stdlib {}", path.display()))?;
+                let uri = Url::from_file_path(path).map_err(|()| {
+                    anyhow::anyhow!(
+                        "runtime stdlib path is not a valid file URI: {}",
+                        path.display()
+                    )
+                })?;
+                Ok((path.clone(), uri, content))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        {
+            let mut engine = analysis_engine.write();
+            for (path, _, content) in &sources {
+                engine.register_file(ruby_analysis::engine::SourceFileInput {
+                    path: path.clone(),
+                    content: content.clone(),
+                    kind: ruby_analysis::core::SourceKind::Stdlib,
+                });
+            }
+        }
+        let known_namespaces = std::sync::Arc::new({
+            let engine = analysis_engine.read();
+            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+        });
+        let templates = sources
+            .par_iter()
+            .map(|(_, uri, content)| {
+                self.file_processor
+                    .collect_project_neutral_file_template_without_insertion(
+                        uri,
+                        content,
+                        analysis_engine.clone(),
+                        ruby_analysis::core::SourceKind::Stdlib,
+                        known_namespaces.clone(),
+                    )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let indexed_count = sources.len();
+        let mut engine = analysis_engine.write();
+        for ((path, _, _), template) in sources.iter().zip(templates) {
+            let file_id = engine.file_id(path).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: deterministic stdlib collection lost registered file {}. This is a bug because the batch registers every source before template collection. Fix: preserve file registration through deterministic stdlib commit.",
+                    path.display()
+                )
+            });
+            engine.replace_facts(
+                file_id,
+                template.instantiate(file_id),
+                ruby_analysis::engine::ResolveMode::Deferred,
+            );
         }
 
-        if indexed_count > 0 {
-            analysis_engine.write().resolve();
+        if resolve && indexed_count > 0 {
+            engine.resolve();
         }
 
         info!(
@@ -353,84 +688,25 @@ impl IndexerStdlib {
     // ========================================================================
 
     /// Discover standard library paths based on Ruby version
-    fn discover_stdlib_paths(&mut self) {
+    fn discover_stdlib_paths(&mut self) -> Result<()> {
         self.stdlib_paths.clear();
 
-        if let Some(version) = self.ruby_version {
-            self.discover_version_specific_paths(&version);
+        if let Some(paths) = self.runtime_stdlib_paths.as_ref() {
+            self.stdlib_paths.extend(paths.paths().iter().cloned());
+            return Ok(());
         }
 
-        self.discover_system_stdlib_paths();
-        self.discover_bundled_stubs();
-
-        info!("Discovered {} stdlib paths", self.stdlib_paths.len());
-    }
-
-    /// Discover version-specific stdlib paths
-    fn discover_version_specific_paths(&mut self, version: &RubyVersion) {
-        let version_str = version.to_string();
-        let home = std::env::var("HOME").unwrap_or_default();
-
-        let potential_paths = [
-            format!("/usr/lib/ruby/{}", version_str),
-            format!("/usr/local/lib/ruby/{}", version_str),
-            format!("/opt/ruby/{}/lib/ruby/{}", version_str, version_str),
-            format!(
-                "{}/.rbenv/versions/{}/lib/ruby/{}",
-                home, version_str, version_str
-            ),
-            format!(
-                "{}/.rvm/rubies/ruby-{}/lib/ruby/{}",
-                home, version_str, version_str
-            ),
-        ];
-
-        for path_str in potential_paths {
-            let path = PathBuf::from(path_str);
-            if path.exists() && path.is_dir() {
-                debug!("Found version-specific stdlib path: {:?}", path);
-                self.stdlib_paths.push(path);
-            }
-        }
-    }
-
-    /// Discover system Ruby stdlib paths
-    fn discover_system_stdlib_paths(&mut self) {
-        let Ok(output) = std::process::Command::new("ruby")
-            .args([
-                "-e",
-                "puts $LOAD_PATH.select { |p| p.include?('ruby') && !p.include?('gems') }",
-            ])
-            .output()
-        else {
-            return;
+        let Some(executable) = self.runtime_executable.as_ref() else {
+            warn!(
+                "Exact Ruby runtime executable unavailable; bundled core stubs remain indexed, skipping runtime-dependent stdlib discovery"
+            );
+            return Ok(());
         };
 
-        if !output.status.success() {
-            return;
-        }
-
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let path = PathBuf::from(line.trim());
-            if path.exists() && path.is_dir() {
-                debug!("Found system stdlib path: {:?}", path);
-                self.stdlib_paths.push(path);
-            }
-        }
-    }
-
-    /// Discover bundled stub files
-    fn discover_bundled_stubs(&mut self) {
-        let Some(version) = &self.ruby_version else {
-            return;
-        };
-
-        if let Some(path) = self.find_core_stubs_path(version.to_tuple()) {
-            if path.exists() {
-                debug!("Found bundled stubs: {:?}", path);
-                self.stdlib_paths.push(path);
-            }
-        }
+        let product =
+            RuntimeStdlibPathKey::new(executable, self.runtime_java_home.as_deref())?.discover()?;
+        self.stdlib_paths.extend(product.paths);
+        Ok(())
     }
 
     /// Get the path to core stubs for a specific Ruby version
@@ -540,6 +816,68 @@ mod tests {
     use std::fs;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    #[test]
+    fn bundled_jruby_core_seed_is_cross_process_stable() {
+        fn fingerprint() -> String {
+            let extension_root =
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("editors/vscode/vsix");
+            let mut indexer = IndexerStdlib::new(
+                FileProcessor::new(),
+                Some(RubyVersion::new_with_implementation(
+                    2,
+                    5,
+                    RubyImplementation::JRuby,
+                )),
+            );
+            indexer.set_extension_path(extension_root);
+            let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+            indexer
+                .index_core_stubs_blocking(engine.clone())
+                .expect("bundled JRuby core stubs must index");
+            let fingerprint = engine
+                .read()
+                .semantic_context_fingerprint()
+                .stable_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            fingerprint
+        }
+
+        const CHILD_ENV: &str = "RUBY_FAST_LSP_JRUBY_CORE_FINGERPRINT_CHILD";
+        if std::env::var_os(CHILD_ENV).is_some() {
+            for index in 0..512 {
+                let _ = RubyConstant::new(&format!("JrubyCoreFingerprintNoise{index}")).unwrap();
+            }
+            println!("RUBY_FAST_LSP_JRUBY_CORE_FINGERPRINT={}", fingerprint());
+            return;
+        }
+
+        let expected = fingerprint();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "indexer::indexer_stdlib::tests::bundled_jruby_core_seed_is_cross_process_stable",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "JRuby core fingerprint child failed:\nstdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let child = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("RUBY_FAST_LSP_JRUBY_CORE_FINGERPRINT="))
+            .unwrap()
+            .to_string();
+        assert_eq!(child, expected);
+    }
 
     #[test]
     fn every_supported_jruby_series_has_a_parseable_explicit_overlay() {
@@ -693,6 +1031,159 @@ mod tests {
                 .symbols_for_fqn(&thread)
                 .is_empty(),
             "Thread must resolve from default bundled core stubs when runtime detection fails"
+        );
+    }
+
+    #[test]
+    fn runtime_stdlib_discovery_without_an_exact_runtime_does_not_use_path() {
+        let mut indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(3, 0)));
+
+        indexer
+            .discover_stdlib_paths()
+            .expect("missing exact runtime must be a supported stub-only state");
+
+        assert!(
+            indexer.stdlib_paths.is_empty(),
+            "runtime stdlib discovery must not borrow whichever Ruby happens to be on the server PATH: {:?}",
+            indexer.stdlib_paths
+        );
+    }
+
+    #[test]
+    fn runtime_stdlib_path_key_changes_with_the_runtime_executable() {
+        let fixture = TempDir::new().expect("runtime fixture directory must be created");
+        let executable = fixture.path().join("ruby");
+        fs::write(&executable, b"runtime-v1").expect("runtime fixture must be written");
+        let before =
+            RuntimeStdlibPathKey::new(&executable, None).expect("runtime key must be constructed");
+
+        fs::write(&executable, b"runtime-v2-with-different-length")
+            .expect("runtime fixture must be replaced");
+        let after = RuntimeStdlibPathKey::new(&executable, None)
+            .expect("replacement runtime key must be constructed");
+
+        assert_ne!(
+            before, after,
+            "replacing a runtime in place must reserve a new immutable stdlib-path product identity"
+        );
+    }
+
+    #[test]
+    fn runtime_stdlib_cannot_replace_bundled_stub_ownership() {
+        let fixture = TempDir::new().expect("stdlib fixture directory must be created");
+        let path = fixture.path().join("runtime_probe.rb");
+        fs::write(&path, "class RuntimeProbe\nend\n").expect("stdlib fixture must be written");
+
+        let mut indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(3, 0)));
+        let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+        indexer
+            .index_stub_files_deterministically(std::slice::from_ref(&path), engine.clone())
+            .expect("stub fixture must index");
+        indexer.stdlib_paths.push(fixture.path().to_path_buf());
+        indexer.add_required_module("runtime_probe".to_string());
+
+        indexer
+            .index_required_modules_blocking_with_resolution(engine.clone(), false)
+            .expect("runtime stdlib collection must succeed");
+
+        let engine = engine.read();
+        let file_id = engine
+            .file_id(&path)
+            .expect("stub fixture must retain a registered file");
+        assert_eq!(
+            engine.file(file_id).expect("stub fixture must exist").kind,
+            ruby_analysis::core::SourceKind::Stub,
+            "runtime stdlib discovery must never reclassify bundled language semantics"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_stdlib_discovery_uses_the_exact_selected_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = TempDir::new().expect("runtime fixture directory must be created");
+        let runtime_root = fixture.path().join("exact-runtime");
+        let runtime_bin = runtime_root.join("bin");
+        let runtime_stdlib = runtime_root.join("lib/ruby/stdlib");
+        fs::create_dir_all(&runtime_bin).expect("runtime bin directory must be created");
+        fs::create_dir_all(&runtime_stdlib).expect("runtime stdlib directory must be created");
+        let executable = runtime_bin.join("ruby");
+        fs::write(
+            &executable,
+            "#!/bin/sh\nruntime_root=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\nprintf '%s\\0' \"$runtime_root/lib/ruby/stdlib\"\n",
+        )
+        .expect("fake exact runtime must be written");
+        let mut permissions = fs::metadata(&executable)
+            .expect("fake exact runtime metadata must exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions)
+            .expect("fake exact runtime must be executable");
+
+        let mut indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(3, 0)));
+        indexer.set_selected_runtime(executable, None);
+        indexer
+            .discover_stdlib_paths()
+            .expect("exact runtime stdlib discovery must succeed");
+
+        assert_eq!(
+            indexer.stdlib_paths,
+            vec![fs::canonicalize(runtime_stdlib).expect("runtime stdlib must canonicalize")],
+            "stdlib discovery must use only the exact selected runtime's load path"
+        );
+    }
+
+    #[test]
+    fn runtime_stdlib_deferred_collection_leaves_resolution_to_the_coordinator() {
+        let fixture = TempDir::new().expect("stdlib fixture directory must be created");
+        let child_path = fixture.path().join("runtime_probe").join("root.rb");
+        let base_dir = fixture.path().join("runtime_probe").join("root");
+        let base_path = base_dir.join("base.rb");
+        fs::create_dir_all(&base_dir).expect("nested stdlib fixture must be created");
+        fs::write(&child_path, "class RuntimeChild < RuntimeBase\nend\n")
+            .expect("stdlib child fixture must be written");
+        fs::write(&base_path, "class RuntimeBase\nend\n")
+            .expect("stdlib base fixture must be written");
+
+        let mut indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(3, 0)));
+        indexer.stdlib_paths.push(fixture.path().to_path_buf());
+        indexer.add_required_module("runtime_probe/root".to_string());
+        let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+
+        indexer
+            .index_required_modules_blocking_with_resolution(engine.clone(), false)
+            .expect("deferred stdlib collection must succeed");
+
+        let runtime_base =
+            RubyConstant::new("RuntimeBase").expect("RuntimeBase must be a valid Ruby constant");
+        assert!(
+            engine
+                .read()
+                .unresolved_graph_edges()
+                .iter()
+                .any(|edge| edge.target_parts == vec![runtime_base]),
+            "deferred stdlib collection must leave cross-file inheritance for the coordinator"
+        );
+
+        engine.write().resolve();
+        assert!(
+            engine
+                .read()
+                .unresolved_graph_edges()
+                .iter()
+                .all(|edge| edge.target_parts != vec![runtime_base]),
+            "the coordinator's one final resolution must connect the deferred stdlib graph edge"
+        );
+        assert!(
+            AnalysisQuery::new(&engine.read())
+                .debug_ancestors("RuntimeChild")
+                .ancestors
+                .iter()
+                .any(|ancestor| {
+                    ancestor.name == "RuntimeBase" && ancestor.kind == "superclass"
+                }),
+            "the coordinator's one final resolution must materialize stdlib inheritance"
         );
     }
 

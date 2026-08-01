@@ -1,9 +1,113 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::{
-    FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind, RubyConstant, RubyMethod,
-    RubyType, SourceFileId, TypeFact, TypeResolution, TypeSubject,
+    FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind, ResolvedMethodCallee,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeResolution, TypeSubject,
 };
+use parking_lot::Mutex;
+
+const MAX_RESOLVED_METHOD_CACHE_ENTRIES_PER_SOURCE: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) enum MethodReturnQueryAccess {
+    Private,
+    Public,
+    Protected(FullyQualifiedName),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MethodReturnQueryKey {
+    namespace: FullyQualifiedName,
+    method: RubyMethod,
+    access: MethodReturnQueryAccess,
+}
+
+#[derive(Debug, Default)]
+struct AnalysisQueryCacheState {
+    engine_identity: Option<(u64, u64)>,
+    method_returns: HashMap<MethodReturnQueryKey, Option<RubyType>>,
+    method_callees: HashMap<MethodReturnQueryKey, Option<Vec<ResolvedMethodCallee>>>,
+}
+
+/// Bounded-lifetime memoization for repeated semantic queries while collecting
+/// one source product.
+///
+/// The cache binds itself to one exact engine instance and semantic revision.
+/// Replacements and engine clones receive different identities, so callers
+/// cannot accidentally reuse results across isolated project engines.
+#[derive(Debug, Default)]
+pub struct AnalysisQueryCache {
+    state: Mutex<AnalysisQueryCacheState>,
+}
+
+impl AnalysisQueryCache {
+    fn method_return(
+        &self,
+        engine_identity: (u64, u64),
+        key: MethodReturnQueryKey,
+        compute: impl FnOnce() -> Option<RubyType>,
+    ) -> Option<RubyType> {
+        {
+            let mut state = self.state.lock();
+            if state.engine_identity != Some(engine_identity) {
+                state.engine_identity = Some(engine_identity);
+                state.method_returns.clear();
+                state.method_callees.clear();
+            }
+            if let Some(cached) = state.method_returns.get(&key) {
+                return cached.clone();
+            }
+        }
+
+        let result = compute();
+        let mut state = self.state.lock();
+        if state.engine_identity == Some(engine_identity) {
+            state.method_returns.insert(key, result.clone());
+        }
+        result
+    }
+
+    pub(super) fn method_callees(
+        &self,
+        engine_identity: (u64, u64),
+        namespace: &FullyQualifiedName,
+        method: RubyMethod,
+        access: MethodReturnQueryAccess,
+        compute: impl FnOnce() -> Option<Vec<ResolvedMethodCallee>>,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        let key = MethodReturnQueryKey {
+            namespace: namespace.clone(),
+            method,
+            access,
+        };
+        {
+            let mut state = self.state.lock();
+            if state.engine_identity != Some(engine_identity) {
+                state.engine_identity = Some(engine_identity);
+                state.method_returns.clear();
+                state.method_callees.clear();
+            }
+            if let Some(cached) = state.method_callees.get(&key) {
+                return cached.clone();
+            }
+        }
+
+        let result = compute();
+        let mut state = self.state.lock();
+        if state.engine_identity == Some(engine_identity)
+            && state.method_callees.len() < MAX_RESOLVED_METHOD_CACHE_ENTRIES_PER_SOURCE
+        {
+            state.method_callees.insert(key, result.clone());
+        }
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn valid_entry_counts_for_test(&self) -> (usize, usize) {
+        let state = self.state.lock();
+        (state.method_returns.len(), state.method_callees.len())
+    }
+}
 use crate::engine::lookup_types::{ConstantHover, ConstantHoverKind, VariableTypeKind};
 use crate::engine::query::AnalysisQuery;
 use crate::engine::resolution::{
@@ -300,6 +404,10 @@ impl<'a> AnalysisQuery<'a> {
             .map(|fact| fact.kind)
     }
 
+    pub fn namespace_exists(&self, namespace_fqn: &FullyQualifiedName) -> bool {
+        self.namespace_node_kind(namespace_fqn).is_some()
+    }
+
     pub fn namespace_type(&self, namespace_fqn: &FullyQualifiedName) -> Option<RubyType> {
         match self.namespace_node_kind(namespace_fqn)? {
             GraphNodeKind::Class => Some(RubyType::Class(namespace_fqn.clone())),
@@ -425,6 +533,52 @@ impl<'a> AnalysisQuery<'a> {
         self.method_return_type_inner(fact, &mut seen)
     }
 
+    /// Resolve return types for a callee that has already passed ordinary MRO,
+    /// visibility, execution-context, and `method_missing` resolution.
+    ///
+    /// Callers that already own a [`ResolvedMethodCallee`] must use this path
+    /// instead of resolving the callee owner as a fresh receiver. Re-running
+    /// receiver lookup is both redundant and subtly different for module
+    /// includers because the callee already identifies the winning definition
+    /// ranges.
+    pub fn method_return_type_for_callee(
+        &self,
+        callee: &ResolvedMethodCallee,
+    ) -> Option<crate::core::RubyType> {
+        if callee.definition_ranges.is_empty() {
+            return None;
+        }
+
+        let mut facts = self
+            .engine
+            .method_facts_matching_owner_name(&callee.owner, &callee.method)
+            .into_iter()
+            .filter(|fact| callee.definition_ranges.contains(&fact.range))
+            .collect::<Vec<_>>();
+        facts.sort_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+                fact.fqn.to_string(),
+            )
+        });
+        facts.dedup();
+
+        let mut seen = HashSet::new();
+        let mut return_types = facts
+            .iter()
+            .filter_map(|fact| self.method_return_type_inner(fact, &mut seen))
+            .collect::<Vec<_>>();
+        return_types.sort_by_key(ToString::to_string);
+        return_types.dedup();
+        match return_types.len() {
+            0 => None,
+            1 => return_types.pop(),
+            2.. => Some(RubyType::union(return_types)),
+        }
+    }
+
     fn method_return_type_inner(
         &self,
         fact: &MethodFact,
@@ -500,6 +654,22 @@ impl<'a> AnalysisQuery<'a> {
         self.method_return_type_for_receiver_inner(namespace_fqn, method, true, None, &mut seen)
     }
 
+    pub fn method_return_type_for_receiver_cached(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        cache: &AnalysisQueryCache,
+    ) -> Option<crate::core::RubyType> {
+        let key = MethodReturnQueryKey {
+            namespace: namespace_fqn.clone(),
+            method: *method,
+            access: MethodReturnQueryAccess::Private,
+        };
+        cache.method_return(self.engine.query_cache_identity(), key, || {
+            self.method_return_type_for_receiver(namespace_fqn, method)
+        })
+    }
+
     pub fn method_return_type_for_public_receiver(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -507,6 +677,22 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Option<crate::core::RubyType> {
         let mut seen = HashSet::new();
         self.method_return_type_for_receiver_inner(namespace_fqn, method, false, None, &mut seen)
+    }
+
+    pub fn method_return_type_for_public_receiver_cached(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        cache: &AnalysisQueryCache,
+    ) -> Option<crate::core::RubyType> {
+        let key = MethodReturnQueryKey {
+            namespace: namespace_fqn.clone(),
+            method: *method,
+            access: MethodReturnQueryAccess::Public,
+        };
+        cache.method_return(self.engine.query_cache_identity(), key, || {
+            self.method_return_type_for_public_receiver(namespace_fqn, method)
+        })
     }
 
     pub fn method_return_type_for_protected_receiver(
@@ -523,6 +709,27 @@ impl<'a> AnalysisQuery<'a> {
             Some(caller_namespace_fqn),
             &mut seen,
         )
+    }
+
+    pub fn method_return_type_for_protected_receiver_cached(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        caller_namespace_fqn: &FullyQualifiedName,
+        cache: &AnalysisQueryCache,
+    ) -> Option<crate::core::RubyType> {
+        let key = MethodReturnQueryKey {
+            namespace: namespace_fqn.clone(),
+            method: *method,
+            access: MethodReturnQueryAccess::Protected(caller_namespace_fqn.clone()),
+        };
+        cache.method_return(self.engine.query_cache_identity(), key, || {
+            self.method_return_type_for_protected_receiver(
+                namespace_fqn,
+                method,
+                caller_namespace_fqn,
+            )
+        })
     }
 
     fn method_return_type_for_receiver_inner(

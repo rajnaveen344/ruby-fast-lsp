@@ -1,0 +1,210 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Stop serializing and hashing the same exact locked-gem applicability snapshot once per project file while preserving extension semantic-target invalidation.",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "scheduler_concurrency": 2,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "change": {
+    "scope": "ProjectContextSeed computes one SHA-256 applicability identity when its exact lockfile snapshot is detected or refreshed. Per-file ProjectContext snapshots copy that 32-byte identity into semantic-seed checks instead of reserializing every locked gem.",
+    "identity": "The digest contains only lockfile presence, completeness, and the deterministic locked name/version/source vector used by extension applicability. Registry replacement still owns a fresh seeded-engine table; a dependency refresh changes the identity and replaces the synthetic semantic-target file in the same isolated engine.",
+    "lifetime": "The cached digest lives in the existing isolated project context seed. It retains no AnalysisEngine, extension instance, registry snapshot, source buffer, or semantic fact.",
+    "unchanged_boundaries": "Extension manifests remain the owner of applicability requirements; the project lock snapshot remains the source of exact versions; semantic targets still enter through one ordinary file-owned Stub replacement; project engines and guest instances remain isolated."
+  },
+  "focused_regression": {
+    "red_failure": "The initial test failed to compile because ProjectContextSeed had no cached applicability identity or snapshot API.",
+    "green_tests": [
+      "extensions::project_context::tests::applicability_fingerprint_is_computed_once_per_dependency_snapshot",
+      "extensions::tests::cached_project_snapshot_replaces_semantic_seed_after_dependency_refresh"
+    ],
+    "proof": "Three per-file contexts reuse one computation, while one exact lockfile refresh performs one replacement computation and removes now-inapplicable RSpec semantic targets from the same engine.",
+    "extension_tests": {
+      "passed": 66,
+      "failed": 0
+    },
+    "file_processor_tests": {
+      "passed": 7,
+      "failed": 0
+    }
+  },
+  "symbolized_profile": {
+    "baseline": {
+      "profile": "/tmp/ruby-fast-lsp-extension-applicability-v279-symbolized-profile.json.gz",
+      "symbols": "/tmp/ruby-fast-lsp-extension-applicability-v279-symbolized-profile.json.syms.json",
+      "profiler_executable_sha256": "9aa6939342d6cfd43f1057fa31a507a4de72fc7626449bf542bd0f9b17d64b7f",
+      "application_cpu_us": 30495267,
+      "ensure_semantic_seed_facts": {
+        "inclusive_cpu_us": 617670,
+        "percent": 2.026
+      }
+    },
+    "candidate": {
+      "profile": "/tmp/ruby-fast-lsp-semantic-seed-v282-symbolized-profile.json.gz",
+      "symbols": "/tmp/ruby-fast-lsp-semantic-seed-v282-symbolized-profile.json.syms.json",
+      "profiler_executable_sha256": "979186735352330f9c154674e490513aa6ae17c282351124e3fa86740c10db3a",
+      "application_cpu_us": 30453046,
+      "ensure_semantic_seed_facts": {
+        "inclusive_cpu_us": 0,
+        "percent": 0.0
+      }
+    },
+    "interpretation": "The formerly sampled 2.03% semantic-seed check disappears from the 1 kHz symbolized profile. Its remaining pointer/fingerprint comparison is below sampling resolution."
+  },
+  "controlled_ab": {
+    "baseline_executable": "/tmp/ruby-fast-lsp-profiler-applicability-snapshot",
+    "baseline_executable_sha256": "43f082153309c753efb31842d37746e292b5e3e6b16207c5b6743d807bc6182b",
+    "candidate_executable": "/tmp/ruby-fast-lsp-profiler-semantic-seed-fingerprint",
+    "candidate_executable_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "excluded_run": {
+      "path": "/tmp/ruby-fast-lsp-semantic-seed-candidate-1.log",
+      "reason": "The bounded persistent cache evicted and rebuilt 512 gem products during this run, so it was not a fully warm comparison.",
+      "gem_hits": 69,
+      "gem_lookups": 581,
+      "wall_ms": 33965.973834
+    },
+    "baseline_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-semantic-seed-baseline-2.log",
+        "wall_ms": 13453.421208,
+        "user_cpu_ms": 24887.038,
+        "system_cpu_ms": 2586.628,
+        "peak_rss_bytes": 1450442752,
+        "active_project_navigation_ms": 5462,
+        "active_dependency_navigation_ms": 11681,
+        "active_semantic_complete_ms": 11718,
+        "live_project_probe_ms": 483,
+        "live_dependency_probe_ms": 1332
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-semantic-seed-baseline-3.log",
+        "wall_ms": 13333.26575,
+        "user_cpu_ms": 24835.84,
+        "system_cpu_ms": 2595.46,
+        "peak_rss_bytes": 1338343424,
+        "active_project_navigation_ms": 5310,
+        "active_dependency_navigation_ms": 11657,
+        "active_semantic_complete_ms": 11696,
+        "live_project_probe_ms": 420,
+        "live_dependency_probe_ms": 1334
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-semantic-seed-baseline-4.log",
+        "wall_ms": 13390.904292,
+        "user_cpu_ms": 24815.699,
+        "system_cpu_ms": 2608.613,
+        "peak_rss_bytes": 1343635456,
+        "active_project_navigation_ms": 5369,
+        "active_dependency_navigation_ms": 11670,
+        "active_semantic_complete_ms": 11706,
+        "live_project_probe_ms": 397,
+        "live_dependency_probe_ms": 1395
+      }
+    ],
+    "candidate_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-semantic-seed-candidate-2.log",
+        "wall_ms": 13180.666625,
+        "user_cpu_ms": 24332.203,
+        "system_cpu_ms": 2539.958,
+        "peak_rss_bytes": 1307934720,
+        "active_project_navigation_ms": 5269,
+        "active_dependency_navigation_ms": 11525,
+        "active_semantic_complete_ms": 11567,
+        "live_project_probe_ms": 374,
+        "live_dependency_probe_ms": 1318
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-semantic-seed-candidate-3.log",
+        "wall_ms": 13136.476166,
+        "user_cpu_ms": 24535.731,
+        "system_cpu_ms": 2502.668,
+        "peak_rss_bytes": 1638416384,
+        "active_project_navigation_ms": 5296,
+        "active_dependency_navigation_ms": 11502,
+        "active_semantic_complete_ms": 11539,
+        "live_project_probe_ms": 368,
+        "live_dependency_probe_ms": 1281
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-semantic-seed-candidate-4.log",
+        "wall_ms": 13060.301291,
+        "user_cpu_ms": 24265.379,
+        "system_cpu_ms": 2544.706,
+        "peak_rss_bytes": 1361756160,
+        "active_project_navigation_ms": 5210,
+        "active_dependency_navigation_ms": 11453,
+        "active_semantic_complete_ms": 11496,
+        "live_project_probe_ms": 365,
+        "live_dependency_probe_ms": 1250
+      }
+    ],
+    "median": {
+      "baseline": {
+        "wall_ms": 13390.904292,
+        "user_cpu_ms": 24835.84,
+        "system_cpu_ms": 2595.46,
+        "peak_rss_bytes": 1343635456,
+        "active_project_navigation_ms": 5369,
+        "active_dependency_navigation_ms": 11670,
+        "active_semantic_complete_ms": 11706,
+        "live_project_probe_ms": 420,
+        "live_dependency_probe_ms": 1334
+      },
+      "candidate": {
+        "wall_ms": 13136.476166,
+        "user_cpu_ms": 24332.203,
+        "system_cpu_ms": 2539.958,
+        "peak_rss_bytes": 1361756160,
+        "active_project_navigation_ms": 5269,
+        "active_dependency_navigation_ms": 11502,
+        "active_semantic_complete_ms": 11539,
+        "live_project_probe_ms": 368,
+        "live_dependency_probe_ms": 1281
+      }
+    },
+    "change_percent": {
+      "wall_ms": -1.9,
+      "user_cpu_ms": -2.028,
+      "system_cpu_ms": -2.138,
+      "peak_rss_bytes": 1.349,
+      "active_project_navigation_ms": -1.863,
+      "active_dependency_navigation_ms": -1.44,
+      "active_semantic_complete_ms": -1.427,
+      "live_project_probe_ms": -12.381,
+      "live_dependency_probe_ms": -3.973
+    },
+    "maximum_candidate_peak_rss_bytes": 1638416384,
+    "minimum_candidate_rss_ceiling_headroom_bytes": 138430054
+  },
+  "correctness": {
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
+      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+    },
+    "semantic_export_manifest_sha256_all_six_valid_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
+    "manifest_project_records_per_run": 2,
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "persistent_gem_hits": 607,
+    "persistent_gem_lookups": 607,
+    "persistent_java_hits": 168,
+    "persistent_java_lookups": 168,
+    "panicked_resource_tasks": 0,
+    "resource_leaks_at_end": 0
+  },
+  "decision": "Accepted. One cached project dependency identity removes the entire previously sampled 2.03% semantic-seed hashing path without changing extension applicability, isolated engine ownership, invalidation, semantic output, navigation provenance, or resource accounting. Three valid interleaved warm pairs improve median wall 1.900%, user CPU 2.028%, active project navigation 1.863%, dependency navigation 1.440%, and active semantic completion 1.427%. Median RSS rises 1.349% amid allocator variance, while every candidate remains below the fixed ceiling with at least 138.4 MB headroom. Warm project navigation remains 5.269 seconds versus the five-second target, and active semantic completion remains 11.539 seconds versus the five-second target."
+}

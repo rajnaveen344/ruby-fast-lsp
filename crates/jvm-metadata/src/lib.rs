@@ -10,6 +10,7 @@ mod java_source;
 
 pub use archive::{
     parse_archive, ArchiveClass, ArchiveError, ArchiveKind, ArchiveLimits, ArchiveMetadata,
+    ARCHIVE_PRODUCT_SEMANTIC_VERSION,
 };
 pub use classfile::{
     parse_class, AnnotationInfo, ClassFile, ClassKind, ClassLimits, InnerClassInfo, MemberInfo,

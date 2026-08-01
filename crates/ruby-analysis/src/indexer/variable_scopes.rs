@@ -15,6 +15,8 @@
 //! - **Soft boundaries** (Block): Inner scopes CAN capture outer variables
 
 use crate::core::{RubyType, TextRange};
+#[cfg(test)]
+use std::cell::Cell;
 
 pub type LVScopeId = usize;
 pub use crate::LocalScopeKind as LVScopeKind;
@@ -29,6 +31,8 @@ pub struct VariableScopes {
     root: LVScopeId,
     /// Current active scope during building
     current: Option<LVScopeId>,
+    #[cfg(test)]
+    scope_owner_scan_count: Cell<usize>,
 }
 
 impl VariableScopes {
@@ -53,6 +57,8 @@ impl VariableScopes {
             scopes,
             root: 0,
             current: Some(0),
+            #[cfg(test)]
+            scope_owner_scan_count: Cell::new(0),
         }
     }
 
@@ -301,6 +307,13 @@ impl VariableScopes {
         file_id: crate::core::SourceFileId,
         byte_offset: u32,
     ) -> Option<LVScopeId> {
+        #[cfg(test)]
+        self.scope_owner_scan_count
+            .set(self.scope_owner_scan_count.get().checked_add(1).expect(
+                "INVARIANT VIOLATED: variable-scope ownership scan counter overflowed. \
+                     This is a bug because one test process cannot perform usize::MAX scope scans. \
+                     Fix: investigate an unbounded scope-query loop before widening the counter.",
+            ));
         let name_key = ustr::ustr(name);
         for scope in &self.scopes {
             for var in &scope.local_variables {
@@ -325,6 +338,11 @@ impl VariableScopes {
             }
         }
         None
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scope_owner_scan_count_for_test(&self) -> usize {
+        self.scope_owner_scan_count.get()
     }
 
     /// Find the scope at a given position

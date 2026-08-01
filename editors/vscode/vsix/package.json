@@ -181,6 +181,10 @@
         "title": "Ruby Fast LSP: Show Runtime Status"
       },
       {
+        "command": "ruby-fast-lsp.indexing.status",
+        "title": "Ruby Fast LSP: Show Project Indexing Status"
+      },
+      {
         "command": "ruby-fast-lsp.runtime.configure",
         "title": "Ruby Fast LSP: Configure Active Project"
       },

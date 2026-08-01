@@ -1,34 +1,27 @@
 use crate::core::{SourceFileId, TextRange};
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct SourceDocument {
-    content: String,
     file_id: SourceFileId,
     line_offsets: Vec<usize>,
-    comments: Vec<(usize, usize)>,
+    comments: OnceLock<Vec<(usize, usize)>>,
 }
 
 impl SourceDocument {
-    pub fn new(content: String, file_id: SourceFileId) -> Self {
-        let line_offsets = compute_line_offsets(&content);
-        let comments = parse_comments(&content);
+    pub fn new(content: &str, file_id: SourceFileId) -> Self {
+        let line_offsets = compute_line_offsets(content);
         Self {
-            content,
             file_id,
             line_offsets,
-            comments,
+            comments: OnceLock::new(),
         }
     }
 
-    pub fn update(&mut self, content: String) {
-        self.line_offsets = compute_line_offsets(&content);
-        self.comments = parse_comments(&content);
-        self.content = content;
-    }
-
-    pub fn content(&self) -> &str {
-        &self.content
+    pub fn update(&mut self, content: &str) {
+        self.line_offsets = compute_line_offsets(content);
+        self.comments.take();
     }
 
     pub fn file_id(&self) -> SourceFileId {
@@ -39,13 +32,13 @@ impl SourceDocument {
         self.file_id = file_id;
     }
 
-    pub fn comments(&self) -> &[(usize, usize)] {
-        &self.comments
+    pub fn comments(&self, content: &str) -> &[(usize, usize)] {
+        self.comments.get_or_init(|| parse_comments(content))
     }
 
-    pub fn offset_to_line_character(&self, offset: usize) -> (u32, u32) {
-        let mut offset = offset.min(self.content.len());
-        while offset > 0 && !self.content.is_char_boundary(offset) {
+    pub fn offset_to_line_character(&self, content: &str, offset: usize) -> (u32, u32) {
+        let mut offset = offset.min(content.len());
+        while offset > 0 && !content.is_char_boundary(offset) {
             offset -= 1;
         }
         let line_index = match self.line_offsets.binary_search(&offset) {
@@ -53,7 +46,7 @@ impl SourceDocument {
             Err(after) => after - 1,
         };
         let line_start = self.line_offsets[line_index];
-        let character: usize = self.content[line_start..offset]
+        let character: usize = content[line_start..offset]
             .chars()
             .map(char::len_utf16)
             .sum();
@@ -71,14 +64,14 @@ impl SourceDocument {
         )
     }
 
-    pub fn line_character_to_offset(&self, line: u32, character: u32) -> usize {
+    pub fn line_character_to_offset(&self, content: &str, line: u32, character: u32) -> usize {
         let line = usize::try_from(line).expect(
             "INVARIANT VIOLATED: u32 line could not convert to usize. \
              This is a bug because usize must represent u32 on supported platforms. \
              Fix: unsupported target architecture.",
         );
         if line >= self.line_offsets.len() - 1 {
-            return self.content.len();
+            return content.len();
         }
 
         let line_start = self.line_offsets[line];
@@ -91,7 +84,7 @@ impl SourceDocument {
 
         let mut byte_offset = 0;
         let mut utf16_units = 0;
-        for c in self.content[line_start..line_end].chars() {
+        for c in content[line_start..line_end].chars() {
             let char_units = c.len_utf16();
             if utf16_units + char_units > target_char || c == '\n' {
                 break;
@@ -174,53 +167,64 @@ mod tests {
 
     #[test]
     fn computes_line_offsets() {
-        let doc = SourceDocument::new(
-            "def foo\n  puts 'Hello'\nend\n".to_string(),
-            SourceFileId(7),
-        );
+        let doc = SourceDocument::new("def foo\n  puts 'Hello'\nend\n", SourceFileId(7));
 
         assert_eq!(doc.line_offsets(), &[0, 8, 23, 27]);
     }
 
     #[test]
     fn converts_offsets_and_line_characters() {
-        let doc = SourceDocument::new("line1\nline2\nline3".to_string(), SourceFileId(0));
+        let source = "line1\nline2\nline3";
+        let doc = SourceDocument::new(source, SourceFileId(0));
 
-        assert_eq!(doc.offset_to_line_character(0), (0, 0));
-        assert_eq!(doc.offset_to_line_character(6), (1, 0));
-        assert_eq!(doc.line_character_to_offset(1, 3), 9);
-        assert_eq!(doc.line_character_to_offset(100, 0), 17);
+        assert_eq!(doc.offset_to_line_character(source, 0), (0, 0));
+        assert_eq!(doc.offset_to_line_character(source, 6), (1, 0));
+        assert_eq!(doc.line_character_to_offset(source, 1, 3), 9);
+        assert_eq!(doc.line_character_to_offset(source, 100, 0), 17);
     }
 
     #[test]
     fn handles_utf8_character_offsets() {
-        let doc = SourceDocument::new("hello 你好\nworld".to_string(), SourceFileId(0));
+        let source = "hello 你好\nworld";
+        let doc = SourceDocument::new(source, SourceFileId(0));
 
-        assert_eq!(doc.offset_to_line_character(7), (0, 6));
-        assert_eq!(doc.line_character_to_offset(0, 6), 6);
+        assert_eq!(doc.offset_to_line_character(source, 7), (0, 6));
+        assert_eq!(doc.line_character_to_offset(source, 0, 6), 6);
     }
 
     #[test]
     fn positions_use_utf16_code_units() {
-        let doc = SourceDocument::new("a😀b\n".to_string(), SourceFileId(0));
+        let source = "a😀b\n";
+        let doc = SourceDocument::new(source, SourceFileId(0));
 
-        assert_eq!(doc.offset_to_line_character(1), (0, 1));
-        assert_eq!(doc.offset_to_line_character(5), (0, 3));
-        assert_eq!(doc.line_character_to_offset(0, 3), 5);
+        assert_eq!(doc.offset_to_line_character(source, 1), (0, 1));
+        assert_eq!(doc.offset_to_line_character(source, 5), (0, 3));
+        assert_eq!(doc.line_character_to_offset(source, 0, 3), 5);
     }
 
     #[test]
     fn parses_comments() {
-        let doc = SourceDocument::new("# hello\nclass User\nend\n".to_string(), SourceFileId(0));
+        let source = "# hello\nclass User\nend\n";
+        let doc = SourceDocument::new(source, SourceFileId(0));
 
-        assert_eq!(doc.comments(), &[(0, 7)]);
+        assert_eq!(doc.comments(source), &[(0, 7)]);
+    }
+
+    #[test]
+    fn updating_source_invalidates_lazily_parsed_comments() {
+        let mut doc = SourceDocument::new("# old\n", SourceFileId(0));
+        assert_eq!(doc.comments("# old\n"), &[(0, 5)]);
+
+        doc.update("class User\n# new\nend\n");
+
+        assert_eq!(doc.comments("class User\n# new\nend\n"), &[(11, 16)]);
     }
 
     #[test]
     fn parses_shebang_as_a_comment_without_crashing() {
         let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nputs 'ok'\n";
-        let doc = SourceDocument::new(source.to_string(), SourceFileId(0));
+        let doc = SourceDocument::new(source, SourceFileId(0));
 
-        assert_eq!(doc.comments(), &[(0, 19), (20, 49)]);
+        assert_eq!(doc.comments(source), &[(0, 19), (20, 49)]);
     }
 }

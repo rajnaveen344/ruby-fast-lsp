@@ -9,6 +9,7 @@ mod debug;
 mod debug_types;
 mod diagnostic_helpers;
 mod diagnostics;
+mod external_facts_template;
 mod file_id_map;
 mod hierarchy;
 mod hierarchy_types;
@@ -28,6 +29,10 @@ pub use debug_types::{
     InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
     StatsResponse,
 };
+pub use external_facts_template::{
+    ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate,
+    ProjectNeutralTemplateRejection,
+};
 pub use file_id_map::FileIdMap;
 pub use hierarchy_types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
@@ -44,6 +49,7 @@ pub use query::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
 pub use state::{
     AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, SemanticChange,
-    SemanticExportFingerprint, SourceFile, SourceFileInput,
+    SemanticExportFingerprint, SemanticResultFingerprint, SourceFile, SourceFileInput,
 };
+pub use types::AnalysisQueryCache;
 pub use workspace_symbol_types::WorkspaceSymbolMatch;

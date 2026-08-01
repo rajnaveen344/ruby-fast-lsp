@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Cursor, Read};
+use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{parse_class, ClassFile, ClassLimits, MetadataError};
 
 const JMOD_MAGIC: &[u8; 4] = b"JM\x01\x00";
 const VERSIONED_PREFIX: &str = "META-INF/versions/";
+pub const ARCHIVE_PRODUCT_SEMANTIC_VERSION: &str =
+    concat!(env!("CARGO_PKG_VERSION"), ":archive-product-v1");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveKind {
@@ -14,14 +18,14 @@ pub enum ArchiveKind {
     Jmod,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchiveClass {
     pub entry_name: String,
     pub release: Option<u16>,
-    pub class: ClassFile,
+    pub class: Arc<ClassFile>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchiveMetadata {
     pub fingerprint_sha256: String,
     pub classes: Vec<ArchiveClass>,
@@ -173,7 +177,7 @@ pub fn parse_archive(
         classes.push(ArchiveClass {
             entry_name,
             release,
-            class,
+            class: Arc::new(class),
         });
     }
 
@@ -360,6 +364,7 @@ fn class_candidate(
 #[cfg(test)]
 mod tests {
     use std::io::{Cursor, Write};
+    use std::sync::Arc;
 
     use zip::write::SimpleFileOptions;
 
@@ -454,6 +459,20 @@ mod tests {
             .expect("checked JMOD fixture must parse");
         assert_eq!(metadata.classes.len(), 1);
         assert_eq!(metadata.classes[0].class.name, "com/example/Demo");
+    }
+
+    #[test]
+    fn cloned_archive_metadata_shares_immutable_class_declarations() {
+        let class = minimal_class();
+        let archive = zip_bytes(&[("com/example/Demo.class", &class)]);
+        let metadata = parse_archive(&archive, ArchiveKind::Jar, 17, ArchiveLimits::default())
+            .expect("checked JAR fixture must parse");
+        let cloned = metadata.clone();
+
+        assert!(
+            Arc::ptr_eq(&metadata.classes[0].class, &cloned.classes[0].class),
+            "cloning one immutable archive product must not duplicate its parsed ClassFile heap"
+        );
     }
 
     #[test]

@@ -1,0 +1,144 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-31",
+  "purpose": "Measure and remove extension-dispatch overhead for ordinary Ruby calls whose names cannot be handled or tracked by any loaded extension.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "raw_local_evidence": [
+    {
+      "id": "v39-symbolized-sample",
+      "jsonl": "/tmp/ruby-fast-lsp-symbolized-sample-v39-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-symbolized-sample-v39-20260731.log",
+      "sample": "/tmp/ruby-fast-lsp-symbolized-sample-v39-20260731.sample.txt"
+    },
+    {
+      "id": "v40",
+      "jsonl": "/tmp/ruby-fast-lsp-extension-prefilter-two-project-jruby-warm-v40-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-extension-prefilter-two-project-jruby-warm-v40-20260731.log"
+    },
+    {
+      "id": "v41",
+      "jsonl": "/tmp/ruby-fast-lsp-extension-prefilter-two-project-jruby-warm-v41-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-extension-prefilter-two-project-jruby-warm-v41-20260731.log"
+    }
+  ],
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "profile": {
+    "finding": "FactCollector call-node traversal entered process_call_node_with_registry for every ordinary Ruby call and cloned/scanned loaded extension state before discovering that most names were irrelevant.",
+    "symbolized_sample_fact_collector_visit_call_samples": 5510,
+    "symbolized_sample_process_call_entry_samples": 3363,
+    "symbolized_sample_extension_registry_process_samples": 1313,
+    "symbolized_sample_wasm_process_samples": 598
+  },
+  "change": {
+    "prefilter": "Read the registry's complete deterministic tracked_call_names set and return before extension call processing when the call name is absent.",
+    "coverage": "tracked_call_names contains the built-in RSpec indexed names plus every loaded Wasm indexed call name and frame call name.",
+    "semantic_boundary": "The guard changes only dispatcher admission; matching calls, lexical frames, patch validation, conflict policy, and isolated engine ownership are unchanged."
+  },
+  "result": {
+    "repeats": [
+      {
+        "id": "v40",
+        "wall_ms": 22216.750083,
+        "peak_rss_bytes": 1405026304,
+        "project_user_pmm_ms": 551,
+        "dependency_bson_object_id_ms": 1681,
+        "active_semantic_complete_ms": 19844,
+        "all_project_semantic_complete_ms": 22216,
+        "server_project_file_visitor_cpu_ms": 12955.592,
+        "sibling_project_file_visitor_cpu_ms": 13358.767
+      },
+      {
+        "id": "v41",
+        "wall_ms": 21516.917083,
+        "peak_rss_bytes": 1587691520,
+        "project_user_pmm_ms": 510,
+        "dependency_bson_object_id_ms": 1761,
+        "active_semantic_complete_ms": 19363,
+        "all_project_semantic_complete_ms": 21516,
+        "server_project_file_visitor_cpu_ms": 13091.822,
+        "sibling_project_file_visitor_cpu_ms": 13417.306
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 21866.833583,
+      "peak_rss_bytes": 1496358912,
+      "project_user_pmm_ms": 530.5,
+      "dependency_bson_object_id_ms": 1721,
+      "active_semantic_complete_ms": 19603.5,
+      "all_project_semantic_complete_ms": 21866,
+      "server_project_file_visitor_cpu_ms": 13023.707,
+      "sibling_project_file_visitor_cpu_ms": 13388.037
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "exact_semantic_probes_passed": true
+  },
+  "comparison": {
+    "previous_terminal_wall_median_ms": 21889.561917,
+    "terminal_wall_change_percent": -0.1,
+    "previous_peak_rss_median_bytes": 1701879808,
+    "peak_rss_change_percent": -12.07,
+    "previous_server_project_file_visitor_cpu_ms": 13981,
+    "server_project_file_visitor_cpu_change_percent": -6.85,
+    "previous_sibling_project_file_visitor_cpu_ms": 14151,
+    "sibling_project_file_visitor_cpu_change_percent": -5.39,
+    "project_navigation_change_percent": -7.58,
+    "dependency_navigation_change_percent": 1.15,
+    "active_semantic_completion_change_percent": 1.06
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "all_gem_products_rebound": true,
+    "all_java_products_rebound": true,
+    "extension_focused_tests": 60,
+    "extension_focused_failures": 0,
+    "full_root_library_tests": 1313,
+    "full_root_library_failures": 0
+  },
+  "rejected_adjacent_experiments": [
+    {
+      "name": "shared FactCollector local method-return map",
+      "raw_local_evidence": [
+        "/tmp/ruby-fast-lsp-shared-method-returns-two-project-jruby-warm-v35-20260731.jsonl",
+        "/tmp/ruby-fast-lsp-shared-method-returns-two-project-jruby-warm-v36-20260731.jsonl"
+      ],
+      "wall_median_ms": 23720.66,
+      "decision": "Rejected and reverted. Avoiding per-method map reconstruction did not improve the exact workload and materially regressed terminal wall time, so map cloning is not the next dominant target."
+    },
+    {
+      "name": "lazy current-file type-subject lookup index",
+      "raw_local_evidence": [
+        "/tmp/ruby-fast-lsp-direct-type-index-two-project-jruby-warm-v42-20260731.jsonl",
+        "/tmp/ruby-fast-lsp-direct-type-index-two-project-jruby-warm-v43-20260731.jsonl"
+      ],
+      "wall_median_ms": 23675.74275,
+      "peak_rss_median_bytes": 1499529216,
+      "project_navigation_median_ms": 618,
+      "dependency_navigation_median_ms": 1890,
+      "decision": "Rejected and reverted. Replacing small append-only local type-fact scans with hashing and RefCell synchronization increased the exact terminal-wall median by 8.27% and increased measured visitor CPU. Local type-vector lookup is not the next dominant target."
+    }
+  ],
+  "decision": "Accepted. The complete tracked-name guard preserves extension semantics and exact isolated-engine navigation while reducing measured FactCollector visitor CPU by 5.39-6.85% and median peak RSS by 12.07%. Exact project navigation remains below one second and dependency navigation remains below three seconds. Terminal wall time is effectively flat at 21.867 seconds and active semantic completion is 19.604 seconds, so exhaustive throughput remains the release-blocking performance gap."
+}

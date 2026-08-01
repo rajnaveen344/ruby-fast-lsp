@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "decision": "rejected_and_removed",
+  "purpose": "Evaluate a checksum-keyed persistent composed Java catalog above the accepted per-artifact JAR/JMOD products.",
+  "workspace": "/Users/naveenraj/goshposh",
+  "dataset_fingerprint_sha256": "8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73",
+  "command": "RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --scheduler-concurrency 2 --definition-at server/tasks/rake_helpers.rb:4:49 --definition-at server/tasks/rake_helpers.rb:9:18",
+  "accepted_baseline": {
+    "profiler_sha256": "887133c14298d01651146786e40568926a02bd2fc9a26560ca3c1553c6a92810",
+    "raw_jsonl": "/tmp/ruby-fast-lsp-goshposh-batch-admission-warm-20260731.jsonl",
+    "raw_log": "/tmp/ruby-fast-lsp-goshposh-batch-admission-warm-20260731.log",
+    "project_definition_ms": 3093,
+    "dependency_definition_ms": 8416,
+    "active_semantic_complete_ms": 19787,
+    "workspace_complete_ms": 27844,
+    "internal_peak_rss_bytes": 1815396352,
+    "external_peak_rss_bytes": 2124580952,
+    "java_artifact_hits": 358,
+    "java_artifact_physical_read_bytes": 24064884
+  },
+  "zero_copy_warm_catalog_hit": {
+    "profiler_sha256": "6435c25fc89839d47ba34e14c789de8d2352458b4e0c62a95dd40109ffc8d089",
+    "raw_jsonl": "/tmp/ruby-fast-lsp-goshposh-java-catalog-zero-copy-warm-20260731.jsonl",
+    "raw_log": "/tmp/ruby-fast-lsp-goshposh-java-catalog-zero-copy-warm-20260731.log",
+    "project_definition_ms": 2932,
+    "dependency_definition_ms": 8485,
+    "active_semantic_complete_ms": 19921,
+    "workspace_complete_ms": 28068,
+    "internal_peak_rss_bytes": 1762918400,
+    "external_peak_rss_bytes": 2193361056,
+    "java_catalog_hits": 2,
+    "java_catalog_physical_read_bytes": 22931204,
+    "java_artifact_lookups": 0,
+    "catalog_phase_ms": [
+      817,
+      852
+    ]
+  },
+  "zero_copy_first_publication": {
+    "profiler_sha256": "6435c25fc89839d47ba34e14c789de8d2352458b4e0c62a95dd40109ffc8d089",
+    "raw_jsonl": "/tmp/ruby-fast-lsp-goshposh-java-catalog-zero-copy-populate-20260731.jsonl",
+    "raw_log": "/tmp/ruby-fast-lsp-goshposh-java-catalog-zero-copy-populate-20260731.log",
+    "project_definition_ms": 5294,
+    "dependency_definition_ms": 9752,
+    "active_semantic_complete_ms": 21286,
+    "workspace_complete_ms": 29268,
+    "internal_peak_rss_bytes": 2203992064,
+    "external_peak_rss_bytes": 2319091872,
+    "java_catalog_hits": 1,
+    "java_catalog_producers": 1,
+    "java_artifact_hits": 179,
+    "catalog_phase_ms": [
+      1922,
+      2607
+    ]
+  },
+  "reason": [
+    "Warm dependency navigation, semantic completion, and workspace completion did not improve beyond run-to-run noise.",
+    "First publication serialized one project behind the other catalog producer and moved active project navigation beyond the five-second target.",
+    "The 11 MiB compressed catalog still decoded roughly 91 MiB of logical metadata per project, so replacing 179 artifact reads saved I/O calls but not the dominant fact/indexing work.",
+    "The accepted per-artifact products retain exact content reuse without adding a new producer critical path."
+  ]
+}

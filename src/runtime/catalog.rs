@@ -8,10 +8,15 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
+use crate::indexing_resources::{
+    IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
+};
+
 const MAX_RUNTIME_CANDIDATES: usize = 256;
 const MAX_VERSION_OUTPUT_BYTES: u64 = 16 * 1024;
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 const DISCOVERY_CONCURRENCY: usize = 8;
+const RUNTIME_DISCOVERY_TRANSIENT_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -100,6 +105,9 @@ pub struct ProjectRuntimeStatus {
     pub java_home: Option<PathBuf>,
     pub stub_overlay: Option<String>,
     pub classpath_fingerprint_sha256: Option<String>,
+    pub indexing: crate::indexing_status::ProjectIndexingSnapshot,
+    /// Backward-compatible projection for clients predating structured
+    /// indexing state. New clients must use `indexing`.
     pub indexing_complete: bool,
 }
 
@@ -276,18 +284,50 @@ struct RuntimeCandidate {
     source: RuntimeDiscoverySource,
 }
 
-pub async fn discover_runtime_catalog(project_roots: Vec<PathBuf>) -> RuntimeCatalog {
-    runtime_catalog_for_projects(project_roots, discover_runtimes().await)
+pub async fn discover_runtime_catalog(
+    project_roots: Vec<PathBuf>,
+    indexing_resources: IndexingResourceGovernor,
+) -> RuntimeCatalog {
+    runtime_catalog_for_projects(project_roots, discover_runtimes(indexing_resources).await)
 }
 
-pub async fn discover_runtimes() -> Vec<DiscoveredRuntime> {
-    let candidates = discover_candidates();
-    let java_homes = std::sync::Arc::new(discover_java_homes());
+pub async fn discover_runtimes(
+    indexing_resources: IndexingResourceGovernor,
+) -> Vec<DiscoveredRuntime> {
+    let discovery_spec = IndexingWorkSpec::new(
+        None,
+        IndexingResourcePriority::Background,
+        1,
+        RUNTIME_DISCOVERY_TRANSIENT_MEMORY_BYTES,
+        1,
+    );
+    let (candidates, java_homes) = indexing_resources
+        .run_with_resources(
+            "runtime installation discovery",
+            discovery_spec,
+            None,
+            || {
+                (
+                    discover_candidates(),
+                    std::sync::Arc::new(discover_java_homes()),
+                )
+            },
+        )
+        .await
+        .expect(
+            "INVARIANT VIOLATED: runtime installation discovery failed its fixed resource admission. \
+             This is a bug because its bounded claim must fit the server-owned policy. \
+             Fix: keep runtime discovery within the configured production budget.",
+        );
     let mut runtimes = stream::iter(candidates)
         .map(|candidate| {
             let java_homes = java_homes.clone();
+            let indexing_resources = indexing_resources.clone();
             async move {
-                if let Some(output) = bounded_version_output(&candidate.executable, None).await {
+                if let Some(output) =
+                    bounded_version_output(&candidate.executable, None, indexing_resources.clone())
+                        .await
+                {
                     if let Some(runtime) = parse_runtime_output(
                         &output,
                         candidate.executable.clone(),
@@ -301,8 +341,12 @@ pub async fn discover_runtimes() -> Vec<DiscoveredRuntime> {
                     }
                 }
                 for java_home in java_homes.iter() {
-                    let Some(output) =
-                        bounded_version_output(&candidate.executable, Some(java_home)).await
+                    let Some(output) = bounded_version_output(
+                        &candidate.executable,
+                        Some(java_home),
+                        indexing_resources.clone(),
+                    )
+                    .await
                     else {
                         continue;
                     };
@@ -495,7 +539,37 @@ fn add_candidate(
     candidates.push(RuntimeCandidate { executable, source });
 }
 
-async fn bounded_version_output(executable: &Path, java_home: Option<&Path>) -> Option<String> {
+async fn bounded_version_output(
+    executable: &Path,
+    java_home: Option<&Path>,
+    indexing_resources: IndexingResourceGovernor,
+) -> Option<String> {
+    let spec = IndexingWorkSpec::new(
+        None,
+        IndexingResourcePriority::Background,
+        1,
+        RUNTIME_DISCOVERY_TRANSIENT_MEMORY_BYTES,
+        1,
+    );
+    indexing_resources
+        .run_async_with_resources(
+            "runtime version probe",
+            spec,
+            None,
+            bounded_version_output_admitted(executable, java_home),
+        )
+        .await
+        .expect(
+            "INVARIANT VIOLATED: a non-cancellable runtime probe failed resource admission. \
+             This is a bug because its fixed positive claim must fit the server-owned policy. \
+             Fix: keep runtime probes within the configured production budget.",
+        )
+}
+
+async fn bounded_version_output_admitted(
+    executable: &Path,
+    java_home: Option<&Path>,
+) -> Option<String> {
     let mut command = tokio::process::Command::new(executable);
     command
         .arg("--version")
@@ -801,5 +875,89 @@ mod tests {
             select_runtime_for_marker("system", &[]).unwrap().is_none(),
             "version-manager system markers must defer to the active environment"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_version_probe_waits_for_weighted_resource_admission() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let governor = crate::indexing_resources::IndexingResourceGovernor::new(
+            crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                1,
+                1,
+                64 * 1024 * 1024,
+                1,
+            ),
+        );
+        let (holder_started_tx, holder_started_rx) = tokio::sync::oneshot::channel();
+        let holder_release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let holder_governor = governor.clone();
+        let holder_release_task = holder_release.clone();
+        let holder = tokio::spawn(async move {
+            holder_governor
+                .run_async_with_resources(
+                    "runtime probe contention holder",
+                    crate::indexing_resources::IndexingWorkSpec::new(
+                        None,
+                        crate::indexing_resources::IndexingResourcePriority::Background,
+                        1,
+                        64 * 1024 * 1024,
+                        1,
+                    ),
+                    None,
+                    async move {
+                        holder_started_tx.send(()).unwrap();
+                        holder_release_task.notified().await;
+                    },
+                )
+                .await
+                .unwrap();
+        });
+        holder_started_rx.await.unwrap();
+
+        let fixture = tempfile::tempdir().unwrap();
+        let executable = fixture.path().join("ruby");
+        fs::write(
+            &executable,
+            "#!/bin/sh\nprintf '%s\\n' 'ruby 3.3.11 (fixture) [arm64-darwin]'\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions).unwrap();
+
+        let probe_governor = governor.clone();
+        let probe =
+            tokio::spawn(
+                async move { bounded_version_output(&executable, None, probe_governor).await },
+            );
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while governor.snapshot().queued_tasks != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("runtime probe must queue behind the complete weighted claim");
+
+        holder_release.notify_one();
+        holder.await.unwrap();
+        assert!(
+            probe
+                .await
+                .unwrap()
+                .is_some_and(|output| output.starts_with("ruby 3.3.11")),
+            "admitted runtime probe must retain its bounded version output"
+        );
+        let complete = governor.snapshot();
+        assert_eq!(complete.active_tasks, 0);
+        assert_eq!(complete.queued_tasks, 0);
+        assert_eq!(complete.completed_tasks, 2);
+        assert_eq!(complete.peak_active_cpu_lanes, 1);
+        assert_eq!(
+            complete.peak_active_transient_memory_bytes,
+            64 * 1024 * 1024
+        );
+        assert_eq!(complete.peak_active_io_slots, 1);
     }
 }

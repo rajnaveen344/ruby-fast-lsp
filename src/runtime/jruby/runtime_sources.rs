@@ -116,12 +116,17 @@ mod tests {
         writer.write_all(b"raise 'must not extract'\n").unwrap();
         let bytes = writer.finish().unwrap().into_inner();
         fs::write(&archive_path, &bytes).unwrap();
+        let file_identity = crate::runtime::jruby::classpath::SourceFileIdentity {
+            byte_length: bytes.len() as u64,
+            modified: fs::metadata(&archive_path).unwrap().modified().unwrap(),
+        };
         let artifact = ClasspathArtifact {
             path: archive_path,
             origin: ArtifactOrigin::JrubyRuntime,
             kind: ArtifactKind::Jar,
             fingerprint_sha256: format!("{:x}", Sha256::digest(&bytes)),
             byte_length: bytes.len() as u64,
+            file_identity,
         };
 
         let cache = temp.path().join("cache");
@@ -140,12 +145,17 @@ mod tests {
         let temp = tempdir().unwrap();
         let archive_path = temp.path().join("jruby.jar");
         fs::write(&archive_path, b"not the recorded archive").unwrap();
+        let file_identity = crate::runtime::jruby::classpath::SourceFileIdentity {
+            byte_length: 24,
+            modified: fs::metadata(&archive_path).unwrap().modified().unwrap(),
+        };
         let artifact = ClasspathArtifact {
             path: archive_path,
             origin: ArtifactOrigin::JrubyRuntime,
             kind: ArtifactKind::Jar,
             fingerprint_sha256: "wrong".to_string(),
             byte_length: 24,
+            file_identity,
         };
 
         assert_eq!(

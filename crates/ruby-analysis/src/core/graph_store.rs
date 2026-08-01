@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use super::memory_estimate::{map_table_bytes, vec_payload_bytes};
+use super::memory_estimate::{map_table_bytes, set_table_bytes, vec_payload_bytes};
 use crate::{ConstLookupId, FqnId, FullyQualifiedName, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -198,6 +198,7 @@ pub struct SemanticGraph {
     nodes: HashMap<FqnId, GraphNode>,
     edges: Vec<Option<GraphEdge>>,
     free_edges: Vec<GraphEdgeId>,
+    node_definition_files: HashSet<SourceFileId>,
     edges_by_file: HashMap<SourceFileId, Vec<GraphEdgeId>>,
     unresolved_by_file: HashMap<SourceFileId, Vec<StoredUnresolvedGraphEdgeFact>>,
 }
@@ -208,6 +209,7 @@ impl SemanticGraph {
     }
 
     pub fn add_node(&mut self, fact: StoredGraphNodeFact) {
+        self.node_definition_files.insert(fact.range.file_id);
         let node = self.nodes.entry(fact.fqn).or_default();
         node.definitions.push(GraphNodeDefinition {
             kind: fact.kind,
@@ -318,16 +320,18 @@ impl SemanticGraph {
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {
-        let mut empty_nodes = Vec::new();
-        for (fqn, node) in &mut self.nodes {
-            node.definitions
-                .retain(|definition| definition.range.file_id != file_id);
-            if node.definitions.is_empty() && node_has_no_edges(node) {
-                empty_nodes.push(*fqn);
+        if self.node_definition_files.remove(&file_id) {
+            let mut empty_nodes = Vec::new();
+            for (fqn, node) in &mut self.nodes {
+                node.definitions
+                    .retain(|definition| definition.range.file_id != file_id);
+                if node.definitions.is_empty() && node_has_no_edges(node) {
+                    empty_nodes.push(*fqn);
+                }
             }
-        }
-        for fqn in empty_nodes {
-            self.nodes.remove(&fqn);
+            for fqn in empty_nodes {
+                self.nodes.remove(&fqn);
+            }
         }
 
         let Some(stale_edges) = self.edges_by_file.remove(&file_id) else {
@@ -416,6 +420,7 @@ impl SemanticGraph {
         map_table_bytes(&self.nodes)
             + vec_payload_bytes(&self.edges)
             + vec_payload_bytes(&self.free_edges)
+            + set_table_bytes(&self.node_definition_files)
             + map_table_bytes(&self.edges_by_file)
             + self
                 .nodes
@@ -451,6 +456,7 @@ impl SemanticGraph {
         self.nodes.shrink_to_fit();
         self.edges.shrink_to_fit();
         self.free_edges.shrink_to_fit();
+        self.node_definition_files.shrink_to_fit();
         self.edges_by_file.shrink_to_fit();
         self.unresolved_by_file.shrink_to_fit();
         for node in self.nodes.values_mut() {
@@ -505,7 +511,6 @@ impl SemanticGraph {
             .or_default()
             .push_incoming(kind, id);
         self.edges_by_file.entry(file_id).or_default().push(id);
-        self.sort_edge_id_lists(source, target, file_id);
         id
     }
 
@@ -535,19 +540,6 @@ impl SemanticGraph {
             .collect();
         sort_graph_edges(&mut facts);
         facts
-    }
-
-    fn sort_edge_id_lists(&mut self, source: FqnId, target: FqnId, file_id: SourceFileId) {
-        let edges = &self.edges;
-        if let Some(node) = self.nodes.get_mut(&source) {
-            node.sort_outgoing(edges);
-        }
-        if let Some(node) = self.nodes.get_mut(&target) {
-            node.sort_incoming(edges);
-        }
-        if let Some(ids) = self.edges_by_file.get_mut(&file_id) {
-            sort_edge_ids(edges, ids);
-        }
     }
 }
 
@@ -601,21 +593,6 @@ impl GraphNode {
             }
         }
     }
-
-    fn sort_outgoing(&mut self, edges: &[Option<GraphEdge>]) {
-        sort_edge_ids(edges, &mut self.includes);
-        sort_edge_ids(edges, &mut self.prepends);
-        sort_edge_ids(edges, &mut self.extends);
-        sort_edge_ids(edges, &mut self.execution_context_applications);
-    }
-
-    fn sort_incoming(&mut self, edges: &[Option<GraphEdge>]) {
-        sort_edge_ids(edges, &mut self.children);
-        sort_edge_ids(edges, &mut self.included_by);
-        sort_edge_ids(edges, &mut self.prepended_by);
-        sort_edge_ids(edges, &mut self.extended_by);
-        sort_edge_ids(edges, &mut self.execution_context_templates);
-    }
 }
 
 fn node_has_no_edges(node: &GraphNode) -> bool {
@@ -665,24 +642,6 @@ fn sort_graph_edges(facts: &mut [StoredGraphEdgeFact]) {
     });
 }
 
-fn sort_edge_ids(edges: &[Option<GraphEdge>], ids: &mut [GraphEdgeId]) {
-    ids.sort_by_key(|id| {
-        let edge = edges[id.0].as_ref().expect(
-            "INVARIANT VIOLATED: graph adjacency points to missing edge. \
-             This is a bug because edge ids must be removed from adjacency lists before edge deletion. \
-             Fix: remove stale ids from all graph adjacency lists.",
-        );
-        (
-            edge.range.file_id,
-            edge.range.start_byte,
-            edge.range.end_byte,
-            edge.kind,
-            edge.source,
-            edge.target,
-        )
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{FqnId, SourceFileId, TextRange};
@@ -724,5 +683,72 @@ mod tests {
         assert!(store.nodes_for(source).is_empty());
         assert!(store.edges_from(source).is_empty());
         assert_eq!(store.nodes_for(target).len(), 1);
+    }
+
+    #[test]
+    fn node_definition_file_index_tracks_only_files_that_require_node_cleanup() {
+        let node_file = SourceFileId(1);
+        let edge_only_file = SourceFileId(2);
+        let source = FqnId(1);
+        let target = FqnId(2);
+        let mut store = SemanticGraph::new();
+
+        store.add_node(StoredGraphNodeFact::new(
+            source,
+            GraphNodeKind::Class,
+            TextRange::new(node_file, 0, 10),
+        ));
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            target,
+            GraphEdgeKind::Include,
+            TextRange::new(edge_only_file, 0, 10),
+        ));
+
+        assert!(store.node_definition_files.contains(&node_file));
+        assert!(
+            !store.node_definition_files.contains(&edge_only_file),
+            "edge endpoint nodes must not trigger a global definition cleanup scan"
+        );
+
+        store.replace_file(node_file, [], [], []);
+        assert!(!store.node_definition_files.contains(&node_file));
+        assert!(store.nodes_for(source).is_empty());
+    }
+
+    #[test]
+    fn edge_queries_are_deterministic_independent_of_insertion_order() {
+        let source = FqnId(1);
+        let first_target = FqnId(2);
+        let second_target = FqnId(3);
+        let first = StoredGraphEdgeFact::new(
+            source,
+            first_target,
+            GraphEdgeKind::Include,
+            TextRange::new(SourceFileId(2), 4, 8),
+        );
+        let second = StoredGraphEdgeFact::new(
+            source,
+            second_target,
+            GraphEdgeKind::Include,
+            TextRange::new(SourceFileId(1), 12, 16),
+        );
+
+        let mut forward = SemanticGraph::new();
+        forward.add_edge(first);
+        forward.add_edge(second);
+        let mut reverse = SemanticGraph::new();
+        reverse.add_edge(second);
+        reverse.add_edge(first);
+
+        assert_eq!(forward.edges_from(source), reverse.edges_from(source));
+        assert_eq!(
+            forward.edges_to(first_target),
+            reverse.edges_to(first_target)
+        );
+        assert_eq!(
+            forward.edges_to(second_target),
+            reverse.edges_to(second_target)
+        );
     }
 }

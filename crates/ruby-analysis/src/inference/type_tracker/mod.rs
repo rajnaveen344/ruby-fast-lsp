@@ -14,7 +14,7 @@ mod narrow;
 
 use crate::control_flow;
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{AnalysisEngine, AnalysisQuery, AnalysisQueryCache};
 use crate::r#type::literal::LiteralAnalyzer;
 use crate::r#type::ruby::RubyType;
 use parking_lot::RwLock;
@@ -44,6 +44,7 @@ pub struct TypeTracker<'a> {
 
     /// Engine for method return type lookups on analysis path
     analysis_engine: Option<Arc<RwLock<AnalysisEngine>>>,
+    analysis_query_cache: Option<Arc<AnalysisQueryCache>>,
 
     /// Max loop iterations (to prevent infinite loops)
     max_loop_iterations: usize,
@@ -83,6 +84,7 @@ impl<'a> TypeTracker<'a> {
             source,
             literal_analyzer: LiteralAnalyzer::new(),
             analysis_engine: None,
+            analysis_query_cache: None,
             max_loop_iterations: 10,
             loop_depth: 0,
             #[cfg(test)]
@@ -98,6 +100,11 @@ impl<'a> TypeTracker<'a> {
 
     pub fn with_analysis_engine(mut self, analysis_engine: Arc<RwLock<AnalysisEngine>>) -> Self {
         self.analysis_engine = Some(analysis_engine);
+        self
+    }
+
+    pub fn with_analysis_query_cache(mut self, cache: Arc<AnalysisQueryCache>) -> Self {
+        self.analysis_query_cache = Some(cache);
         self
     }
 
@@ -1054,15 +1061,39 @@ impl<'a> TypeTracker<'a> {
         let engine = analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         if allow_private {
-            query.method_return_type_for_receiver(&namespace, &method)
+            self.analysis_query_cache.as_ref().map_or_else(
+                || query.method_return_type_for_receiver(&namespace, &method),
+                |cache| query.method_return_type_for_receiver_cached(&namespace, &method, cache),
+            )
         } else if let Some(current_class) = self.current_class.as_ref() {
             let caller_namespace = FullyQualifiedName::namespace_with_kind(
                 current_class.namespace_parts(),
                 crate::core::NamespaceKind::Instance,
             );
-            query.method_return_type_for_protected_receiver(&namespace, &method, &caller_namespace)
+            self.analysis_query_cache.as_ref().map_or_else(
+                || {
+                    query.method_return_type_for_protected_receiver(
+                        &namespace,
+                        &method,
+                        &caller_namespace,
+                    )
+                },
+                |cache| {
+                    query.method_return_type_for_protected_receiver_cached(
+                        &namespace,
+                        &method,
+                        &caller_namespace,
+                        cache,
+                    )
+                },
+            )
         } else {
-            query.method_return_type_for_public_receiver(&namespace, &method)
+            self.analysis_query_cache.as_ref().map_or_else(
+                || query.method_return_type_for_public_receiver(&namespace, &method),
+                |cache| {
+                    query.method_return_type_for_public_receiver_cached(&namespace, &method, cache)
+                },
+            )
         }
     }
 
@@ -1190,7 +1221,7 @@ impl<'a> TypeTracker<'a> {
             return return_type.clone();
         }
         query
-            .method_return_type_for_receiver(&callee.owner, method)
+            .method_return_type_for_callee(&callee)
             .unwrap_or(RubyType::Unknown)
     }
 

@@ -1,0 +1,113 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Measure whether activation-scoped extension project context can stay on the isolated guest instance instead of being cloned and serialized with every matching call.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "profiler_executable_sha256": "da8e976f3d04100a739baca10ec779dd208cfdb0c3d1ec068c42ea18a9495997",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "change": {
+    "activation_delivery": "Filter extension applicability against the collector's borrowed ProjectContext, build one projectless CallContext per matching AST call, and keep project identity on the already isolated activation-scoped Wasm instance.",
+    "legacy_delivery": "ABI-v1 per-call guests still receive the complete ProjectContext through one lazily shared full CallContext.",
+    "semantic_boundary": "Project selection, extension applicability, patch validation, execution-context validation, conflict policy, and per-project guest isolation are unchanged. Only redundant payload construction and serialization are removed."
+  },
+  "baseline": {
+    "raw_local_evidence": [
+      "/tmp/ruby-fast-lsp-deterministic-provider-boundary-v80.jsonl",
+      "/tmp/ruby-fast-lsp-deterministic-provider-boundary-v81.jsonl"
+    ],
+    "repeat_median": {
+      "wall_ms": 18861.844729,
+      "peak_rss_bytes": 1804673024,
+      "user_cpu_ms": 41822.4925,
+      "active_semantic_complete_ms": 16004,
+      "project_navigation_ms": 581,
+      "dependency_navigation_ms": 1757.5,
+      "minitest_guest_time_ms": 246.268682
+    }
+  },
+  "result": {
+    "raw_local_evidence": [
+      {
+        "id": "v83",
+        "jsonl": "/tmp/ruby-fast-lsp-extension-context-v83.jsonl",
+        "log": "/tmp/ruby-fast-lsp-extension-context-v83.log",
+        "wall_ms": 18819.431541,
+        "peak_rss_bytes": 1814167552,
+        "user_cpu_ms": 39416.069,
+        "project_navigation_ms": 635,
+        "dependency_navigation_ms": 1644,
+        "active_semantic_complete_ms": 15913,
+        "minitest_guest_time_ms": 152.901376
+      },
+      {
+        "id": "v84",
+        "jsonl": "/tmp/ruby-fast-lsp-extension-context-v84.jsonl",
+        "log": "/tmp/ruby-fast-lsp-extension-context-v84.log",
+        "wall_ms": 18423.233,
+        "peak_rss_bytes": 1673265152,
+        "user_cpu_ms": 39731.151,
+        "project_navigation_ms": 507,
+        "dependency_navigation_ms": 1567,
+        "active_semantic_complete_ms": 15599,
+        "minitest_guest_time_ms": 154.283969
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 18621.3322705,
+      "peak_rss_bytes": 1743716352,
+      "user_cpu_ms": 39573.61,
+      "active_semantic_complete_ms": 15756,
+      "project_navigation_ms": 571,
+      "dependency_navigation_ms": 1605.5,
+      "minitest_guest_time_ms": 153.5926725
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "semantic_export_manifest_sha256": "6bdb1000c83120b1f2a3a62b54f54a40a0a6529e1acce764b586fb5fcc498b32",
+    "fingerprints_equal_across_baseline_and_changed_repeats": true,
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "comparison": {
+    "terminal_wall_change_percent": -1.275,
+    "peak_rss_change_percent": -3.378,
+    "user_cpu_change_percent": -5.377,
+    "active_semantic_complete_change_percent": -1.55,
+    "project_navigation_change_percent": -1.721,
+    "dependency_navigation_change_percent": -8.648,
+    "minitest_guest_time_change_percent": -37.633
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "extension_focused_tests": 61,
+    "extension_focused_failures": 0,
+    "wasm_host_tests": 12,
+    "wasm_host_failures": 0,
+    "packaged_framework_and_jruby_smoke_passed": true
+  },
+  "decision": "Accepted. Activation-scoped guests retain project identity on their isolated instance instead of cloning and serializing the same context for every matching call. Exact semantic outputs and provenance remain identical, all warm interactive budgets still pass, guest time falls 37.633%, user CPU falls 5.377%, and median RSS falls 3.378%. The 1.275% terminal-wall improvement is useful but does not close the 15-second workspace or five-second active semantic targets."
+}

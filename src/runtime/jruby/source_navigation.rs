@@ -3,6 +3,7 @@ use super::{
     imports::ruby_type_for_jvm,
     java_catalog::JavaClassDeclaration,
 };
+use parking_lot::{Mutex, MutexGuard};
 use ruby_analysis::core::{
     FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind, NamespaceKind, RubyConstant,
     RubyMethod, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance,
@@ -16,10 +17,10 @@ use ruby_fast_lsp_jvm_metadata::{
     ClassKind, JavaSourceClassLocation, JavaSourceError, JavaSourceLimits, SourceByteRange,
     Visibility,
 };
-use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{Cursor, Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy)]
 pub struct JavaSourceResolutionLimits {
@@ -56,9 +57,54 @@ pub enum JavaSourceResolutionError {
 
 #[derive(Debug, Clone)]
 pub struct JavaSourceResolver {
-    roots: Vec<SourceRoot>,
+    roots: Vec<PreparedSourceRoot>,
     cache_root: PathBuf,
     limits: JavaSourceResolutionLimits,
+}
+
+struct PreparedSourceRoot {
+    source: SourceRoot,
+    archive: OnceLock<Result<Mutex<zip::ZipArchive<fs::File>>, JavaSourceResolutionError>>,
+}
+
+impl std::fmt::Debug for PreparedSourceRoot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedSourceRoot")
+            .field("source", &self.source)
+            .field("archive_initialized", &self.archive.get().is_some())
+            .finish()
+    }
+}
+
+impl Clone for PreparedSourceRoot {
+    fn clone(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+            archive: OnceLock::new(),
+        }
+    }
+}
+
+impl PreparedSourceRoot {
+    fn archive(
+        &self,
+    ) -> Result<MutexGuard<'_, zip::ZipArchive<fs::File>>, JavaSourceResolutionError> {
+        verify_source_file_identity(&self.source)?;
+        let archive = self.archive.get_or_init(|| {
+            let file = open_verified_source_file(&self.source)?;
+            zip::ZipArchive::new(file).map(Mutex::new).map_err(|error| {
+                JavaSourceResolutionError::InvalidArchive {
+                    path: self.source.path.clone(),
+                    message: error.to_string(),
+                }
+            })
+        });
+        match archive {
+            Ok(archive) => Ok(archive.lock()),
+            Err(error) => Err(error.clone()),
+        }
+    }
 }
 
 impl JavaSourceResolver {
@@ -73,7 +119,13 @@ impl JavaSourceResolver {
                 .then_with(|| left.path.cmp(&right.path))
         });
         Self {
-            roots,
+            roots: roots
+                .into_iter()
+                .map(|source| PreparedSourceRoot {
+                    source,
+                    archive: OnceLock::new(),
+                })
+                .collect(),
             cache_root,
             limits,
         }
@@ -84,7 +136,8 @@ impl JavaSourceResolver {
         declaration: &JavaClassDeclaration,
     ) -> Result<Option<ResolvedJavaSource>, JavaSourceResolutionError> {
         let relative_path = source_relative_path(&declaration.class)?;
-        for root in &self.roots {
+        for prepared_root in &self.roots {
+            let root = &prepared_root.source;
             if root.path.is_dir() {
                 let candidate = root.path.join(&relative_path);
                 if !candidate.is_file() {
@@ -115,11 +168,6 @@ impl JavaSourceResolver {
                     message: "source root is neither a file nor a directory".to_string(),
                 });
             }
-            let bytes = fs::read(&root.path).map_err(|error| JavaSourceResolutionError::Read {
-                path: root.path.clone(),
-                message: error.to_string(),
-            })?;
-            let actual_fingerprint = format!("{:x}", Sha256::digest(&bytes));
             let expected_fingerprint = root.fingerprint_sha256.as_ref().ok_or_else(|| {
                 JavaSourceResolutionError::Read {
                     path: root.path.clone(),
@@ -128,11 +176,6 @@ impl JavaSourceResolver {
                             .to_string(),
                 }
             })?;
-            if &actual_fingerprint != expected_fingerprint {
-                return Err(JavaSourceResolutionError::FingerprintMismatch {
-                    path: root.path.clone(),
-                });
-            }
 
             if root
                 .path
@@ -140,7 +183,16 @@ impl JavaSourceResolver {
                 .and_then(|extension| extension.to_str())
                 == Some("java")
             {
-                let content = String::from_utf8(bytes).map_err(|error| {
+                if root.file_identity.is_some_and(|identity| {
+                    identity.byte_length > self.limits.max_source_bytes as u64
+                }) {
+                    return Err(JavaSourceResolutionError::LimitExceeded(
+                        "Java source bytes",
+                    ));
+                }
+                let mut source_file = open_verified_source_file(root)?;
+                let mut content = String::new();
+                source_file.read_to_string(&mut content).map_err(|error| {
                     JavaSourceResolutionError::InvalidSource {
                         path: root.path.clone(),
                         message: error.to_string(),
@@ -164,8 +216,9 @@ impl JavaSourceResolver {
                 }));
             }
 
+            let mut archive = prepared_root.archive()?;
             let Some((content, location)) =
-                source_from_archive(declaration, root, &bytes, &relative_path, self.limits)?
+                source_from_archive(declaration, root, &mut archive, &relative_path, self.limits)?
             else {
                 continue;
             };
@@ -184,6 +237,41 @@ impl JavaSourceResolver {
         }
         Ok(None)
     }
+}
+
+fn open_verified_source_file(root: &SourceRoot) -> Result<fs::File, JavaSourceResolutionError> {
+    verify_source_file_identity(root)?;
+    fs::File::open(&root.path).map_err(|error| JavaSourceResolutionError::Read {
+        path: root.path.clone(),
+        message: error.to_string(),
+    })
+}
+
+fn verify_source_file_identity(root: &SourceRoot) -> Result<(), JavaSourceResolutionError> {
+    let expected = root
+        .file_identity
+        .ok_or_else(|| JavaSourceResolutionError::Read {
+            path: root.path.clone(),
+            message:
+                "file source root has no discovery-time filesystem identity; rediscover classpath"
+                    .to_string(),
+        })?;
+    let metadata = fs::metadata(&root.path).map_err(|error| JavaSourceResolutionError::Read {
+        path: root.path.clone(),
+        message: error.to_string(),
+    })?;
+    let modified = metadata
+        .modified()
+        .map_err(|error| JavaSourceResolutionError::Read {
+            path: root.path.clone(),
+            message: error.to_string(),
+        })?;
+    if metadata.len() != expected.byte_length || modified != expected.modified {
+        return Err(JavaSourceResolutionError::FingerprintMismatch {
+            path: root.path.clone(),
+        });
+    }
+    Ok(())
 }
 
 fn source_origin_precedence(origin: SourceOrigin) -> u8 {
@@ -281,19 +369,13 @@ fn locate_verified_source(
     })
 }
 
-fn source_from_archive(
+fn source_from_archive<R: Read + Seek>(
     declaration: &JavaClassDeclaration,
     root: &SourceRoot,
-    bytes: &[u8],
+    archive: &mut zip::ZipArchive<R>,
     relative_path: &Path,
     limits: JavaSourceResolutionLimits,
 ) -> Result<Option<(String, JavaSourceClassLocation)>, JavaSourceResolutionError> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|error| {
-        JavaSourceResolutionError::InvalidArchive {
-            path: root.path.clone(),
-            message: error.to_string(),
-        }
-    })?;
     if archive.len() > limits.max_archive_entries {
         return Err(JavaSourceResolutionError::LimitExceeded(
             "Java source archive entries",
@@ -303,17 +385,11 @@ fn source_from_archive(
     let suffix = format!("/{expected}");
     let mut candidate_indexes = Vec::new();
     for index in 0..archive.len() {
-        let entry =
-            archive
-                .by_index(index)
-                .map_err(|error| JavaSourceResolutionError::InvalidArchive {
-                    path: root.path.clone(),
-                    message: error.to_string(),
-                })?;
-        if entry.is_dir() {
-            continue;
-        }
-        let name = entry.name();
+        let name = archive.name_for_index(index).expect(
+            "INVARIANT VIOLATED: ZIP central-directory index disappeared while resolving Java \
+             source. This is a bug because the archive is immutably borrowed and the index is \
+             bounded by ZipArchive::len. Fix: inspect the zip crate archive metadata lifecycle.",
+        );
         if name == expected
             || (matches!(root.origin, SourceOrigin::Jdk | SourceOrigin::Explicit)
                 && name.ends_with(&suffix))
@@ -665,9 +741,30 @@ mod tests {
     };
     use sha2::{Digest, Sha256};
     use std::fs;
-    use std::io::{Cursor, Write};
+    use std::io::{Cursor, Read, Seek, SeekFrom, Write};
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
     use zip::write::SimpleFileOptions;
+
+    struct CountingReader<R> {
+        inner: R,
+        bytes_read: Arc<AtomicU64>,
+    }
+
+    impl<R: Read> Read for CountingReader<R> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let read = self.inner.read(buffer)?;
+            self.bytes_read.fetch_add(read as u64, Ordering::Relaxed);
+            Ok(read)
+        }
+    }
+
+    impl<R: Seek> Seek for CountingReader<R> {
+        fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(position)
+        }
+    }
 
     fn decode_hex(source: &str) -> Vec<u8> {
         let digits = source
@@ -694,7 +791,8 @@ mod tests {
                 )),
                 ClassLimits::default(),
             )
-            .expect("checked class fixture must parse"),
+            .expect("checked class fixture must parse")
+            .into(),
             artifact_path: root.join("rich.jar"),
             artifact_fingerprint_sha256: "fixture-artifact".to_string(),
             entry_name: "fixtures/RichFixture.class".to_string(),
@@ -703,13 +801,23 @@ mod tests {
     }
 
     fn source_root(path: PathBuf, origin: SourceOrigin) -> SourceRoot {
-        let fingerprint_sha256 = path
-            .is_file()
-            .then(|| format!("{:x}", Sha256::digest(fs::read(&path).unwrap())));
+        let (fingerprint_sha256, file_identity) = if path.is_file() {
+            let metadata = fs::metadata(&path).unwrap();
+            (
+                Some(format!("{:x}", Sha256::digest(fs::read(&path).unwrap()))),
+                Some(super::super::classpath::SourceFileIdentity {
+                    byte_length: metadata.len(),
+                    modified: metadata.modified().unwrap(),
+                }),
+            )
+        } else {
+            (None, None)
+        };
         SourceRoot {
             path,
             origin,
             fingerprint_sha256,
+            file_identity,
         }
     }
 
@@ -727,6 +835,52 @@ mod tests {
             .finish()
             .expect("source fixture archive must finish")
             .into_inner()
+    }
+
+    #[test]
+    fn archive_resolution_streams_only_the_selected_entry() {
+        let source = include_str!("../../../crates/jvm-metadata/fixtures/sources/RichFixture.java");
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let stored =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("padding.bin", stored).unwrap();
+        writer.write_all(&vec![0_u8; 8 * 1024 * 1024]).unwrap();
+        writer
+            .start_file("fixtures/RichFixture.java", stored)
+            .unwrap();
+        writer.write_all(source.as_bytes()).unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+        let bytes_read = Arc::new(AtomicU64::new(0));
+        let reader = CountingReader {
+            inner: Cursor::new(bytes.clone()),
+            bytes_read: Arc::clone(&bytes_read),
+        };
+        let root = SourceRoot {
+            path: PathBuf::from("fixture-sources.jar"),
+            origin: SourceOrigin::Attached,
+            fingerprint_sha256: Some("fixture".to_string()),
+            file_identity: None,
+        };
+
+        let mut archive =
+            zip::ZipArchive::new(reader).expect("streaming archive fixture must parse");
+        let resolved = source_from_archive(
+            &rich_declaration(Path::new("/fixture")),
+            &root,
+            &mut archive,
+            Path::new("fixtures/RichFixture.java"),
+            JavaSourceResolutionLimits::default(),
+        )
+        .expect("streaming archive resolution must succeed")
+        .expect("selected source entry must resolve");
+
+        assert_eq!(resolved.0, source);
+        assert!(
+            bytes_read.load(Ordering::Relaxed) < 1024 * 1024,
+            "INVARIANT VIOLATED: resolving one Java source entry read the complete source archive. \
+             This is a performance bug because classpath discovery already verified the archive identity. \
+             Fix: keep ZipArchive backed by a seekable file and read only the selected entry."
+        );
     }
 
     #[test]
@@ -790,6 +944,49 @@ mod tests {
         assert!(resolved.path.ends_with("fixtures/RichFixture.java"));
         assert_eq!(fs::read_to_string(&resolved.path).unwrap(), source);
         assert_eq!(resolved.content, source);
+    }
+
+    #[test]
+    fn reuses_one_parsed_archive_for_repeated_source_resolution() {
+        let fixture = tempfile::tempdir().expect("source resolver fixture must be created");
+        let source = include_str!("../../../crates/jvm-metadata/fixtures/sources/RichFixture.java");
+        let attached = fixture.path().join("rich-sources.jar");
+        fs::write(
+            &attached,
+            source_archive(&[("fixtures/RichFixture.java", source)]),
+        )
+        .unwrap();
+        let resolver = JavaSourceResolver::new(
+            vec![source_root(attached, SourceOrigin::Attached)],
+            fixture.path().join("cache"),
+            JavaSourceResolutionLimits::default(),
+        );
+        let declaration = rich_declaration(fixture.path());
+
+        resolver
+            .resolve(&declaration)
+            .expect("first source resolution must succeed")
+            .expect("first source resolution must find the class");
+        let first_archive = resolver.roots[0]
+            .archive
+            .get()
+            .expect("first source resolution must initialize the archive");
+
+        resolver
+            .resolve(&declaration)
+            .expect("second source resolution must succeed")
+            .expect("second source resolution must find the class");
+        let second_archive = resolver.roots[0]
+            .archive
+            .get()
+            .expect("second source resolution must retain the archive");
+
+        assert!(
+            std::ptr::eq(first_archive, second_archive),
+            "INVARIANT VIOLATED: repeated Java source resolution replaced the parsed archive. \
+             This is a performance bug because every replacement reparses the immutable central \
+             directory. Fix: retain one verified ZipArchive per prepared source root."
+        );
     }
 
     #[test]

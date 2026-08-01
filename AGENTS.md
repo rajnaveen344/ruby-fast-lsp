@@ -184,6 +184,19 @@ not the editor, resolves that exact marker against one bounded discovered
 runtime catalog shared by the isolated project coordinators. Never let the
 editor reconstruct implementation/compatibility mappings or silently choose a
 nearby runtime.
+The indexing detail picker joins the exact server-reported runtime, JDK, and
+classpath identity for each isolated project with the authoritative indexing
+snapshot. Persistent gem/Java/compiled-Wasm counters plus gem, classpath-file,
+and parsed Java-artifact single-flight reuse are process-lifetime evidence
+because identical immutable work can be shared across isolated engines;
+display them as process-wide totals and never attribute global counter deltas
+to one project.
+The VS Code indexing-status session is transport-scoped. Suspend acceptance
+before restarting the language client, coalesce concurrent restart callers,
+reset the sequence only after the old transport has stopped, and then refresh
+one authoritative snapshot. Disposal permanently rejects delayed
+notifications. Never carry a previous server process's sequence into a new
+server, whose sequence begins again at one.
 
 An editor workspace folder is a project container, not necessarily one Ruby
 project. A root `Gemfile` owns the folder. Without one, discover the nearest
@@ -204,6 +217,18 @@ Document queries and watchers route by longest project-root prefix;
 workspace-symbol search aggregates isolated engines deterministically. Dynamic
 folder add/remove must rehome open documents between project and orphan engines
 and clear their stale facts from the previous owner.
+While active-project navigation is pending, its source pass owns all but one
+bounded indexing CPU lane. Exact immutable gem discovery for that same project
+may use the remaining lane, second task admission, transient-memory partition,
+and I/O slot; sibling project-parallel passes remain blocked by the active
+navigation reservation. Discovery returns resolver state to the owning
+coordinator, and semantic product binding still occurs only through the
+project's isolated engine.
+Release that five-lane reservation at the accepted project-navigation frontier.
+Keeping it through the exhaustive active-project tail was measured and rejected:
+it improved the early frontier but regressed active dependency/semantic readiness,
+terminal wall time, and peak memory, including one fixed-ceiling breach. Do not
+repeat that scheduling shape without a materially different profile-backed design.
 
 Bundler discovery must use the owning project's exact `Gemfile`. If a locked
 Git dependency has no normal Bundler checkout but has an extracted
@@ -224,6 +249,17 @@ registry gem. These are valid platform alternatives, not conflicting source
 identities: select the `java` identity for JRuby and the non-Java identity for
 other engines, while retaining exact version/source matching and rejecting
 genuinely ambiguous variants.
+Automatic installed-gem discovery performs Bundler resolution and its global
+RubyGems fallback inside one invocation of the exact selected runtime. The
+child result carries an explicit source marker so Bundler-installed and global
+sources retain their distinct selection precedence; do not restore a failed
+Bundler process followed by a second runtime startup.
+Standalone Ruby project roots without a `Gemfile` must skip automatic installed
+gem discovery entirely and index only project, core-stub, and available stdlib
+inputs. A plain `require` in such a project does not authorize searching the
+active runtime's global gems. Explicit `includedGems` remains the sole unlocked
+exception and may trigger one governed global discovery after the project scan
+has established the explicit selection set.
 Explicit `includedGems` is the sole unlocked exception and may select the
 active Ruby's highest installed version by deliberate user request. Validate a
 project archive's package metadata against the lockfile, extract only declared
@@ -239,6 +275,36 @@ cannot be detected, use the bundled Ruby 3.0 core stubs as a conservative
 fallback and skip only runtime-dependent stdlib modules. Missing runtimes must
 never turn universal core constants such as `Thread` into false unresolved
 diagnostics.
+Runtime stdlib discovery must invoke only the owning project's exact selected
+runtime executable, with its exact Java home and without inherited Ruby,
+RubyGems, or Bundler environment overrides. Never fall back to the server's
+`PATH`, guess runtime homes from a version string, or rediscover bundled stubs as
+runtime stdlib. A runtime path may replace only an existing `Stdlib` source at
+the same canonical path; a collision with `Stub`, `Project`, `Excluded`,
+`Signature`, `External`, or `Gem` ownership is an invariant violation.
+Identical runtime load-path probes are one bounded server-owned process-local
+single-flight product keyed by the canonical executable's byte length and
+modified time plus canonical Java home. Verify executable identity before and
+after the producer, canonicalize every returned path, and keep the producer
+independent of the initiating waiter. Each isolated project still binds the
+result through its own stdlib lifecycle and engine.
+Reusable gem products must be seeded from a clean core/runtime engine, never by
+cloning the owning project engine after core facts were added to it. An editor
+may open or change a project document before cold indexing reaches core setup;
+those project, excluded, or previously bound gem facts must not enter the
+dependency seed or its semantic fingerprint. Install the shared core template
+additively when live project facts already exist, while retaining a separate
+clean template clone for the dependency seed. Add JRuby runtime implementation
+inputs to both engines through the ordinary file-owned lifecycle, then fail
+loudly if the reusable seed contains `Project`, `Excluded`, or `Gem` sources.
+Persistent gem-product identity must include the build-generated SHA-256 of
+every semantic fact-producer source, in addition to its explicit product and
+payload schemas, parser/dependency identity, semantic seed, runtime provider,
+locked closure, and exact source content. Keep `build.rs`'s producer input set
+aligned with `ruby-analysis`, root fact composition, and JRuby import/catalog
+semantics. A semantic producer change must reserve and publish a new product;
+an older payload must never remain selectable merely because the package
+version and manually maintained schema did not change.
 Explicit `rubyVersion` configuration wins over automatic detection. RVM,
 rbenv, and asdf `.ruby-version` markers must retain implementation prefixes
 such as `jruby-` and `truffleruby-`; use those markers to select the matching
@@ -256,6 +322,55 @@ Each isolated project owns its exact JDK/JAR classpath and generated Java proxy
 facts. Bounded static classfile metadata may produce ordinary external
 signature facts; never execute artifacts, merge project catalogs, or make
 decompiled method bodies semantic truth.
+Checksum-keyed Java artifact products are independent and may resolve in
+parallel only inside the process resource governor's owned Rayon pool. Collect
+the indexed artifact vector in its original order, then compose the
+project-specific catalog sequentially so the first classpath definition wins
+and duplicate provenance remains deterministic. Never parallelize the
+classpath-precedence write itself or admit artifact work outside the owning
+CPU, memory, I/O, and task lease.
+An unconditional zero-retention single-flight around every persistent Java
+artifact lookup was measured and rejected on the two-project JRuby `goshposh`
+corpus: 1,074 lookups produced 1,074 independent flights and zero joins, while
+median CPU, readiness, and RSS regressed. Do not restore that wrapper merely
+because the keys are immutable. First prove concurrent identical product keys,
+or remove the measured sequential decode/composition cost with a bounded design
+that still preserves project catalog order and provenance.
+The accepted sequential-reuse design keeps a server-owned cache of at most 256
+exact Java artifact products and 256 MiB of estimated deep metadata. Archive
+products and project declarations share immutable `Arc<ClassFile>` values;
+project-specific paths, classpath ordering, duplicate winners, providers,
+facts, and engines remain separate. On the two-project JRuby `goshposh` corpus
+it retained 168 identities, reused all 190 repeated lookups, halved persistent
+reads, and improved median wall, CPU, readiness, and RSS with exact semantics.
+Keep capacity and deep-weight eviction tests, report reuse as a process-wide
+counter, and never replace this per-artifact sharing with a composed catalog or
+raw artifact retention.
+Classpath discovery establishes each artifact checksum from one bounded,
+metadata-stable byte buffer. Inspect a JAR's manifest from that same buffer;
+do not reread the complete archive immediately after hashing it. Drop the
+buffer after discovery rather than retaining raw package-manager artifacts in
+Ruby Fast LSP's cache.
+Identical canonical classpath files may share one process-local product keyed
+by canonical path, byte length, modification time, and manifest parse limit.
+The product retains only SHA-256 and bounded manifest `Class-Path` entries under
+the fixed entry/estimated-weight limits; never retain raw JAR/JMOD/source bytes.
+Every project consumer must revalidate current metadata, apply its own file and
+total-byte limits, and compose its own ordered classpath and catalog. Cache hits
+must never share duplicate winners, imports, provenance, or semantic ownership.
+Bounded CFR implementation navigation must keep its fixed JVM heap, direct
+memory, metaspace, code-cache, compressed-class-space, process-count, output,
+and wall-clock limits. Its 256 MiB resident-memory ceiling is enforced through
+native child RSS inspection on macOS, Linux, and Windows; inspection failure,
+overage, or timeout must kill and reap the child before returning an isolated
+decompiler error. Keep the limit aligned with the owning JRuby work claim and
+change the decompilation cache options identity whenever a JVM bound changes.
+Cold project indexing derives JRuby static-navigation plans from the ordinary
+file pass's existing Prism tree and materializes those exact inputs before its
+deferred resolution. Do not restore a separate project-wide Java preflight
+read/parse. Keep the catalog-aware source prefilter complete for every supported
+Java DSL/proxy form, and route interactive edits through the same
+materialization lifecycle.
 
 Full-document formatting is available through opt-in RuboCop or Standard
 integration. It consumes the current unsaved buffer over stdin, uses RuboCop's
@@ -386,6 +501,22 @@ precedence. Reconfiguration with unchanged paths uses the settings-only path
 only when that fingerprint is also unchanged. In-place package updates activate
 a replacement registry first, swap atomically, then deactivate the previous
 guests; do not use timestamps as semantic reload identity.
+Read each discovered Wasm artifact once per discovery generation and reuse those
+exact bytes for its fingerprint, manifest checksum, and compilation identity.
+Reject source artifacts larger than 64 MiB before allocation and bound the
+actual read against concurrent file growth. Compiled-Wasm persistent envelopes
+must reject declared logical payloads larger than 64 MiB before allocation or
+decompression.
+Compiled Wasmtime modules are process-neutral derived products: key them by the
+source digest and Wasmtime's exact target/compiler/config compatibility hash,
+then persist only the host-produced serialized bytes inside the private bounded
+derived-product cache. Before unsafe Wasmtime deserialization, validate the
+cache envelope checksum, embedded source identity, compiler identity, artifact
+length, and artifact checksum. A rejected native artifact must be removed under
+the exact product lock and rebuilt from the already validated Wasm source; cache
+failure must never prevent loading an otherwise valid extension. Each loaded
+extension owns one ticker; its project guests share only that immutable compiled
+module/ticker and retain independent stores, memories, limits, and mutable state.
 
 Project-local extension discovery is fail-closed on workspace trust. Trusted
 roots may contribute manifest packages from `.ruby-fast-lsp/extensions/*` and
@@ -397,8 +528,14 @@ deterministic final tie-break across multi-root workspaces.
 Manifest `[watching]` globs require the `watching` capability and must be valid
 workspace-relative patterns without parent traversal. Supporting clients receive
 a dynamically refreshed, sorted registration. Incoming file changes are scoped
-to the deepest workspace root, normalized, sorted/deduplicated, matched per
-extension, and delivered through bounded `files.changed` events. Watch callbacks
+to the deepest workspace root and pass through one server-owned 100 ms debounce
+generation. The newest generation retains only the final event per URI in
+deterministic order; older timers cannot process a partial filesystem state.
+The normalized batch is matched per extension and delivered through bounded
+`files.changed` events. Gemfile/lockfile, auto-runtime marker, trusted
+project-extension, and owning JRuby classpath changes create at most one
+replacement generation per affected project; ordinary closed source changes
+retain the per-file replacement lifecycle. Watch callbacks
 may update private guest state or request an external process, but cannot
 directly return patches into engine or editor state. External process requests
 require a trusted workspace, the `process` capability, `process.exec`
@@ -1044,6 +1181,80 @@ Moved non-LSP logic out of `src/`:
   file; exported changes reprocess and publish at most eight deterministically
   sorted, project-owned open documents. Do not raise that bound or add closed
   workspace files to the typing path without a measured lifecycle benchmark.
+- Shared symbol/type subject indexes are ordered by `SourceFileId` and the
+  existing exact per-fact range key. Replacement-only stores remove one file,
+  stable-sort only that file's appended tail, then rotate the complete file
+  group into its binary-searched position. Do not restore a full shared-bucket
+  sort. `TypeStore::add` is append-only and may create a non-file-ordered
+  prefix; once that API is used, any later replacement must use the explicit
+  full-sort fallback rather than assuming the splice precondition.
+- Fact collection that needs known method-return types uses the borrowed
+  `TypeStore::known_method_return_types` domain view. It preserves fact-arena
+  order and filters unknown/unrelated facts before the collector clones the
+  small domain values it owns. Do not replace it with `all_facts` expansion or
+  a retained per-file lookup. Both an incrementally maintained borrowed
+  `HashMap` and a compact FQN-sorted vector improved warm wall time by about
+  3%, but raised median peak RSS by 11.0% and 22.3% respectively because their
+  lifetime overlaps the full collector traversal. Both were measured, rejected,
+  and removed; keep same-file return context short-lived unless a new profile
+  proves a different ownership lifetime stays below the fixed RSS ceiling.
+- Disabling `TypeTracker`'s discarded per-statement variable snapshots only for
+  `FactCollector` return inference was also measured and removed. It preserved
+  the exact semantic manifest and fingerprints, but the profiled target was
+  only 0.41% inclusive and the controlled three-pair `goshposh` A/B produced no
+  measurable gain: median wall, user CPU, active semantic readiness, and
+  dependency navigation all regressed slightly. Do not add a special
+  return-only snapshot mode without a new profile showing a materially larger
+  target; evidence is in
+  `support/performance/type-tracker-discarded-snapshots-rejection-2026-08-01.json`.
+- During AST traversal, `FactCollector` and `VariableScopes` maintain one
+  synchronized active lexical scope. Collector-local receiver type inference
+  starts from that scope and lets `get_type_at_position` walk capturable block
+  parents and stop at hard boundaries; it must not rescan every scope and
+  variable location to rediscover traversal context. Cursor-driven completion,
+  hover, rename, and diagnostic queries do not own that cursor and must retain
+  their position-based scope lookup.
+- Exact lexical, source-ordered `VariableScopes` facts are the sole authority
+  for a local-variable receiver during fact collection. If that lookup has no
+  defensible type, keep the receiver unknown. Never restore the removed
+  whole-file text scan or nested Prism parse fallback: it crossed hard method
+  boundaries, borrowed later same-named assignments, and created tens of
+  thousands of false method-reference candidates on `goshposh`. The corrected
+  semantic-result fingerprints and controlled A/B are recorded in
+  `support/performance/fact-collector-source-ordered-local-receivers-2026-08-01.json`.
+- Rejected August 1 2026 extension-call experiment: sharing the
+  `tracked_call_names` prefilter between patch dispatch and enclosing-frame
+  classification reduced warm wall time but failed the multi-root memory gate.
+  Holding one registry snapshot raised median RSS 24.7%; preserving short-lived
+  registry reads still raised median RSS 5.1%, slightly regressed CPU, and
+  exceeded the fixed 1.777 GB ceiling in one controlled run. Both shapes and
+  their temporary probe were removed. Do not merge these extension operations
+  merely to eliminate the duplicate name lookup; evidence is in
+  `support/performance/extension-call-classification-rejection-2026-08-01.json`.
+- Exact owner/name resolution uses MethodStore's crate-private borrowed
+  effective-fact selector. The already ordered bucket applies `Absent` and
+  `Unavailable` precedence, collapses exact adjacent duplicates, and expands
+  only one unique winner; distinct effective facts remain ambiguous. Keep MRO,
+  execution-context applications, `method_missing`, diagnostics, and the public
+  lookup result in engine resolution. Do not restore expanded-vector
+  sort/dedup on this hot path or expose stored facts/arena IDs publicly.
+- Per-resolution method-chain caching returns the stored interned owner IDs as
+  a borrowed slice. A miss still constructs one chain through the sole
+  engine-owned `method_lookup_chain` and translates only owners that can exist
+  in the ID-keyed graph/method stores; hits must not clone the vector, rebuild
+  FQNs, or probe each owner merely to release the cache borrow before recursive
+  execution-context lookup. Keep the borrow scoped before recursion and do not
+  replace it with a second MRO cache. The test-only `NameRegistry` lookup
+  counter is measurement instrumentation and must remain absent from production
+  builds.
+- Rejected August 1 2026 experiment: traversing MRO directly through graph
+  `FqnId` adjacency first changed complete semantic-result fingerprints because
+  edge-only endpoint entries were mistaken for declared namespaces. The focused
+  `edge_only_graph_entries_do_not_promote_missing_namespaces` regression now
+  preserves that boundary. The corrected ID traversal still regressed the exact
+  warm `goshposh` wall, CPU, and readiness medians, so it was removed. Do not
+  restore that shape without a new symbolized profile, explicit graph-node
+  definition semantics, and a three-run production improvement.
 
 Rule of thumb: anything returning or consuming `tower_lsp::lsp_types::*`,
 `Url`, editor commands, or publish diagnostics can stay in `ruby-fast-lsp`.
@@ -1285,6 +1496,17 @@ driven rather than a polished code example:
 
 ## Production Analysis Invariants
 
+- Completed shared core-engine templates use a weighted single-flight cache
+  bounded to eight entries and 128 MiB of engine-estimated heap. Completed gem
+  products are deliberately ephemeral. Do not make either cache unbounded or
+  merge isolated project engines to obtain reuse; profiler schema 6 records
+  retained product weights while aggregate project-engine RSS remains a
+  measured production acceptance budget.
+- Project-source collection uses cooperative Rayon pools sized to
+  `max(1, cpu_lanes / top_level_tasks)` after atomic resource admission. Do not
+  run that phase in the full shared pool or claim fewer lanes than nested Rayon
+  can actually use. Concurrent cooperative pools must remain bounded by the one
+  task/CPU/transient-memory/I/O governor.
 - Flow inference stabilizes only the outermost lexical `while`/`until` loop.
   Nested loops receive one semantic pass per outer iteration so generated
   parsers cannot turn the configured iteration bound into exponential work.

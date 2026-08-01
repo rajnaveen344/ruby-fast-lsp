@@ -32,8 +32,8 @@ impl FactCollector {
     ) -> TextRange {
         TextRange::new(
             self.document.analysis_file_id(),
-            u32_offset(location.start_offset(), &format!("{kind} start offset")),
-            u32_offset(location.end_offset(), &format!("{kind} end offset")),
+            u32_text_range_offset(location.start_offset(), kind, TextRangeBoundary::Start),
+            u32_text_range_offset(location.end_offset(), kind, TextRangeBoundary::End),
         )
     }
 
@@ -44,24 +44,69 @@ impl FactCollector {
     ) -> TextRange {
         TextRange::new(
             self.document.analysis_file_id(),
-            u32_offset(
+            u32_text_range_offset(
                 self.document.position_to_offset(range.start),
-                &format!("{kind} start offset"),
+                kind,
+                TextRangeBoundary::Start,
             ),
-            u32_offset(
+            u32_text_range_offset(
                 self.document.position_to_offset(range.end),
-                &format!("{kind} end offset"),
+                kind,
+                TextRangeBoundary::End,
             ),
         )
     }
 }
 
-fn u32_offset(offset: usize, message: &str) -> u32 {
-    u32::try_from(offset).unwrap_or_else(|_| {
-        panic!(
-            "INVARIANT VIOLATED: {message} exceeded u32. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
-        )
-    })
+#[derive(Clone, Copy)]
+enum TextRangeBoundary {
+    Start,
+    End,
+}
+
+fn u32_text_range_offset(offset: usize, kind: &str, boundary: TextRangeBoundary) -> u32 {
+    match u32::try_from(offset) {
+        Ok(offset) => offset,
+        Err(_) => {
+            let boundary = match boundary {
+                TextRangeBoundary::Start => "start",
+                TextRangeBoundary::End => "end",
+            };
+            panic!(
+                "INVARIANT VIOLATED: {kind} {boundary} offset exceeded u32. \
+                 This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
+                 Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_range_offset_context_is_typed_and_only_formatted_on_failure() {
+        assert_eq!(
+            u32_text_range_offset(7, "constant reference", TextRangeBoundary::Start),
+            7
+        );
+
+        let overflow = usize::try_from(u64::from(u32::MAX) + 1)
+            .expect("test platform must represent a byte offset larger than u32::MAX");
+        let panic = std::panic::catch_unwind(|| {
+            u32_text_range_offset(
+                overflow,
+                "method diagnostic candidate",
+                TextRangeBoundary::End,
+            )
+        })
+        .expect_err("an offset larger than u32::MAX must fail loudly");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .expect("overflow panic must carry a readable invariant message");
+        assert!(message.contains("method diagnostic candidate end offset exceeded u32"));
+    }
 }

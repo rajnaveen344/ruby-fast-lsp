@@ -1,0 +1,104 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-31",
+  "purpose": "Prove that exact project navigation demands already queued when project discovery starts are collected and released before unrelated active-document candidate files.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "raw_local_evidence": [
+    {
+      "id": "v31",
+      "jsonl": "/tmp/ruby-fast-lsp-initial-demand-two-project-jruby-warm-v31-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-initial-demand-two-project-jruby-warm-v31-20260731.log"
+    },
+    {
+      "id": "v32",
+      "jsonl": "/tmp/ruby-fast-lsp-initial-demand-two-project-jruby-warm-v32-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-initial-demand-two-project-jruby-warm-v32-20260731.log"
+    }
+  ],
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "change": {
+    "initial_demand_selection": "drain the exact generation-owned project demand queue at worker start and select at most 8 conventional candidates per key and 64 files total",
+    "frontier_order": "collect selected demand files before unrelated active-document candidates, then retain the deterministic active and exhaustive complements in the same IndexerProject",
+    "completion": "wake only keys whose bounded candidate files have entered the owning isolated engine; zero-candidate and ambiguous keys remain pending until exhaustive completion",
+    "mid_frontier_requests": "drain requests that arrive during the initial micro-frontier immediately after the active frontier using the existing immutable namespace snapshot"
+  },
+  "result": {
+    "repeats": [
+      {
+        "id": "v31",
+        "wall_ms": 22068.476917,
+        "peak_rss_bytes": 1750155264,
+        "project_user_pmm_ms": 517,
+        "dependency_bson_object_id_ms": 1607,
+        "active_project_navigation_ready_ms": 11059,
+        "active_semantic_complete_ms": 18932,
+        "all_project_semantic_complete_ms": 22068,
+        "initial_demand_frontier_ms": 245.193291
+      },
+      {
+        "id": "v32",
+        "wall_ms": 21710.646917,
+        "peak_rss_bytes": 1653604352,
+        "project_user_pmm_ms": 631,
+        "dependency_bson_object_id_ms": 1796,
+        "active_project_navigation_ready_ms": 11266,
+        "active_semantic_complete_ms": 19865,
+        "all_project_semantic_complete_ms": 21710,
+        "initial_demand_frontier_ms": 363.926041
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 21889.561917,
+      "peak_rss_bytes": 1701879808,
+      "project_user_pmm_ms": 574,
+      "dependency_bson_object_id_ms": 1701.5,
+      "active_project_navigation_ready_ms": 11162.5,
+      "active_semantic_complete_ms": 19398.5,
+      "all_project_semantic_complete_ms": 21889,
+      "initial_demand_frontier_ms": 304.559666
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "exact_semantic_probes_passed": true
+  },
+  "comparison": {
+    "previous_project_navigation_median_ms": 1108.5,
+    "project_navigation_change_percent": -48.22,
+    "previous_terminal_wall_median_ms": 22034.0176245,
+    "terminal_wall_change_percent": -0.66,
+    "previous_peak_rss_median_bytes": 1587806208,
+    "peak_rss_change_percent": 7.18,
+    "full_ahead_baseline_peak_rss_bytes": 1615314944,
+    "peak_rss_change_from_full_ahead_percent": 5.36
+  },
+  "correctness": {
+    "queued_target_queryable_before_unrelated_active_candidate": true,
+    "bounded_candidate_caps_preserved": true,
+    "zero_candidate_absence_semantics_preserved": true,
+    "generation_owned_completion_preserved": true,
+    "isolated_engine_ownership_unchanged": true,
+    "full_root_library_tests": 1313
+  },
+  "decision": "Accepted. Both repeats satisfy the strict one-second project-navigation target at 517-631 ms, a 48.22% median reduction from the immediately preceding allocation-optimized evidence. Locked dependency navigation remains below three seconds, terminal wall time improves by 0.66%, all cache products are fresh-process hits, and exact definitions retain Project/Gem provenance. Median RSS varies upward from the preceding pair but remains only 5.36% above the original full-ahead baseline, inside the explicit 10% ceiling. Exhaustive throughput remains open: active semantic completion is 19.399 seconds and all-project completion is 21.890 seconds."
+}

@@ -10,7 +10,27 @@ impl FactCollector {
     pub fn process_class_node_entry(&mut self, node: &ClassNode) -> bool {
         let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
         let lexical_context = self.scope_tracker.get_ns_stack();
-        let reopened_target = mixin_ref_from_node(&node.constant_path())
+        let mut syntactic_scope = self.scope_tracker.clone();
+        if syntactic_scope
+            .push_namespace_from_constant_path(&node.constant_path(), node.name().as_slice())
+            .is_err()
+        {
+            error!("Error creating namespace for class");
+            return false;
+        }
+        let syntactic_fqn = FullyQualifiedName::namespace(syntactic_scope.get_ns_stack());
+        let has_explicit_superclass = node.superclass().is_some();
+        let superclass = node.superclass().and_then(|superclass| {
+            let reference = mixin_ref_from_node(&superclass)?;
+            let super_range = self.direct_range(&superclass.location());
+            let target = self.direct_resolve_namespace_from(
+                &reference.parts,
+                reference.absolute,
+                &lexical_context,
+            );
+            Some((reference, super_range, target))
+        });
+        let mut reopened_target = mixin_ref_from_node(&node.constant_path())
             .and_then(|reference| {
                 self.resolve_declaration_constant_value_type_from(
                     &reference.parts,
@@ -28,6 +48,14 @@ impl FactCollector {
                 | RubyType::Union(_)
                 | RubyType::Unknown => None,
             });
+        if has_explicit_superclass
+            && superclass
+                .as_ref()
+                .and_then(|(_, _, target)| target.as_ref())
+                == reopened_target.as_ref()
+        {
+            reopened_target = None;
+        }
 
         // Handle namespace setup
         if let Some(target) = &reopened_target {
@@ -48,42 +76,31 @@ impl FactCollector {
         let range = self.direct_range(&node.location());
         let name_range = self
             .direct_terminal_name_range(&node.constant_path().location(), node.name().as_slice());
-        let has_explicit_superclass = node.superclass().is_some();
-        let superclass = node.superclass().and_then(|superclass| {
-            let reference = mixin_ref_from_node(&superclass)?;
-            let super_range = self.direct_range(&superclass.location());
-            let target = self.direct_resolve_namespace_from(
-                &reference.parts,
-                reference.absolute,
-                &lexical_context,
-            );
-            Some((reference, super_range, target))
-        });
         if reopened_target.is_none() {
+            assert_eq!(
+                fqn, syntactic_fqn,
+                "INVARIANT VIOLATED: syntactic class scope differs from the scope used for its declaration. This is a bug because both scopes were derived from the same Prism constant path. Fix: keep class declaration scope construction single-sourced."
+            );
             self.direct_push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range, name_range);
         }
         if let Some((superclass_ref, super_range, target)) = superclass {
             if let Some(target) = target {
-                self.direct_facts
-                    .graph_edges
-                    .push(crate::core::GraphEdgeFact::new(
-                        fqn.clone(),
-                        target.clone(),
-                        GraphEdgeKind::Superclass,
-                        super_range,
-                    ));
+                self.direct_push_resolved_edge(
+                    fqn.clone(),
+                    target.clone(),
+                    GraphEdgeKind::Superclass,
+                    super_range,
+                );
                 if let (Some(source_singleton), Some(target_singleton)) = (
                     fqn.to_singleton_namespace(),
                     target.to_singleton_namespace(),
                 ) {
-                    self.direct_facts
-                        .graph_edges
-                        .push(crate::core::GraphEdgeFact::new(
-                            source_singleton,
-                            target_singleton,
-                            GraphEdgeKind::Superclass,
-                            super_range,
-                        ));
+                    self.direct_push_resolved_edge(
+                        source_singleton,
+                        target_singleton,
+                        GraphEdgeKind::Superclass,
+                        super_range,
+                    );
                 }
             } else {
                 self.direct_facts.unresolved_graph_edges.push(

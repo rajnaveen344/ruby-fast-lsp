@@ -100,9 +100,14 @@ impl FactCollector {
             return Some(return_type);
         }
         let callees = if allow_private {
-            query.resolve_method_callees(&namespace, &method)?
+            query.resolve_method_callees_cached(&namespace, &method, &self.analysis_query_cache)?
         } else {
-            query.resolve_protected_method_callees(&namespace, &method, &caller_namespace)?
+            query.resolve_protected_method_callees_cached(
+                &namespace,
+                &method,
+                &caller_namespace,
+                &self.analysis_query_cache,
+            )?
         };
 
         let mut return_types = Vec::new();
@@ -130,15 +135,7 @@ impl FactCollector {
                 }
             }
 
-            let return_type = if allow_private {
-                query.method_return_type_for_receiver(&callee.owner, &callee.method)
-            } else {
-                query.method_return_type_for_protected_receiver(
-                    &callee.owner,
-                    &callee.method,
-                    &caller_namespace,
-                )
-            };
+            let return_type = query.method_return_type_for_callee(&callee);
             if let Some(return_type) = return_type {
                 if !return_types.contains(&return_type) {
                     return_types.push(return_type);

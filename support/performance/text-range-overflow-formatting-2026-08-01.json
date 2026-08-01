@@ -1,0 +1,206 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove eager diagnostic-string allocation from the Prism-byte-offset to TextRange conversion used for every constant, method, diagnostic, raise, and super reference.",
+  "profile_rationale": {
+    "source_profile": "/tmp/ruby-fast-lsp-no-text-fallback-v195-symbolized-profile.json.gz",
+    "source_profile_analysis": "/tmp/ruby-fast-lsp-no-text-fallback-v195-analysis.txt",
+    "file_fact_collection_inclusive_percent": 39.30,
+    "call_node_processing_inclusive_percent": 15.07,
+    "text_range_conversion_inclusive_percent": 2.53,
+    "call_subtree_formatting_percent": 12.52,
+    "observation": "Each successful range conversion eagerly built `format!(\"{kind} start offset\")` and `format!(\"{kind} end offset\")` strings only to pass them to an overflow branch that is unreachable for ordinary files. The formatted message remains required when a source byte offset actually exceeds u32::MAX."
+  },
+  "red_green": {
+    "test": "indexer::fact_collector::constant_read_node::tests::text_range_offset_context_is_typed_and_only_formatted_on_failure",
+    "red": "cargo test -p ruby-analysis text_range_offset_context_is_typed_and_only_formatted_on_failure failed because `u32_text_range_offset` and `TextRangeBoundary` did not exist.",
+    "green": "The typed start/end boundary conversion returns directly on the valid path and constructs the complete TigerBeetle-style invariant message only in the overflow branch.",
+    "focused_result": "1 passed",
+    "ruby_analysis_result": "408 passed",
+    "format_result": "cargo fmt --all -- --check passed"
+  },
+  "configuration": {
+    "workspace": "/Users/naveenraj/goshposh",
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "scheduler_concurrency": 2,
+    "persistent_cache": "/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731",
+    "persistent_cache_state": "Both analyzer producer identities were warmed before accepted timing. Every retained run had 607/607 gem hits and 168/168 persistent Java hits with zero producers.",
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "baseline_profiler_sha256": "69d41f237353b2bbcf697c6034eb4a40149601379deaa1b645f662b8ec2b2ce9",
+    "candidate_profiler_sha256": "a1c9a76f97bb65407eb3a62d83a73342f900b9bd3eba0ec68985505ea5b13913"
+  },
+  "discarded_cache_warmup": {
+    "id": "candidate-v267",
+    "reason": "Changing ruby-analysis correctly changed the gem semantic-producer identity. This run rebuilt 512 distinct persistent gem products and is excluded from timing comparison.",
+    "wall_ms": 34541.902125,
+    "gem_hits": 67,
+    "gem_producers": 512,
+    "jsonl_sha256": "b35ee71aec7cda2d0a431a8c9aa4abfd2632407f941584b83915ab2e80e08bef",
+    "log_sha256": "88a8dc96567c135ac42df7ddac0fcee7c210bf96daf68a812c9aeed2f58c9011"
+  },
+  "baseline_runs": [
+    {
+      "id": "baseline-v266",
+      "wall_ms": 13879.49225,
+      "user_cpu_ms": 26349.311,
+      "system_cpu_ms": 2645.817,
+      "external_peak_rss_bytes": 1498038272,
+      "internal_peak_rss_bytes": 1352073216,
+      "active_semantic_complete_ms": 12257,
+      "project_navigation_ms": 501,
+      "dependency_navigation_ms": 1437,
+      "summed_project_ms": 13998.962126,
+      "summed_dependencies_ms": 9227.798749,
+      "summed_resolve_ms": 2508.028,
+      "jsonl_sha256": "15538234fb2dd1b7321c40f62faf45a89f6e525b53344251c725331c7f8ea3c5",
+      "log_sha256": "93dd341ca9d873b3750d96f202e28c9b5470040a32ee9579d956fb55d0ed61da"
+    },
+    {
+      "id": "baseline-v268",
+      "wall_ms": 13527.18375,
+      "user_cpu_ms": 26339.387,
+      "system_cpu_ms": 2591.563,
+      "external_peak_rss_bytes": 1642446848,
+      "internal_peak_rss_bytes": 1412661248,
+      "active_semantic_complete_ms": 12071,
+      "project_navigation_ms": 371,
+      "dependency_navigation_ms": 1418,
+      "summed_project_ms": 13687.138083,
+      "summed_dependencies_ms": 8974.014,
+      "summed_resolve_ms": 2518.412333,
+      "jsonl_sha256": "a442487920333c3abf779da9f6f6661daab2d082b817269fda2cb3e3e39e7827",
+      "log_sha256": "64c2533401bb8b187e7d89ddfbf74d169c15bd9b586f9296aebc11dc6152c1f7"
+    },
+    {
+      "id": "baseline-v270",
+      "wall_ms": 13527.229542,
+      "user_cpu_ms": 26285.384,
+      "system_cpu_ms": 2602.476,
+      "external_peak_rss_bytes": 1480409088,
+      "internal_peak_rss_bytes": 1290043392,
+      "active_semantic_complete_ms": 11971,
+      "project_navigation_ms": 372,
+      "dependency_navigation_ms": 1402,
+      "summed_project_ms": 13617.398958,
+      "summed_dependencies_ms": 9005.039125,
+      "summed_resolve_ms": 2469.347875,
+      "jsonl_sha256": "03ff7454da553d71ffb8cf379e31fb78a415a350792d6ea5697d7d270c8824fb",
+      "log_sha256": "e3e873e4dbfcc25f5b860b6278ceccc07c53547cee3ad21c9e9e3376b492aa24"
+    }
+  ],
+  "candidate_runs": [
+    {
+      "id": "candidate-v269",
+      "wall_ms": 13319.250958,
+      "user_cpu_ms": 25299.021,
+      "system_cpu_ms": 2541.353,
+      "external_peak_rss_bytes": 1522712576,
+      "internal_peak_rss_bytes": 1359609856,
+      "active_semantic_complete_ms": 11736,
+      "project_navigation_ms": 374,
+      "dependency_navigation_ms": 1383,
+      "summed_project_ms": 13246.167499,
+      "summed_dependencies_ms": 8861.620417,
+      "summed_resolve_ms": 2545.839834,
+      "jsonl_sha256": "f53c2f568a251f2025cea5cd0e069e8ad8d518ee0d99eb7baa7a8dadc1e59e3b",
+      "log_sha256": "04d080a2bc7b58e6b76a2e9ebace87a3c7c6b03488c46cb501b558ad64721793"
+    },
+    {
+      "id": "candidate-v271",
+      "wall_ms": 13446.331208,
+      "user_cpu_ms": 25591.11,
+      "system_cpu_ms": 2620.04,
+      "external_peak_rss_bytes": 1453965312,
+      "internal_peak_rss_bytes": 1284538368,
+      "active_semantic_complete_ms": 11853,
+      "project_navigation_ms": 374,
+      "dependency_navigation_ms": 1265,
+      "summed_project_ms": 13387.709583,
+      "summed_dependencies_ms": 8971.520542,
+      "summed_resolve_ms": 2520.493334,
+      "jsonl_sha256": "e1bbd953bef106e149fb19048c936bf4cceb89bf4e67c575fa3ef51db5e17f94",
+      "log_sha256": "fe1c4f1532b847204470050d8cf9be4db86437e9bf327d91a3e1dd906378814f"
+    },
+    {
+      "id": "candidate-v272",
+      "wall_ms": 13256.972458,
+      "user_cpu_ms": 25584.389,
+      "system_cpu_ms": 2553.638,
+      "external_peak_rss_bytes": 1559805952,
+      "internal_peak_rss_bytes": 1362509824,
+      "active_semantic_complete_ms": 11863,
+      "project_navigation_ms": 362,
+      "dependency_navigation_ms": 1489,
+      "summed_project_ms": 13260.668959,
+      "summed_dependencies_ms": 8923.443542,
+      "summed_resolve_ms": 2527.483541,
+      "jsonl_sha256": "2aff623d140860b27c7c212ee2a2b9cb3c8a8c66d3186b2c465d0870ac5addcd",
+      "log_sha256": "819f122d43650931ab3c811de9f922a291cb29bcf126795723f88d56ba686026"
+    }
+  ],
+  "medians": {
+    "baseline": {
+      "wall_ms": 13527.229542,
+      "user_cpu_ms": 26339.387,
+      "system_cpu_ms": 2602.476,
+      "external_peak_rss_bytes": 1498038272,
+      "internal_peak_rss_bytes": 1352073216,
+      "active_semantic_complete_ms": 12071,
+      "project_navigation_ms": 372,
+      "dependency_navigation_ms": 1418,
+      "summed_project_ms": 13687.138083,
+      "summed_dependencies_ms": 9005.039125,
+      "summed_resolve_ms": 2508.028
+    },
+    "candidate": {
+      "wall_ms": 13319.250958,
+      "user_cpu_ms": 25584.389,
+      "system_cpu_ms": 2553.638,
+      "external_peak_rss_bytes": 1522712576,
+      "internal_peak_rss_bytes": 1359609856,
+      "active_semantic_complete_ms": 11853,
+      "project_navigation_ms": 374,
+      "dependency_navigation_ms": 1383,
+      "summed_project_ms": 13260.668959,
+      "summed_dependencies_ms": 8923.443542,
+      "summed_resolve_ms": 2527.483541
+    },
+    "candidate_change_percent": {
+      "wall": -1.537,
+      "user_cpu": -2.866,
+      "system_cpu": -1.877,
+      "external_peak_rss": 1.647,
+      "internal_peak_rss": 0.557,
+      "active_semantic_complete": -1.806,
+      "project_navigation": 0.538,
+      "dependency_navigation": -2.468,
+      "summed_project": -3.116,
+      "summed_dependencies": -0.906,
+      "summed_resolve": 0.776
+    }
+  },
+  "correctness": {
+    "semantic_export_manifest_sha256_all_six_runs": "54268a7cd555eb82ffe9ea3a233378113c2dd5da5a8d576c15fb4de1fe717513",
+    "semantic_result_fingerprints_all_six_runs": {
+      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
+      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+    },
+    "gem_hits_per_run": 607,
+    "java_hits_per_run": 168,
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "panicked_resource_tasks": 0,
+    "resource_leases_at_end": 0,
+    "highest_candidate_external_peak_rss_bytes": 1559805952,
+    "rss_ceiling_headroom_bytes": 217040486
+  },
+  "decision": "Accepted. The change removes two eager heap allocations from every ordinary reference range conversion. Three interleaved warm-cache pairs preserve the complete semantic manifest, both project fingerprints, exact Project/Gem navigation, persistent-cache reuse, and resource cleanup while improving median project collection 3.116%, user CPU 2.866%, active semantic completion 1.806%, and terminal wall 1.537%. Median external RSS moves 1.647% but every candidate stays at least 217 MB below the fixed ceiling. Active semantic completion remains 11.853 seconds versus the five-second goal.",
+  "next_step": "Capture a new symbolized profile from the accepted binary and select the next distinct fact-collection or final-resolution target. Do not infer that this local allocation removal closes the remaining active-semantic or cold/incremental acceptance gaps."
+}

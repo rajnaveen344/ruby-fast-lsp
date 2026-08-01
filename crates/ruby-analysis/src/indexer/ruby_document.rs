@@ -41,7 +41,7 @@ impl RubyDocument {
         };
         Self {
             uri,
-            source: SourceDocument::new(content.clone(), analysis_file_id),
+            source: SourceDocument::new(&content, analysis_file_id),
             content,
             embedded,
             version,
@@ -74,7 +74,7 @@ impl RubyDocument {
     }
 
     pub fn get_comments(&self) -> &[(usize, usize)] {
-        self.source.comments()
+        self.source.comments(&self.content)
     }
 
     /// Updates document content and version, recomputing line offsets
@@ -85,7 +85,7 @@ impl RubyDocument {
         } else {
             None
         };
-        self.source.update(content.clone());
+        self.source.update(&content);
         self.content = content;
         self.version = version;
         self.variable_scopes = VariableScopes::new();
@@ -103,14 +103,14 @@ impl RubyDocument {
 
     /// Converts a byte offset to an LSP Position (line, character)
     pub fn offset_to_position(&self, offset: usize) -> Position {
-        let (line, character) = self.source.offset_to_line_character(offset);
+        let (line, character) = self.source.offset_to_line_character(&self.content, offset);
         Position::new(line, character)
     }
 
     /// Converts an LSP Position to a byte offset
     pub fn position_to_offset(&self, position: Position) -> usize {
         self.source
-            .line_character_to_offset(position.line, position.character)
+            .line_character_to_offset(&self.content, position.line, position.character)
     }
 
     pub fn position_to_analysis_offset(&self, position: Position) -> u32 {

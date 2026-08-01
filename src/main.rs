@@ -1,12 +1,16 @@
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::process::exit;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::{error, info};
 use tower_lsp::{LspService, Server};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if run_cache_command_if_requested()? {
+        return Ok(());
+    }
+
     // Initialize the logger with trace level enabled (actual filtering is done via log::set_max_level)
     // This allows runtime log level changes without restarting the server
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
@@ -64,6 +68,10 @@ async fn main() -> Result<()> {
         "ruby-fast-lsp/runtime/status",
         RubyLanguageServer::handle_runtime_status,
     )
+    .custom_method(
+        "ruby-fast-lsp/indexing/status",
+        RubyLanguageServer::handle_indexing_status,
+    )
     .finish();
 
     info!("Ruby LSP server initialized, waiting for client connections");
@@ -71,4 +79,49 @@ async fn main() -> Result<()> {
     Server::new(stdin, stdout, socket).serve(service).await;
 
     Ok(())
+}
+
+fn run_cache_command_if_requested() -> Result<bool> {
+    let mut arguments = std::env::args().skip(1);
+    let Some(command) = arguments.next() else {
+        return Ok(false);
+    };
+    if command != "cache" {
+        return Ok(false);
+    }
+    let operation = arguments
+        .next()
+        .ok_or_else(|| anyhow!("cache command requires `show` or `clear`"))?;
+    if let Some(unexpected) = arguments.next() {
+        return Err(anyhow!(
+            "cache command received unexpected argument `{unexpected}`"
+        ));
+    }
+    let cache = ruby_fast_lsp::persistent_cache::PersistentDerivedProductCache::new(
+        ruby_fast_lsp::utils::ruby_fast_lsp_user_cache_root()?,
+    );
+    let (action, summary) = match operation.as_str() {
+        "show" => ("show", cache.summary()?),
+        "clear" => ("clear", cache.clear()?),
+        "cache" | "show-cache" | "clear-cache" => {
+            return Err(anyhow!(
+                "unknown cache operation `{operation}`; expected `show` or `clear`"
+            ));
+        }
+        _ => {
+            return Err(anyhow!(
+                "unknown cache operation `{operation}`; expected `show` or `clear`"
+            ));
+        }
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "action": action,
+            "root": summary.root,
+            "entries": summary.entries,
+            "bytes": summary.bytes,
+        }))?
+    );
+    Ok(true)
 }

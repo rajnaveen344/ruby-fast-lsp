@@ -6,8 +6,7 @@ use crate::core::{
     SymbolKind, TextRange, TypeFact, TypeProvenance, TypeStore, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
-use crate::engine::AnalysisEngine;
-use once_cell::unsync::OnceCell;
+use crate::engine::{AnalysisEngine, AnalysisQueryCache};
 use ruby_fast_lsp_extension_api::{IndexPatch, Receiver, ResolvedCall, SourceRange};
 use ruby_prism::*;
 
@@ -56,10 +55,10 @@ pub struct FactCollector {
     pending_block_execution_context: Option<BlockExecutionContext>,
     pub extension_host: Arc<dyn FactCollectorExtensionHost>,
     pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    analysis_query_cache: Arc<AnalysisQueryCache>,
     pub include_local_vars: bool,
     pub reference_candidates: Vec<ReferenceCandidate>,
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
-    pub variable_types: OnceCell<HashMap<String, RubyType>>,
     pub resolve_analysis_method_returns: bool,
     pub infer_expression_receivers: bool,
     pub diagnostics_enabled: bool,
@@ -69,6 +68,7 @@ pub struct FactCollector {
     pub yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
     pub proc_return_types_by_local: HashMap<String, RubyType>,
     direct_known_namespaces: HashSet<FullyQualifiedName>,
+    shared_direct_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,10 +198,10 @@ impl FactCollector {
             pending_block_execution_context: None,
             extension_host,
             analysis_engine,
+            analysis_query_cache: Arc::new(AnalysisQueryCache::default()),
             include_local_vars: true,
             reference_candidates: Vec::new(),
             diagnostic_candidates: Vec::new(),
-            variable_types: OnceCell::new(),
             resolve_analysis_method_returns: true,
             infer_expression_receivers: true,
             diagnostics_enabled: true,
@@ -211,6 +211,7 @@ impl FactCollector {
             yield_param_types_by_method: HashMap::new(),
             proc_return_types_by_local: HashMap::new(),
             direct_known_namespaces: HashSet::new(),
+            shared_direct_known_namespaces: None,
         }
     }
 
@@ -243,6 +244,29 @@ impl FactCollector {
     ) -> Self {
         self.direct_known_namespaces = known_namespaces;
         self
+    }
+
+    pub fn with_shared_direct_known_namespaces(
+        mut self,
+        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
+    ) -> Self {
+        self.shared_direct_known_namespaces = Some(known_namespaces);
+        self
+    }
+
+    pub fn extend_direct_known_namespaces(
+        &mut self,
+        known_namespaces: impl IntoIterator<Item = FullyQualifiedName>,
+    ) {
+        self.direct_known_namespaces.extend(known_namespaces);
+    }
+
+    fn direct_namespace_is_known(&self, fqn: &FullyQualifiedName) -> bool {
+        self.direct_known_namespaces.contains(fqn)
+            || self
+                .shared_direct_known_namespaces
+                .as_ref()
+                .is_some_and(|known| known.contains(fqn))
     }
 
     fn static_eval_block_context(
@@ -518,7 +542,7 @@ impl FactCollector {
             let mut probe = search.clone();
             probe.extend(parts.iter().cloned());
             let fqn = FullyQualifiedName::namespace(probe);
-            if self.direct_known_namespaces.contains(&fqn) {
+            if self.direct_namespace_is_known(&fqn) {
                 return Some(fqn);
             }
             if absolute || search.is_empty() {
@@ -528,11 +552,11 @@ impl FactCollector {
         }
 
         let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.direct_known_namespaces.contains(&fqn).then_some(fqn)
+        self.direct_namespace_is_known(&fqn).then_some(fqn)
     }
 
     pub fn namespace_is_known(&self, fqn: &FullyQualifiedName) -> bool {
-        if self.direct_known_namespaces.contains(fqn) {
+        if self.direct_namespace_is_known(fqn) {
             return true;
         }
         let engine = self.analysis_engine.read();
@@ -623,9 +647,84 @@ impl FactCollector {
                 ));
             return;
         };
+        self.direct_push_resolved_edge(source, target, kind, range);
+    }
+
+    pub fn direct_push_resolved_edge(
+        &mut self,
+        source: FullyQualifiedName,
+        target: FullyQualifiedName,
+        kind: GraphEdgeKind,
+        range: TextRange,
+    ) -> bool {
+        if self
+            .direct_facts
+            .graph_edges
+            .iter()
+            .any(|edge| edge.source == source && edge.target == target && edge.kind == kind)
+        {
+            return true;
+        }
+
+        if kind == GraphEdgeKind::Superclass {
+            if let Some(existing) = self
+                .direct_facts
+                .graph_edges
+                .iter()
+                .find(|edge| edge.source == source && edge.kind == GraphEdgeKind::Superclass)
+            {
+                self.push_error_diagnostic(
+                    range,
+                    "conflicting-superclass",
+                    format!(
+                        "Class `{source}` already inherits `{}` and cannot also inherit `{target}`",
+                        existing.target
+                    ),
+                );
+                return false;
+            }
+        }
+
+        if ancestry_edge_kind(kind)
+            && (source == target || self.direct_ancestry_path_exists(&target, &source))
+        {
+            self.push_error_diagnostic(
+                range,
+                "cyclic-inheritance",
+                format!("Inheritance edge `{source}` -> `{target}` creates a cycle"),
+            );
+            return false;
+        }
+
         self.direct_facts
             .graph_edges
             .push(GraphEdgeFact::new(source, target, kind, range));
+        true
+    }
+
+    fn direct_ancestry_path_exists(
+        &self,
+        start: &FullyQualifiedName,
+        destination: &FullyQualifiedName,
+    ) -> bool {
+        let mut pending = vec![start.clone()];
+        let mut visited = HashSet::new();
+        while let Some(current) = pending.pop() {
+            if &current == destination {
+                return true;
+            }
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            pending.extend(
+                self.direct_facts
+                    .graph_edges
+                    .iter()
+                    .filter(|edge| edge.source == current && ancestry_edge_kind(edge.kind))
+                    .map(|edge| edge.target.clone()),
+            );
+        }
+        false
     }
 
     pub fn direct_push_method_fact(
@@ -837,13 +936,6 @@ impl FactCollector {
         let fact = TypeFact::new(subject, ruby_type, range, provenance);
         self.type_store.add(fact.clone());
         self.direct_facts.types.push(fact);
-    }
-
-    pub fn infer_variable_type_cached(&self, var_name: &str) -> Option<RubyType> {
-        let map = self
-            .variable_types
-            .get_or_init(|| build_variable_type_map(&self.document.content));
-        map.get(var_name).cloned()
     }
 
     /// Infer type from a value node during indexing.
@@ -1588,17 +1680,21 @@ impl FactCollector {
     }
 
     fn direct_constant_value_type(&self, constant_fqn: &FullyQualifiedName) -> Option<RubyType> {
-        self.direct_facts
+        let direct = self
+            .direct_facts
             .types
             .iter()
-            .chain(
-                self.type_store
-                    .facts_for(&TypeSubject::Constant(constant_fqn.clone()))
-                    .iter(),
-            )
-            .filter(|fact| {
-                fact.subject == TypeSubject::Constant(constant_fqn.clone())
-                    && fact.ruby_type != RubyType::Unknown
+            .filter(|fact| match &fact.subject {
+                TypeSubject::Constant(fqn) => {
+                    fqn == constant_fqn && fact.ruby_type != RubyType::Unknown
+                }
+                TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => false,
             })
             .max_by_key(|fact| {
                 (
@@ -1606,8 +1702,28 @@ impl FactCollector {
                     fact.range.start_byte,
                     fact.range.end_byte,
                 )
-            })
-            .map(|fact| fact.ruby_type.clone())
+            });
+        let subject = TypeSubject::Constant(constant_fqn.clone());
+        let stored = self.type_store.latest_non_unknown_type_with_range(&subject);
+
+        match (direct, stored) {
+            (None, None) => None,
+            (Some(fact), None) => Some(fact.ruby_type.clone()),
+            (None, Some((ruby_type, _))) => Some(ruby_type.clone()),
+            (Some(fact), Some((ruby_type, range))) => {
+                let direct_key = (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                );
+                let stored_key = (range.file_id, range.start_byte, range.end_byte);
+                if direct_key > stored_key {
+                    Some(fact.ruby_type.clone())
+                } else {
+                    Some(ruby_type.clone())
+                }
+            }
+        }
     }
 
     fn const_get_target_parts(&self, call: &CallNode<'_>) -> Option<Vec<RubyConstant>> {
@@ -1673,16 +1789,14 @@ impl FactCollector {
         );
         let file_id = self.document.analysis_file_id();
 
-        // Use VariableScopes tree for type lookup
-        let scope_id = self
-            .document
-            .variable_scopes()
-            .find_scope_for_variable_at(var_name, file_id, byte_offset)
-            .or_else(|| {
-                self.document
-                    .variable_scopes()
-                    .scope_at_position(file_id, byte_offset)
-            })?;
+        // Fact collection traverses the AST while keeping VariableScopes aligned with the
+        // current lexical node. Starting from that scope preserves block capture and hard-scope
+        // boundaries through get_type_at_position without rescanning every variable location.
+        let scope_id = self.document.variable_scopes().current_scope().expect(
+            "INVARIANT VIOLATED: local variable type inference ran without an active lexical scope. \
+             This is a bug because FactCollector and VariableScopes must enter and exit AST scopes together. \
+             Fix: balance the variable-scope lifecycle around every collector traversal branch.",
+        );
 
         let ty = self.document.variable_scopes().get_type_at_position(
             var_name,
@@ -1788,6 +1902,16 @@ impl FactCollector {
     }
 }
 
+fn ancestry_edge_kind(kind: GraphEdgeKind) -> bool {
+    match kind {
+        GraphEdgeKind::Superclass
+        | GraphEdgeKind::Include
+        | GraphEdgeKind::Prepend
+        | GraphEdgeKind::Extend => true,
+        GraphEdgeKind::ExecutionContextApplication => false,
+    }
+}
+
 fn source_range(visitor: &FactCollector, location: &ruby_prism::Location) -> SourceRange {
     let range = visitor.document.prism_location_to_lsp_range(location);
     SourceRange {
@@ -1800,53 +1924,6 @@ fn source_range(visitor: &FactCollector, location: &ruby_prism::Location) -> Sou
             character: range.end.character,
         },
     }
-}
-
-fn build_variable_type_map(content: &str) -> HashMap<String, RubyType> {
-    let mut map: HashMap<String, RubyType> = HashMap::new();
-    let literal_analyzer = LiteralAnalyzer::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        let Some(eq_idx) = trimmed.find('=') else {
-            continue;
-        };
-        let lhs = trimmed[..eq_idx].trim();
-        let mut chars = lhs.chars();
-        match chars.next() {
-            Some(c) if c.is_lowercase() || c == '_' => {}
-            Some(_) | None => continue,
-        }
-        if !lhs.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            continue;
-        }
-        let rhs_full = trimmed[eq_idx + 1..].trim();
-        let parse_result = ruby_prism::parse(rhs_full.as_bytes());
-        if parse_result.errors().count() == 0 {
-            if let Some(literal_type) = literal_analyzer.analyze_literal(&parse_result.node()) {
-                if literal_type != RubyType::Unknown {
-                    map.entry(lhs.to_string()).or_insert(literal_type);
-                    continue;
-                }
-            }
-        }
-        let Some(new_pos) = rhs_full.find(".new") else {
-            continue;
-        };
-        let class_part = rhs_full[..new_pos].trim();
-        if !class_part.chars().next().is_some_and(|c| c.is_uppercase()) {
-            continue;
-        }
-        let parts: Vec<_> = class_part
-            .split("::")
-            .filter_map(|s| RubyConstant::new(s.trim()).ok())
-            .collect();
-        if parts.is_empty() {
-            continue;
-        }
-        map.entry(lhs.to_string())
-            .or_insert_with(|| RubyType::Class(FullyQualifiedName::constant(parts)));
-    }
-    map
 }
 
 fn const_get_arg_constant(arg: &Node<'_>) -> Option<RubyConstant> {
@@ -2531,6 +2608,99 @@ mod execution_context_tests {
     }
 
     #[test]
+    fn local_receiver_inference_uses_the_active_lexical_scope() {
+        let source = "class User\nend\nouter = User.new\n2.times do\n  outer.save\n  inner = \"value\"\n  1.times do\n    inner.upcase\n  end\nend\n";
+        let uri = Url::parse("file:///workspace/lib/local_receiver.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/local_receiver.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let method_owner = |name: &str| {
+            collector
+                .reference_candidates
+                .iter()
+                .find_map(|candidate| match &candidate.kind {
+                    crate::core::ReferenceCandidateKind::Method { owner, method, .. }
+                        if method.as_str() == name =>
+                    {
+                        Some(owner.iter().map(ToString::to_string).collect::<Vec<_>>())
+                    }
+                    crate::core::ReferenceCandidateKind::Constant { .. }
+                    | crate::core::ReferenceCandidateKind::Method { .. }
+                    | crate::core::ReferenceCandidateKind::Resolved { .. } => None,
+                })
+                .unwrap_or_else(|| panic!("expected a method reference candidate for {name}"))
+        };
+
+        assert_eq!(method_owner("save"), vec!["User"]);
+        assert_eq!(method_owner("upcase"), vec!["String"]);
+        assert_eq!(
+            collector
+                .document
+                .variable_scopes()
+                .scope_owner_scan_count_for_test(),
+            0,
+            "fact collection already owns the active lexical scope and must not scan every scope and variable to rediscover it"
+        );
+    }
+
+    #[test]
+    fn local_receiver_inference_does_not_borrow_an_assignment_from_another_method() {
+        let source = "class User\nend\ndef inspect(user)\n  user.save\nend\ndef build\n  user = User.new\nend\n";
+        let uri = Url::parse("file:///workspace/lib/source_order.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/source_order.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let save_owners = collector
+            .reference_candidates
+            .iter()
+            .filter_map(|candidate| match &candidate.kind {
+                crate::core::ReferenceCandidateKind::Method { owner, method, .. }
+                    if method.as_str() == "save" =>
+                {
+                    Some(owner.iter().map(ToString::to_string).collect::<Vec<_>>())
+                }
+                crate::core::ReferenceCandidateKind::Constant { .. }
+                | crate::core::ReferenceCandidateKind::Method { .. }
+                | crate::core::ReferenceCandidateKind::Resolved { .. } => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            save_owners,
+            Vec::<Vec<String>>::new(),
+            "an untyped `user` parameter must not borrow `user = User.new` from a different method through a whole-file text scan"
+        );
+    }
+
+    #[test]
     fn recovered_invalid_namespace_does_not_unbalance_an_enclosing_method_context() {
         let source = "def outer\n  def self.forName(module, name); end\nend\n";
         let uri = Url::parse("file:///workspace/lib/recovered.rb").unwrap();
@@ -2556,6 +2726,74 @@ mod execution_context_tests {
             Vec::<RubyConstant>::new()
         );
         assert!(!collector.scope_tracker.execution_context_active());
+    }
+
+    #[test]
+    fn shared_known_namespaces_are_immutable_while_file_declarations_stay_local() {
+        let shared_namespace =
+            FullyQualifiedName::namespace(vec![RubyConstant::new("Shared").unwrap()]);
+        let local_namespace =
+            FullyQualifiedName::namespace(vec![RubyConstant::new("Local").unwrap()]);
+        let shared = Arc::new(HashSet::from([shared_namespace.clone()]));
+        let source = "class Local\nend\n";
+        let uri = Url::parse("file:///workspace/lib/local.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/local.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Gem,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document =
+            RubyDocument::with_analysis_file_id(uri.clone(), source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine.clone(),
+        )
+        .with_shared_direct_known_namespaces(shared.clone());
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        assert_eq!(
+            collector.direct_resolve_namespace(&[RubyConstant::new("Shared").unwrap()], true),
+            Some(shared_namespace),
+            "the immutable batch snapshot must participate in direct lookup"
+        );
+        assert_eq!(
+            collector.direct_resolve_namespace(&[RubyConstant::new("Local").unwrap()], true),
+            Some(local_namespace),
+            "declarations from the current file must remain directly visible"
+        );
+        assert_eq!(
+            shared.len(),
+            1,
+            "file-local declarations must not mutate the shared batch snapshot"
+        );
+
+        let other_file_id = engine.write().register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/other.rb"),
+            content: String::new(),
+            kind: SourceKind::Gem,
+        });
+        let other_document = RubyDocument::with_analysis_file_id(
+            Url::parse("file:///workspace/lib/other.rb").unwrap(),
+            String::new(),
+            0,
+            other_file_id,
+        );
+        let other_collector = FactCollector::analysis_only(
+            other_document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        )
+        .with_shared_direct_known_namespaces(shared);
+        assert_eq!(
+            other_collector.direct_resolve_namespace(&[RubyConstant::new("Local").unwrap()], true),
+            None,
+            "one file's declarations must not leak into another file's local overlay"
+        );
     }
 
     #[test]
@@ -2658,6 +2896,146 @@ mod execution_context_tests {
                     ])
             }),
             "a value constant alias must not become a second class identity"
+        );
+    }
+
+    #[test]
+    fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
+        let source = "class StringScanner\n\
+                      end\n\
+                      module Sass\n\
+                        module Util\n\
+                        end\n\
+                      end\n\
+                      Sass::Util::MultibyteStringScanner = StringScanner\n\
+                      class Sass::Util::MultibyteStringScanner < StringScanner\n\
+                        def wrapped_string\n\
+                          string\n\
+                        end\n\
+                      end\n";
+        let uri = Url::parse("file:///workspace/sass/multibyte_string_scanner.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/sass/multibyte_string_scanner.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Gem,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let subclass = FullyQualifiedName::namespace(vec![
+            RubyConstant::new("Sass").unwrap(),
+            RubyConstant::new("Util").unwrap(),
+            RubyConstant::new("MultibyteStringScanner").unwrap(),
+        ]);
+        let string_scanner =
+            FullyQualifiedName::namespace(vec![RubyConstant::new("StringScanner").unwrap()]);
+        let method = collector
+            .direct_facts
+            .methods
+            .iter()
+            .find(|fact| fact.fqn.name() == "wrapped_string")
+            .expect("method in the explicit subclass must be collected");
+
+        assert_eq!(
+            method.owner, subclass,
+            "an alias cannot reopen its target when that would make the target inherit itself"
+        );
+        assert!(
+            collector
+                .direct_facts
+                .graph_edges
+                .iter()
+                .any(|edge| edge.kind == GraphEdgeKind::Superclass
+                    && edge.source == subclass
+                    && edge.target == string_scanner),
+            "the feasible explicit subclass branch must retain its superclass"
+        );
+        assert!(
+            collector
+                .direct_facts
+                .graph_edges
+                .iter()
+                .all(|edge| edge.kind != GraphEdgeKind::Superclass
+                    || edge.source != string_scanner
+                    || edge.target != string_scanner),
+            "the flow-insensitive alias must not create StringScanner < StringScanner"
+        );
+    }
+
+    #[test]
+    fn local_graph_edge_validation_rejects_cycles_and_conflicting_superclasses() {
+        let source = "";
+        let uri = Url::parse("file:///workspace/lib/invalid_inheritance.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/invalid_inheritance.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let range = TextRange::new(file_id, 0, 0);
+        let a = FullyQualifiedName::namespace(vec![RubyConstant::new("A").unwrap()]);
+        let b = FullyQualifiedName::namespace(vec![RubyConstant::new("B").unwrap()]);
+        let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
+
+        assert!(collector.direct_push_resolved_edge(
+            a.clone(),
+            b.clone(),
+            GraphEdgeKind::Include,
+            range,
+        ));
+        assert!(
+            !collector.direct_push_resolved_edge(
+                b.clone(),
+                a.clone(),
+                GraphEdgeKind::Include,
+                range,
+            ),
+            "the edge that closes a local ancestry cycle must be rejected"
+        );
+        assert!(collector.direct_push_resolved_edge(
+            child.clone(),
+            a.clone(),
+            GraphEdgeKind::Superclass,
+            range,
+        ));
+        assert!(
+            !collector.direct_push_resolved_edge(
+                child.clone(),
+                b.clone(),
+                GraphEdgeKind::Superclass,
+                range,
+            ),
+            "a second distinct local superclass must be rejected"
+        );
+
+        assert_eq!(
+            collector
+                .analysis_diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>(),
+            vec!["cyclic-inheritance", "conflicting-superclass"]
+        );
+        assert_eq!(
+            collector.direct_facts.graph_edges.len(),
+            2,
+            "only the two valid ancestry edges may become same-pass semantic input"
         );
     }
 }

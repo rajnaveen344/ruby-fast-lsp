@@ -1,0 +1,154 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Restore move-only ownership for project source buffers across deterministic priority and exhaustive batch partitions. The bounded batch implementation had regressed the previously accepted ownership rule by borrowing every tuple and cloning its String before RubyDocument construction.",
+  "profile_basis": {
+    "profile": "/private/tmp/ruby-fast-lsp-no-text-fallback-v195-symbolized-profile.json.gz",
+    "profile_sha256": "efd1d2e116d4844d38e4b262c40dbb1df617be332de42ca023a0d2c503fc5978",
+    "string_clone_self_percent": 2.3,
+    "file_fact_collection_inclusive_percent": 39.3,
+    "observation": "collect_facts_and_track_dependencies retained the read Vec, traversed it by reference, and cloned every source String into collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution. The source owner had no later consumer after batch registration."
+  },
+  "change": {
+    "implementation": "Split the owned input Vec at the deterministic priority boundary, consume both indexed Rayon partitions by value, and move each String into RubyDocument construction.",
+    "ownership_boundary": "map_owned_project_inputs accepts non-Clone T values. The type boundary prevents the project batch from depending on Clone while preserving indexed parallel order inside both partitions.",
+    "unchanged": "Project isolation, immutable semantic-read engines, exact JRuby provider handoff/replay, file registration, ordered fact replacement, diagnostics, and final resolution are unchanged."
+  },
+  "controlled_workload": {
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "baseline_executable_sha256": "e21b2504729dc4bd849e98ad438ee49f6511a7939a959d700b34fb2352a47b11",
+    "candidate_executable_sha256": "69d41f237353b2bbcf697c6034eb4a40149601379deaa1b645f662b8ec2b2ce9",
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "persistent_cache_state": "valid fully warm fresh process",
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "runtime": "jruby-9.2.21.0",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "red_green": {
+    "test": "project_input_partitions_consume_non_clone_values_in_order",
+    "red": "The focused test failed to compile because map_owned_project_inputs did not exist; the fixture type deliberately had no Clone implementation.",
+    "green": "The helper consumes the non-Clone values and returns 1,2,3,4 in exact priority-then-exhaustive order.",
+    "focused_command": "cargo test --lib project_input_partitions_consume_non_clone_values_in_order -- --nocapture",
+    "jruby_regression_commands": [
+      "cargo test --lib exact_jruby -- --nocapture",
+      "cargo test --lib jruby_provider -- --nocapture"
+    ]
+  },
+  "baseline_runs": [
+    {
+      "id": "v251",
+      "jsonl_sha256": "6a4b5194f9bd20cf758ae8fac81bc564c5bdad357611b593775322511f0da5fc",
+      "log_sha256": "af633c691272bcdba66847d88c2f453877cd1fb181f0046160bc46eb290ac929",
+      "wall_ms": 14004.239875,
+      "peak_rss_bytes": 1667563520,
+      "user_cpu_ms": 26530.8,
+      "project_phase_ms": 14217.088667,
+      "active_semantic_complete_ms": 12436,
+      "active_project_navigation_ms": 5989,
+      "active_dependency_navigation_ms": 12396
+    },
+    {
+      "id": "v254",
+      "jsonl_sha256": "c0b68fe2dffc97c965f6d1a9ea79b2e6c2e4b318485be4a9228d907834229cf5",
+      "log_sha256": "9f8b2dc93821b171f582e63b126333f1f21eb9ed804c218ebf4b54f0f2de4060",
+      "wall_ms": 13366.807167,
+      "peak_rss_bytes": 1650950144,
+      "user_cpu_ms": 26310.648,
+      "project_phase_ms": 13435.227501,
+      "active_semantic_complete_ms": 11797,
+      "active_project_navigation_ms": 5536,
+      "active_dependency_navigation_ms": 11758
+    },
+    {
+      "id": "v255",
+      "jsonl_sha256": "b28fe16a1b1cb8ee711d1beb8a7613ca2812c3549320ee0779912625a3202af0",
+      "log_sha256": "4676948f12d5691f1662f14420cf3761900b89b234b014280e15b24b004109fd",
+      "wall_ms": 13623.537,
+      "peak_rss_bytes": 1386741760,
+      "user_cpu_ms": 26555.687,
+      "project_phase_ms": 13866.158749,
+      "active_semantic_complete_ms": 12059,
+      "active_project_navigation_ms": 5825,
+      "active_dependency_navigation_ms": 12020
+    }
+  ],
+  "candidate_runs": [
+    {
+      "id": "v252",
+      "jsonl_sha256": "62ea61dd9569e6e932e1ed9ca2430f01e511ed9521320b21deac436c447e5228",
+      "log_sha256": "07bd79bb56697e10e50125bfb4eb0f49c3fe5064d7c535cef9e3446afc6becfe",
+      "wall_ms": 13363.2195,
+      "peak_rss_bytes": 1713504256,
+      "user_cpu_ms": 26204.592,
+      "project_phase_ms": 13428.091376,
+      "active_semantic_complete_ms": 11774,
+      "active_project_navigation_ms": 5547,
+      "active_dependency_navigation_ms": 11740
+    },
+    {
+      "id": "v253",
+      "jsonl_sha256": "f3f2445dc243d5ce40221b9c2f99bac45528e96174d219c099d76fc9103108a5",
+      "log_sha256": "8313dc24138dc58012664b322a769195c99b5aa0ffb3cf43edd746a12db11800",
+      "wall_ms": 13587.617459,
+      "peak_rss_bytes": 1379516416,
+      "user_cpu_ms": 26294.192,
+      "project_phase_ms": 13852.531542,
+      "active_semantic_complete_ms": 12164,
+      "active_project_navigation_ms": 5848,
+      "active_dependency_navigation_ms": 12131
+    },
+    {
+      "id": "v256",
+      "jsonl_sha256": "a371a46598e9d8cb21c1aefb3cb94f604310fea75ccb40750b3efba9e7f90af9",
+      "log_sha256": "7e817c4b962c5881ffb39100a764263b81b3e96b767795faab0f119a6c8a4432",
+      "wall_ms": 13377.746125,
+      "peak_rss_bytes": 1613332480,
+      "user_cpu_ms": 26421.447,
+      "project_phase_ms": 13413.329458,
+      "active_semantic_complete_ms": 11793,
+      "active_project_navigation_ms": 5569,
+      "active_dependency_navigation_ms": 11760
+    }
+  ],
+  "median_comparison": {
+    "baseline_wall_ms": 13623.537,
+    "candidate_wall_ms": 13377.746125,
+    "wall_change_percent": -1.804,
+    "baseline_peak_rss_bytes": 1650950144,
+    "candidate_peak_rss_bytes": 1613332480,
+    "peak_rss_change_percent": -2.278,
+    "candidate_max_peak_rss_bytes": 1713504256,
+    "baseline_user_cpu_ms": 26530.8,
+    "candidate_user_cpu_ms": 26294.192,
+    "user_cpu_change_percent": -0.892,
+    "baseline_project_phase_ms": 13866.158749,
+    "candidate_project_phase_ms": 13428.091376,
+    "project_phase_change_percent": -3.159,
+    "baseline_active_semantic_complete_ms": 12059,
+    "candidate_active_semantic_complete_ms": 11793,
+    "active_semantic_change_percent": -2.206,
+    "baseline_active_project_navigation_ms": 5825,
+    "candidate_active_project_navigation_ms": 5569,
+    "active_project_navigation_change_percent": -4.395,
+    "baseline_active_dependency_navigation_ms": 12020,
+    "candidate_active_dependency_navigation_ms": 11760,
+    "active_dependency_navigation_change_percent": -2.163
+  },
+  "semantic_equivalence": {
+    "semantic_export_manifest_sha256_all_six_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
+    "semantic_result_fingerprints_all_six_runs": {
+      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
+      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "decision": "Accepted. Moving the source owner through the batch boundary improves every median timing domain, keeps exact semantic output, and remains below the fixed RSS ceiling. This does not close the five-second active semantic target; the remaining RubyDocument clone and visitor cost stay open."
+}

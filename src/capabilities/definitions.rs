@@ -10,6 +10,19 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 
+pub(crate) fn navigation_demand_keys_at_position(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    position: Position,
+) -> Option<crate::query::definition::DefinitionNavigationDemandKeys> {
+    let content = {
+        let documents = server.docs.lock();
+        let content = documents.get(uri)?.read().content.clone();
+        content
+    };
+    crate::query::definition::definition_navigation_demand_keys(uri, position, &content)
+}
+
 /// Find definition at position using the unified EngineQuery layer
 pub async fn find_definition_at_position(
     server: &RubyLanguageServer,

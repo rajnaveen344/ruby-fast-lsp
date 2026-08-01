@@ -1,0 +1,120 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-30",
+  "purpose": "Measure the first real two-project JRuby cold run after removing the eager project-wide Java preflight scan and deriving Java navigation inputs from the ordinary parsed project pass.",
+  "command": "RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --scheduler-concurrency 2 --definition-at server/lib/api_app.rb:8:35 --definition-at server/tasks/rake_helpers.rb:9:18",
+  "raw_local_evidence": {
+    "jsonl": "/tmp/ruby-fast-lsp-goshposh-single-pass-prefilter-20260730.jsonl",
+    "log": "/tmp/ruby-fast-lsp-goshposh-single-pass-prefilter-20260730.log"
+  },
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "os_release": "Darwin 25.2.0",
+    "physical_memory_bytes": 25769803776,
+    "target": "aarch64-macos"
+  },
+  "build": {
+    "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
+    "tracked_diff_sha256": "0d3d25b067221224386ce80f8bb93241d3b16a0948dbb47161382dd16c106087",
+    "profiler_executable_sha256": "36a061848a3ed49a889d2d36271a4e232639356f3b6e9fc71f1260800e9364cc",
+    "dataset_fingerprint_sha256": "fb687c0f6c93d09dcc5c388952b442e755d3a13cc2422133017692d7f4e90b75"
+  },
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server-devops-5441/",
+      "/Users/naveenraj/goshposh/server/"
+    ],
+    "runtime": "jruby-9.2.21.0",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "result": {
+    "wall_ms": 109202.248958,
+    "external_wall_seconds": 112.2,
+    "internal_peak_rss_bytes": 1329954816,
+    "external_peak_rss_bytes": 1892171776,
+    "external_peak_memory_footprint_bytes": 2342603152,
+    "readiness_ms": {
+      "project_navigation": {
+        "min": 39338,
+        "p50": 39338,
+        "p95": 72766,
+        "max": 72766
+      },
+      "dependency_navigation": {
+        "min": 99596,
+        "p50": 99596,
+        "p95": 107570,
+        "max": 107570
+      },
+      "semantic_complete": {
+        "min": 101144,
+        "p50": 101144,
+        "p95": 109202,
+        "max": 109202
+      }
+    },
+    "phase_sum_ms": {
+      "core": 645.903791,
+      "runtime": 12029.938958,
+      "project": 99428.213959,
+      "dependencies": 95062.544166,
+      "resolve": 3083.464208,
+      "publish": 3086.389332
+    },
+    "project_file_pass_seconds": [
+      30.8663435,
+      31.0787865
+    ],
+    "navigation_probes": {
+      "project_definition": {
+        "file": "server/lib/api_app.rb",
+        "locations": 1290,
+        "post_index_latency_ms": 14.2495
+      },
+      "locked_java_gem_definition": {
+        "file": "server/tasks/rake_helpers.rb",
+        "symbol": "BSON::ObjectId",
+        "locations": 1,
+        "post_index_latency_ms": 1.807,
+        "target": "bson-4.14.101-java/lib/bson/object_id.rb"
+      }
+    },
+    "core_template": {
+      "lookups": 1,
+      "producers": 1,
+      "retained_weight_bytes": 4784154
+    },
+    "gem_products": {
+      "lookups": 604,
+      "misses": 604,
+      "producers": 604,
+      "joined_flights": 0,
+      "hits": 0,
+      "evictions": 604,
+      "retained_weight_bytes": 0,
+      "successful_bindings": 604,
+      "bound_files": 29046
+    }
+  },
+  "comparison_to_previous_two_project_run": {
+    "previous_core_phase_sum_ms": 71363,
+    "current_core_phase_sum_ms": 645.903791,
+    "core_reduction_percent": 99.09,
+    "previous_internal_wall_ms": 96204,
+    "current_internal_wall_ms": 109202.248958,
+    "wall_change_percent": 13.51
+  },
+  "decision": {
+    "single_pass_jruby_integration": "accepted",
+    "performance_goal": "not_met",
+    "reason": "The false 71 second core phase is eliminated and exact JRuby navigation remains correct, but full-lane project scans serialize sibling projects and ephemeral gem products cannot reuse completed work once overlap disappears. Project navigation remains 7.9x to 14.6x above the five-second target and dependency navigation remains 6.6x to 7.2x above the fifteen-second target.",
+    "next_bottlenecks": [
+      "Partition project source collection lanes so the active project is useful first without serializing every sibling behind a full six-lane claim.",
+      "Add demand-loaded persistent exact-gem products so sequential and fresh-process projects reuse immutable work without retaining all products in process memory.",
+      "Measure first-success definition probes during indexing after those changes, not only post-index query latency."
+    ]
+  }
+}

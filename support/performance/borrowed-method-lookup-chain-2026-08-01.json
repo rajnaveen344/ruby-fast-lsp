@@ -1,0 +1,334 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove the final per-reference clone of an already cached method lookup chain, then store its members as interned owner IDs, while preserving engine-owned MRO, execution-context, method_missing, ambiguity, and diagnostic policy.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "profiler_executable_sha256": "575b7415be91691e96bec2283d338f3abc5dff885d3a5e79d851860f717ce0b4",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "before_profile": "/tmp/ruby-fast-lsp-borrowed-exact-method-v152-symbolized-profile.json.gz",
+    "before_profile_sha256": "7af3226816df623c0afbba21135bbf02a46544b5d6ca9167872a4ae62532f7ff",
+    "before_presymbolicated_sidecar_sha256": "a645c07f9faa11dbbbc1b43d158acba8957993d69f8e7b5b9a89ed7a7f2d894d",
+    "after_profile": "/tmp/ruby-fast-lsp-borrowed-chain-v156-symbolized-profile.json.gz",
+    "after_profile_sha256": "42e1379c0b20d33b210f47224c4515c9a0a01faa44100ac98da835c415a1e6bb",
+    "after_presymbolicated_sidecar_sha256": "4399c548e46dab11f37177bad924760e352a8ec2ea6c93694e7cfad90e31c644",
+    "after_symbolized_profiler_sha256": "10555962a903f15ba8396a0fcfafa031cb30b2c293d1a317cba55efc50bf5e9d",
+    "before_application_cpu_samples": 34678220,
+    "after_application_cpu_samples": 34979774,
+    "lookup_chain_vec_clone_before_direct_percent": 0.83,
+    "lookup_chain_vec_clone_after_direct_percent": 0.0,
+    "analysis_engine_resolve_before_inclusive_percent": 8.85,
+    "analysis_engine_resolve_after_inclusive_percent": 8.27,
+    "method_reference_resolution_before_inclusive_percent": 4.81,
+    "method_reference_resolution_after_inclusive_percent": 4.17,
+    "remaining_method_lookup_chain_inclusive_percent": 2.46,
+    "remaining_name_registry_fqn_id_inclusive_percent": 2.47,
+    "observation": "resolve_method_reference_with_chain_cache cloned the exact cached Vec<FullyQualifiedName> before every scan only to end the mutable HashMap entry borrow before recursively resolving execution-context applications."
+  },
+  "change": {
+    "implementation": "A private cached-chain view inserts the engine-owned method_lookup_chain once and returns the stored slice by borrow. Final method-reference resolution scans that slice directly; the borrow ends before recursive execution-context or method_missing lookup mutates the same per-resolution cache.",
+    "semantic_boundary": "The helper remains private to engine resolution, stores no new long-lived state, exposes no graph/name IDs, and delegates chain construction to the single existing method_lookup_chain implementation.",
+    "allocation_boundary": "A cache miss still constructs one owned chain for the cache. Cache hits no longer allocate or clone the chain vector or its FQNs."
+  },
+  "red_green": {
+    "red": "The focused borrowed-cache regression failed to compile with E0432 because method_lookup_chain_for_reference_cached did not exist.",
+    "green": "The regression obtains the same pointer and length from two cache hits and proves the cache contains exactly one chain; all 403 ruby-analysis tests pass."
+  },
+  "baseline": {
+    "evidence": "support/performance/borrowed-exact-method-match-2026-08-01.json",
+    "repeat_median": {
+      "wall_ms": 14158.129916,
+      "peak_rss_bytes": 1739571200,
+      "user_cpu_ms": 28375.022,
+      "active_semantic_complete_ms": 12055,
+      "project_navigation_ms": 363,
+      "dependency_navigation_ms": 1443
+    }
+  },
+  "accepted_result": {
+    "raw_local_evidence": [
+      {
+        "id": "v153",
+        "jsonl": "/tmp/ruby-fast-lsp-borrowed-chain-v153.jsonl",
+        "jsonl_sha256": "795e87f4674f254e2ff4c640c25c9373beecf81b06dbee0d16613af903e3f3ba",
+        "log_sha256": "2ca27e9849dc4f542e38e04704e72eb613d32f99d0fa0a1cc5d9087af5e5f3f1",
+        "wall_ms": 14460.990333,
+        "peak_rss_bytes": 1675182080,
+        "user_cpu_ms": 28065.049,
+        "active_semantic_complete_ms": 12385,
+        "project_navigation_ms": 482,
+        "dependency_navigation_ms": 1636
+      },
+      {
+        "id": "v154",
+        "jsonl": "/tmp/ruby-fast-lsp-borrowed-chain-v154.jsonl",
+        "jsonl_sha256": "78c327da94ab30f971aa9818a12c901733d0720b8e95fde899e9ec21b7a276a7",
+        "log_sha256": "44265a2da95918a5e9b55a8f939eebd0babdda4d37058db2c1cecd71ee517411",
+        "wall_ms": 13943.775292,
+        "peak_rss_bytes": 1513504768,
+        "user_cpu_ms": 28327.304,
+        "active_semantic_complete_ms": 11845,
+        "project_navigation_ms": 358,
+        "dependency_navigation_ms": 1310
+      },
+      {
+        "id": "v155",
+        "jsonl": "/tmp/ruby-fast-lsp-borrowed-chain-v155.jsonl",
+        "jsonl_sha256": "9e4e711e6d76d5614126230369ca1f67d79a610cb19c9ecad1102877cb866424",
+        "log_sha256": "f1857435cc49b4863c8f53ff034a994a0486b087f11c6c6539a884c070dbaa5c",
+        "wall_ms": 13894.574042,
+        "peak_rss_bytes": 1698332672,
+        "user_cpu_ms": 28290.157,
+        "active_semantic_complete_ms": 11831,
+        "project_navigation_ms": 361,
+        "dependency_navigation_ms": 1330
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 13943.775292,
+      "peak_rss_bytes": 1675182080,
+      "user_cpu_ms": 28290.157,
+      "active_semantic_complete_ms": 11845,
+      "project_navigation_ms": 361,
+      "dependency_navigation_ms": 1330
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "comparison_to_baseline_percent": {
+    "terminal_wall": -1.514,
+    "peak_rss": -3.701,
+    "user_cpu": -0.299,
+    "active_semantic_complete": -1.742,
+    "project_navigation": -0.551,
+    "dependency_navigation": -7.831,
+    "peak_rss_change_from_full_ahead": 3.706,
+    "peak_rss_headroom_bytes": 101664358
+  },
+  "interned_owner_id_followup": {
+    "change": {
+      "implementation": "The resolution-local MethodLookupChainCache stores Vec<FqnId> rather than Vec<FullyQualifiedName>. A cache miss still delegates construction to the sole engine-owned method_lookup_chain, translates only owners that can exist in the ID-keyed graph/method stores, and exact method selection consumes the owner ID directly. A cache hit performs only the receiver namespace-existence lookup.",
+      "semantic_boundary": "The cache remains private, resolution-local, and invalidated with the surrounding resolve pass. It does not expose IDs publicly, add a second MRO cache, merge engines, or move lookup policy out of engine resolution.",
+      "test_instrumentation": "A cfg(test)-only NameRegistry counter proves that resolving a second method through an already cached Child-to-Parent chain performs exactly one fqn_id lookup rather than one lookup per cached owner. The counter is absent from production builds."
+    },
+    "red_green": {
+      "red": "The cached-owner regression observed three fqn_id probes: one namespace-existence lookup plus one conversion for each cached Child and Parent FQN.",
+      "green": "The regression observes exactly one fqn_id probe on the cache hit, the stored-chain pointer regression remains green, and all 405 current ruby-analysis tests pass after retaining the edge-only namespace regression."
+    },
+    "rejected_intermediate_shape": {
+      "shape": "Vec of entries retaining both FullyQualifiedName and Option<FqnId>",
+      "runs": ["v157", "v158", "v159"],
+      "reason": "Although CPU and readiness moved in the right direction, retaining both identities pushed memory too close to the fixed ceiling and v158 reached 2158000000 bytes, above the 1776846438-byte ceiling. The shape was removed."
+    },
+    "accepted_result": {
+      "raw_local_evidence": [
+        {
+          "id": "v160",
+          "wall_ms": 14118.947958,
+          "peak_rss_bytes": 1598128128,
+          "user_cpu_ms": 28082.86,
+          "active_semantic_complete_ms": 12088,
+          "project_navigation_ms": 423,
+          "dependency_navigation_ms": 1571
+        },
+        {
+          "id": "v161",
+          "wall_ms": 13886.408709,
+          "peak_rss_bytes": 1474183168,
+          "user_cpu_ms": 28123.47,
+          "active_semantic_complete_ms": 11815,
+          "project_navigation_ms": 355,
+          "dependency_navigation_ms": 1315
+        },
+        {
+          "id": "v162",
+          "wall_ms": 13830.378834,
+          "peak_rss_bytes": 1752612864,
+          "user_cpu_ms": 28054.766,
+          "active_semantic_complete_ms": 11740,
+          "project_navigation_ms": 357,
+          "dependency_navigation_ms": 1288
+        }
+      ],
+      "repeat_median": {
+        "wall_ms": 13886.408709,
+        "peak_rss_bytes": 1598128128,
+        "user_cpu_ms": 28082.86,
+        "active_semantic_complete_ms": 11815,
+        "project_navigation_ms": 357,
+        "dependency_navigation_ms": 1315
+      },
+      "comparison_to_borrowed_chain_percent": {
+        "terminal_wall": -0.411,
+        "peak_rss": -4.6,
+        "user_cpu": -0.733,
+        "active_semantic_complete": -0.253,
+        "project_navigation": -1.108,
+        "dependency_navigation": -1.128
+      },
+      "persistent_products": {
+        "gem_hits": 607,
+        "gem_lookups": 607,
+        "gem_producers": 0,
+        "java_hits": 358,
+        "java_lookups": 358,
+        "java_producers": 0
+      },
+      "semantic_result_fingerprints": {
+        "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+        "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+      },
+      "resource_leaks_at_end": 0,
+      "panicked_resource_tasks": 0,
+      "highest_peak_rss_bytes": 1752612864,
+      "minimum_peak_rss_headroom_bytes": 24233574
+    },
+    "symbolized_profile": {
+      "profile": "/tmp/ruby-fast-lsp-interned-id-chain-v164-symbolized-profile.json.gz",
+      "profile_sha256": "26abdb8f2391bf337c082c14fa4ad70cd4661c7c112993b36d7ee1ff7ea14857",
+      "presymbolicated_sidecar_sha256": "7374ef4ad14251f8c0ea289f3a6c93a155384ce6a52fc6fa82a11548798450e6",
+      "symbolized_profiler_sha256": "6ed88a8f288e0a6de1b1600dc8dc731d765061f5cc07fcd0f758c00620e50868",
+      "application_cpu_samples": 34639914,
+      "name_registry_fqn_id_inclusive_percent": 1.962,
+      "name_registry_fqn_id_change_percent": -20.567,
+      "method_reference_resolution_inclusive_percent": 3.455,
+      "method_reference_resolution_change_percent": -17.146,
+      "analysis_engine_resolve_inclusive_percent": 7.441,
+      "analysis_engine_resolve_change_percent": -10.024,
+      "method_lookup_chain_inclusive_percent": 2.429,
+      "effective_method_fact_matching_owner_id_inclusive_percent": 0.669
+    },
+    "current_rebuilt_profiler_sha256": "a2c85575ec7aff5f429f7f0c65d9b6ed481ca269d99b1281cf0ba20273d54c67"
+  },
+  "rejected_interned_mro_traversal": {
+    "attempt": "Walk graph ancestry directly as FqnId values and expand the completed chain to FQNs once.",
+    "first_gate_failure": {
+      "runs": ["v165", "v166", "v167"],
+      "observed_server_fingerprint": "5b58f56d6160034e65ab579f9fe8ce3e",
+      "observed_sibling_fingerprint": "0a75e530039a4e69087839430223df56",
+      "expected_server_fingerprint": "379a1aed9e52fcd189668987e0444ae6",
+      "expected_sibling_fingerprint": "80714a67726f4dd61e80eb2170d011d0",
+      "root_cause": "SemanticGraph stores edge-only endpoint entries in its adjacency map. Treating map membership as a declared graph node promoted an unresolved namespace and followed edges that the original graph-node definition query correctly ignored."
+    },
+    "regression": "edge_only_graph_entries_do_not_promote_missing_namespaces preserves the fallback chain for an interned edge endpoint with no graph-node definition.",
+    "corrected_repeats": {
+      "runs": [
+        {
+          "id": "v168",
+          "log": "/tmp/ruby-fast-lsp-interned-mro-v168.log",
+          "log_sha256": "59d65b75423801836e5dd872959acfa4585b8cb1676db51a4733751f55a73e68",
+          "wall_ms": 15737.035875,
+          "peak_rss_bytes": 1665433600,
+          "user_cpu_ms": 29708.636,
+          "active_semantic_complete_ms": 13466,
+          "project_navigation_ms": 7365,
+          "dependency_navigation_ms": 13427
+        },
+        {
+          "id": "v169",
+          "log": "/tmp/ruby-fast-lsp-interned-mro-v169.log",
+          "log_sha256": "65d9e611b727b914664252a5a2b36136d4ac94c99421bd2590830ff7e2eb6df2",
+          "wall_ms": 17899.234333,
+          "peak_rss_bytes": 1192951808,
+          "user_cpu_ms": 31296.221,
+          "active_semantic_complete_ms": 15464,
+          "project_navigation_ms": 7142,
+          "dependency_navigation_ms": 15394
+        },
+        {
+          "id": "v170",
+          "log": "/tmp/ruby-fast-lsp-interned-mro-v170.log",
+          "log_sha256": "727ad027803447b95a1cdd1ead48fd65a3a88036a706f2ded5ebf9ade2804324",
+          "wall_ms": 16729.459541,
+          "peak_rss_bytes": 1269448704,
+          "user_cpu_ms": 30883.931,
+          "active_semantic_complete_ms": 14414,
+          "project_navigation_ms": 7926,
+          "dependency_navigation_ms": 14366
+        }
+      ],
+      "repeat_median": {
+        "wall_ms": 16729.459541,
+        "peak_rss_bytes": 1269448704,
+        "user_cpu_ms": 30883.931,
+        "active_semantic_complete_ms": 14414,
+        "project_navigation_ms": 7365,
+        "dependency_navigation_ms": 14366
+      },
+      "semantic_result_fingerprints_restored": true,
+      "persistent_gem_hits": 607,
+      "persistent_java_hits": 358,
+      "panicked_resource_tasks": 0,
+      "resource_leaks_at_end": 0
+    },
+    "decision": "Rejected and reverted. After the semantic boundary was repaired, the exact three-run median still regressed wall, CPU, active semantic completion, project navigation, and dependency navigation relative to v160-v162. High concurrent host load made the magnitude noisy but cannot demonstrate an improvement, so the broader traversal does not survive the measurement gate."
+  },
+  "packaged_artifact": {
+    "extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "platform": "macos-arm64",
+    "vsix": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "5f009f0e72801cf5cce199c6ab70af67d5cfb593f7d7e50bb1926a74dd7fdd35",
+    "packaged_binary_sha256": "afd30369bf89e6dc3e027e19c9f9a6bab5cbce997588f41e26c18f1b5cbe0993",
+    "installed_binary_sha256": "afd30369bf89e6dc3e027e19c9f9a6bab5cbce997588f41e26c18f1b5cbe0993",
+    "clean_reinstall_verified": true,
+    "contains_interned_owner_id_followup": false,
+    "note": "This installed known-good package predates the accepted interned-owner-ID follow-up. Package the follow-up only after the broader goal's next completion gate.",
+    "smoke_verified": [
+      "RSpec",
+      "Rails",
+      "Minitest",
+      "Sinatra",
+      "Cucumber",
+      "ERB host support",
+      "JRuby implementation navigation"
+    ]
+  },
+  "completion_gates": {
+    "cargo_test_root_passed": true,
+    "root_library_tests": 1333,
+    "profiler_unit_tests": 13,
+    "cargo_test_workspace_excluding_root_passed": true,
+    "vscode_adapter_tests": 43,
+    "vscode_adapter_failures": 0,
+    "cargo_release_build_passed": true,
+    "current_platform_vsix_smoke_passed": true
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "ruby_analysis_tests": 403,
+    "ruby_analysis_failures": 0,
+    "focused_borrowed_chain_tests": 1,
+    "manifest_equal_across_all_repeats_and_historical_checkpoint": true,
+    "highest_internal_run_peak_rss_bytes": 1698332672,
+    "highest_internal_run_below_fixed_ceiling": true
+  },
+  "decision": "Accepted through the compact interned-owner-ID follow-up. The borrowed-chain slice first removed the per-reference Vec/FQN clone; the compact follow-up then reduced repeated FQN-to-ID lookup without adding long-lived cache state, improved every three-run median, and preserved both complete semantic fingerprints. The broader direct-ID MRO traversal was rejected and reverted after the fingerprint gate caught an edge-only namespace semantic regression and corrected repeats failed the performance gate. Active semantic completion remains 11.815 seconds versus the five-second goal."
+}

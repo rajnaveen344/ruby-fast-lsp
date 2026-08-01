@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "indexing-resource-governor-built-in-sample",
+  "recorded_at": "2026-07-30",
+  "profiler_schema_version": 5,
+  "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
+  "source_worktree_dirty": true,
+  "profiler_executable_sha256": "4c065ac6e15e873c034be7dbc6534f9d8e28a1182c53d5b98718f0eb9f9f72a6",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "dataset": {
+    "projects": 1,
+    "files": 172,
+    "source_bytes": 2403206,
+    "dataset_fingerprint_sha256": "9dd358ea6cd8039476369c1cc374e410e9a6372385bec092addc1a14fc9e52d4"
+  },
+  "resource_budget": {
+    "cpu_lanes": 4,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "resource_usage": {
+    "completed_tasks": 9,
+    "panicked_tasks": 0,
+    "cancelled_before_start": 0,
+    "cancelled_after_start": 0,
+    "peak_active_tasks": 1,
+    "peak_active_cpu_lanes": 4,
+    "peak_active_transient_memory_bytes": 268435456,
+    "peak_active_io_slots": 1,
+    "active_tasks_at_end": 0,
+    "queued_tasks_at_end": 0
+  },
+  "readiness_ms": {
+    "project_navigation": 1050,
+    "dependency_navigation": 1130,
+    "semantic_complete": 1138
+  },
+  "process": {
+    "user_cpu_ms": 1041.635,
+    "system_cpu_ms": 48.951,
+    "peak_rss_bytes": 79773696
+  },
+  "limitations": [
+    "This deterministic built-in sample validates profiler schema and exact resource accounting; it does not establish production defaults.",
+    "The sample admitted only one peak top-level task, so multi-project pressure must be measured on the reference umbrella workspace.",
+    "Extension guests, child processes, JVM/decompiler work, and retained cache memory are not yet all charged to this governor."
+  ],
+  "raw_local_evidence": {
+    "jsonl": "/tmp/ruby-fast-lsp-resource-schema5-async.jsonl",
+    "log": "/tmp/ruby-fast-lsp-resource-schema5-async.log"
+  }
+}

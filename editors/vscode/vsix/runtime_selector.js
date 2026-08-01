@@ -180,7 +180,7 @@ function runtimeStatusItem(status) {
     if (status.classpathFingerprintSha256) {
         details.push(`classpath ${status.classpathFingerprintSha256.slice(0, 12)}`);
     }
-    details.push(status.indexingComplete ? 'ready' : 'indexing');
+    details.push(indexingDescription(status));
     return {
         label: `${project} → ${implementation}`,
         description: details.join(' · '),
@@ -202,19 +202,102 @@ function runtimeStatusPresentation(status) {
     const project = status.root
         ? normalizePath(status.root).split('/').filter(Boolean).pop()
         : 'Ruby project';
-    const ready = status.indexingComplete ? 'ready' : 'indexing';
-    const icon = status.indexingComplete ? '$(ruby)' : '$(sync~spin)';
+    const indexing = status.indexing;
+    const phase = indexing?.phase;
+    if (phase === 'failed') {
+        return {
+            text: `$(warning) ${project}: indexing failed`,
+            tooltip: `${project}: ${indexing.failure || 'Indexing failed'}`
+        };
+    }
+    if (phase === 'cancelled') {
+        return {
+            text: `$(clock) ${project}: cancelled`,
+            tooltip: `${project}: indexing was cancelled`
+        };
+    }
+    const ready = phase === 'ready' || (!phase && status.indexingComplete);
+    if (!ready) {
+        const elapsedSeconds = Math.max(0, Number(indexing?.elapsedMs || 0) / 1000);
+        const targetSeconds = dependencyPhase(phase) ? 15 : 5;
+        const slow = elapsedSeconds > targetSeconds;
+        const label = phaseLabel(phase);
+        const progress = indexingProgress(indexing);
+        const timing = `${formatSeconds(elapsedSeconds)} / ${targetSeconds}s`;
+        return {
+            text: slow
+                ? `$(warning) ${project}: slow indexing · ${formatSeconds(elapsedSeconds)}`
+                : `$(sync~spin) ${project}: ${label} ${timing}`,
+            tooltip: `${project}: ${label}${progress} — ${timing}${slow ? ' (target exceeded)' : ''}`
+        };
+    }
     const runtime = shortRuntimeIdentity(status);
     if (status.mode === 'auto') {
         return {
-            text: `${icon} ${runtime === 'Auto' ? 'Auto' : `Auto: ${runtime}`}`,
-            tooltip: `${project}: ${runtime === 'Auto' ? 'Auto runtime detection' : `Auto → ${runtime}`} — ${ready}`
+            text: `$(ruby) ${runtime === 'Auto' ? 'Auto' : `Auto: ${runtime}`}`,
+            tooltip: `${project}: ${runtime === 'Auto' ? 'Auto runtime detection' : `Auto → ${runtime}`} — ready`
         };
     }
     return {
-        text: `${icon} ${runtime}`,
-        tooltip: `${project}: ${detailedRuntimeIdentity(status)} — ${ready}`
+        text: `$(ruby) ${runtime}`,
+        tooltip: `${project}: ${detailedRuntimeIdentity(status)} — ready`
     };
+}
+
+function indexingDescription(status) {
+    const phase = status.indexing?.phase;
+    if (phase === 'ready' || (!phase && status.indexingComplete)) {
+        return 'ready';
+    }
+    if (phase === 'failed') {
+        return `failed: ${status.indexing.failure || 'unknown error'}`;
+    }
+    return phaseLabel(phase);
+}
+
+function dependencyPhase(phase) {
+    return [
+        'indexingDependencies',
+        'dependencyNavigationReady',
+        'resolvingSemantics',
+        'publishingDiagnostics'
+    ].includes(phase);
+}
+
+function phaseLabel(phase) {
+    switch (phase) {
+        case 'discovered': return 'discovered';
+        case 'queued': return 'queued';
+        case 'resolvingRuntime': return 'runtime';
+        case 'discoveringInputs': return 'inputs';
+        case 'indexingCore': return 'core';
+        case 'indexingProject': return 'project';
+        case 'projectNavigationReady': return 'dependencies';
+        case 'indexingDependencies': return 'dependencies';
+        case 'dependencyNavigationReady': return 'semantics';
+        case 'resolvingSemantics': return 'semantics';
+        case 'publishingDiagnostics': return 'diagnostics';
+        case 'failed': return 'failed';
+        case 'cancelled': return 'cancelled';
+        case 'ready': return 'ready';
+        case undefined: return 'indexing';
+        default:
+            throw new Error(`INVARIANT VIOLATED: unknown indexing phase '${phase}'`);
+    }
+}
+
+function indexingProgress(indexing) {
+    if (!indexing || indexing.completed === undefined || indexing.completed === null) {
+        return '';
+    }
+    if (indexing.total === undefined || indexing.total === null) {
+        throw new Error('INVARIANT VIOLATED: indexing status has completed work without a total');
+    }
+    return ` ${indexing.completed}/${indexing.total}`;
+}
+
+function formatSeconds(seconds) {
+    return seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
 }
 
 function runtimeVersionMarker(status) {

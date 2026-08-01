@@ -1,0 +1,196 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Test whether file-local type queries should borrow interned TypeStore facts and clone only the winning RubyType instead of expanding every fact owned by the file.",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "scheduler_concurrency": 2,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "experiment": {
+    "shape": "TypeStore exposed a file-owned borrowed iterator over interned subjects and stored RubyType values. Six immediate AnalysisQuery consumers retained their existing deterministic range selection and cloned only the selected RubyType.",
+    "correctness_boundary": "The iterator preserved facts_in_file order and source range/provenance. No ownership, resolution, source-kind, or result precedence changed.",
+    "focused_regression": {
+      "red": "variable_type_before expanded three file facts, including an unrelated union type.",
+      "green": "The same query expanded zero facts and returned the same winning Integer type."
+    },
+    "candidate_tests": {
+      "ruby_analysis_passed": 409,
+      "ruby_analysis_failed": 0,
+      "full_lib_passed": 1349,
+      "full_lib_failed": 0
+    }
+  },
+  "controlled_ab": {
+    "baseline_executable": "/tmp/ruby-fast-lsp-profiler-semantic-seed-fingerprint",
+    "baseline_executable_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
+    "candidate_executable": "/tmp/ruby-fast-lsp-profiler-borrowed-file-type-facts",
+    "candidate_executable_sha256": "28523885b9a9645b8c8f4e2fc8270c009d11143fd99b9abc8e260df518ee3c14",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "excluded_runs": [
+      {
+        "baseline_stdout": "/tmp/borrowed-type-facts-b1.stdout",
+        "candidate_stdout": "/tmp/borrowed-type-facts-c1.stdout",
+        "reason": "The candidate semantic product identity correctly invalidated old derived entries. Its first run produced and published 512 gem products, so the complete pair was excluded before warm medians.",
+        "candidate_gem_hits": 78,
+        "candidate_gem_lookups": 590,
+        "candidate_gem_producers": 512,
+        "candidate_wall_ms": 32571.76925
+      }
+    ],
+    "baseline_runs": [
+      {
+        "stdout": "/tmp/borrowed-type-facts-b2.stdout",
+        "stderr": "/tmp/borrowed-type-facts-b2.stderr",
+        "wall_ms": 13041.829583,
+        "user_cpu_ms": 24245.859,
+        "system_cpu_ms": 2508.977,
+        "peak_rss_bytes": 1625112576,
+        "active_project_navigation_ms": 5227,
+        "active_dependency_navigation_ms": 11451,
+        "active_semantic_complete_ms": 11487,
+        "live_project_probe_ms": 367,
+        "live_dependency_probe_ms": 1252
+      },
+      {
+        "stdout": "/tmp/borrowed-type-facts-b3.stdout",
+        "stderr": "/tmp/borrowed-type-facts-b3.stderr",
+        "wall_ms": 12737.450625,
+        "user_cpu_ms": 24117.767,
+        "system_cpu_ms": 2489.729,
+        "peak_rss_bytes": 1557315584,
+        "active_project_navigation_ms": 5117,
+        "active_dependency_navigation_ms": 11186,
+        "active_semantic_complete_ms": 11229,
+        "live_project_probe_ms": 365,
+        "live_dependency_probe_ms": 1223
+      },
+      {
+        "stdout": "/tmp/borrowed-type-facts-b4.stdout",
+        "stderr": "/tmp/borrowed-type-facts-b4.stderr",
+        "wall_ms": 12960.894417,
+        "user_cpu_ms": 24294.34,
+        "system_cpu_ms": 2467.254,
+        "peak_rss_bytes": 1665957888,
+        "active_project_navigation_ms": 5202,
+        "active_dependency_navigation_ms": 11357,
+        "active_semantic_complete_ms": 11393,
+        "live_project_probe_ms": 365,
+        "live_dependency_probe_ms": 1238
+      }
+    ],
+    "candidate_runs": [
+      {
+        "stdout": "/tmp/borrowed-type-facts-c2.stdout",
+        "stderr": "/tmp/borrowed-type-facts-c2.stderr",
+        "wall_ms": 12644.195583,
+        "user_cpu_ms": 23810.194,
+        "system_cpu_ms": 2446.441,
+        "peak_rss_bytes": 1691598848,
+        "active_project_navigation_ms": 5222,
+        "active_dependency_navigation_ms": 11235,
+        "active_semantic_complete_ms": 11270,
+        "live_project_probe_ms": 364,
+        "live_dependency_probe_ms": 1223
+      },
+      {
+        "stdout": "/tmp/borrowed-type-facts-c3.stdout",
+        "stderr": "/tmp/borrowed-type-facts-c3.stderr",
+        "wall_ms": 12744.326416,
+        "user_cpu_ms": 23899.603,
+        "system_cpu_ms": 2455.655,
+        "peak_rss_bytes": 1719599104,
+        "active_project_navigation_ms": 5205,
+        "active_dependency_navigation_ms": 11194,
+        "active_semantic_complete_ms": 11228,
+        "live_project_probe_ms": 367,
+        "live_dependency_probe_ms": 1312
+      },
+      {
+        "stdout": "/tmp/borrowed-type-facts-c4.stdout",
+        "stderr": "/tmp/borrowed-type-facts-c4.stderr",
+        "wall_ms": 13084.360959,
+        "user_cpu_ms": 23788.192,
+        "system_cpu_ms": 2612.51,
+        "peak_rss_bytes": 1445429248,
+        "active_project_navigation_ms": 5374,
+        "active_dependency_navigation_ms": 11560,
+        "active_semantic_complete_ms": 11596,
+        "live_project_probe_ms": 355,
+        "live_dependency_probe_ms": 1384
+      }
+    ],
+    "median": {
+      "baseline": {
+        "wall_ms": 12960.894417,
+        "user_cpu_ms": 24245.859,
+        "system_cpu_ms": 2489.729,
+        "peak_rss_bytes": 1625112576,
+        "active_project_navigation_ms": 5202,
+        "active_dependency_navigation_ms": 11357,
+        "active_semantic_complete_ms": 11393,
+        "live_project_probe_ms": 365,
+        "live_dependency_probe_ms": 1238
+      },
+      "candidate": {
+        "wall_ms": 12744.326416,
+        "user_cpu_ms": 23810.194,
+        "system_cpu_ms": 2455.655,
+        "peak_rss_bytes": 1691598848,
+        "active_project_navigation_ms": 5222,
+        "active_dependency_navigation_ms": 11235,
+        "active_semantic_complete_ms": 11270,
+        "live_project_probe_ms": 364,
+        "live_dependency_probe_ms": 1312
+      }
+    },
+    "change_percent": {
+      "wall_ms": -1.671,
+      "user_cpu_ms": -1.797,
+      "system_cpu_ms": -1.369,
+      "peak_rss_bytes": 4.091,
+      "active_project_navigation_ms": 0.384,
+      "active_dependency_navigation_ms": -1.074,
+      "active_semantic_complete_ms": -1.08,
+      "live_project_probe_ms": -0.274,
+      "live_dependency_probe_ms": 5.977
+    },
+    "maximum_candidate_peak_rss_bytes": 1719599104,
+    "minimum_candidate_rss_ceiling_headroom_bytes": 57247334
+  },
+  "correctness": {
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
+      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+    },
+    "semantic_export_manifest_sha256_all_six_valid_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
+    "persistent_gem_hits_per_run": 607,
+    "persistent_gem_lookups_per_run": 607,
+    "persistent_java_hits_per_run": 168,
+    "persistent_java_lookups_per_run": 168,
+    "definition_source_kinds": [
+      "Project",
+      "Gem"
+    ],
+    "panicked_resource_tasks": 0,
+    "resource_leaks_at_end": 0
+  },
+  "revert_proof": {
+    "reverted_ruby_analysis_tests_passed": 408,
+    "restored_release_profiler_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
+    "accepted_baseline_profiler_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
+    "byte_identical": true
+  },
+  "decision": "Rejected and reverted. Borrowing file-owned type facts preserved exact semantics and reduced median wall time 1.671%, user CPU 1.797%, dependency readiness 1.074%, and semantic completion 1.080%, but it did not improve active-project readiness, slowed the live dependency probe 5.977%, and increased median peak RSS 4.091%. The ordinary release after revert is byte-identical to the accepted baseline. Do not repeat this broad borrowed iterator as an indexing optimization; profile a narrower store query keyed by subject and position, or target a distinct dominant path with an independently measurable budget win."
+}

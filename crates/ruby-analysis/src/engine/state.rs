@@ -2,22 +2,36 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
+use crate::core::method_store::StoredMethodFactMatch;
 use crate::core::{
     ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateStore,
-    DiagnosticFact, DiagnosticStore, ExecutionContextFact, FqnId, FullyQualifiedName,
-    GraphEdgeFact, GraphNodeFact, MethodAvailability, MethodFact, MethodStore,
-    MethodVisibilityOverrideFact, ReferenceCandidate, ReferenceCandidateKind,
-    ReferenceCandidateStore, ReferenceFact, ReferenceStore, RubyConstant, SemanticGraph,
-    SourceFileId, SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact, StoredMethodFact,
-    StoredReferenceCandidate, StoredSymbolFact, StoredUnresolvedGraphEdgeFact, SymbolFact,
-    SymbolKind, SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore, TypeSubject,
-    UnresolvedGraphEdgeFact,
+    DiagnosticFact, DiagnosticSeverity, DiagnosticStore, ExecutionContextFact, ExecutionScopeMode,
+    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
+    MethodAvailability, MethodFact, MethodParamKind, MethodReferenceAccess, MethodStore,
+    MethodVisibilityOverrideFact, NamespaceKind, ReferenceCandidate, ReferenceCandidateKind,
+    ReferenceCandidateStore, ReferenceFact, ReferenceStore, RubyConstant, RubyMethod, RubyType,
+    SemanticGraph, SourceFileId, SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact,
+    StoredMethodFact, StoredReferenceCandidate, StoredSymbolFact, StoredUnresolvedGraphEdgeFact,
+    SymbolFact, SymbolKind, SymbolStore, TextRange, TypeFact, TypeProvenance, TypeResolution,
+    TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
+use crate::method_store::MethodVisibility;
 use crate::FileIdMap;
+use indexmap::IndexSet;
+use parking_lot::Mutex;
+
+pub(super) enum EffectiveMethodFactMatch {
+    Missing,
+    Unique(MethodFact),
+    Ambiguous,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
@@ -138,37 +152,38 @@ impl SemanticExportFingerprint {
                 SymbolKind::Class | SymbolKind::Module | SymbolKind::Constant
             ) {
                 exports.push(export_hash(|hasher| {
-                    1u8.hash(hasher);
-                    fact.fqn.hash(hasher);
-                    fact.kind.hash(hasher);
+                    stable_u8(hasher, 1);
+                    stable_fqn(hasher, &fact.fqn);
+                    stable_symbol_kind(hasher, fact.kind);
                 }));
             }
         }
         for fact in &facts.methods {
             exports.push(export_hash(|hasher| {
-                2u8.hash(hasher);
-                fact.fqn.hash(hasher);
-                fact.owner.hash(hasher);
-                fact.params.hash(hasher);
-                fact.param_facts.len().hash(hasher);
+                stable_u8(hasher, 2);
+                stable_fqn(hasher, &fact.fqn);
+                stable_fqn(hasher, &fact.owner);
+                stable_strings(hasher, &fact.params);
+                stable_len(hasher, fact.param_facts.len());
                 for parameter in &fact.param_facts {
-                    parameter.name.hash(hasher);
-                    parameter.kind.hash(hasher);
-                    parameter.type_label.hash(hasher);
-                    parameter.documentation.hash(hasher);
+                    stable_string(hasher, &parameter.name);
+                    stable_method_param_kind(hasher, parameter.kind);
+                    stable_optional_string(hasher, parameter.type_label.as_deref());
+                    stable_optional_string(hasher, parameter.documentation.as_deref());
                 }
-                fact.delegate_receiver.hash(hasher);
-                fact.visibility.hash(hasher);
-                fact.documentation.hash(hasher);
-                fact.return_type_label.hash(hasher);
+                stable_optional_method(hasher, fact.delegate_receiver);
+                stable_method_visibility(hasher, fact.visibility);
+                stable_method_availability(hasher, &fact.availability);
+                stable_optional_string(hasher, fact.documentation.as_deref());
+                stable_optional_string(hasher, fact.return_type_label.as_deref());
             }));
         }
         for fact in &facts.method_visibility_overrides {
             exports.push(export_hash(|hasher| {
-                3u8.hash(hasher);
-                fact.owner.hash(hasher);
-                fact.method.hash(hasher);
-                fact.visibility.hash(hasher);
+                stable_u8(hasher, 3);
+                stable_fqn(hasher, &fact.owner);
+                stable_method(hasher, fact.method);
+                stable_method_visibility(hasher, fact.visibility);
             }));
         }
         for fact in &facts.types {
@@ -179,47 +194,72 @@ impl SemanticExportFingerprint {
                     | TypeSubject::Parameter { .. }
             ) {
                 exports.push(export_hash(|hasher| {
-                    4u8.hash(hasher);
-                    fact.subject.hash(hasher);
-                    fact.ruby_type.hash(hasher);
-                    fact.provenance.hash(hasher);
+                    stable_u8(hasher, 4);
+                    stable_type_subject(hasher, &fact.subject);
+                    stable_ruby_type(hasher, &fact.ruby_type);
+                    stable_type_provenance(hasher, fact.provenance);
                 }));
             }
         }
         for fact in &facts.graph_nodes {
             exports.push(export_hash(|hasher| {
-                5u8.hash(hasher);
-                fact.fqn.hash(hasher);
-                fact.kind.hash(hasher);
+                stable_u8(hasher, 5);
+                stable_fqn(hasher, &fact.fqn);
+                stable_graph_node_kind(hasher, fact.kind);
             }));
         }
         for fact in &facts.graph_edges {
             exports.push(export_hash(|hasher| {
-                6u8.hash(hasher);
-                fact.source.hash(hasher);
-                fact.target.hash(hasher);
-                fact.kind.hash(hasher);
+                stable_u8(hasher, 6);
+                stable_fqn(hasher, &fact.source);
+                stable_fqn(hasher, &fact.target);
+                stable_graph_edge_kind(hasher, fact.kind);
             }));
         }
         for fact in &facts.unresolved_graph_edges {
             exports.push(export_hash(|hasher| {
-                7u8.hash(hasher);
-                fact.source.hash(hasher);
-                fact.target_parts.hash(hasher);
-                fact.absolute.hash(hasher);
-                fact.context.hash(hasher);
-                fact.kind.hash(hasher);
+                stable_u8(hasher, 7);
+                stable_fqn(hasher, &fact.source);
+                stable_len(hasher, fact.target_parts.len());
+                for part in &fact.target_parts {
+                    stable_string(hasher, part.as_str());
+                }
+                stable_bool(hasher, fact.absolute);
+                stable_fqn(hasher, &fact.context);
+                stable_graph_edge_kind(hasher, fact.kind);
             }));
         }
 
         exports.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
         export_hash(|hasher| {
-            exports.len().hash(hasher);
+            stable_len(hasher, exports.len());
             for fingerprint in &exports {
-                fingerprint.high.hash(hasher);
-                fingerprint.low.hash(hasher);
+                stable_u64(hasher, fingerprint.high);
+                stable_u64(hasher, fingerprint.low);
             }
         })
+    }
+}
+
+/// Stable identity of the engine's user-visible semantic result.
+///
+/// Unlike [`SemanticExportFingerprint`], this includes exact declaration and
+/// reference ranges, every type fact, resolved graph state, diagnostics, and
+/// framework execution contexts. Physical paths and engine-local file/FQN IDs
+/// remain excluded so equivalent cold and cached indexing runs can be compared
+/// across fresh processes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SemanticResultFingerprint {
+    high: u64,
+    low: u64,
+}
+
+impl SemanticResultFingerprint {
+    pub fn stable_bytes(self) -> [u8; 16] {
+        let mut bytes = [0u8; 16];
+        bytes[..8].copy_from_slice(&self.high.to_le_bytes());
+        bytes[8..].copy_from_slice(&self.low.to_le_bytes());
+        bytes
     }
 }
 
@@ -236,36 +276,407 @@ impl SemanticChange {
     }
 }
 
+fn stable_u8(hasher: &mut StableExportHasher, value: u8) {
+    hasher.write(&[value]);
+}
+
+fn stable_bool(hasher: &mut StableExportHasher, value: bool) {
+    stable_u8(hasher, u8::from(value));
+}
+
+fn stable_u32(hasher: &mut StableExportHasher, value: u32) {
+    hasher.write(&value.to_le_bytes());
+}
+
+fn stable_u64(hasher: &mut StableExportHasher, value: u64) {
+    hasher.write(&value.to_le_bytes());
+}
+
+fn stable_len(hasher: &mut StableExportHasher, value: usize) {
+    stable_u64(
+        hasher,
+        u64::try_from(value).expect(
+            "INVARIANT VIOLATED: semantic export collection length exceeded u64. This is a bug because one process cannot hold that many facts. Fix: reject oversized semantic inputs before fingerprinting.",
+        ),
+    );
+}
+
+fn stable_string(hasher: &mut StableExportHasher, value: &str) {
+    stable_len(hasher, value.len());
+    hasher.write(value.as_bytes());
+}
+
+fn stable_strings(hasher: &mut StableExportHasher, values: &[String]) {
+    stable_len(hasher, values.len());
+    for value in values {
+        stable_string(hasher, value);
+    }
+}
+
+fn stable_optional_string(hasher: &mut StableExportHasher, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            stable_u8(hasher, 1);
+            stable_string(hasher, value);
+        }
+        None => stable_u8(hasher, 0),
+    }
+}
+
+fn stable_method(hasher: &mut StableExportHasher, method: RubyMethod) {
+    stable_string(hasher, method.as_str());
+}
+
+fn stable_optional_method(hasher: &mut StableExportHasher, method: Option<RubyMethod>) {
+    match method {
+        Some(method) => {
+            stable_u8(hasher, 1);
+            stable_method(hasher, method);
+        }
+        None => stable_u8(hasher, 0),
+    }
+}
+
+fn stable_optional_fqn(hasher: &mut StableExportHasher, fqn: Option<&FullyQualifiedName>) {
+    match fqn {
+        Some(fqn) => {
+            stable_u8(hasher, 1);
+            stable_fqn(hasher, fqn);
+        }
+        None => stable_u8(hasher, 0),
+    }
+}
+
+fn stable_range_offsets(hasher: &mut StableExportHasher, range: TextRange) {
+    stable_u32(hasher, range.start_byte);
+    stable_u32(hasher, range.end_byte);
+}
+
+fn stable_fqn(hasher: &mut StableExportHasher, fqn: &FullyQualifiedName) {
+    match fqn {
+        FullyQualifiedName::Namespace(parts, kind) => {
+            stable_u8(hasher, 1);
+            stable_len(hasher, parts.len());
+            for part in parts {
+                stable_string(hasher, part.as_str());
+            }
+            match kind {
+                NamespaceKind::Instance => stable_u8(hasher, 1),
+                NamespaceKind::Singleton => stable_u8(hasher, 2),
+            }
+        }
+        FullyQualifiedName::Constant(parts) => {
+            stable_u8(hasher, 2);
+            stable_len(hasher, parts.len());
+            for part in parts {
+                stable_string(hasher, part.as_str());
+            }
+        }
+        FullyQualifiedName::Method(parts, method) => {
+            stable_u8(hasher, 3);
+            stable_len(hasher, parts.len());
+            for part in parts {
+                stable_string(hasher, part.as_str());
+            }
+            stable_method(hasher, *method);
+        }
+        FullyQualifiedName::LocalVariable(name) => {
+            stable_u8(hasher, 4);
+            stable_string(hasher, name.as_str());
+        }
+        FullyQualifiedName::InstanceVariable(name) => {
+            stable_u8(hasher, 5);
+            stable_string(hasher, name.as_str());
+        }
+        FullyQualifiedName::ClassVariable(name) => {
+            stable_u8(hasher, 6);
+            stable_string(hasher, name.as_str());
+        }
+        FullyQualifiedName::GlobalVariable(name) => {
+            stable_u8(hasher, 7);
+            stable_string(hasher, name.as_str());
+        }
+    }
+}
+
+fn stable_symbol_kind(hasher: &mut StableExportHasher, kind: SymbolKind) {
+    match kind {
+        SymbolKind::Class => stable_u8(hasher, 1),
+        SymbolKind::Module => stable_u8(hasher, 2),
+        SymbolKind::Method => stable_u8(hasher, 3),
+        SymbolKind::Constant => stable_u8(hasher, 4),
+        SymbolKind::LocalVariable => stable_u8(hasher, 5),
+        SymbolKind::InstanceVariable => stable_u8(hasher, 6),
+        SymbolKind::ClassVariable => stable_u8(hasher, 7),
+        SymbolKind::GlobalVariable => stable_u8(hasher, 8),
+    }
+}
+
+fn stable_method_param_kind(hasher: &mut StableExportHasher, kind: MethodParamKind) {
+    match kind {
+        MethodParamKind::Required => stable_u8(hasher, 1),
+        MethodParamKind::Optional => stable_u8(hasher, 2),
+        MethodParamKind::Rest => stable_u8(hasher, 3),
+        MethodParamKind::RequiredKeyword => stable_u8(hasher, 4),
+        MethodParamKind::OptionalKeyword => stable_u8(hasher, 5),
+        MethodParamKind::KeywordRest => stable_u8(hasher, 6),
+        MethodParamKind::Block => stable_u8(hasher, 7),
+        MethodParamKind::Forwarding => stable_u8(hasher, 8),
+        MethodParamKind::AnonymousRest => stable_u8(hasher, 9),
+        MethodParamKind::AnonymousKeywordRest => stable_u8(hasher, 10),
+    }
+}
+
+fn stable_method_visibility(hasher: &mut StableExportHasher, visibility: MethodVisibility) {
+    match visibility {
+        MethodVisibility::Public => stable_u8(hasher, 1),
+        MethodVisibility::Protected => stable_u8(hasher, 2),
+        MethodVisibility::Private => stable_u8(hasher, 3),
+    }
+}
+
+fn stable_method_reference_access(hasher: &mut StableExportHasher, access: MethodReferenceAccess) {
+    match access {
+        MethodReferenceAccess::Normal => stable_u8(hasher, 1),
+        MethodReferenceAccess::ExplicitReceiver => stable_u8(hasher, 2),
+        MethodReferenceAccess::VisibilityBypass => stable_u8(hasher, 3),
+    }
+}
+
+fn stable_method_availability(hasher: &mut StableExportHasher, availability: &MethodAvailability) {
+    match availability {
+        MethodAvailability::Available => stable_u8(hasher, 1),
+        MethodAvailability::Unavailable { reason } => {
+            stable_u8(hasher, 2);
+            stable_string(hasher, reason);
+        }
+        MethodAvailability::Absent { reason } => {
+            stable_u8(hasher, 3);
+            stable_string(hasher, reason);
+        }
+    }
+}
+
+fn stable_type_subject(hasher: &mut StableExportHasher, subject: &TypeSubject) {
+    match subject {
+        TypeSubject::Constant(fqn) => {
+            stable_u8(hasher, 1);
+            stable_fqn(hasher, fqn);
+        }
+        TypeSubject::Local { scope_id, name } => {
+            stable_u8(hasher, 2);
+            stable_u32(hasher, *scope_id);
+            stable_string(hasher, name);
+        }
+        TypeSubject::InstanceVariable { owner, name } => {
+            stable_u8(hasher, 3);
+            stable_fqn(hasher, owner);
+            stable_string(hasher, name);
+        }
+        TypeSubject::ClassVariable { owner, name } => {
+            stable_u8(hasher, 4);
+            stable_fqn(hasher, owner);
+            stable_string(hasher, name);
+        }
+        TypeSubject::GlobalVariable(name) => {
+            stable_u8(hasher, 5);
+            stable_string(hasher, name);
+        }
+        TypeSubject::MethodReturn(fqn) => {
+            stable_u8(hasher, 6);
+            stable_fqn(hasher, fqn);
+        }
+        TypeSubject::Parameter { method, name } => {
+            stable_u8(hasher, 7);
+            stable_fqn(hasher, method);
+            stable_string(hasher, name);
+        }
+        TypeSubject::Expression(range) => {
+            stable_u8(hasher, 8);
+            stable_u32(hasher, range.start_byte);
+            stable_u32(hasher, range.end_byte);
+        }
+    }
+}
+
+fn stable_ruby_type(hasher: &mut StableExportHasher, ruby_type: &RubyType) {
+    match ruby_type {
+        RubyType::Class(fqn) => {
+            stable_u8(hasher, 1);
+            stable_fqn(hasher, fqn);
+        }
+        RubyType::Module(fqn) => {
+            stable_u8(hasher, 2);
+            stable_fqn(hasher, fqn);
+        }
+        RubyType::ClassReference(fqn) => {
+            stable_u8(hasher, 3);
+            stable_fqn(hasher, fqn);
+        }
+        RubyType::ModuleReference(fqn) => {
+            stable_u8(hasher, 4);
+            stable_fqn(hasher, fqn);
+        }
+        RubyType::Array(elements) => {
+            stable_u8(hasher, 5);
+            stable_len(hasher, elements.len());
+            for element in elements {
+                stable_ruby_type(hasher, element);
+            }
+        }
+        RubyType::Hash(keys, values) => {
+            stable_u8(hasher, 6);
+            stable_len(hasher, keys.len());
+            for key in keys {
+                stable_ruby_type(hasher, key);
+            }
+            stable_len(hasher, values.len());
+            for value in values {
+                stable_ruby_type(hasher, value);
+            }
+        }
+        RubyType::Union(types) => {
+            stable_u8(hasher, 7);
+            stable_len(hasher, types.len());
+            for ruby_type in types {
+                stable_ruby_type(hasher, ruby_type);
+            }
+        }
+        RubyType::Unknown => stable_u8(hasher, 8),
+    }
+}
+
+fn stable_type_provenance(hasher: &mut StableExportHasher, provenance: TypeProvenance) {
+    match provenance {
+        TypeProvenance::Literal => stable_u8(hasher, 1),
+        TypeProvenance::Assignment => stable_u8(hasher, 2),
+        TypeProvenance::Flow => stable_u8(hasher, 3),
+        TypeProvenance::Rbs => stable_u8(hasher, 4),
+        TypeProvenance::Yard => stable_u8(hasher, 5),
+        TypeProvenance::Runtime => stable_u8(hasher, 6),
+        TypeProvenance::Extension => stable_u8(hasher, 7),
+        TypeProvenance::Inferred => stable_u8(hasher, 8),
+    }
+}
+
+fn stable_graph_node_kind(hasher: &mut StableExportHasher, kind: GraphNodeKind) {
+    match kind {
+        GraphNodeKind::Class => stable_u8(hasher, 1),
+        GraphNodeKind::Module => stable_u8(hasher, 2),
+    }
+}
+
+fn stable_graph_edge_kind(hasher: &mut StableExportHasher, kind: GraphEdgeKind) {
+    match kind {
+        GraphEdgeKind::Superclass => stable_u8(hasher, 1),
+        GraphEdgeKind::Include => stable_u8(hasher, 2),
+        GraphEdgeKind::Prepend => stable_u8(hasher, 3),
+        GraphEdgeKind::Extend => stable_u8(hasher, 4),
+        GraphEdgeKind::ExecutionContextApplication => stable_u8(hasher, 5),
+    }
+}
+
+fn stable_source_kind(hasher: &mut StableExportHasher, kind: SourceKind) {
+    match kind {
+        SourceKind::Project => stable_u8(hasher, 1),
+        SourceKind::Excluded => stable_u8(hasher, 2),
+        SourceKind::Signature => stable_u8(hasher, 3),
+        SourceKind::External => stable_u8(hasher, 4),
+        SourceKind::Stub => stable_u8(hasher, 5),
+        SourceKind::Stdlib => stable_u8(hasher, 6),
+        SourceKind::Gem => stable_u8(hasher, 7),
+    }
+}
+
+fn stable_diagnostic_severity(hasher: &mut StableExportHasher, severity: DiagnosticSeverity) {
+    match severity {
+        DiagnosticSeverity::Error => stable_u8(hasher, 1),
+        DiagnosticSeverity::Warning => stable_u8(hasher, 2),
+        DiagnosticSeverity::Information => stable_u8(hasher, 3),
+        DiagnosticSeverity::Hint => stable_u8(hasher, 4),
+    }
+}
+
+fn stable_execution_scope_mode(hasher: &mut StableExportHasher, mode: ExecutionScopeMode) {
+    match mode {
+        ExecutionScopeMode::Preserve => stable_u8(hasher, 1),
+    }
+}
+
 fn export_hash(mut hash_fields: impl FnMut(&mut StableExportHasher)) -> SemanticExportFingerprint {
-    let mut high = StableExportHasher::new(0xcbf2_9ce4_8422_2325);
-    hash_fields(&mut high);
-    let mut low = StableExportHasher::new(0x8422_2325_cbf2_9ce4);
-    hash_fields(&mut low);
-    SemanticExportFingerprint {
-        high: high.finish(),
-        low: low.finish(),
+    let mut hasher = StableExportHasher::new(0xcbf2_9ce4_8422_2325, 0x8422_2325_cbf2_9ce4);
+    hash_fields(&mut hasher);
+    let (high, low) = hasher.finish_lanes();
+    SemanticExportFingerprint { high, low }
+}
+
+fn result_hash(mut hash_fields: impl FnMut(&mut StableExportHasher)) -> SemanticResultFingerprint {
+    let mut hasher = StableExportHasher::new(0x517c_c1b7_2722_0a95, 0x2722_0a95_517c_c1b7);
+    hash_fields(&mut hasher);
+    let (high, low) = hasher.finish_lanes();
+    SemanticResultFingerprint { high, low }
+}
+
+#[cfg(test)]
+mod stable_export_hasher_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    fn legacy_lane(seed: u64, bytes: &[u8]) -> u64 {
+        bytes.iter().fold(seed, |state, byte| {
+            (state ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    }
+
+    #[test]
+    fn export_hash_visits_fields_once_and_preserves_both_legacy_lanes() {
+        let visits = Cell::new(0usize);
+        let fingerprint = export_hash(|hasher| {
+            visits.set(visits.get() + 1);
+            hasher.write(b"semantic-export");
+        });
+
+        assert_eq!(visits.get(), 1);
+        assert_eq!(
+            fingerprint.high,
+            legacy_lane(0xcbf2_9ce4_8422_2325, b"semantic-export")
+        );
+        assert_eq!(
+            fingerprint.low,
+            legacy_lane(0x8422_2325_cbf2_9ce4, b"semantic-export")
+        );
     }
 }
 
 struct StableExportHasher {
-    state: u64,
+    high: u64,
+    low: u64,
 }
 
 impl StableExportHasher {
-    fn new(seed: u64) -> Self {
-        Self { state: seed }
+    fn new(high_seed: u64, low_seed: u64) -> Self {
+        Self {
+            high: high_seed,
+            low: low_seed,
+        }
+    }
+
+    fn finish_lanes(&self) -> (u64, u64) {
+        (self.high, self.low)
     }
 }
 
 impl Hasher for StableExportHasher {
     fn finish(&self) -> u64 {
-        self.state
+        self.high
     }
 
     fn write(&mut self, bytes: &[u8]) {
         for byte in bytes {
-            self.state ^= u64::from(*byte);
-            self.state = self.state.wrapping_mul(0x0000_0100_0000_01b3);
+            self.high ^= u64::from(*byte);
+            self.high = self.high.wrapping_mul(0x0000_0100_0000_01b3);
+            self.low ^= u64::from(*byte);
+            self.low = self.low.wrapping_mul(0x0000_0100_0000_01b3);
         }
     }
 }
@@ -283,10 +694,24 @@ pub enum ResolveMode {
     Deferred,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SemanticExportFingerprint {
     high: u64,
     low: u64,
+}
+
+impl SemanticExportFingerprint {
+    /// Stable semantic identity bytes for validated derived-product keys.
+    ///
+    /// This does not expose engine stores. It only makes the already-public
+    /// fingerprint portable across process boundaries without relying on
+    /// `Debug`, Rust's randomized hashers, or layout-dependent serialization.
+    pub fn stable_bytes(self) -> [u8; 16] {
+        let mut bytes = [0u8; 16];
+        bytes[..8].copy_from_slice(&self.high.to_le_bytes());
+        bytes[8..].copy_from_slice(&self.low.to_le_bytes());
+        bytes
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +753,7 @@ pub struct AnalysisMemoryStats {
     pub diagnostic_candidates: usize,
     pub graph: usize,
     pub unresolved_graph_edges: usize,
+    pub query_caches: usize,
 }
 
 impl AnalysisMemoryStats {
@@ -343,6 +769,7 @@ impl AnalysisMemoryStats {
             + self.diagnostic_candidates
             + self.graph
             + self.unresolved_graph_edges
+            + self.query_caches
     }
 }
 
@@ -352,62 +779,78 @@ pub(super) struct SourceRegistry {
     pub(super) files: HashMap<SourceFileId, SourceFile>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(super) struct NameRegistry {
     state: NameRegistryState,
+    #[cfg(test)]
+    fqn_lookup_count: AtomicUsize,
+}
+
+impl Clone for NameRegistry {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            #[cfg(test)]
+            fqn_lookup_count: AtomicUsize::new(self.fqn_lookup_count.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl NameRegistry {
     pub(super) fn intern_fqn(&mut self, fqn: FullyQualifiedName) -> FqnId {
         let state = &mut self.state;
-        if let Some(id) = state.by_fqn.get(&fqn) {
-            return *id;
-        }
-        let id = FqnId(u32::try_from(state.fqns.len()).expect(
+        let (index, _) = state.fqns.insert_full(fqn);
+        FqnId(u32::try_from(index).expect(
             "INVARIANT VIOLATED: FQN interner exceeded u32 ids. \
                  This is a bug because FqnId stores u32. \
                  Fix: widen FqnId before interning more than u32::MAX names.",
-        ));
-        state.fqns.push(fqn.clone());
-        state.by_fqn.insert(fqn, id);
-        id
+        ))
     }
 
     pub(super) fn fqn_id(&self, fqn: &FullyQualifiedName) -> Option<FqnId> {
-        self.state.by_fqn.get(fqn).copied()
+        #[cfg(test)]
+        self.fqn_lookup_count.fetch_add(1, Ordering::Relaxed);
+        self.state
+            .fqns
+            .get_index_of(fqn)
+            .map(|index| FqnId(u32::try_from(index).expect(
+                "INVARIANT VIOLATED: FQN interner returned an index above u32. This is a bug because every inserted index is validated before becoming an FqnId. Fix: widen FqnId and its insertion boundary together.",
+            )))
     }
 
     pub(super) fn fqn(&self, id: FqnId) -> Option<&FullyQualifiedName> {
-        self.state.fqns.get(id.0 as usize)
+        self.state.fqns.get_index(id.0 as usize)
+    }
+
+    #[cfg(test)]
+    fn reset_fqn_lookup_count_for_test(&self) {
+        self.fqn_lookup_count.store(0, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    fn fqn_lookup_count_for_test(&self) -> usize {
+        self.fqn_lookup_count.load(Ordering::Relaxed)
     }
 
     pub(super) fn intern_const_lookup(&mut self, lookup: ConstLookup) -> ConstLookupId {
         let state = &mut self.state;
-        if let Some(id) = state.by_const_lookup.get(&lookup) {
-            return *id;
-        }
-        let id = ConstLookupId(u32::try_from(state.const_lookups.len()).expect(
+        let (index, _) = state.const_lookups.insert_full(lookup);
+        ConstLookupId(u32::try_from(index).expect(
             "INVARIANT VIOLATED: constant lookup interner exceeded u32 ids. \
                  This is a bug because ConstLookupId stores u32. \
                  Fix: widen ConstLookupId before interning more than u32::MAX lookups.",
-        ));
-        state.const_lookups.push(lookup.clone());
-        state.by_const_lookup.insert(lookup, id);
-        id
+        ))
     }
 
     pub(super) fn const_lookup(&self, id: ConstLookupId) -> Option<&ConstLookup> {
-        self.state.const_lookups.get(id.0 as usize)
+        self.state.const_lookups.get_index(id.0 as usize)
     }
 
     fn estimated_heap_bytes(&self) -> usize {
         let state = &self.state;
-        state.by_fqn.capacity() * (size_of::<FullyQualifiedName>() + size_of::<FqnId>() + 1)
-            + vec_payload_bytes(&state.fqns)
+        state.fqns.capacity() * (size_of::<FullyQualifiedName>() + size_of::<usize>() + 1)
             + state.fqns.iter().map(fqn_heap_bytes).sum::<usize>()
-            + state.by_const_lookup.capacity()
-                * (size_of::<ConstLookup>() + size_of::<ConstLookupId>() + 1)
-            + vec_payload_bytes(&state.const_lookups)
+            + state.const_lookups.capacity() * (size_of::<ConstLookup>() + size_of::<usize>() + 1)
             + state
                 .const_lookups
                 .iter()
@@ -430,10 +873,8 @@ fn const_lookup_heap_bytes(lookup: &ConstLookup) -> usize {
 
 #[derive(Debug, Clone, Default)]
 struct NameRegistryState {
-    by_fqn: HashMap<FullyQualifiedName, FqnId>,
-    fqns: Vec<FullyQualifiedName>,
-    by_const_lookup: HashMap<ConstLookup, ConstLookupId>,
-    const_lookups: Vec<ConstLookup>,
+    fqns: IndexSet<FullyQualifiedName>,
+    const_lookups: IndexSet<ConstLookup>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -463,8 +904,10 @@ pub(super) struct DiagnosticFacts {
 }
 
 /// Shared analysis state for editor and agent consumers.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug)]
 pub struct AnalysisEngine {
+    instance_id: u64,
+    semantic_revision: u64,
     pub(super) sources: SourceRegistry,
     pub(super) names: NameRegistry,
     pub(super) facts: FactArena,
@@ -472,6 +915,57 @@ pub struct AnalysisEngine {
     pub(super) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
     execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
     semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
+    top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
+}
+
+static NEXT_ANALYSIS_ENGINE_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_analysis_engine_instance_id() -> u64 {
+    NEXT_ANALYSIS_ENGINE_INSTANCE_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .unwrap_or_else(|_| {
+            panic!(
+                "INVARIANT VIOLATED: analysis engine instance identity exhausted u64. \
+                 This is a bug because query caches require a unique engine identity. \
+                 Fix: widen the identity before creating u64::MAX engine instances."
+            )
+        })
+}
+
+impl Default for AnalysisEngine {
+    fn default() -> Self {
+        Self {
+            instance_id: next_analysis_engine_instance_id(),
+            semantic_revision: 0,
+            sources: SourceRegistry::default(),
+            names: NameRegistry::default(),
+            facts: FactArena::default(),
+            graph: SemanticGraph::default(),
+            method_visibility_overrides: Vec::new(),
+            execution_contexts: HashMap::new(),
+            semantic_export_fingerprints: HashMap::new(),
+            top_level_method_lookup_chain_cache: Mutex::new(None),
+        }
+    }
+}
+
+impl Clone for AnalysisEngine {
+    fn clone(&self) -> Self {
+        Self {
+            instance_id: next_analysis_engine_instance_id(),
+            semantic_revision: self.semantic_revision,
+            sources: self.sources.clone(),
+            names: self.names.clone(),
+            facts: self.facts.clone(),
+            graph: self.graph.clone(),
+            method_visibility_overrides: self.method_visibility_overrides.clone(),
+            execution_contexts: self.execution_contexts.clone(),
+            semantic_export_fingerprints: self.semantic_export_fingerprints.clone(),
+            top_level_method_lookup_chain_cache: Mutex::new(None),
+        }
+    }
 }
 
 impl AnalysisEngine {
@@ -480,7 +974,6 @@ impl AnalysisEngine {
     }
 
     pub fn register_file(&mut self, file: SourceFileInput) -> SourceFileId {
-        let id = self.sources.ids.get_or_insert(&file.path);
         let line_index = SourceLineIndex::new(&file.content);
         let content_hash = source_hash(&file.content);
         let source = if line_index.is_ascii() {
@@ -488,15 +981,46 @@ impl AnalysisEngine {
         } else {
             Some(file.content)
         };
+        self.register_indexed_file(file.path, file.kind, line_index, content_hash, source)
+    }
+
+    /// Register source whose caller retains the owned buffer. ASCII files need
+    /// only their line index and content hash after collection; non-ASCII files
+    /// retain one engine-owned copy for exact UTF-16 conversion.
+    pub fn register_file_borrowed(
+        &mut self,
+        path: PathBuf,
+        content: &str,
+        kind: SourceKind,
+    ) -> SourceFileId {
+        let line_index = SourceLineIndex::new(content);
+        let content_hash = source_hash(content);
+        let source = if line_index.is_ascii() {
+            None
+        } else {
+            Some(content.to_string())
+        };
+        self.register_indexed_file(path, kind, line_index, content_hash, source)
+    }
+
+    fn register_indexed_file(
+        &mut self,
+        path: PathBuf,
+        kind: SourceKind,
+        line_index: SourceLineIndex,
+        content_hash: u64,
+        source: Option<String>,
+    ) -> SourceFileId {
+        let id = self.sources.ids.get_or_insert(&path);
         self.sources.files.insert(
             id,
             SourceFile {
                 id,
-                path: file.path.components().collect(),
+                path: path.components().collect(),
                 source,
                 line_index,
                 content_hash,
-                kind: file.kind,
+                kind,
             },
         );
         id
@@ -527,12 +1051,32 @@ impl AnalysisEngine {
     }
 
     pub fn resolve_file(&mut self, file_id: SourceFileId) {
-        self.assert_known_file_id(
-            file_id,
-            "file-local resolve references unknown source file id",
-        );
+        self.resolve_files(&[file_id]);
+    }
+
+    pub fn resolve_files(&mut self, file_ids: &[SourceFileId]) {
+        let mut unique = HashSet::with_capacity(file_ids.len());
+        for file_id in file_ids {
+            self.assert_known_file_id(
+                *file_id,
+                "selected-file resolve references unknown source file id",
+            );
+            assert!(
+                unique.insert(*file_id),
+                "INVARIANT VIOLATED: selected-file semantic resolution contains duplicate file \
+                 id {:?}. This is a bug because one staged resolution must replace each file's \
+                 references and diagnostics exactly once. Fix: sort and deduplicate the selected \
+                 file ids before calling AnalysisEngine::resolve_files.",
+                file_id
+            );
+        }
+        if file_ids.is_empty() {
+            return;
+        }
         self.retry_unresolved_graph_edges();
-        self.resolve_reference_candidates_in_file(file_id);
+        for file_id in file_ids {
+            self.resolve_reference_candidates_in_file(*file_id);
+        }
     }
 
     pub fn shrink_to_fit(&mut self) {
@@ -546,9 +1090,7 @@ impl AnalysisEngine {
             file.line_index.shrink_to_fit();
         }
 
-        self.names.state.by_fqn.shrink_to_fit();
         self.names.state.fqns.shrink_to_fit();
-        self.names.state.by_const_lookup.shrink_to_fit();
         self.names.state.const_lookups.shrink_to_fit();
 
         self.facts.definitions.symbols.shrink_to_fit();
@@ -604,7 +1146,16 @@ impl AnalysisEngine {
             diagnostic_candidates: self.facts.diagnostics.candidates.estimated_heap_bytes(),
             graph: self.graph.estimated_heap_bytes(),
             unresolved_graph_edges: self.graph.estimated_unresolved_heap_bytes(),
+            query_caches: self.estimated_top_level_method_lookup_chain_cache_heap_bytes(),
         }
+    }
+
+    fn estimated_top_level_method_lookup_chain_cache_heap_bytes(&self) -> usize {
+        self.top_level_method_lookup_chain_cache
+            .lock()
+            .as_ref()
+            .map(|chain| vec_payload_bytes(chain) + chain.iter().map(fqn_heap_bytes).sum::<usize>())
+            .unwrap_or(0)
     }
 
     fn estimated_file_store_heap_bytes(&self) -> usize {
@@ -645,11 +1196,271 @@ impl AnalysisEngine {
         self.semantic_export_fingerprints.get(&file_id).copied()
     }
 
+    /// Stable semantic identity for an immutable dependency seed.
+    ///
+    /// Physical paths and engine-local file IDs are deliberately excluded so
+    /// equivalent runtime/core inputs can share one project-neutral producer.
+    /// Source kind remains part of identity because definition precedence and
+    /// edit/diagnostic policy differ between implementations, stubs, and
+    /// signatures.
+    pub fn semantic_context_fingerprint(&self) -> SemanticExportFingerprint {
+        let mut file_fingerprints = self
+            .semantic_export_fingerprints
+            .iter()
+            .map(|(file_id, fingerprint)| {
+                let source = self.sources.files.get(file_id).expect(
+                    "INVARIANT VIOLATED: semantic export fingerprint has no registered source file. This is a bug because replace_facts validates every file id before recording semantic state. Fix: remove fingerprints through the same file lifecycle as source registration.",
+                );
+                export_hash(|hasher| {
+                    stable_source_kind(hasher, source.kind);
+                    stable_u64(hasher, fingerprint.high);
+                    stable_u64(hasher, fingerprint.low);
+                })
+            })
+            .collect::<Vec<_>>();
+        file_fingerprints.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
+        export_hash(|hasher| {
+            stable_len(hasher, file_fingerprints.len());
+            for fingerprint in &file_fingerprints {
+                stable_u64(hasher, fingerprint.high);
+                stable_u64(hasher, fingerprint.low);
+            }
+        })
+    }
+
+    /// Stable, path-independent identity of every user-visible semantic fact.
+    ///
+    /// This is intended for cross-process correctness evidence, not query
+    /// lookup. Each fact is reduced to an order-independent stable component;
+    /// the final multiset preserves file ownership and source-kind precedence
+    /// without retaining engine-local IDs or physical paths.
+    pub fn semantic_result_fingerprint(&self) -> SemanticResultFingerprint {
+        fn push_component(
+            components: &mut HashMap<SourceFileId, Vec<SemanticExportFingerprint>>,
+            file_id: SourceFileId,
+            component: SemanticExportFingerprint,
+        ) {
+            components.get_mut(&file_id).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: semantic result fact belongs to unknown file id {:?}. This is a bug because every stored fact must be owned by one registered source. Fix: remove and replace facts through the same file lifecycle.",
+                    file_id
+                )
+            }).push(component);
+        }
+
+        let mut components = self
+            .sources
+            .files
+            .keys()
+            .copied()
+            .map(|file_id| (file_id, Vec::new()))
+            .collect::<HashMap<_, _>>();
+
+        for fact in self.all_symbol_facts() {
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 1);
+                    stable_fqn(hasher, &fact.fqn);
+                    stable_symbol_kind(hasher, fact.kind);
+                    stable_range_offsets(hasher, fact.name_range);
+                    stable_range_offsets(hasher, fact.range);
+                }),
+            );
+        }
+        for fact in self.all_method_facts() {
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 2);
+                    stable_fqn(hasher, &fact.fqn);
+                    stable_fqn(hasher, &fact.owner);
+                    stable_range_offsets(hasher, fact.name_range);
+                    stable_range_offsets(hasher, fact.range);
+                    stable_strings(hasher, &fact.params);
+                    stable_len(hasher, fact.param_facts.len());
+                    for parameter in &fact.param_facts {
+                        stable_string(hasher, &parameter.name);
+                        stable_method_param_kind(hasher, parameter.kind);
+                        stable_optional_string(hasher, parameter.type_label.as_deref());
+                        stable_optional_string(hasher, parameter.documentation.as_deref());
+                    }
+                    stable_optional_method(hasher, fact.delegate_receiver);
+                    stable_method_visibility(hasher, fact.visibility);
+                    stable_method_availability(hasher, &fact.availability);
+                    stable_optional_string(hasher, fact.documentation.as_deref());
+                    stable_optional_string(hasher, fact.return_type_label.as_deref());
+                }),
+            );
+        }
+        for fact in &self.method_visibility_overrides {
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 3);
+                    stable_fqn(hasher, &fact.owner);
+                    stable_method(hasher, fact.method);
+                    stable_method_visibility(hasher, fact.visibility);
+                    stable_range_offsets(hasher, fact.range);
+                }),
+            );
+        }
+        for fact in self.facts.types.all_facts() {
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 4);
+                    stable_type_subject(hasher, &fact.subject);
+                    stable_ruby_type(hasher, &fact.ruby_type);
+                    stable_type_provenance(hasher, fact.provenance);
+                    stable_range_offsets(hasher, fact.range);
+                }),
+            );
+        }
+        for fact in self.all_graph_nodes() {
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 5);
+                    stable_fqn(hasher, &fact.fqn);
+                    stable_graph_node_kind(hasher, fact.kind);
+                    stable_range_offsets(hasher, fact.range);
+                }),
+            );
+        }
+        for fact in self.all_graph_edges() {
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 6);
+                    stable_fqn(hasher, &fact.source);
+                    stable_fqn(hasher, &fact.target);
+                    stable_graph_edge_kind(hasher, fact.kind);
+                    stable_range_offsets(hasher, fact.range);
+                }),
+            );
+        }
+        for fact in self.unresolved_graph_edges() {
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 7);
+                    stable_fqn(hasher, &fact.source);
+                    stable_len(hasher, fact.target_parts.len());
+                    for part in &fact.target_parts {
+                        stable_string(hasher, part.as_str());
+                    }
+                    stable_bool(hasher, fact.absolute);
+                    stable_fqn(hasher, &fact.context);
+                    stable_graph_edge_kind(hasher, fact.kind);
+                    stable_range_offsets(hasher, fact.range);
+                }),
+            );
+        }
+        for (target, fact) in self.facts.references.resolved.iter_facts_with_targets() {
+            let target = self.names.fqn(target).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: resolved reference target {:?} has no interned FQN. This is a bug because stored references must retain a valid semantic target. Fix: intern targets before resolving references and remove them only with their facts.",
+                    target
+                )
+            });
+            let caller = fact.caller.map(|caller| {
+                self.names.fqn(caller).unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: resolved reference caller {:?} has no interned FQN. This is a bug because caller provenance must remain valid while the reference exists. Fix: intern callers before resolving references and remove them only with their facts.",
+                        caller
+                    )
+                })
+            });
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 8);
+                    stable_fqn(hasher, target);
+                    stable_optional_fqn(hasher, caller);
+                    stable_method_reference_access(hasher, fact.access);
+                    stable_range_offsets(hasher, fact.range);
+                }),
+            );
+        }
+        for fact in self.facts.diagnostics.resolved.all_facts() {
+            push_component(
+                &mut components,
+                fact.range.file_id,
+                export_hash(|hasher| {
+                    stable_u8(hasher, 9);
+                    stable_diagnostic_severity(hasher, fact.severity);
+                    stable_string(hasher, &fact.code);
+                    stable_string(hasher, &fact.message);
+                    stable_range_offsets(hasher, fact.range);
+                }),
+            );
+        }
+        for (file_id, contexts) in &self.execution_contexts {
+            for context in contexts {
+                push_component(
+                    &mut components,
+                    *file_id,
+                    export_hash(|hasher| {
+                        stable_u8(hasher, 10);
+                        stable_fqn(hasher, &context.lexical_namespace);
+                        stable_fqn(hasher, &context.implicit_receiver);
+                        stable_fqn(hasher, &context.method_definition_owner);
+                        stable_execution_scope_mode(hasher, context.lexical_scope);
+                        stable_execution_scope_mode(hasher, context.local_scope);
+                        stable_string(hasher, &context.extension_id);
+                        stable_range_offsets(hasher, context.range);
+                    }),
+                );
+            }
+        }
+
+        let mut file_fingerprints = components
+            .into_iter()
+            .map(|(file_id, mut facts)| {
+                let source = self.sources.files.get(&file_id).expect(
+                    "INVARIANT VIOLATED: semantic result component owner has no registered source file. This is a bug because the component map is seeded exclusively from registered sources. Fix: keep source removal and semantic fact removal atomic.",
+                );
+                facts.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
+                result_hash(|hasher| {
+                    stable_source_kind(hasher, source.kind);
+                    stable_len(hasher, facts.len());
+                    for fact in &facts {
+                        stable_u64(hasher, fact.high);
+                        stable_u64(hasher, fact.low);
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        file_fingerprints.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
+        result_hash(|hasher| {
+            stable_len(hasher, file_fingerprints.len());
+            for fingerprint in &file_fingerprints {
+                stable_u64(hasher, fingerprint.high);
+                stable_u64(hasher, fingerprint.low);
+            }
+        })
+    }
+
     pub fn files(&self) -> impl Iterator<Item = &SourceFile> {
         self.sources.files.values()
     }
 
     fn replace_facts_deferred(&mut self, file_id: SourceFileId, facts: FileFacts) {
+        self.semantic_revision = self.semantic_revision.checked_add(1).expect(
+            "INVARIANT VIOLATED: analysis engine semantic revision exhausted u64. \
+             This is a bug because cached queries require monotonic invalidation. \
+             Fix: widen the semantic revision before performing u64::MAX replacements.",
+        );
+        *self.top_level_method_lookup_chain_cache.get_mut() = None;
         self.assert_known_file_id(file_id, "file analysis references unknown source file id");
         let symbols = self.intern_symbol_facts(facts.symbols);
         self.facts
@@ -687,6 +1498,23 @@ impl AnalysisEngine {
             .diagnostics
             .resolved
             .replace_file(file_id, facts.diagnostics);
+    }
+
+    pub(super) fn query_cache_identity(&self) -> (u64, u64) {
+        (self.instance_id, self.semantic_revision)
+    }
+
+    pub(super) fn cached_top_level_method_lookup_chain(&self) -> Option<Vec<FullyQualifiedName>> {
+        self.top_level_method_lookup_chain_cache.lock().clone()
+    }
+
+    pub(super) fn cache_top_level_method_lookup_chain(&self, chain: Vec<FullyQualifiedName>) {
+        *self.top_level_method_lookup_chain_cache.lock() = Some(chain);
+    }
+
+    #[cfg(test)]
+    fn valid_method_lookup_chain_cache_len_for_test(&self) -> usize {
+        usize::from(self.top_level_method_lookup_chain_cache.lock().is_some())
     }
 
     fn replace_execution_contexts(
@@ -860,6 +1688,36 @@ impl AnalysisEngine {
             .collect::<Vec<_>>();
         retain_effective_method_availability(&mut facts);
         facts
+    }
+
+    pub(super) fn effective_method_fact_matching_owner_name(
+        &self,
+        owner: &FullyQualifiedName,
+        method: &crate::core::RubyMethod,
+    ) -> EffectiveMethodFactMatch {
+        let Some(owner_id) = self.names.fqn_id(owner) else {
+            return EffectiveMethodFactMatch::Missing;
+        };
+        self.effective_method_fact_matching_owner_id(owner_id, method)
+    }
+
+    pub(super) fn effective_method_fact_matching_owner_id(
+        &self,
+        owner_id: FqnId,
+        method: &crate::core::RubyMethod,
+    ) -> EffectiveMethodFactMatch {
+        match self
+            .facts
+            .definitions
+            .methods
+            .effective_fact_matching_owner_name(owner_id, method)
+        {
+            StoredMethodFactMatch::Missing => EffectiveMethodFactMatch::Missing,
+            StoredMethodFactMatch::Unique(fact) => {
+                EffectiveMethodFactMatch::Unique(self.expand_method_fact(fact.clone()))
+            }
+            StoredMethodFactMatch::Ambiguous => EffectiveMethodFactMatch::Ambiguous,
+        }
     }
 
     pub fn method_visibility_overrides_matching_owner_name(

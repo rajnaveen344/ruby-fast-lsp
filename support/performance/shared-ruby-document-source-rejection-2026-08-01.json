@@ -1,0 +1,139 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Test whether changing RubyDocument.content from String to Arc<String> removes the remaining full source clone when FileProcessor clones a document for FactCollector traversal.",
+  "profile_basis": {
+    "profile": "/private/tmp/ruby-fast-lsp-no-text-fallback-v195-symbolized-profile.json.gz",
+    "profile_sha256": "efd1d2e116d4844d38e4b262c40dbb1df617be332de42ca023a0d2c503fc5978",
+    "string_clone_self_percent": 2.3,
+    "observation": "RubyDocument::clone duplicated source bytes because the Prism tree borrows the original parse buffer while FactCollector owns a separately mutable document."
+  },
+  "candidate": {
+    "implementation": "Store immutable source bytes in Arc<String>; clones share the allocation while update replaces only the edited document's Arc. Mutable variable scopes, version, line-index state, and hints remain document-local.",
+    "executable_sha256": "b3e97e2bd6da97755858c465256d4aa1c8ab14518e07a447cd4bfff53ca6eedf",
+    "baseline_executable_sha256": "69d41f237353b2bbcf697c6034eb4a40149601379deaa1b645f662b8ec2b2ce9",
+    "red_green": {
+      "test": "cloned_document_shares_immutable_source_allocation",
+      "red": "The original String-backed clone produced different source allocation pointers.",
+      "green": "The Arc-backed clone shared the source pointer, and updating the clone replaced only its own source snapshot.",
+      "analysis_tests": 408,
+      "root_tests": 1346,
+      "failures": 0
+    }
+  },
+  "controlled_workload": {
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "persistent_cache_state": "valid fully warm fresh process for each executable identity",
+    "discarded_warmup": "v259 rebuilt dependency products after the semantic producer identity changed and is excluded from timing evidence.",
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "baseline_runs": [
+    {
+      "id": "v260",
+      "jsonl_sha256": "577ec826f7628557ede3236580714070d9fe0f3d5e23c91e96a303e59d23d819",
+      "log_sha256": "0637856b048fe53f040d3008c699795ed5f0651ad85f3fa00071b8523cd02620",
+      "wall_ms": 13683.442833,
+      "peak_rss_bytes": 1268088832,
+      "user_cpu_ms": 26402.242,
+      "project_phase_ms": 13772.175709,
+      "active_semantic_complete_ms": 12189,
+      "active_project_navigation_ms": 5744,
+      "active_dependency_navigation_ms": 12149
+    },
+    {
+      "id": "v263",
+      "jsonl_sha256": "776b5de814f8416f2c2fc64a21abf4c51eb1d6191a827a0d3704a87dc374482b",
+      "log_sha256": "bce0387020ebfabefd114026c77bed744d0dd6c034bc7d77c1b5463f3850ffd9",
+      "wall_ms": 13452.403209,
+      "peak_rss_bytes": 1616101376,
+      "user_cpu_ms": 26323.035,
+      "project_phase_ms": 13532.405709,
+      "active_semantic_complete_ms": 11854,
+      "active_project_navigation_ms": 5550,
+      "active_dependency_navigation_ms": 11820
+    },
+    {
+      "id": "v264",
+      "jsonl_sha256": "0d11ebba37a0b0327e0b2b440442164496583cf841de0a53c2681516d2216d6a",
+      "log_sha256": "18f86223e97bdfa3f84f549a535472120fc26c814090dcb7a8fba5f9f79348f4",
+      "wall_ms": 13459.405375,
+      "peak_rss_bytes": 1398915072,
+      "user_cpu_ms": 26149.705,
+      "project_phase_ms": 13381.245583,
+      "active_semantic_complete_ms": 11834,
+      "active_project_navigation_ms": 5596,
+      "active_dependency_navigation_ms": 11792
+    }
+  ],
+  "candidate_runs": [
+    {
+      "id": "v261",
+      "jsonl_sha256": "c3604df50dda5c2c9db89250d382bb0f1467424925584827f140737b344387b2",
+      "log_sha256": "89168a71899ee0eef55637286f3f989c56666a32bacf1bf043b0f5ab6187a137",
+      "wall_ms": 13388.008166,
+      "peak_rss_bytes": 1714601984,
+      "user_cpu_ms": 26039.527,
+      "project_phase_ms": 13383.6695,
+      "active_semantic_complete_ms": 11745,
+      "active_project_navigation_ms": 5490,
+      "active_dependency_navigation_ms": 11710
+    },
+    {
+      "id": "v262",
+      "jsonl_sha256": "538acb4cd90b130629cd27416e3e89b458acd65db8dc8754e1599180195112ca",
+      "log_sha256": "71e59f3bcf8dcb2b67a70b015fe4046a573bf625ff4c24e01fc7adaffd294ea7",
+      "wall_ms": 13401.331083,
+      "peak_rss_bytes": 1694154752,
+      "user_cpu_ms": 26533.591,
+      "project_phase_ms": 13477.892749,
+      "active_semantic_complete_ms": 11817,
+      "active_project_navigation_ms": 5569,
+      "active_dependency_navigation_ms": 11782
+    },
+    {
+      "id": "v265",
+      "jsonl_sha256": "8f5c0ba062daa52552215773db2da40cd141de279c8dc8592a2667f7549ccbc1",
+      "log_sha256": "d0df77c5d27616cb4b590a59792c063b6807976ec5b9957f4354233eb15e4df5",
+      "wall_ms": 13568.7525,
+      "peak_rss_bytes": 1419706368,
+      "user_cpu_ms": 26007.885,
+      "project_phase_ms": 13460.371708,
+      "active_semantic_complete_ms": 11905,
+      "active_project_navigation_ms": 5514,
+      "active_dependency_navigation_ms": 11869
+    }
+  ],
+  "median_comparison": {
+    "baseline_wall_ms": 13459.405375,
+    "candidate_wall_ms": 13401.331083,
+    "wall_change_percent": -0.431,
+    "baseline_peak_rss_bytes": 1398915072,
+    "candidate_peak_rss_bytes": 1694154752,
+    "peak_rss_change_percent": 21.105,
+    "candidate_max_peak_rss_bytes": 1714601984,
+    "baseline_user_cpu_ms": 26323.035,
+    "candidate_user_cpu_ms": 26039.527,
+    "user_cpu_change_percent": -1.077,
+    "baseline_project_phase_ms": 13532.405709,
+    "candidate_project_phase_ms": 13460.371708,
+    "project_phase_change_percent": -0.532,
+    "baseline_active_semantic_complete_ms": 11854,
+    "candidate_active_semantic_complete_ms": 11817,
+    "active_semantic_change_percent": -0.312,
+    "baseline_active_project_navigation_ms": 5596,
+    "candidate_active_project_navigation_ms": 5514,
+    "active_project_navigation_change_percent": -1.465,
+    "baseline_active_dependency_navigation_ms": 11820,
+    "candidate_active_dependency_navigation_ms": 11782,
+    "active_dependency_navigation_change_percent": -0.321
+  },
+  "semantic_equivalence": {
+    "semantic_export_manifest_sha256_all_six_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
+    "semantic_result_fingerprints_all_six_runs": {
+      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
+      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+    }
+  },
+  "decision": "Rejected and reverted. The exact semantics and absolute RSS ceiling passed, but the 0.431% wall and 0.312% active-semantic improvements are not material enough to justify a public content-type migration, and median peak RSS regressed 21.105%. Keep RubyDocument source ownership unchanged and target a larger distinct visitor or resolution hotspot."
+}

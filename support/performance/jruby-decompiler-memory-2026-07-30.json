@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "jruby-decompiler-resident-memory-bound",
+  "recorded_at": "2026-07-30",
+  "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
+  "source_worktree_dirty": true,
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "os": "macOS 26.2",
+    "os_build": "25C56"
+  },
+  "java": {
+    "executable": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java",
+    "version": "17.0.18",
+    "runtime": "OpenJDK Runtime Environment Homebrew"
+  },
+  "input": {
+    "class_fixture": "crates/jvm-metadata/fixtures/rich_fixture.class.hex",
+    "decoded_class_sha256": "ce2f5b16c8b9980b3f854b40433884f9572f23a1e379792563c340f4ac174ae2",
+    "cfr_asset": "support/jruby/decompiler/cfr-0.152.jar",
+    "cfr_sha256": "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2"
+  },
+  "jvm_fixed_bounds": {
+    "max_heap_bytes": 134217728,
+    "max_direct_memory_bytes": 33554432,
+    "max_metaspace_bytes": 100663296,
+    "reserved_code_cache_bytes": 33554432,
+    "compressed_class_space_bytes": 16777216,
+    "enforced_max_resident_bytes": 268435456
+  },
+  "measurements": [
+    {
+      "max_heap_bytes": 100663296,
+      "maximum_resident_bytes": 69386240
+    },
+    {
+      "max_heap_bytes": 134217728,
+      "maximum_resident_bytes": 69828608
+    },
+    {
+      "max_heap_bytes": 201326592,
+      "maximum_resident_bytes": 69632000
+    },
+    {
+      "max_heap_bytes": 268435456,
+      "maximum_resident_bytes": 69959680
+    }
+  ],
+  "acceptance": {
+    "selected_max_heap_bytes": 134217728,
+    "selected_max_resident_bytes": 268435456,
+    "representative_peak_fraction_of_limit": 0.2601,
+    "reason": "The selected class family completed at about 70 MB RSS for every measured heap size. A 256 MiB resident cap matches the existing JRuby indexing and interactive work claim while leaving measured native overhead headroom."
+  },
+  "enforcement": {
+    "macos": "proc_pidinfo(PROC_PIDTASKINFO).pti_resident_size",
+    "linux": "/proc/<pid>/statm resident pages multiplied by sysconf(_SC_PAGESIZE)",
+    "windows": "GetProcessMemoryInfo(PROCESS_MEMORY_COUNTERS).WorkingSetSize",
+    "behavior": "Inspection failure, resident-memory overage, or timeout kills and reaps the JVM child before returning an isolated decompiler error."
+  }
+}

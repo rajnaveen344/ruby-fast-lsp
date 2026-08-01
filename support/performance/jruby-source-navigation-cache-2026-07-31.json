@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-07-31",
+  "purpose": "Measure checksum-preserving JRuby Java source navigation changes on two isolated goshposh projects pinned to JRuby 9.2.21.0.",
+  "machine": {
+    "cpu": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "target": "aarch64-macos"
+  },
+  "workload": {
+    "workspace": "/Users/naveenraj/goshposh",
+    "project_roots": [
+      "server",
+      "server-devops-5441"
+    ],
+    "runtime": "jruby-9.2.21.0",
+    "persistent_gem_hits": 604,
+    "definition_probes": [
+      "server/lib/api_app.rb:8:35",
+      "server/tasks/rake_helpers.rb:9:18"
+    ],
+    "semantic_expectations": {
+      "project_definition_locations": 1290,
+      "bson_object_id_definition_locations": 1
+    }
+  },
+  "measurements": [
+    {
+      "name": "pre-source-navigation-cache",
+      "internal_wall_ms": 62077,
+      "project_navigation_p95_ms": 42777,
+      "dependency_navigation_p95_ms": 60438,
+      "peak_rss_bytes": 1672000000
+    },
+    {
+      "name": "seekable-source-archive",
+      "internal_wall_ms": 44977,
+      "project_navigation_p95_ms": 26312,
+      "dependency_navigation_p95_ms": 43420
+    },
+    {
+      "name": "central-directory-name-lookup",
+      "internal_wall_ms": 37630,
+      "project_navigation_p95_ms": 19435,
+      "dependency_navigation_p95_ms": 36098,
+      "peak_rss_bytes": 1906000000
+    },
+    {
+      "name": "one-parsed-source-archive-per-project-root",
+      "profiler_sha256": "8089bd0f96d99225f8ed5f4f9f2620be16d8a7ef2eaf5465579d6c508aa5c903",
+      "internal_wall_ms": 33824,
+      "external_wall_ms": 36740,
+      "project_navigation_ms": {
+        "server": 15152,
+        "server-devops-5441": 14931,
+        "p95": 15152
+      },
+      "dependency_navigation_ms": {
+        "server": 32246,
+        "server-devops-5441": 29954,
+        "p95": 32246
+      },
+      "semantic_complete_ms": {
+        "server": 33823,
+        "server-devops-5441": 33791,
+        "p95": 33823
+      },
+      "phase_sum_ms": {
+        "runtime": 11770,
+        "core": 680,
+        "project": 17634,
+        "dependencies": 32117,
+        "resolve": 5347,
+        "publish": 5350
+      },
+      "interactive_open_ms": {
+        "api_app": 179,
+        "rake_helpers": 9
+      },
+      "internal_peak_rss_bytes": 1865793536,
+      "external_peak_rss_bytes": 2322415616,
+      "user_cpu_ms": 82780,
+      "system_cpu_ms": 4530,
+      "exact_semantic_probes_passed": true
+    }
+  ],
+  "decision": {
+    "targeted_change": "accepted",
+    "overall_goal": "rejected",
+    "reason": "Streaming only selected source entries, comparing central-directory names without constructing every entry, and retaining one verified parsed archive reduced project navigation by 64.6 percent and total internal wall time by 45.5 percent from the pre-cache run while preserving exact Ruby and BSON navigation. The five-second project, fifteen-second dependency, and thirty-second semantic-completion targets are still missed.",
+    "remaining_bottlenecks": [
+      "Persist checksum-keyed Java/JAR/JMOD catalog products so each process does not rebuild the same immutable runtime catalog.",
+      "Prioritize the active project more strongly than sibling source passes while retaining bounded starvation.",
+      "Reduce or overlap the approximately 6.7-second per-project parallel fact pass and its approximately 1.9-second first resolution."
+    ]
+  },
+  "verification": {
+    "cargo_test_release_workspace": "passed",
+    "root_tests": 1264,
+    "vscode_adapter_tests": 34,
+    "focused_source_navigation_tests": 8
+  }
+}

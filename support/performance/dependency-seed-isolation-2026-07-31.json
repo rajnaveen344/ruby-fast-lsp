@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-31",
+  "dataset_fingerprint_sha256": "8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "target": "aarch64-macos"
+  },
+  "change": {
+    "summary": "Build the reusable gem dependency seed from a clean core/JRuby runtime engine even when an open document already populated the owning project engine.",
+    "correctness": [
+      "Open unsaved project facts remain in the isolated project engine.",
+      "Project, excluded, and gem facts are rejected from the dependency seed by a production invariant.",
+      "Equivalent core seeds have the same semantic fingerprint regardless of editor open timing."
+    ]
+  },
+  "build": {
+    "profiler_executable_sha256": "ce43906012d0969b0c2eb2c3ac2703380e0e6a277f9ae306a1701f255eb7d48e",
+    "ruby_fast_lsp_version": "0.2.6"
+  },
+  "resource_policy": {
+    "scheduler_concurrency": 2,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "isolated_cold_cache": {
+    "cache_root": "/tmp/ruby-fast-lsp-seed-isolation-20260731",
+    "project_definition_first_success_ms": 9433,
+    "bson_definition_first_success_ms": 14628,
+    "active_project_semantic_complete_ms": 31018,
+    "all_projects_semantic_complete_ms": 56880,
+    "persistent_gem_products": {
+      "lookups": 604,
+      "hits": 95,
+      "producers": 509,
+      "publications": 509
+    },
+    "persistent_java_artifacts": {
+      "lookups": 358,
+      "hits": 190,
+      "producers": 168,
+      "publications": 168
+    },
+    "internal_peak_rss_bytes": 1833238528,
+    "external_max_rss_bytes": 1842429952,
+    "result": "mixed",
+    "assessment": "The exact BSON dependency probe passes the 15-second cold navigation budget and the second project reuses 95 immutable gem products instead of producing all 604 independently. Project navigation, active semantic completion, and total completion still miss their absolute cold budgets."
+  },
+  "fresh_process_warm_cache": {
+    "project_definition_first_success_ms": 3239,
+    "bson_definition_first_success_ms": 8689,
+    "active_project_semantic_complete_ms": 20711,
+    "all_projects_semantic_complete_ms": 31258,
+    "persistent_gem_products": {
+      "lookups": 604,
+      "hits": 604,
+      "producers": 0
+    },
+    "persistent_java_artifacts": {
+      "lookups": 358,
+      "hits": 358,
+      "producers": 0
+    },
+    "internal_peak_rss_bytes": 1525186560,
+    "result": "rejected_as_terminal",
+    "assessment": "Exact project and BSON navigation remain correct, but the strict 1-second project, 3-second dependency, 5-second active semantic, and 15-second workspace warm budgets remain open."
+  },
+  "decision": {
+    "dependency_seed_isolation": "accepted",
+    "performance_goal_complete": false,
+    "next_bottlenecks": [
+      "Cold JRuby classpath and Java artifact preparation before active project work",
+      "Active project source fact collection and first resolution",
+      "Persistent-hit deserialization, validation, and rebinding cost",
+      "Exhaustive sibling completion"
+    ]
+  }
+}

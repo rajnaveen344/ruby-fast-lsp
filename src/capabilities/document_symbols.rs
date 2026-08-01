@@ -1,4 +1,4 @@
-use log::{debug, info};
+use log::{debug, info, warn};
 use ruby_prism::Visit;
 use std::time::Instant;
 use tower_lsp::lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse};
@@ -27,32 +27,46 @@ pub async fn handle_document_symbols(
         }
     };
 
-    // Parse Ruby code using Prism
-    let parse_result = document.parse();
-    let parse_time = start_time.elapsed();
-    debug!("[PERF] Document symbols parse took {:?}", parse_time);
+    let mut lsp_symbols = {
+        // Prism parse results and AST nodes are not Send. Keep them in this
+        // scope so they are destroyed before the governed extension await.
+        let parse_result = document.parse();
+        let parse_time = start_time.elapsed();
+        debug!("[PERF] Document symbols parse took {:?}", parse_time);
 
-    let root_node = parse_result.node();
+        let root_node = parse_result.node();
+        let mut visitor = DocumentSymbolsVisitor::new(&document);
+        visitor.visit(&root_node);
+        let ruby_symbols = visitor.build_hierarchy();
 
-    // Extract symbols using visitor
-    let mut visitor = DocumentSymbolsVisitor::new(&document);
-    visitor.visit(&root_node);
-    let ruby_symbols = visitor.build_hierarchy();
+        let visit_time = start_time.elapsed() - parse_time;
+        debug!("[PERF] Document symbols visitor took {:?}", visit_time);
 
-    let visit_time = start_time.elapsed() - parse_time;
-    debug!("[PERF] Document symbols visitor took {:?}", visit_time);
-
-    // Convert to LSP DocumentSymbol format - all symbols are now top-level since children are nested
-    let lsp_symbols: Vec<DocumentSymbol> = ruby_symbols
-        .iter()
-        .map(|symbol| convert_to_document_symbol(symbol.clone()))
-        .collect();
-    let mut lsp_symbols = lsp_symbols;
-    lsp_symbols.extend(server.extension_registry.document_symbols(
-        uri.as_str(),
-        &document.content,
-        server.extension_project_context_for_document(&uri),
-    ));
+        ruby_symbols
+            .iter()
+            .map(|symbol| convert_to_document_symbol(symbol.clone()))
+            .collect::<Vec<DocumentSymbol>>()
+    };
+    let project_root = server
+        .analysis_workspace_for_uri(&uri)
+        .map(|workspace| workspace.root_path);
+    match server
+        .extension_registry
+        .document_symbols_governed(
+            server.indexing_resources.clone(),
+            project_root,
+            uri.as_str().to_string(),
+            document.content.clone(),
+            server.extension_project_context_for_document(&uri),
+        )
+        .await
+    {
+        Ok(extension_symbols) => lsp_symbols.extend(extension_symbols),
+        Err(error) => warn!(
+            "Extension document-symbol request failed for {}: {error:#}",
+            uri.path()
+        ),
+    }
 
     debug!("Found {} top-level symbols", lsp_symbols.len());
 
@@ -143,7 +157,12 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::lsp_types::{Position, Range, SymbolKind};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tower_lsp::lsp_types::{
+        DidOpenTextDocumentParams, Position, Range, SymbolKind, TextDocumentIdentifier,
+        TextDocumentItem, Url,
+    };
 
     fn create_test_range() -> Range {
         Range {
@@ -292,5 +311,121 @@ mod tests {
             doc_symbol.detail,
             Some("private • instance method".to_string())
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn request_time_extension_symbols_wait_for_admission_without_blocking_reactor() {
+        let uri =
+            Url::parse("file:///tmp/governed_document_symbols.rb").expect("test URI must parse");
+        let mut server = RubyLanguageServer::default();
+        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
+            crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                1,
+                1,
+                256 * 1024 * 1024,
+                1,
+            ),
+        );
+        server
+            .extension_registry
+            .configure_from_config(&crate::config::RubyFastLspConfig {
+                extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("extensions/rspec-ruby")
+                    .to_string_lossy()
+                    .into_owned()],
+                ..crate::config::RubyFastLspConfig::default()
+            });
+        crate::capabilities::indexing::handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class GovernedDocumentSymbol\nend\n".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let holder_release = Arc::new(tokio::sync::Notify::new());
+        let holder_release_task = holder_release.clone();
+        let holder_governor = server.indexing_resources.clone();
+        let holder = tokio::spawn(async move {
+            holder_governor
+                .run_async_with_resources(
+                    "document symbol contention holder",
+                    crate::indexing_resources::IndexingWorkSpec::new(
+                        None,
+                        crate::indexing_resources::IndexingResourcePriority::Background,
+                        1,
+                        256 * 1024 * 1024,
+                        1,
+                    ),
+                    None,
+                    async move {
+                        holder_release_task.notified().await;
+                    },
+                )
+                .await
+                .unwrap();
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while server.indexing_resources.snapshot().active_tasks != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("resource holder must be admitted before document-symbol request");
+
+        let request_server = server.clone();
+        let request_uri = uri.clone();
+        let request = tokio::spawn(async move {
+            handle_document_symbols(
+                &request_server,
+                DocumentSymbolParams {
+                    text_document: TextDocumentIdentifier { uri: request_uri },
+                    work_done_progress_params: Default::default(),
+                    partial_result_params: Default::default(),
+                },
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while server.indexing_resources.snapshot().queued_tasks != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("document-symbol request must queue behind the complete weighted claim");
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            tokio::time::sleep(Duration::from_millis(1)),
+        )
+        .await
+        .expect("queued document-symbol request must not block the current-thread Tokio reactor");
+        assert!(
+            !request.is_finished(),
+            "document-symbol request must not bypass weighted admission"
+        );
+
+        holder_release.notify_one();
+        holder.await.unwrap();
+        let response = request
+            .await
+            .unwrap()
+            .expect("open document must return symbols");
+        let DocumentSymbolResponse::Nested(symbols) = response else {
+            panic!(
+                "INVARIANT VIOLATED: document-symbol handler returned flat symbols. This is a bug because the handler always constructs a nested hierarchy. Fix: preserve nested document-symbol responses."
+            );
+        };
+        assert!(symbols
+            .iter()
+            .any(|symbol| symbol.name == "GovernedDocumentSymbol"));
+        let complete = server.indexing_resources.snapshot();
+        assert_eq!(complete.active_tasks, 0);
+        assert_eq!(complete.queued_tasks, 0);
+        assert_eq!(complete.completed_tasks, 3);
     }
 }

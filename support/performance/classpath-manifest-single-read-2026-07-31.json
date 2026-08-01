@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-31",
+  "dataset_fingerprint_sha256": "8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73",
+  "change": {
+    "summary": "Parse each JAR manifest from the exact bounded byte buffer already read to establish its checksum and file-stability identity.",
+    "removed_work": "One unconditional second full-file read and allocation per discovered JAR.",
+    "retained_invariants": [
+      "Metadata is checked before and after the checksum read.",
+      "Length and modification time must remain stable.",
+      "The exact same bytes establish SHA-256 identity and manifest expansion.",
+      "Manifest entry count, traversal, cycle, and precedence bounds are unchanged.",
+      "The byte buffer is dropped after the artifact is registered and is not a retained cache."
+    ]
+  },
+  "fresh_process_warm_cache": {
+    "profiler_executable_sha256": "255f53731aa819bbabd213d45333c1d9e2fd0a45e7bbe68895c400273910a801",
+    "active_classpath_discovery_ms": 1164,
+    "active_java_catalog_ms": 472,
+    "project_definition_first_success_ms": 2504,
+    "bson_definition_first_success_ms": 7511,
+    "active_project_semantic_complete_ms": 18154,
+    "all_projects_semantic_complete_ms": 37424,
+    "internal_peak_rss_bytes": 1892827136,
+    "assessment": "Classpath discovery remained approximately 1.16 seconds, so this result does not establish a latency improvement. Active navigation happened earlier while sibling completion happened later because scheduler/resource ordering differed from the adjacent run; neither change is attributed to the removed read."
+  },
+  "validation": {
+    "classpath_tests": 10,
+    "result": "pass"
+  },
+  "decision": {
+    "single_read_manifest_expansion": "accepted_as_redundant_io_removal",
+    "performance_claim": "neutral",
+    "performance_goal_complete": false
+  }
+}

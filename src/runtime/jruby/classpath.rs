@@ -1,10 +1,16 @@
+use crate::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightSnapshot};
 use globset::Glob;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, File, Metadata};
 use std::io::{Cursor, Read};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
+use std::time::SystemTime;
 use walkdir::WalkDir;
+
+const DEFAULT_CLASSPATH_FILE_CACHE_ENTRIES: usize = 4_096;
+const DEFAULT_CLASSPATH_FILE_CACHE_WEIGHT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ArtifactOrigin {
@@ -18,7 +24,7 @@ pub enum ArtifactOrigin {
     Explicit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArtifactKind {
     Jar,
     Jmod,
@@ -31,6 +37,7 @@ pub struct ClasspathArtifact {
     pub kind: ArtifactKind,
     pub fingerprint_sha256: String,
     pub byte_length: u64,
+    pub(crate) file_identity: SourceFileIdentity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +54,114 @@ pub struct SourceRoot {
     pub path: PathBuf,
     pub origin: SourceOrigin,
     pub fingerprint_sha256: Option<String>,
+    pub(crate) file_identity: Option<SourceFileIdentity>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct SourceFileIdentity {
+    pub byte_length: u64,
+    pub modified: SystemTime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ClasspathFileProductKind {
+    Fingerprint,
+    JarManifest { max_archive_entries: usize },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ClasspathFileProductKey {
+    canonical_path: PathBuf,
+    identity: SourceFileIdentity,
+    kind: ClasspathFileProductKind,
+}
+
+#[derive(Debug)]
+struct ClasspathFileProduct {
+    fingerprint_sha256: String,
+    manifest_class_path_entries: Vec<String>,
+}
+
+impl ClasspathFileProduct {
+    fn estimated_weight_bytes(&self) -> u64 {
+        // Include a fixed allowance for the cache key, hash-map entry, Arc,
+        // String/Vec headers, and typical canonical path. Entry count is an
+        // independent hard bound for paths longer than this allowance.
+        self.manifest_class_path_entries
+            .iter()
+            .try_fold(512u64, |total, entry| {
+                total.checked_add(u64::try_from(entry.len()).expect(
+                    "INVARIANT VIOLATED: a manifest entry length does not fit u64. This is a bug because manifest input is bounded to one MiB. Fix: retain bounded manifest parsing before caching its logical entries.",
+                ))
+            })
+            .and_then(|total| {
+                total.checked_add(u64::try_from(self.fingerprint_sha256.len()).expect(
+                    "INVARIANT VIOLATED: a SHA-256 string length does not fit u64. This is a bug because its encoded length is fixed at 64 bytes. Fix: keep fingerprints as bounded SHA-256 hex strings.",
+                ))
+            })
+            .expect(
+                "INVARIANT VIOLATED: retained classpath descriptor weight overflowed u64. This is a bug because manifest payloads and cache entry counts are bounded. Fix: inspect descriptor weight accounting.",
+            )
+    }
+}
+
+/// Process-owned reuse for immutable classpath file descriptors. This never
+/// retains raw JAR/JMOD/source bytes and never owns project classpath order or
+/// semantic facts; each isolated project composes the returned descriptor into
+/// its own `ProjectClasspath`.
+#[derive(Clone)]
+pub struct ClasspathFileProductCache {
+    inner: BlockingBoundedSingleFlightCache<
+        ClasspathFileProductKey,
+        ClasspathFileProduct,
+        ClasspathError,
+    >,
+}
+
+impl Default for ClasspathFileProductCache {
+    fn default() -> Self {
+        Self::new(
+            DEFAULT_CLASSPATH_FILE_CACHE_ENTRIES,
+            DEFAULT_CLASSPATH_FILE_CACHE_WEIGHT_BYTES,
+        )
+    }
+}
+
+impl ClasspathFileProductCache {
+    pub fn new(max_entries: usize, max_weight_bytes: u64) -> Self {
+        Self {
+            inner: BlockingBoundedSingleFlightCache::new(
+                max_entries,
+                max_weight_bytes,
+                ClasspathFileProduct::estimated_weight_bytes,
+            ),
+        }
+    }
+
+    pub fn snapshot(&self) -> SingleFlightSnapshot {
+        self.inner.snapshot()
+    }
+
+    pub fn retained_weight_bytes(&self) -> u64 {
+        self.inner.retained_weight()
+    }
+
+    fn get_or_read(
+        &self,
+        path: &Path,
+        identity: SourceFileIdentity,
+        kind: ClasspathFileProductKind,
+        max_file_bytes: u64,
+    ) -> Result<Arc<ClasspathFileProduct>, ClasspathError> {
+        let key = ClasspathFileProductKey {
+            canonical_path: path.to_path_buf(),
+            identity,
+            kind,
+        };
+        self.inner.get_or_try_init(key, || {
+            read_classpath_file_product(path, identity, kind, max_file_bytes)
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +230,22 @@ pub fn discover_project_classpath(
     inputs: &ClasspathInputs,
     limits: ClasspathLimits,
 ) -> Result<ProjectClasspath, ClasspathError> {
+    discover_project_classpath_inner(inputs, limits, None)
+}
+
+pub fn discover_project_classpath_with_cache(
+    inputs: &ClasspathInputs,
+    limits: ClasspathLimits,
+    file_product_cache: &ClasspathFileProductCache,
+) -> Result<ProjectClasspath, ClasspathError> {
+    discover_project_classpath_inner(inputs, limits, Some(file_product_cache.clone()))
+}
+
+fn discover_project_classpath_inner(
+    inputs: &ClasspathInputs,
+    limits: ClasspathLimits,
+    file_product_cache: Option<ClasspathFileProductCache>,
+) -> Result<ProjectClasspath, ClasspathError> {
     let project_root = canonical_directory(&inputs.project_root)
         .map_err(|_| ClasspathError::MissingProjectRoot(inputs.project_root.clone()))?;
     let jruby_executable = canonical_file(&inputs.jruby_executable)
@@ -126,7 +257,7 @@ pub fn discover_project_classpath(
         .and_then(Path::parent)
         .expect("INVARIANT VIOLATED: canonical JRuby executable must have bin and home parents");
 
-    let mut builder = ClasspathBuilder::new(project_root.clone(), limits);
+    let mut builder = ClasspathBuilder::new(project_root.clone(), limits, file_product_cache);
     builder.add_known_jruby_runtime(jruby_home)?;
     builder.add_jdk_runtime(&java_home)?;
     for root in &inputs.java_gem_roots {
@@ -144,6 +275,7 @@ pub fn discover_project_classpath(
 struct ClasspathBuilder {
     project_root: PathBuf,
     limits: ClasspathLimits,
+    file_product_cache: Option<ClasspathFileProductCache>,
     artifacts: BTreeMap<PathBuf, ClasspathArtifact>,
     sources: BTreeMap<PathBuf, SourceRoot>,
     unresolved: Vec<UnresolvedCoordinate>,
@@ -151,10 +283,15 @@ struct ClasspathBuilder {
 }
 
 impl ClasspathBuilder {
-    fn new(project_root: PathBuf, limits: ClasspathLimits) -> Self {
+    fn new(
+        project_root: PathBuf,
+        limits: ClasspathLimits,
+        file_product_cache: Option<ClasspathFileProductCache>,
+    ) -> Self {
         Self {
             project_root,
             limits,
+            file_product_cache,
             artifacts: BTreeMap::new(),
             sources: BTreeMap::new(),
             unresolved: Vec::new(),
@@ -387,15 +524,23 @@ impl ClasspathBuilder {
         if self.artifacts.len() >= self.limits.max_artifacts {
             return Err(ClasspathError::LimitExceeded("classpath artifacts"));
         }
-        let (byte_length, fingerprint_sha256) = self.fingerprint_file(&path)?;
+        let file_identity = classpath_file_identity(&path)?;
+        let product_kind = match kind {
+            ArtifactKind::Jar => ClasspathFileProductKind::JarManifest {
+                max_archive_entries: self.limits.max_walk_entries,
+            },
+            ArtifactKind::Jmod => ClasspathFileProductKind::Fingerprint,
+        };
+        let product = self.file_product(&path, file_identity, product_kind)?;
         self.artifacts.insert(
             path.clone(),
             ClasspathArtifact {
                 path: path.clone(),
                 origin,
                 kind,
-                fingerprint_sha256,
-                byte_length,
+                fingerprint_sha256: product.fingerprint_sha256.clone(),
+                byte_length: file_identity.byte_length,
+                file_identity,
             },
         );
         if kind == ArtifactKind::Jar {
@@ -403,11 +548,7 @@ impl ClasspathBuilder {
             if source_archive.is_file() {
                 self.add_source(&source_archive, SourceOrigin::Attached)?;
             }
-            for entry in manifest_class_path_entries(
-                &path,
-                self.limits.max_file_bytes,
-                self.limits.max_walk_entries,
-            )? {
+            for entry in &product.manifest_class_path_entries {
                 let relative = validate_manifest_class_path_entry(&path, &entry)?;
                 let parent = path.parent().expect(
                     "INVARIANT VIOLATED: canonical JAR path has no parent. \
@@ -430,7 +571,7 @@ impl ClasspathBuilder {
                 if !canonical.starts_with(parent) {
                     return Err(ClasspathError::InvalidManifestEntry {
                         artifact: path.clone(),
-                        entry,
+                        entry: entry.clone(),
                     });
                 }
                 self.add_artifact(&canonical, ArtifactOrigin::ManifestClassPath)?;
@@ -450,10 +591,11 @@ impl ClasspathBuilder {
         if self.sources.len() >= self.limits.max_sources {
             return Err(ClasspathError::LimitExceeded("classpath sources"));
         }
-        let fingerprint_sha256 = if path.is_file() {
-            Some(self.fingerprint_file(&path)?.1)
+        let (fingerprint_sha256, file_identity) = if path.is_file() {
+            let (_, fingerprint, identity) = self.fingerprint_file(&path)?;
+            (Some(fingerprint), Some(identity))
         } else if path.is_dir() {
-            None
+            (None, None)
         } else {
             return Err(ClasspathError::Io {
                 path,
@@ -466,32 +608,60 @@ impl ClasspathBuilder {
                 path,
                 origin,
                 fingerprint_sha256,
+                file_identity,
             },
         );
         Ok(())
     }
 
-    fn fingerprint_file(&mut self, path: &Path) -> Result<(u64, String), ClasspathError> {
-        let metadata = fs::metadata(path).map_err(|error| ClasspathError::Io {
-            path: path.to_path_buf(),
-            message: error.to_string(),
-        })?;
-        let length = metadata.len();
-        if length > self.limits.max_file_bytes {
+    fn fingerprint_file(
+        &mut self,
+        path: &Path,
+    ) -> Result<(u64, String, SourceFileIdentity), ClasspathError> {
+        let identity = classpath_file_identity(path)?;
+        let product = self.file_product(path, identity, ClasspathFileProductKind::Fingerprint)?;
+        Ok((
+            identity.byte_length,
+            product.fingerprint_sha256.clone(),
+            identity,
+        ))
+    }
+
+    fn file_product(
+        &mut self,
+        path: &Path,
+        identity: SourceFileIdentity,
+        kind: ClasspathFileProductKind,
+    ) -> Result<Arc<ClasspathFileProduct>, ClasspathError> {
+        if identity.byte_length > self.limits.max_file_bytes {
             return Err(ClasspathError::LimitExceeded("classpath artifact bytes"));
+        }
+        let product = match &self.file_product_cache {
+            Some(cache) => cache.get_or_read(path, identity, kind, self.limits.max_file_bytes)?,
+            None => Arc::new(read_classpath_file_product(
+                path,
+                identity,
+                kind,
+                self.limits.max_file_bytes,
+            )?),
+        };
+        let after = classpath_file_identity(path)?;
+        if after != identity {
+            return Err(ClasspathError::Io {
+                path: path.to_path_buf(),
+                message:
+                    "classpath file changed while its cached checksum identity was being consumed"
+                        .to_string(),
+            });
         }
         self.total_bytes = self
             .total_bytes
-            .checked_add(length)
+            .checked_add(identity.byte_length)
             .ok_or(ClasspathError::LimitExceeded("total classpath bytes"))?;
         if self.total_bytes > self.limits.max_total_bytes {
             return Err(ClasspathError::LimitExceeded("total classpath bytes"));
         }
-        let bytes = fs::read(path).map_err(|error| ClasspathError::Io {
-            path: path.to_path_buf(),
-            message: error.to_string(),
-        })?;
-        Ok((length, format!("{:x}", Sha256::digest(bytes))))
+        Ok(product)
     }
 
     fn finish(mut self) -> Result<ProjectClasspath, ClasspathError> {
@@ -534,6 +704,113 @@ impl ClasspathBuilder {
             unresolved: self.unresolved,
             fingerprint_sha256: format!("{:x}", fingerprint.finalize()),
         })
+    }
+}
+
+fn classpath_file_identity(path: &Path) -> Result<SourceFileIdentity, ClasspathError> {
+    let metadata = fs::metadata(path).map_err(|error| ClasspathError::Io {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    })?;
+    classpath_file_identity_from_metadata(path, &metadata)
+}
+
+fn classpath_file_identity_from_metadata(
+    path: &Path,
+    metadata: &Metadata,
+) -> Result<SourceFileIdentity, ClasspathError> {
+    if !metadata.is_file() {
+        return Err(ClasspathError::Io {
+            path: path.to_path_buf(),
+            message: "classpath product input is not a regular file".to_string(),
+        });
+    }
+    let modified = metadata.modified().map_err(|error| ClasspathError::Io {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    })?;
+    Ok(SourceFileIdentity {
+        byte_length: metadata.len(),
+        modified,
+    })
+}
+
+fn read_classpath_file_product(
+    path: &Path,
+    expected_identity: SourceFileIdentity,
+    kind: ClasspathFileProductKind,
+    max_file_bytes: u64,
+) -> Result<ClasspathFileProduct, ClasspathError> {
+    if expected_identity.byte_length > max_file_bytes {
+        return Err(ClasspathError::LimitExceeded("classpath artifact bytes"));
+    }
+    let mut file = File::open(path).map_err(|error| ClasspathError::Io {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    })?;
+    let opened_identity = file
+        .metadata()
+        .map_err(|error| ClasspathError::Io {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })
+        .and_then(|metadata| classpath_file_identity_from_metadata(path, &metadata))?;
+    if opened_identity != expected_identity {
+        return Err(classpath_file_changed(path));
+    }
+    let read_limit = max_file_bytes
+        .checked_add(1)
+        .ok_or(ClasspathError::LimitExceeded("classpath artifact bytes"))?;
+    let capacity = usize::try_from(expected_identity.byte_length)
+        .map_err(|_| ClasspathError::LimitExceeded("classpath artifact bytes"))?;
+    let mut bytes = Vec::with_capacity(capacity);
+    (&mut file)
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|error| ClasspathError::Io {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?;
+    if u64::try_from(bytes.len()).expect(
+        "INVARIANT VIOLATED: an in-memory classpath buffer length does not fit u64. This is a bug because the read is bounded far below u64::MAX. Fix: keep classpath read bounds below the addressable process size.",
+    ) > max_file_bytes
+    {
+        return Err(ClasspathError::LimitExceeded("classpath artifact bytes"));
+    }
+    let handle_after_identity = file
+        .metadata()
+        .map_err(|error| ClasspathError::Io {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })
+        .and_then(|metadata| classpath_file_identity_from_metadata(path, &metadata))?;
+    let path_after_identity = classpath_file_identity(path)?;
+    if u64::try_from(bytes.len()).expect(
+        "INVARIANT VIOLATED: an in-memory classpath buffer length does not fit u64. This is a bug because the read is bounded far below u64::MAX. Fix: keep classpath read bounds below the addressable process size.",
+    ) != expected_identity.byte_length
+        || handle_after_identity != expected_identity
+        || path_after_identity != expected_identity
+    {
+        return Err(classpath_file_changed(path));
+    }
+
+    let manifest_class_path_entries = match kind {
+        ClasspathFileProductKind::Fingerprint => Vec::new(),
+        ClasspathFileProductKind::JarManifest {
+            max_archive_entries,
+        } => manifest_class_path_entries(path, &bytes, max_archive_entries)?,
+    };
+    Ok(ClasspathFileProduct {
+        fingerprint_sha256: format!("{:x}", Sha256::digest(&bytes)),
+        manifest_class_path_entries,
+    })
+}
+
+fn classpath_file_changed(path: &Path) -> ClasspathError {
+    ClasspathError::Io {
+        path: path.to_path_buf(),
+        message: "classpath file changed while its checksum identity was being established"
+            .to_string(),
     }
 }
 
@@ -789,16 +1066,9 @@ fn read_text(path: &Path, max_bytes: u64) -> Result<String, ClasspathError> {
 
 fn manifest_class_path_entries(
     path: &Path,
-    max_artifact_bytes: u64,
+    bytes: &[u8],
     max_entries: usize,
 ) -> Result<Vec<String>, ClasspathError> {
-    let bytes = fs::read(path).map_err(|error| ClasspathError::Io {
-        path: path.to_path_buf(),
-        message: error.to_string(),
-    })?;
-    if bytes.len() as u64 > max_artifact_bytes {
-        return Err(ClasspathError::LimitExceeded("classpath artifact bytes"));
-    }
     let Ok(mut archive) = zip::ZipArchive::new(Cursor::new(bytes)) else {
         // Catalog parsing remains the authority for rejecting malformed JARs.
         // Classpath discovery only expands a manifest when a bounded archive is
@@ -982,6 +1252,174 @@ mod tests {
             additional_classpath: vec!["vendor/jars/*.jar".to_string()],
             additional_sources: vec!["java-src".to_string()],
         }
+    }
+
+    fn sibling_project_inputs(shared: &ClasspathInputs, root: &Path) -> ClasspathInputs {
+        let project = root.join("project");
+        fs::create_dir_all(&project).expect("sibling project fixture root must be created");
+        write(
+            &project.join("Jars.lock"),
+            b"com.example:demo:jar:1.2:runtime:\ncom.missing:absent:jar:9.0:runtime:\n",
+        );
+        write(
+            &project.join("vendor/jars/explicit.jar"),
+            b"sibling explicit",
+        );
+        fs::create_dir_all(project.join("java-src"))
+            .expect("sibling explicit source fixture must be created");
+        ClasspathInputs {
+            project_root: project,
+            jruby_executable: shared.jruby_executable.clone(),
+            java_home: shared.java_home.clone(),
+            maven_repository: shared.maven_repository.clone(),
+            java_gem_roots: shared.java_gem_roots.clone(),
+            additional_classpath: shared.additional_classpath.clone(),
+            additional_sources: shared.additional_sources.clone(),
+        }
+    }
+
+    #[test]
+    fn reuses_exact_file_products_without_merging_project_classpaths() {
+        let fixture = tempfile::tempdir().expect("classpath fixture root must be created");
+        let left_inputs = fixture_inputs(&fixture.path().join("shared"));
+        let right_inputs = sibling_project_inputs(&left_inputs, &fixture.path().join("right"));
+        let cache = ClasspathFileProductCache::new(128, 1024 * 1024);
+
+        let left =
+            discover_project_classpath_with_cache(&left_inputs, ClasspathLimits::default(), &cache)
+                .expect("left cached classpath must be discovered");
+        let after_left = cache.snapshot();
+        assert!(after_left.lookups > 0);
+        assert_eq!(after_left.producers, after_left.lookups);
+        assert_eq!(after_left.hits, 0);
+        assert_eq!(after_left.joined_flights, 0);
+
+        let right = discover_project_classpath_with_cache(
+            &right_inputs,
+            ClasspathLimits::default(),
+            &cache,
+        )
+        .expect("right cached classpath must be discovered");
+        let after_right = cache.snapshot();
+
+        assert_ne!(left.project_root, right.project_root);
+        assert_ne!(left.fingerprint_sha256, right.fingerprint_sha256);
+        assert!(
+            after_right.hits >= 5,
+            "expected shared runtime/JDK/Maven reuse"
+        );
+        assert!(after_right.producers < after_right.lookups);
+        assert!(left
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.path.starts_with(&left.project_root)));
+        assert!(left
+            .artifacts
+            .iter()
+            .all(|artifact| !artifact.path.starts_with(&right.project_root)));
+        assert!(right
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.path.starts_with(&right.project_root)));
+        assert!(right
+            .artifacts
+            .iter()
+            .all(|artifact| !artifact.path.starts_with(&left.project_root)));
+    }
+
+    #[test]
+    fn concurrent_identical_discovery_has_one_producer_per_file_identity() {
+        let fixture = tempfile::tempdir().expect("classpath fixture root must be created");
+        let inputs = fixture_inputs(fixture.path());
+        let cache = ClasspathFileProductCache::new(128, 1024 * 1024);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let inputs = inputs.clone();
+            let cache = cache.clone();
+            let barrier = barrier.clone();
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                discover_project_classpath_with_cache(&inputs, ClasspathLimits::default(), &cache)
+                    .expect("concurrent cached classpath must be discovered")
+            }));
+        }
+        barrier.wait();
+        let left = workers
+            .remove(0)
+            .join()
+            .expect("left worker must not panic");
+        let right = workers
+            .remove(0)
+            .join()
+            .expect("right worker must not panic");
+        let snapshot = cache.snapshot();
+
+        assert_eq!(left, right);
+        assert!(snapshot.producers > 0);
+        assert_eq!(snapshot.lookups, snapshot.producers * 2);
+        assert_eq!(snapshot.hits + snapshot.joined_flights, snapshot.producers);
+    }
+
+    #[test]
+    fn changed_files_miss_the_cache_and_hit_paths_still_enforce_consumer_limits() {
+        let fixture = tempfile::tempdir().expect("classpath fixture root must be created");
+        let inputs = fixture_inputs(fixture.path());
+        let cache = ClasspathFileProductCache::new(128, 1024 * 1024);
+        let first =
+            discover_project_classpath_with_cache(&inputs, ClasspathLimits::default(), &cache)
+                .expect("initial cached classpath must be discovered");
+        let after_first = cache.snapshot();
+        let explicit_path = inputs.project_root.join("vendor/jars/explicit.jar");
+        let first_fingerprint = first
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == explicit_path.canonicalize().unwrap())
+            .expect("initial explicit artifact must exist")
+            .fingerprint_sha256
+            .clone();
+
+        write(
+            &explicit_path,
+            b"changed explicit artifact with a new length",
+        );
+        let second =
+            discover_project_classpath_with_cache(&inputs, ClasspathLimits::default(), &cache)
+                .expect("changed cached classpath must be rediscovered");
+        let after_second = cache.snapshot();
+        let second_fingerprint = second
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == explicit_path.canonicalize().unwrap())
+            .expect("changed explicit artifact must exist")
+            .fingerprint_sha256
+            .clone();
+
+        assert_ne!(first_fingerprint, second_fingerprint);
+        assert_eq!(after_second.producers, after_first.producers + 1);
+        assert!(after_second.hits > after_first.hits);
+
+        let mut restrictive = ClasspathLimits::default();
+        restrictive.max_total_bytes = 1;
+        assert_eq!(
+            discover_project_classpath_with_cache(&inputs, restrictive, &cache),
+            Err(ClasspathError::LimitExceeded("total classpath bytes"))
+        );
+    }
+
+    #[test]
+    fn file_product_retention_obeys_entry_and_weight_bounds() {
+        let fixture = tempfile::tempdir().expect("classpath fixture root must be created");
+        let inputs = fixture_inputs(fixture.path());
+        let cache = ClasspathFileProductCache::new(2, 1_200);
+
+        discover_project_classpath_with_cache(&inputs, ClasspathLimits::default(), &cache)
+            .expect("bounded cached classpath must be discovered");
+        let snapshot = cache.snapshot();
+
+        assert!(snapshot.entries <= 2);
+        assert!(cache.retained_weight_bytes() <= 1_200);
+        assert!(snapshot.evictions > 0);
     }
 
     #[test]

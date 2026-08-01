@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "configured-jruby-gem-single-flight-retention-decision",
+  "recorded_at": "2026-07-27",
+  "workspace": "/Users/naveenraj/goshposh",
+  "projects": [
+    "server",
+    "server-devops-5441"
+  ],
+  "runtime": {
+    "implementation": "jruby",
+    "engine_version": "9.2.21.0",
+    "compatibility_version": "2.5"
+  },
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "scheduler_concurrency": 1,
+  "retained_completed_products": {
+    "profiler_executable_sha256": "dd3aad09dd762cdf004143285dba7b03b52569b4b08840d71fe3737520bfc4ab",
+    "tracked_diff_sha256": "179f2fb5355b75ea4a7a3ee35c21ac8e6feebd2a2ece8bf7f79c600b7ada69bd",
+    "dataset_fingerprint_sha256": "42e04cd244c2c5369bd4f97ed9666e0b99091cd42c2be151faf9df7d7d99d687",
+    "wall_ms": 154528.363417,
+    "external_wall_ms": 159120,
+    "phase_sum_ms": {
+      "core": 55499.885375,
+      "project": 40022.229959,
+      "dependencies": 38916.000375,
+      "runtime": 10815.747667
+    },
+    "process": {
+      "profiler_peak_rss_bytes": 1867776000,
+      "time_maximum_resident_set_size_bytes": 2094153728,
+      "time_peak_memory_footprint_bytes": 2269628792,
+      "user_cpu_ms": 456681.101,
+      "system_cpu_ms": 11137.363
+    },
+    "gem_products": {
+      "lookups": 601,
+      "producers": 508,
+      "completed_hits": 93,
+      "joined_flights": 0,
+      "evictions": 232,
+      "retained_entries": 276,
+      "retained_weight_bytes": 134102429,
+      "second_project_preflight_requested": 301,
+      "second_project_preflight_completed": 93,
+      "second_project_preflight_completed_weight_bytes": 3317982
+    },
+    "raw_local_jsonl": "/tmp/ruby-fast-lsp-two-server-cache-preflight-sequential-jruby-20260727.jsonl",
+    "raw_local_log": "/tmp/ruby-fast-lsp-two-server-cache-preflight-sequential-jruby-20260727.log"
+  },
+  "ephemeral_completed_products": {
+    "profiler_executable_sha256": "5bbe2e0fdeb89035a2c3a27ad6f82c919f4c2cc5b5bacbf5ea1110bbd691b95c",
+    "tracked_diff_sha256": "5800f0008cfb86396c9b8000b6e4ca6b248d4a5ccc17ae79df74d2c9cf1e9981",
+    "dataset_fingerprint_sha256": "d16961d3caef52bc2014bcefe22f2bc0c5bfbaa5e834a2a76ad1cd6dd8418d3e",
+    "wall_ms": 155474.56475,
+    "external_wall_ms": 159990,
+    "phase_sum_ms": {
+      "core": 54421.172125,
+      "project": 42451.609584,
+      "dependencies": 38632.8195,
+      "runtime": 10804.793166
+    },
+    "process": {
+      "profiler_peak_rss_bytes": 2099576832,
+      "time_maximum_resident_set_size_bytes": 2099576832,
+      "time_peak_memory_footprint_bytes": 1800800464,
+      "user_cpu_ms": 461730.555,
+      "system_cpu_ms": 10923.026
+    },
+    "gem_products": {
+      "lookups": 601,
+      "producers": 601,
+      "completed_hits": 0,
+      "joined_flights": 0,
+      "evictions": 601,
+      "retained_entries": 0,
+      "retained_weight_bytes": 0
+    },
+    "raw_local_jsonl": "/tmp/ruby-fast-lsp-two-server-ephemeral-flights-sequential-jruby-20260727.jsonl",
+    "raw_local_log": "/tmp/ruby-fast-lsp-two-server-ephemeral-flights-sequential-jruby-20260727.log"
+  },
+  "semantic_probes": {
+    "bson_object_id": {
+      "count": 1,
+      "consumer_correct_locked_java_gem": true
+    },
+    "java_time_unit": {
+      "count": 1,
+      "consumer_correct_exact_source": true
+    }
+  },
+  "decision": {
+    "completed_process_retention": "rejected",
+    "concurrent_single_flight": "accepted",
+    "reason": "The second project could reuse only 93 exact products totaling 3,317,982 bytes after retaining 112,127,594 bytes from the first project. Removing completed retention changed total dependency time from 38.916 seconds to 38.633 seconds and external wall time by less than one second while retaining zero product bytes. Completed sequential and cross-process reuse belongs in a checksum-verified demand-loaded persistent cache rather than an always-resident template cache."
+  },
+  "limitations": [
+    "macOS RSS and peak-footprint counters varied materially between runs; both raw counters are retained and the decision does not rely on one peak measurement.",
+    "The aggregate dataset fingerprint changed even though both per-project source fingerprints and engine file/source totals were identical; semantic probe equality and exact project evidence were checked separately.",
+    "This decision accepts the in-process concurrent single-flight lifecycle only. Persistent serialization, corruption recovery, disk bounds, and fresh-process reuse remain unimplemented."
+  ]
+}

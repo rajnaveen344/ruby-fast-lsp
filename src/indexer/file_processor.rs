@@ -16,9 +16,12 @@
 
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::{
-    analysis_ruby_type_from_extension, ExtensionRegistryHandle, ProjectContextSeed,
+    analysis_ruby_type_from_extension, ExtensionApplicabilitySnapshot, ExtensionRegistryHandle,
+    ProjectContextSeed,
 };
-use crate::runtime::jruby::imports::JrubyImportProvider;
+use crate::runtime::jruby::imports::{
+    JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
+};
 use crate::runtime::jruby::source_navigation::java_source_navigation_facts_with_declaration;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
@@ -31,7 +34,8 @@ use ruby_analysis::core::{
     UnresolvedGraphEdgeFact,
 };
 use ruby_analysis::engine::{
-    AnalysisEngine, AnalysisQuery, FileFacts, ResolveMode, SemanticChange,
+    AnalysisEngine, AnalysisQuery, FileFacts, ProjectNeutralFileFactsTemplate, ResolveMode,
+    SemanticChange, SourceFileInput,
 };
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_analysis::indexer::RubyDocument;
@@ -42,10 +46,10 @@ use ruby_fast_lsp_extension_api::{
 };
 use ruby_prism::{CallNode, Visit};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Instant;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
 /// Result of processing a file
@@ -58,11 +62,45 @@ pub struct ProcessResult {
     pub semantic_change: SemanticChange,
 }
 
+struct CollectedFileFactsOutput {
+    project_neutral_template: Option<ProjectNeutralFileFactsTemplate>,
+    retained_file_facts: Option<FileFacts>,
+    jruby_navigation_plan: StaticJavaNavigationPlan,
+    jruby_source_hint: StaticJavaSourceHint,
+    timing: ProjectFileCollectionTiming,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ProjectFileCollectionTiming {
+    pub(crate) total: Duration,
+    pub(crate) registration: Duration,
+    pub(crate) parse: Duration,
+    pub(crate) jruby_plan: Duration,
+    pub(crate) semantic_seed: Duration,
+    pub(crate) visitor: Duration,
+    pub(crate) assembly: Duration,
+    pub(crate) replacement: Duration,
+}
+
+pub(crate) struct CollectedProjectFileFacts {
+    pub file_facts: FileFacts,
+    pub jruby_navigation_plan: StaticJavaNavigationPlan,
+    pub jruby_source_hint: StaticJavaSourceHint,
+    pub timing: ProjectFileCollectionTiming,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileResolution {
     Full,
     CurrentFile,
     Deferred,
+}
+
+enum JrubyNavigationResolution {
+    Immediate,
+    Deferred {
+        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
+    },
 }
 
 /// Server-owned composition of built-in runtime semantics and public Wasm
@@ -72,7 +110,23 @@ enum FileResolution {
 #[derive(Debug)]
 struct ProjectFactCollectorHost {
     extension_registry: ExtensionRegistryHandle,
+    extension_applicability: OnceLock<ExtensionApplicabilitySnapshot>,
     jruby_import_provider: Option<Arc<JrubyImportProvider>>,
+    extensions_enabled: bool,
+}
+
+impl ProjectFactCollectorHost {
+    fn extension_applicability(
+        &self,
+        project: Option<&ProjectContext>,
+    ) -> &ExtensionApplicabilitySnapshot {
+        assert!(
+            self.extensions_enabled,
+            "INVARIANT VIOLATED: disabled extension traversal requested an applicability snapshot. This is a bug because non-project sources must not execute extension hooks. Fix: keep all snapshot access behind the extensions_enabled gate."
+        );
+        self.extension_applicability
+            .get_or_init(|| self.extension_registry.applicability_snapshot(project))
+    }
 }
 
 impl FactCollectorExtensionHost for ProjectFactCollectorHost {
@@ -80,12 +134,26 @@ impl FactCollectorExtensionHost for ProjectFactCollectorHost {
         if let Some(provider) = &self.jruby_import_provider {
             provider.process_call_node(visitor, node);
         }
-        self.extension_registry.process_call_node(visitor, node);
+        if self.extensions_enabled && self.extension_registry.tracks_call(node) {
+            self.extension_registry
+                .process_call_node_with_applicability(
+                    visitor,
+                    node,
+                    self.extension_applicability(visitor.extension_project_context.as_ref()),
+                );
+        }
     }
 
     fn should_track_enclosing_call(&self, visitor: &FactCollector, node: &CallNode<'_>) -> bool {
-        self.extension_registry
-            .should_track_enclosing_call(visitor, node)
+        self.extensions_enabled
+            && self.extension_registry.tracks_call(node)
+            && self
+                .extension_registry
+                .should_track_enclosing_call_with_applicability(
+                    visitor,
+                    node,
+                    self.extension_applicability(visitor.extension_project_context.as_ref()),
+                )
     }
 
     fn resolved_call_for_stack(
@@ -93,8 +161,16 @@ impl FactCollectorExtensionHost for ProjectFactCollectorHost {
         visitor: &FactCollector,
         node: &CallNode<'_>,
     ) -> ResolvedCall {
+        assert!(
+            self.extensions_enabled,
+            "INVARIANT VIOLATED: an extension call frame was resolved for a source kind that disables extensions. This is a bug because disabled extension hosts must reject frame tracking before payload construction. Fix: keep should_track_enclosing_call gated by extensions_enabled."
+        );
         self.extension_registry
-            .resolved_call_for_stack(visitor, node)
+            .resolved_call_for_stack_with_applicability(
+                visitor,
+                node,
+                self.extension_applicability(visitor.extension_project_context.as_ref()),
+            )
     }
 }
 
@@ -160,10 +236,16 @@ impl FileProcessor {
         self
     }
 
-    fn fact_collector_host(&self) -> Arc<dyn FactCollectorExtensionHost> {
+    pub(crate) fn jruby_import_provider(&self) -> Option<&Arc<JrubyImportProvider>> {
+        self.jruby_import_provider.as_ref()
+    }
+
+    fn fact_collector_host(&self, extensions_enabled: bool) -> Arc<dyn FactCollectorExtensionHost> {
         Arc::new(ProjectFactCollectorHost {
             extension_registry: self.extension_registry.clone(),
+            extension_applicability: OnceLock::new(),
             jruby_import_provider: self.jruby_import_provider.clone(),
+            extensions_enabled,
         })
     }
 
@@ -331,15 +413,30 @@ impl FileProcessor {
             &direct_facts_seed,
             false,
         );
-        let extension_project_context = server.extension_project_context_for_uri(uri, source_kind);
-        self.extension_registry
-            .ensure_semantic_seed_facts(&analysis_engine, extension_project_context.as_ref());
+        let extensions_enabled = matches!(source_kind, SourceKind::Project | SourceKind::Excluded);
+        let extension_project_context_snapshot = extensions_enabled
+            .then(|| server.extension_project_context_snapshot_for_uri(uri, source_kind))
+            .flatten();
+        let extension_project_context = extension_project_context_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.context.clone());
+        if extensions_enabled {
+            if let Some(snapshot) = extension_project_context_snapshot.as_ref() {
+                self.extension_registry
+                    .ensure_semantic_seed_facts_for_snapshot(&analysis_engine, snapshot);
+            } else {
+                self.extension_registry.ensure_semantic_seed_facts(
+                    &analysis_engine,
+                    extension_project_context.as_ref(),
+                );
+            }
+        }
         let direct_elapsed = direct_start.elapsed();
 
         let visitor_start = Instant::now();
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
-            self.fact_collector_host(),
+            self.fact_collector_host(extensions_enabled),
             analysis_engine.clone(),
         );
         visitor.extension_project_context = extension_project_context.clone();
@@ -445,17 +542,66 @@ impl FileProcessor {
         let Some(provider) = &self.jruby_import_provider else {
             return Ok(());
         };
-        let Some(cache_root) = provider.signature_cache_root() else {
-            return Ok(());
-        };
-        let class_names = provider
-            .static_navigation_class_names(content)
+        let plan = provider
+            .static_navigation_plan(content)
             .map_err(|message| {
                 anyhow!("failed to resolve static JRuby Java dependencies: {message}")
             })?;
-        if class_names.is_empty() {
+        self.materialize_jruby_navigation_plan(
+            plan,
+            analysis_engine,
+            JrubyNavigationResolution::Immediate,
+        )
+    }
+
+    pub(crate) fn materialize_jruby_navigation_plan_as_deferred_resolution(
+        &self,
+        plan: StaticJavaNavigationPlan,
+        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
+    ) -> Result<()> {
+        self.materialize_jruby_navigation_plan(
+            plan,
+            analysis_engine,
+            JrubyNavigationResolution::Deferred { known_namespaces },
+        )
+    }
+
+    fn materialize_jruby_navigation_plan(
+        &self,
+        plan: StaticJavaNavigationPlan,
+        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        resolution: JrubyNavigationResolution,
+    ) -> Result<()> {
+        if plan.signature_class_names.is_empty() {
             return Ok(());
         }
+        let provider = self.jruby_import_provider.as_ref().expect(
+            "INVARIANT VIOLATED: a JRuby navigation plan was materialized without an owning \
+             JRuby provider. This is a bug because plans are derived from one exact project \
+             classpath catalog. Fix: keep plan collection and materialization on the same \
+             project FileProcessor.",
+        );
+        let cache_root = provider.signature_cache_root().ok_or_else(|| {
+            anyhow!(
+                "JRuby provider for classpath {} has no isolated signature cache root",
+                provider.classpath_fingerprint()
+            )
+        })?;
+        let signature_class_names = plan
+            .signature_class_names
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let implementation_class_names = plan
+            .implementation_class_names
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let (deferred_signature_known_namespaces, file_resolution) = match resolution {
+            JrubyNavigationResolution::Immediate => (None, FileResolution::Full),
+            JrubyNavigationResolution::Deferred { known_namespaces } => {
+                (Some(known_namespaces), FileResolution::Deferred)
+            }
+        };
         std::fs::create_dir_all(cache_root).with_context(|| {
             format!(
                 "failed to create isolated JRuby signature cache {}",
@@ -463,14 +609,36 @@ impl FileProcessor {
             )
         })?;
 
-        for class_name in class_names {
+        let mut exact_sources = BTreeMap::<
+            PathBuf,
+            (
+                String,
+                Vec<(
+                    String,
+                    ruby_fast_lsp_jvm_metadata::JavaSourceClassLocation,
+                    bool,
+                )>,
+            ),
+        >::new();
+        let mut signature_generation_wall = Duration::default();
+        let mut signature_cache_io_wall = Duration::default();
+        let mut signature_index_wall = Duration::default();
+        let mut implementation_resolution_wall = Duration::default();
+        let mut generated_signatures = 0usize;
+        let mut indexed_signatures = 0usize;
+        for class_name in signature_class_names {
+            let signature_generation_started = Instant::now();
             let Some((internal_name, signature)) =
                 provider.generated_signature(&class_name).map_err(|error| {
                     anyhow!("failed to generate signature for Java class `{class_name}`: {error:?}")
                 })?
             else {
+                signature_generation_wall += signature_generation_started.elapsed();
                 continue;
             };
+            signature_generation_wall += signature_generation_started.elapsed();
+            generated_signatures += 1;
+            let signature_cache_io_started = Instant::now();
             let signature_path = cache_root.join(format!("{internal_name}.rb"));
             let signature_parent = signature_path.parent().expect(
                 "INVARIANT VIOLATED: generated JRuby signature path has no parent. \
@@ -492,6 +660,7 @@ impl FileProcessor {
                     )
                 })?;
             }
+            signature_cache_io_wall += signature_cache_io_started.elapsed();
             let signature_uri = Url::from_file_path(&signature_path).map_err(|_| {
                 anyhow!(
                     "generated JRuby signature is not a valid file URI: {}",
@@ -501,74 +670,140 @@ impl FileProcessor {
             let signature_already_indexed =
                 analysis_engine.read().file_id(&signature_path).is_some();
             if !signature_already_indexed {
-                self.collect_file_facts_as_with_resolution(
-                    &signature_uri,
-                    &signature,
-                    analysis_engine.clone(),
-                    SourceKind::Signature,
-                    false,
-                    None,
-                )?;
+                let signature_index_started = Instant::now();
+                match &deferred_signature_known_namespaces {
+                    Some(known_namespaces) => {
+                        self.collect_file_facts_as_deferred_resolution_with_known_namespaces_in_engine(
+                            &signature_uri,
+                            &signature,
+                            analysis_engine.clone(),
+                            SourceKind::Signature,
+                            known_namespaces.clone(),
+                        )?;
+                    }
+                    None => {
+                        self.collect_file_facts_as_with_resolution(
+                            &signature_uri,
+                            &signature,
+                            analysis_engine.clone(),
+                            SourceKind::Signature,
+                            true,
+                            None,
+                            false,
+                            true,
+                        )?;
+                    }
+                }
+                signature_index_wall += signature_index_started.elapsed();
+                indexed_signatures += 1;
             }
 
             if provider.has_registered_navigation_class(&internal_name) {
                 continue;
             }
+            if !implementation_class_names.contains(&internal_name) {
+                continue;
+            }
+            let implementation_resolution_started = Instant::now();
             let resolved_sources = match provider
                 .resolved_navigation_implementations(&internal_name)
             {
                 Ok(resolved) => resolved,
                 Err(error) => {
                     warn!(
-                        "Java implementation source unavailable for {} during interactive indexing: {:?}; using generated signature fallback",
+                        "Java implementation source unavailable for {} during JRuby navigation materialization: {:?}; using generated signature fallback",
                         internal_name, error
                     );
                     Vec::new()
                 }
             };
+            implementation_resolution_wall += implementation_resolution_started.elapsed();
             if resolved_sources.is_empty() {
                 continue;
             }
-            let declaration = provider.class_declaration(&internal_name).expect(
-                "INVARIANT VIOLATED: interactive Java implementation resolved for a class absent \
-                 from its owning catalog. This is a bug because resolution starts from that exact \
-                 catalog declaration. Fix: keep provider catalog and resolver transactionally paired.",
-            );
             for (index, resolved) in resolved_sources.into_iter().enumerate() {
+                let entry = exact_sources
+                    .entry(resolved.path)
+                    .or_insert_with(|| (resolved.content.clone(), Vec::new()));
+                assert_eq!(
+                    entry.0, resolved.content,
+                    "INVARIANT VIOLATED: one exact Java source path resolved to different content \
+                     during a single classpath pass. This is a bug because the classpath and source \
+                     fingerprints are immutable for the pass. Fix: retain one verified source identity \
+                     for every materialized path."
+                );
+                entry
+                    .1
+                    .push((internal_name.clone(), resolved.location, index == 0));
+            }
+        }
+
+        let exact_source_insertion_started = Instant::now();
+        let exact_source_files = exact_sources.len();
+        for (path, (content, mut classes)) in exact_sources {
+            classes.sort_by(|left, right| {
+                left.0
+                    .cmp(&right.0)
+                    .then_with(|| left.1.internal_name.cmp(&right.1.internal_name))
+            });
+            classes.dedup_by(|left, right| left.0 == right.0);
+            let (file_id, mut facts) = {
                 let mut engine = analysis_engine.write();
-                let file_id = engine.register_file(ruby_analysis::engine::SourceFileInput {
-                    path: resolved.path,
-                    content: resolved.content,
+                let file_id = engine.register_file(SourceFileInput {
+                    path,
+                    content,
                     kind: SourceKind::External,
                 });
-                provider.register_method_navigation_ranges(
-                    &internal_name,
-                    &resolved.location,
-                    file_id,
-                );
                 let query = AnalysisQuery::new(&engine);
-                let mut facts = FileFacts {
-                    symbols: query.symbol_facts_in_file(file_id),
-                    methods: query.method_facts_in_file(file_id),
-                    method_visibility_overrides: query.method_visibility_overrides_in_file(file_id),
-                    types: query.type_facts_in_file(file_id),
-                    graph_nodes: query.graph_nodes_in_file(file_id),
-                    graph_edges: query.graph_edges_in_file(file_id),
-                    diagnostics: query.diagnostic_facts_in_file(file_id),
-                    ..FileFacts::default()
-                };
+                (
+                    file_id,
+                    FileFacts {
+                        symbols: query.symbol_facts_in_file(file_id),
+                        methods: query.method_facts_in_file(file_id),
+                        method_visibility_overrides: query
+                            .method_visibility_overrides_in_file(file_id),
+                        types: query.type_facts_in_file(file_id),
+                        graph_nodes: query.graph_nodes_in_file(file_id),
+                        graph_edges: query.graph_edges_in_file(file_id),
+                        diagnostics: query.diagnostic_facts_in_file(file_id),
+                        ..FileFacts::default()
+                    },
+                )
+            };
+            for (internal_name, location, include_class_declaration) in classes {
+                let declaration = provider.class_declaration(&internal_name).expect(
+                    "INVARIANT VIOLATED: exact Java implementation resolved for a class absent \
+                     from its owning catalog. This is a bug because resolution starts from that exact \
+                     catalog declaration. Fix: keep provider catalog and resolver transactionally paired.",
+                );
+                provider.register_method_navigation_ranges(&internal_name, &location, file_id);
                 let new_facts = java_source_navigation_facts_with_declaration(
                     &declaration.class,
-                    &resolved.location,
+                    &location,
                     file_id,
-                    index == 0,
+                    include_class_declaration,
                 );
                 extend_unique(&mut facts.symbols, new_facts.symbols);
                 extend_unique(&mut facts.methods, new_facts.methods);
                 extend_unique(&mut facts.types, new_facts.types);
-                engine.replace_facts(file_id, facts, ResolveMode::Immediate);
             }
+            replace_file_analysis(analysis_engine, file_id, facts, file_resolution);
         }
+        info!(
+            "[PERF][JRuby navigation materialization] classpath={} generated_signatures={} \
+             indexed_signatures={} exact_source_files={} signature_generation={:?} \
+             signature_cache_io={:?} signature_index={:?} implementation_resolution={:?} \
+             exact_source_insertion={:?}",
+            provider.classpath_fingerprint(),
+            generated_signatures,
+            indexed_signatures,
+            exact_source_files,
+            signature_generation_wall,
+            signature_cache_io_wall,
+            signature_index_wall,
+            implementation_resolution_wall,
+            exact_source_insertion_started.elapsed()
+        );
         Ok(())
     }
 
@@ -600,7 +835,10 @@ impl FileProcessor {
             source_kind,
             true,
             None,
-        )
+            false,
+            true,
+        )?;
+        Ok(())
     }
 
     pub fn collect_file_facts_as_deferred_resolution(
@@ -618,7 +856,10 @@ impl FileProcessor {
             source_kind,
             false,
             None,
-        )
+            false,
+            true,
+        )?;
+        Ok(())
     }
 
     pub fn collect_file_facts_as_deferred_resolution_in_engine(
@@ -635,7 +876,10 @@ impl FileProcessor {
             source_kind,
             false,
             None,
-        )
+            false,
+            true,
+        )?;
+        Ok(())
     }
 
     pub fn collect_rbs_facts_as_deferred_resolution(
@@ -708,7 +952,7 @@ impl FileProcessor {
         content: &str,
         server: &RubyLanguageServer,
         source_kind: SourceKind,
-        known_namespaces: &HashSet<FullyQualifiedName>,
+        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<()> {
         self.collect_file_facts_as_with_resolution(
             uri,
@@ -717,7 +961,10 @@ impl FileProcessor {
             source_kind,
             false,
             Some(known_namespaces),
-        )
+            false,
+            true,
+        )?;
+        Ok(())
     }
 
     pub fn collect_file_facts_as_deferred_resolution_with_known_namespaces_in_engine(
@@ -726,7 +973,7 @@ impl FileProcessor {
         content: &str,
         analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
         source_kind: SourceKind,
-        known_namespaces: &HashSet<FullyQualifiedName>,
+        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<()> {
         self.collect_file_facts_as_with_resolution(
             uri,
@@ -735,7 +982,132 @@ impl FileProcessor {
             source_kind,
             false,
             Some(known_namespaces),
-        )
+            false,
+            true,
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution(
+        &self,
+        uri: &Url,
+        content: String,
+        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
+    ) -> Result<CollectedProjectFileFacts> {
+        let output = self.collect_file_facts_as_with_resolution_output_owned(
+            uri,
+            content,
+            analysis_engine,
+            SourceKind::Project,
+            false,
+            Some(known_namespaces),
+            false,
+            false,
+            true,
+            true,
+        )?;
+        Ok(CollectedProjectFileFacts {
+            file_facts: output.retained_file_facts.expect(
+                "INVARIANT VIOLATED: project batch collection did not retain its file-owned facts. This is a bug because deterministic batch insertion requires every worker to return facts without mutating the shared engine. Fix: keep retained_file_facts enabled for the project batch path.",
+            ),
+            jruby_navigation_plan: output.jruby_navigation_plan,
+            jruby_source_hint: output.jruby_source_hint,
+            timing: output.timing,
+        })
+    }
+
+    pub(crate) fn ensure_project_semantic_seed(
+        &self,
+        uri: &Url,
+        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+    ) {
+        let project_context_snapshot = self.extension_project_context_seed.as_ref().map(|seed| {
+            seed.read()
+                .context_snapshot(uri.to_string(), SourceKind::Project)
+        });
+        if let Some(snapshot) = project_context_snapshot.as_ref() {
+            self.extension_registry
+                .ensure_semantic_seed_facts_for_snapshot(analysis_engine, snapshot);
+        } else {
+            self.extension_registry
+                .ensure_semantic_seed_facts(analysis_engine, None);
+        }
+    }
+
+    pub(crate) fn replace_collected_project_file_facts_as_deferred_resolution(
+        &self,
+        path: &Path,
+        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        facts: FileFacts,
+    ) {
+        let file_id = analysis_engine.read().file_id(path).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: deterministic project fact replacement received an unregistered source {}. This is a bug because the bounded batch must be registered before semantic collection. Fix: preserve the pre-registration and ordered replacement lifecycle.",
+                path.display()
+            )
+        });
+        replace_file_analysis(analysis_engine, file_id, facts, FileResolution::Deferred);
+    }
+
+    pub fn collect_project_neutral_file_template_as_deferred_resolution_in_engine(
+        &self,
+        uri: &Url,
+        content: &str,
+        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        source_kind: SourceKind,
+        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
+    ) -> Result<ProjectNeutralFileFactsTemplate> {
+        assert!(
+            source_kind.is_external(),
+            "INVARIANT VIOLATED: a project-neutral dependency template was requested for a project-owned source kind. This is a bug because project facts may contain project-specific references, diagnostics, and extension execution contexts. Fix: request templates only for validated external dependency source kinds."
+        );
+        self.collect_file_facts_as_with_resolution(
+            uri,
+            content,
+            analysis_engine,
+            source_kind,
+            false,
+            Some(known_namespaces),
+            true,
+            true,
+        )?
+        .ok_or_else(|| {
+            anyhow!(
+                "project-neutral template capture unexpectedly produced no template for {}",
+                uri
+            )
+        })
+    }
+
+    pub fn collect_project_neutral_file_template_without_insertion(
+        &self,
+        uri: &Url,
+        content: &str,
+        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        source_kind: SourceKind,
+        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
+    ) -> Result<ProjectNeutralFileFactsTemplate> {
+        assert!(
+            source_kind.is_external(),
+            "INVARIANT VIOLATED: a project-neutral dependency template was requested for a project-owned source kind. This is a bug because project facts may contain project-specific references, diagnostics, and extension execution contexts. Fix: request templates only for validated external dependency source kinds."
+        );
+        self.collect_file_facts_as_with_resolution(
+            uri,
+            content,
+            analysis_engine,
+            source_kind,
+            false,
+            Some(known_namespaces),
+            true,
+            false,
+        )?
+        .ok_or_else(|| {
+            anyhow!(
+                "project-neutral template capture unexpectedly produced no template for {}",
+                uri
+            )
+        })
     }
 
     fn collect_file_facts_as_with_resolution(
@@ -745,39 +1117,148 @@ impl FileProcessor {
         analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
         source_kind: SourceKind,
         resolve_references: bool,
-        known_namespaces: Option<&HashSet<FullyQualifiedName>>,
-    ) -> Result<()> {
+        known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
+        capture_project_neutral_template: bool,
+        insert_collected_facts: bool,
+    ) -> Result<Option<ProjectNeutralFileFactsTemplate>> {
+        Ok(self
+            .collect_file_facts_as_with_resolution_output(
+                uri,
+                content,
+                analysis_engine,
+                source_kind,
+                resolve_references,
+                known_namespaces,
+                capture_project_neutral_template,
+                insert_collected_facts,
+                false,
+            )?
+            .project_neutral_template)
+    }
+
+    fn collect_file_facts_as_with_resolution_output(
+        &self,
+        uri: &Url,
+        content: &str,
+        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        source_kind: SourceKind,
+        resolve_references: bool,
+        known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
+        capture_project_neutral_template: bool,
+        insert_collected_facts: bool,
+        collect_jruby_navigation_plan: bool,
+    ) -> Result<CollectedFileFactsOutput> {
+        self.collect_file_facts_as_with_resolution_output_owned(
+            uri,
+            content.to_string(),
+            analysis_engine,
+            source_kind,
+            resolve_references,
+            known_namespaces,
+            capture_project_neutral_template,
+            insert_collected_facts,
+            collect_jruby_navigation_plan,
+            false,
+        )
+    }
+
+    fn collect_file_facts_as_with_resolution_output_owned(
+        &self,
+        uri: &Url,
+        content: String,
+        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        source_kind: SourceKind,
+        resolve_references: bool,
+        known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
+        capture_project_neutral_template: bool,
+        insert_collected_facts: bool,
+        collect_jruby_navigation_plan: bool,
+        retain_collected_facts: bool,
+    ) -> Result<CollectedFileFactsOutput> {
+        let collection_started = Instant::now();
+        assert!(
+            insert_collected_facts
+                || retain_collected_facts
+                || (capture_project_neutral_template && !resolve_references),
+            "INVARIANT VIOLATED: FileProcessor skipped engine insertion without retaining file-owned facts or capturing a deferred project-neutral template. This is a bug because ordinary indexing must use the engine replacement lifecycle. Fix: use insertion for normal sources, retained facts for deterministic project batches, or the explicit dependency-template collection path."
+        );
+        assert!(
+            !retain_collected_facts || (!insert_collected_facts && !capture_project_neutral_template),
+            "INVARIANT VIOLATED: retained file facts were combined with insertion or project-neutral capture. This is a bug because one collection result must have exactly one owner. Fix: retain facts only for the deterministic project batch path."
+        );
         debug!("Collecting facts for: {:?}", uri);
 
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let analysis_file_id =
-            analysis_engine
-                .write()
-                .register_file(ruby_analysis::engine::SourceFileInput {
-                    path,
-                    content: content.to_string(),
-                    kind: source_kind,
-                });
-        let document = RubyDocument::with_analysis_file_id(
-            uri.clone(),
-            content.to_string(),
-            0,
-            analysis_file_id,
-        );
+        let registration_started = Instant::now();
+        let analysis_file_id = if retain_collected_facts {
+            analysis_engine.read().file_id(&path).unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: deterministic project batch collection received an unregistered source {}. This is a bug because every batch file must be pre-registered before parallel semantic reads begin. Fix: register the complete bounded batch in path order before collecting facts.",
+                        path.display()
+                    )
+                })
+        } else {
+            let mut engine = analysis_engine.write();
+            if !insert_collected_facts {
+                if let Some(file_id) = engine.file_id(&path) {
+                    file_id
+                } else {
+                    engine.register_file(ruby_analysis::engine::SourceFileInput {
+                        path,
+                        content: String::new(),
+                        kind: source_kind,
+                    })
+                }
+            } else {
+                engine.register_file_borrowed(path, &content, source_kind)
+            }
+        };
+        let document =
+            RubyDocument::with_analysis_file_id(uri.clone(), content, 0, analysis_file_id);
+        let registration_elapsed = registration_started.elapsed();
 
-        let analysis_source = analysis_source(uri, content);
+        let parse_started = Instant::now();
+        let analysis_source = analysis_source(uri, &document.content);
         let parse_result = ruby_prism::parse(analysis_source.as_bytes());
         let node = parse_result.node();
+        let parse_elapsed = parse_started.elapsed();
+        let jruby_plan_started = Instant::now();
+        let jruby_source_hint = collect_jruby_navigation_plan
+            .then(|| StaticJavaSourceHint::from_source(analysis_source.as_ref()))
+            .unwrap_or_default();
+        let jruby_navigation_plan = if collect_jruby_navigation_plan {
+            self.jruby_import_provider
+                .as_ref()
+                .filter(|provider| {
+                    provider.source_hint_may_reference_static_java(&jruby_source_hint)
+                })
+                .map(|provider| {
+                    provider
+                        .static_navigation_plan_for_node(&node)
+                        .map_err(|message| {
+                            anyhow!(
+                                "failed to plan static JRuby navigation for {}: {message}",
+                                uri
+                            )
+                        })
+                })
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            StaticJavaNavigationPlan::default()
+        };
+        let jruby_plan_elapsed = jruby_plan_started.elapsed();
 
+        let semantic_seed_started = Instant::now();
         let direct_facts_seed = if resolve_references {
             collect_direct_facts(
                 &analysis_engine,
                 &node,
                 analysis_source.as_ref(),
                 analysis_file_id,
-                known_namespaces,
+                known_namespaces.as_deref(),
             )
         } else {
             ruby_analysis::indexer::AnalysisIndex::default()
@@ -790,31 +1271,51 @@ impl FileProcessor {
                 resolve_references,
             );
         }
-        let extension_project_context = self
-            .extension_project_context_seed
+        let extensions_enabled = matches!(source_kind, SourceKind::Project | SourceKind::Excluded);
+        let extension_project_context_snapshot = extensions_enabled
+            .then(|| {
+                self.extension_project_context_seed
+                    .as_ref()
+                    .map(|seed| seed.read().context_snapshot(uri.to_string(), source_kind))
+            })
+            .flatten();
+        let extension_project_context = extension_project_context_snapshot
             .as_ref()
-            .map(|seed| seed.read().context(uri.to_string(), source_kind));
-        self.extension_registry
-            .ensure_semantic_seed_facts(&analysis_engine, extension_project_context.as_ref());
+            .map(|snapshot| snapshot.context.clone());
+        if extensions_enabled {
+            if let Some(snapshot) = extension_project_context_snapshot.as_ref() {
+                self.extension_registry
+                    .ensure_semantic_seed_facts_for_snapshot(&analysis_engine, snapshot);
+            } else {
+                self.extension_registry.ensure_semantic_seed_facts(
+                    &analysis_engine,
+                    extension_project_context.as_ref(),
+                );
+            }
+        }
 
         let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
-            self.fact_collector_host(),
+            self.fact_collector_host(extensions_enabled),
             analysis_engine.clone(),
         );
         fact_collector.extension_project_context = extension_project_context.clone();
-        let mut direct_known_namespaces = known_namespaces
-            .cloned()
-            .unwrap_or_else(|| collect_known_namespaces(&analysis_engine));
-        direct_known_namespaces.extend(
+        let shared_direct_known_namespaces = known_namespaces
+            .unwrap_or_else(|| Arc::new(collect_known_namespaces(&analysis_engine)));
+        fact_collector =
+            fact_collector.with_shared_direct_known_namespaces(shared_direct_known_namespaces);
+        fact_collector.extend_direct_known_namespaces(
             direct_facts_seed
                 .graph_nodes
                 .iter()
                 .map(|fact| fact.fqn.clone()),
         );
-        fact_collector = fact_collector.with_direct_known_namespaces(direct_known_namespaces);
+        let semantic_seed_elapsed = semantic_seed_started.elapsed();
+        let visitor_started = Instant::now();
         fact_collector.visit(&node);
+        let visitor_elapsed = visitor_started.elapsed();
 
+        let assembly_started = Instant::now();
         let mut direct_facts = if resolve_references {
             direct_facts_seed
         } else {
@@ -845,30 +1346,69 @@ impl FileProcessor {
         } else {
             (Vec::new(), Vec::new())
         };
-        replace_file_analysis(
-            &analysis_engine,
-            analysis_file_id,
-            FileFacts {
-                symbols: direct_facts.symbols,
-                methods: direct_facts.methods,
-                method_visibility_overrides: direct_facts.method_visibility_overrides,
-                types: direct_facts.types,
-                graph_nodes: direct_facts.graph_nodes,
-                graph_edges: direct_facts.graph_edges,
-                unresolved_graph_edges: direct_facts.unresolved_graph_edges,
-                reference_candidates,
-                diagnostic_candidates,
-                diagnostics,
-                execution_contexts: fact_collector.extension_execution_context_facts,
-            },
-            if resolve_references {
-                FileResolution::Full
-            } else {
-                FileResolution::Deferred
-            },
-        );
+        let file_facts = FileFacts {
+            symbols: direct_facts.symbols,
+            methods: direct_facts.methods,
+            method_visibility_overrides: direct_facts.method_visibility_overrides,
+            types: direct_facts.types,
+            graph_nodes: direct_facts.graph_nodes,
+            graph_edges: direct_facts.graph_edges,
+            unresolved_graph_edges: direct_facts.unresolved_graph_edges,
+            reference_candidates,
+            diagnostic_candidates,
+            diagnostics,
+            execution_contexts: fact_collector.extension_execution_context_facts,
+        };
+        let assembly_elapsed = assembly_started.elapsed();
+        let replacement_started = Instant::now();
+        let template = if capture_project_neutral_template {
+            Some(
+                ProjectNeutralFileFactsTemplate::try_new(analysis_file_id, file_facts.clone())
+                    .with_context(|| {
+                        format!(
+                            "facts for {} are not safe for project-neutral dependency reuse",
+                            uri
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+        let retained_file_facts = if retain_collected_facts {
+            Some(file_facts)
+        } else {
+            if insert_collected_facts {
+                replace_file_analysis(
+                    &analysis_engine,
+                    analysis_file_id,
+                    file_facts,
+                    if resolve_references {
+                        FileResolution::Full
+                    } else {
+                        FileResolution::Deferred
+                    },
+                );
+            }
+            None
+        };
+        let replacement_elapsed = replacement_started.elapsed();
         debug!("Collected facts for {:?}", uri);
-        Ok(())
+        Ok(CollectedFileFactsOutput {
+            project_neutral_template: template,
+            retained_file_facts,
+            jruby_navigation_plan,
+            jruby_source_hint,
+            timing: ProjectFileCollectionTiming {
+                total: collection_started.elapsed(),
+                registration: registration_elapsed,
+                parse: parse_elapsed,
+                jruby_plan: jruby_plan_elapsed,
+                semantic_seed: semantic_seed_elapsed,
+                visitor: visitor_elapsed,
+                assembly: assembly_elapsed,
+                replacement: replacement_elapsed,
+            },
+        })
     }
 
     fn analysis_source_kind_for_uri(&self, server: &RubyLanguageServer, uri: &Url) -> SourceKind {
@@ -1494,6 +2034,51 @@ mod tests {
             .expect("gem source must be registered");
         assert_eq!(engine.file(file_id).unwrap().kind, SourceKind::Gem);
         assert!(server.analysis_engine.read().file_id(&path).is_none());
+    }
+
+    #[test]
+    fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
+        let server = RubyLanguageServer::default();
+        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+        let dependency_uri = Url::parse("file:///shared/gems/widget/lib/widget.rb").unwrap();
+        let source = "class SharedWidget\n  def value\n    'cached'\n  end\nend\n";
+
+        let template = processor
+            .collect_project_neutral_file_template_as_deferred_resolution_in_engine(
+                &dependency_uri,
+                source,
+                producer_engine,
+                SourceKind::Gem,
+                Arc::new(HashSet::new()),
+            )
+            .unwrap();
+
+        let mut consumer = AnalysisEngine::new();
+        consumer.register_file(ruby_analysis::engine::SourceFileInput {
+            path: PathBuf::from("/consumer/project.rb"),
+            content: String::new(),
+            kind: SourceKind::Project,
+        });
+        let dependency_file = consumer.register_file(ruby_analysis::engine::SourceFileInput {
+            path: PathBuf::from("/consumer/cache/widget/lib/widget.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Gem,
+        });
+        consumer.replace_facts(
+            dependency_file,
+            template.instantiate(dependency_file),
+            ResolveMode::Immediate,
+        );
+
+        let definitions = AnalysisQuery::new(&consumer)
+            .constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[]);
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].file_id, dependency_file);
+        assert_eq!(
+            consumer.file(definitions[0].file_id).unwrap().path,
+            PathBuf::from("/consumer/cache/widget/lib/widget.rb")
+        );
     }
 }
 

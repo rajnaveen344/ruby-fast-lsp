@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use std::mem::size_of;
 
@@ -11,6 +11,14 @@ where
     // Hashbrown stores control bytes separately/in-line depending on layout.
     // This is an intentionally conservative app-level estimate, not allocator truth.
     map.capacity() * (size_of::<K>() + size_of::<V>() + 1)
+}
+
+pub fn set_table_bytes<K, S>(set: &HashSet<K, S>) -> usize
+where
+    S: BuildHasher,
+{
+    // Hashbrown stores one value plus a control byte per occupied-capacity slot.
+    set.capacity() * (size_of::<K>() + 1)
 }
 
 pub fn vec_payload_bytes<T>(values: &Vec<T>) -> usize {

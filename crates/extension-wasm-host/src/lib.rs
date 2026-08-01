@@ -1,3 +1,5 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -25,6 +27,7 @@ const DEFAULT_MAX_MEMORY_BYTES: usize = 32 * 1024 * 1024;
 const DEFAULT_FUEL_PER_CALL: u64 = 1_000_000_000;
 const DEFAULT_WALL_TIMEOUT: Duration = Duration::from_millis(500);
 const EPOCH_TICK: Duration = Duration::from_millis(5);
+const COMPILED_MODULE_CACHE_SCHEMA: u32 = 1;
 
 #[derive(Clone, Copy, Debug)]
 pub struct WasmExtensionConfig {
@@ -86,6 +89,7 @@ impl Drop for EpochTicker {
 }
 
 pub struct WasmExtension {
+    _compiled: CompiledWasmExtension,
     store: Store<ExtensionStore>,
     memory: Memory,
     alloc: TypedFunc<i32, i32>,
@@ -97,7 +101,120 @@ pub struct WasmExtension {
     id: String,
     indexed_call_names_cache: Vec<String>,
     config: WasmExtensionConfig,
+}
+
+struct CompiledWasmExtensionInner {
+    engine: Engine,
+    module: Module,
     _epoch_ticker: EpochTicker,
+}
+
+#[derive(Clone)]
+pub struct CompiledWasmExtension {
+    inner: Arc<CompiledWasmExtensionInner>,
+}
+
+/// Owns the exact Wasmtime engine used to compile or restore one extension.
+///
+/// Each compile/restore result owns one epoch ticker. Clones used to instantiate
+/// project guests share that immutable module and ticker, while every guest
+/// still owns an independent store, memory, limits, and mutable state.
+pub struct WasmExtensionCompiler {
+    engine: Engine,
+}
+
+impl WasmExtensionCompiler {
+    pub fn new() -> Result<Self> {
+        Ok(Self { engine: engine()? })
+    }
+
+    /// Returns a deterministic identity for Wasmtime's target/compiler/config
+    /// compatibility plus Ruby Fast LSP's compiled-product schema.
+    pub fn cache_identity(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        COMPILED_MODULE_CACHE_SCHEMA.hash(&mut hasher);
+        self.engine
+            .precompile_compatibility_hash()
+            .hash(&mut hasher);
+        hasher.finish()
+    }
+
+    pub fn compile(&self, wasm_bytes: &[u8]) -> Result<CompiledWasmExtension> {
+        let module = map_wasmtime(
+            Module::from_binary(&self.engine, wasm_bytes),
+            "failed to compile Wasm extension bytes",
+        )?;
+        Ok(CompiledWasmExtension::new(self.engine.clone(), module))
+    }
+
+    pub fn compile_and_serialize(
+        &self,
+        wasm_bytes: &[u8],
+    ) -> Result<(CompiledWasmExtension, Vec<u8>)> {
+        let compiled = self.compile(wasm_bytes)?;
+        let serialized = compiled.serialize()?;
+        Ok((compiled, serialized))
+    }
+
+    /// Restores a module from byte-exact output previously returned by
+    /// `compile_and_serialize` for the same `cache_identity`.
+    ///
+    /// # Safety
+    ///
+    /// Wasmtime compiled artifacts contain native code and are only lightly
+    /// validated. The caller must prove that `serialized` is unmodified output
+    /// from `compile_and_serialize`, including an exact source digest,
+    /// compatibility identity, payload length, and payload checksum check.
+    pub unsafe fn deserialize_verified(&self, serialized: &[u8]) -> Result<CompiledWasmExtension> {
+        let module = map_wasmtime(
+            // SAFETY: the caller contract above is exactly Wasmtime's
+            // `Module::deserialize` contract.
+            unsafe { Module::deserialize(&self.engine, serialized) },
+            "failed to deserialize verified compiled Wasm extension module",
+        )?;
+        Ok(CompiledWasmExtension::new(self.engine.clone(), module))
+    }
+}
+
+impl CompiledWasmExtension {
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        map_wasmtime(
+            self.inner.module.serialize(),
+            "failed to serialize compiled Wasm extension module",
+        )
+    }
+
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
+        let engine = engine()?;
+        let module = map_wasmtime(
+            Module::from_file(&engine, path.as_ref()),
+            &format!(
+                "failed to compile Wasm extension module at {}",
+                path.as_ref().display()
+            ),
+        )?;
+        Ok(Self::new(engine, module))
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let engine = engine()?;
+        let module = map_wasmtime(
+            Module::from_binary(&engine, bytes),
+            "failed to compile Wasm extension bytes",
+        )?;
+        Ok(Self::new(engine, module))
+    }
+
+    fn new(engine: Engine, module: Module) -> Self {
+        let epoch_ticker = EpochTicker::start(engine.clone());
+        Self {
+            inner: Arc::new(CompiledWasmExtensionInner {
+                engine,
+                module,
+                _epoch_ticker: epoch_ticker,
+            }),
+        }
+    }
 }
 
 impl WasmExtension {
@@ -110,15 +227,8 @@ impl WasmExtension {
         path: impl AsRef<Path>,
         host_config: WasmExtensionConfig,
     ) -> Result<Self> {
-        let engine = engine()?;
-        let module = map_wasmtime(
-            Module::from_file(&engine, path.as_ref()),
-            &format!(
-                "failed to compile Wasm extension module at {}",
-                path.as_ref().display()
-            ),
-        )?;
-        Self::from_module(id, &engine, module, host_config)
+        let compiled = CompiledWasmExtension::from_file(path)?;
+        Self::from_compiled_with_config(id, compiled, host_config)
     }
 
     pub fn from_bytes(id: impl Into<String>, bytes: &[u8]) -> Result<Self> {
@@ -130,18 +240,17 @@ impl WasmExtension {
         bytes: &[u8],
         host_config: WasmExtensionConfig,
     ) -> Result<Self> {
-        let engine = engine()?;
-        let module = map_wasmtime(
-            Module::from_binary(&engine, bytes),
-            "failed to compile Wasm extension bytes",
-        )?;
-        Self::from_module(id, &engine, module, host_config)
+        let compiled = CompiledWasmExtension::from_bytes(bytes)?;
+        Self::from_compiled_with_config(id, compiled, host_config)
     }
 
-    fn from_module(
+    pub fn from_compiled(id: impl Into<String>, compiled: CompiledWasmExtension) -> Result<Self> {
+        Self::from_compiled_with_config(id, compiled, WasmExtensionConfig::default())
+    }
+
+    pub fn from_compiled_with_config(
         id: impl Into<String>,
-        engine: &Engine,
-        module: Module,
+        compiled: CompiledWasmExtension,
         host_config: WasmExtensionConfig,
     ) -> Result<Self> {
         if host_config.wall_timeout.is_zero() {
@@ -149,7 +258,7 @@ impl WasmExtension {
                 "extension wall-clock timeout must be greater than zero"
             ));
         }
-        let epoch_ticker = EpochTicker::start(engine.clone());
+        let engine = &compiled.inner.engine;
         let state = ExtensionStore {
             wasi: WasiCtxBuilder::new().build_p1(),
             limits: StoreLimitsBuilder::new()
@@ -170,7 +279,7 @@ impl WasmExtension {
             "failed to add WASI preview1 imports to extension linker",
         )?;
         let instance = map_guest_call(
-            linker.instantiate(&mut store, &module),
+            linker.instantiate(&mut store, &compiled.inner.module),
             "failed to instantiate extension",
         )?;
 
@@ -237,6 +346,7 @@ impl WasmExtension {
             serde_json::from_slice(&names_bytes).context("invalid indexed_call_names JSON")?;
 
         Ok(Self {
+            _compiled: compiled,
             store,
             memory,
             alloc,
@@ -248,7 +358,6 @@ impl WasmExtension {
             id: id.into(),
             indexed_call_names_cache,
             config: host_config,
-            _epoch_ticker: epoch_ticker,
         })
     }
 
@@ -530,6 +639,54 @@ mod tests {
         let ctx = let_context();
         let patches = ext.index_call(&ctx).unwrap();
         assert_eq!(patches.len(), 1);
+    }
+
+    #[test]
+    fn compiled_wasm_module_instantiates_independent_project_guests() {
+        let wasm = wat::parse_str(test_extension_wat()).unwrap();
+        let compiled = CompiledWasmExtension::from_bytes(&wasm).unwrap();
+        let mut first = WasmExtension::from_compiled("test", compiled.clone()).unwrap();
+        let mut second = WasmExtension::from_compiled("test", compiled).unwrap();
+
+        first.memory.write(&mut first.store, 0, &[42]).unwrap();
+        let mut second_byte = [0];
+        second
+            .memory
+            .read(&second.store, 0, &mut second_byte)
+            .unwrap();
+        assert_eq!(
+            second_byte,
+            [0],
+            "shared compiled code must not share mutable guest memory across project instances"
+        );
+        assert_eq!(first.index_call(&let_context()).unwrap().len(), 1);
+        assert_eq!(second.index_call(&let_context()).unwrap().len(), 1);
+        assert_eq!(first.abi_version().unwrap(), ABI_VERSION);
+        assert_eq!(second.abi_version().unwrap(), ABI_VERSION);
+    }
+
+    #[test]
+    fn serialized_compiled_module_round_trips_under_exact_engine_identity() {
+        let wasm = wat::parse_str(test_extension_wat()).unwrap();
+        let compiler = WasmExtensionCompiler::new().unwrap();
+        let identity = compiler.cache_identity();
+        let (compiled, serialized) = compiler.compile_and_serialize(&wasm).unwrap();
+        let mut first = WasmExtension::from_compiled("first", compiled).unwrap();
+        assert_eq!(first.index_call(&let_context()).unwrap().len(), 1);
+        drop(first);
+
+        let restoring_compiler = WasmExtensionCompiler::new().unwrap();
+        assert_eq!(restoring_compiler.cache_identity(), identity);
+        // SAFETY: `serialized` is the byte-exact output of
+        // `compile_and_serialize` above and has not crossed a trust boundary.
+        let restored = unsafe {
+            restoring_compiler
+                .deserialize_verified(&serialized)
+                .unwrap()
+        };
+        let mut second = WasmExtension::from_compiled("second", restored).unwrap();
+        assert_eq!(second.abi_version().unwrap(), ABI_VERSION);
+        assert_eq!(second.index_call(&let_context()).unwrap().len(), 1);
     }
 
     #[test]

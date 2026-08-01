@@ -17,36 +17,104 @@ use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::*;
 
 const MAX_OPEN_DIAGNOSTIC_REFRESH_FILES: usize = 8;
+const INTERACTIVE_SEMANTIC_TRANSIENT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 
-fn process_interactive_file(
+#[derive(Clone, Copy)]
+enum DocumentSemanticMode {
+    CurrentFile,
+    Full,
+}
+
+fn interactive_file_processor(server: &RubyLanguageServer, uri: &Url) -> FileProcessor {
+    let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    server
+        .jruby_import_provider_for_uri(uri)
+        .map(|provider| processor.clone().with_jruby_import_provider(provider))
+        .unwrap_or(processor)
+}
+
+async fn process_interactive_file(
     indexer: &FileProcessor,
     server: &RubyLanguageServer,
     uri: &Url,
     content: &str,
+    mode: DocumentSemanticMode,
 ) -> anyhow::Result<crate::indexer::file_processor::ProcessResult> {
-    let start = Instant::now();
-    if server.workspace_for_uri(uri).is_some() {
-        let result = indexer.process_file_current_file_resolution(uri, content, server);
-        info!(
-            "[PERF][interactive] file={} mode=current-file elapsed={:?}",
-            uri.path(),
-            start.elapsed()
-        );
-        result
-    } else {
-        let result = indexer.process_file(uri, content, server);
-        info!(
-            "[PERF][interactive] file={} mode=full-orphan elapsed={:?}",
-            uri.path(),
-            start.elapsed()
-        );
-        result
-    }
+    let workspace = server.workspace_for_uri(uri);
+    let project_root = workspace
+        .as_ref()
+        .map(|workspace| workspace.root_path.clone())
+        .or_else(|| {
+            uri.to_file_path()
+                .ok()
+                .and_then(|path| path.parent().map(Path::to_path_buf))
+        });
+    let current_file_resolution =
+        matches!(mode, DocumentSemanticMode::CurrentFile) && workspace.is_some();
+    let mode_label = match (mode, workspace.is_some()) {
+        (DocumentSemanticMode::CurrentFile, true) => "current-file",
+        (DocumentSemanticMode::CurrentFile, false) => "full-orphan",
+        (DocumentSemanticMode::Full, _) => "full",
+    };
+    let indexer = indexer.clone();
+    let server = server.clone();
+    let uri = uri.clone();
+    let content = content.to_string();
+    let spec = crate::indexing_resources::IndexingWorkSpec::new(
+        project_root,
+        crate::indexing_resources::IndexingResourcePriority::OpenDocument,
+        1,
+        INTERACTIVE_SEMANTIC_TRANSIENT_MEMORY_BYTES,
+        1,
+    );
+    server
+        .indexing_resources
+        .clone()
+        .run_with_resources(
+            "interactive document semantic analysis",
+            spec,
+            None,
+            move || {
+                let start = Instant::now();
+                let result = if current_file_resolution {
+                    indexer.process_file_current_file_resolution(&uri, &content, &server)
+                } else {
+                    indexer.process_file(&uri, &content, &server)
+                };
+                info!(
+                    "[PERF][interactive] file={} mode={} elapsed={:?}",
+                    uri.path(),
+                    mode_label,
+                    start.elapsed()
+                );
+                result
+            },
+        )
+        .await?
 }
 
 /// Initialize workspace and run complete indexing.
 ///
-pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> anyhow::Result<()> {
+pub async fn init_workspace(
+    server: &RubyLanguageServer,
+    folder_uri: Url,
+) -> anyhow::Result<crate::indexer::coordinator::IndexingTimings> {
+    init_workspace_inner(server, folder_uri, None).await
+}
+
+pub async fn init_workspace_for_run(
+    server: &RubyLanguageServer,
+    folder_uri: Url,
+    run: crate::indexing_status::IndexingRun,
+) -> anyhow::Result<crate::indexer::coordinator::IndexingTimings> {
+    init_workspace_inner(server, folder_uri, Some(run)).await
+}
+
+async fn init_workspace_inner(
+    server: &RubyLanguageServer,
+    folder_uri: Url,
+    run: Option<crate::indexing_status::IndexingRun>,
+) -> anyhow::Result<crate::indexer::coordinator::IndexingTimings> {
     let workspace_path = folder_uri
         .to_file_path()
         .map_err(|_| anyhow::anyhow!("Failed to convert folder URI to file path"))?;
@@ -54,19 +122,31 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
     info!("Initializing workspace: {:?}", workspace_path);
 
     let mut coordinator = IndexingCoordinator::new(workspace_path, server.config.lock().clone());
+    if let Some(workspace) = server
+        .list_workspaces()
+        .into_iter()
+        .find(|workspace| workspace.root_uri == folder_uri)
+    {
+        coordinator.set_analysis_engine(workspace.analysis_engine);
+    }
     #[cfg(test)]
     if let Some(root) = server.user_cache_root_for_tests() {
         coordinator.set_user_cache_root_for_tests(root);
     }
     coordinator.set_extension_registry(server.extension_registry.clone());
+    if let Some(run) = run {
+        coordinator.set_indexing_run(run);
+    }
     coordinator.run_complete_indexing(server).await?;
 
-    Ok(())
+    Ok(coordinator.last_timings())
 }
 
 pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
     let total_start = Instant::now();
     let uri = params.text_document.uri.clone();
+    let semantic_lock = server.document_semantic_lock(&uri);
+    let _semantic_guard = semantic_lock.lock().await;
     let content = params.text_document.text.clone();
     let existing_kind = analysis_file_kind(server, &uri);
     let indexed_content_matches = existing_kind == Some(SourceKind::Project)
@@ -103,7 +183,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
 
     // Process file with unified FileProcessor::process_file. Route analysis state
     // by URI so the file lands in its workspace's own index.
-    let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    let indexer = interactive_file_processor(server, &uri);
 
     let process_start = Instant::now();
     let (affected_uris, mut diagnostics) = if skip_processing {
@@ -143,7 +223,15 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         );
         (std::collections::HashSet::new(), diagnostics)
     } else {
-        match process_interactive_file(&indexer, server, &uri, &content) {
+        match process_interactive_file(
+            &indexer,
+            server,
+            &uri,
+            &content,
+            DocumentSemanticMode::CurrentFile,
+        )
+        .await
+        {
             Ok(result) => (result.affected_uris, result.diagnostics),
             Err(_) => (std::collections::HashSet::new(), Vec::new()),
         }
@@ -286,6 +374,8 @@ fn analysis_file_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKi
 pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTextDocumentParams) {
     let total_start = Instant::now();
     let uri = params.text_document.uri.clone();
+    let semantic_lock = server.document_semantic_lock(&uri);
+    let _semantic_guard = semantic_lock.lock().await;
     let version = params.text_document.version;
 
     // Get the final content from the last change
@@ -323,22 +413,29 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     // Process current file without forcing a project-wide reference/diagnostic
     // resolve. Project-wide propagation runs during workspace indexing/save.
     // Route by URI so the file's workspace index is the one updated.
-    let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    let indexer = interactive_file_processor(server, &uri);
 
     let process_start = Instant::now();
-    let (affected_uris, mut diagnostics, semantic_change) =
-        match process_interactive_file(&indexer, server, &uri, &final_content) {
-            Ok(result) => (
-                result.affected_uris,
-                result.diagnostics,
-                result.semantic_change,
-            ),
-            Err(_) => (
-                std::collections::HashSet::new(),
-                Vec::new(),
-                ruby_analysis::engine::SemanticChange::BodyOnly,
-            ),
-        };
+    let (affected_uris, mut diagnostics, semantic_change) = match process_interactive_file(
+        &indexer,
+        server,
+        &uri,
+        &final_content,
+        DocumentSemanticMode::CurrentFile,
+    )
+    .await
+    {
+        Ok(result) => (
+            result.affected_uris,
+            result.diagnostics,
+            result.semantic_change,
+        ),
+        Err(_) => (
+            std::collections::HashSet::new(),
+            Vec::new(),
+            ruby_analysis::engine::SemanticChange::BodyOnly,
+        ),
+    };
     let process_elapsed = process_start.elapsed();
 
     // Add unresolved diagnostics (now freshly computed with correct positions)
@@ -452,6 +549,8 @@ fn bounded_open_diagnostic_refresh_targets(
 
 pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDocumentParams) {
     let uri = params.text_document.uri;
+    let semantic_lock = server.document_semantic_lock(&uri);
+    let _semantic_guard = semantic_lock.lock().await;
     info!("Document saved: {}", uri.path());
 
     if !uri.path().ends_with(".rb") {
@@ -469,9 +568,17 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
 
     // On save: do full indexing with unresolved tracking (for cross-file
     // diagnostics). Route by URI for multi-workspace correctness.
-    let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    let indexer = interactive_file_processor(server, &uri);
 
-    let (affected_uris, mut diagnostics) = match indexer.process_file(&uri, &content, server) {
+    let (affected_uris, mut diagnostics) = match process_interactive_file(
+        &indexer,
+        server,
+        &uri,
+        &content,
+        DocumentSemanticMode::Full,
+    )
+    .await
+    {
         Ok(result) => (result.affected_uris, result.diagnostics),
         Err(_) => (std::collections::HashSet::new(), Vec::new()),
     };
@@ -531,6 +638,7 @@ async fn append_external_linter_diagnostics(
 
     match lint_document(
         &config,
+        server.indexing_resources.clone(),
         &workspace_root,
         &file_path,
         content,
@@ -549,6 +657,8 @@ async fn append_external_linter_diagnostics(
 
 pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextDocumentParams) {
     let uri = params.text_document.uri.clone();
+    let semantic_lock = server.document_semantic_lock(&uri);
+    let _semantic_guard = semantic_lock.lock().await;
 
     // Remove the document from in-memory cache but keep analysis facts.
     server.docs.lock().remove(&uri);
@@ -1000,6 +1110,234 @@ mod tests {
         let file = engine.file(file_id).unwrap();
         assert_eq!(file.line_index.len(), "A = 1".len());
         assert!(file.source_text().is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_reactor() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let workspace_root = workspace.path().to_path_buf();
+        std::fs::write(
+            workspace.path().join("Gemfile"),
+            "source 'https://rubygems.org'\n",
+        )
+        .unwrap();
+        let path = workspace.path().join("opened.rb");
+        let uri = Url::from_file_path(&path).unwrap();
+        let mut server = RubyLanguageServer::default();
+        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
+            crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                1,
+                1,
+                256 * 1024 * 1024,
+                1,
+            ),
+        );
+        server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
+
+        let release = Arc::new(tokio::sync::Notify::new());
+        let holder_release = release.clone();
+        let holder_resources = server.indexing_resources.clone();
+        let holder_root = workspace_root.clone();
+        let holder = tokio::spawn(async move {
+            holder_resources
+                .run_async_with_resources(
+                    "interactive semantic contention holder",
+                    crate::indexing_resources::IndexingWorkSpec::new(
+                        Some(holder_root),
+                        crate::indexing_resources::IndexingResourcePriority::Background,
+                        1,
+                        256 * 1024 * 1024,
+                        1,
+                    ),
+                    None,
+                    async move {
+                        holder_release.notified().await;
+                    },
+                )
+                .await
+                .unwrap();
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while server.indexing_resources.snapshot().active_tasks != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("resource holder must be admitted before didOpen");
+
+        let open_server = server.clone();
+        let open_uri = uri.clone();
+        let open = tokio::spawn(async move {
+            handle_did_open(
+                &open_server,
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: open_uri,
+                        language_id: "ruby".to_string(),
+                        version: 1,
+                        text: "class OpenedUnderPressure\nend\n".to_string(),
+                    },
+                },
+            )
+            .await;
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while server.indexing_resources.snapshot().queued_tasks != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didOpen semantic work must queue behind the weighted holder");
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            tokio::time::sleep(Duration::from_millis(1)),
+        )
+        .await
+        .expect("queued didOpen must not block the current-thread Tokio reactor");
+        assert!(
+            !open.is_finished(),
+            "didOpen must not bypass weighted admission while resources are saturated"
+        );
+
+        release.notify_one();
+        holder.await.unwrap();
+        open.await.unwrap();
+        assert!(has_namespace(&server, &uri, "OpenedUnderPressure"));
+        let complete = server.indexing_resources.snapshot();
+        assert_eq!(complete.active_tasks, 0);
+        assert_eq!(complete.queued_tasks, 0);
+        assert_eq!(complete.completed_tasks, 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            workspace.path().join("Gemfile"),
+            "source 'https://rubygems.org'\n",
+        )
+        .unwrap();
+        let path = workspace.path().join("changing.rb");
+        let uri = Url::from_file_path(&path).unwrap();
+        let mut server = RubyLanguageServer::default();
+        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
+            crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                1,
+                1,
+                256 * 1024 * 1024,
+                1,
+            ),
+        );
+        server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class InitialVersion\nend\n".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let release = Arc::new(tokio::sync::Notify::new());
+        let holder_release = release.clone();
+        let holder_resources = server.indexing_resources.clone();
+        let holder_root = workspace.path().to_path_buf();
+        let holder = tokio::spawn(async move {
+            holder_resources
+                .run_async_with_resources(
+                    "didChange ordering contention holder",
+                    crate::indexing_resources::IndexingWorkSpec::new(
+                        Some(holder_root),
+                        crate::indexing_resources::IndexingResourcePriority::Background,
+                        1,
+                        256 * 1024 * 1024,
+                        1,
+                    ),
+                    None,
+                    async move {
+                        holder_release.notified().await;
+                    },
+                )
+                .await
+                .unwrap();
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while server.indexing_resources.snapshot().active_tasks != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("contention holder must be admitted");
+
+        let version_two_server = server.clone();
+        let version_two_uri = uri.clone();
+        let version_two = tokio::spawn(async move {
+            handle_did_change(
+                &version_two_server,
+                DidChangeTextDocumentParams {
+                    text_document: VersionedTextDocumentIdentifier {
+                        uri: version_two_uri,
+                        version: 2,
+                    },
+                    content_changes: vec![TextDocumentContentChangeEvent {
+                        range: None,
+                        range_length: None,
+                        text: "class VersionTwo\nend\n".to_string(),
+                    }],
+                },
+            )
+            .await;
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while server.indexing_resources.snapshot().queued_tasks != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("version two must queue behind the holder");
+
+        let version_three_server = server.clone();
+        let version_three_uri = uri.clone();
+        let version_three = tokio::spawn(async move {
+            handle_did_change(
+                &version_three_server,
+                DidChangeTextDocumentParams {
+                    text_document: VersionedTextDocumentIdentifier {
+                        uri: version_three_uri,
+                        version: 3,
+                    },
+                    content_changes: vec![TextDocumentContentChangeEvent {
+                        range: None,
+                        range_length: None,
+                        text: "class VersionThree\nend\n".to_string(),
+                    }],
+                },
+            )
+            .await;
+        });
+        tokio::task::yield_now().await;
+
+        release.notify_one();
+        holder.await.unwrap();
+        version_two.await.unwrap();
+        version_three.await.unwrap();
+        assert!(
+            has_namespace(&server, &uri, "VersionThree"),
+            "the newest document version must own the final semantic facts"
+        );
+        assert!(
+            !has_namespace(&server, &uri, "VersionTwo"),
+            "an older queued pass must not mark a newer buffer as already indexed"
+        );
+        assert_eq!(
+            server.get_doc(&uri).unwrap().version,
+            3,
+            "the document cache and semantic facts must agree on the final version"
+        );
     }
 
     #[tokio::test]

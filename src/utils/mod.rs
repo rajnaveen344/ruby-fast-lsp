@@ -3,7 +3,6 @@ pub mod cache;
 pub mod file_ops;
 pub mod lsp;
 pub mod parser;
-pub mod ruby_environment;
 pub mod stub_loader;
 
 // Re-export commonly used functions for convenience
@@ -15,5 +14,4 @@ pub use file_ops::{
 };
 pub use lsp::deduplicate_locations;
 pub use parser::{offset_to_line, position_to_offset};
-pub use ruby_environment::detect_system_ruby_version;
 pub use stub_loader::{find_stubs_directory, get_stub_files};

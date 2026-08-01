@@ -1199,10 +1199,7 @@ impl FactCollector {
 
         if let Some(local_var) = receiver_node.as_local_variable_read_node() {
             let var_name = utf8_str(local_var.name().as_slice());
-            if let Some(ty) = self.get_local_var_type(var_name, &local_var.location()) {
-                return Some(ty);
-            }
-            return self.infer_variable_type_cached(var_name);
+            return self.get_local_var_type(var_name, &local_var.location());
         }
 
         if let Some(ivar) = receiver_node.as_instance_variable_read_node() {

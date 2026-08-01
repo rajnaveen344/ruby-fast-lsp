@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "decision": "rejected_and_reverted",
+  "date": "2026-08-01",
+  "objective": "Test whether a zero-retention process-local single-flight around each exact checksum-keyed persistent Java artifact lookup removes duplicate JAR/JMOD reads, deserialization, validation, or construction across two isolated JRuby projects.",
+  "architecture": {
+    "candidate_key": "JavaArtifactProductKey: product schema, package version, JVM metadata semantic version, exact artifact SHA-256, artifact kind, JDK feature, and archive-limit fingerprint",
+    "retention": "zero completed entries and zero completed bytes",
+    "preserved_ownership": [
+      "each project retained its own ordered classpath",
+      "catalog composition remained sequential and first-classpath-definition-wins",
+      "consumer artifact paths were rebound after immutable product resolution",
+      "each isolated project retained its own AnalysisEngine and JRuby provider"
+    ],
+    "reverted_components": [
+      "blocking ephemeral single-flight constructor",
+      "Java artifact product flight wrapper",
+      "server-owned flight instance",
+      "coordinator persistent-lookup wrapper",
+      "profiler schema 12 candidate counters"
+    ]
+  },
+  "dataset": {
+    "workspace": "/Users/naveenraj/goshposh",
+    "projects": [
+      "/Users/naveenraj/goshposh/server/",
+      "/Users/naveenraj/goshposh/server-devops-5441/"
+    ],
+    "runtime": "JRuby 9.2.21.0",
+    "scheduler_concurrency": 2,
+    "persistent_cache": "/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731",
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "command_shape": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=<cache> <binary> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest"
+  },
+  "binaries": {
+    "baseline_sha256": "0313a894936c0f53771d08a259218681d76d50789cc519bb3d87811634b99abb",
+    "candidate_sha256": "f76dc0f141b5b9c5d5b7b55164af519092272116d6fa64e89f62ec791fdb4e15",
+    "baseline_profiler_schema": 11,
+    "candidate_profiler_schema": 12
+  },
+  "runs": {
+    "baseline": [
+      {
+        "wall_ms": 13859.9385,
+        "user_cpu_ms": 26328.077,
+        "system_cpu_ms": 2717.464,
+        "internal_peak_rss_bytes": 1559445504,
+        "external_peak_rss_bytes": 1788624896,
+        "project_navigation_ready_ms": 6364,
+        "dependency_navigation_ready_ms": 12535,
+        "active_semantic_complete_ms": 12578,
+        "jsonl_sha256": "dbf57bdf588bf7c36625bf623e401006fac1af0b36abadc933a5dd559deb1f0e",
+        "log_sha256": "88a967b89308efe9b8b5d67bf51d8a37423e22095d564c43bde17aa38b88a57d"
+      },
+      {
+        "wall_ms": 13685.86125,
+        "user_cpu_ms": 26209.52,
+        "system_cpu_ms": 2650.492,
+        "internal_peak_rss_bytes": 1611726848,
+        "external_peak_rss_bytes": 1758724096,
+        "project_navigation_ready_ms": 6105,
+        "dependency_navigation_ready_ms": 12098,
+        "active_semantic_complete_ms": 12135,
+        "jsonl_sha256": "6f3c5941579611a7e1d9be391f1e98d78eb5c0c66d7663f93dc7fa15d19f3dd5",
+        "log_sha256": "ab14bf9dfa3a57c27a1dbfaeff3f5b410566a9d7c36cf88f4a66e8d274e0485a"
+      },
+      {
+        "wall_ms": 13473.980625,
+        "user_cpu_ms": 26485.535,
+        "system_cpu_ms": 2623.699,
+        "internal_peak_rss_bytes": 1517928448,
+        "external_peak_rss_bytes": 1753219072,
+        "project_navigation_ready_ms": 6022,
+        "dependency_navigation_ready_ms": 12042,
+        "active_semantic_complete_ms": 12087,
+        "jsonl_sha256": "92f5e24365420fd8eb12cee3eb46fc86babc76b10a2fa366d6629ded8f11efea",
+        "log_sha256": "5cb25eb16322b5bd8a5b0d82967783e3ee1bf1c24ac3f15296c4a0b252dfc810"
+      }
+    ],
+    "candidate": [
+      {
+        "wall_ms": 20358.203083,
+        "user_cpu_ms": 40703.388,
+        "system_cpu_ms": 3280.532,
+        "internal_peak_rss_bytes": 1625866240,
+        "external_peak_rss_bytes": 1856651264,
+        "project_navigation_ready_ms": 6130,
+        "dependency_navigation_ready_ms": 19150,
+        "active_semantic_complete_ms": 19211,
+        "java_flight_lookups": 358,
+        "java_flight_producers": 358,
+        "java_flight_joined": 0,
+        "java_flight_retained_entries": 0,
+        "java_flight_retained_weight_bytes": 0,
+        "jsonl_sha256": "fe35601600e35d6ead00ab6950222a898a7a2698709414e5159c2736a2497ad1",
+        "log_sha256": "54b323d6eabd4aa37ddae2d5846b9c7465378ad76630b97bbf549aa7afd1d8f8"
+      },
+      {
+        "wall_ms": 13600.821875,
+        "user_cpu_ms": 26689.416,
+        "system_cpu_ms": 2679.812,
+        "internal_peak_rss_bytes": 1622097920,
+        "external_peak_rss_bytes": 1773666304,
+        "project_navigation_ready_ms": 6283,
+        "dependency_navigation_ready_ms": 12238,
+        "active_semantic_complete_ms": 12272,
+        "java_flight_lookups": 358,
+        "java_flight_producers": 358,
+        "java_flight_joined": 0,
+        "java_flight_retained_entries": 0,
+        "java_flight_retained_weight_bytes": 0,
+        "jsonl_sha256": "33266fec39aec7774f5114c5763ad7bf787a9127fbf0a9a4163c70432e7ef4cb",
+        "log_sha256": "5af94d357540f53954ae9d8357c119ef2813f98204282e85962ddce3b5ca2faa"
+      },
+      {
+        "wall_ms": 13565.2295,
+        "user_cpu_ms": 26647.29,
+        "system_cpu_ms": 2631.814,
+        "internal_peak_rss_bytes": 1580613632,
+        "external_peak_rss_bytes": 1756758016,
+        "project_navigation_ready_ms": 6233,
+        "dependency_navigation_ready_ms": 12222,
+        "active_semantic_complete_ms": 12258,
+        "java_flight_lookups": 358,
+        "java_flight_producers": 358,
+        "java_flight_joined": 0,
+        "java_flight_retained_entries": 0,
+        "java_flight_retained_weight_bytes": 0,
+        "jsonl_sha256": "cf60856dd3cd007cac9e30925cd72aaea6215243beada541273a7de9d7357ff4",
+        "log_sha256": "a539a4bdc1aa22c79c4635f47437095fd14446a381604bce9607d09ea11f14f5"
+      }
+    ]
+  },
+  "median_comparison": {
+    "baseline_wall_ms": 13685.86125,
+    "candidate_wall_ms": 13600.821875,
+    "wall_change_percent": -0.621367,
+    "baseline_user_cpu_ms": 26328.077,
+    "candidate_user_cpu_ms": 26689.416,
+    "user_cpu_change_percent": 1.372447,
+    "baseline_system_cpu_ms": 2650.492,
+    "candidate_system_cpu_ms": 2679.812,
+    "system_cpu_change_percent": 1.10621,
+    "baseline_internal_peak_rss_bytes": 1559445504,
+    "candidate_internal_peak_rss_bytes": 1622097920,
+    "internal_peak_rss_change_percent": 4.017609,
+    "baseline_external_peak_rss_bytes": 1758724096,
+    "candidate_external_peak_rss_bytes": 1773666304,
+    "external_peak_rss_change_percent": 0.849605,
+    "baseline_project_navigation_ready_ms": 6105,
+    "candidate_project_navigation_ready_ms": 6233,
+    "project_navigation_change_percent": 2.096642,
+    "baseline_dependency_navigation_ready_ms": 12098,
+    "candidate_dependency_navigation_ready_ms": 12238,
+    "dependency_navigation_change_percent": 1.157216,
+    "baseline_active_semantic_complete_ms": 12135,
+    "candidate_active_semantic_complete_ms": 12272,
+    "active_semantic_change_percent": 1.128966
+  },
+  "sequential_identity_probe": {
+    "purpose": "Count exact JavaArtifactProductKey reuse after the rejected flight showed zero overlap.",
+    "total_lookups": 358,
+    "lookups_per_project": 179,
+    "unique_identities_per_project": 168,
+    "unique_identities_process_wide": 168,
+    "identities_seen_twice": 157,
+    "identities_seen_four_times": 11,
+    "sequential_redundant_lookups": 190,
+    "active_catalog_ms": 946.67225,
+    "sibling_catalog_ms": 969.485875,
+    "active_catalog_completed_before_sibling_catalog_started": true,
+    "identity_tsv_sha256": "26c54b92cc70faa4db95a8975ca0ce1473e37d89f9ad10e477f6faa2f84c5d83",
+    "probe_jsonl_sha256": "8112153ad292e23550d292ff4032823d8d6639f3c62a6667e75578f9d1381567",
+    "probe_log_sha256": "18f25b8327513c571ca4ac2ac8a7468be955fa31f2faac8c6e1d46de44d850a4",
+    "conclusion": "The repeated work is real but sequential. A useful design must reuse decoded immutable metadata across catalog lifetimes without retaining a third monolithic copy or changing per-project classpath precedence."
+  },
+  "semantic_equivalence": {
+    "manifest_sha256_all_six_runs": "54268a7cd555eb82ffe9ea3a233378113c2dd5da5a8d576c15fb4de1fe717513",
+    "definition_results_sha256_all_six_runs": "a2fa41c527077805e96d92d402d50ebc681c1f8f3a14f2df5774b9c7e93034e9",
+    "project_semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server-devops-5441/": "a4e95dab56b27139b21e2252d6092ee7",
+      "/Users/naveenraj/goshposh/server/": "ebd291845022823615ba4d53306938da"
+    },
+    "persistent_java_hits_per_run": 358,
+    "persistent_java_lookups_per_run": 358,
+    "resource_leaks_or_panics": 0
+  },
+  "reason": "The actual two-project schedule never overlapped an identical JavaArtifactProductKey: every candidate lookup became its own producer and no read/decode/build was eliminated. The small median wall decrease was contradicted by worse user CPU, system CPU, every readiness milestone, both RSS measures, and one severe candidate outlier. Retaining an unconditional hash/mutex/Arc layer without observed reuse is not production evidence.",
+  "next_direction": "Do not restore this unconditional ephemeral wrapper. Measure exact repeated Java product identities and sequential decode/composition ownership first. A future flight is justified only on a path that demonstrates concurrent identical keys, or as part of a bounded design that also removes the measured sequential cost without retaining a monolithic project catalog."
+}

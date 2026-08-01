@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-31",
+  "purpose": "Measure whether removing redundant source-buffer copies and eager comment parsing closes the warm multi-root RSS budget without regressing terminal throughput or semantic correctness.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "raw_local_evidence": [
+    {
+      "id": "v29",
+      "jsonl": "/tmp/ruby-fast-lsp-borrowed-source-two-project-jruby-warm-v29-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-borrowed-source-two-project-jruby-warm-v29-20260731.log"
+    },
+    {
+      "id": "v30",
+      "jsonl": "/tmp/ruby-fast-lsp-borrowed-source-two-project-jruby-warm-v30-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-borrowed-source-two-project-jruby-warm-v30-20260731.log"
+    }
+  ],
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "change": {
+    "engine_ascii_registration": "borrowed source; retain line index and hash only",
+    "engine_non_ascii_registration": "borrowed source with one engine-owned copy for UTF-16 conversion",
+    "project_collection": "move each read String into RubyDocument instead of cloning it",
+    "source_document": "store offsets and lazily initialized comments, not a duplicate source String",
+    "comment_cache_invalidation": "document update clears the OnceLock before the new source can be queried",
+    "dependency_scan": "collect into allocation-free empty Vecs and lock shared sets only when dependencies exist"
+  },
+  "result": {
+    "repeats": [
+      {
+        "id": "v29",
+        "wall_ms": 21595.889041,
+        "peak_rss_bytes": 1692565504,
+        "project_user_pmm_ms": 1116,
+        "dependency_bson_object_id_ms": 1569,
+        "active_project_navigation_ready_ms": 10800,
+        "active_semantic_complete_ms": 18698,
+        "all_project_semantic_complete_ms": 21595
+      },
+      {
+        "id": "v30",
+        "wall_ms": 22472.146208,
+        "peak_rss_bytes": 1483046912,
+        "project_user_pmm_ms": 1101,
+        "dependency_bson_object_id_ms": 1576,
+        "active_project_navigation_ready_ms": 11758,
+        "active_semantic_complete_ms": 20383,
+        "all_project_semantic_complete_ms": 22471
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 22034.0176245,
+      "peak_rss_bytes": 1587806208,
+      "project_user_pmm_ms": 1108.5,
+      "dependency_bson_object_id_ms": 1572.5,
+      "active_project_navigation_ready_ms": 11279,
+      "active_semantic_complete_ms": 19540.5,
+      "all_project_semantic_complete_ms": 22033
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "exact_semantic_probes_passed": true
+  },
+  "comparison": {
+    "previous_current_code_repeat_median_wall_ms": 21726.5670415,
+    "previous_current_code_repeat_median_peak_rss_bytes": 1957945344,
+    "terminal_wall_change_percent": 1.42,
+    "peak_rss_change_percent": -18.90,
+    "full_ahead_baseline_wall_ms": 21711.205625,
+    "full_ahead_baseline_peak_rss_bytes": 1615314944,
+    "terminal_wall_change_from_full_ahead_percent": 1.49,
+    "peak_rss_change_from_full_ahead_percent": -1.70
+  },
+  "correctness": {
+    "borrowed_ascii_hash_matches_after_caller_drop": true,
+    "borrowed_non_ascii_utf16_positions_match_after_caller_drop": true,
+    "lazy_comment_ranges_match_prism": true,
+    "lazy_comment_cache_is_invalidated_on_update": true,
+    "shebang_comment_masking_is_preserved": true,
+    "isolated_engine_ownership_is_unchanged": true
+  },
+  "decision": "Accepted. Median peak RSS fell 18.90% relative to the immediately preceding current-code evidence and is 1.70% below the original full-ahead baseline. Median terminal time is 1.42% slower than the immediately preceding pair but only 1.49% above the original baseline, with overlapping phase-level variance and no added semantic work; the allocation path closes the explicit 10% RSS ceiling without a material throughput regression. Dependency navigation remains below three seconds. Project navigation measured 1.101-1.116 seconds, so the one-second p95 target remains open and is not claimed by this slice."
+}

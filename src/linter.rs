@@ -8,6 +8,12 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
+use crate::indexing_resources::{
+    IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
+};
+
+const EDITOR_TOOL_TRANSIENT_MEMORY_BYTES: usize = 128 * 1024 * 1024;
+
 #[derive(Debug, Deserialize)]
 struct LinterReport {
     files: Vec<LinterFile>,
@@ -38,6 +44,7 @@ struct LinterLocation {
 
 pub async fn lint_document(
     config: &RubyFastLspConfig,
+    indexing_resources: IndexingResourceGovernor,
     workspace_root: &Path,
     file_path: &Path,
     content: &str,
@@ -46,7 +53,24 @@ pub async fn lint_document(
     if config.linter == LinterKind::None {
         return Ok(Vec::new());
     }
+    let spec = editor_tool_work_spec(workspace_root);
+    indexing_resources
+        .run_async_with_resources(
+            "external Ruby linter",
+            spec,
+            None,
+            lint_document_admitted(config, workspace_root, file_path, content, timeout),
+        )
+        .await?
+}
 
+async fn lint_document_admitted(
+    config: &RubyFastLspConfig,
+    workspace_root: &Path,
+    file_path: &Path,
+    content: &str,
+    timeout: Duration,
+) -> Result<Vec<Diagnostic>> {
     let command_argv = resolved_command(config);
     let (program, initial_args) = command_argv.split_first().expect(
         "INVARIANT VIOLATED: linter command argv is empty after default command resolution. \
@@ -119,6 +143,7 @@ pub async fn lint_document(
 
 pub async fn fix_document(
     config: &RubyFastLspConfig,
+    indexing_resources: IndexingResourceGovernor,
     workspace_root: &Path,
     file_path: &Path,
     content: &str,
@@ -139,7 +164,8 @@ pub async fn fix_document(
              Fix: preserve the disabled-linter guard above."
         ),
     };
-    run_correction(
+    run_correction_with_resources(
+        indexing_resources,
         &command_argv,
         config.linter.data_name().expect(
             "INVARIANT VIOLATED: enabled linter has no data name. This is a bug because correction errors must identify their tool. Fix: add the LinterKind mapping.",
@@ -155,6 +181,7 @@ pub async fn fix_document(
 
 pub async fn format_document(
     config: &RubyFastLspConfig,
+    indexing_resources: IndexingResourceGovernor,
     workspace_root: &Path,
     file_path: &Path,
     content: &str,
@@ -187,7 +214,8 @@ pub async fn format_document(
             "INVARIANT VIOLATED: disabled formatter reached flag selection. This is a bug because format_document rejects FormatterKind::None first. Fix: preserve that guard."
         ),
     };
-    run_correction(
+    run_correction_with_resources(
+        indexing_resources,
         &command_argv,
         config.formatter.data_name().expect(
             "INVARIANT VIOLATED: enabled formatter has no data name. This is a bug because formatter errors must identify their tool. Fix: add the FormatterKind mapping.",
@@ -199,6 +227,35 @@ pub async fn format_document(
         timeout,
     )
     .await
+}
+
+async fn run_correction_with_resources(
+    indexing_resources: IndexingResourceGovernor,
+    command_argv: &[String],
+    tool_name: &str,
+    fix_flag: &str,
+    workspace_root: &Path,
+    file_path: &Path,
+    content: &str,
+    timeout: Duration,
+) -> Result<String> {
+    let spec = editor_tool_work_spec(workspace_root);
+    indexing_resources
+        .run_async_with_resources(
+            "external Ruby correction tool",
+            spec,
+            None,
+            run_correction(
+                command_argv,
+                tool_name,
+                fix_flag,
+                workspace_root,
+                file_path,
+                content,
+                timeout,
+            ),
+        )
+        .await?
 }
 
 async fn run_correction(
@@ -272,6 +329,16 @@ async fn run_correction(
         ));
     }
     Ok(fixed)
+}
+
+fn editor_tool_work_spec(workspace_root: &Path) -> IndexingWorkSpec {
+    IndexingWorkSpec::new(
+        Some(workspace_root.to_path_buf()),
+        IndexingResourcePriority::OpenDocument,
+        1,
+        EDITOR_TOOL_TRANSIENT_MEMORY_BYTES,
+        1,
+    )
 }
 
 fn resolved_command(config: &RubyFastLspConfig) -> Vec<String> {
@@ -468,8 +535,17 @@ mod tests {
             ..RubyFastLspConfig::default()
         };
         let source = "puts \"hello\"\n  example\n";
+        let indexing_resources = IndexingResourceGovernor::new(
+            crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                1,
+                1,
+                EDITOR_TOOL_TRANSIENT_MEMORY_BYTES,
+                1,
+            ),
+        );
         let diagnostics = lint_document(
             &config,
+            indexing_resources.clone(),
             temp.path(),
             &temp.path().join("sample.rb"),
             source,
@@ -487,6 +563,16 @@ mod tests {
             fs::canonicalize(fs::read_to_string(captured_pwd).unwrap().trim()).unwrap(),
             fs::canonicalize(temp.path()).unwrap()
         );
+        let resources = indexing_resources.snapshot();
+        assert_eq!(resources.completed_tasks, 1);
+        assert_eq!(resources.active_tasks, 0);
+        assert_eq!(resources.queued_tasks, 0);
+        assert_eq!(resources.peak_active_cpu_lanes, 1);
+        assert_eq!(
+            resources.peak_active_transient_memory_bytes,
+            EDITOR_TOOL_TRANSIENT_MEMORY_BYTES
+        );
+        assert_eq!(resources.peak_active_io_slots, 1);
     }
 
     #[cfg(unix)]
@@ -508,6 +594,7 @@ mod tests {
 
         let error = lint_document(
             &config,
+            IndexingResourceGovernor::default(),
             temp.path(),
             &temp.path().join("sample.rb"),
             "puts 1\n",
@@ -543,6 +630,7 @@ mod tests {
         let source = "puts 'already safe'\n";
         let fixed = fix_document(
             &config,
+            IndexingResourceGovernor::default(),
             temp.path(),
             &temp.path().join("sample.rb"),
             source,
@@ -582,6 +670,7 @@ mod tests {
         let source = "puts \"current buffer\"\n";
         let formatted = format_document(
             &config,
+            IndexingResourceGovernor::default(),
             temp.path(),
             &temp.path().join("sample.rb"),
             source,

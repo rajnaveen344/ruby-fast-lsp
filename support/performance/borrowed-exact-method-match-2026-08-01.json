@@ -1,0 +1,170 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Avoid cloning, expanding, sorting, and deduplicating every exact owner/name MethodFact during final method-reference resolution when the store can select missing, unique, or ambiguous from its existing deterministic index.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "profiler_executable_sha256": "b0659b0f3d287f61c270f13d9c4da6d5db9098e827c58724aa6c7e583d8f4eb9",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "before_profile": "/tmp/ruby-fast-lsp-borrowed-method-returns-v145-symbolized-profile.json.gz",
+    "before_profile_sha256": "8c70071804e1c47a7cd2229618d50afa2a4959045cca21de30c0ab93615280e9",
+    "before_presymbolicated_sidecar_sha256": "2545c3bf3974af0bae85673eb9d014b3b69a5c9b6e09be23bdb72732ded4f44a",
+    "after_profile": "/tmp/ruby-fast-lsp-borrowed-exact-method-v152-symbolized-profile.json.gz",
+    "after_profile_sha256": "7af3226816df623c0afbba21135bbf02a46544b5d6ca9167872a4ae62532f7ff",
+    "after_presymbolicated_sidecar_sha256": "a645c07f9faa11dbbbc1b43d158acba8957993d69f8e7b5b9a89ed7a7f2d894d",
+    "after_symbolized_profiler_sha256": "815aa697e3c2a2569e906dd3404919186fae86d43f3581bdd10f42362df3a786",
+    "before_application_cpu_samples": 34854241,
+    "after_application_cpu_samples": 34678220,
+    "method_facts_matching_owner_name_before_inclusive_percent": 2.95,
+    "method_facts_matching_owner_name_after_inclusive_percent": 0.07,
+    "analysis_engine_resolve_before_inclusive_percent": 9.68,
+    "analysis_engine_resolve_after_inclusive_percent": 8.85,
+    "remaining_exact_borrowed_selection_inclusive_percent": 1.85,
+    "remaining_method_lookup_chain_inclusive_percent": 1.75,
+    "remaining_name_registry_fqn_id_inclusive_percent": 1.25,
+    "remaining_chain_vec_clone_inclusive_percent": 0.83,
+    "observation": "The exact owner/name MethodStore bucket was already sorted by file/range/FQN, but final resolution cloned and expanded every candidate, sorted the expanded vector again, deduplicated it, and discarded the vector after choosing missing, unique, or ambiguous."
+  },
+  "change": {
+    "implementation": "MethodStore now selects an internal borrowed StoredMethodFactMatch directly from the exact owner/name bucket. It compares stored facts in index order, collapses exact adjacent duplicates, and AnalysisEngine expands only one unique winner. Final resolution retains sole ownership of ancestor/MRO, execution-context application, method_missing, ambiguity, and diagnostic policy.",
+    "availability_semantics": "Any Absent fact masks the exact identity. Otherwise any Unavailable fact masks Available declarations; exact duplicate effective facts collapse, distinct effective facts remain ambiguous.",
+    "semantic_boundary": "The borrowed stored match is crate-private, exposes no arena IDs, and becomes an owned domain MethodFact before crossing the engine state boundary. No long-lived cache or alternate lookup policy is introduced."
+  },
+  "red_green": {
+    "red": "The focused tests failed to compile because StoredMethodFactMatch and effective_fact_matching_owner_name did not exist.",
+    "green_cases": [
+      "the selected unique fact is pointer-identical to the store arena entry",
+      "identical facts deduplicate",
+      "distinct facts remain ambiguous",
+      "Unavailable overrides Available",
+      "Absent masks the method"
+    ]
+  },
+  "baseline": {
+    "evidence": "support/performance/borrowed-method-return-view-2026-08-01.json",
+    "repeat_median": {
+      "wall_ms": 14430.331291,
+      "peak_rss_bytes": 1661566976,
+      "user_cpu_ms": 28881.722,
+      "active_semantic_complete_ms": 12217,
+      "project_navigation_ms": 357,
+      "dependency_navigation_ms": 1455
+    }
+  },
+  "accepted_result": {
+    "raw_local_evidence": [
+      {
+        "id": "v149",
+        "jsonl": "/tmp/ruby-fast-lsp-borrowed-exact-method-v149.jsonl",
+        "jsonl_sha256": "75bf98f3081105744cdca87e2685fa72be550a72917652aefcd2f69288b9fee7",
+        "log_sha256": "376e78b2c070e36c127639e1a9bfc8ac15b6be6ecbf405d3f69d05086980e81c",
+        "wall_ms": 14643.71225,
+        "peak_rss_bytes": 1775042560,
+        "user_cpu_ms": 28401.452,
+        "active_semantic_complete_ms": 12536,
+        "project_navigation_ms": 492,
+        "dependency_navigation_ms": 1603
+      },
+      {
+        "id": "v150",
+        "jsonl": "/tmp/ruby-fast-lsp-borrowed-exact-method-v150.jsonl",
+        "jsonl_sha256": "f7610049cb03017bf55ddbec458b85e198d57029bc03c01bb539690a813c74fb",
+        "log_sha256": "8f98af0149f38ff4085dbb1c44771e4f4029ce064398fc331b85af512d00488c",
+        "wall_ms": 14098.302709,
+        "peak_rss_bytes": 1739571200,
+        "user_cpu_ms": 28375.022,
+        "active_semantic_complete_ms": 12055,
+        "project_navigation_ms": 363,
+        "dependency_navigation_ms": 1388
+      },
+      {
+        "id": "v151",
+        "jsonl": "/tmp/ruby-fast-lsp-borrowed-exact-method-v151.jsonl",
+        "jsonl_sha256": "6bd34d83ab685072bb25cb45cfdf6acafad374fcbb536f5860a00281bca16a38",
+        "log_sha256": "693f9eeb48a9e25fd06d2b9651eec767dc483d10a591e10c2b757fb3f9344207",
+        "wall_ms": 14158.129916,
+        "peak_rss_bytes": 1582825472,
+        "user_cpu_ms": 28361.39,
+        "active_semantic_complete_ms": 11982,
+        "project_navigation_ms": 353,
+        "dependency_navigation_ms": 1443
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 14158.129916,
+      "peak_rss_bytes": 1739571200,
+      "user_cpu_ms": 28375.022,
+      "active_semantic_complete_ms": 12055,
+      "project_navigation_ms": 363,
+      "dependency_navigation_ms": 1443
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "comparison_to_baseline_percent": {
+    "terminal_wall": -1.886,
+    "peak_rss": 4.695,
+    "user_cpu": -1.754,
+    "active_semantic_complete": -1.326,
+    "project_navigation": 1.681,
+    "dependency_navigation": -0.825,
+    "peak_rss_change_from_full_ahead": 7.692,
+    "peak_rss_headroom_bytes": 37275238
+  },
+  "packaged_artifact": {
+    "extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "platform": "macos-arm64",
+    "vsix": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "b5a7fe8b13716df4b59cca77de4b1256dedab5960f3ba65cf432b8d5a16b1983",
+    "packaged_binary_sha256": "b98bb7be7694a6abf36e00e0931cd7d366ee61e680724e664a2a39cfa2012fec",
+    "installed_binary_sha256": "b98bb7be7694a6abf36e00e0931cd7d366ee61e680724e664a2a39cfa2012fec",
+    "clean_reinstall_verified": true,
+    "smoke_verified": [
+      "RSpec",
+      "Rails",
+      "Minitest",
+      "Sinatra",
+      "Cucumber",
+      "ERB host support",
+      "JRuby implementation navigation"
+    ]
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "ruby_analysis_tests": 402,
+    "ruby_analysis_failures": 0,
+    "focused_borrowed_match_tests": 2,
+    "manifest_equal_across_all_repeats_and_historical_checkpoint": true,
+    "highest_internal_run_peak_rss_bytes": 1775042560,
+    "highest_internal_run_below_fixed_ceiling": true
+  },
+  "decision": "Accepted. Median wall, CPU, active semantic completion, and dependency navigation all improve while complete semantic identity and exact definitions remain unchanged. Median RSS regresses relative to the unusually low prior sample but remains 37.3 MB below the fixed ceiling, every individual internal run remains below it, and the change itself removes cloning rather than retaining state. Active semantic completion remains 12.055 seconds versus the five-second goal."
+}

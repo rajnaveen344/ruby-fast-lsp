@@ -1,0 +1,136 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove the measured full shared-bucket sort performed for every file replacement while preserving exact deterministic file/range ordering and the ordinary file-owned engine lifecycle.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "before_profile": "/tmp/ruby-fast-lsp-post-classpath-v135-symbolized-profile.json.gz",
+    "before_profile_sha256": "abd19b8b63044ced7722956772d5ad4f6cbeb872e296e1cab0b9b206c9db7fca",
+    "before_presymbolicated_sidecar_sha256": "a3b1c7d72c102da727a299f3da6fecc14cf869eded019046462633d1c880625a",
+    "after_profile": "/tmp/ruby-fast-lsp-file-bucket-splice-v139-profile.json.gz",
+    "after_profile_sha256": "f9abad49e7b825303f572a2306caa752aac9a884024be787f3beb61f11025138",
+    "after_presymbolicated_sidecar_sha256": "eec0933a69605131a806cd44a6bfe8f0031911005c0de85ecaf24bfb4f3a7c5a",
+    "before_application_cpu_samples": 39856612,
+    "after_application_cpu_samples": 36630755,
+    "analysis_engine_replace_facts_before_inclusive_percent": 10.42,
+    "analysis_engine_replace_facts_after_inclusive_percent": 5.46,
+    "symbol_store_replace_file_before_inclusive_percent": 4.07,
+    "symbol_store_replace_file_after_inclusive_percent": 1.04,
+    "symbol_and_type_full_bucket_sort_before_inclusive_percent": 5.21,
+    "observation": "SymbolStore and TypeStore repeatedly sorted complete shared subject buckets after replacing one file, even though removal left an already ordered prefix and every new fact belonged to one known SourceFileId."
+  },
+  "change": {
+    "implementation": "Each touched bucket records its appended count, stable-sorts only the appended tail by the existing exact key, binary-searches the target SourceFileId in the ordered prefix, asserts that stale target-file facts are absent, and rotates the new file group into place.",
+    "type_store_safety": "TypeStore explicitly records whether append-only add() has invalidated file ordering. Engine-owned replacement-only stores retain the splice fast path; any store that mixes append-only collection with replacement uses the original full stable sort forever.",
+    "semantic_boundary": "The helper is private to ruby-analysis::core. Store indexes and IDs remain private, facts still enter AnalysisEngine only through per-file replacement, and final compaction behavior is unchanged."
+  },
+  "red_green": {
+    "logarithmic_append_red_comparisons": 4096,
+    "logarithmic_append_green_max_comparisons": 32,
+    "mixed_add_replace_red_file_order": [3, 1, 2],
+    "mixed_add_replace_green_file_order": [1, 2, 3],
+    "additional_cases": [
+      "out-of-order file insertion rotates one stable sorted group",
+      "replacement panics if stale same-file facts remain in the prefix"
+    ]
+  },
+  "baseline": {
+    "evidence": "support/performance/dual-lane-semantic-fingerprint-2026-08-01.json",
+    "repeat_median": {
+      "wall_ms": 16641.625625,
+      "peak_rss_bytes": 1756856320,
+      "user_cpu_ms": 33461.473,
+      "active_semantic_complete_ms": 14034,
+      "project_navigation_ms": 377,
+      "dependency_navigation_ms": 1527
+    }
+  },
+  "accepted_candidate": {
+    "raw_local_evidence": [
+      {
+        "id": "v136",
+        "jsonl": "/tmp/ruby-fast-lsp-file-bucket-splice-v136.jsonl",
+        "jsonl_sha256": "f15e7c345297b2d70fbbd6e5c62b5f70cd6b0f459917db9ff6227bd0e2f2c946",
+        "log_sha256": "62a4e1b6b831206da5591062d6a7f1cdf85091d2010a3c31d280e98e5082048f",
+        "wall_ms": 15522.470292,
+        "peak_rss_bytes": 1708523520,
+        "user_cpu_ms": 30937.342,
+        "active_semantic_complete_ms": 13364,
+        "project_navigation_ms": 517,
+        "dependency_navigation_ms": 1770
+      },
+      {
+        "id": "v137",
+        "jsonl": "/tmp/ruby-fast-lsp-file-bucket-splice-v137.jsonl",
+        "jsonl_sha256": "8838a925084d01f484d853b900a6476858ab9f07903d368d3b37fced62e3fbb3",
+        "log_sha256": "94bfd21a48948c2cf9eefff0f5e17d7c931a4cb8589b3ab02598e5e7d73ca58b",
+        "wall_ms": 15054.693625,
+        "peak_rss_bytes": 1723842560,
+        "user_cpu_ms": 30935.778,
+        "active_semantic_complete_ms": 12972,
+        "project_navigation_ms": 381,
+        "dependency_navigation_ms": 1509
+      },
+      {
+        "id": "v138",
+        "jsonl": "/tmp/ruby-fast-lsp-file-bucket-splice-v138.jsonl",
+        "jsonl_sha256": "d22175860b9a5e5f7a06f5728e8970791808ca400b307473fc911ae6e1bc6ce9",
+        "log_sha256": "e131c9e112e25c3dc3f56c228f5d1f570c81a7c0f228f207fd846a3013c2ceb9",
+        "wall_ms": 14845.29775,
+        "peak_rss_bytes": 1603878912,
+        "user_cpu_ms": 30702.643,
+        "active_semantic_complete_ms": 12792,
+        "project_navigation_ms": 377,
+        "dependency_navigation_ms": 1344
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 15054.693625,
+      "peak_rss_bytes": 1708523520,
+      "user_cpu_ms": 30935.778,
+      "active_semantic_complete_ms": 12972,
+      "project_navigation_ms": 381,
+      "dependency_navigation_ms": 1509
+    },
+    "comparison_to_baseline_percent": {
+      "terminal_wall": -9.536,
+      "peak_rss": -2.751,
+      "user_cpu": -7.548,
+      "active_semantic_complete": -7.567,
+      "project_navigation": 1.061,
+      "dependency_navigation": -1.179
+    }
+  },
+  "correctness": {
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "gem_hits": 607,
+    "gem_lookups": 607,
+    "java_hits": 358,
+    "java_lookups": 358,
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "final_safety_qualification": "The later three-repeat borrowed-method-return evidence reruns the complete candidate after the mixed append/replacement fallback was added."
+  },
+  "decision": "Accepted. The optimization removes the measured full-bucket sort without weakening ordering or file ownership. The explicit mixed-mode fallback closes the only discovered precondition gap, while replacement-only engine stores retain the measured fast path."
+}

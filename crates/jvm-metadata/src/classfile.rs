@@ -1,3 +1,6 @@
+use serde::{Deserialize, Serialize};
+use std::mem::size_of;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClassLimits {
     pub max_class_bytes: usize,
@@ -15,7 +18,11 @@ impl Default for ClassLimits {
             max_class_bytes: 16 * 1024 * 1024,
             max_constant_pool_entries: 65_535,
             max_members: 65_535,
-            max_attributes: 4_096,
+            // Attribute counts are u16 per class, field, method, Code body, and
+            // record component. Large generated APIs can legitimately exceed
+            // 4,096 in aggregate while remaining far below the independent
+            // class-byte and member bounds.
+            max_attributes: 65_535,
             max_attribute_bytes: 8 * 1024 * 1024,
             max_annotations: 4_096,
             max_annotation_depth: 32,
@@ -23,7 +30,7 @@ impl Default for ClassLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemberInfo {
     pub access_flags: u16,
     pub name: String,
@@ -85,18 +92,18 @@ impl MemberInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MethodParameter {
     pub name: String,
     pub access_flags: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnnotationInfo {
     pub descriptor: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InnerClassInfo {
     pub inner_class: String,
     pub outer_class: Option<String>,
@@ -104,7 +111,7 @@ pub struct InnerClassInfo {
     pub access_flags: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecordComponentInfo {
     pub name: String,
     pub descriptor: String,
@@ -122,7 +129,7 @@ pub enum ClassKind {
     Module,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassFile {
     pub minor_version: u16,
     pub major_version: u16,
@@ -156,6 +163,142 @@ impl ClassFile {
             ClassKind::Class
         }
     }
+
+    /// Conservative owned-heap estimate used to bound process-local immutable
+    /// metadata retention. It counts allocation capacities, not merely logical
+    /// lengths, and includes the fixed `ClassFile` allocation itself.
+    pub fn estimated_heap_bytes(&self) -> u64 {
+        let mut bytes = size_of::<Self>();
+        add_capacity(&mut bytes, self.name.capacity(), "class name");
+        add_optional_string(&mut bytes, self.super_name.as_ref(), "superclass name");
+        add_string_vector(&mut bytes, &self.interfaces, "interface names");
+        add_member_vector(&mut bytes, &self.fields, "field metadata");
+        add_member_vector(&mut bytes, &self.methods, "method metadata");
+        add_optional_string(&mut bytes, self.source_file.as_ref(), "source file");
+        add_optional_string(&mut bytes, self.signature.as_ref(), "class signature");
+        add_annotation_vector(&mut bytes, &self.annotations, "class annotations");
+
+        add_vector_allocation(
+            &mut bytes,
+            self.inner_classes.capacity(),
+            size_of::<InnerClassInfo>(),
+            "inner-class metadata",
+        );
+        for inner in &self.inner_classes {
+            add_capacity(&mut bytes, inner.inner_class.capacity(), "inner class name");
+            add_optional_string(&mut bytes, inner.outer_class.as_ref(), "outer class name");
+            add_optional_string(&mut bytes, inner.inner_name.as_ref(), "inner simple name");
+        }
+
+        add_vector_allocation(
+            &mut bytes,
+            self.record_components.capacity(),
+            size_of::<RecordComponentInfo>(),
+            "record-component metadata",
+        );
+        for component in &self.record_components {
+            add_capacity(
+                &mut bytes,
+                component.name.capacity(),
+                "record component name",
+            );
+            add_capacity(
+                &mut bytes,
+                component.descriptor.capacity(),
+                "record component descriptor",
+            );
+            add_optional_string(
+                &mut bytes,
+                component.signature.as_ref(),
+                "record component signature",
+            );
+            add_annotation_vector(
+                &mut bytes,
+                &component.annotations,
+                "record component annotations",
+            );
+        }
+
+        add_optional_string(&mut bytes, self.module_name.as_ref(), "module name");
+        u64::try_from(bytes).expect(
+            "INVARIANT VIOLATED: a JVM ClassFile heap estimate does not fit u64. This is a bug because one parsed class cannot exceed the process address space. Fix: inspect class metadata bounds and weight arithmetic.",
+        )
+    }
+}
+
+fn add_member_vector(bytes: &mut usize, members: &Vec<MemberInfo>, label: &'static str) {
+    add_vector_allocation(bytes, members.capacity(), size_of::<MemberInfo>(), label);
+    for member in members {
+        add_capacity(bytes, member.name.capacity(), "member name");
+        add_capacity(bytes, member.descriptor.capacity(), "member descriptor");
+        add_optional_string(bytes, member.signature.as_ref(), "member signature");
+        add_string_vector(bytes, &member.exceptions, "member exceptions");
+        add_vector_allocation(
+            bytes,
+            member.parameters.capacity(),
+            size_of::<MethodParameter>(),
+            "method parameters",
+        );
+        for parameter in &member.parameters {
+            add_capacity(bytes, parameter.name.capacity(), "method parameter name");
+        }
+        add_annotation_vector(bytes, &member.annotations, "member annotations");
+    }
+}
+
+fn add_annotation_vector(
+    bytes: &mut usize,
+    annotations: &Vec<AnnotationInfo>,
+    label: &'static str,
+) {
+    add_vector_allocation(
+        bytes,
+        annotations.capacity(),
+        size_of::<AnnotationInfo>(),
+        label,
+    );
+    for annotation in annotations {
+        add_capacity(
+            bytes,
+            annotation.descriptor.capacity(),
+            "annotation descriptor",
+        );
+    }
+}
+
+fn add_string_vector(bytes: &mut usize, values: &Vec<String>, label: &'static str) {
+    add_vector_allocation(bytes, values.capacity(), size_of::<String>(), label);
+    for value in values {
+        add_capacity(bytes, value.capacity(), label);
+    }
+}
+
+fn add_optional_string(bytes: &mut usize, value: Option<&String>, label: &'static str) {
+    if let Some(value) = value {
+        add_capacity(bytes, value.capacity(), label);
+    }
+}
+
+fn add_vector_allocation(
+    bytes: &mut usize,
+    capacity: usize,
+    element_size: usize,
+    label: &'static str,
+) {
+    let allocation = capacity.checked_mul(element_size).unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: JVM {label} allocation weight overflowed usize. This is a bug because parsed metadata is bounded by the process address space. Fix: inspect vector capacity and element-size accounting."
+        )
+    });
+    add_capacity(bytes, allocation, label);
+}
+
+fn add_capacity(bytes: &mut usize, capacity: usize, label: &'static str) {
+    *bytes = bytes.checked_add(capacity).unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: JVM {label} heap weight overflowed usize. This is a bug because parsed metadata is bounded by the process address space. Fix: inspect nested metadata weight accounting."
+        )
+    });
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1165,6 +1308,31 @@ mod tests {
         assert_eq!(class.methods[0].access_flags, 0x0001);
         assert_eq!(class.methods[0].name, "<init>");
         assert_eq!(class.methods[0].descriptor, "()V");
+    }
+
+    #[test]
+    fn default_limits_accept_large_bounded_aggregate_attribute_counts() {
+        let mut bytes = decode_hex(include_str!("../fixtures/minimal_class.hex"));
+        let source_file_attribute = decode_hex("00 01 00 08 00 00 00 02 00 09");
+        assert!(
+            bytes.ends_with(&source_file_attribute),
+            "INVARIANT VIOLATED: minimal class fixture shape changed. This is a bug because the \
+             aggregate-attribute regression must replace the exact checked class attribute table. \
+             Fix: update the regression builder for the new fixture shape."
+        );
+        bytes.truncate(bytes.len() - source_file_attribute.len());
+
+        let attribute_count = 4_097u16;
+        bytes.extend_from_slice(&attribute_count.to_be_bytes());
+        for _ in 0..attribute_count {
+            bytes.extend_from_slice(&9u16.to_be_bytes());
+            bytes.extend_from_slice(&0u32.to_be_bytes());
+        }
+
+        let class = parse_class(&bytes, ClassLimits::default()).expect(
+            "a bounded classfile with a production-sized aggregate attribute count must parse",
+        );
+        assert_eq!(class.name, "com/example/Demo");
     }
 
     #[test]

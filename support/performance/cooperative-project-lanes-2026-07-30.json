@@ -1,0 +1,120 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-30",
+  "purpose": "Evaluate cooperative project-source lane partitions after the full six-lane project pass serialized sibling projects in the preceding two-project JRuby profile.",
+  "command": "RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --scheduler-concurrency 2 --definition-at server/lib/api_app.rb:8:35 --definition-at server/tasks/rake_helpers.rb:9:18",
+  "raw_local_evidence": {
+    "jsonl": "/tmp/ruby-fast-lsp-goshposh-cooperative-project-lanes-20260730.jsonl",
+    "log": "/tmp/ruby-fast-lsp-goshposh-cooperative-project-lanes-20260730.log"
+  },
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "os_release": "Darwin 25.2.0",
+    "physical_memory_bytes": 25769803776,
+    "target": "aarch64-macos"
+  },
+  "build": {
+    "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
+    "tracked_diff_sha256": "590f6da7e8435c889473e3b9a121e5388d4a398b2682195531c91cbf4720735a",
+    "profiler_executable_sha256": "e24bb15da0e1826cf9bf2adcaa049e60f9f04ee4fee8dcb0569cf88e9d8acd14",
+    "dataset_fingerprint_sha256": "26a4257f6ce90646c449bfc6d119bd149ef07f24cfef08b70dc007b8ce3cb91d"
+  },
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server-devops-5441/",
+      "/Users/naveenraj/goshposh/server/"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server/",
+    "runtime": "jruby-9.2.21.0",
+    "cpu_lanes": 6,
+    "cooperative_project_lanes_each": 3,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "baseline": {
+    "evidence": "support/performance/jruby-single-pass-project-index-2026-07-30.json",
+    "wall_ms": 109202.248958,
+    "active_project_navigation_ready_ms": 72766,
+    "active_dependency_navigation_ready_ms": 107570,
+    "external_peak_rss_bytes": 1892171776,
+    "external_peak_memory_footprint_bytes": 2342603152
+  },
+  "result": {
+    "wall_ms": 78681.083125,
+    "external_wall_seconds": 81.42,
+    "internal_peak_rss_bytes": 1648230400,
+    "external_peak_rss_bytes": 2075787264,
+    "external_peak_memory_footprint_bytes": 2400111016,
+    "readiness_ms": {
+      "project_navigation": {
+        "min": 42339,
+        "p50": 42339,
+        "p95": 42602,
+        "max": 42602
+      },
+      "dependency_navigation": {
+        "min": 69594,
+        "p50": 69594,
+        "p95": 77184,
+        "max": 77184
+      },
+      "semantic_complete": {
+        "min": 71135,
+        "p50": 71135,
+        "p95": 78680,
+        "max": 78680
+      }
+    },
+    "phase_sum_ms": {
+      "core": 625.812834,
+      "runtime": 11680.07825,
+      "project": 72635.292625,
+      "dependencies": 61836.772334,
+      "resolve": 2954.5585,
+      "publish": 2957.813
+    },
+    "project_file_pass_seconds": [
+      34.121908041,
+      34.204401834
+    ],
+    "navigation_probes": {
+      "project_definition": {
+        "file": "server/lib/api_app.rb",
+        "locations": 1290,
+        "post_index_latency_ms": 15.96125
+      },
+      "locked_java_gem_definition": {
+        "file": "server/tasks/rake_helpers.rb",
+        "symbol": "BSON::ObjectId",
+        "locations": 1,
+        "post_index_latency_ms": 1.820792,
+        "target": "bson-4.14.101-java/lib/bson/object_id.rb"
+      }
+    },
+    "gem_products": {
+      "lookups": 604,
+      "misses": 604,
+      "producers": 604,
+      "joined_flights": 0,
+      "hits": 0,
+      "evictions": 604,
+      "retained_weight_bytes": 0,
+      "successful_bindings": 604,
+      "bound_files": 29046
+    }
+  },
+  "comparison": {
+    "wall_reduction_percent": 27.95,
+    "active_project_navigation_reduction_percent": 41.45,
+    "active_dependency_navigation_reduction_percent": 28.25,
+    "external_peak_rss_growth_percent": 9.7,
+    "external_peak_memory_footprint_growth_percent": 2.45
+  },
+  "decision": {
+    "cooperative_project_lane_partition": "accepted",
+    "performance_goal": "not_met",
+    "reason": "Both large project passes overlapped under the exact six-lane, two-task, 512 MiB and two-I/O-slot resource ceiling. Active-project and total readiness improved materially, exact semantic probes remained correct, and external peak RSS stayed within the goal's ten-percent comparison ceiling. The five- and fifteen-second product targets remain unmet.",
+    "next_bottleneck": "The aligned projects still produced 604 ephemeral exact-gem products independently with zero joined flights or completed reuse. Implement bounded demand-loaded persistent products rather than retaining them in process memory or further tuning project lane counts."
+  }
+}

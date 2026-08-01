@@ -1,0 +1,241 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove the whole-file textual assignment fallback from AST-time local receiver inference. Receiver types must come only from exact lexical, source-ordered VariableScopes facts; an unknown receiver must remain unknown rather than borrow a same-named assignment from another Ruby method.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "pre_change_profile": "/tmp/ruby-fast-lsp-active-scope-v188-symbolized-profile.json.gz",
+    "pre_change_profile_sha256": "50f2a3450ac76f953b69b8448c6b1ea32e665f996f928843ce179023c359463c",
+    "pre_change_symbols_sha256": "19cd3df34cf974156ba3a7f7123284101c5caef1489d0183b0f43fa43b04988c",
+    "pre_change_jsonl_sha256": "e70b6c6d66b65ec9e3eff9befdae9db1b17f7ab305b863c45e3c82e9557d334f",
+    "pre_change_log_sha256": "c945bd1a70f66a7cc9330d3cefa81d60499df62446e0383eb22204a74bec4e63",
+    "pre_change_analysis_sha256": "32d712b0c18bcf2cf6fedbb3cc95ba327805c66416b4df63f386091fcc0fc743",
+    "pre_change_debug_profiler_sha256": "8c252c25b1faef9b2dd979c8217e27bca43218aa5655ab54b778d885d6edb506",
+    "build_variable_type_map_inclusive_percent": 1.43,
+    "infer_variable_type_cached_inclusive_percent": 1.50,
+    "infer_expression_receiver_type_inclusive_percent": 5.37,
+    "fact_collection_inclusive_percent": 39.75,
+    "observation": "After exact lexical lookup returned no type, infer_variable_type_cached split every source line, reparsed matching right-hand-side fragments with Prism, ignored lexical and hard method boundaries, and returned the first same-named assignment in the file. This repeated parsing and created semantically invalid receiver ownership."
+  },
+  "change": {
+    "implementation": "A LocalVariableRead receiver now returns only FactCollector::get_local_var_type at its exact source location. The collector-local OnceCell<HashMap<String, RubyType>>, infer_variable_type_cached, and build_variable_type_map were removed.",
+    "semantic_boundary": "VariableScopes remains the sole local-variable authority. It walks capturable soft block parents, stops at hard method/class boundaries, and considers only assignments preceding the receiver. No file-wide text scan or nested Prism parse may recover an unknown local receiver.",
+    "failure_policy": "When no defensible lexical fact exists, receiver inference returns None and downstream method attribution fails closed."
+  },
+  "red_green": {
+    "test": "local_receiver_inference_does_not_borrow_an_assignment_from_another_method",
+    "fixture": "class User; end; def inspect(user); user.save; end; def build; user = User.new; end",
+    "red": "The old fallback incorrectly emitted User as the owner of save for the untyped inspect parameter by borrowing build's later assignment.",
+    "green": "No owner is emitted for save. The existing captured-block regression still resolves outer User#save and nested String#upcase with zero global scope scans.",
+    "focused_command": "cargo test -p ruby-analysis local_receiver",
+    "package_command": "cargo test -p ruby-analysis",
+    "package_result": "407 passed; 0 failed"
+  },
+  "controlled_canonical_ab": {
+    "method": "The baseline and candidate stripped executables were alternated at the canonical target/release/profiler path so development-layout bundled resources remained identical. Executable checksums identify the implementations.",
+    "baseline_profiler_sha256": "5e78b1fc8a393713f081a0241059db206aede570c4525d32b81e93f487d0f01e",
+    "candidate_profiler_sha256": "3b722509dc189ec15c7fccc5d84a9be7cd5e875c81e98a41e0c00390c79fd975",
+    "baseline_runs": [
+      {
+        "id": "v189",
+        "jsonl_sha256": "c90eda186249e3dfa7cbb9a48e5d2b873b6af0cdb904ec952baf6ae832bbc779",
+        "log_sha256": "65a9b6ecd3c851744f3e7eca727488fe95c0a52211ef07af33cdfa838c4be469",
+        "wall_ms": 14355.098125,
+        "peak_rss_bytes": 1680637952,
+        "user_cpu_ms": 27758.215,
+        "active_semantic_complete_ms": 12057,
+        "project_navigation_ms": 362,
+        "dependency_navigation_ms": 1668
+      },
+      {
+        "id": "v191",
+        "jsonl_sha256": "6aad63beba8cb9b160ca4064ee874b448c1a3218007972554f7b97a830f1e501",
+        "log_sha256": "5a02bb39fa1838bb84ac392408f026471fdd2697c9cb8e41f1413b13f852fd5f",
+        "wall_ms": 13879.758958,
+        "peak_rss_bytes": 1620721664,
+        "user_cpu_ms": 27854.134,
+        "active_semantic_complete_ms": 11880,
+        "project_navigation_ms": 374,
+        "dependency_navigation_ms": 1342
+      },
+      {
+        "id": "v193",
+        "jsonl_sha256": "eb5a01439b9569683e4df7ec5af7b252e1f77ad20c1383e5e873344896b76b12",
+        "log_sha256": "5152d14f2ade5699a0310c739f6e03b6152f72f8240b9868df75480643487142",
+        "wall_ms": 13827.231667,
+        "peak_rss_bytes": 1676820480,
+        "user_cpu_ms": 27702.919,
+        "active_semantic_complete_ms": 11817,
+        "project_navigation_ms": 361,
+        "dependency_navigation_ms": 1269
+      }
+    ],
+    "candidate_runs": [
+      {
+        "id": "v190",
+        "jsonl_sha256": "3d2f9ff73e0f51928fd4a7753fc0928f45a78442aaf989f06bf6e28e25e75499",
+        "log_sha256": "0991a7fa8bb18167d34db0919467ba15aa2274513de1646359c0f9624c183b0f",
+        "wall_ms": 13663.866083,
+        "peak_rss_bytes": 1535819776,
+        "user_cpu_ms": 27052.261,
+        "active_semantic_complete_ms": 11550,
+        "project_navigation_ms": 360,
+        "dependency_navigation_ms": 1336
+      },
+      {
+        "id": "v192",
+        "jsonl_sha256": "ba46e9a2b38d5b67079aa417d5976ecb5d15d63c08ead94c92bcd15185796bbc",
+        "log_sha256": "6a33e6cb6e34f324a5ae74ff79b70d0e6a8b1fb40e936c171dafffec9e9b2e93",
+        "wall_ms": 13661.347916,
+        "peak_rss_bytes": 1560690688,
+        "user_cpu_ms": 27111.023,
+        "active_semantic_complete_ms": 11549,
+        "project_navigation_ms": 357,
+        "dependency_navigation_ms": 1341
+      },
+      {
+        "id": "v194",
+        "jsonl_sha256": "449bfa3b95387c52eb6d104578386d40fe2389f19658b57a509d996e44825782",
+        "log_sha256": "d12930908edd8c828183f473b764cfd2a2192b895d63773e410da63f1d97651e",
+        "wall_ms": 13813.196625,
+        "peak_rss_bytes": 1535524864,
+        "user_cpu_ms": 27081.904,
+        "active_semantic_complete_ms": 11623,
+        "project_navigation_ms": 358,
+        "dependency_navigation_ms": 1338
+      }
+    ],
+    "baseline_median": {
+      "wall_ms": 13879.758958,
+      "peak_rss_bytes": 1676820480,
+      "user_cpu_ms": 27758.215,
+      "active_semantic_complete_ms": 11880,
+      "project_navigation_ms": 362,
+      "dependency_navigation_ms": 1342
+    },
+    "candidate_median": {
+      "wall_ms": 13663.866083,
+      "peak_rss_bytes": 1535819776,
+      "user_cpu_ms": 27081.904,
+      "active_semantic_complete_ms": 11550,
+      "project_navigation_ms": 358,
+      "dependency_navigation_ms": 1338
+    },
+    "candidate_change_percent": {
+      "terminal_wall": -1.555,
+      "peak_rss": -8.409,
+      "user_cpu": -2.436,
+      "active_semantic_complete": -2.778,
+      "project_navigation": -1.105,
+      "dependency_navigation": -0.298
+    }
+  },
+  "semantic_correction": {
+    "semantic_export_manifest_sha256_all_six_runs": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "baseline_semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "corrected_semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "c3d9ee7694347372cda26b762ea383c0",
+      "/Users/naveenraj/goshposh/server-devops-5441": "d7776e8174da7ee439ceb9706a5c694b"
+    },
+    "representative_v189_to_v190": {
+      "server_method_reference_candidates": {
+        "before": 361990,
+        "after": 325966,
+        "removed": 36024
+      },
+      "server_resolved_references": {
+        "before": 752213,
+        "after": 716586,
+        "removed": 35627
+      },
+      "server_diagnostics": {
+        "before": 47782,
+        "after": 36749,
+        "removed": 11033
+      },
+      "sibling_method_reference_candidates": {
+        "before": 357810,
+        "after": 322047,
+        "removed": 35763
+      },
+      "sibling_resolved_references": {
+        "before": 745168,
+        "after": 709624,
+        "removed": 35544
+      },
+      "sibling_diagnostics": {
+        "before": 47235,
+        "after": 36209,
+        "removed": 11026
+      },
+      "unchanged_domains": "Constants, direct resolved candidates, unresolved graph edges, per-file declaration exports, dataset identity, and live definition probes remained exact."
+    },
+    "interpretation": "The fingerprint transition is expected semantic correction, not worker nondeterminism. The removed candidates depended solely on a cross-method textual namesake assignment after exact lexical lookup had failed."
+  },
+  "correctness_and_resource_evidence": {
+    "gem_hits_per_run": 607,
+    "gem_lookups_per_run": 607,
+    "gem_producers_per_run": 0,
+    "java_hits_per_run": 358,
+    "java_lookups_per_run": 358,
+    "java_producers_per_run": 0,
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "candidate_highest_peak_rss_bytes": 1560690688,
+    "minimum_peak_rss_headroom_bytes": 216155750
+  },
+  "post_change_profile": {
+    "profile": "/tmp/ruby-fast-lsp-no-text-fallback-v195-symbolized-profile.json.gz",
+    "profile_sha256": "efd1d2e116d4844d38e4b262c40dbb1df617be332de42ca023a0d2c503fc5978",
+    "symbols_sha256": "ebe5feed549c5f06de5f07cbedd8243073df61df3f57507aac6b7bfcf86b3129",
+    "jsonl_sha256": "8ab8985576477fb565c790cd212c34a2676f6b907855692ee6cf5da58af3bae3",
+    "log_sha256": "632633fb5c7da257e6257e9dfb87f3415d254de4babf3491207b2b611ee0b594",
+    "analysis_sha256": "bf967439e97fd19f6f8e5a0e0d933190767659d80d48fc0a6a0f672afdf88c09",
+    "debug_profiler_sha256": "3a04a0fdbe4ee1ea1886c7df5e811561154ea011f20f1c599ec9876fa2c97004",
+    "removed_symbols_absent": [
+      "build_variable_type_map",
+      "infer_variable_type_cached"
+    ],
+    "remaining_inclusive_percent": {
+      "file_fact_collection": 39.30,
+      "project_deferred_fact_collection": 37.26,
+      "call_visit": 19.37,
+      "process_call_node_entry": 15.07,
+      "engine_resolve": 7.82,
+      "persistent_cache_lookup_disk": 7.82,
+      "def_entry": 6.35,
+      "replace_facts": 6.22,
+      "infer_type_from_value": 5.09,
+      "infer_type_from_value_with_locals": 5.07,
+      "local_write": 4.27,
+      "handle_expression_receiver": 4.21,
+      "infer_expression_receiver_type": 4.08,
+      "infer_assignment_type_from_value": 3.92,
+      "method_reference_chain_cache": 3.70,
+      "type_subject_partial_eq_self": 1.27
+    },
+    "note": "Debug-profile wall and RSS are not production acceptance measurements. The production A/B medians above are authoritative."
+  },
+  "decision": "accepted",
+  "next_step": "Use the v195 symbolized profile to select a distinct, narrow fact-pass or engine target. Do not restore whole-file local inference, repeat the measured-regressing shared local type-subject index, or weaken unknown-receiver absence semantics."
+}

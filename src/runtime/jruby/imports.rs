@@ -18,11 +18,19 @@ use ruby_fast_lsp_jvm_metadata::{
     MethodDescriptor, Visibility,
 };
 use ruby_prism::{
-    visit_call_node, visit_constant_path_node, CallNode, ConstantPathNode, Node, Visit,
+    visit_call_node, visit_constant_path_node, visit_constant_read_node, CallNode,
+    ConstantPathNode, ConstantReadNode, Node, Visit,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+#[cfg(test)]
+std::thread_local! {
+    static SEMANTIC_PREFILTER_PARSE_COUNT: std::cell::Cell<usize> = const {
+        std::cell::Cell::new(0)
+    };
+}
 
 const MAX_INCLUDED_PACKAGE_CLASSES: usize = 4_096;
 const MAX_STATIC_IMPORT_ALIAS_BYTES: usize = 256;
@@ -34,10 +42,77 @@ pub enum JavaImplementationResolutionError {
     Decompiler(JavaDecompilerError),
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StaticJavaNavigationPlan {
+    pub signature_class_names: Vec<String>,
+    pub implementation_class_names: Vec<String>,
+}
+
+/// Compact, catalog-independent evidence retained by the first project pass.
+///
+/// The exact JRuby catalog may still be under construction while ordinary Ruby
+/// facts are collected. Keeping only definite Java DSL/canonical-proxy markers
+/// and dotted receiver roots lets the owning project later replay the bounded
+/// subset whose semantics depend on that catalog without retaining source
+/// buffers or reading every project file a second time.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StaticJavaSourceHint {
+    definite_catalog_semantics: bool,
+    dotted_roots: Vec<String>,
+}
+
+impl StaticJavaSourceHint {
+    pub fn from_source(source: &str) -> Self {
+        let mut definite_catalog_semantics = [
+            "java_import",
+            "include_package",
+            "java_implements",
+            "java_package",
+            "java_alias",
+            "java_send",
+            "java_method",
+            "to_java",
+        ]
+        .iter()
+        .any(|marker| source.contains(marker));
+
+        let mut dotted_roots = Vec::new();
+        let mut characters = source.char_indices().peekable();
+        while let Some((start, character)) = characters.next() {
+            if !(character.is_alphabetic() || character == '_' || character == '$') {
+                continue;
+            }
+            let mut end = start + character.len_utf8();
+            while let Some(&(offset, next)) = characters.peek() {
+                if !(next.is_alphanumeric() || next == '_' || next == '$') {
+                    break;
+                }
+                characters.next();
+                end = offset + next.len_utf8();
+            }
+            let identifier = &source[start..end];
+            let suffix = source[end..].trim_start_matches(char::is_whitespace);
+            if identifier == "Java" && suffix.starts_with("::") {
+                definite_catalog_semantics = true;
+            }
+            if suffix.starts_with('.') {
+                dotted_roots.push(source[start..end].to_string());
+            }
+        }
+        dotted_roots.sort();
+        dotted_roots.dedup();
+        Self {
+            definite_catalog_semantics,
+            dotted_roots,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct JrubyImportProvider {
     catalog: Arc<ProjectJavaCatalog>,
     proxy_to_internal: BTreeMap<String, Vec<String>>,
+    static_top_level_packages: BTreeSet<String>,
     source_resolver: Option<Arc<JavaSourceResolver>>,
     decompiler: Option<Arc<JavaDecompiler>>,
     signature_cache_root: Option<PathBuf>,
@@ -48,7 +123,11 @@ pub struct JrubyImportProvider {
 impl JrubyImportProvider {
     pub fn new(catalog: Arc<ProjectJavaCatalog>) -> Self {
         let mut proxy_to_internal = BTreeMap::<String, Vec<String>>::new();
+        let mut static_top_level_packages = BTreeSet::new();
         for internal_name in catalog.classes.keys() {
+            if let Some(package) = internal_name.split('/').next() {
+                static_top_level_packages.insert(package.to_string());
+            }
             // JVM classfiles may legitimately contain anonymous and compiler-generated
             // names such as `Outer$1`. They are classpath truth, but JRuby cannot expose
             // them as ordinary Ruby proxy constants. Keep them in metadata for exact
@@ -64,6 +143,7 @@ impl JrubyImportProvider {
         Self {
             catalog,
             proxy_to_internal,
+            static_top_level_packages,
             source_resolver: None,
             decompiler: None,
             signature_cache_root: None,
@@ -274,25 +354,80 @@ impl JrubyImportProvider {
     }
 
     pub fn static_navigation_class_names(&self, source: &str) -> Result<Vec<String>, String> {
-        let mut class_names = BTreeSet::new();
-        for dependency in static_java_dependencies(source) {
+        Ok(self.static_navigation_plan(source)?.signature_class_names)
+    }
+
+    pub fn source_may_reference_static_java(&self, source: &str) -> bool {
+        self.source_hint_may_reference_static_java(&StaticJavaSourceHint::from_source(source))
+    }
+
+    pub fn source_hint_may_reference_static_java(&self, hint: &StaticJavaSourceHint) -> bool {
+        hint.definite_catalog_semantics
+            || hint.dotted_roots.iter().any(|root| {
+                root == "Java" || self.static_top_level_packages.contains(root.as_str())
+            })
+    }
+
+    pub fn static_navigation_plan(&self, source: &str) -> Result<StaticJavaNavigationPlan, String> {
+        let parse = ruby_prism::parse(source.as_bytes());
+        self.static_navigation_plan_for_node(&parse.node())
+    }
+
+    pub fn static_navigation_plan_for_node(
+        &self,
+        node: &Node<'_>,
+    ) -> Result<StaticJavaNavigationPlan, String> {
+        let mut signature_class_names = BTreeSet::new();
+        let mut implementation_class_names = BTreeSet::new();
+        let mut visitor = StaticNavigationVisitor::default();
+        visitor.visit(node);
+        visitor.dependencies.sort();
+        visitor.dependencies.dedup();
+        visitor.proxy_references.sort();
+        visitor.proxy_references.dedup();
+        visitor.constant_references.sort();
+        visitor.constant_references.dedup();
+        for dependency in visitor.dependencies {
             match dependency {
                 StaticJavaDependency::Class(name) => {
                     if let Some(class_name) = self.class_name_for_static_proxy_reference(&name)? {
-                        class_names.insert(class_name);
+                        signature_class_names.insert(class_name.clone());
+                        implementation_class_names.insert(class_name);
                     }
                 }
                 StaticJavaDependency::Package(package) => {
-                    class_names.extend(self.class_names_in_package(&package)?);
+                    signature_class_names.extend(self.class_names_in_package(&package)?);
                 }
             }
         }
-        for reference in static_java_proxy_references(source) {
+        for reference in visitor.proxy_references {
             if let Some(class_name) = self.class_name_for_static_proxy_reference(&reference)? {
-                class_names.insert(class_name);
+                signature_class_names.insert(class_name.clone());
+                implementation_class_names.insert(class_name);
             }
         }
-        Ok(class_names.into_iter().collect())
+        let mut package_classes_by_constant = BTreeMap::<String, Vec<String>>::new();
+        for internal_name in &signature_class_names {
+            let Ok(name) = JavaClassName::parse(internal_name) else {
+                continue;
+            };
+            package_classes_by_constant
+                .entry(name.imported_constant().to_string())
+                .or_default()
+                .push(internal_name.clone());
+        }
+        for constant in visitor.constant_references {
+            let Some(candidates) = package_classes_by_constant.get(&constant) else {
+                continue;
+            };
+            if candidates.len() == 1 {
+                implementation_class_names.insert(candidates[0].clone());
+            }
+        }
+        Ok(StaticJavaNavigationPlan {
+            signature_class_names: signature_class_names.into_iter().collect(),
+            implementation_class_names: implementation_class_names.into_iter().collect(),
+        })
     }
 
     pub fn class_name_for_static_proxy_reference(
@@ -496,6 +631,9 @@ impl JrubyImportProvider {
         }
         let source = FullyQualifiedName::namespace(visitor.scope_tracker.get_ns_stack());
         for interface in interfaces {
+            if !is_java_class_name(&interface.name) {
+                continue;
+            }
             let Ok(java_name) = JavaClassName::parse(&interface.name) else {
                 continue;
             };
@@ -1825,25 +1963,50 @@ pub fn static_java_import_names(source: &str) -> Vec<String> {
 }
 
 pub fn static_java_dependencies(source: &str) -> Vec<StaticJavaDependency> {
+    record_semantic_prefilter_parse();
     let parse = ruby_prism::parse(source.as_bytes());
+    static_java_dependencies_for_node(&parse.node())
+}
+
+fn static_java_dependencies_for_node(node: &Node<'_>) -> Vec<StaticJavaDependency> {
     let mut visitor = StaticImportVisitor {
         dependencies: Vec::new(),
     };
-    visitor.visit(&parse.node());
+    visitor.visit(node);
     visitor.dependencies.sort();
     visitor.dependencies.dedup();
     visitor.dependencies
 }
 
 pub fn static_java_proxy_references(source: &str) -> Vec<String> {
+    record_semantic_prefilter_parse();
     let parse = ruby_prism::parse(source.as_bytes());
+    static_java_proxy_references_for_node(&parse.node())
+}
+
+fn static_java_proxy_references_for_node(node: &Node<'_>) -> Vec<String> {
     let mut visitor = StaticProxyVisitor {
         references: Vec::new(),
     };
-    visitor.visit(&parse.node());
+    visitor.visit(node);
     visitor.references.sort();
     visitor.references.dedup();
     visitor.references
+}
+
+pub fn source_semantics_depend_on_jruby_catalog(source: &str) -> bool {
+    record_semantic_prefilter_parse();
+    let parse = ruby_prism::parse(source.as_bytes());
+    let mut visitor = StaticNavigationVisitor::default();
+    visitor.visit(&parse.node());
+    visitor.catalog_sensitive
+        || !visitor.dependencies.is_empty()
+        || !visitor.proxy_references.is_empty()
+}
+
+fn record_semantic_prefilter_parse() {
+    #[cfg(test)]
+    SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.set(count.get() + 1));
 }
 
 struct StaticImportVisitor {
@@ -1852,6 +2015,44 @@ struct StaticImportVisitor {
 
 struct StaticProxyVisitor {
     references: Vec<String>,
+}
+
+#[derive(Default)]
+struct StaticNavigationVisitor {
+    dependencies: Vec<StaticJavaDependency>,
+    proxy_references: Vec<String>,
+    constant_references: Vec<String>,
+    catalog_sensitive: bool,
+}
+
+impl<'pr> Visit<'pr> for StaticNavigationVisitor {
+    fn visit_call_node(&mut self, node: &CallNode<'pr>) {
+        collect_static_dependencies_from_call(node, &mut self.dependencies);
+        if matches!(
+            node.name().as_slice(),
+            b"java_package" | b"java_alias" | b"java_send" | b"java_method" | b"to_java"
+        ) {
+            self.catalog_sensitive = true;
+        }
+        if let Some(reference) = dotted_call_name(node).filter(|reference| reference.contains('.'))
+        {
+            self.proxy_references.push(reference);
+        }
+        visit_call_node(self, node);
+    }
+
+    fn visit_constant_read_node(&mut self, node: &ConstantReadNode<'pr>) {
+        self.constant_references
+            .push(String::from_utf8_lossy(node.name().as_slice()).to_string());
+        visit_constant_read_node(self, node);
+    }
+
+    fn visit_constant_path_node(&mut self, node: &ConstantPathNode<'pr>) {
+        if let Some(reference) = canonical_java_constant_path(node) {
+            self.proxy_references.push(reference);
+        }
+        visit_constant_path_node(self, node);
+    }
 }
 
 impl<'pr> Visit<'pr> for StaticProxyVisitor {
@@ -1894,40 +2095,47 @@ fn collect_ruby_constant_path(node: &ConstantPathNode<'_>, parts: &mut Vec<Strin
 
 impl<'pr> Visit<'pr> for StaticImportVisitor {
     fn visit_call_node(&mut self, node: &CallNode<'pr>) {
-        let has_supported_alias_block = node
-            .block()
-            .and_then(|block| block.as_block_node())
-            .is_some_and(|block| {
-                evaluate_static_import_alias(&block, "example.package", "Example").is_some()
-            });
-        if node.receiver().is_none() && (node.block().is_none() || has_supported_alias_block) {
-            if let Some(arguments) = node.arguments() {
-                let mut names = Vec::new();
-                for argument in arguments.arguments().iter() {
-                    collect_static_import_names(&argument, &mut names);
-                }
-                match node.name().as_slice() {
-                    b"java_import" => self
-                        .dependencies
-                        .extend(names.into_iter().map(StaticJavaDependency::Class)),
-                    b"include_package" => self
-                        .dependencies
-                        .extend(names.into_iter().map(StaticJavaDependency::Package)),
-                    b"include" | b"java_implements" => self
-                        .dependencies
-                        .extend(names.into_iter().map(StaticJavaDependency::Class)),
-                    b"import" => self.dependencies.extend(names.into_iter().map(|name| {
-                        if is_java_class_name(&name) {
-                            StaticJavaDependency::Class(name)
-                        } else {
-                            StaticJavaDependency::Package(name)
-                        }
-                    })),
-                    _ => {}
-                }
-            }
-        }
+        collect_static_dependencies_from_call(node, &mut self.dependencies);
         visit_call_node(self, node);
+    }
+}
+
+fn collect_static_dependencies_from_call(
+    node: &CallNode<'_>,
+    dependencies: &mut Vec<StaticJavaDependency>,
+) {
+    let has_supported_alias_block = node
+        .block()
+        .and_then(|block| block.as_block_node())
+        .is_some_and(|block| {
+            evaluate_static_import_alias(&block, "example.package", "Example").is_some()
+        });
+    if node.receiver().is_some() || (node.block().is_some() && !has_supported_alias_block) {
+        return;
+    }
+    let Some(arguments) = node.arguments() else {
+        return;
+    };
+    let mut names = Vec::new();
+    for argument in arguments.arguments().iter() {
+        collect_static_import_names(&argument, &mut names);
+    }
+    match node.name().as_slice() {
+        b"java_import" => dependencies.extend(names.into_iter().map(StaticJavaDependency::Class)),
+        b"include_package" => {
+            dependencies.extend(names.into_iter().map(StaticJavaDependency::Package))
+        }
+        b"include" | b"java_implements" => {
+            dependencies.extend(names.into_iter().map(StaticJavaDependency::Class))
+        }
+        b"import" => dependencies.extend(names.into_iter().map(|name| {
+            if is_java_class_name(&name) {
+                StaticJavaDependency::Class(name)
+            } else {
+                StaticJavaDependency::Package(name)
+            }
+        })),
+        _ => {}
     }
 }
 
@@ -1972,7 +2180,7 @@ mod tests {
                 (
                     (*name).to_string(),
                     JavaClassDeclaration {
-                        class: ClassFile {
+                        class: Arc::new(ClassFile {
                             minor_version: 0,
                             major_version: 61,
                             access_flags: 0x0021,
@@ -1987,7 +2195,7 @@ mod tests {
                             inner_classes: Vec::new(),
                             record_components: Vec::new(),
                             module_name: None,
-                        },
+                        }),
                         artifact_path: PathBuf::from("/fixture/runtime.jar"),
                         artifact_fingerprint_sha256: "fixture".to_string(),
                         entry_name: format!("{name}.class"),
@@ -2124,11 +2332,11 @@ mod tests {
     fn java_alias_projects_the_selected_java_overload_onto_the_proxy_owner() {
         let mut catalog = Arc::try_unwrap(catalog(&["java/util/ArrayList", "java/lang/Object"]))
             .expect("fixture catalog must have one owner");
-        catalog
+        let declaration = catalog
             .classes
             .get_mut("java/util/ArrayList")
-            .expect("fixture class must exist")
-            .class
+            .expect("fixture class must exist");
+        Arc::make_mut(&mut declaration.class)
             .methods
             .push(MemberInfo {
                 access_flags: 0x0001,
@@ -2186,11 +2394,11 @@ mod tests {
             "java/lang/String",
         ]))
         .expect("fixture catalog must have one owner");
-        let list = &mut catalog
+        let declaration = catalog
             .classes
             .get_mut("java/util/ArrayList")
-            .expect("fixture class must exist")
-            .class;
+            .expect("fixture class must exist");
+        let list = Arc::make_mut(&mut declaration.class);
         list.methods.extend([
             MemberInfo {
                 access_flags: 0x0001,
@@ -2352,11 +2560,11 @@ mod tests {
     fn java_method_distinguishes_bound_static_and_unbound_instance_handles() {
         let mut catalog = Arc::try_unwrap(catalog(&["java/lang/String"]))
             .expect("fixture catalog must have one owner");
-        let string = &mut catalog
+        let declaration = catalog
             .classes
             .get_mut("java/lang/String")
-            .expect("fixture class must exist")
-            .class;
+            .expect("fixture class must exist");
+        let string = Arc::make_mut(&mut declaration.class);
         string.methods.extend([
             MemberInfo {
                 access_flags: 0x0009,
@@ -2462,12 +2670,11 @@ mod tests {
     fn java_interfaces_connect_to_ruby_classes_through_include_and_java_implements() {
         let mut catalog = Arc::try_unwrap(catalog(&["java/lang/Runnable"]))
             .expect("fixture catalog must have one owner");
-        catalog
+        let declaration = catalog
             .classes
             .get_mut("java/lang/Runnable")
-            .expect("fixture interface must exist")
-            .class
-            .access_flags = 0x0601;
+            .expect("fixture interface must exist");
+        Arc::make_mut(&mut declaration.class).access_flags = 0x0601;
         let collector = collect_with_catalog(
             "class Worker\n\
              \x20 java_implements java.lang.Runnable\n\
@@ -2492,6 +2699,19 @@ mod tests {
             }));
         }
         assert!(collector.analysis_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn ordinary_ruby_include_argument_calls_are_not_java_interfaces() {
+        let collector = collect("[301, 302].should include last_response.status\n", &[]);
+
+        assert!(
+            collector
+                .analysis_diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unresolved-java-interface"),
+            "ordinary Ruby include arguments must not be interpreted as JRuby interface names"
+        );
     }
 
     #[test]
@@ -2644,5 +2864,80 @@ mod tests {
         );
         assert!(references.contains(&"java.lang.String".to_string()));
         assert!(references.contains(&"Java::JavaUtil::Map::Entry".to_string()));
+    }
+
+    #[test]
+    fn gem_semantic_prefilter_parses_each_source_once() {
+        SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.set(0));
+
+        assert!(!source_semantics_depend_on_jruby_catalog(
+            "class PlainRuby\n  def value\n    42\n  end\nend\n"
+        ));
+
+        let parse_count = SEMANTIC_PREFILTER_PARSE_COUNT.with(|count| count.get());
+        assert_eq!(
+            parse_count, 1,
+            "the gem cache-key prefilter must derive all JRuby semantic evidence from one Prism parse"
+        );
+    }
+
+    #[test]
+    fn package_preflight_materializes_signatures_but_only_referenced_implementations() {
+        let provider = JrubyImportProvider::new(catalog(&[
+            "java/util/ArrayList",
+            "java/util/HashMap",
+            "java/time/Instant",
+        ]));
+        let plan = provider
+            .static_navigation_plan(
+                "include_package 'java.util'\n\
+                 java_import 'java.time.Instant'\n\
+                 LIST = ArrayList.new\n",
+            )
+            .expect("static navigation plan must resolve checked catalog names");
+
+        assert_eq!(
+            plan.signature_class_names,
+            vec![
+                "java/time/Instant".to_string(),
+                "java/util/ArrayList".to_string(),
+                "java/util/HashMap".to_string(),
+            ],
+            "package imports need signatures for every bounded direct class"
+        );
+        assert_eq!(
+            plan.implementation_class_names,
+            vec![
+                "java/time/Instant".to_string(),
+                "java/util/ArrayList".to_string(),
+            ],
+            "exact source/decompilation work is needed only for explicit imports and referenced \
+             package proxies"
+        );
+    }
+
+    #[test]
+    fn static_navigation_prefilter_covers_every_supported_java_entry_form() {
+        let provider = JrubyImportProvider::new(catalog(&["java/lang/String", "com/example/Demo"]));
+        for source in [
+            "java_import 'java.lang.String'\n",
+            "include_package 'java.lang'\nString.new\n",
+            "import 'java.lang'\nString.new\n",
+            "include java.lang.String\n",
+            "java_implements java.lang.String\n",
+            "Java::JavaLang::String.new\n",
+            "Java :: JavaLang :: String.new\n",
+            "com.example.Demo.new\n",
+            "com . example . Demo.new\n",
+        ] {
+            assert!(
+                provider.source_may_reference_static_java(source),
+                "the exact-catalog prefilter must retain supported Java source: {source:?}"
+            );
+        }
+        assert!(
+            !provider.source_may_reference_static_java("module Admin\n  user.profile.name\nend\n"),
+            "ordinary Ruby call chains must not pay a redundant JRuby AST traversal"
+        );
     }
 }

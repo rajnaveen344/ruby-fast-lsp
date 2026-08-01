@@ -1,0 +1,164 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove exhaustive TypeFact materialization and repeated TypeSubject construction from the measured constant-value inference hot path while preserving exact deterministic precedence.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "profile": "/tmp/ruby-fast-lsp-post-yard-v98-profile.json.gz",
+    "analysis": "/tmp/ruby-fast-lsp-post-yard-v98-analysis.txt",
+    "direct_constant_value_type_inclusive_percent": 6.17,
+    "resolve_constant_value_type_from_inclusive_percent": 5.57,
+    "type_store_all_facts_inclusive_percent": 3.36,
+    "type_store_expand_fact_inclusive_percent": 2.81,
+    "type_subject_equality_self_percent": 1.08
+  },
+  "change": {
+    "type_store": "Add a domain query that scans only the subject's indexed fact IDs and returns a borrowed latest non-Unknown RubyType plus TextRange. It does not expose store internals or materialize all expanded TypeFacts.",
+    "fact_collector": "Match direct facts by borrowed subject, construct the constant TypeSubject once for the store query, and compare the direct and stored winners by the exact previous (file_id, start_byte, end_byte) precedence. Equal keys still choose the stored fact, matching Iterator::chain(...).max_by_key(...) tie behavior.",
+    "semantic_boundary": "The change stays inside ruby-analysis core/indexer, preserves file-owned facts, source kinds, isolated engines, diagnostics, and deterministic resolution, and does not cache mutable project state."
+  },
+  "baseline": {
+    "evidence": "support/performance/yard-line-scan-and-name-registry-2026-08-01.json",
+    "repeat_median": {
+      "wall_ms": 17272.847917,
+      "peak_rss_bytes": 1641480192,
+      "user_cpu_ms": 36306.891,
+      "active_semantic_complete_ms": 14594,
+      "project_navigation_ms": 397,
+      "dependency_navigation_ms": 1469
+    }
+  },
+  "accepted_result": {
+    "raw_local_evidence": [
+      {
+        "id": "v99",
+        "wall_ms": 16881.0125,
+        "peak_rss_bytes": 1736048640,
+        "user_cpu_ms": 33454.836,
+        "active_semantic_complete_ms": 14250,
+        "project_navigation_ms": 507,
+        "dependency_navigation_ms": 1483
+      },
+      {
+        "id": "v100",
+        "wall_ms": 16766.035833,
+        "peak_rss_bytes": 1691484160,
+        "user_cpu_ms": 33604.333,
+        "active_semantic_complete_ms": 13954,
+        "project_navigation_ms": 392,
+        "dependency_navigation_ms": 1649
+      },
+      {
+        "id": "v101",
+        "wall_ms": 16861.944209,
+        "peak_rss_bytes": 1747664896,
+        "user_cpu_ms": 33731.511,
+        "active_semantic_complete_ms": 13906,
+        "project_navigation_ms": 382,
+        "dependency_navigation_ms": 1711
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 16861.944209,
+      "peak_rss_bytes": 1736048640,
+      "user_cpu_ms": 33604.333,
+      "active_semantic_complete_ms": 13954,
+      "project_navigation_ms": 392,
+      "dependency_navigation_ms": 1649
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "manifest_hash_equal_to_baseline_and_all_candidates": true,
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "comparison_to_baseline_percent": {
+    "terminal_wall": -2.379,
+    "peak_rss": 5.761,
+    "user_cpu": -7.444,
+    "active_semantic_complete": -4.385,
+    "project_navigation": -1.259,
+    "dependency_navigation": 12.253,
+    "peak_rss_change_from_full_ahead": 7.474,
+    "peak_rss_headroom_bytes": 40797798
+  },
+  "rejected_followup": {
+    "change": "Consume the temporary per-file TypeStore at collector handoff, move each RubyType, and move an interned TypeSubject on its final active use while preserving arena order.",
+    "profile_rationale": {
+      "profile": "/tmp/ruby-fast-lsp-post-constant-v102-profile.json.gz",
+      "analysis_observation": "TypeStore::all_facts remained 3.29% inclusive and TypeStore::expand_fact 3.11% after the accepted constant lookup change."
+    },
+    "raw_local_evidence": [
+      "/tmp/ruby-fast-lsp-consuming-types-v103.jsonl",
+      "/tmp/ruby-fast-lsp-consuming-types-v104.jsonl",
+      "/tmp/ruby-fast-lsp-consuming-types-v105.jsonl"
+    ],
+    "repeat_median": {
+      "wall_ms": 16977.878375,
+      "peak_rss_bytes": 1743486976,
+      "user_cpu_ms": 34087.908,
+      "active_semantic_complete_ms": 14271,
+      "project_navigation_ms": 385,
+      "dependency_navigation_ms": 1613
+    },
+    "comparison_to_accepted_result_percent": {
+      "terminal_wall": 0.687,
+      "peak_rss": 0.428,
+      "user_cpu": 1.439,
+      "active_semantic_complete": 2.272,
+      "project_navigation": -1.786,
+      "dependency_navigation": -2.183
+    },
+    "semantic_result_fingerprints_unchanged": true,
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "java_hits": 358,
+      "java_lookups": 358
+    },
+    "decision": "Rejected and reverted. The consuming export preserved exact semantics and slightly improved both navigation probes, but regressed terminal wall, active semantic completion, CPU, and RSS. Reconstructing per-subject use counts cost more than the avoided clones on this real workload."
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "ruby_analysis_tests": 394,
+    "ruby_analysis_failures": 0,
+    "root_library_tests": 1318,
+    "root_library_failures": 0,
+    "focused_type_store_tests": 1,
+    "focused_type_store_failures": 0,
+    "fact_collector_tests": 7,
+    "fact_collector_failures": 0,
+    "packaged_vsix_smoke": "passed",
+    "installed_extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "installed_binary_sha256": "d83f9250a954a5d651fc024ed7a9e65d2a5a6bfd32fc870b1f4bda6bcd3bc375"
+  },
+  "decision": "Accepted. Three exact warm fresh-process repeats preserve both complete semantic-result fingerprints, the whole exported manifest, source ownership, and cache-hit behavior. Median terminal wall improves 2.379%, user CPU improves 7.444%, and active semantic completion improves 4.385%. Median peak RSS remains 40.8 MB below the fixed 10% ceiling. The noisy dependency median remains inside the absolute three-second budget. The 15-second workspace and five-second active-semantic targets remain open."
+}

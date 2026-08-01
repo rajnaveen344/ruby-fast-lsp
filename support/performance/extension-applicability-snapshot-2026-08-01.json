@@ -1,0 +1,224 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove repeated locked-gem scanning and semver parsing from extension frame tracking and dispatch without retaining Wasm instances, project engines, or semantic facts.",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "scheduler_concurrency": 2,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "change": {
+    "scope": "Each project or excluded Ruby file lazily computes one registry-order bit vector on its first extension-tracked call. Frame tracking, frame ownership, and Wasm dispatch reuse those exact decisions for the rest of that file traversal.",
+    "identity": "The snapshot carries the extension package discovery fingerprint. A concurrent registry replacement fails over to exact current-registry applicability rather than using stale positions.",
+    "lifetime": "The snapshot is owned only by the file's ProjectFactCollectorHost. It contains no Arc<LoadedWasmExtension>, registry snapshot, AnalysisEngine, file facts, or project context clone.",
+    "unchanged_boundaries": "Extension manifests remain the owner of applicability requirements; isolated project lock snapshots remain the source of exact gem versions; SourceKind gating, extension status, semantic target matching, guest isolation, patch validation, and file-owned engine insertion are unchanged."
+  },
+  "focused_regression": {
+    "red_failure": "The new test initially failed to compile because neither an applicability snapshot nor an evaluation counter existed.",
+    "green_test": "extensions::tests::collector_applicability_snapshot_reuses_exact_project_decisions",
+    "proof": "One eligible file snapshot evaluates the RSpec locked-gem requirement exactly once across 101 repeated lookups; an exact locked-version change creates an independently evaluated fail-closed decision.",
+    "extension_tests": {
+      "passed": 65,
+      "failed": 0
+    },
+    "file_processor_tests": {
+      "passed": 7,
+      "failed": 0
+    }
+  },
+  "symbolized_profile": {
+    "baseline": {
+      "profile": "/tmp/ruby-fast-lsp-text-range-v277-symbolized-profile.json.gz",
+      "symbols": "/tmp/ruby-fast-lsp-text-range-v277-symbolized-profile.json.syms.json",
+      "profiler_executable_sha256": "a7b312a32d5d977eb84367b50796475ef5d36dd661f080e54ec31bb6d064ccef",
+      "application_cpu_us": 31526604,
+      "process_call_node_entry": {
+        "inclusive_cpu_us": 4361608,
+        "percent": 13.835
+      },
+      "extension_applies_to": {
+        "inclusive_cpu_us": 516808,
+        "percent": 1.639
+      },
+      "extension_applies_to_source": {
+        "inclusive_cpu_us": 623131,
+        "percent": 1.976
+      },
+      "extension_should_track_enclosing_call": {
+        "inclusive_cpu_us": 661952,
+        "percent": 2.099
+      }
+    },
+    "candidate": {
+      "profile": "/tmp/ruby-fast-lsp-extension-applicability-v279-symbolized-profile.json.gz",
+      "symbols": "/tmp/ruby-fast-lsp-extension-applicability-v279-symbolized-profile.json.syms.json",
+      "profiler_executable_sha256": "9aa6939342d6cfd43f1057fa31a507a4de72fc7626449bf542bd0f9b17d64b7f",
+      "application_cpu_us": 30495267,
+      "process_call_node_entry": {
+        "inclusive_cpu_us": 3734373,
+        "percent": 12.246
+      },
+      "extension_applies_to": {
+        "inclusive_cpu_us": 12660,
+        "percent": 0.042
+      },
+      "extension_applies_to_source": {
+        "inclusive_cpu_us": 12660,
+        "percent": 0.042
+      },
+      "extension_tracks_call": {
+        "inclusive_cpu_us": 266286,
+        "percent": 0.873
+      }
+    },
+    "interpretation": "Exact applicability work falls from 1.64% of total application CPU to 0.04%. The replacement tracked-name guard costs 0.87%, and the complete call-node path falls from 13.84% to 12.25%."
+  },
+  "controlled_ab": {
+    "baseline_executable": "/tmp/ruby-fast-lsp-profiler-applicability-baseline",
+    "baseline_executable_sha256": "a3add79eaa1353bb996d4def8d70b2e8335cd8cee5e5471a4cbda5f9c5ed76db",
+    "candidate_executable": "/tmp/ruby-fast-lsp-profiler-applicability-snapshot",
+    "candidate_executable_sha256": "43f082153309c753efb31842d37746e292b5e3e6b16207c5b6743d807bc6182b",
+    "command": "RUST_LOG=warn RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+    "excluded_run": {
+      "path": "/tmp/ruby-fast-lsp-applicability-baseline-1.log",
+      "reason": "The bounded persistent cache evicted and rebuilt 512 of 597 gem products during this run, so it was not a fully warm comparison.",
+      "gem_hits": 85,
+      "gem_lookups": 597,
+      "wall_ms": 34595.103333
+    },
+    "baseline_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-applicability-baseline-2.log",
+        "wall_ms": 13170.695167,
+        "user_cpu_ms": 25634.813,
+        "peak_rss_bytes": 1563918336,
+        "active_project_navigation_ms": 5353,
+        "active_dependency_navigation_ms": 11558,
+        "active_semantic_complete_ms": 11601,
+        "live_project_probe_ms": 368,
+        "live_dependency_probe_ms": 1256
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-applicability-baseline-3.log",
+        "wall_ms": 13203.184333,
+        "user_cpu_ms": 25672.566,
+        "peak_rss_bytes": 1630666752,
+        "active_project_navigation_ms": 5380,
+        "active_dependency_navigation_ms": 11594,
+        "active_semantic_complete_ms": 11627,
+        "live_project_probe_ms": 364,
+        "live_dependency_probe_ms": 1250
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-applicability-baseline-4.log",
+        "wall_ms": 13173.240208,
+        "user_cpu_ms": 25555.709,
+        "peak_rss_bytes": 1714323456,
+        "active_project_navigation_ms": 5395,
+        "active_dependency_navigation_ms": 11524,
+        "active_semantic_complete_ms": 11567,
+        "live_project_probe_ms": 363,
+        "live_dependency_probe_ms": 1265
+      }
+    ],
+    "candidate_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-applicability-snapshot-2.log",
+        "wall_ms": 13081.910667,
+        "user_cpu_ms": 24816.792,
+        "peak_rss_bytes": 1704050688,
+        "active_project_navigation_ms": 5294,
+        "active_dependency_navigation_ms": 11412,
+        "active_semantic_complete_ms": 11445,
+        "live_project_probe_ms": 373,
+        "live_dependency_probe_ms": 1307
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-applicability-snapshot-3.log",
+        "wall_ms": 13021.850667,
+        "user_cpu_ms": 24830.166,
+        "peak_rss_bytes": 1688027136,
+        "active_project_navigation_ms": 5259,
+        "active_dependency_navigation_ms": 11506,
+        "active_semantic_complete_ms": 11539,
+        "live_project_probe_ms": 369,
+        "live_dependency_probe_ms": 1247
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-applicability-snapshot-4.log",
+        "wall_ms": 13431.23375,
+        "user_cpu_ms": 24793.099,
+        "peak_rss_bytes": 1374978048,
+        "active_project_navigation_ms": 5460,
+        "active_dependency_navigation_ms": 11851,
+        "active_semantic_complete_ms": 11887,
+        "live_project_probe_ms": 366,
+        "live_dependency_probe_ms": 1349
+      }
+    ],
+    "median": {
+      "baseline": {
+        "wall_ms": 13173.240208,
+        "user_cpu_ms": 25634.813,
+        "peak_rss_bytes": 1630666752,
+        "active_project_navigation_ms": 5380,
+        "active_dependency_navigation_ms": 11558,
+        "active_semantic_complete_ms": 11601,
+        "live_project_probe_ms": 364,
+        "live_dependency_probe_ms": 1256
+      },
+      "candidate": {
+        "wall_ms": 13081.910667,
+        "user_cpu_ms": 24816.792,
+        "peak_rss_bytes": 1688027136,
+        "active_project_navigation_ms": 5294,
+        "active_dependency_navigation_ms": 11506,
+        "active_semantic_complete_ms": 11539,
+        "live_project_probe_ms": 369,
+        "live_dependency_probe_ms": 1307
+      }
+    },
+    "change_percent": {
+      "wall_ms": -0.693,
+      "user_cpu_ms": -3.191,
+      "peak_rss_bytes": 3.518,
+      "active_project_navigation_ms": -1.599,
+      "active_dependency_navigation_ms": -0.45,
+      "active_semantic_complete_ms": -0.534,
+      "live_project_probe_ms": 1.374,
+      "live_dependency_probe_ms": 4.061
+    },
+    "maximum_candidate_peak_rss_bytes": 1704050688,
+    "minimum_candidate_rss_ceiling_headroom_bytes": 72795750
+  },
+  "correctness": {
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
+      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+    },
+    "sorted_semantic_export_manifest_sha256": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
+    "manifest_project_records": 2,
+    "baseline_manifest_log": "/tmp/ruby-fast-lsp-applicability-baseline-manifest.log",
+    "candidate_manifest_log": "/tmp/ruby-fast-lsp-applicability-snapshot-manifest.log",
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "persistent_gem_hits": 607,
+    "persistent_gem_lookups": 607,
+    "persistent_java_hits": 168,
+    "persistent_java_lookups": 168,
+    "panicked_resource_tasks": 0,
+    "resource_leaks_at_end": 0
+  },
+  "decision": "Accepted. A file-lifetime applicability bit vector removes repeated locked-gem scans and semver parsing without retaining registry or engine ownership. Three valid fully warm pairs preserve the exact complete semantic fingerprints, sorted semantic export manifest, Project/Gem navigation, persistent cache hits, and resource cleanup. Median user CPU improves 3.191%, wall improves 0.693%, and active semantic completion improves 0.534%. Median RSS moves 3.518% amid wide allocator variance, but every candidate remains below the fixed ceiling with at least 72.8 MB headroom. Active semantic completion remains 11.539 seconds versus the five-second goal."
+}

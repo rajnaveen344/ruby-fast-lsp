@@ -1,0 +1,140 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-31",
+  "purpose": "Measure whether an exact JRuby provider can be handed to later bounded project batches as soon as its immutable catalog is ready, leaving only earlier providerless files for correctness-preserving replay.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "project_batch_size": 1024,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "change": {
+    "generation_local_handoff": "The exact immutable JRuby provider is published to the owning project's running generation immediately after catalog construction, before the runtime companion future joins the complete project pass.",
+    "batch_boundary_installation": "The exhaustive project worker checks the handoff only between bounded batches and installs at most one classpath fingerprint for that generation.",
+    "ordinary_fact_path": "Provider-aware batches still use the ordinary Prism visitor, extension processing, per-file fact replacement, and deferred resolution lifecycle.",
+    "bounded_replay": "Only files actually collected without a provider retain compact source hints. Provider-aware files cannot enter the replay set; earlier providerless files still replay after the exact provider is installed.",
+    "semantic_boundary": "No project engines, semantic stores, or mutable facts are shared. The handoff contains one Arc to the immutable project-owned provider and fails loudly if a second classpath fingerprint appears."
+  },
+  "raw_local_evidence": [
+    {
+      "id": "v52",
+      "jsonl": "/tmp/ruby-fast-lsp-jruby-provider-handoff-two-project-warm-v52-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-jruby-provider-handoff-two-project-warm-v52-20260731.log"
+    },
+    {
+      "id": "v53",
+      "jsonl": "/tmp/ruby-fast-lsp-jruby-provider-handoff-two-project-warm-v53-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-jruby-provider-handoff-two-project-warm-v53-20260731.log"
+    }
+  ],
+  "baseline": {
+    "evidence": "support/performance/resolved-callee-query-cache-2026-07-31.json",
+    "repeat_ids": [
+      "v50",
+      "v51"
+    ],
+    "wall_median_ms": 21804.4883955,
+    "peak_rss_median_bytes": 1758740480,
+    "project_user_pmm_median_ms": 530.5,
+    "dependency_bson_object_id_median_ms": 1675.5,
+    "active_semantic_complete_median_ms": 18763.5,
+    "active_project_replay_files": 60,
+    "sibling_project_replay_files": 59,
+    "active_project_replay_wall_median_ms": 2316.798625,
+    "sibling_project_replay_wall_median_ms": 1916.058375
+  },
+  "result": {
+    "repeats": [
+      {
+        "id": "v52",
+        "wall_ms": 21132.253959,
+        "peak_rss_bytes": 1785708544,
+        "project_user_pmm_ms": 686,
+        "dependency_bson_object_id_ms": 1696,
+        "active_semantic_complete_ms": 17063,
+        "all_project_semantic_complete_ms": 21132,
+        "active_provider_aware_batches": 2,
+        "sibling_provider_aware_batches": 3,
+        "active_replay_files": 18,
+        "sibling_replay_files": 0,
+        "active_replay_wall_ms": 226.84025,
+        "sibling_replay_wall_ms": 0.041166
+      },
+      {
+        "id": "v53",
+        "wall_ms": 20888.334917,
+        "peak_rss_bytes": 1689124864,
+        "project_user_pmm_ms": 531,
+        "dependency_bson_object_id_ms": 1622,
+        "active_semantic_complete_ms": 17074,
+        "all_project_semantic_complete_ms": 20888,
+        "active_provider_aware_batches": 2,
+        "sibling_provider_aware_batches": 3,
+        "active_replay_files": 18,
+        "sibling_replay_files": 0,
+        "active_replay_wall_ms": 214.381,
+        "sibling_replay_wall_ms": 0.024708
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 21010.294438,
+      "peak_rss_bytes": 1737416704,
+      "project_user_pmm_ms": 608.5,
+      "dependency_bson_object_id_ms": 1659,
+      "active_semantic_complete_ms": 17068.5,
+      "all_project_semantic_complete_ms": 21010,
+      "active_replay_files": 18,
+      "sibling_replay_files": 0,
+      "active_replay_wall_ms": 220.610625,
+      "sibling_replay_wall_ms": 0.032937
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "exact_semantic_probes_passed": true
+  },
+  "comparison": {
+    "terminal_wall_change_percent": -3.642,
+    "active_semantic_complete_change_percent": -9.033,
+    "project_navigation_change_percent": 14.703,
+    "dependency_navigation_change_percent": -0.985,
+    "peak_rss_change_percent": -1.212,
+    "active_replay_file_change_percent": -70.0,
+    "sibling_replay_file_change_percent": -100.0,
+    "full_ahead_peak_rss_baseline_bytes": 1615314944,
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "peak_rss_change_from_full_ahead_percent": 7.559,
+    "peak_rss_headroom_bytes": 39429734
+  },
+  "correctness": {
+    "dataset_and_project_source_fingerprints_unchanged": true,
+    "runtime_classpath_fingerprints_unchanged": true,
+    "engine_files": 35600,
+    "engine_source_bytes": 221249866,
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "all_gem_products_rebound": true,
+    "all_java_products_rebound": true,
+    "semantic_equivalence_regression": "A mixed providerless/provider-aware two-batch project plus bounded replay has the same engine semantic-context fingerprint as a fully providerless project pass plus full exact replay.",
+    "full_root_library_tests": 1314,
+    "full_root_library_failures": 0
+  },
+  "decision": "Accepted. The generation-local provider handoff eliminates replay for every later provider-aware batch while retaining exact replay for earlier files. The two warm repeats preserve source, runtime, dependency-product, and definition provenance; median terminal wall improves 3.642%, active semantic completion improves 9.033%, and median RSS falls 1.212% while remaining under the explicit ceiling. The slice does not close the 15-second exhaustive-workspace or five-second active-semantic targets."
+}

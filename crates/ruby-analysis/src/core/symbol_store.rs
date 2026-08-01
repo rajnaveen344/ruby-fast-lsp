@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use super::file_owned_index::place_appended_file_facts;
 use super::memory_estimate::{map_table_bytes, vec_payload_bytes};
 use crate::{FqnId, FullyQualifiedName, SourceFileId, TextRange};
 
@@ -171,16 +172,36 @@ impl SymbolStore {
                  Fix: partition facts by SourceFileId before replacing."
             );
             let key = fact.fqn;
-            if !touched_fqns.contains(&key) {
-                touched_fqns.push(key);
+            if let Some((_, appended_count)) =
+                touched_fqns.iter_mut().find(|(touched, _)| *touched == key)
+            {
+                *appended_count += 1;
+            } else {
+                touched_fqns.push((key, 1));
             }
             let id = self.insert_fact(fact);
             self.facts_by_fqn.entry(key).or_default().push(id);
             self.facts_by_file.entry(file_id).or_default().push(id);
         }
-        for fqn in touched_fqns {
+        for (fqn, appended_count) in touched_fqns {
             if let Some(ids) = self.facts_by_fqn.get_mut(&fqn) {
-                sort_symbol_ids(&self.facts, ids);
+                place_appended_file_facts(
+                    ids,
+                    appended_count,
+                    file_id,
+                    |id| {
+                        self.facts[id.0]
+                            .as_ref()
+                            .expect(
+                                "INVARIANT VIOLATED: symbol index points to missing fact. \
+                                 This is a bug because indexes must be removed before arena facts. \
+                                 Fix: remove stale ids from every SymbolStore index.",
+                            )
+                            .range
+                            .file_id
+                    },
+                    |appended| sort_symbol_ids(&self.facts, appended),
+                );
                 ids.shrink_to_fit();
             }
         }

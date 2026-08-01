@@ -1,5 +1,7 @@
 use ruby_analysis::core::SourceKind;
 use ruby_fast_lsp_extension_api::{LockedGem, LockedGemSource, ProjectContext, ProjectSourceKind};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -20,6 +22,18 @@ pub(crate) struct ProjectContextSeed {
     pub workspace_trusted: bool,
     pub ruby_version: Option<String>,
     snapshot: LockedGemSnapshot,
+    applicability_fingerprint: ExtensionApplicabilityFingerprint,
+    #[cfg(test)]
+    applicability_fingerprint_computations: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExtensionApplicabilityFingerprint([u8; 32]);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProjectContextSnapshot {
+    pub context: ProjectContext,
+    pub applicability_fingerprint: ExtensionApplicabilityFingerprint,
 }
 
 impl ProjectContextSeed {
@@ -29,37 +43,115 @@ impl ProjectContextSeed {
         workspace_trusted: bool,
         ruby_version: Option<String>,
     ) -> Self {
+        let snapshot = locked_gem_snapshot(project_root);
         Self {
             project_uri,
             workspace_trusted,
             ruby_version,
-            snapshot: locked_gem_snapshot(project_root),
+            applicability_fingerprint: ExtensionApplicabilityFingerprint::from_snapshot(Some(
+                &snapshot,
+            )),
+            snapshot,
+            #[cfg(test)]
+            applicability_fingerprint_computations: 1,
         }
     }
 
     pub fn refresh_dependencies(&mut self, project_root: &Path) {
         self.snapshot = locked_gem_snapshot(project_root);
+        self.applicability_fingerprint =
+            ExtensionApplicabilityFingerprint::from_snapshot(Some(&self.snapshot));
+        #[cfg(test)]
+        {
+            self.applicability_fingerprint_computations += 1;
+        }
     }
 
+    #[cfg(test)]
     pub fn context(&self, source_uri: String, source_kind: SourceKind) -> ProjectContext {
-        ProjectContext {
-            project_uri: self.project_uri.clone(),
-            source_uri,
-            source_kind: match source_kind {
-                SourceKind::Project => ProjectSourceKind::Project,
-                SourceKind::Gem => ProjectSourceKind::Gem,
-                SourceKind::Stdlib => ProjectSourceKind::Stdlib,
-                SourceKind::Stub => ProjectSourceKind::Stub,
-                SourceKind::Signature => ProjectSourceKind::Signature,
-                SourceKind::External => ProjectSourceKind::Signature,
-                SourceKind::Excluded => ProjectSourceKind::Excluded,
+        self.context_snapshot(source_uri, source_kind).context
+    }
+
+    pub fn context_snapshot(
+        &self,
+        source_uri: String,
+        source_kind: SourceKind,
+    ) -> ProjectContextSnapshot {
+        ProjectContextSnapshot {
+            context: ProjectContext {
+                project_uri: self.project_uri.clone(),
+                source_uri,
+                source_kind: match source_kind {
+                    SourceKind::Project => ProjectSourceKind::Project,
+                    SourceKind::Gem => ProjectSourceKind::Gem,
+                    SourceKind::Stdlib => ProjectSourceKind::Stdlib,
+                    SourceKind::Stub => ProjectSourceKind::Stub,
+                    SourceKind::Signature => ProjectSourceKind::Signature,
+                    SourceKind::External => ProjectSourceKind::Signature,
+                    SourceKind::Excluded => ProjectSourceKind::Excluded,
+                },
+                workspace_trusted: self.workspace_trusted,
+                ruby_version: self.ruby_version.clone(),
+                lockfile_present: self.snapshot.lockfile_present,
+                locked_gems_complete: self.snapshot.complete,
+                locked_gems: self.snapshot.gems.clone(),
             },
-            workspace_trusted: self.workspace_trusted,
-            ruby_version: self.ruby_version.clone(),
-            lockfile_present: self.snapshot.lockfile_present,
-            locked_gems_complete: self.snapshot.complete,
-            locked_gems: self.snapshot.gems.clone(),
+            applicability_fingerprint: self.applicability_fingerprint,
         }
+    }
+
+    #[cfg(test)]
+    pub fn applicability_fingerprint(&self) -> ExtensionApplicabilityFingerprint {
+        self.applicability_fingerprint
+    }
+
+    #[cfg(test)]
+    fn applicability_fingerprint_computations(&self) -> u64 {
+        self.applicability_fingerprint_computations
+    }
+}
+
+impl ExtensionApplicabilityFingerprint {
+    pub fn from_project_context(project: Option<&ProjectContext>) -> Self {
+        Self::from_parts(project.map(|project| {
+            (
+                project.lockfile_present,
+                project.locked_gems_complete,
+                project.locked_gems.as_slice(),
+            )
+        }))
+    }
+
+    fn from_snapshot(snapshot: Option<&LockedGemSnapshot>) -> Self {
+        Self::from_parts(snapshot.map(|snapshot| {
+            (
+                snapshot.lockfile_present,
+                snapshot.complete,
+                snapshot.gems.as_slice(),
+            )
+        }))
+    }
+
+    fn from_parts(parts: Option<(bool, bool, &[LockedGem])>) -> Self {
+        #[derive(Serialize)]
+        struct ApplicabilityInput<'a> {
+            lockfile_present: bool,
+            locked_gems_complete: bool,
+            locked_gems: &'a [LockedGem],
+        }
+
+        let input =
+            parts.map(
+                |(lockfile_present, locked_gems_complete, locked_gems)| ApplicabilityInput {
+                    lockfile_present,
+                    locked_gems_complete,
+                    locked_gems,
+                },
+            );
+        let encoded = serde_json::to_vec(&input).expect(
+            "INVARIANT VIOLATED: extension applicability input failed serialization. This is a host ABI bug because locked gem applicability types derive Serialize. Fix: keep the semantic seed fingerprint limited to the exact fields used by extension applicability.",
+        );
+        Self(Sha256::digest(encoded).into())
     }
 }
 
@@ -252,5 +344,52 @@ GEM
         assert_eq!(second_context.source_kind, ProjectSourceKind::Gem);
         assert!(!second_context.workspace_trusted);
         assert_eq!(second_context.locked_gems[0].version, "3.13.1");
+    }
+
+    #[test]
+    fn applicability_fingerprint_is_computed_once_per_dependency_snapshot() {
+        let project = TempDir::new().expect("project temp directory must be created");
+        std::fs::write(
+            project.path().join("Gemfile.lock"),
+            "GEM\n  specs:\n    rspec-core (3.13.1)\n",
+        )
+        .expect("initial lockfile must be written");
+
+        let mut seed = ProjectContextSeed::detect(
+            "file:///umbrella/app".to_string(),
+            project.path(),
+            true,
+            Some("3.3".to_string()),
+        );
+        let initial_fingerprint = seed.applicability_fingerprint();
+        assert_eq!(seed.applicability_fingerprint_computations(), 1);
+
+        for source_uri in [
+            "file:///umbrella/app/lib/a.rb",
+            "file:///umbrella/app/lib/b.rb",
+            "file:///umbrella/app/spec/a_spec.rb",
+        ] {
+            let snapshot = seed.context_snapshot(source_uri.to_string(), SourceKind::Project);
+            assert_eq!(snapshot.applicability_fingerprint, initial_fingerprint);
+        }
+        assert_eq!(
+            seed.applicability_fingerprint_computations(),
+            1,
+            "per-file contexts must reuse the dependency snapshot fingerprint"
+        );
+
+        std::fs::write(
+            project.path().join("Gemfile.lock"),
+            "GEM\n  specs:\n    rspec-core (3.14.0)\n",
+        )
+        .expect("updated lockfile must be written");
+        seed.refresh_dependencies(project.path());
+
+        assert_ne!(seed.applicability_fingerprint(), initial_fingerprint);
+        assert_eq!(
+            seed.applicability_fingerprint_computations(),
+            2,
+            "one dependency refresh must compute exactly one replacement fingerprint"
+        );
     }
 }

@@ -7,6 +7,7 @@
 pub mod diagnostic_candidate_store;
 pub mod diagnostic_store;
 pub mod execution_context;
+mod file_owned_index;
 pub mod fqn_id;
 pub mod fully_qualified_name;
 pub mod graph_store;

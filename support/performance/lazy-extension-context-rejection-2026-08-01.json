@@ -1,0 +1,210 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Test whether delaying each project file's full extension ProjectContext until its first syntactically tracked extension call removes meaningful cold-indexing work.",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "scheduler_concurrency": 2,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "experiment": {
+    "shape": "A file-owned FactCollector host retained only the isolated ProjectContextSeed, source URI, and SourceKind. It materialized the full ProjectContext on the first registry-tracked call, after project semantic targets had already been seeded once for the batch.",
+    "correctness_boundary": "The context remained file-lifetime only; extension applicability, generated-owner identity, semantic patch validation, isolated engines, and source provenance remained unchanged.",
+    "focused_regression": {
+      "red": "A plain retained project file performed one extra ProjectContext materialization after the project semantic seed.",
+      "green": "A plain file performed zero additional materializations, while one RSpec-tracked file performed exactly one and retained its generated execution-context facts."
+    },
+    "full_lib_tests": {
+      "passed": 1350,
+      "failed": 0
+    }
+  },
+  "symbolized_profile": {
+    "baseline": {
+      "profile": "/tmp/ruby-fast-lsp-semantic-seed-v282-symbolized-profile.json.gz",
+      "symbols": "/tmp/ruby-fast-lsp-semantic-seed-v282-symbolized-profile.json.syms.json",
+      "application_cpu_us": 30453046,
+      "project_context_snapshot_inclusive_cpu_us": 56953,
+      "project_context_snapshot_percent": 0.187,
+      "direct_caller": "FileProcessor::collect_file_facts_as_with_resolution_output_owned"
+    },
+    "candidate": {
+      "profile": "/tmp/ruby-fast-lsp-lazy-extension-context-v283-symbolized-profile.json.gz",
+      "symbols": "/tmp/ruby-fast-lsp-lazy-extension-context-v283-symbolized-profile.json.syms.json",
+      "profiler_executable_sha256": "53d122af65b8a080bb4be944edcfb83570b334a1107cad71420b659fd46a4437",
+      "application_cpu_us": 29912853,
+      "project_context_snapshot_inclusive_cpu_us": 55331,
+      "project_context_snapshot_percent": 0.185,
+      "direct_caller": "ProjectFactCollectorHost::process_call_node"
+    },
+    "interpretation": "The target fell by only 1.622 ms of sampled CPU, or 2.85% of an already 0.19% path. GoshPosh project files commonly contain tracked names such as include, extend, before, or framework DSL calls, so the lazy branch still materialized the context across almost the entire corpus."
+  },
+  "controlled_ab": {
+    "baseline_executable": "/tmp/ruby-fast-lsp-profiler-semantic-seed-fingerprint",
+    "baseline_executable_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
+    "candidate_executable": "/tmp/ruby-fast-lsp-profiler-lazy-extension-context",
+    "candidate_executable_sha256": "14d40687f351d8fbdcd364adb3c43b3665fd642bbabe2046b221c56d82f9c37f",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "excluded_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-lazy-context-candidate-1.log",
+        "reason": "The bounded cache evicted and rebuilt 512 gem products, so it was not a fully warm comparison.",
+        "gem_hits": 88,
+        "gem_lookups": 600,
+        "wall_ms": 33197.872875
+      },
+      {
+        "baseline_path": "/tmp/ruby-fast-lsp-lazy-context-baseline-2.log",
+        "candidate_path": "/tmp/ruby-fast-lsp-lazy-context-candidate-2.log",
+        "reason": "The baseline half was a scheduling outlier: 19.576-second terminal wall and 12.052-second active project navigation versus about 13.1 and 5.2 seconds in every adjacent fully warm baseline. The complete pair was excluded before taking medians."
+      }
+    ],
+    "baseline_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-lazy-context-baseline-3.log",
+        "wall_ms": 13079.936166,
+        "user_cpu_ms": 24451.085,
+        "system_cpu_ms": 2506.933,
+        "peak_rss_bytes": 1680932864,
+        "active_project_navigation_ms": 5234,
+        "active_dependency_navigation_ms": 11375,
+        "active_semantic_complete_ms": 11407,
+        "live_project_probe_ms": 363,
+        "live_dependency_probe_ms": 1294
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-lazy-context-baseline-4.log",
+        "wall_ms": 13207.04175,
+        "user_cpu_ms": 24215.879,
+        "system_cpu_ms": 2578.528,
+        "peak_rss_bytes": 1463468032,
+        "active_project_navigation_ms": 5214,
+        "active_dependency_navigation_ms": 11492,
+        "active_semantic_complete_ms": 11533,
+        "live_project_probe_ms": 362,
+        "live_dependency_probe_ms": 1286
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-lazy-context-baseline-5.log",
+        "wall_ms": 13068.221125,
+        "user_cpu_ms": 24171.049,
+        "system_cpu_ms": 2473.454,
+        "peak_rss_bytes": 1884045312,
+        "active_project_navigation_ms": 5218,
+        "active_dependency_navigation_ms": 11330,
+        "active_semantic_complete_ms": 11368,
+        "live_project_probe_ms": 365,
+        "live_dependency_probe_ms": 1253
+      }
+    ],
+    "candidate_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-lazy-context-candidate-3.log",
+        "wall_ms": 13078.859875,
+        "user_cpu_ms": 24066.632,
+        "system_cpu_ms": 2530.363,
+        "peak_rss_bytes": 1451737088,
+        "active_project_navigation_ms": 5194,
+        "active_dependency_navigation_ms": 11404,
+        "active_semantic_complete_ms": 11448,
+        "live_project_probe_ms": 364,
+        "live_dependency_probe_ms": 1253
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-lazy-context-candidate-4.log",
+        "wall_ms": 12987.369833,
+        "user_cpu_ms": 23878.378,
+        "system_cpu_ms": 2544.555,
+        "peak_rss_bytes": 1717354496,
+        "active_project_navigation_ms": 5270,
+        "active_dependency_navigation_ms": 11549,
+        "active_semantic_complete_ms": 11587,
+        "live_project_probe_ms": 366,
+        "live_dependency_probe_ms": 1261
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-lazy-context-candidate-5.log",
+        "wall_ms": 12871.008708,
+        "user_cpu_ms": 24048.186,
+        "system_cpu_ms": 2484.197,
+        "peak_rss_bytes": 1834303488,
+        "active_project_navigation_ms": 5164,
+        "active_dependency_navigation_ms": 11296,
+        "active_semantic_complete_ms": 11331,
+        "live_project_probe_ms": 372,
+        "live_dependency_probe_ms": 1245
+      }
+    ],
+    "median": {
+      "baseline": {
+        "wall_ms": 13079.936166,
+        "user_cpu_ms": 24215.879,
+        "system_cpu_ms": 2506.933,
+        "peak_rss_bytes": 1680932864,
+        "active_project_navigation_ms": 5218,
+        "active_dependency_navigation_ms": 11375,
+        "active_semantic_complete_ms": 11407,
+        "live_project_probe_ms": 363,
+        "live_dependency_probe_ms": 1286
+      },
+      "candidate": {
+        "wall_ms": 12987.369833,
+        "user_cpu_ms": 24048.186,
+        "system_cpu_ms": 2530.363,
+        "peak_rss_bytes": 1717354496,
+        "active_project_navigation_ms": 5194,
+        "active_dependency_navigation_ms": 11404,
+        "active_semantic_complete_ms": 11448,
+        "live_project_probe_ms": 366,
+        "live_dependency_probe_ms": 1253
+      }
+    },
+    "change_percent": {
+      "wall_ms": -0.708,
+      "user_cpu_ms": -0.692,
+      "system_cpu_ms": 0.935,
+      "peak_rss_bytes": 2.167,
+      "active_project_navigation_ms": -0.46,
+      "active_dependency_navigation_ms": 0.255,
+      "active_semantic_complete_ms": 0.359,
+      "live_project_probe_ms": 0.826,
+      "live_dependency_probe_ms": -2.566
+    },
+    "maximum_candidate_peak_rss_bytes": 1834303488,
+    "minimum_candidate_rss_ceiling_headroom_bytes": -57457050
+  },
+  "correctness": {
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
+      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+    },
+    "semantic_export_manifest_sha256_all_six_valid_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
+    "persistent_gem_hits_per_run": 607,
+    "persistent_gem_lookups_per_run": 607,
+    "persistent_java_hits_per_run": 168,
+    "persistent_java_lookups_per_run": 168,
+    "definition_source_kinds": [
+      "Project",
+      "Gem"
+    ],
+    "panicked_resource_tasks": 0,
+    "resource_leaks_at_end": 0
+  },
+  "revert_proof": {
+    "restored_release_profiler_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
+    "accepted_baseline_profiler_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
+    "byte_identical": true
+  },
+  "decision": "Rejected and reverted. The candidate preserved exact semantics and improved median wall 0.708% and user CPU 0.692%, but those changes are below the noise threshold; active dependency readiness regressed 0.255%, active semantic completion regressed 0.359%, median RSS rose 2.167%, and one candidate exceeded the fixed RSS ceiling by 57.5 MB. The profile explains why: common tracked call names caused almost every real project file to materialize the full context anyway, reducing the target by only 1.622 ms. The ordinary release build after revert is byte-identical to the accepted baseline. Do not repeat per-file lazy context materialization without first narrowing the syntactic tracking set or replacing the full ABI context with an independently proven compact projection."
+}

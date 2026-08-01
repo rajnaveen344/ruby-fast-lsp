@@ -6,6 +6,8 @@
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use rbs_parser::{Loader, RbsType};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::core::FullyQualifiedName;
 use crate::core::RubyConstant;
@@ -37,6 +39,18 @@ static RBS_LOADER: Lazy<RwLock<Loader>> = Lazy::new(|| {
     );
     RwLock::new(loader)
 });
+
+#[derive(Default)]
+struct RbsMethodNameCache {
+    instance: HashMap<String, Arc<HashSet<String>>>,
+    singleton: HashMap<String, Arc<HashSet<String>>>,
+}
+
+/// The embedded RBS environment is immutable after initialization. Cache only
+/// declared owners, so this process-wide cache is bounded by the finite set of
+/// embedded declarations rather than arbitrary source identifiers.
+static RBS_METHOD_NAMES: Lazy<RwLock<RbsMethodNameCache>> =
+    Lazy::new(|| RwLock::new(RbsMethodNameCache::default()));
 
 /// Get the return type of a method from RBS definitions
 pub fn get_rbs_method_return_type(
@@ -369,8 +383,8 @@ pub struct RbsMethodInfo {
 pub fn get_rbs_class_methods(class_name: &str, include_singleton: bool) -> Vec<RbsMethodInfo> {
     let loader = RBS_LOADER.read();
     let mut methods = Vec::new();
-    let mut seen_methods = std::collections::HashSet::new();
-    let mut visited = std::collections::HashSet::new();
+    let mut seen_methods = HashSet::new();
+    let mut visited = HashSet::new();
 
     collect_rbs_methods_recursive(
         &loader,
@@ -382,6 +396,62 @@ pub fn get_rbs_class_methods(class_name: &str, include_singleton: bool) -> Vec<R
     );
 
     methods
+}
+
+pub fn rbs_class_method_exists(
+    class_name: &str,
+    method_name: &str,
+    include_singleton: bool,
+) -> bool {
+    rbs_method_name_catalog(class_name, include_singleton).contains(method_name)
+}
+
+fn rbs_method_name_catalog(class_name: &str, include_singleton: bool) -> Arc<HashSet<String>> {
+    {
+        let cache = RBS_METHOD_NAMES.read();
+        let catalogs = if include_singleton {
+            &cache.singleton
+        } else {
+            &cache.instance
+        };
+        if let Some(catalog) = catalogs.get(class_name) {
+            return Arc::clone(catalog);
+        }
+    }
+
+    // Hold the write lock through construction so concurrent project indexers
+    // single-flight the first catalog build instead of duplicating the same
+    // recursive RBS traversal.
+    let mut cache = RBS_METHOD_NAMES.write();
+    let catalogs = if include_singleton {
+        &mut cache.singleton
+    } else {
+        &mut cache.instance
+    };
+    if let Some(catalog) = catalogs.get(class_name) {
+        return Arc::clone(catalog);
+    }
+
+    let loader = RBS_LOADER.read();
+    let owner_is_declared =
+        loader.get_class(class_name).is_some() || loader.get_module(class_name).is_some();
+    if !owner_is_declared {
+        return Arc::new(HashSet::new());
+    }
+
+    let mut method_names = HashSet::new();
+    let mut visited = HashSet::new();
+    collect_rbs_method_names_recursive(
+        &loader,
+        class_name,
+        include_singleton,
+        &mut method_names,
+        &mut visited,
+    );
+
+    let catalog = Arc::new(method_names);
+    catalogs.insert(class_name.to_string(), Arc::clone(&catalog));
+    catalog
 }
 
 /// Extract a class/module name from an RbsType (used for ancestor resolution)
@@ -489,6 +559,103 @@ fn collect_rbs_methods_recursive(
                         visited,
                     );
                 }
+            }
+        }
+    }
+}
+
+fn collect_rbs_method_names_recursive(
+    loader: &Loader,
+    class_name: &str,
+    include_singleton: bool,
+    method_names: &mut HashSet<String>,
+    visited: &mut HashSet<String>,
+) {
+    if !visited.insert(class_name.to_string()) {
+        return;
+    }
+
+    if let Some(class) = loader.get_class(class_name) {
+        collect_method_names_from_decl(&class.methods, include_singleton, method_names);
+        collect_alias_names_from_members(&class.members, include_singleton, method_names);
+
+        for member in &class.members {
+            if let rbs_parser::Member::Include(module_type) = member {
+                if let Some(module_name) = rbs_type_to_class_name(module_type) {
+                    collect_rbs_method_names_recursive(
+                        loader,
+                        &module_name,
+                        include_singleton,
+                        method_names,
+                        visited,
+                    );
+                }
+            }
+        }
+
+        if let Some(superclass) = &class.superclass {
+            if let Some(parent_name) = rbs_type_to_class_name(superclass) {
+                collect_rbs_method_names_recursive(
+                    loader,
+                    &parent_name,
+                    include_singleton,
+                    method_names,
+                    visited,
+                );
+            }
+        } else if class_name != "BasicObject" {
+            collect_rbs_method_names_recursive(
+                loader,
+                "Object",
+                include_singleton,
+                method_names,
+                visited,
+            );
+        }
+    }
+
+    if let Some(module) = loader.get_module(class_name) {
+        collect_method_names_from_decl(&module.methods, include_singleton, method_names);
+        collect_alias_names_from_members(&module.members, include_singleton, method_names);
+
+        for member in &module.members {
+            if let rbs_parser::Member::Include(module_type) = member {
+                if let Some(module_name) = rbs_type_to_class_name(module_type) {
+                    collect_rbs_method_names_recursive(
+                        loader,
+                        &module_name,
+                        include_singleton,
+                        method_names,
+                        visited,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn collect_method_names_from_decl(
+    method_decls: &[rbs_parser::MethodDecl],
+    include_singleton: bool,
+    method_names: &mut HashSet<String>,
+) {
+    for method in method_decls {
+        let is_singleton = method.kind == rbs_parser::MethodKind::Singleton;
+        if !is_singleton || include_singleton {
+            method_names.insert(method.name.clone());
+        }
+    }
+}
+
+fn collect_alias_names_from_members(
+    members: &[rbs_parser::Member],
+    include_singleton: bool,
+    method_names: &mut HashSet<String>,
+) {
+    for member in members {
+        if let rbs_parser::Member::Alias(alias) = member {
+            if !alias.is_singleton || include_singleton {
+                method_names.insert(alias.new_name.clone());
             }
         }
     }
@@ -777,6 +944,31 @@ mod tests {
         assert!(
             method_names.contains(&"tap"),
             "Should have Kernel#tap (inherited)"
+        );
+    }
+
+    #[test]
+    fn rbs_method_catalog_is_shared_and_preserves_inherited_aliases() {
+        let first = rbs_method_name_catalog("String", false);
+        let second = rbs_method_name_catalog("String", false);
+
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &second),
+            "INVARIANT VIOLATED: repeated immutable RBS catalog queries rebuilt String. \
+             This is a bug because the embedded RBS environment cannot change at runtime. \
+             Fix: share one catalog per declared RBS owner and singleton mode."
+        );
+        assert!(
+            first.contains("tap"),
+            "INVARIANT VIOLATED: cached String methods lost inherited Kernel#tap. \
+             This is a bug because caching must preserve the complete RBS ancestor lookup. \
+             Fix: construct the cache entry through the ordinary recursive collector."
+        );
+        assert!(
+            first.contains("object_id"),
+            "INVARIANT VIOLATED: cached String methods lost the Kernel#object_id alias. \
+             This is a bug because cached and uncached RBS lookup must be semantically identical. \
+             Fix: retain alias collection when constructing a cache entry."
         );
     }
 

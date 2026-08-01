@@ -76,6 +76,39 @@ impl RubyConstant {
         Self(owner.0)
     }
 
+    pub(crate) fn from_canonical_generated_owner(identity: &str) -> Result<Self, &'static str> {
+        let Some(mut remainder) = identity.strip_prefix(GENERATED_OWNER_PREFIX) else {
+            return Err("Generated owner identity lacks its reserved prefix");
+        };
+        let mut components = Vec::with_capacity(3);
+        for _ in 0..3 {
+            let Some(colon) = remainder.find(':') else {
+                return Err("Generated owner identity lacks a component length delimiter");
+            };
+            let length = remainder[..colon]
+                .parse::<usize>()
+                .map_err(|_| "Generated owner identity has an invalid component length")?;
+            if length == 0 || length > MAX_GENERATED_OWNER_COMPONENT_BYTES {
+                return Err("Generated owner identity component length is out of bounds");
+            }
+            remainder = &remainder[colon + 1..];
+            if length > remainder.len() || !remainder.is_char_boundary(length) {
+                return Err("Generated owner identity component length splits its encoded value");
+            }
+            let (component, tail) = remainder.split_at(length);
+            components.push(component);
+            remainder = tail;
+        }
+        if !remainder.is_empty() {
+            return Err("Generated owner identity contains trailing bytes");
+        }
+        let canonical = GeneratedOwnerId::new(components[0], components[1], components[2])?;
+        if canonical.as_str() != identity {
+            return Err("Generated owner identity is not canonically encoded");
+        }
+        Ok(Self(canonical.0))
+    }
+
     pub fn is_generated_owner(&self) -> bool {
         self.0.as_str().starts_with(GENERATED_OWNER_PREFIX)
     }

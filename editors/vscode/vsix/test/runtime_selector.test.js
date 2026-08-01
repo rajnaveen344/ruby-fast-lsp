@@ -250,8 +250,56 @@ test('renders exact runtime identity and indexing state for the status bar', () 
         compatibilityVersion: '3.3',
         indexingComplete: false
     }), {
-        text: '$(sync~spin) Auto: MRI 3.3.11',
-        tooltip: 'server: Auto → MRI 3.3.11 — indexing'
+        text: '$(sync~spin) server: indexing 0.0s / 5s',
+        tooltip: 'server: indexing — 0.0s / 5s'
+    });
+});
+
+test('renders authoritative project phases, deadlines, and terminal failures', () => {
+    assert.deepEqual(runtimeStatusPresentation({
+        root: '/repo/admin',
+        mode: 'explicit',
+        implementation: 'jruby',
+        engineVersion: '9.2.21.0',
+        compatibilityVersion: '2.5',
+        indexing: {
+            generation: 3,
+            sequence: 9,
+            phase: 'indexingProject',
+            completed: 120,
+            total: 300,
+            elapsedMs: 3200
+        }
+    }), {
+        text: '$(sync~spin) admin: project 3.2s / 5s',
+        tooltip: 'admin: project 120/300 — 3.2s / 5s'
+    });
+
+    assert.deepEqual(runtimeStatusPresentation({
+        root: '/repo/admin',
+        indexing: {
+            generation: 3,
+            sequence: 10,
+            phase: 'indexingDependencies',
+            elapsedMs: 18100
+        }
+    }), {
+        text: '$(warning) admin: slow indexing · 18s',
+        tooltip: 'admin: dependencies — 18s / 15s (target exceeded)'
+    });
+
+    assert.deepEqual(runtimeStatusPresentation({
+        root: '/repo/admin',
+        indexing: {
+            generation: 3,
+            sequence: 11,
+            phase: 'failed',
+            elapsedMs: 19000,
+            failure: 'Gemfile.lock could not be read'
+        }
+    }), {
+        text: '$(warning) admin: indexing failed',
+        tooltip: 'admin: Gemfile.lock could not be read'
     });
 });
 

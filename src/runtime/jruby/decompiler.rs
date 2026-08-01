@@ -17,7 +17,9 @@ use walkdir::WalkDir;
 
 pub const CFR_VERSION: &str = "0.152";
 pub const CFR_SHA256: &str = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
-const CFR_OPTIONS_ID: &str = "cfr-0.152|silent=true|comments=false|heap=256m|locale=C|v1";
+const CFR_OPTIONS_ID: &str = "cfr-0.152|silent=true|comments=false|heap=128m|direct=32m|metaspace=96m|code-cache=32m|compressed-class=16m|resident=256m|locale=C|v2";
+const MIB: u64 = 1024 * 1024;
+const DEFAULT_MAX_PROCESS_RESIDENT_BYTES: u64 = 256 * MIB;
 static ACTIVE_DECOMPILERS: AtomicUsize = AtomicUsize::new(0);
 static DECOMPILATION_RUN_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -38,6 +40,7 @@ pub struct JavaDecompilerLimits {
     pub max_generated_files: usize,
     pub max_generated_bytes: u64,
     pub max_parallel_processes: usize,
+    pub max_process_resident_bytes: u64,
     pub timeout: Duration,
 }
 
@@ -52,6 +55,7 @@ impl Default for JavaDecompilerLimits {
             max_generated_files: 256,
             max_generated_bytes: 32 * 1024 * 1024,
             max_parallel_processes: 2,
+            max_process_resident_bytes: DEFAULT_MAX_PROCESS_RESIDENT_BYTES,
             timeout: Duration::from_secs(10),
         }
     }
@@ -63,10 +67,21 @@ pub enum JavaDecompilerError {
     MissingAsset(PathBuf),
     AssetFingerprintMismatch(PathBuf),
     ArtifactFingerprintMismatch(PathBuf),
-    Read { path: PathBuf, message: String },
-    InvalidArchive { path: PathBuf, message: String },
+    Read {
+        path: PathBuf,
+        message: String,
+    },
+    InvalidArchive {
+        path: PathBuf,
+        message: String,
+    },
     LimitExceeded(&'static str),
     ProcessLimit,
+    ProcessMemoryInspection(String),
+    ProcessMemoryLimitExceeded {
+        limit_bytes: u64,
+        observed_bytes: u64,
+    },
     Spawn(String),
     Timeout,
     AbnormalExit(Option<i32>),
@@ -96,7 +111,7 @@ pub fn discover_bundled_cfr_asset() -> Result<JavaDecompilerAsset, JavaDecompile
             }
         }
     }
-    if cfg!(debug_assertions) {
+    if cfg!(any(debug_assertions, test)) {
         candidates.push(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("support/jruby/decompiler/cfr-0.152.jar"),
@@ -145,6 +160,12 @@ impl JavaDecompiler {
             "INVARIANT VIOLATED: Java decompiler timeout is zero. \
              This is a configuration bug because every valid process would time out before launch. \
              Fix: configure a positive bounded wall-clock timeout."
+        );
+        assert!(
+            limits.max_process_resident_bytes > 0,
+            "INVARIANT VIOLATED: Java decompiler resident-memory limit is zero. \
+             This is a configuration bug because no valid JVM child could remain below the limit. \
+             Fix: configure a positive measured resident-memory bound."
         );
         Ok(Self {
             java_executable,
@@ -236,6 +257,7 @@ impl JavaDecompiler {
             &output_root,
             &work_root,
             self.limits.timeout,
+            self.limits.max_process_resident_bytes,
         )?;
         let Some((_generated_path, content, location)) =
             find_verified_output(&output_root, declaration, self.limits)?
@@ -491,9 +513,14 @@ fn run_cfr(
     output_root: &Path,
     work_root: &Path,
     timeout: Duration,
+    max_process_resident_bytes: u64,
 ) -> Result<(), JavaDecompilerError> {
     let mut child = Command::new(java_executable)
-        .arg("-Xmx256m")
+        .arg("-Xmx128m")
+        .arg("-XX:MaxDirectMemorySize=32m")
+        .arg("-XX:MaxMetaspaceSize=96m")
+        .arg("-XX:ReservedCodeCacheSize=32m")
+        .arg("-XX:CompressedClassSpaceSize=16m")
         .arg("-Duser.language=en")
         .arg("-Duser.country=US")
         .arg("-Dfile.encoding=UTF-8")
@@ -519,6 +546,20 @@ fn run_cfr(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| JavaDecompilerError::Spawn(error.to_string()))?;
+    wait_for_bounded_child(&mut child, timeout, max_process_resident_bytes)
+}
+
+fn wait_for_bounded_child(
+    child: &mut std::process::Child,
+    timeout: Duration,
+    max_process_resident_bytes: u64,
+) -> Result<(), JavaDecompilerError> {
+    assert!(
+        max_process_resident_bytes > 0,
+        "INVARIANT VIOLATED: bounded child wait received a zero resident-memory limit. \
+         This is a bug because every live process would violate the limit. \
+         Fix: validate a positive process limit before spawning the JVM."
+    );
     let started = Instant::now();
     loop {
         if let Some(status) = child
@@ -531,13 +572,148 @@ fn run_cfr(
                 Err(JavaDecompilerError::AbnormalExit(status.code()))
             };
         }
+        let resident_bytes = match resident_memory_bytes(child.id()) {
+            Ok(Some(resident_bytes)) => resident_bytes,
+            Ok(None) => {
+                thread::sleep(Duration::from_millis(1));
+                continue;
+            }
+            Err(message) => {
+                terminate_and_reap(child);
+                return Err(JavaDecompilerError::ProcessMemoryInspection(message));
+            }
+        };
+        if resident_bytes > max_process_resident_bytes {
+            terminate_and_reap(child);
+            return Err(JavaDecompilerError::ProcessMemoryLimitExceeded {
+                limit_bytes: max_process_resident_bytes,
+                observed_bytes: resident_bytes,
+            });
+        }
         if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_and_reap(child);
             return Err(JavaDecompilerError::Timeout);
         }
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn terminate_and_reap(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(target_os = "macos")]
+fn resident_memory_bytes(pid: u32) -> Result<Option<u64>, String> {
+    let pid = i32::try_from(pid)
+        .map_err(|_| format!("child process ID `{pid}` does not fit macOS pid_t"))?;
+    let mut task_info = std::mem::MaybeUninit::<libc::proc_taskinfo>::zeroed();
+    let expected_size = std::mem::size_of::<libc::proc_taskinfo>();
+    let buffer_size = i32::try_from(expected_size)
+        .map_err(|_| "macOS proc_taskinfo size does not fit c_int".to_string())?;
+    let returned = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTASKINFO,
+            0,
+            task_info.as_mut_ptr().cast(),
+            buffer_size,
+        )
+    };
+    if returned == 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(None)
+        } else {
+            Err(format!("proc_pidinfo failed for child {pid}: {error}"))
+        };
+    }
+    if returned != buffer_size {
+        return Err(format!(
+            "proc_pidinfo returned {returned} bytes for child {pid}; expected {buffer_size}"
+        ));
+    }
+    let task_info = unsafe { task_info.assume_init() };
+    Ok(Some(task_info.pti_resident_size))
+}
+
+#[cfg(target_os = "linux")]
+fn resident_memory_bytes(pid: u32) -> Result<Option<u64>, String> {
+    let statm_path = PathBuf::from(format!("/proc/{pid}/statm"));
+    let statm = match fs::read_to_string(&statm_path) {
+        Ok(statm) => statm,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("failed to read {}: {error}", statm_path.display())),
+    };
+    let resident_pages = statm
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| format!("{} has no resident-page field", statm_path.display()))?
+        .parse::<u64>()
+        .map_err(|error| {
+            format!(
+                "{} has an invalid resident-page field: {error}",
+                statm_path.display()
+            )
+        })?;
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if page_size <= 0 {
+        return Err(format!(
+            "sysconf(_SC_PAGESIZE) failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let page_size = u64::try_from(page_size)
+        .map_err(|_| format!("negative page size `{page_size}` escaped validation"))?;
+    resident_pages
+        .checked_mul(page_size)
+        .map(Some)
+        .ok_or_else(|| format!("resident bytes overflowed for child {pid}"))
+}
+
+#[cfg(target_os = "windows")]
+fn resident_memory_bytes(pid: u32) -> Result<Option<u64>, String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    };
+
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid) };
+    if handle.is_null() {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(87) {
+            Ok(None)
+        } else {
+            Err(format!("OpenProcess failed for child {pid}: {error}"))
+        };
+    }
+    let mut counters = std::mem::MaybeUninit::<PROCESS_MEMORY_COUNTERS>::zeroed();
+    let size = u32::try_from(std::mem::size_of::<PROCESS_MEMORY_COUNTERS>())
+        .map_err(|_| "PROCESS_MEMORY_COUNTERS size does not fit u32".to_string())?;
+    let succeeded = unsafe { GetProcessMemoryInfo(handle, counters.as_mut_ptr(), size) };
+    unsafe {
+        CloseHandle(handle);
+    }
+    if succeeded == 0 {
+        return Err(format!(
+            "GetProcessMemoryInfo failed for child {pid}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let counters = unsafe { counters.assume_init() };
+    u64::try_from(counters.WorkingSetSize)
+        .map(Some)
+        .map_err(|_| format!("working-set size for child {pid} does not fit u64"))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn resident_memory_bytes(pid: u32) -> Result<Option<u64>, String> {
+    Err(format!(
+        "resident-memory enforcement is unavailable for child {pid} on this operating system"
+    ))
 }
 
 fn find_verified_output(
@@ -713,6 +889,10 @@ mod tests {
         let jar = fixture_jar(&class);
         let path = root.join("rich.jar");
         fs::write(&path, &jar).unwrap();
+        let file_identity = crate::runtime::jruby::classpath::SourceFileIdentity {
+            byte_length: jar.len() as u64,
+            modified: fs::metadata(&path).unwrap().modified().unwrap(),
+        };
         let classpath = ProjectClasspath {
             project_root: root.to_path_buf(),
             artifacts: vec![ClasspathArtifact {
@@ -721,6 +901,7 @@ mod tests {
                 kind: ArtifactKind::Jar,
                 fingerprint_sha256: format!("{:x}", Sha256::digest(&jar)),
                 byte_length: jar.len() as u64,
+                file_identity,
             }],
             sources: Vec::new(),
             unresolved: Vec::new(),
@@ -817,6 +998,44 @@ mod tests {
         assert_eq!(
             decompiler.decompile(&declaration),
             Err(JavaDecompilerError::AssetFingerprintMismatch(asset.path))
+        );
+    }
+
+    #[test]
+    fn default_limits_bound_total_decompiler_resident_memory() {
+        assert_eq!(
+            JavaDecompilerLimits::default().max_process_resident_bytes,
+            256 * 1024 * 1024,
+            "the JVM child must fit the same conservative 256 MiB resource claim used by JRuby indexing and interactive materialization"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn child_exceeding_resident_memory_limit_is_killed_and_reaped() {
+        let mut child = Command::new("sleep")
+            .arg("5")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the platform sleep command must launch");
+
+        let result = wait_for_bounded_child(&mut child, Duration::from_secs(2), 1);
+
+        assert!(
+            matches!(
+                result,
+                Err(JavaDecompilerError::ProcessMemoryLimitExceeded {
+                    limit_bytes: 1,
+                    observed_bytes
+                }) if observed_bytes > 1
+            ),
+            "the resident-memory monitor must report the measured overage: {result:?}"
+        );
+        assert!(
+            child.try_wait().unwrap().is_some(),
+            "a memory-limited child must be reaped before the error is returned"
         );
     }
 }

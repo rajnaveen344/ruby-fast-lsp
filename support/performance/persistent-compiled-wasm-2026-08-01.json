@@ -1,0 +1,222 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Persist exact compiled Wasmtime extension modules so fresh Ruby Fast LSP processes do not recompile identical bundled or user-installed Wasm while preserving project-isolated guest state and analysis engines.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "profiler_executable_sha256": "3cb9d2f638de282ab47c886351ce8141e30def95ec0aa2208ede73f1f962c1a2",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_gem_products": "fully warm fresh-process hits",
+    "persistent_java_products": "fully warm fresh-process hits",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "previous_accepted_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "profile": "/tmp/ruby-fast-lsp-post-dual-lane-v109-profile.json.gz",
+    "profile_sha256": "f12a3a5445aa1abdde2e66643c52478af5c3013d547762b59a2fab227ea60d46",
+    "compiled_wasm_from_file_cpu_seconds": 2.507,
+    "finding": "Fresh processes rebuilt all five unchanged framework modules before project discovery. This was an immutable, checksum-addressable startup product independent of project semantic ownership."
+  },
+  "change": {
+    "discovery": "Each Wasm source is read once per discovery generation and the same immutable bytes drive discovery fingerprinting, manifest checksum validation, product identity, and compilation.",
+    "identity": "The product key includes the exact source length and SHA-256 plus Wasmtime's target/compiler/config precompile compatibility hash and Ruby Fast LSP's compiled-product schema.",
+    "validation": "A private persistent envelope and nested payload verify magic, schema, bounded lengths, envelope checksum, source identity, compiler identity, artifact length, and artifact checksum before unsafe Wasmtime deserialization.",
+    "recovery": "A rejected native artifact is invalidated under the exact cross-process key lock and rebuilt once from the already validated Wasm source. Any cache lookup, serialization, publication, or invalidation failure falls back to a valid in-memory compilation.",
+    "bounds": {
+      "source_bytes": 67108864,
+      "compiled_logical_payload_bytes": 67108864,
+      "global_entries": 4096,
+      "global_physical_bytes": 2147483648,
+      "permissions_unix": "0600"
+    },
+    "isolation": "A loaded extension shares only its immutable engine/module and one epoch ticker. Every project instance has an independent Wasmtime store, memory, resource limits, WASI context, and mutable guest state; every Ruby project retains its own AnalysisEngine and extension facts."
+  },
+  "cold_producer": {
+    "id": "v118",
+    "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-final-cold-v118.jsonl",
+    "log": "/tmp/ruby-fast-lsp-compiled-wasm-final-cold-v118.log",
+    "extension_load_ms": 2845.492667,
+    "lookups": 5,
+    "hits": 0,
+    "producers": 5,
+    "publications": 5,
+    "physical_write_bytes": 3269604,
+    "logical_artifact_bytes": 7991164,
+    "wall_ms": 17079.3565,
+    "peak_rss_bytes": 1711931392,
+    "user_cpu_ms": 33993.02,
+    "active_semantic_complete_ms": 14509,
+    "project_navigation_ms": 515,
+    "dependency_navigation_ms": 1456
+  },
+  "ordinary_warm_repeats": {
+    "raw_local_evidence": [
+      {
+        "id": "v119",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-final-warm-v119.jsonl",
+        "extension_load_ms": 143.624209,
+        "wall_ms": 16581.156834,
+        "peak_rss_bytes": 1704525824,
+        "user_cpu_ms": 33652.934,
+        "active_semantic_complete_ms": 13908,
+        "project_navigation_ms": 388,
+        "dependency_navigation_ms": 1512
+      },
+      {
+        "id": "v120",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-final-warm-v120.jsonl",
+        "extension_load_ms": 141.673916,
+        "wall_ms": 16566.491709,
+        "peak_rss_bytes": 1667825664,
+        "user_cpu_ms": 34027.205,
+        "active_semantic_complete_ms": 13897,
+        "project_navigation_ms": 384,
+        "dependency_navigation_ms": 1342
+      },
+      {
+        "id": "v121",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-final-warm-v121.jsonl",
+        "extension_load_ms": 142.285041,
+        "wall_ms": 16473.793791,
+        "peak_rss_bytes": 2024833024,
+        "user_cpu_ms": 34066.846,
+        "active_semantic_complete_ms": 13798,
+        "project_navigation_ms": 387,
+        "dependency_navigation_ms": 1369
+      },
+      {
+        "id": "v123",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-final-warm-v123.jsonl",
+        "extension_load_ms": 157.666875,
+        "wall_ms": 16878.802167,
+        "peak_rss_bytes": 1881063424,
+        "user_cpu_ms": 33765.395,
+        "active_semantic_complete_ms": 14023,
+        "project_navigation_ms": 383,
+        "dependency_navigation_ms": 1826
+      },
+      {
+        "id": "v124",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-final-warm-v124.jsonl",
+        "extension_load_ms": 146.053583,
+        "wall_ms": 16392.064292,
+        "peak_rss_bytes": 2025373696,
+        "user_cpu_ms": 33834.645,
+        "active_semantic_complete_ms": 13772,
+        "project_navigation_ms": 382,
+        "dependency_navigation_ms": 1379
+      }
+    ],
+    "median": {
+      "extension_load_ms": 143.624209,
+      "wall_ms": 16566.491709,
+      "peak_rss_bytes": 1881063424,
+      "user_cpu_ms": 33834.645,
+      "active_semantic_complete_ms": 13897,
+      "project_navigation_ms": 384,
+      "dependency_navigation_ms": 1379
+    },
+    "cache": {
+      "lookups": 5,
+      "hits": 5,
+      "producers": 0,
+      "physical_read_bytes": 3269604,
+      "logical_read_bytes": 7991164
+    }
+  },
+  "controlled_cold_warm_pairs": [
+    {
+      "cold": {
+        "id": "v127",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-paired-cold-v127 128.jsonl",
+        "extension_load_ms": 2772.928166,
+        "wall_ms": 16493.251875,
+        "peak_rss_bytes": 1671544832,
+        "user_cpu_ms": 33719.011
+      },
+      "warm": {
+        "id": "v128",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-paired-warm-v.jsonl",
+        "extension_load_ms": 140.71725,
+        "wall_ms": 16330.099916,
+        "peak_rss_bytes": 1538375680,
+        "user_cpu_ms": 33489.057
+      },
+      "warm_minus_cold_peak_rss_bytes": -133169152,
+      "warm_minus_cold_wall_ms": -163.151959
+    },
+    {
+      "cold": {
+        "id": "v129",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-paired-cold-v129.jsonl",
+        "extension_load_ms": 2712.185875,
+        "wall_ms": 17103.264584,
+        "peak_rss_bytes": 1822457856,
+        "user_cpu_ms": 34010.648
+      },
+      "warm": {
+        "id": "v130",
+        "jsonl": "/tmp/ruby-fast-lsp-compiled-wasm-paired-warm-v130.jsonl",
+        "extension_load_ms": 139.004083,
+        "wall_ms": 16532.2005,
+        "peak_rss_bytes": 1563066368,
+        "user_cpu_ms": 33773.988
+      },
+      "warm_minus_cold_peak_rss_bytes": -259391488,
+      "warm_minus_cold_wall_ms": -571.064084
+    }
+  ],
+  "controlled_pair_median": {
+    "cold_extension_load_ms": 2742.557021,
+    "warm_extension_load_ms": 139.860667,
+    "extension_load_change_percent": -94.9,
+    "warm_peak_rss_lower_in_every_pair": true,
+    "warm_wall_lower_in_every_pair": true
+  },
+  "correctness": {
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "manifest_hash_equal_for_all_cold_and_warm_runs": true,
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "persistent_gem_hits": 607,
+    "persistent_gem_lookups": 607,
+    "persistent_java_hits": 358,
+    "persistent_java_lookups": 358,
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "cache_files": 5,
+    "cache_physical_bytes": 3269604,
+    "cache_files_are_private": true,
+    "ruby_analysis_tests": 395,
+    "ruby_analysis_failures": 0,
+    "root_library_tests": 1325,
+    "root_library_failures": 0,
+    "wasm_host_tests": 13,
+    "wasm_host_failures": 0,
+    "vscode_indexing_status_tests": 10,
+    "vscode_indexing_status_failures": 0
+  },
+  "packaging": {
+    "extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "vsix": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "f5839105629e4bf2931e97426e899d257ba96f1816aecd002acfc9e295917675",
+    "packaged_binary_sha256": "5ef75a5ad6f8c49b5c4a20f0cc63b603e8958cfee2fa9f9e14a4c43633e56d24",
+    "installed_binary_sha256": "5ef75a5ad6f8c49b5c4a20f0cc63b603e8958cfee2fa9f9e14a4c43633e56d24",
+    "smoke": "passed for Rails, RSpec, Minitest, Sinatra, Cucumber, ERB host features, and verified JRuby implementation navigation"
+  },
+  "open_constraint": "The five ordinary warm repeats had a 1881063424-byte median peak RSS, above the previously fixed 1776846438-byte whole-workspace ceiling. The two controlled cold-to-warm pairs each reduced RSS, so the compiled-Wasm product is not the causal source of that variability. This slice does not accept the overall process-memory goal; future whole-workspace acceptance must still pass its fixed RSS budget.",
+  "decision": "Accepted as a narrow persistent compiled-Wasm product. Fresh-process extension loading improves 94.9% from a 2742.557 ms paired cold median to 139.861 ms warm, below the one-second startup target. Exact semantic manifests, project fingerprints, source kinds, gem/Java reuse, resource-release accounting, private disk ownership, and per-project guest isolation remain unchanged. Overall multi-root readiness remains below 9/10 because the 15-second workspace, five-second active-semantic, fixed RSS, invalidation, failure, and installed-client acceptance gates remain open."
+}

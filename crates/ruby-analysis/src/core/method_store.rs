@@ -256,6 +256,13 @@ pub struct StoredMethodFact {
     pub return_type_label: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StoredMethodFactMatch<'a> {
+    Missing,
+    Unique(&'a StoredMethodFact),
+    Ambiguous,
+}
+
 impl StoredMethodFact {
     pub fn new(fqn: FqnId, owner: FqnId, method: Option<RubyMethod>, range: TextRange) -> Self {
         Self {
@@ -373,6 +380,55 @@ impl MethodStore {
             .get(&(owner, *method))
             .map(|ids| self.clone_facts(ids))
             .unwrap_or_default()
+    }
+
+    /// Select the effective exact owner/name fact without cloning or expanding
+    /// the indexed candidates.
+    ///
+    /// The owner/name bucket is already kept in deterministic file/range/FQN
+    /// order. Exact duplicates are therefore adjacent, matching the previous
+    /// sort-and-dedup behavior after expansion. Runtime `Absent` facts mask the
+    /// method completely; otherwise `Unavailable` facts override available
+    /// declarations for the same exact method identity.
+    pub(crate) fn effective_fact_matching_owner_name(
+        &self,
+        owner: FqnId,
+        method: &RubyMethod,
+    ) -> StoredMethodFactMatch<'_> {
+        let Some(ids) = self.facts_by_owner_name.get(&(owner, *method)) else {
+            return StoredMethodFactMatch::Missing;
+        };
+        let indexed_fact = |id: &MethodFactId| {
+            self.fact(*id).expect(
+                "INVARIANT VIOLATED: method owner/name index points to a missing fact. \
+                 This is a bug because indexes must be cleared before arena facts. \
+                 Fix: remove every MethodFactId from owner/name indexes before freeing it.",
+            )
+        };
+
+        if ids
+            .iter()
+            .map(indexed_fact)
+            .any(|fact| matches!(fact.availability, MethodAvailability::Absent { .. }))
+        {
+            return StoredMethodFactMatch::Missing;
+        }
+        let unavailable_wins = ids
+            .iter()
+            .map(indexed_fact)
+            .any(|fact| matches!(fact.availability, MethodAvailability::Unavailable { .. }));
+        let mut effective = ids.iter().map(indexed_fact).filter(|fact| {
+            !unavailable_wins || matches!(fact.availability, MethodAvailability::Unavailable { .. })
+        });
+        let Some(first) = effective.next() else {
+            return StoredMethodFactMatch::Missing;
+        };
+        for fact in effective {
+            if fact != first {
+                return StoredMethodFactMatch::Ambiguous;
+            }
+        }
+        StoredMethodFactMatch::Unique(first)
     }
 
     pub fn method_names_for_owner(&self, owner: FqnId) -> Vec<&'static str> {
@@ -705,5 +761,92 @@ mod tests {
         assert_eq!(store.facts_for(fqn).len(), 1);
         assert_eq!(store.facts_for(fqn)[0].range.start_byte, 10);
         assert_eq!(store.facts_for(other_fqn).len(), 1);
+    }
+
+    #[test]
+    fn exact_owner_name_match_borrows_one_effective_fact_and_deduplicates() {
+        let fqn = FqnId(1);
+        let owner = FqnId(2);
+        let method = RubyMethod::new("call").unwrap();
+        let fact = StoredMethodFact::new(
+            fqn,
+            owner,
+            Some(method),
+            TextRange::new(SourceFileId(3), 4, 12),
+        );
+        let mut store = MethodStore::new();
+        store.add(fact.clone());
+        store.add(fact);
+
+        let match_result = store.effective_fact_matching_owner_name(owner, &method);
+        let StoredMethodFactMatch::Unique(selected) = match_result else {
+            panic!("identical stored method facts must collapse to one borrowed match")
+        };
+        let first_id = store.facts_by_owner_name[&(owner, method)][0];
+        assert!(std::ptr::eq(
+            selected,
+            store
+                .fact(first_id)
+                .expect("the indexed method fact must remain in the arena")
+        ));
+    }
+
+    #[test]
+    fn exact_owner_name_match_preserves_availability_and_ambiguity() {
+        let fqn = FqnId(1);
+        let owner = FqnId(2);
+        let method = RubyMethod::new("call").unwrap();
+        let mut available = StoredMethodFact::new(
+            fqn,
+            owner,
+            Some(method),
+            TextRange::new(SourceFileId(1), 0, 8),
+        );
+        let mut unavailable = StoredMethodFact::new(
+            fqn,
+            owner,
+            Some(method),
+            TextRange::new(SourceFileId(2), 0, 8),
+        );
+        unavailable.availability = MethodAvailability::Unavailable {
+            reason: "JRuby runtime API".to_string(),
+        };
+
+        let mut store = MethodStore::new();
+        store.add(available.clone());
+        store.add(unavailable);
+        assert!(matches!(
+            store.effective_fact_matching_owner_name(owner, &method),
+            StoredMethodFactMatch::Unique(fact)
+                if matches!(fact.availability, MethodAvailability::Unavailable { .. })
+        ));
+
+        available.range = TextRange::new(SourceFileId(3), 0, 8);
+        available.availability = MethodAvailability::Absent {
+            reason: "not defined by this runtime".to_string(),
+        };
+        store.add(available);
+        assert!(matches!(
+            store.effective_fact_matching_owner_name(owner, &method),
+            StoredMethodFactMatch::Missing
+        ));
+
+        let mut ambiguous = MethodStore::new();
+        ambiguous.add(StoredMethodFact::new(
+            fqn,
+            owner,
+            Some(method),
+            TextRange::new(SourceFileId(1), 0, 8),
+        ));
+        ambiguous.add(StoredMethodFact::new(
+            fqn,
+            owner,
+            Some(method),
+            TextRange::new(SourceFileId(2), 0, 8),
+        ));
+        assert!(matches!(
+            ambiguous.effective_fact_matching_owner_name(owner, &method),
+            StoredMethodFactMatch::Ambiguous
+        ));
     }
 }

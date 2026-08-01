@@ -50,6 +50,10 @@ async fn add_workspace_at_runtime_creates_a_new_index() {
 async fn remove_workspace_at_runtime_drops_it() {
     let editor = FakeEditor::new().await;
     editor.add_workspace("temporary");
+    let workspace = editor
+        .workspace_for("temporary/project.rb")
+        .expect("test workspace must be registered");
+    let active_run = workspace.indexing_status.begin_run();
     assert_eq!(editor.workspace_count(), 1);
 
     let params = DidChangeWorkspaceFoldersParams {
@@ -61,6 +65,10 @@ async fn remove_workspace_at_runtime_drops_it() {
     handle_did_change_workspace_folders(editor.server(), params).await;
 
     assert_eq!(editor.workspace_count(), 0);
+    assert!(
+        active_run.is_cancelled(),
+        "removing a workspace must cancel its queued or active indexing generation"
+    );
 }
 
 #[tokio::test]

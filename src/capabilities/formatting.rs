@@ -34,6 +34,7 @@ pub async fn handle_document_formatting(
         .unwrap_or_else(|| Path::new(".").to_path_buf());
     let formatted = match format_document(
         &config,
+        server.indexing_resources.clone(),
         &workspace_root,
         &file_path,
         &content,

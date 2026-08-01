@@ -3,9 +3,12 @@
 //! This module handles gem discovery and indexing for the Ruby Language Server.
 //! It supports both Bundler-based (Gemfile) and global gem discovery.
 
-use crate::indexer::coordinator::IndexingCoordinator;
+use crate::dependency_product::{
+    GemDependencyFileTemplate, GemDependencyManifest, GemDependencyProduct, GemDependencySource,
+};
 use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::version::ruby_version::RubyImplementation;
+use crate::indexing_resources::{IndexingResourcePriority, IndexingWorkSpec};
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
@@ -18,9 +21,12 @@ use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Cursor, Read};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::time::Instant;
 use tar::EntryType;
+use tokio_util::sync::CancellationToken;
 use tower_lsp::lsp_types::Url;
 use walkdir::WalkDir;
 
@@ -30,6 +36,8 @@ const MAX_CACHED_GEM_EXTRACTED_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_CACHED_GEM_FILES: usize = 100_000;
 const MAX_LOCKFILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_JAVA_GEM_SEARCH_ENTRIES: usize = 100_000;
+const GEM_PRODUCT_COLLECTION_LANES: usize = 12;
+const GEM_PRODUCT_TRANSIENT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 
 pub fn discover_locked_java_gem_roots(
     project_root: &Path,
@@ -342,6 +350,13 @@ struct GemDiscoveryRecord {
     default_gem: bool,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum GemDiscoveryStage {
+    NotStarted,
+    NavigationInputs,
+    Complete,
+}
+
 // ============================================================================
 // IndexerGem
 // ============================================================================
@@ -360,8 +375,15 @@ pub struct IndexerGem {
     ruby_executable: Option<PathBuf>,
     java_home: Option<PathBuf>,
     cached_gem_root_override: Option<PathBuf>,
-    gem_paths: Vec<PathBuf>,
     file_processor: Option<FileProcessor>,
+    dependency_seed_engine: Option<ruby_analysis::engine::AnalysisEngine>,
+    runtime_provider_fingerprint: Option<String>,
+    discovery_stage: GemDiscoveryStage,
+}
+
+pub(crate) struct LoadedGemDependencyProduct {
+    manifest: GemDependencyManifest,
+    product: Arc<GemDependencyProduct>,
 }
 
 impl IndexerGem {
@@ -378,8 +400,10 @@ impl IndexerGem {
             ruby_executable: None,
             java_home: None,
             cached_gem_root_override: None,
-            gem_paths: Vec::new(),
             file_processor: None,
+            dependency_seed_engine: None,
+            runtime_provider_fingerprint: None,
+            discovery_stage: GemDiscoveryStage::NotStarted,
         }
     }
 
@@ -391,6 +415,17 @@ impl IndexerGem {
     /// Set the file processor for indexing
     pub fn set_file_processor(&mut self, file_processor: FileProcessor) {
         self.file_processor = Some(file_processor);
+    }
+
+    pub fn set_dependency_seed_engine(
+        &mut self,
+        dependency_seed_engine: ruby_analysis::engine::AnalysisEngine,
+    ) {
+        self.dependency_seed_engine = Some(dependency_seed_engine);
+    }
+
+    pub fn set_runtime_provider_fingerprint(&mut self, fingerprint: Option<String>) {
+        self.runtime_provider_fingerprint = fingerprint;
     }
 
     // ========================================================================
@@ -464,7 +499,12 @@ impl IndexerGem {
             return Ok(Vec::new());
         }
 
-        self.discover_gems().await?;
+        let prepared_manifests = if selective {
+            Some(self.prepare_required_gem_manifests_blocking()?)
+        } else {
+            self.discover_gems().await?;
+            None
+        };
         info!("Discovered {} gems", self.discovered_gems.len());
         let project_root = self.workspace_root.as_ref().expect(
             "INVARIANT VIOLATED: gem indexing has no Ruby project root. This is a bug because dependency facts must be owned by one isolated project engine. Fix: construct IndexerGem with the owning project root.",
@@ -478,39 +518,443 @@ impl IndexerGem {
         let analysis_engine = server.analysis_engine_for_uri(&project_uri);
 
         let indexed_files = if selective && !self.required_gems.is_empty() {
-            self.index_required_gems(server, analysis_engine.clone())
-                .await?
+            self.index_prepared_required_gems_with_shared_product(
+                server,
+                analysis_engine.clone(),
+                prepared_manifests.expect(
+                    "INVARIANT VIOLATED: selective gem indexing lost its prepared manifests. \
+                     This is a bug because discovery and manifest construction are one required \
+                    preflight. Fix: retain the prepared manifests until product binding.",
+                ),
+                None,
+            )
+            .await?
         } else {
-            self.index_all_gems(server, analysis_engine.clone()).await?
+            let indexed_files = self.index_all_gems(analysis_engine.clone()).await?;
+            if !indexed_files.is_empty() {
+                analysis_engine.write().resolve();
+            }
+            indexed_files
         };
-
-        if !indexed_files.is_empty() {
-            analysis_engine.write().resolve();
-        }
 
         info!("Indexed {} files from gems", indexed_files.len());
         Ok(indexed_files)
     }
 
-    /// Index only the gems required by the project
-    async fn index_required_gems(
+    pub(crate) async fn index_prepared_required_gems_with_shared_product(
+        &self,
+        server: &RubyLanguageServer,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        manifests: Vec<GemDependencyManifest>,
+        cancellation: Option<CancellationToken>,
+    ) -> Result<Vec<Url>> {
+        let mut indexed_files = Vec::new();
+        for manifest in manifests {
+            indexed_files.extend(
+                self.bind_prepared_required_gem_with_shared_product(
+                    server,
+                    analysis_engine.clone(),
+                    manifest,
+                    cancellation.clone(),
+                )
+                .await?,
+            );
+        }
+        if !indexed_files.is_empty() {
+            self.resolve_bound_required_gems(server, analysis_engine, cancellation)
+                .await?;
+        }
+        info!(
+            "Indexed {} files from checksum-keyed gem dependency product",
+            indexed_files.len()
+        );
+        Ok(indexed_files)
+    }
+
+    pub(crate) async fn bind_prepared_required_gem_with_shared_product(
+        &self,
+        server: &RubyLanguageServer,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        manifest: GemDependencyManifest,
+        cancellation: Option<CancellationToken>,
+    ) -> Result<Vec<Url>> {
+        let loaded = self
+            .load_prepared_required_gem_with_shared_product(server, manifest)
+            .await?;
+        self.bind_loaded_required_gem_product(server, analysis_engine, loaded, cancellation)
+            .await
+    }
+
+    pub(crate) async fn load_prepared_required_gem_with_shared_product(
+        &self,
+        server: &RubyLanguageServer,
+        manifest: GemDependencyManifest,
+    ) -> Result<LoadedGemDependencyProduct> {
+        let processor = self.file_processor.clone().ok_or_else(|| {
+            anyhow!("gem dependency product requires a configured file processor")
+        })?;
+        let dependency_seed = self.dependency_seed_engine.clone().ok_or_else(|| {
+            anyhow!(
+                "gem dependency product requires the dependency-only core/runtime semantic seed"
+            )
+        })?;
+        let project_root = self.workspace_root.clone().expect(
+            "INVARIANT VIOLATED: shared gem product indexing has no owning project root. This is a bug because resource priority and semantic provenance must use the same isolated project. Fix: construct IndexerGem with the owning project root.",
+        );
+        let key = manifest.key().clone();
+        let producer_manifest = manifest.clone();
+        let indexing_resources = server.indexing_resources.clone();
+        let persistent_cache = server.persistent_derived_product_cache.clone();
+        let lookup_spec = IndexingWorkSpec::new(
+            Some(project_root.clone()),
+            IndexingResourcePriority::Background,
+            1,
+            GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
+            1,
+        );
+        let producer_lanes = indexing_resources.project_parallel_cpu_lanes(&project_root);
+        let producer_spec = IndexingWorkSpec::new(
+            Some(project_root.clone()),
+            IndexingResourcePriority::Background,
+            producer_lanes,
+            GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
+            0,
+        )
+        .as_project_parallel();
+        let producer_uses_shared_pool = producer_lanes == indexing_resources.policy().cpu_lanes();
+        let product = server
+            .gem_dependency_cache
+            .get_or_try_init(key, move || async move {
+                let lookup_manifest = producer_manifest.clone();
+                let lookup = indexing_resources
+                    .run_with_resources(
+                        "persistent gem dependency product lookup",
+                        lookup_spec,
+                        None,
+                        move || persistent_cache.lookup_or_reserve(&lookup_manifest),
+                    )
+                    .await
+                    .map_err(|error| {
+                        format!("persistent gem-product lookup worker failed: {error}")
+                    })?
+                    .map_err(|error| format!("persistent gem-product lookup failed: {error:#}"))?;
+                let crate::persistent_cache::PersistentGemProductLookup::Reservation(
+                    reservation,
+                ) = lookup
+                else {
+                    let crate::persistent_cache::PersistentGemProductLookup::Hit(product) = lookup
+                    else {
+                        panic!(
+                            "INVARIANT VIOLATED: persistent gem-product lookup returned an unhandled state. This is a bug because lookup has exactly hit and reservation outcomes. Fix: handle every PersistentGemProductLookup variant explicitly."
+                        );
+                    };
+                    return Ok(Arc::try_unwrap(product)
+                        .unwrap_or_else(|shared| shared.as_ref().clone()));
+                };
+                let build_product = move || {
+                    build_gem_dependency_product(
+                        &producer_manifest,
+                        dependency_seed,
+                        processor,
+                    )
+                    .map_err(|error| error.to_string())
+                };
+                let product = if producer_uses_shared_pool {
+                    indexing_resources
+                        .run_parallel_with_resources(
+                            "gem dependency product construction",
+                            producer_spec,
+                            None,
+                            build_product,
+                        )
+                        .await
+                } else {
+                    indexing_resources
+                        .run_partitioned_parallel_with_resources(
+                        "gem dependency product construction",
+                        producer_spec,
+                        None,
+                        build_product,
+                    )
+                    .await
+                }
+                .map_err(|error| format!("gem dependency product worker failed: {error}"))??;
+                let publication_spec = IndexingWorkSpec::new(
+                    Some(project_root),
+                    IndexingResourcePriority::Background,
+                    1,
+                    GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
+                    1,
+                );
+                indexing_resources
+                    .run_with_resources(
+                        "persistent gem dependency product publication",
+                        publication_spec,
+                        None,
+                        move || {
+                            reservation.publish(&product).map_err(|error| {
+                                format!("persistent gem-product publication failed: {error:#}")
+                            })?;
+                            Ok(product)
+                        },
+                    )
+                    .await
+                    .map_err(|error| {
+                        format!("persistent gem-product publication worker failed: {error}")
+                    })?
+            })
+            .await
+            .map_err(anyhow::Error::msg)?;
+        Ok(LoadedGemDependencyProduct { manifest, product })
+    }
+
+    pub(crate) async fn bind_loaded_required_gem_product(
+        &self,
+        server: &RubyLanguageServer,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        loaded: LoadedGemDependencyProduct,
+        cancellation: Option<CancellationToken>,
+    ) -> Result<Vec<Url>> {
+        let project_root = self.workspace_root.clone().expect(
+            "INVARIANT VIOLATED: shared gem product binding has no owning project root. This is a bug because resource priority and semantic provenance must use the same isolated project. Fix: construct IndexerGem with the owning project root.",
+        );
+        let LoadedGemDependencyProduct { manifest, product } = loaded;
+        let binding_engine = analysis_engine;
+        let binding_spec = IndexingWorkSpec::new(
+            Some(project_root),
+            IndexingResourcePriority::Background,
+            1,
+            GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
+            0,
+        );
+        let binding = match server
+            .indexing_resources
+            .run_with_resources(
+                "gem dependency product binding",
+                binding_spec,
+                cancellation,
+                move || {
+                    product.bind_owned_deferred_into_measured(manifest, &mut binding_engine.write())
+                },
+            )
+            .await?
+        {
+            Ok(binding) => binding,
+            Err(error) => {
+                server.gem_dependency_binding_counters.record_failure();
+                return Err(error);
+            }
+        };
+        server
+            .gem_dependency_binding_counters
+            .record_success(&binding);
+        Ok(binding.uris)
+    }
+
+    pub(crate) async fn resolve_bound_required_gems(
+        &self,
+        server: &RubyLanguageServer,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        cancellation: Option<CancellationToken>,
+    ) -> Result<()> {
+        let project_root = self.workspace_root.clone().expect(
+            "INVARIANT VIOLATED: gem dependency resolution has no owning project root. This is a bug because resource priority and semantic provenance must use the same isolated project. Fix: construct IndexerGem with the owning project root.",
+        );
+        let resolving_engine = analysis_engine.clone();
+        let resolution_spec = IndexingWorkSpec::new(
+            Some(project_root),
+            IndexingResourcePriority::Background,
+            1,
+            GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
+            0,
+        );
+        server
+            .indexing_resources
+            .run_with_resources(
+                "gem dependency semantic resolution",
+                resolution_spec,
+                cancellation,
+                move || {
+                    resolving_engine.write().resolve();
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn index_required_gems_with_shared_product(
         &self,
         server: &RubyLanguageServer,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) -> Result<Vec<Url>> {
+        let seed = self
+            .dependency_seed_engine
+            .as_ref()
+            .ok_or_else(|| {
+                anyhow!(
+                    "gem dependency product requires the dependency-only core/runtime semantic seed"
+                )
+            })?
+            .semantic_context_fingerprint();
+        let manifests = self.required_gem_manifests(seed)?;
+        self.index_prepared_required_gems_with_shared_product(
+            server,
+            analysis_engine,
+            manifests,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) fn prepare_required_gem_manifests_blocking(
+        &mut self,
+    ) -> Result<Vec<GemDependencyManifest>> {
+        let names = self.discover_required_gems_blocking()?;
+        names
+            .into_iter()
+            .filter_map(|name| {
+                self.prepare_required_gem_manifest_blocking(&name)
+                    .transpose()
+            })
+            .collect()
+    }
+
+    pub(crate) fn discover_required_gems_blocking(&mut self) -> Result<Vec<String>> {
+        if self.required_gems.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.discover_gems_blocking()?;
+        Ok(self.required_gems_with_dependencies())
+    }
+
+    pub(crate) fn prepare_required_gem_manifest_blocking(
+        &self,
+        gem_name: &str,
+    ) -> Result<Option<GemDependencyManifest>> {
+        let seed = self
+            .dependency_seed_engine
+            .as_ref()
+            .ok_or_else(|| {
+                anyhow!(
+                    "gem dependency product requires the dependency-only core/runtime semantic seed"
+                )
+            })?
+            .semantic_context_fingerprint();
+        self.required_gem_manifest(gem_name, seed)
+    }
+
+    #[cfg(test)]
+    fn required_gem_manifests(
+        &self,
+        seed: ruby_analysis::engine::SemanticExportFingerprint,
+    ) -> Result<Vec<GemDependencyManifest>> {
         let required_gems = self.required_gems_with_dependencies();
-        let total = required_gems.len();
+        let mut manifests = Vec::with_capacity(required_gems.len());
+        for gem_name in &required_gems {
+            if let Some(manifest) = self.required_gem_manifest(gem_name, seed)? {
+                manifests.push(manifest);
+            }
+        }
+        Ok(manifests)
+    }
+
+    fn required_gem_manifest(
+        &self,
+        gem_name: &str,
+        seed: ruby_analysis::engine::SemanticExportFingerprint,
+    ) -> Result<Option<GemDependencyManifest>> {
+        let Some(gem_versions) = self.discovered_gems.get(gem_name) else {
+            debug!("Required gem not found: {}", gem_name);
+            return Ok(None);
+        };
+        let Some(gem_info) = self.select_preferred_version(gem_versions) else {
+            return Ok(None);
+        };
+        let mut semantic_identities = vec![format!(
+            "{}:{}:{}:{}",
+            gem_info.name,
+            gem_info.locked_version,
+            gem_info.platform,
+            gem_source_label(gem_info.source)
+        )];
+        let mut dependencies = gem_info.dependencies.clone();
+        dependencies.sort();
+        semantic_identities.extend(
+            dependencies
+                .into_iter()
+                .map(|dependency| format!("dependency:{dependency}")),
+        );
+        info!(
+            "Preparing required gem product input: {} v{} platform={} source={:?}",
+            gem_info.name, gem_info.version, gem_info.platform, gem_info.source
+        );
+        let mut sources = Vec::new();
+        for (lib_index, lib_path) in gem_info.lib_paths.iter().enumerate() {
+            if !lib_path.is_dir() {
+                continue;
+            }
+            let mut ruby_files = utils::collect_ruby_files(lib_path);
+            ruby_files.sort();
+            for file_path in ruby_files {
+                let relative = file_path.strip_prefix(lib_path).with_context(|| {
+                    format!(
+                        "gem source {} is outside require path {}",
+                        file_path.display(),
+                        lib_path.display()
+                    )
+                })?;
+                let logical_path = format!(
+                    "gems/{}/{}/{}/{}/{}/{}",
+                    gem_info.name,
+                    gem_info.locked_version,
+                    gem_info.platform,
+                    gem_source_label(gem_info.source),
+                    lib_index,
+                    normalized_relative_path(relative)?
+                );
+                let content = std::fs::read_to_string(&file_path).with_context(|| {
+                    format!("failed to read gem dependency {}", file_path.display())
+                })?;
+                sources.push(GemDependencySource::new(
+                    0,
+                    logical_path,
+                    file_path,
+                    content,
+                )?);
+            }
+        }
+        if sources.is_empty() {
+            return Ok(None);
+        }
+        let runtime_provider_fingerprint =
+            self.runtime_provider_fingerprint.as_deref().filter(|_| {
+                sources.iter().any(|source| {
+                    crate::runtime::jruby::imports::source_semantics_depend_on_jruby_catalog(
+                        source.content.as_str(),
+                    )
+                })
+            });
+        GemDependencyManifest::new(
+            seed,
+            runtime_provider_fingerprint,
+            &semantic_identities,
+            sources,
+        )
+        .map(Some)
+    }
+
+    /// Legacy direct indexing path retained for focused tests and unlocked
+    /// callers. Production selective indexing uses the checksum-keyed product.
+    #[allow(dead_code)]
+    async fn index_required_gems(
+        &self,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<Vec<Url>> {
+        let required_gems = self.required_gems_with_dependencies();
         let mut indexed_files = Vec::new();
 
-        for (current, gem_name) in required_gems.iter().enumerate() {
-            IndexingCoordinator::send_progress_report(
-                server,
-                "Indexing Gems".to_string(),
-                current + 1,
-                total,
-            )
-            .await;
-
+        for gem_name in &required_gems {
             if let Some(gem_versions) = self.discovered_gems.get(gem_name.as_str()) {
                 if let Some(gem_info) = self.select_preferred_version(gem_versions) {
                     info!(
@@ -530,21 +974,11 @@ impl IndexerGem {
     /// Index all discovered gems
     async fn index_all_gems(
         &self,
-        server: &RubyLanguageServer,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) -> Result<Vec<Url>> {
-        let total = self.discovered_gems.len();
         let mut indexed_files = Vec::new();
 
-        for (current, gem_versions) in self.discovered_gems.values().enumerate() {
-            IndexingCoordinator::send_progress_report(
-                server,
-                "Indexing Gems".to_string(),
-                current + 1,
-                total,
-            )
-            .await;
-
+        for gem_versions in self.discovered_gems.values() {
             if let Some(gem_info) = self.select_preferred_version(gem_versions) {
                 if self.excluded_gems.contains(&gem_info.name) {
                     continue;
@@ -575,6 +1009,10 @@ impl IndexerGem {
         };
 
         let mut indexed_files = Vec::new();
+        let known_namespaces = std::sync::Arc::new({
+            let engine = analysis_engine.read();
+            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+        });
 
         for lib_path in &gem_info.lib_paths {
             if lib_path.exists() && lib_path.is_dir() {
@@ -582,15 +1020,16 @@ impl IndexerGem {
 
                 let ruby_files = utils::collect_ruby_files(lib_path);
 
-                ruby_files.par_iter().for_each(|file_path| {
+                ruby_files.iter().for_each(|file_path| {
                     if let Ok(content) = std::fs::read_to_string(file_path) {
                         if let Ok(uri) = Url::from_file_path(file_path) {
                             if let Err(e) = processor
-                                .collect_file_facts_as_deferred_resolution_in_engine(
+                                .collect_file_facts_as_deferred_resolution_with_known_namespaces_in_engine(
                                     &uri,
                                     &content,
                                     analysis_engine.clone(),
                                     ruby_analysis::core::SourceKind::Gem,
+                                    known_namespaces.clone(),
                                 )
                             {
                                 warn!("Failed to index gem file {:?}: {}", file_path, e);
@@ -616,48 +1055,197 @@ impl IndexerGem {
 
     /// Discover available gems in the system
     pub async fn discover_gems(&mut self) -> Result<usize> {
+        self.discover_gems_blocking()
+    }
+
+    pub(crate) fn discover_gems_blocking(&mut self) -> Result<usize> {
         debug!("Starting gem discovery process");
+        let total_started = Instant::now();
 
         self.discovered_gems.clear();
         self.locked_gems.clear();
-        self.gem_paths.clear();
+        self.discovery_stage = GemDiscoveryStage::NotStarted;
 
+        if self
+            .workspace_root
+            .as_ref()
+            .is_some_and(|root| !root.join("Gemfile").is_file())
+        {
+            if self.explicitly_included_gems.is_empty() {
+                info!(
+                    "No Gemfile at Ruby project root; skipping gem discovery for standalone project"
+                );
+                self.discovery_stage = GemDiscoveryStage::Complete;
+                return Ok(0);
+            }
+            self.detect_active_ruby_engine()?;
+            self.discover_global_gems()?;
+            self.resolve_gem_lib_paths();
+            info!(
+                "[PERF][gem discovery] project={} total={:?} source=explicit-global unique_gems={}",
+                self.workspace_root
+                    .as_deref()
+                    .map(Path::display)
+                    .map(|path| path.to_string())
+                    .unwrap_or_else(|| "<none>".to_string()),
+                total_started.elapsed(),
+                self.discovered_gems.len()
+            );
+            self.discovery_stage = GemDiscoveryStage::Complete;
+            return Ok(self.discovered_gems.len());
+        }
+
+        let engine_started = Instant::now();
         self.detect_active_ruby_engine()?;
+        let engine_wall = engine_started.elapsed();
+        let lockfile_started = Instant::now();
         self.load_locked_gems()?;
-        self.discover_gem_paths()?;
+        let lockfile_wall = lockfile_started.elapsed();
+        let installed_started = Instant::now();
         self.discover_installed_gems()?;
+        let installed_wall = installed_started.elapsed();
+        let git_started = Instant::now();
         self.discover_cached_git_gems()?;
+        let git_wall = git_started.elapsed();
+        let archives_started = Instant::now();
         self.discover_cached_gem_archives()?;
+        let archives_wall = archives_started.elapsed();
+        let resolution_started = Instant::now();
         self.resolve_gem_lib_paths();
+        let resolution_wall = resolution_started.elapsed();
 
-        info!("Discovered {} unique gems", self.discovered_gems.len());
+        info!(
+            "[PERF][gem discovery] project={} total={:?} engine={:?} lockfile={:?} \
+             installed={:?} vendor_git={:?} vendor_archives={:?} \
+             resolve_paths={:?} unique_gems={}",
+            self.workspace_root
+                .as_deref()
+                .map(Path::display)
+                .map(|path| path.to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            total_started.elapsed(),
+            engine_wall,
+            lockfile_wall,
+            installed_wall,
+            git_wall,
+            archives_wall,
+            resolution_wall,
+            self.discovered_gems.len()
+        );
+        self.discovery_stage = GemDiscoveryStage::Complete;
         Ok(self.discovered_gems.len())
     }
 
-    /// Get gem paths from Ruby's gem environment
-    fn discover_gem_paths(&mut self) -> Result<()> {
-        let output = self
-            .ruby_command()
-            .args(["-e", "require 'rubygems'; puts Gem.path.join('\n')"])
-            .output()
-            .map_err(|e| anyhow!("Failed to execute ruby command: {}", e))?;
+    pub(crate) fn discover_navigation_gems_blocking(
+        &mut self,
+        priority_keys: &HashSet<String>,
+    ) -> Result<usize> {
+        assert!(
+            !priority_keys.is_empty(),
+            "INVARIANT VIOLATED: navigation gem discovery received no active-document keys. \
+             This is a bug because an empty frontier cannot identify bounded dependency work. \
+             Fix: use complete discovery when no active dependency key exists."
+        );
+        assert!(
+            self.workspace_root
+                .as_ref()
+                .is_some_and(|root| root.join("Gemfile").is_file()),
+            "INVARIANT VIOLATED: navigation gem discovery has no owning-project Gemfile. This is \
+             a bug because exact locked source precedence exists only for a Ruby project. Fix: \
+             keep standalone explicit-global discovery on the complete discovery path."
+        );
+        let total_started = Instant::now();
+        self.discovered_gems.clear();
+        self.locked_gems.clear();
+        self.discovery_stage = GemDiscoveryStage::NotStarted;
 
-        if !output.status.success() {
-            return Err(anyhow!(
-                "Ruby command failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
+        let engine_started = Instant::now();
+        self.detect_active_ruby_engine()?;
+        let engine_wall = engine_started.elapsed();
+        let lockfile_started = Instant::now();
+        self.load_locked_gems()?;
+        let lockfile_wall = lockfile_started.elapsed();
+        let installed_started = Instant::now();
+        self.discover_installed_gems()?;
+        let installed_wall = installed_started.elapsed();
+        let git_started = Instant::now();
+        self.discover_cached_git_gems()?;
+        let git_wall = git_started.elapsed();
+        let archives_started = Instant::now();
+        self.discover_priority_cached_gem_archives(priority_keys)?;
+        let archives_wall = archives_started.elapsed();
+        let resolution_started = Instant::now();
+        self.resolve_gem_lib_paths();
+        let resolution_wall = resolution_started.elapsed();
+        self.discovery_stage = GemDiscoveryStage::NavigationInputs;
 
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let path = PathBuf::from(line.trim());
-            if path.exists() && path.is_dir() {
-                self.gem_paths.push(path.clone());
-                debug!("Found gem path: {:?}", path);
-            }
-        }
+        info!(
+            "[PERF][priority gem discovery] project={} total={:?} engine={:?} lockfile={:?} \
+             installed={:?} vendor_git={:?} priority_vendor_archives={:?} \
+             resolve_paths={:?} unique_gems={}",
+            self.workspace_root
+                .as_deref()
+                .map(Path::display)
+                .map(|path| path.to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            total_started.elapsed(),
+            engine_wall,
+            lockfile_wall,
+            installed_wall,
+            git_wall,
+            archives_wall,
+            resolution_wall,
+            self.discovered_gems.len()
+        );
+        Ok(self.discovered_gems.len())
+    }
 
-        Ok(())
+    pub(crate) fn complete_navigation_gem_discovery_blocking(&mut self) -> Result<usize> {
+        assert_eq!(
+            self.discovery_stage,
+            GemDiscoveryStage::NavigationInputs,
+            "INVARIANT VIOLATED: exhaustive gem discovery did not follow the bounded navigation \
+             phase. This is a bug because completing an uninitialized or already-complete \
+             catalog could hide stale candidates. Fix: call this exactly once after successful \
+             discover_navigation_gems_blocking."
+        );
+        let started = Instant::now();
+        self.discover_cached_gem_archives()?;
+        self.resolve_gem_lib_paths();
+        self.discovery_stage = GemDiscoveryStage::Complete;
+        info!(
+            "[PERF][exhaustive vendor archive discovery] project={} total={:?} unique_gems={}",
+            self.workspace_root
+                .as_deref()
+                .map(Path::display)
+                .map(|path| path.to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            started.elapsed(),
+            self.discovered_gems.len()
+        );
+        Ok(self.discovered_gems.len())
+    }
+
+    pub(crate) fn priority_locked_gem_names(&self, priority_keys: &HashSet<String>) -> Vec<String> {
+        let mut names = self
+            .locked_gems
+            .keys()
+            .filter(|name| {
+                priority_keys.contains(&crate::indexer::coordinator::dependency_priority_key(name))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    pub(crate) fn needs_unlocked_explicit_discovery(&self) -> bool {
+        self.discovered_gems.is_empty()
+            && !self.explicitly_included_gems.is_empty()
+            && self
+                .workspace_root
+                .as_ref()
+                .is_some_and(|root| !root.join("Gemfile").is_file())
     }
 
     fn detect_active_ruby_engine(&mut self) -> Result<()> {
@@ -700,15 +1288,101 @@ impl IndexerGem {
                 self.discover_global_gems()
             }
             _ => {
-                debug!("Gem indexing scope: Auto (Bundler with global fallback)");
-                if self.discover_bundler_gems().is_ok() {
-                    debug!("Using Bundler gems from Gemfile");
-                    Ok(())
-                } else {
-                    debug!("Falling back to global gem discovery");
-                    self.discover_global_gems()
-                }
+                debug!("Gem indexing scope: Auto (Bundler with in-process global fallback)");
+                self.discover_auto_gems()
             }
+        }
+    }
+
+    /// Discover the exact Bundler environment when available, otherwise the
+    /// selected runtime's global RubyGems installation. Both branches execute
+    /// in one selected-runtime process so a missing Bundler does not pay a
+    /// second runtime startup before fallback.
+    fn discover_auto_gems(&mut self) -> Result<()> {
+        let gemfile = self.find_gemfile()?;
+        let script = r#"
+            require 'json'
+            project = lambda do |specs|
+              specs.map do |spec|
+                next if spec.name.nil? || spec.version.nil?
+                {
+                  name: spec.name,
+                  version: spec.version.to_s,
+                  platform: spec.platform.to_s,
+                  gem_dir: spec.gem_dir,
+                  lib_dirs: spec.require_paths.map { |p| File.join(spec.gem_dir, p) },
+                  dependencies: spec.runtime_dependencies.map(&:name),
+                  default_gem: spec.default_gem?
+                }
+              end.compact
+            end
+            begin
+              require 'bundler'
+              Bundler.root
+              gems = project.call(Bundler.load.specs)
+              source = 'bundler'
+            rescue Exception
+              require 'rubygems'
+              gems = project.call(Gem::Specification.to_a)
+              source = 'global'
+            end
+            puts "RUBY_FAST_LSP_GEM_DISCOVERY=#{JSON.generate({ source: source, gems: gems })}"
+        "#;
+        let output = self
+            .ruby_command()
+            .env("BUNDLE_GEMFILE", &gemfile)
+            .args(["-e", script])
+            .output()
+            .map_err(|error| anyhow!("Failed to execute automatic gem discovery: {error}"))?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "Bundler and global gem discovery failed in the selected runtime: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        const DISCOVERY_PREFIX: &[u8] = b"RUBY_FAST_LSP_GEM_DISCOVERY=";
+        let payload = output
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .rev()
+            .find_map(|line| line.strip_prefix(DISCOVERY_PREFIX))
+            .ok_or_else(|| {
+                anyhow!(
+                    "automatic gem discovery returned no framed result (stdout={:?}, stderr={:?})",
+                    String::from_utf8_lossy(&output.stdout)
+                        .chars()
+                        .take(512)
+                        .collect::<String>(),
+                    String::from_utf8_lossy(&output.stderr)
+                        .chars()
+                        .take(512)
+                        .collect::<String>()
+                )
+            })?;
+        let value = serde_json::from_slice::<serde_json::Value>(payload)
+            .context("automatic gem discovery returned invalid framed JSON")?;
+        let source = value
+            .get("source")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow!("automatic gem discovery JSON has no string `source`"))?;
+        let gems = value
+            .get("gems")
+            .ok_or_else(|| anyhow!("automatic gem discovery JSON has no `gems` array"))?;
+        let encoded = serde_json::to_vec(gems)
+            .context("automatic gem discovery gem array could not be re-encoded")?;
+        match source {
+            "bundler" => {
+                debug!("Using Bundler gems from Gemfile");
+                self.process_gem_json(&encoded, "Bundler", GemSource::BundlerInstalled)
+            }
+            "global" => {
+                debug!("Bundler unavailable; using selected runtime global gems");
+                self.process_gem_json(&encoded, "Global", GemSource::GlobalInstalled)
+            }
+            other => Err(anyhow!(
+                "automatic gem discovery returned unknown source `{other}`"
+            )),
         }
     }
 
@@ -938,6 +1612,33 @@ impl IndexerGem {
 
     fn discover_cached_gem_archives(&mut self) -> Result<()> {
         self.load_locked_gems()?;
+        self.discover_cached_gem_archives_matching(None)
+    }
+
+    fn discover_priority_cached_gem_archives(
+        &mut self,
+        priority_keys: &HashSet<String>,
+    ) -> Result<()> {
+        assert!(
+            !priority_keys.is_empty(),
+            "INVARIANT VIOLATED: priority vendor-archive discovery received no keys. This is a \
+             bug because an empty navigation frontier cannot select bounded work. Fix: skip the \
+             priority phase when the active document exposes no constant roots."
+        );
+        assert!(
+            !self.locked_gems.is_empty(),
+            "INVARIANT VIOLATED: priority vendor-archive discovery started before lockfile \
+             identities were loaded. This is a bug because source selection must use the exact \
+             owning-project lock identity. Fix: load and select Gemfile.lock identities before \
+             scheduling priority archive work."
+        );
+        self.discover_cached_gem_archives_matching(Some(priority_keys))
+    }
+
+    fn discover_cached_gem_archives_matching(
+        &mut self,
+        priority_keys: Option<&HashSet<String>>,
+    ) -> Result<()> {
         let Some(root) = &self.workspace_root else {
             return Ok(());
         };
@@ -956,6 +1657,13 @@ impl IndexerGem {
         locked_registry_gems.sort_by(|left, right| left.name.cmp(&right.name));
 
         for locked in &locked_registry_gems {
+            if priority_keys.is_some_and(|keys| {
+                !keys.contains(&crate::indexer::coordinator::dependency_priority_key(
+                    &locked.name,
+                ))
+            }) {
+                continue;
+            }
             let exact_installed_source_exists =
                 self.discovered_gems
                     .get(&locked.name)
@@ -963,7 +1671,9 @@ impl IndexerGem {
                         candidates.iter().any(|candidate| {
                             matches!(
                                 candidate.source,
-                                GemSource::BundlerInstalled | GemSource::GlobalInstalled
+                                GemSource::BundlerInstalled
+                                    | GemSource::GlobalInstalled
+                                    | GemSource::VendorArchive
                             ) && candidate.locked_version == locked.locked_version
                                 && candidate.lib_paths.iter().any(|path| path.is_dir())
                         })
@@ -1255,6 +1965,10 @@ impl IndexerGem {
         &self.required_gems
     }
 
+    pub(crate) fn ordered_required_gems_after_discovery(&self) -> Vec<String> {
+        self.required_gems_with_dependencies()
+    }
+
     pub fn get_all_gems(&self) -> Vec<&GemInfo> {
         self.discovered_gems
             .values()
@@ -1291,6 +2005,88 @@ impl IndexerGem {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+fn build_gem_dependency_product(
+    manifest: &GemDependencyManifest,
+    dependency_seed: ruby_analysis::engine::AnalysisEngine,
+    processor: FileProcessor,
+) -> Result<GemDependencyProduct> {
+    let producer_engine = std::sync::Arc::new(parking_lot::RwLock::new(dependency_seed));
+    let known_namespaces = std::sync::Arc::new({
+        let engine = producer_engine.read();
+        ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+    });
+    let chunk_size = manifest
+        .sources()
+        .len()
+        .div_ceil(GEM_PRODUCT_COLLECTION_LANES)
+        .max(1);
+    let templates = manifest
+        .sources()
+        .par_chunks(chunk_size)
+        .map(|chunk| {
+            chunk
+                .iter()
+                .map(|source| {
+                    let uri = Url::from_file_path(&source.physical_path).map_err(|_| {
+                        anyhow!(
+                            "gem dependency source is not a valid file URI: {}",
+                            source.physical_path.display()
+                        )
+                    })?;
+                    let facts = processor.collect_project_neutral_file_template_without_insertion(
+                        &uri,
+                        source.content.as_str(),
+                        producer_engine.clone(),
+                        ruby_analysis::core::SourceKind::Gem,
+                        known_namespaces.clone(),
+                    )?;
+                    Ok(GemDependencyFileTemplate::new(
+                        source.logical_path.clone(),
+                        source.content_sha256,
+                        facts,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    GemDependencyProduct::new(manifest, templates)
+}
+
+fn gem_source_label(source: GemSource) -> &'static str {
+    match source {
+        GemSource::BundlerInstalled => "bundler",
+        GemSource::GlobalInstalled => "global",
+        GemSource::VendorGit => "vendor-git",
+        GemSource::VendorArchive => "vendor-archive",
+    }
+}
+
+fn normalized_relative_path(path: &Path) -> Result<String> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        let Component::Normal(part) = component else {
+            return Err(anyhow!(
+                "gem dependency path is not normalized and relative: {}",
+                path.display()
+            ));
+        };
+        parts.push(
+            part.to_str()
+                .ok_or_else(|| {
+                    anyhow!("gem dependency path is not valid UTF-8: {}", path.display())
+                })?
+                .to_string(),
+        );
+    }
+    if parts.is_empty() {
+        return Err(anyhow!("gem dependency relative path is empty"));
+    }
+    Ok(parts.join("/"))
+}
 
 /// Compare two gem version strings
 fn compare_versions(a: &str, b: &str) -> Ordering {
@@ -1878,10 +2674,15 @@ mod tests {
     use super::*;
     use flate2::write::GzEncoder;
     use flate2::Compression;
+    use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyMethod, RubyType, SourceKind};
+    use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, FileFacts, ResolveMode};
     use std::fs;
     use std::io::Cursor;
+    use std::sync::{Arc, Mutex};
     use tar::{Builder, Header};
     use tempfile::TempDir;
+
+    static HOME_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn create_test_indexer() -> IndexerGem {
         let temp_dir = TempDir::new().unwrap();
@@ -1893,6 +2694,288 @@ mod tests {
         let indexer = create_test_indexer();
         assert_eq!(indexer.gem_count(), 0);
         assert!(indexer.get_required_gems().is_empty());
+    }
+
+    fn shared_dependency_indexer(project_root: &Path, gem_root: &Path) -> IndexerGem {
+        let mut indexer = IndexerGem::new(Some(project_root.to_path_buf()));
+        indexer.set_required_gems(HashSet::from(["shared_widget".to_string()]));
+        indexer.discovered_gems.insert(
+            "shared_widget".to_string(),
+            vec![GemInfo {
+                name: "shared_widget".to_string(),
+                version: "1.0.0".to_string(),
+                platform: "ruby".to_string(),
+                locked_version: "1.0.0".to_string(),
+                source: GemSource::BundlerInstalled,
+                path: gem_root.to_path_buf(),
+                lib_paths: vec![gem_root.join("lib")],
+                dependencies: Vec::new(),
+                is_default: false,
+            }],
+        );
+        indexer.set_file_processor(FileProcessor::new());
+        indexer.set_dependency_seed_engine(AnalysisEngine::new());
+        indexer
+    }
+
+    fn assert_shared_dependency_semantics(engine: &AnalysisEngine, expected_path: &Path) {
+        let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("SharedWidget").unwrap()]);
+        let method = RubyMethod::new("label").unwrap();
+        let query = AnalysisQuery::new(engine);
+        let definitions =
+            query.constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[]);
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(
+            engine.file(definitions[0].file_id).unwrap().path,
+            expected_path
+        );
+        assert_eq!(
+            engine.file(definitions[0].file_id).unwrap().kind,
+            SourceKind::Gem
+        );
+
+        let signatures = query.resolve_method_signature_facts(&owner, &method);
+        assert_eq!(signatures.len(), 1);
+        assert_eq!(signatures[0].params, ["prefix"]);
+        assert_eq!(signatures[0].return_type_label.as_deref(), Some("String"));
+        let value = FullyQualifiedName::constant(vec![
+            RubyConstant::new("SharedWidget").unwrap(),
+            RubyConstant::new("DEFAULT_LABEL").unwrap(),
+        ]);
+        assert_eq!(query.constant_value_type(&value), Some(RubyType::string()));
+    }
+
+    #[test]
+    fn ordinary_gem_products_ignore_unrelated_jruby_classpaths_but_java_gems_do_not() {
+        let fixture = TempDir::new().unwrap();
+        let first_project = fixture.path().join("first");
+        let second_project = fixture.path().join("second");
+        let first_gem = first_project.join("bundle/shared_widget-1.0.0");
+        let second_gem = second_project.join("bundle/shared_widget-1.0.0");
+        fs::create_dir_all(first_gem.join("lib")).unwrap();
+        fs::create_dir_all(second_gem.join("lib")).unwrap();
+        let ordinary = "module SharedWidget\nend\n";
+        fs::write(first_gem.join("lib/shared_widget.rb"), ordinary).unwrap();
+        fs::write(second_gem.join("lib/shared_widget.rb"), ordinary).unwrap();
+
+        let mut first = shared_dependency_indexer(&first_project, &first_gem);
+        first.set_runtime_provider_fingerprint(Some("classpath-a".to_string()));
+        let mut second = shared_dependency_indexer(&second_project, &second_gem);
+        second.set_runtime_provider_fingerprint(Some("classpath-b".to_string()));
+        let seed = AnalysisEngine::new().semantic_context_fingerprint();
+        let first_key = first.required_gem_manifests(seed).unwrap()[0].key().clone();
+        let second_key = second.required_gem_manifests(seed).unwrap()[0]
+            .key()
+            .clone();
+        assert_eq!(
+            first_key, second_key,
+            "ordinary Ruby gem facts must not be invalidated by an unrelated project classpath"
+        );
+
+        fs::write(
+            first_gem.join("lib/shared_widget.rb"),
+            "java_import 'fixtures.RichFixture'\n",
+        )
+        .unwrap();
+        fs::write(
+            second_gem.join("lib/shared_widget.rb"),
+            "java_import 'fixtures.RichFixture'\n",
+        )
+        .unwrap();
+        let first_key = first.required_gem_manifests(seed).unwrap()[0].key().clone();
+        let second_key = second.required_gem_manifests(seed).unwrap()[0]
+            .key()
+            .clone();
+        assert_ne!(
+            first_key, second_key,
+            "a gem using JRuby interop must retain the exact owning classpath identity"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
+        let fixture = TempDir::new().unwrap();
+        let first_project = fixture.path().join("first");
+        let second_project = fixture.path().join("second");
+        let third_project = fixture.path().join("third");
+        let first_gem = first_project.join("bundle/shared_widget-1.0.0");
+        let second_gem = second_project.join("bundle/shared_widget-1.0.0");
+        let third_gem = third_project.join("bundle/shared_widget-1.0.0");
+        let content = concat!(
+            "class SharedWidget\n",
+            "  DEFAULT_LABEL = \"label\"\n",
+            "  # @param prefix [String]\n",
+            "  # @return [String]\n",
+            "  def label(prefix)\n",
+            "    \"label\"\n",
+            "  end\n",
+            "end\n",
+        );
+        for (project, gem) in [
+            (&first_project, &first_gem),
+            (&second_project, &second_gem),
+            (&third_project, &third_gem),
+        ] {
+            fs::create_dir_all(gem.join("lib")).unwrap();
+            fs::write(project.join("Gemfile"), "gem 'shared_widget'\n").unwrap();
+            fs::write(gem.join("lib/shared_widget.rb"), content).unwrap();
+        }
+
+        let first_indexer = shared_dependency_indexer(&first_project, &first_gem);
+        let second_indexer = shared_dependency_indexer(&second_project, &second_gem);
+        let server = RubyLanguageServer::default();
+        server.set_user_cache_root_for_tests(fixture.path().join("user-cache"));
+        let first_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+        let second_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+
+        let (first_result, second_result) = tokio::join!(
+            first_indexer.index_required_gems_with_shared_product(&server, first_engine.clone()),
+            second_indexer.index_required_gems_with_shared_product(&server, second_engine.clone()),
+        );
+        assert_eq!(first_result.unwrap().len(), 1);
+        assert_eq!(second_result.unwrap().len(), 1);
+        let cache = server.gem_dependency_cache.snapshot();
+        assert_eq!(cache.lookups, 2);
+        assert_eq!(cache.producers, 1);
+        assert_eq!(cache.hits + cache.joined_flights, 1);
+        assert_eq!(cache.entries, 0);
+
+        let first_path = first_gem.join("lib/shared_widget.rb");
+        let second_path = second_gem.join("lib/shared_widget.rb");
+        assert_shared_dependency_semantics(&first_engine.read(), &first_path);
+        assert_shared_dependency_semantics(&second_engine.read(), &second_path);
+        let first_file_id = first_engine.read().file_id(&first_path).unwrap();
+        let second_file_id = second_engine.read().file_id(&second_path).unwrap();
+        assert!(first_engine.read().file_id(&second_path).is_none());
+        assert!(second_engine.read().file_id(&first_path).is_none());
+        assert_eq!(
+            first_engine.read().file(first_file_id).unwrap().path,
+            first_path
+        );
+        assert_eq!(
+            second_engine.read().file(second_file_id).unwrap().path,
+            second_path
+        );
+
+        first_engine.write().replace_facts(
+            first_file_id,
+            FileFacts::default(),
+            ResolveMode::Immediate,
+        );
+        assert!(
+            AnalysisQuery::new(&first_engine.read())
+                .constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[],)
+                .is_empty(),
+            "ordinary replacement must remove rebound facts from only the first consumer"
+        );
+        assert_shared_dependency_semantics(&second_engine.read(), &second_path);
+
+        let third_indexer = shared_dependency_indexer(&third_project, &third_gem);
+        let third_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+        assert_eq!(
+            third_indexer
+                .index_required_gems_with_shared_product(&server, third_engine.clone())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let after_sequential_consumer = server.gem_dependency_cache.snapshot();
+        assert_eq!(after_sequential_consumer.lookups, 3);
+        assert_eq!(after_sequential_consumer.producers, 2);
+        assert_eq!(after_sequential_consumer.hits, 0);
+        assert_eq!(after_sequential_consumer.entries, 0);
+        let persistent = server
+            .persistent_derived_product_cache
+            .gem_product_snapshot();
+        assert_eq!(persistent.producers, 1);
+        assert_eq!(persistent.publications, 1);
+        assert_eq!(persistent.hits, 1);
+        assert_shared_dependency_semantics(
+            &third_engine.read(),
+            &third_gem.join("lib/shared_widget.rb"),
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
+        let fixture = TempDir::new().unwrap();
+        let project_root = fixture.path().join("project");
+        let gem_root = project_root.join("bundle/shared_widget-1.0.0");
+        fs::create_dir_all(gem_root.join("lib")).unwrap();
+        fs::write(project_root.join("Gemfile"), "gem 'shared_widget'\n").unwrap();
+        fs::write(
+            gem_root.join("lib/shared_widget.rb"),
+            "class SharedWidget\nend\n",
+        )
+        .unwrap();
+
+        let indexer = shared_dependency_indexer(&project_root, &gem_root);
+        let mut server = RubyLanguageServer::default();
+        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
+            crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                6,
+                2,
+                512 * 1024 * 1024,
+                2,
+            ),
+        );
+        server
+            .indexing_resources
+            .prioritize_active_project_with_navigation_pending(&project_root, true);
+        server.set_user_cache_root_for_tests(fixture.path().join("user-cache"));
+        let server = Arc::new(server);
+
+        let (runtime_started_tx, runtime_started_rx) = tokio::sync::oneshot::channel();
+        let (runtime_release_tx, runtime_release_rx) = std::sync::mpsc::channel();
+        let runtime_server = server.clone();
+        let runtime_root = project_root.clone();
+        let runtime = tokio::spawn(async move {
+            runtime_server
+                .indexing_resources
+                .run_partitioned_parallel_with_resources(
+                    "simulated JRuby runtime companion",
+                    IndexingWorkSpec::new(
+                        Some(runtime_root),
+                        IndexingResourcePriority::Background,
+                        1,
+                        GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
+                        1,
+                    )
+                    .as_project_parallel(),
+                    None,
+                    move || {
+                        runtime_started_tx.send(()).unwrap();
+                        runtime_release_rx.recv().unwrap();
+                    },
+                )
+                .await
+                .unwrap();
+        });
+        runtime_started_rx.await.unwrap();
+
+        let engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            indexer.index_required_gems_with_shared_product(&server, engine),
+        )
+        .await;
+        runtime_release_tx.send(()).unwrap();
+        runtime.await.unwrap();
+
+        assert!(
+            result.is_ok(),
+            "cold gem-product construction must use the active project's five-lane partition so \
+             it can finish while the one-lane JRuby companion owns the persistent-cache \
+             maintenance path"
+        );
+        assert_eq!(result.unwrap().unwrap().len(), 1);
+        let resources = server.indexing_resources.snapshot();
+        assert_eq!(resources.peak_active_cpu_lanes, 6);
+        assert_eq!(
+            resources.peak_active_transient_memory_bytes,
+            512 * 1024 * 1024
+        );
     }
 
     #[test]
@@ -2140,6 +3223,45 @@ mod tests {
             std::fs::read_to_string(gem.path.join("lib/example.rb")).unwrap(),
             "module Example; class Cached; end; end\n"
         );
+    }
+
+    #[test]
+    fn priority_vendor_archive_discovery_defers_unrelated_locked_archives() {
+        let workspace = TempDir::new().unwrap();
+        let extraction_cache = TempDir::new().unwrap();
+        std::fs::write(
+            workspace.path().join("Gemfile.lock"),
+            "GEM\n  remote: https://rubygems.org/\n  specs:\n    active_gem (1.2.3)\n    background_gem (4.5.6)\n\nPLATFORMS\n  ruby\n",
+        )
+        .unwrap();
+        create_cached_gem(
+            &workspace.path().join("vendor/cache/active_gem-1.2.3.gem"),
+            "active_gem",
+            "1.2.3",
+            "ruby",
+        );
+        let deferred_archive = workspace
+            .path()
+            .join("vendor/cache/background_gem-4.5.6.gem");
+        std::fs::write(&deferred_archive, b"not a gem archive").unwrap();
+        let mut indexer = create_cached_gem_indexer(workspace.path(), extraction_cache.path());
+        indexer.load_locked_gems().unwrap();
+
+        indexer
+            .discover_priority_cached_gem_archives(&HashSet::from(["activegem".to_string()]))
+            .unwrap();
+
+        assert!(indexer.discovered_gems.contains_key("active_gem"));
+        assert!(
+            !indexer.discovered_gems.contains_key("background_gem"),
+            "navigation discovery must not read or validate an unrelated archive"
+        );
+
+        create_cached_gem(&deferred_archive, "background_gem", "4.5.6", "ruby");
+        indexer.discover_cached_gem_archives().unwrap();
+
+        assert_eq!(indexer.discovered_gems["active_gem"].len(), 1);
+        assert!(indexer.discovered_gems.contains_key("background_gem"));
     }
 
     #[test]
@@ -2524,6 +3646,60 @@ mod tests {
     }
 
     #[test]
+    fn standalone_project_without_explicit_gems_skips_runtime_discovery() {
+        let workspace = TempDir::new().unwrap();
+        let mut indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
+        indexer.set_selected_runtime(
+            workspace.path().join("missing-ruby"),
+            RubyImplementation::Mri,
+            None,
+        );
+
+        assert_eq!(indexer.discover_gems_blocking().unwrap(), 0);
+        assert!(
+            !indexer.needs_unlocked_explicit_discovery(),
+            "a standalone project without explicit included gems must not schedule global discovery"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn standalone_project_discovers_only_explicitly_included_global_gems() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let workspace = TempDir::new().unwrap();
+        let invocation_log = workspace.path().join("invocations");
+        let fake_ruby = workspace.path().join("ruby");
+        std::fs::write(
+            &fake_ruby,
+            format!(
+                "#!/bin/sh\nprintf x >> '{}'\nprintf '%s' '[{{\"name\":\"example\",\"version\":\"1.2.3\",\"platform\":\"ruby\",\"gem_dir\":\"/gems/example-1.2.3\",\"lib_dirs\":[\"/gems/example-1.2.3/lib\"],\"dependencies\":[],\"default_gem\":false}},{{\"name\":\"unrequested\",\"version\":\"9.9.9\",\"platform\":\"ruby\",\"gem_dir\":\"/gems/unrequested-9.9.9\",\"lib_dirs\":[\"/gems/unrequested-9.9.9/lib\"],\"dependencies\":[],\"default_gem\":false}}]'\n",
+                invocation_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&fake_ruby).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_ruby, permissions).unwrap();
+
+        let mut indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
+        indexer.set_selected_runtime(fake_ruby, RubyImplementation::Mri, None);
+        indexer.set_explicitly_included_gems(HashSet::from(["example".to_string()]));
+
+        assert!(
+            indexer.needs_unlocked_explicit_discovery(),
+            "the explicit standalone exception must request governed global discovery"
+        );
+        assert_eq!(indexer.discover_gems_blocking().unwrap(), 2);
+        assert_eq!(std::fs::read_to_string(invocation_log).unwrap(), "x");
+        assert_eq!(indexer.get_gem("example").unwrap().version, "1.2.3");
+        assert!(
+            indexer.get_gem("unrequested").is_none(),
+            "global discovery must not make an unrequested gem selectable"
+        );
+    }
+
+    #[test]
     fn test_version_comparison() {
         assert_eq!(compare_versions("1.0.0", "1.0.0"), Ordering::Equal);
         assert_eq!(compare_versions("1.0.1", "1.0.0"), Ordering::Greater);
@@ -2597,6 +3773,51 @@ mod tests {
     }
 
     #[test]
+    fn required_gem_manifest_preparation_is_lazy_and_root_first() {
+        let fixture = TempDir::new().unwrap();
+        let project = fixture.path().join("project");
+        let first = fixture.path().join("gems/first-1.0.0");
+        let later = fixture.path().join("gems/later-1.0.0");
+        fs::create_dir_all(first.join("lib")).unwrap();
+        fs::create_dir_all(later.join("lib")).unwrap();
+        fs::create_dir_all(&project).unwrap();
+        fs::write(first.join("lib/first.rb"), "module FirstDependency\nend\n").unwrap();
+        fs::write(later.join("lib/later.rb"), [0xff, 0xfe]).unwrap();
+
+        let mut indexer = IndexerGem::new(Some(project));
+        indexer.set_required_gems(HashSet::from(["later".to_string(), "first".to_string()]));
+        for (name, root) in [("first", first), ("later", later)] {
+            indexer.discovered_gems.insert(
+                name.to_string(),
+                vec![GemInfo {
+                    name: name.to_string(),
+                    version: "1.0.0".to_string(),
+                    platform: "ruby".to_string(),
+                    locked_version: "1.0.0".to_string(),
+                    source: GemSource::BundlerInstalled,
+                    path: root.clone(),
+                    lib_paths: vec![root.join("lib")],
+                    dependencies: Vec::new(),
+                    is_default: false,
+                }],
+            );
+        }
+
+        let names = indexer.required_gems_with_dependencies();
+        assert_eq!(names, ["first", "later"]);
+        let seed = AnalysisEngine::new().semantic_context_fingerprint();
+        let first_manifest = indexer
+            .required_gem_manifest("first", seed)
+            .unwrap()
+            .expect("the first direct dependency must produce a manifest");
+        assert_eq!(first_manifest.sources().len(), 1);
+        assert!(
+            indexer.required_gem_manifest("later", seed).is_err(),
+            "a later invalid dependency must fail only when its own manifest is prepared"
+        );
+    }
+
+    #[test]
     fn test_excluded_gems_win_over_roots_and_transitive_dependencies() {
         let mut indexer = create_test_indexer();
         indexer.set_required_gems(HashSet::from(["rails".to_string(), "debug".to_string()]));
@@ -2624,6 +3845,9 @@ mod tests {
 
     #[test]
     fn test_workspace_ruby_path_uses_rvm_ruby_version_file() {
+        let _home_guard = HOME_ENV_LOCK.lock().expect(
+            "INVARIANT VIOLATED: a Ruby path test poisoned the HOME environment lock. This is a test bug because process-global environment mutations must be serialized and restored. Fix: restore HOME before allowing an environment-dependent test to unwind.",
+        );
         let temp_dir = TempDir::new().unwrap();
         std::fs::write(temp_dir.path().join(".ruby-version"), "ruby-3.3.11\n").unwrap();
         let fake_home = temp_dir.path().join("home");
@@ -2650,6 +3874,9 @@ mod tests {
 
     #[test]
     fn workspace_ruby_path_supports_rvm_jruby_version_file() {
+        let _home_guard = HOME_ENV_LOCK.lock().expect(
+            "INVARIANT VIOLATED: a Ruby path test poisoned the HOME environment lock. This is a test bug because process-global environment mutations must be serialized and restored. Fix: restore HOME before allowing an environment-dependent test to unwind.",
+        );
         let temp_dir = TempDir::new().unwrap();
         std::fs::write(temp_dir.path().join(".ruby-version"), "jruby-9.2.21.0\n").unwrap();
         let fake_home = temp_dir.path().join("home");
@@ -2672,5 +3899,40 @@ mod tests {
         }
 
         assert_eq!(detected, Some(ruby_path));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn auto_installed_gem_discovery_uses_one_runtime_process() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let workspace = TempDir::new().unwrap();
+        std::fs::write(
+            workspace.path().join("Gemfile"),
+            "source 'https://example.test'\n",
+        )
+        .unwrap();
+        let invocation_log = workspace.path().join("invocations");
+        let fake_ruby = workspace.path().join("ruby");
+        std::fs::write(
+            &fake_ruby,
+            format!(
+                "#!/bin/sh\nprintf x >> '{}'\nprintf '%s' 'RUBY_FAST_LSP_GEM_DISCOVERY={{\"source\":\"global\",\"gems\":[{{\"name\":\"example\",\"version\":\"1.2.3\",\"platform\":\"ruby\",\"gem_dir\":\"/gems/example-1.2.3\",\"lib_dirs\":[\"/gems/example-1.2.3/lib\"],\"dependencies\":[],\"default_gem\":false}}]}}'\n",
+                invocation_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&fake_ruby).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_ruby, permissions).unwrap();
+
+        let mut indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
+        indexer.set_selected_runtime(fake_ruby, RubyImplementation::JRuby, None);
+        indexer.discover_auto_gems().unwrap();
+
+        assert_eq!(std::fs::read_to_string(invocation_log).unwrap(), "x");
+        let gem = &indexer.discovered_gems["example"][0];
+        assert_eq!(gem.source, GemSource::GlobalInstalled);
+        assert_eq!(gem.version, "1.2.3");
     }
 }

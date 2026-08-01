@@ -8,10 +8,8 @@ use crate::config::runtime::EffectiveRuntimeSelection;
 use crate::config::RubyFastLspConfig;
 use crate::runtime::catalog::RuntimeImplementation;
 use crate::server::RubyLanguageServer;
-use crate::utils::detect_system_ruby_version;
 use log::{debug, info, warn};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 
@@ -111,9 +109,18 @@ pub async fn handle_initialize(
     } else {
         warn!("No workspace folder or root URI provided. Files opened ad-hoc will use the orphan index.");
     }
-    lang_server
+    if let Err(error) = lang_server
         .extension_registry
-        .configure_from_config_and_workspace_roots(&config, &lang_server.workspace_root_paths());
+        .configure_from_config_and_workspace_roots_governed(
+            &config,
+            &lang_server.workspace_root_paths(),
+            lang_server.indexing_resources.clone(),
+        )
+        .await
+    {
+        warn!("Extension initialization worker failed: {error:#}");
+        return Err(tower_lsp::jsonrpc::Error::internal_error());
+    }
 
     // Build static capabilities
     // Note: Type hierarchy is dynamically registered in handle_initialized
@@ -228,18 +235,11 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
 
     let config = server.config.lock().clone();
 
-    // Determine Ruby version based on configuration
-    let ruby_version = if let Some(version) = config.get_ruby_version() {
-        info!("Using configured Ruby version: {:?}", version);
-        version
+    if let Some(version) = config.get_ruby_version() {
+        info!("Using configured Ruby compatibility version: {version:?}");
     } else {
-        detect_system_ruby_version().unwrap_or_else(|| {
-            info!("No Ruby version detected, using default Ruby 3.0");
-            (3, 0)
-        })
-    };
-
-    info!("Using Ruby version: {}.{}", ruby_version.0, ruby_version.1);
+        info!("Ruby runtime and compatibility will be resolved independently per project");
+    }
 
     // Spawn one coordinator per registered workspace. Coordinators feed the
     // shared analysis engine and only share the server for client notifications,
@@ -250,36 +250,50 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
         return;
     }
 
-    if let Some(client) = &server.client {
-        let _ = client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token: NumberOrString::String("indexing".to_string()),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                    WorkDoneProgressBegin {
-                        title: "Ruby Fast LSP".to_string(),
-                        message: Some(format!("Indexing {} workspace(s)...", workspaces.len())),
-                        percentage: Some(0),
-                        cancellable: Some(false),
-                    },
-                )),
-            })
-            .await;
-    }
-
     let total = workspaces.len();
-    let remaining = Arc::new(AtomicUsize::new(total));
 
-    for ws in workspaces {
+    let scheduled = workspaces
+        .into_iter()
+        .map(|ws| {
+            let run = ws.begin_indexing_run();
+            let admission = server.indexing_scheduler.register_cancellable(
+                ws.root_path.clone(),
+                crate::indexing_scheduler::IndexingPriority::Background,
+                run.cancellation(),
+            );
+            (ws, run, admission)
+        })
+        .collect::<Vec<_>>();
+
+    for (ws, run, admission) in scheduled {
         let server_clone = server.clone();
-        let remaining_clone = remaining.clone();
         tokio::spawn(async move {
             let workspace_uri = ws.root_uri.clone();
+            server_clone.publish_indexing_status().await;
+            let Some(_permit) = admission.wait().await else {
+                return;
+            };
+            if ws
+                .indexing_status
+                .transition(
+                    run.generation(),
+                    crate::indexing_status::IndexingPhase::ResolvingRuntime,
+                    None,
+                    None,
+                )
+                .is_none()
+            {
+                return;
+            }
+            server_clone.publish_indexing_status().await;
             info!(
                 "Starting background indexing for workspace: {}",
                 workspace_uri.as_str()
             );
 
-            let result = indexing::init_workspace(&server_clone, workspace_uri.clone()).await;
+            let result =
+                indexing::init_workspace_for_run(&server_clone, workspace_uri.clone(), run.clone())
+                    .await;
 
             match result {
                 Ok(_) => {
@@ -287,38 +301,40 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
                         "Background indexing completed for workspace: {}",
                         workspace_uri.as_str()
                     );
-                    ws.indexing_complete
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    ws.navigation_demands.complete_stage(
+                        run.generation(),
+                        crate::navigation_demand::NavigationDemandStage::Project,
+                    );
+                    ws.navigation_demands.complete_stage(
+                        run.generation(),
+                        crate::navigation_demand::NavigationDemandStage::Dependency,
+                    );
+                    let _ = ws.indexing_status.transition(
+                        run.generation(),
+                        crate::indexing_status::IndexingPhase::Ready,
+                        None,
+                        None,
+                    );
+                    server_clone.publish_indexing_status().await;
                 }
                 Err(e) => {
+                    if run.is_cancelled() || !ws.indexing_status.is_current_run(&run) {
+                        info!(
+                            "Background indexing generation {} stopped for workspace {}: {}",
+                            run.generation(),
+                            workspace_uri.as_str(),
+                            e
+                        );
+                        return;
+                    }
+                    ws.navigation_demands.cancel_generation(run.generation());
                     warn!(
                         "Background indexing failed for workspace {}: {}",
                         workspace_uri.as_str(),
                         e
                     );
-                }
-            }
-
-            // Last workspace to finish closes out the progress notification.
-            let prev = remaining_clone.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-            if prev == 1 {
-                if let Some(client) = &server_clone.client {
-                    let _ = client
-                        .send_notification::<notification::Progress>(ProgressParams {
-                            token: NumberOrString::String("indexing".to_string()),
-                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                WorkDoneProgressEnd {
-                                    message: Some("Indexing complete".to_string()),
-                                },
-                            )),
-                        })
-                        .await;
-                    let _ = client
-                        .show_message(
-                            MessageType::INFO,
-                            "Ruby Fast LSP: Workspace indexing complete",
-                        )
-                        .await;
+                    let _ = ws.indexing_status.fail(run.generation(), e.to_string());
+                    server_clone.publish_indexing_status().await;
                 }
             }
         });
@@ -350,20 +366,28 @@ pub async fn handle_did_change_watched_files(
     server: &RubyLanguageServer,
     mut params: DidChangeWatchedFilesParams,
 ) {
+    let debounce_generation = server.queue_watched_file_changes(params.changes);
+    tokio::time::sleep(crate::server::WATCHED_FILE_DEBOUNCE_INTERVAL).await;
+    let Some(changes) = server.take_watched_file_changes(debounce_generation) else {
+        return;
+    };
+    params.changes = changes;
+
     let config = server.config.lock().clone();
-    let mut runtime_rebuilds = server
-        .list_workspaces()
-        .into_iter()
+    let workspaces = server.list_workspaces();
+    let mut project_rebuilds = workspaces
+        .iter()
         .filter(|workspace| {
             params.changes.iter().any(|change| {
                 change.uri.to_file_path().is_ok_and(|path| {
-                    jruby_classpath_change_requires_rebuild(&workspace.root_path, &path, &config)
+                    project_input_change_requires_rebuild(&workspace.root_path, &path, &config)
                 })
             })
         })
+        .cloned()
         .collect::<Vec<_>>();
-    runtime_rebuilds.sort_by(|left, right| left.root_path.cmp(&right.root_path));
-    runtime_rebuilds.dedup_by(|left, right| left.root_path == right.root_path);
+    project_rebuilds.sort_by(|left, right| left.root_path.cmp(&right.root_path));
+    project_rebuilds.dedup_by(|left, right| left.root_path == right.root_path);
 
     for change in &params.changes {
         if change
@@ -376,6 +400,27 @@ pub async fn handle_did_change_watched_files(
             server.refresh_extension_project_dependencies_for_uri(&change.uri);
         }
     }
+    let extension_inputs_changed = config.workspace_trusted
+        && params.changes.iter().any(|change| {
+            change.uri.to_file_path().is_ok_and(|path| {
+                workspaces
+                    .iter()
+                    .any(|workspace| project_extension_input_changed(&workspace.root_path, &path))
+            })
+        });
+    if extension_inputs_changed {
+        if let Err(error) = server
+            .extension_registry
+            .configure_from_config_and_workspace_roots_governed(
+                &config,
+                &server.workspace_root_paths(),
+                server.indexing_resources.clone(),
+            )
+            .await
+        {
+            warn!("Project extension watcher reload failed: {error:#}");
+        }
+    }
     let workspace_trusted = server.config.lock().workspace_trusted;
     let reindex_uris = server
         .extension_registry
@@ -383,6 +428,7 @@ pub async fn handle_did_change_watched_files(
             workspace_trusted,
             &server.workspace_root_paths(),
             &params.changes,
+            server.indexing_resources.clone(),
         )
         .await;
     params
@@ -396,19 +442,19 @@ pub async fn handle_did_change_watched_files(
         let Ok(path) = change.uri.to_file_path() else {
             return true;
         };
-        !runtime_rebuilds.iter().any(|workspace| {
-            jruby_classpath_change_requires_rebuild(&workspace.root_path, &path, &config)
+        !project_rebuilds.iter().any(|workspace| {
+            project_input_change_requires_rebuild(&workspace.root_path, &path, &config)
         })
     });
     if !params.changes.is_empty() {
         indexing::handle_watched_files_changed(server, params).await;
     }
-    for workspace in runtime_rebuilds {
+    for workspace in project_rebuilds {
         rebuild_runtime_owned_project_state(server, workspace).await;
     }
 }
 
-fn jruby_classpath_change_requires_rebuild(
+fn project_input_change_requires_rebuild(
     project_root: &std::path::Path,
     changed_path: &std::path::Path,
     config: &RubyFastLspConfig,
@@ -417,21 +463,29 @@ fn jruby_classpath_change_requires_rebuild(
         return false;
     }
     let root = project_root.to_string_lossy();
+    let file_name = changed_path.file_name().and_then(|name| name.to_str());
+    if config.workspace_trusted && project_extension_input_changed(project_root, changed_path) {
+        return true;
+    }
+    if matches!(file_name, Some("Gemfile" | "Gemfile.lock")) {
+        return true;
+    }
+    let runtime_selection = config
+        .runtime
+        .selection_for_project(&root, &config.ruby_version);
+    if changed_path.parent() == Some(project_root)
+        && matches!(file_name, Some(".ruby-version" | ".tool-versions"))
+    {
+        return matches!(&runtime_selection, EffectiveRuntimeSelection::Auto);
+    }
     if !matches!(
-        config
-            .runtime
-            .selection_for_project(&root, &config.ruby_version),
+        &runtime_selection,
         EffectiveRuntimeSelection::Explicit(runtime)
             if runtime.implementation == RuntimeImplementation::Jruby
     ) {
         return false;
     }
-    if changed_path.file_name().is_some_and(|name| {
-        matches!(
-            name.to_str(),
-            Some("Gemfile.lock" | "Jarfile" | "Jars.lock")
-        )
-    }) {
+    if matches!(file_name, Some("Jarfile" | "Jars.lock")) {
         return true;
     }
     changed_path
@@ -439,10 +493,64 @@ fn jruby_classpath_change_requires_rebuild(
         .is_some_and(|extension| matches!(extension.to_str(), Some("jar" | "jmod" | "java")))
 }
 
+fn project_extension_input_changed(
+    project_root: &std::path::Path,
+    changed_path: &std::path::Path,
+) -> bool {
+    let Ok(relative) = changed_path.strip_prefix(project_root) else {
+        return false;
+    };
+    let mut components = relative.components();
+    match components
+        .next()
+        .and_then(|component| component.as_os_str().to_str())
+    {
+        Some(".ruby-fast-lsp") => components
+            .next()
+            .is_some_and(|component| component.as_os_str() == std::ffi::OsStr::new("extensions")),
+        Some("ruby_fast_lsp") => true,
+        Some(_) | None => false,
+    }
+}
+
 async fn rebuild_runtime_owned_project_state(
     server: &RubyLanguageServer,
     workspace: crate::server::Workspace,
 ) {
+    info!(
+        "Rebuilding runtime-owned semantic state for project {}",
+        workspace.root_path.display()
+    );
+    let run = workspace.begin_indexing_run();
+    server.publish_indexing_status().await;
+    let Some(_permit) = server
+        .indexing_scheduler
+        .acquire_cancellable(
+            workspace.root_path.clone(),
+            crate::indexing_scheduler::IndexingPriority::OpenDocument,
+            run.cancellation(),
+        )
+        .await
+    else {
+        return;
+    };
+    if workspace
+        .indexing_status
+        .transition(
+            run.generation(),
+            crate::indexing_status::IndexingPhase::ResolvingRuntime,
+            None,
+            None,
+        )
+        .is_none()
+    {
+        return;
+    }
+    server.publish_indexing_status().await;
+
+    // The scheduler admits at most one generation per project. Only after the
+    // superseded coordinator has released its permit may the replacement clear
+    // and rebuild that project's semantic state.
     let open_documents = server
         .docs
         .lock()
@@ -459,25 +567,57 @@ async fn rebuild_runtime_owned_project_state(
                 })
         })
         .collect::<Vec<_>>();
-    info!(
-        "Rebuilding runtime-owned semantic state for project {}",
-        workspace.root_path.display()
-    );
     server.release_external_documents_for_project(&workspace.root_uri);
+    server.set_jruby_import_provider(&workspace.root_path, None);
+    server.set_runtime_classpath_fingerprint(&workspace.root_path, None);
+    server.set_effective_runtime(&workspace.root_path, None);
+    server.set_extension_project_ruby_version(&workspace.root_path, None);
     *workspace.analysis_engine.write() = ruby_analysis::engine::AnalysisEngine::new();
-    workspace.indexing_complete.store(false, Ordering::Release);
-    let rebuild = indexing::init_workspace(server, workspace.root_uri.clone()).await;
+    let rebuild =
+        indexing::init_workspace_for_run(server, workspace.root_uri.clone(), run.clone()).await;
     for text_document in open_documents {
         indexing::handle_did_open(server, DidOpenTextDocumentParams { text_document }).await;
     }
     match rebuild {
-        Ok(()) => {
-            workspace.indexing_complete.store(true, Ordering::Release);
+        Ok(_) => {
+            workspace.navigation_demands.complete_stage(
+                run.generation(),
+                crate::navigation_demand::NavigationDemandStage::Project,
+            );
+            workspace.navigation_demands.complete_stage(
+                run.generation(),
+                crate::navigation_demand::NavigationDemandStage::Dependency,
+            );
+            let _ = workspace.indexing_status.transition(
+                run.generation(),
+                crate::indexing_status::IndexingPhase::Ready,
+                None,
+                None,
+            );
+            server.publish_indexing_status().await;
         }
-        Err(error) => warn!(
-            "Runtime rebuild failed for project {}: {error}",
-            workspace.root_path.display()
-        ),
+        Err(error) => {
+            if run.is_cancelled() || !workspace.indexing_status.is_current_run(&run) {
+                info!(
+                    "Runtime rebuild generation {} stopped for project {}: {}",
+                    run.generation(),
+                    workspace.root_path.display(),
+                    error
+                );
+                return;
+            }
+            workspace
+                .navigation_demands
+                .cancel_generation(run.generation());
+            let _ = workspace
+                .indexing_status
+                .fail(run.generation(), error.to_string());
+            server.publish_indexing_status().await;
+            warn!(
+                "Runtime rebuild failed for project {}: {error}",
+                workspace.root_path.display()
+            );
+        }
     }
 }
 
@@ -533,9 +673,17 @@ pub async fn handle_did_change_workspace_folders(
     }
 
     let config = server.config.lock().clone();
-    server
+    if let Err(error) = server
         .extension_registry
-        .configure_from_config_and_workspace_roots(&config, &server.workspace_root_paths());
+        .configure_from_config_and_workspace_roots_governed(
+            &config,
+            &server.workspace_root_paths(),
+            server.indexing_resources.clone(),
+        )
+        .await
+    {
+        warn!("Extension workspace reconfiguration worker failed: {error:#}");
+    }
     refresh_extension_watch_registration(server).await;
 
     for text_document in open_documents_to_rehome {
@@ -550,30 +698,91 @@ pub async fn handle_did_change_workspace_folders(
         // discovery includes the new root.
         let server_clone = server.clone();
         let workspace_uri = workspace.root_uri.clone();
-        let indexing_complete_flag = workspace.indexing_complete.clone();
+        let project_root = workspace.root_path.clone();
+        let run = workspace.begin_indexing_run();
+        let indexing_status = workspace.indexing_status.clone();
         tokio::spawn(async move {
+            server_clone.publish_indexing_status().await;
+            let Some(_permit) = server_clone
+                .indexing_scheduler
+                .acquire_cancellable(
+                    project_root,
+                    crate::indexing_scheduler::IndexingPriority::Background,
+                    run.cancellation(),
+                )
+                .await
+            else {
+                return;
+            };
+            if indexing_status
+                .transition(
+                    run.generation(),
+                    crate::indexing_status::IndexingPhase::ResolvingRuntime,
+                    None,
+                    None,
+                )
+                .is_none()
+            {
+                return;
+            }
+            server_clone.publish_indexing_status().await;
             info!(
                 "Starting background indexing for newly added workspace: {}",
                 workspace_uri.as_str()
             );
-            match indexing::init_workspace(&server_clone, workspace_uri.clone()).await {
+            match indexing::init_workspace_for_run(
+                &server_clone,
+                workspace_uri.clone(),
+                run.clone(),
+            )
+            .await
+            {
                 Ok(_) => {
                     info!(
                         "Background indexing completed for added workspace: {}",
                         workspace_uri.as_str()
                     );
-                    indexing_complete_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    workspace.navigation_demands.complete_stage(
+                        run.generation(),
+                        crate::navigation_demand::NavigationDemandStage::Project,
+                    );
+                    workspace.navigation_demands.complete_stage(
+                        run.generation(),
+                        crate::navigation_demand::NavigationDemandStage::Dependency,
+                    );
+                    let _ = indexing_status.transition(
+                        run.generation(),
+                        crate::indexing_status::IndexingPhase::Ready,
+                        None,
+                        None,
+                    );
+                    server_clone.publish_indexing_status().await;
                 }
                 Err(e) => {
+                    if run.is_cancelled() || !indexing_status.is_current_run(&run) {
+                        info!(
+                            "Added-workspace indexing generation {} stopped for {}: {}",
+                            run.generation(),
+                            workspace_uri.as_str(),
+                            e
+                        );
+                        return;
+                    }
+                    workspace
+                        .navigation_demands
+                        .cancel_generation(run.generation());
                     warn!(
                         "Background indexing failed for added workspace {}: {}",
                         workspace_uri.as_str(),
                         e
                     );
+                    let _ = indexing_status.fail(run.generation(), e.to_string());
+                    server_clone.publish_indexing_status().await;
                 }
             }
         });
     }
+    server.publish_indexing_status().await;
 }
 
 pub async fn handle_did_change_configuration(
@@ -616,30 +825,29 @@ pub async fn handle_did_change_configuration(
 
                 // Apply log level immediately (works without restart)
                 config.apply_log_level();
-                server
+                if let Err(error) = server
                     .extension_registry
-                    .configure_from_config_and_workspace_roots(
+                    .configure_from_config_and_workspace_roots_governed(
                         &config,
                         &server.workspace_root_paths(),
-                    );
+                        server.indexing_resources.clone(),
+                    )
+                    .await
+                {
+                    warn!("Extension settings reconfiguration worker failed: {error:#}");
+                    return;
+                }
                 refresh_extension_watch_registration(server).await;
 
                 *server.config.lock() = config.clone();
 
-                let ruby_version = if let Some(version) = config.get_ruby_version() {
-                    info!("Using configured Ruby version: {:?}", version);
-                    version
+                if let Some(version) = config.get_ruby_version() {
+                    info!("Using configured Ruby compatibility version: {version:?}");
                 } else {
-                    detect_system_ruby_version().unwrap_or_else(|| {
-                        info!("No Ruby version detected, using default Ruby 3.0");
-                        (3, 0)
-                    })
-                };
-
-                info!(
-                    "Configuration updated with Ruby version: {:?}",
-                    ruby_version
-                );
+                    info!(
+                        "Ruby runtime and compatibility will be resolved independently per project"
+                    );
+                }
 
                 for workspace in runtime_changed_workspaces {
                     rebuild_runtime_owned_project_state(server, workspace).await;
@@ -751,6 +959,8 @@ fn preserve_initialization_only_config(
 
 pub async fn handle_shutdown(server: &RubyLanguageServer) -> LspResult<()> {
     info!("Shutting down Ruby LSP server");
+    server.cancel_watched_file_changes();
+    server.cancel_all_indexing();
     server.extension_registry.shutdown();
     Ok(())
 }
@@ -763,8 +973,8 @@ mod tests {
         SelectedRuntimeDescriptor,
     };
     use crate::runtime::catalog::RuntimeDiscoverySource;
-    use ruby_analysis::core::SourceKind;
-    use ruby_analysis::engine::SourceFileInput;
+    use ruby_analysis::core::{FullyQualifiedName, RubyConstant, SourceKind};
+    use ruby_analysis::engine::{AnalysisQuery, SourceFileInput};
     use std::io::{Cursor, Write};
     use std::path::PathBuf;
     use zip::write::SimpleFileOptions;
@@ -778,6 +988,91 @@ mod tests {
             .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect()
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancels_every_project_indexing_generation() {
+        let fixture = tempfile::tempdir().unwrap();
+        let server = RubyLanguageServer::default();
+        let first =
+            server.add_workspace(Url::from_directory_path(fixture.path().join("admin")).unwrap());
+        let second =
+            server.add_workspace(Url::from_directory_path(fixture.path().join("server")).unwrap());
+        let first_run = first.indexing_status.begin_run();
+        let second_run = second.indexing_status.begin_run();
+        let pending_watcher_generation = server.queue_watched_file_changes(vec![FileEvent {
+            uri: Url::from_file_path(fixture.path().join("pending.rb")).unwrap(),
+            typ: FileChangeType::CHANGED,
+        }]);
+
+        handle_shutdown(&server)
+            .await
+            .expect("test server shutdown must succeed");
+
+        assert!(first_run.is_cancelled());
+        assert!(second_run.is_cancelled());
+        assert_eq!(
+            first.indexing_status.snapshot().phase,
+            crate::indexing_status::IndexingPhase::Cancelled
+        );
+        assert_eq!(
+            second.indexing_status.snapshot().phase,
+            crate::indexing_status::IndexingPhase::Cancelled
+        );
+        assert!(
+            server
+                .take_watched_file_changes(pending_watcher_generation)
+                .is_none(),
+            "shutdown must invalidate pending watcher work"
+        );
+    }
+
+    #[tokio::test]
+    async fn watcher_storm_processes_only_the_newest_complete_batch() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("server");
+        let source_path = project.join("lib/service.rb");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "class StaleService\nend\n").unwrap();
+        let source_uri = Url::from_file_path(&source_path).unwrap();
+        let server = RubyLanguageServer::default();
+        let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
+
+        let first_server = server.clone();
+        let first_uri = source_uri.clone();
+        let first = tokio::spawn(async move {
+            handle_did_change_watched_files(
+                &first_server,
+                DidChangeWatchedFilesParams {
+                    changes: vec![FileEvent {
+                        uri: first_uri,
+                        typ: FileChangeType::CREATED,
+                    }],
+                },
+            )
+            .await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        std::fs::write(&source_path, "class CurrentService\nend\n").unwrap();
+        handle_did_change_watched_files(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: source_uri,
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        )
+        .await;
+        first.await.unwrap();
+
+        let stale = FullyQualifiedName::namespace(vec![RubyConstant::new("StaleService").unwrap()]);
+        let current =
+            FullyQualifiedName::namespace(vec![RubyConstant::new("CurrentService").unwrap()]);
+        let engine = workspace.analysis_engine.read();
+        let query = AnalysisQuery::new(&engine);
+        assert!(query.symbols_for_fqn(&stale).is_empty());
+        assert_eq!(query.symbols_for_fqn(&current).len(), 1);
     }
 
     fn write_jar(path: &std::path::Path, entry: &str, contents: &[u8]) {
@@ -812,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn only_owning_jruby_classpath_inputs_trigger_runtime_rebuilds() {
+    fn project_inputs_trigger_only_the_owning_project_rebuild() {
         let project = PathBuf::from("/repo/admin");
         let mut config = RubyFastLspConfig {
             runtime: RuntimeSelectionConfig {
@@ -834,6 +1129,7 @@ mod tests {
         };
 
         for changed in [
+            "Gemfile",
             "Gemfile.lock",
             "Jarfile",
             "Jars.lock",
@@ -841,18 +1137,23 @@ mod tests {
             "src/main/java/com/example/Runtime.java",
         ] {
             assert!(
-                jruby_classpath_change_requires_rebuild(&project, &project.join(changed), &config),
-                "{changed} must rebuild the owning JRuby runtime state"
+                project_input_change_requires_rebuild(&project, &project.join(changed), &config),
+                "{changed} must rebuild the owning project state"
             );
         }
-        assert!(!jruby_classpath_change_requires_rebuild(
+        assert!(!project_input_change_requires_rebuild(
             &project,
             PathBuf::from("/repo/server/lib/jars/runtime.jar").as_path(),
             &config
         ));
-        assert!(!jruby_classpath_change_requires_rebuild(
+        assert!(!project_input_change_requires_rebuild(
             &project,
             &project.join("lib/application.rb"),
+            &config
+        ));
+        assert!(!project_input_change_requires_rebuild(
+            &project,
+            &project.join(".ruby-version"),
             &config
         ));
 
@@ -866,9 +1167,58 @@ mod tests {
                 discovery_source: RuntimeDiscoverySource::Rvm,
                 java_home: None,
             });
-        assert!(!jruby_classpath_change_requires_rebuild(
+        for changed in ["Gemfile", "Gemfile.lock"] {
+            assert!(project_input_change_requires_rebuild(
+                &project,
+                &project.join(changed),
+                &config
+            ));
+        }
+        assert!(!project_input_change_requires_rebuild(
             &project,
             &project.join("lib/jars/runtime.jar"),
+            &config
+        ));
+        assert!(!project_input_change_requires_rebuild(
+            &project,
+            &project.join(".ruby-version"),
+            &config
+        ));
+
+        config.runtime.projects[0].selection =
+            RuntimeSelection::Mode(crate::config::runtime::RuntimeSelectionMode::Auto);
+        for marker in [".ruby-version", ".tool-versions"] {
+            assert!(project_input_change_requires_rebuild(
+                &project,
+                &project.join(marker),
+                &config
+            ));
+        }
+        assert!(!project_input_change_requires_rebuild(
+            &project,
+            &project.join("config/.ruby-version"),
+            &config
+        ));
+        assert!(!project_input_change_requires_rebuild(
+            &project,
+            &project.join(".ruby-fast-lsp/extensions/custom/extension.wasm"),
+            &config
+        ));
+        config.workspace_trusted = true;
+        for extension_input in [
+            ".ruby-fast-lsp/extensions/custom/extension.toml",
+            ".ruby-fast-lsp/extensions/custom/extension.wasm",
+            "ruby_fast_lsp/frameworks/custom/extension.toml",
+        ] {
+            assert!(project_input_change_requires_rebuild(
+                &project,
+                &project.join(extension_input),
+                &config
+            ));
+        }
+        assert!(!project_input_change_requires_rebuild(
+            &project,
+            &project.join(".ruby-fast-lsp/config.toml"),
             &config
         ));
     }
@@ -936,13 +1286,21 @@ mod tests {
             .file_id(&external_path)
             .is_some());
 
+        let generation_before_rebuild = workspace.indexing_status.snapshot().generation;
+        let jar_uri = Url::from_file_path(project.join("lib/jars/runtime.jar")).unwrap();
         handle_did_change_watched_files(
             &server,
             DidChangeWatchedFilesParams {
-                changes: vec![FileEvent {
-                    uri: Url::from_file_path(project.join("lib/jars/runtime.jar")).unwrap(),
-                    typ: FileChangeType::DELETED,
-                }],
+                changes: vec![
+                    FileEvent {
+                        uri: jar_uri.clone(),
+                        typ: FileChangeType::CHANGED,
+                    },
+                    FileEvent {
+                        uri: jar_uri,
+                        typ: FileChangeType::DELETED,
+                    },
+                ],
             },
         )
         .await;
@@ -961,7 +1319,15 @@ mod tests {
             server.analysis_workspace_for_uri(&external_uri).is_none(),
             "runtime rebuild must release retained provenance for stale external documents"
         );
-        assert!(!workspace.indexing_complete.load(Ordering::Acquire));
+        assert_eq!(
+            workspace.indexing_status.snapshot().phase,
+            crate::indexing_status::IndexingPhase::Failed
+        );
+        assert_eq!(
+            workspace.indexing_status.snapshot().generation,
+            generation_before_rebuild + 1,
+            "duplicate watcher events for one runtime input must create one replacement generation"
+        );
     }
 
     #[cfg(unix)]
@@ -981,7 +1347,11 @@ mod tests {
         std::fs::create_dir_all(java_home.join("bin")).unwrap();
         std::fs::create_dir_all(java_home.join("jmods")).unwrap();
         std::fs::write(project.join("Gemfile"), "").unwrap();
-        std::fs::write(jruby_home.join("bin/jruby"), "#!/bin/sh\nprintf '[]\\n'\n").unwrap();
+        std::fs::write(
+            jruby_home.join("bin/jruby"),
+            "#!/bin/sh\nprintf 'RUBY_FAST_LSP_GEM_DISCOVERY={\"source\":\"global\",\"gems\":[]}\\n'\n",
+        )
+        .unwrap();
         let permissions = std::os::unix::fs::PermissionsExt::from_mode(0o755);
         std::fs::set_permissions(jruby_home.join("bin/jruby"), permissions).unwrap();
         std::fs::write(java_home.join("release"), "JAVA_VERSION=\"17.0.12\"\n").unwrap();
@@ -1082,6 +1452,6 @@ mod tests {
             engine.file_id(&source_path).is_some(),
             "the project source must be reindexed after the runtime rebuild"
         );
-        assert!(workspace.indexing_complete.load(Ordering::Acquire));
+        assert!(workspace.indexing_status.snapshot().is_ready());
     }
 }

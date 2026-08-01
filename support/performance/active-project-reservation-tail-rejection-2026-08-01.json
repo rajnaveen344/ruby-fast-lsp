@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Test whether keeping the active project's five-lane reservation through the exhaustive project tail improves active semantic completion.",
+  "experiment": {
+    "baseline": "Release the active-project navigation reservation at the accepted navigation frontier.",
+    "candidate": "Retain five of six indexing CPU lanes until the active project completes its exhaustive semantic tail.",
+    "method": "Three interleaved baseline/candidate runs on the same two-project goshposh configuration, immutable profiler binaries, fixed persistent cache, two scheduler workers, identical definition probes, and complete semantic export manifests."
+  },
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "baseline": {
+    "profiler_executable_sha256": "4252de1bef31984313f92e78113c79570e7f72c7a40c6f361aef15f542619ed5",
+    "runs": [
+      {
+        "id": "b230",
+        "jsonl_sha256": "11a16928572d9d888ebc38cbc019df1d1d09d4de3f708c5cac1b45292e6c66a6",
+        "log_sha256": "c6642574341572de4c0e2bde25fb9715249bd2208190877039203c264daf4215",
+        "wall_ms": 14183.39575,
+        "active_project_navigation_ms": 6468,
+        "active_dependency_navigation_ms": 12030,
+        "active_semantic_complete_ms": 12082,
+        "external_peak_rss_bytes": 1741799424
+      },
+      {
+        "id": "b232",
+        "jsonl_sha256": "9b5d6eed0c3a31cb9bf65b5067014169488e03c54894895670c3c69b1ca42e1f",
+        "log_sha256": "9195a1d6a508a4dce926907c9cd7d345692dd49c968786f699c160bec5032f7f",
+        "wall_ms": 13912.668042,
+        "active_project_navigation_ms": 6353,
+        "active_dependency_navigation_ms": 11789,
+        "active_semantic_complete_ms": 11827,
+        "external_peak_rss_bytes": 1744240640
+      },
+      {
+        "id": "b234",
+        "jsonl_sha256": "2f11362d0dd3388e78ec159cb7f82452d3d898a5b97eb99f5606e7bfec315f83",
+        "log_sha256": "818abba388c27f03396cb40c115678537a361a81c636819fd145752fcdac6a03",
+        "wall_ms": 13735.949917,
+        "active_project_navigation_ms": 6212,
+        "active_dependency_navigation_ms": 11673,
+        "active_semantic_complete_ms": 11725,
+        "external_peak_rss_bytes": 1713913856
+      }
+    ],
+    "medians": {
+      "wall_ms": 13912.668042,
+      "user_cpu_ms": 27263.178,
+      "external_peak_rss_bytes": 1741799424,
+      "active_project_navigation_ms": 6353,
+      "active_dependency_navigation_ms": 11789,
+      "active_semantic_complete_ms": 11827
+    }
+  },
+  "candidate": {
+    "profiler_executable_sha256": "a253c8025393da3f88d593632f4b64dbdfc4e753d9dbe213b33b6466648b7786",
+    "runs": [
+      {
+        "id": "c231",
+        "jsonl_sha256": "35f9f4af380ae6ff3239abc30fe496f29ae63893565f005a021a95fdefa20f0b",
+        "log_sha256": "5e918dafa79b27b63061696120ec392805ef89b1f7c3f245837834c709793a38",
+        "wall_ms": 15134.970334,
+        "active_project_navigation_ms": 5286,
+        "active_dependency_navigation_ms": 12348,
+        "active_semantic_complete_ms": 12384,
+        "external_peak_rss_bytes": 1767686144
+      },
+      {
+        "id": "c233",
+        "jsonl_sha256": "85e5542fee094445db6ffddacf5e7e776139a5d3090371ba02e4614740ac2f19",
+        "log_sha256": "b7e798018798f720356742d699491ca472767179e8a94bf7df06efc7f4b5f6bf",
+        "wall_ms": 15633.271125,
+        "active_project_navigation_ms": 5558,
+        "active_dependency_navigation_ms": 12794,
+        "active_semantic_complete_ms": 12832,
+        "external_peak_rss_bytes": 1758576640
+      },
+      {
+        "id": "c235",
+        "jsonl_sha256": "d2e6d4161b91209345b0ffe547f91e5ea6ef6df83fb30219e543600a86a99265",
+        "log_sha256": "021144017be8f262b39a8b60297b437ab81bc41e8156ccf3be93ee7aa421081b",
+        "wall_ms": 15117.43125,
+        "active_project_navigation_ms": 5419,
+        "active_dependency_navigation_ms": 12396,
+        "active_semantic_complete_ms": 12432,
+        "external_peak_rss_bytes": 1802780672
+      }
+    ],
+    "medians": {
+      "wall_ms": 15134.970334,
+      "user_cpu_ms": 26969.373,
+      "external_peak_rss_bytes": 1767686144,
+      "active_project_navigation_ms": 5419,
+      "active_dependency_navigation_ms": 12396,
+      "active_semantic_complete_ms": 12432
+    }
+  },
+  "comparison_percent": {
+    "wall_ms": 8.786,
+    "user_cpu_ms": -1.078,
+    "external_peak_rss_bytes": 1.486,
+    "active_project_navigation_ms": -14.702,
+    "active_dependency_navigation_ms": 5.149,
+    "active_semantic_complete_ms": 5.115
+  },
+  "correctness": {
+    "semantic_export_manifest_sha256": "bbd411ee26e61a460f15110ebdade5722bd3b77e41108f6b60cb484c9785084a",
+    "project_semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "1b65a68a6e4cca852d612331ea13108d",
+      "/Users/naveenraj/goshposh/server-devops-5441": "902fc33c5ca6900b16d17ca1b8210125"
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "fixed_peak_rss_ceiling_bytes": 1776846438,
+    "candidate_run_c235_excess_bytes": 25934234
+  },
+  "decision": "Rejected and reverted. It improved the early project-navigation frontier by 14.7%, but regressed the more important active dependency and semantic frontiers by about 5.1%, regressed terminal wall time by 8.8%, and one candidate run exceeded the fixed RSS ceiling. Do not extend the active five-lane reservation through the exhaustive tail without a materially different measured design."
+}

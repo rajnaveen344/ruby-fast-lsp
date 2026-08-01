@@ -208,17 +208,27 @@ fn log_corpus_shape(dir: &PathBuf) {
 }
 
 fn print_timings(iter: usize, t: &IndexingTimings) {
-    let p1_pct = pct(t.facts, t.total);
-    let p2_pct = pct(t.reserved, t.total);
-    let p3_pct = pct(t.publish, t.total);
     println!(
-        "\n  run {iter}: total {:>8.2?} | facts {:>8.2?} ({:>4.1}%) | reserved {:>8.2?} ({:>4.1}%) | publish {:>8.2?} ({:>4.1}%)\n",
-        t.total, t.facts, p1_pct, t.reserved, p2_pct, t.publish, p3_pct
+        "\n  run {iter}: total {:>8.2?} | runtime {:>8.2?} | discovery {:>8.2?} | core {:>8.2?} | project {:>8.2?} | dependencies {:>8.2?} | resolve {:>8.2?} | publish {:>8.2?}\n",
+        t.total,
+        t.runtime,
+        t.discovery,
+        t.core,
+        t.project,
+        t.dependencies,
+        t.resolve,
+        t.publish,
     );
 }
 
 fn print_summary(runs: &[IndexingTimings]) {
     println!("\n=== SUMMARY over {} runs ===", runs.len());
+    print_stat("runtime      ", runs.iter().map(|t| t.runtime));
+    print_stat("discovery    ", runs.iter().map(|t| t.discovery));
+    print_stat("core         ", runs.iter().map(|t| t.core));
+    print_stat("project      ", runs.iter().map(|t| t.project));
+    print_stat("dependencies ", runs.iter().map(|t| t.dependencies));
+    print_stat("resolve      ", runs.iter().map(|t| t.resolve));
     print_stat("facts        ", runs.iter().map(|t| t.facts));
     print_stat("reserved     ", runs.iter().map(|t| t.reserved));
     print_stat("publish      ", runs.iter().map(|t| t.publish));
@@ -236,12 +246,4 @@ fn print_stat(label: &str, iter: impl Iterator<Item = Duration> + Clone) {
         "  {label}: min {:>8.2?} | mean {:>8.2?} | max {:>8.2?}",
         min, mean, max
     );
-}
-
-fn pct(part: Duration, whole: Duration) -> f64 {
-    if whole.is_zero() {
-        0.0
-    } else {
-        part.as_secs_f64() / whole.as_secs_f64() * 100.0
-    }
 }

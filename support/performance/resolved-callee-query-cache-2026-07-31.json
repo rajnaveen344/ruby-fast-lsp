@@ -1,0 +1,140 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-31",
+  "purpose": "Measure whether FactCollector can reuse exact engine method resolution without rebuilding a receiver MRO for every inferred call while retaining bounded transient memory.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "change": {
+    "exact_callee_return": "After ordinary MRO and visibility resolution selects a ResolvedMethodCallee, return inference reads only that callee's exact declaration ranges instead of resolving its owner as a new receiver.",
+    "query_cache": "One revision-bound AnalysisQueryCache per source collection memoizes resolved private, public, and protected callees and invalidates on engine identity or semantic-revision change.",
+    "admission_bound": "At most 64 resolved-callee query entries are retained per source collection. Additional unique lookups compute normally without entering the cache.",
+    "semantic_boundary": "The cache contains query results only. File facts still enter through ordinary per-file replacement, and local same-pass return facts retain priority over engine-owned facts."
+  },
+  "raw_local_evidence": [
+    {
+      "id": "v50",
+      "jsonl": "/tmp/ruby-fast-lsp-callee-cache-64-two-project-jruby-warm-v50-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-callee-cache-64-two-project-jruby-warm-v50-20260731.log"
+    },
+    {
+      "id": "v51",
+      "jsonl": "/tmp/ruby-fast-lsp-callee-cache-64-two-project-jruby-warm-v51-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-callee-cache-64-two-project-jruby-warm-v51-20260731.log"
+    }
+  ],
+  "result": {
+    "repeats": [
+      {
+        "id": "v50",
+        "wall_ms": 21436.62225,
+        "peak_rss_bytes": 1829453824,
+        "project_user_pmm_ms": 530,
+        "dependency_bson_object_id_ms": 1599,
+        "active_semantic_complete_ms": 18609,
+        "all_project_semantic_complete_ms": 21436
+      },
+      {
+        "id": "v51",
+        "wall_ms": 22172.354541,
+        "peak_rss_bytes": 1688027136,
+        "project_user_pmm_ms": 531,
+        "dependency_bson_object_id_ms": 1752,
+        "active_semantic_complete_ms": 18918,
+        "all_project_semantic_complete_ms": 22172
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 21804.4883955,
+      "peak_rss_bytes": 1758740480,
+      "project_user_pmm_ms": 530.5,
+      "dependency_bson_object_id_ms": 1675.5,
+      "active_semantic_complete_ms": 18763.5,
+      "all_project_semantic_complete_ms": 21804
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "exact_semantic_probes_passed": true
+  },
+  "comparison": {
+    "previous_terminal_wall_median_ms": 21866.833583,
+    "terminal_wall_change_percent": -0.285,
+    "previous_active_semantic_complete_median_ms": 19603.5,
+    "active_semantic_complete_change_percent": -4.285,
+    "previous_project_navigation_median_ms": 530.5,
+    "project_navigation_change_percent": 0.0,
+    "previous_dependency_navigation_median_ms": 1721.0,
+    "dependency_navigation_change_percent": -2.644,
+    "full_ahead_peak_rss_baseline_bytes": 1615314944,
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "peak_rss_change_from_full_ahead_percent": 8.879,
+    "peak_rss_headroom_bytes": 18105958,
+    "previous_checkpoint_peak_rss_median_bytes": 1496358912,
+    "peak_rss_change_from_previous_checkpoint_percent": 17.535
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "all_gem_products_rebound": true,
+    "all_java_products_rebound": true,
+    "bounded_cache_regression": "64 entries after 300 unique lookups",
+    "semantic_replacement_invalidation_regression": "all cache families replaced on engine revision change",
+    "ruby_analysis_tests": 390,
+    "ruby_analysis_failures": 0,
+    "full_root_library_tests": 1313,
+    "full_root_library_failures": 0
+  },
+  "rejected_variants": [
+    {
+      "name": "unbounded callee plus callee-return caches",
+      "raw_local_evidence": [
+        "/tmp/ruby-fast-lsp-query-cache-two-project-jruby-warm-v44-20260731.jsonl",
+        "/tmp/ruby-fast-lsp-query-cache-two-project-jruby-warm-v45-20260731.jsonl"
+      ],
+      "wall_median_ms": 21446.7753335,
+      "peak_rss_median_bytes": 1839939584,
+      "decision": "Rejected. Active semantic completion improved, but median peak RSS exceeded the explicit 10% ceiling."
+    },
+    {
+      "name": "256-entry callee plus callee-return caches",
+      "raw_local_evidence": [
+        "/tmp/ruby-fast-lsp-bounded-query-cache-two-project-jruby-warm-v46-20260731.jsonl",
+        "/tmp/ruby-fast-lsp-bounded-query-cache-two-project-jruby-warm-v47-20260731.jsonl"
+      ],
+      "wall_median_ms": 21766.0647915,
+      "peak_rss_median_bytes": 1842003968,
+      "decision": "Rejected. A count bound did not make the duplicated callee-return catalog fit the memory ceiling."
+    },
+    {
+      "name": "128-entry resolved-callee-only cache",
+      "raw_local_evidence": [
+        "/tmp/ruby-fast-lsp-callee-cache-only-two-project-jruby-warm-v48-20260731.jsonl",
+        "/tmp/ruby-fast-lsp-callee-cache-only-two-project-jruby-warm-v49-20260731.jsonl"
+      ],
+      "wall_median_ms": 21772.0634165,
+      "peak_rss_median_bytes": 1780228096,
+      "decision": "Rejected. Removing the duplicate return cache nearly met the ceiling, but median RSS remained 3.38 MB above it."
+    }
+  ],
+  "decision": "Accepted at the 64-entry bound. Exact navigation, persistent-product provenance, cache invalidation, and the full local library gate remain correct. Active-project semantic completion improved 4.285% and dependency navigation improved 2.644%, while terminal wall remained effectively flat and median RSS stayed 18.1 MB below the predeclared 10% ceiling. This does not close the 15-second exhaustive-workspace or five-second active semantic targets."
+}

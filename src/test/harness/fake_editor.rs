@@ -115,7 +115,7 @@ impl FakeEditor {
         self.server.list_workspaces().len()
     }
 
-    /// Look up the workspace handle (index, root, indexing_complete) for a file path.
+    /// Look up the workspace handle (engine, root, indexing state) for a file path.
     pub fn workspace_for(&self, filename: &str) -> Option<crate::server::Workspace> {
         let uri = Self::filename_to_uri(filename);
         self.server.workspace_for_uri(&uri)

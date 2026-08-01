@@ -1,0 +1,242 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Test whether replacing the per-method reconstruction of same-file return facts with one incrementally maintained borrowed context reduces the TypeTracker hotspot without violating the fixed memory ceiling.",
+  "profile_basis": {
+    "profile": "/private/tmp/ruby-fast-lsp-no-text-fallback-v195-symbolized-profile.json.gz",
+    "profile_sha256": "efd1d2e116d4844d38e4b262c40dbb1df617be332de42ca023a0d2c503fc5978",
+    "process_def_node_entry_hash_map_from_iter_inclusive_percent": 1.23,
+    "type_tracker_track_method_inclusive_percent": 3.22,
+    "observation": "FactCollector rebuilt a map of all preceding known method-return facts before every inferred method."
+  },
+  "controlled_workload": {
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "baseline_executable_sha256": "3b722509dc189ec15c7fccc5d84a9be7cd5e875c81e98a41e0c00390c79fd975",
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "red_green": {
+    "red": "borrowed_local_method_returns_resolve_without_ownership_transfer failed to compile because TypeTracker had no borrowed-context API",
+    "green_before_production_measurement": {
+      "ruby_analysis_tests": 410,
+      "failures": 0,
+      "cursor_tests": 2,
+      "borrowed_context_tests": 1
+    },
+    "after_revert": {
+      "ruby_analysis_tests": 407,
+      "failures": 0
+    }
+  },
+  "hash_map_variant": {
+    "executable_sha256": "5a659460416297c3952d638ce8ed996227f84047b8ec87a9a7f5e104dac5428f",
+    "implementation": "Each append-only file collector incrementally copied new return facts into one HashMap and each TypeTracker borrowed it without synchronization or ownership transfer.",
+    "baseline_runs": [
+      {
+        "id": "v208",
+        "jsonl_sha256": "5449c53faa1e837b4c95e3bb45bab3aab3ec6ba7c3ffcea8de6b562029abe5b4",
+        "log_sha256": "31d8f5ed9558fb9879eaf25350be08deb405e85d2376e994c9de1f5d9a942be5",
+        "wall_ms": 14382.174125,
+        "peak_rss_bytes": 1629683712,
+        "user_cpu_ms": 26869.049,
+        "active_semantic_complete_ms": 12063,
+        "project_navigation_ms": 6517,
+        "dependency_navigation_ms": 12024
+      },
+      {
+        "id": "v210",
+        "jsonl_sha256": "6cfbdc30ae9800b4f4fdf95c7b00e31eb34d67b120296d2e8d6f5264f664d710",
+        "log_sha256": "73a82a48c1c90b4948de44e08f789d158f87f1496c00f6268cf4b8badb297bdd",
+        "wall_ms": 13973.483834,
+        "peak_rss_bytes": 1652801536,
+        "user_cpu_ms": 26877.515,
+        "active_semantic_complete_ms": 11726,
+        "project_navigation_ms": 6243,
+        "dependency_navigation_ms": 11689
+      },
+      {
+        "id": "v212",
+        "jsonl_sha256": "616c293e2480599f420101907c0cb57a8877a1202758fb7d0e5b7b30bc0811ba",
+        "log_sha256": "d231ece51a830b1aa0f80537312ae908741b35ed9852bd91266512345a486646",
+        "wall_ms": 13995.561959,
+        "peak_rss_bytes": 1708883968,
+        "user_cpu_ms": 26977.916,
+        "active_semantic_complete_ms": 11846,
+        "project_navigation_ms": 6369,
+        "dependency_navigation_ms": 11807
+      }
+    ],
+    "candidate_runs": [
+      {
+        "id": "v209",
+        "jsonl_sha256": "1b08307deb36cbebc38625bf0d2c0e5b099f8af92645661c030d7881d565b514",
+        "log_sha256": "73c6ed75d38bd0fb0d23b33d503b74d7e6206e4b0f2135a2ed61b49c5ad9dddb",
+        "wall_ms": 13576.504083,
+        "peak_rss_bytes": 1718517760,
+        "user_cpu_ms": 26846.021,
+        "active_semantic_complete_ms": 11521,
+        "project_navigation_ms": 6043,
+        "dependency_navigation_ms": 11477
+      },
+      {
+        "id": "v211",
+        "jsonl_sha256": "f14ddcfcd95cd9d40838ae944bf9a191d7ab4792ee7917ea131758af4084844d",
+        "log_sha256": "d1981cf4e8ac42ffc41d079933c57cd6a9e31229fabc7392e6364f05370b0cc7",
+        "wall_ms": 13624.595167,
+        "peak_rss_bytes": 1834991616,
+        "user_cpu_ms": 26940.389,
+        "active_semantic_complete_ms": 11581,
+        "project_navigation_ms": 6085,
+        "dependency_navigation_ms": 11541
+      },
+      {
+        "id": "v213",
+        "jsonl_sha256": "5ed40b3c10e025436f24101c28321bb50e004478190c8eb607ef70a2c1ac9b86",
+        "log_sha256": "3aba51f3f18755eeba4873bb6113f0b58032c009b890c2be94ffb0e3b642538a",
+        "wall_ms": 13570.811875,
+        "peak_rss_bytes": 1837088768,
+        "user_cpu_ms": 26725.657,
+        "active_semantic_complete_ms": 11463,
+        "project_navigation_ms": 6036,
+        "dependency_navigation_ms": 11428
+      }
+    ],
+    "median_comparison": {
+      "baseline_wall_ms": 13995.561959,
+      "candidate_wall_ms": 13576.504083,
+      "wall_change_percent": -2.994,
+      "baseline_peak_rss_bytes": 1652801536,
+      "candidate_peak_rss_bytes": 1834991616,
+      "peak_rss_change_percent": 11.023,
+      "baseline_user_cpu_ms": 26877.515,
+      "candidate_user_cpu_ms": 26846.021,
+      "user_cpu_change_percent": -0.117,
+      "active_semantic_change_percent": -2.744,
+      "project_navigation_change_percent": -5.119,
+      "dependency_navigation_change_percent": -2.795
+    },
+    "decision": "Rejected. Two of three candidate runs exceeded the fixed RSS ceiling and median RSS regressed 11.023%."
+  },
+  "sorted_vector_variant": {
+    "executable_sha256": "53d47099ac45ca16cb1ff023297404e9515bd37a2832e23f23ef0083c0143f0d",
+    "implementation": "The same append-only borrowed context used a compact FQN-sorted vector with binary-search lookup, eliminating retained hash-table capacity.",
+    "baseline_runs": [
+      {
+        "id": "v214",
+        "jsonl_sha256": "57ffd670a5de2d5a809fe413118fc8e0eaf10e314c979e43841049c43e75c16e",
+        "log_sha256": "b23c54a4bb15d8663bc987d54429d542dd03d5b69cc470a6ca165f54d80dcf9f",
+        "wall_ms": 14308.04275,
+        "peak_rss_bytes": 1636925440,
+        "user_cpu_ms": 27111.505,
+        "active_semantic_complete_ms": 12117,
+        "project_navigation_ms": 6613,
+        "dependency_navigation_ms": 12081
+      },
+      {
+        "id": "v216",
+        "jsonl_sha256": "676563be6719ca2666d0b625226deab29e8f5acdd8430064761dc481fec69f8c",
+        "log_sha256": "cd7b27bc70714f138c35bb66a92b76aea5e17f57a9e4472eca9eb5022ea61a45",
+        "wall_ms": 13854.138666,
+        "peak_rss_bytes": 1697710080,
+        "user_cpu_ms": 27060.044,
+        "active_semantic_complete_ms": 11547,
+        "project_navigation_ms": 6130,
+        "dependency_navigation_ms": 11505
+      },
+      {
+        "id": "v218",
+        "jsonl_sha256": "c15bb7ac377223f835b9f03a3b7298506e131d57b7556cf1e0ba436d9680fb11",
+        "log_sha256": "656ed301c34a19258a583952f2271db33df3bc15a735e77b68d1c115699bd676",
+        "wall_ms": 13773.790959,
+        "peak_rss_bytes": 1515618304,
+        "user_cpu_ms": 26815.891,
+        "active_semantic_complete_ms": 11517,
+        "project_navigation_ms": 6144,
+        "dependency_navigation_ms": 11479
+      }
+    ],
+    "candidate_runs": [
+      {
+        "id": "v215",
+        "jsonl_sha256": "73ecc91c288e061976b6ac5575697744500fcc4a90f00c005f5a17251df63f5c",
+        "log_sha256": "6f0f4a636f5044b627c0bd1d2390cb6f23aed3d2c152d8d95f423f93c493bef8",
+        "wall_ms": 13456.117,
+        "peak_rss_bytes": 2024112128,
+        "user_cpu_ms": 26663.355,
+        "active_semantic_complete_ms": 11416,
+        "project_navigation_ms": 6049,
+        "dependency_navigation_ms": 11380
+      },
+      {
+        "id": "v217",
+        "jsonl_sha256": "8ebd90795d786a4c5f1e201db6a23d0843c066f49eb51bf1cb5b709f055ba49f",
+        "log_sha256": "d72652028fb2fd19ab94a33e7c80c7954de4a35128a888bf5d516d93059ad303",
+        "wall_ms": 13452.790458,
+        "peak_rss_bytes": 1879293952,
+        "user_cpu_ms": 26456.823,
+        "active_semantic_complete_ms": 11328,
+        "project_navigation_ms": 5975,
+        "dependency_navigation_ms": 11289
+      },
+      {
+        "id": "v219",
+        "jsonl_sha256": "6527496a86c290558a54e8750444a05adad9aa0b7e8f044a5cd7093f5e94a36d",
+        "log_sha256": "7b815dc52c62749328b237ef70fda46304f7a9d42ebc8cee4250267a9f7ceca0",
+        "wall_ms": 13436.136792,
+        "peak_rss_bytes": 2002731008,
+        "user_cpu_ms": 26413.249,
+        "active_semantic_complete_ms": 11416,
+        "project_navigation_ms": 6078,
+        "dependency_navigation_ms": 11375
+      }
+    ],
+    "median_comparison": {
+      "baseline_wall_ms": 13854.138666,
+      "candidate_wall_ms": 13452.790458,
+      "wall_change_percent": -2.897,
+      "baseline_peak_rss_bytes": 1636925440,
+      "candidate_peak_rss_bytes": 2002731008,
+      "peak_rss_change_percent": 22.347,
+      "candidate_max_peak_rss_bytes": 2024112128,
+      "baseline_user_cpu_ms": 27060.044,
+      "candidate_user_cpu_ms": 26456.823,
+      "user_cpu_change_percent": -2.229,
+      "active_semantic_change_percent": -1.134,
+      "project_navigation_change_percent": -1.546,
+      "dependency_navigation_change_percent": -1.13
+    },
+    "decision": "Rejected. Every candidate run exceeded the fixed RSS ceiling and median RSS regressed 22.347%, proving lifetime overlap rather than hash-table capacity is the unsafe part of the design."
+  },
+  "correctness_shared_by_all_runs": {
+    "semantic_export_manifest_sha256": "7153b725b0faba8e63dac2cb5163e4b9d322f646b054a88b6f3bf9fae4aa760b",
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "3e0e3171f5b845346c4f09422fafc265",
+      "/Users/naveenraj/goshposh/server-devops-5441": "8930cb6fce670e611b2bb8240339938e"
+    },
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "persistent_gem_products": {
+      "hits": 607,
+      "lookups": 607,
+      "producers": 0
+    },
+    "persistent_java_products": {
+      "hits": 358,
+      "lookups": 358,
+      "producers": 0
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "final_decision": "Reject and remove both retained per-file method-return context variants. Do not repeat this lifetime shape; pursue allocation reductions that do not keep per-file inference products alive across the full collector traversal."
+}

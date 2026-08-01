@@ -1,0 +1,273 @@
+{
+  "schema_version": 1,
+  "decision": "accepted",
+  "date": "2026-08-01",
+  "objective": "Reuse exact parsed JAR/JMOD class metadata across isolated JRuby project catalogs without sharing project classpath precedence, paths, provenance, generated facts, or AnalysisEngine ownership.",
+  "architecture": {
+    "identity": "JavaArtifactProductKey: product schema, package version, JVM metadata semantic version, exact artifact SHA-256, artifact kind, JDK feature, and archive-limit fingerprint",
+    "process_bound": {
+      "maximum_entries": 256,
+      "maximum_estimated_weight_bytes": 268435456
+    },
+    "sharing": "Archive products and project declarations hold Arc<ClassFile>. Product clones and project catalog rebinding therefore share immutable parsed class allocations while every project creates its own path/provenance wrapper.",
+    "preserved_ownership": [
+      "each project retains its own ordered classpath and classpath fingerprint",
+      "catalog composition remains sequential and first-classpath-definition-wins",
+      "each declaration binds the exact consumer artifact path, checksum, entry name, and release",
+      "each project retains an isolated JRuby provider and AnalysisEngine",
+      "persistent payload validation remains checksum and semantic-schema keyed"
+    ],
+    "weight_accounting": "The bound counts allocation capacities for product identities, archive vectors and entry names, Arc control blocks, and the complete nested ClassFile heap. Overflow is an invariant failure rather than a saturating estimate."
+  },
+  "dataset": {
+    "workspace": "/Users/naveenraj/goshposh",
+    "projects": [
+      "/Users/naveenraj/goshposh/server/",
+      "/Users/naveenraj/goshposh/server-devops-5441/"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server/",
+    "runtime": "JRuby 9.2.21.0",
+    "jdk": "/opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home",
+    "scheduler_concurrency": 2,
+    "persistent_cache": "/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731",
+    "persistent_cache_size": "808 MiB",
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "machine": {
+      "cpu_model": "Apple M4 Pro",
+      "logical_cpus": 14,
+      "physical_memory_bytes": 25769803776,
+      "os_release": "Darwin 25.2.0"
+    },
+    "command_shape": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=<cache> /usr/bin/time -l <binary> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest"
+  },
+  "binaries": {
+    "baseline_path": "/private/tmp/ruby-fast-lsp-java-artifact-flight-baseline-v244",
+    "baseline_sha256": "0313a894936c0f53771d08a259218681d76d50789cc519bb3d87811634b99abb",
+    "baseline_profiler_schema": 11,
+    "rejected_128_mib_pilot_sha256": "08302f262001ed89bbb9ef047757769c92c89671e5af42c16e33e09bf02995a8",
+    "candidate_path": "/private/tmp/ruby-fast-lsp-java-artifact-shared-metadata-candidate-256m-v244",
+    "candidate_sha256": "b6627152837ce024e0b3f8449b59c5c5ff84707e864f0f66c45039785c3c6eba",
+    "candidate_profiler_schema": 12,
+    "candidate_source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
+    "candidate_tracked_diff_sha256": "fd70c9411d21623e85fdd890ec20d28e4fa5e6b02e135f3a628df0f37ce26f1d"
+  },
+  "rejected_capacity_pilot": {
+    "bound_bytes": 134217728,
+    "lookups": 358,
+    "hits": 22,
+    "producers": 336,
+    "retained_entries": 117,
+    "retained_weight_bytes": 132284425,
+    "evictions": 219,
+    "persistent_reads": 336,
+    "wall_ms": 20718.412625,
+    "user_cpu_ms": 39849.111,
+    "internal_peak_rss_bytes": 1624408064,
+    "external_peak_rss_bytes": 1839661056,
+    "reason": "The two projects scan the same identities in the same order. The undersized oldest-first cache cyclically evicted the suffix before the second project reached it, so only the 22 within-classpath repeats were reused. This capacity was rejected before the controlled comparison."
+  },
+  "runs": {
+    "baseline": [
+      {
+        "wall_ms": 16611.681416,
+        "user_cpu_ms": 27192.518,
+        "system_cpu_ms": 3007.642,
+        "internal_peak_rss_bytes": 1182253056,
+        "external_peak_rss_bytes": 1623556096,
+        "project_navigation_ready_ms": 6552,
+        "dependency_navigation_ready_ms": 14281,
+        "active_semantic_complete_ms": 14333,
+        "persistent_java_lookups": 358,
+        "persistent_java_physical_read_bytes": 24064884,
+        "jsonl_sha256": "7d9684705e6b2f170e90bdfcf37435cc7a05c04a26f619777a092de1fce38454",
+        "log_sha256": "807abef2b5974b582429c7fd2f14471a8b2239c5d408e39ea42cedf86d64657f"
+      },
+      {
+        "wall_ms": 13628.557375,
+        "user_cpu_ms": 26407.711,
+        "system_cpu_ms": 2611.843,
+        "internal_peak_rss_bytes": 1674231808,
+        "external_peak_rss_bytes": 1830158336,
+        "project_navigation_ready_ms": 6191,
+        "dependency_navigation_ready_ms": 12224,
+        "active_semantic_complete_ms": 12260,
+        "persistent_java_lookups": 358,
+        "persistent_java_physical_read_bytes": 24064884,
+        "jsonl_sha256": "ccaa436d76e01978ea35f38bc2048fa274330589d7050b3b5fb6f75ec51566d5",
+        "log_sha256": "eb461e0a6c5f70fa37e7ff823e61784003752c61ce294b664d4a5f433fcb629f"
+      },
+      {
+        "wall_ms": 13596.20525,
+        "user_cpu_ms": 26556.614,
+        "system_cpu_ms": 2576.774,
+        "internal_peak_rss_bytes": 1669414912,
+        "external_peak_rss_bytes": 1820311552,
+        "project_navigation_ready_ms": 6182,
+        "dependency_navigation_ready_ms": 12174,
+        "active_semantic_complete_ms": 12217,
+        "persistent_java_lookups": 358,
+        "persistent_java_physical_read_bytes": 24064884,
+        "jsonl_sha256": "3e9b45151fe09097074d57e637ab836138f76092578be1e250c5ee2e7ef3c463",
+        "log_sha256": "a0b299826e323174ea710bc140abce440b2a8c6a703479681cb8600211212342"
+      }
+    ],
+    "candidate": [
+      {
+        "wall_ms": 20588.181875,
+        "user_cpu_ms": 39299.99,
+        "system_cpu_ms": 3281.139,
+        "internal_peak_rss_bytes": 1383514112,
+        "external_peak_rss_bytes": 1621590016,
+        "project_navigation_ready_ms": 6005,
+        "dependency_navigation_ready_ms": 19318,
+        "active_semantic_complete_ms": 19384,
+        "process_java_lookups": 358,
+        "process_java_hits": 190,
+        "process_java_producers": 168,
+        "process_java_entries": 168,
+        "process_java_retained_weight_bytes": 263684845,
+        "process_java_evictions": 0,
+        "persistent_java_lookups": 168,
+        "persistent_java_physical_read_bytes": 11508591,
+        "jsonl_sha256": "9e545369a00fd777482e4739eae4eb79f13a5641a741ebac5ec77bf2a8fa9468",
+        "log_sha256": "79c71605359c5952d938a9da72b6b71e498c66edf9131b1259b422a39bb9ad85"
+      },
+      {
+        "wall_ms": 13036.682625,
+        "user_cpu_ms": 25458.461,
+        "system_cpu_ms": 2517.632,
+        "internal_peak_rss_bytes": 1340342272,
+        "external_peak_rss_bytes": 1603207168,
+        "project_navigation_ready_ms": 5934,
+        "dependency_navigation_ready_ms": 11804,
+        "active_semantic_complete_ms": 11884,
+        "process_java_lookups": 358,
+        "process_java_hits": 190,
+        "process_java_producers": 168,
+        "process_java_entries": 168,
+        "process_java_retained_weight_bytes": 263684845,
+        "process_java_evictions": 0,
+        "persistent_java_lookups": 168,
+        "persistent_java_physical_read_bytes": 11508591,
+        "jsonl_sha256": "0a80e67b9922e53d389c730fab379a5bd155e175db8559b5a499906857e83b33",
+        "log_sha256": "73aaa04426d13491bc32d4e9a89d1c98add222e0b8d9f2ee263e0c020d71a3b3"
+      },
+      {
+        "wall_ms": 13026.683416,
+        "user_cpu_ms": 25440.182,
+        "system_cpu_ms": 2505.107,
+        "internal_peak_rss_bytes": 1389232128,
+        "external_peak_rss_bytes": 1561313280,
+        "project_navigation_ready_ms": 5952,
+        "dependency_navigation_ready_ms": 11829,
+        "active_semantic_complete_ms": 11894,
+        "process_java_lookups": 358,
+        "process_java_hits": 190,
+        "process_java_producers": 168,
+        "process_java_entries": 168,
+        "process_java_retained_weight_bytes": 263684845,
+        "process_java_evictions": 0,
+        "persistent_java_lookups": 168,
+        "persistent_java_physical_read_bytes": 11508591,
+        "jsonl_sha256": "34f1f10169abb725908685ecf406416a5de9137c72b36471927d57b7afe2d4ba",
+        "log_sha256": "0d95ee961e2e031d1119ecdd35ff4647ace455fe0fdd237d5a42f975bca361d4"
+      }
+    ]
+  },
+  "median_comparison": {
+    "wall_ms": { "baseline": 13628.557375, "candidate": 13036.682625, "change_percent": -4.342901 },
+    "user_cpu_ms": { "baseline": 26556.614, "candidate": 25458.461, "change_percent": -4.135139 },
+    "system_cpu_ms": { "baseline": 2611.843, "candidate": 2517.632, "change_percent": -3.60707 },
+    "internal_peak_rss_bytes": { "baseline": 1669414912, "candidate": 1383514112, "change_percent": -17.125808 },
+    "external_peak_rss_bytes": { "baseline": 1820311552, "candidate": 1603207168, "change_percent": -11.926771 },
+    "project_navigation_ready_ms": { "baseline": 6191, "candidate": 5952, "change_percent": -3.860443 },
+    "dependency_navigation_ready_ms": { "baseline": 12224, "candidate": 11829, "change_percent": -3.231348 },
+    "active_semantic_complete_ms": { "baseline": 12260, "candidate": 11894, "change_percent": -2.985318 }
+  },
+  "reuse_evidence": {
+    "exact_process_identities": 168,
+    "total_catalog_lookups": 358,
+    "eliminated_redundant_decodes": 190,
+    "persistent_lookup_reduction_percent": 53.072626,
+    "persistent_physical_read_reduction_percent": 52.176827,
+    "retained_weight_bytes": 263684845,
+    "bound_headroom_bytes": 4750611,
+    "bound_utilization_percent": 98.230259,
+    "candidate_failures": 0,
+    "candidate_evictions": 0,
+    "resource_panics_or_leaks": 0
+  },
+  "semantic_equivalence": {
+    "semantic_manifest_sha256_all_six_runs": "54268a7cd555eb82ffe9ea3a233378113c2dd5da5a8d576c15fb4de1fe717513",
+    "definition_results_sha256_all_six_runs": "4ee5059ca3edfc5ce42bb53fcb87fbbed00c8d374c6e410def6dff8c057c2e42",
+    "project_semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server-devops-5441/": "a4e95dab56b27139b21e2252d6092ee7",
+      "/Users/naveenraj/goshposh/server/": "ebd291845022823615ba4d53306938da"
+    },
+    "dataset_fingerprint_sha256_all_six_runs": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657"
+  },
+  "budget_assessment": {
+    "all_candidate_external_peak_rss_below_fixed_1777000000_byte_ceiling": true,
+    "maximum_candidate_external_peak_rss_bytes": 1621590016,
+    "all_candidate_dependency_navigation_below_15000_ms": false,
+    "median_candidate_dependency_navigation_below_15000_ms": true,
+    "all_candidate_project_navigation_below_5000_ms": false,
+    "all_candidate_active_semantic_completion_below_30000_ms": true,
+    "note": "This accepts the bounded Java metadata reuse slice. It does not claim the overall 9/10 goal: project navigation remains above five seconds, one noisy dependency run exceeded fifteen seconds, and warm active semantic completion remains above five seconds."
+  },
+  "tests": {
+    "ruby_fast_lsp_jvm_metadata": "24 passed",
+    "ruby_fast_lsp_root_lib": "1341 passed",
+    "vscode_indexing_status": "10 passed",
+    "focused_cache_contracts": [
+      "cloned archive metadata shares immutable class declarations",
+      "product clones share class metadata but rebind project paths",
+      "cached metadata reuse does not leak cross-project paths",
+      "parallel product collection preserves ordered classpath winner selection",
+      "entry and deep-weight bounds evict deterministically and serve overweight current consumers"
+    ]
+  },
+  "installed_vsix_validation": {
+    "extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "vsix_sha256": "c4b26f30057ff38953993112a83c4f67f51848c64d58acceddb383e06a6eeae9",
+    "installed_binary_sha256": "b0bd071da16d0b80bf4aae904ef16a04696f68339e9d77329e9b16a4a7fd455c",
+    "elapsed_ms": 14456,
+    "ready_sequence": 21,
+    "projects": [
+      {
+        "root": "/Users/naveenraj/goshposh/server/",
+        "phase": "ready",
+        "project_navigation_ready_ms": 7374,
+        "dependency_navigation_ready_ms": 12804,
+        "semantic_complete_ms": 12873
+      },
+      {
+        "root": "/Users/naveenraj/goshposh/server-devops-5441/",
+        "phase": "ready",
+        "project_navigation_ready_ms": 8196,
+        "dependency_navigation_ready_ms": 13959,
+        "semantic_complete_ms": 13993
+      }
+    ],
+    "java_artifact_reuse": {
+      "lookups": 358,
+      "hits": 190,
+      "joined_flights": 0,
+      "producers": 168,
+      "failures": 0
+    },
+    "persistent_java_artifacts": {
+      "lookups": 168,
+      "hits": 168,
+      "producers": 0,
+      "corruptions": 0
+    },
+    "definitions": {
+      "GoshPosh::Platform::Users::UserPmm": "file:///Users/naveenraj/goshposh/server/lib/platform/users/user.rb",
+      "BSON::ObjectId": "file:///tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731/gems/6061421fa2e255ddcf7f5311abb50b81a8b972e3ea18b2af5291e35c6fc31fb2/71d6e518b87df8945c3966913d67e3a629246a3a1807ca2341efa925a68babd5/bson-4.14.101-java/lib/bson/object_id.rb"
+    },
+    "packaged_smoke": "RSpec, Rails, Minitest, Sinatra, Cucumber, ERB host features, and JRuby implementation navigation passed from the extracted VSIX",
+    "note": "A preceding installed-client schedule reported 22 completed hits plus 168 joined flights for the same 190 eliminated duplicates. The repeat reported 190 completed hits and zero joins. Both shapes used exactly 168 producers and prove the cache handles overlap and sequential reuse without changing ownership."
+  },
+  "conclusion": "Accept the 256-entry/256-MiB process-owned exact Java artifact cache. It eliminates every measured sequential duplicate decode, reduces persistent physical reads by about half, improves median readiness, CPU, and RSS, preserves exact semantics and isolated ownership, and remains explicitly bounded. Keep the rejected zero-retention wrapper and undersized 128-MiB cyclic-thrashing variant rejected."
+}

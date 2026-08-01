@@ -1,0 +1,267 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-07-31",
+  "purpose": "Measure root-first, per-gem manifest preparation and binding so one exact locked dependency becomes navigable before exhaustive dependency preparation completes.",
+  "command": "RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --scheduler-concurrency 2 --definition-at server/tasks/rake_helpers.rb:4:49 --definition-at server/tasks/rake_helpers.rb:9:18",
+  "raw_local_evidence": {
+    "jsonl": "/tmp/ruby-fast-lsp-goshposh-streamed-gems-warm-2p-20260731.jsonl",
+    "log": "/tmp/ruby-fast-lsp-goshposh-streamed-gems-warm-2p-20260731.log"
+  },
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "os_release": "Darwin 25.2.0",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776,
+    "target": "aarch64-macos"
+  },
+  "build": {
+    "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
+    "tracked_diff_sha256": "30a14e76d4ca4ceedcd7a2a9d3c9d8a59ca13673b040ead79ae4591c85b69bb2",
+    "profiler_executable_sha256": "4769b590f88e415fde49a9543f9a5e0230f1912d8c314a8f4582e6750d000dee",
+    "dataset_fingerprint_sha256": "f9fcf89aba824a8ac51fd581e3c42b0b3dd2b09e32bc94f8305d2c9ed5a01f64"
+  },
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server/",
+      "/Users/naveenraj/goshposh/server-devops-5441/"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server/",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "result": {
+    "wall_ms": 31589.006458,
+    "external_wall_ms": 33290,
+    "internal_peak_rss_bytes": 1838841856,
+    "external_peak_rss_bytes": 1852981248,
+    "external_peak_memory_footprint_bytes": 2225817760,
+    "live_navigation_ms": {
+      "project_user_pmm": 3166,
+      "dependency_bson_object_id": 12536
+    },
+    "active_project_stage_ms": {
+      "project_navigation_ready": 7506,
+      "dependency_navigation_ready": 22652,
+      "semantic_complete": 24240
+    },
+    "all_project_stage_p95_ms": {
+      "project_navigation_ready": 14174,
+      "dependency_navigation_ready": 30132,
+      "semantic_complete": 31588
+    },
+    "persistent_products": {
+      "gem_hits": 604,
+      "gem_lookups": 604,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "gem_bindings": {
+      "products": 604,
+      "files": 29046,
+      "failures": 0,
+      "retained_product_bytes": 0
+    },
+    "exact_semantic_probes_passed": true
+  },
+  "behavioral_evidence": {
+    "bson_became_navigable_before_active_dependency_stage_completed_ms": 10116,
+    "project_definition_target_kind": "Project",
+    "dependency_definition_target_kind": "Gem",
+    "dependency_target": "bson-4.14.101-java/lib/bson/object_id.rb",
+    "isolated_engine_ownership_preserved": true
+  },
+  "follow_up_redundant_gem_path_probe_removal": {
+    "profiler_executable_sha256": "cdca37f5b09ef531efac5f4ac6de78441f054253389a14ec6e50a2e54fb900f7",
+    "tracked_diff_sha256": "2f1cd14762ca29f294eb570334189475fb09bc464aa967578ce1782f9f21742c",
+    "raw_local_evidence": {
+      "jsonl": "/tmp/ruby-fast-lsp-goshposh-no-gem-path-probe-warm-2p-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-goshposh-no-gem-path-probe-warm-2p-20260731.log"
+    },
+    "wall_ms": 30258.300417,
+    "internal_peak_rss_bytes": 1739751424,
+    "live_navigation_ms": {
+      "project_user_pmm": 3793,
+      "dependency_bson_object_id": 10937
+    },
+    "active_project_stage_ms": {
+      "project_navigation_ready": 7402,
+      "dependency_navigation_ready": 20931,
+      "semantic_complete": 22504
+    },
+    "active_gem_discovery_ms": {
+      "total": 3040.836667,
+      "installed_bundler": 2230.308,
+      "vendor_archives": 807.705709
+    },
+    "comparison_to_streaming_baseline_percent": {
+      "wall_reduction": 4.21,
+      "bson_navigation_reduction": 12.75,
+      "active_semantic_completion_reduction": 7.16,
+      "internal_peak_rss_reduction": 5.39
+    },
+    "decision": "accepted: the removed Gem.path subprocess populated no consumed state; exact definitions and all persistent-hit counts remained unchanged"
+  },
+  "controlled_active_project_dependency_overlap": {
+    "dataset_fingerprint_sha256": "8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73",
+    "source_identity": {
+      "server": {
+        "files": 2618,
+        "bytes": 39293793,
+        "sha256": "fa6134aa88e14c21093c5fc51f2697ee7441004da46671ccd8bffcb6f4894909"
+      },
+      "server-devops-5441": {
+        "files": 2592,
+        "bytes": 38863128,
+        "sha256": "d9ea83809922a05b1b12d1dc435efbb55036abbdcee9c375d6ba082c58d7b64f"
+      }
+    },
+    "serialized_control": {
+      "profiler_executable_sha256": "d7f7192bd5173646c43b3e69c45a2dd25d57de9581adb6721596541db61f723d",
+      "raw_local_evidence": {
+        "jsonl": "/tmp/ruby-fast-lsp-goshposh-controlled-serial-fixed-fingerprint-warm-2p-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-goshposh-controlled-serial-fixed-fingerprint-warm-2p-20260731.log"
+      },
+      "wall_ms": 30523.169291,
+      "external_peak_rss_bytes": 1737080832,
+      "live_navigation_ms": {
+        "project_user_pmm": 6231,
+        "dependency_bson_object_id": 10819
+      },
+      "active_project_stage_ms": {
+        "project_navigation_ready": 10354,
+        "dependency_navigation_ready": 20989,
+        "semantic_complete": 22555
+      }
+    },
+    "five_plus_one_overlap": {
+      "profiler_executable_sha256": "38ffdc3b199a16c2e31ea63358471a02723f24cc0b26f9a27b7cdf55be18ca52",
+      "raw_local_evidence": {
+        "jsonl": "/tmp/ruby-fast-lsp-goshposh-controlled-overlap-warm-2p-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-goshposh-controlled-overlap-warm-2p-20260731.log"
+      },
+      "wall_ms": 27851.628292,
+      "external_peak_rss_bytes": 1788559360,
+      "live_navigation_ms": {
+        "project_user_pmm": 3760,
+        "dependency_bson_object_id": 8653
+      },
+      "active_project_stage_ms": {
+        "project_navigation_ready": 7924,
+        "dependency_navigation_ready": 18605,
+        "semantic_complete": 20167
+      },
+      "resource_peaks": {
+        "tasks": 2,
+        "cpu_lanes": 6,
+        "transient_memory_bytes": 536870912,
+        "io_slots": 2
+      }
+    },
+    "persistent_products_in_each_run": {
+      "gem_hits": 604,
+      "gem_lookups": 604,
+      "java_hits": 358,
+      "java_lookups": 358
+    },
+    "comparison_percent": {
+      "wall_reduction": 8.753,
+      "dependency_bson_navigation_reduction": 20.020,
+      "active_semantic_completion_reduction": 10.587,
+      "external_peak_rss_increase": 2.963,
+      "user_cpu_reduction": 1.484
+    },
+    "decision": "accepted: immutable exact gem discovery overlaps the active project source pass under the same six-lane, two-task, 512 MiB transient, two-I/O-slot governor; sibling project-parallel work remains blocked by the active navigation reservation and semantic binding remains in the isolated project engine"
+  },
+  "single_process_auto_gem_discovery": {
+    "dataset_fingerprint_sha256": "8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73",
+    "profiler_executable_sha256": "429ac82aaea0965484f60eec121203dcbf2762ed0ccf945455b7a884e3c6f7e8",
+    "raw_local_evidence": [
+      {
+        "jsonl": "/tmp/ruby-fast-lsp-goshposh-single-process-auto-gems-warm-2p-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-goshposh-single-process-auto-gems-warm-2p-20260731.log"
+      },
+      {
+        "jsonl": "/tmp/ruby-fast-lsp-goshposh-single-process-auto-gems-warm-2p-repeat-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-goshposh-single-process-auto-gems-warm-2p-repeat-20260731.log"
+      }
+    ],
+    "mechanical_comparison_ms": {
+      "active_installed_discovery": {
+        "before": 1927.327416,
+        "after_repeat": 1297.873291,
+        "reduction_percent": 32.659
+      },
+      "sibling_installed_discovery": {
+        "before": 2111.182209,
+        "after_repeat": 1082.407666,
+        "reduction_percent": 48.730
+      }
+    },
+    "repeat_result": {
+      "wall_ms": 28302.740375,
+      "external_peak_rss_bytes": 1790132224,
+      "live_navigation_ms": {
+        "project_user_pmm": 2991,
+        "dependency_bson_object_id": 8272
+      },
+      "active_project_stage_ms": {
+        "project_navigation_ready": 7809,
+        "dependency_navigation_ready": 18438,
+        "semantic_complete": 20026
+      },
+      "persistent_products": {
+        "gem_hits": 604,
+        "gem_lookups": 604,
+        "java_hits": 358,
+        "java_lookups": 358
+      }
+    },
+    "decision": "accepted as exact redundant-process removal: auto scope performs Bundler resolution and RubyGems fallback in one selected-runtime process and retains an explicit source marker; discovery CPU latency falls materially, but it is currently hidden behind the project pass and does not satisfy the remaining 3-second dependency or 15-second terminal targets"
+  },
+  "rejected_directory_priority_experiment": {
+    "profiler_executable_sha256": "fcce41b0fa4c935dc1deae2a331fd4e555823712d7debf320510488469aa1b66",
+    "dataset_fingerprint_sha256": "8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73",
+    "raw_local_evidence": {
+      "jsonl": "/tmp/ruby-fast-lsp-goshposh-navigation-priority-warm-2p-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-goshposh-navigation-priority-warm-2p-20260731.log"
+    },
+    "priority_files": 1982,
+    "remaining_files": 636,
+    "live_navigation_ms": {
+      "project_user_pmm": 3515,
+      "dependency_bson_object_id": 8598
+    },
+    "wall_ms": 28807.367458,
+    "decision": "rejected and removed: conventional app/config/lib/src plus the active top-level root selected 75.7% of project files, adding a batch barrier without a bounded navigation working set or a latency improvement"
+  },
+  "decision": {
+    "streamed_manifest_binding": "accepted",
+    "overall_goal": "not_met",
+    "reason": "Root-first streamed binding and controlled five-plus-one discovery overlap both preserve exact isolated-engine definitions with 604/604 gem and 358/358 Java persistent hits. On an identical corrected dataset fingerprint, overlap reduced locked BSON navigation by 20.020%, active semantic completion by 10.587%, and terminal wall by 8.753%, with a 2.963% external peak-RSS increase. This valid-warm run still misses the 3-second warm dependency and 15-second warm workspace limits and does not prove the cold-cache gate.",
+    "next_bottlenecks": [
+      "Avoid repeating exact runtime, lockfile, vendor archive, and installed-gem discovery on a valid warm startup.",
+      "Promote a deterministically identified locked dependency ahead of ordinary root-first work when an active request can name the exact product.",
+      "Reduce active project source startup toward the 1-second valid-warm target without persisting mutable project semantic state."
+    ]
+  },
+  "verification": {
+    "gem_indexer_tests": {
+      "passed": 27,
+      "failed": 0
+    },
+    "vscode_indexing_status_tests": {
+      "passed": 2,
+      "failed": 0
+    },
+    "profiler_dataset_fingerprint_tests": {
+      "passed": 1,
+      "failed": 0
+    }
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "schema": 2,
+  "recorded_at": "2026-07-31",
+  "purpose": "Prove generation-safe request-driven project and dependency navigation during warm multi-root JRuby indexing without merging isolated engines or returning a false not-found response.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "raw_local_evidence": [
+    {
+      "id": "v21",
+      "jsonl": "/tmp/ruby-fast-lsp-demand-two-project-jruby-warm-v21-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-demand-two-project-jruby-warm-v21-20260731.log"
+    },
+    {
+      "id": "v22",
+      "jsonl": "/tmp/ruby-fast-lsp-demand-two-project-jruby-warm-v22-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-demand-two-project-jruby-warm-v22-20260731.log"
+    }
+  ],
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "project_checkpoint_files": 1024,
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2
+  },
+  "result": {
+    "repeats": [
+      {
+        "id": "v21",
+        "wall_ms": 21757.10975,
+        "internal_peak_rss_bytes": 1973633024,
+        "project_user_pmm_ms": 1012,
+        "dependency_bson_object_id_ms": 1616,
+        "active_project_navigation_ready_ms": 11270,
+        "active_semantic_complete_ms": 19755,
+        "all_project_semantic_complete_ms": 21756
+      },
+      {
+        "id": "v22",
+        "wall_ms": 21696.024333,
+        "internal_peak_rss_bytes": 1942257664,
+        "project_user_pmm_ms": 964,
+        "dependency_bson_object_id_ms": 1678,
+        "active_project_navigation_ready_ms": 11261,
+        "active_semantic_complete_ms": 19010,
+        "all_project_semantic_complete_ms": 21695
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 21726.5670415,
+      "internal_peak_rss_bytes": 1957945344,
+      "project_user_pmm_ms": 988,
+      "dependency_bson_object_id_ms": 1647,
+      "active_project_navigation_ready_ms": 11265.5,
+      "active_semantic_complete_ms": 19382.5,
+      "all_project_semantic_complete_ms": 21725.5
+    },
+    "observed_ranges": {
+      "wall_ms": [21696.024333, 21757.10975],
+      "internal_peak_rss_bytes": [1942257664, 1973633024],
+      "project_user_pmm_ms": [964, 1012],
+      "dependency_bson_object_id_ms": [1616, 1678],
+      "active_semantic_complete_ms": [19010, 19755],
+      "all_project_semantic_complete_ms": [21695, 21756]
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "resource_peaks": {
+      "cpu_lanes": 6,
+      "tasks": 2,
+      "transient_memory_bytes": 536870912,
+      "io_slots": 2
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "exact_semantic_probes_passed": true
+  },
+  "comparison_to_same_dataset_full_ahead_baseline": {
+    "baseline_raw_jsonl": "/tmp/ruby-fast-lsp-postcard-full-pipeline-current-warm-v7-20260731.jsonl",
+    "baseline_wall_ms": 21711.205625,
+    "baseline_internal_peak_rss_bytes": 1615314944,
+    "baseline_project_user_pmm_ms": 4362,
+    "baseline_dependency_bson_object_id_ms": 1711,
+    "comparison_uses_current_repeat_median": true,
+    "project_navigation_latency_reduction_percent": 77.35,
+    "dependency_navigation_latency_reduction_percent": 3.74,
+    "terminal_wall_increase_percent": 0.07,
+    "peak_rss_increase_percent": 21.21
+  },
+  "correctness": {
+    "project_definition_target_kind": "Project",
+    "dependency_definition_target_kind": "Gem",
+    "dependency_target": "bson-4.14.101-java/lib/bson/object_id.rb",
+    "both_definitions_resolved_while_phase": "indexingProject",
+    "requests_enqueue_project_and_dependency_demands_concurrently": true,
+    "project_demands_are_consumed_before_dependency_discovery": true,
+    "already_processed_frontier_files_complete_without_reparse": true,
+    "exhaustive_batches_share_one_immutable_post_frontier_namespace_context": true,
+    "startup_priority_gem_binding_completes_matching_dependency_waiters": true,
+    "in_flight_dependency_binding_claims_late_requests": true,
+    "replacement_generation_supersedes_stale_waiters": true,
+    "demand_queue_is_bounded": true,
+    "isolated_engine_ownership_preserved": true
+  },
+  "decision": "Accepted for staged usefulness, deterministic batching, and correctness. Exact bounded project demands are consumed at the frontier before dependency discovery. Across two identical fresh-process warm-cache repeats, UserPmm measured 964-1012 ms (988 ms median) and BSON measured 1616-1678 ms (1647 ms median). Exhaustive batches share one immutable post-frontier namespace context, restoring terminal throughput to baseline while removing batch-order-dependent fact collection. The strict project-navigation target is met at the median but one repeat exceeded it by 12 ms, so more repetitions remain required. Terminal warm completion still misses the 15-second workspace target, active completion still misses five seconds, and RSS remains above the baseline budget."
+}

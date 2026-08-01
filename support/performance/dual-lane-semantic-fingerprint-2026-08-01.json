@@ -1,0 +1,138 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove the measured duplicate traversal of every semantic export and result fingerprint field while preserving the exact stable 128-bit identity bytes.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "profiler_executable_sha256": "7b024bc72d71ea8421694bbaeea98e789ebc282493ddbbd487a39000b86c771c",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "profile": "/tmp/ruby-fast-lsp-post-constant-v102-profile.json.gz",
+    "profile_sha256": "c293707bb10437a704171cf16f8285af3592a171e0f806908c96c8df9776634e",
+    "presymbolicated_sidecar": "/tmp/ruby-fast-lsp-post-constant-v102-profile.json.syms.json",
+    "presymbolicated_sidecar_sha256": "49146ff7be1bf4c00dbacfc7f5a26c32ca8d80479d90c30f99ac466d235e75d6",
+    "analysis_engine_replace_facts_and_export_hash_inclusive_percent": 9.06,
+    "stable_export_hasher_write_self_percent": 2.19,
+    "observation": "export_hash and result_hash invoked the complete field-emission closure once for each 64-bit lane, traversing every string, FQN, type, parameter, and graph component twice."
+  },
+  "change": {
+    "implementation": "StableExportHasher owns the existing high and low FNV-1a states and advances both independent lanes for each emitted byte during one closure traversal. export_hash and result_hash each call their field closure exactly once.",
+    "compatibility": "Both seeds, byte order, field tags, lengths, sort order, multiplication constant, overflow behavior, and final high/low placement are unchanged. A focused regression compares each lane with the legacy single-lane computation.",
+    "semantic_boundary": "Fingerprint construction remains engine-owned. No fact, source, project, cache, or resolution lifecycle changes, and no mutable semantic cache is introduced."
+  },
+  "baseline": {
+    "evidence": "support/performance/borrowed-constant-type-lookup-2026-08-01.json",
+    "repeat_median": {
+      "wall_ms": 16861.944209,
+      "peak_rss_bytes": 1736048640,
+      "user_cpu_ms": 33604.333,
+      "active_semantic_complete_ms": 13954,
+      "project_navigation_ms": 392,
+      "dependency_navigation_ms": 1649
+    }
+  },
+  "accepted_result": {
+    "raw_local_evidence": [
+      {
+        "id": "v106",
+        "jsonl": "/tmp/ruby-fast-lsp-dual-lane-hash-v106.jsonl",
+        "log": "/tmp/ruby-fast-lsp-dual-lane-hash-v106.log",
+        "wall_ms": 16800.279916,
+        "peak_rss_bytes": 1759264768,
+        "user_cpu_ms": 33798.607,
+        "active_semantic_complete_ms": 14034,
+        "project_navigation_ms": 374,
+        "dependency_navigation_ms": 1626
+      },
+      {
+        "id": "v107",
+        "jsonl": "/tmp/ruby-fast-lsp-dual-lane-hash-v107.jsonl",
+        "log": "/tmp/ruby-fast-lsp-dual-lane-hash-v107.log",
+        "wall_ms": 16641.625625,
+        "peak_rss_bytes": 1704607744,
+        "user_cpu_ms": 33461.473,
+        "active_semantic_complete_ms": 14059,
+        "project_navigation_ms": 377,
+        "dependency_navigation_ms": 1527
+      },
+      {
+        "id": "v108",
+        "jsonl": "/tmp/ruby-fast-lsp-dual-lane-hash-v108.jsonl",
+        "log": "/tmp/ruby-fast-lsp-dual-lane-hash-v108.log",
+        "wall_ms": 16508.256125,
+        "peak_rss_bytes": 1756856320,
+        "user_cpu_ms": 33417.723,
+        "active_semantic_complete_ms": 13923,
+        "project_navigation_ms": 395,
+        "dependency_navigation_ms": 1505
+      }
+    ],
+    "repeat_median": {
+      "wall_ms": 16641.625625,
+      "peak_rss_bytes": 1756856320,
+      "user_cpu_ms": 33461.473,
+      "active_semantic_complete_ms": 14034,
+      "project_navigation_ms": 377,
+      "dependency_navigation_ms": 1527
+    },
+    "persistent_products": {
+      "gem_hits": 607,
+      "gem_lookups": 607,
+      "gem_producers": 0,
+      "java_hits": 358,
+      "java_lookups": 358,
+      "java_producers": 0
+    },
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "manifest_hash_equal_to_baseline_and_all_candidates": true,
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0
+  },
+  "comparison_to_baseline_percent": {
+    "terminal_wall": -1.307,
+    "peak_rss": 1.199,
+    "user_cpu": -0.425,
+    "active_semantic_complete": 0.573,
+    "project_navigation": -3.827,
+    "dependency_navigation": -7.398,
+    "peak_rss_change_from_full_ahead": 8.762,
+    "peak_rss_headroom_bytes": 19990118
+  },
+  "correctness": {
+    "project_definition_source_kind": "Project",
+    "dependency_definition_source_kind": "Gem",
+    "ruby_analysis_tests": 395,
+    "ruby_analysis_failures": 0,
+    "root_library_tests": 1318,
+    "root_library_failures": 0,
+    "focused_legacy_lane_test": 1,
+    "focused_legacy_lane_failures": 0,
+    "gate_note": "The first root-library invocation ran concurrently with the analysis suite and had one transient runtime resource-admission subprocess-output failure. That exact test passed alone, and the complete root-library suite then passed serially 1318/1318."
+  },
+  "packaging": {
+    "extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "vsix": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "3a1c9e502b9ad4022b7d63c08a8f804e578b52835653d54b92832c59cfa91b67",
+    "packaged_binary_sha256": "da2cb64fb0bf804cfd5e63825e480999e80fa15c17f94e432fee25025c0c8413",
+    "installed_binary_sha256": "da2cb64fb0bf804cfd5e63825e480999e80fa15c17f94e432fee25025c0c8413",
+    "smoke": "passed for Rails, RSpec, Minitest, Sinatra, Cucumber, ERB host features, and verified JRuby implementation navigation"
+  },
+  "decision": "Accepted as a narrow deterministic fingerprint optimization. The exact stable identities and complete semantic manifest are unchanged across all repeats. Median terminal readiness improves 1.307%, CPU improves 0.425%, project navigation improves 3.827%, and dependency navigation improves 7.398%. Active semantic completion is effectively flat with a measured 80 ms regression, and RSS rises 1.199% but remains 20.0 MB below the fixed ceiling; those are explicit constraints for the next slice. The 15-second workspace and five-second active-semantic targets remain open."
+}

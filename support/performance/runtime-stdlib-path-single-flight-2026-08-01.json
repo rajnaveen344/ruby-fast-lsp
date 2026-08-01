@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Make runtime stdlib discovery deterministic for each isolated project and coalesce identical exact-runtime probes without sharing AnalysisEngine ownership.",
+  "incident": {
+    "symptom": "The same profiler binary produced different semantic manifests when executed from target/release and from a byte-identical copy outside the checkout.",
+    "root_cause": "Runtime stdlib discovery invoked an unqualified ruby from the server PATH and appended bundled stubs relative to the current executable. A checkout-local executable therefore rediscovered selected bundled stubs and replaced SourceKind::Stub with SourceKind::Stdlib, while an external copy did not.",
+    "incorrect_runtime": "PATH resolved MRI 3.3 even though both projects selected JRuby 9.2.21.0.",
+    "selected_runtime": {
+      "implementation": "jruby",
+      "engine_version": "9.2.21.0",
+      "compatibility_version": "2.5",
+      "executable": "/Users/naveenraj/.rvm/rubies/jruby-9.2.21.0/bin/jruby",
+      "java_home": "/opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home"
+    }
+  },
+  "red_green": {
+    "red": [
+      "runtime_stdlib_discovery_without_an_exact_runtime_does_not_use_path observed PATH MRI directories",
+      "runtime_stdlib_cannot_replace_bundled_stub_ownership observed a Stub file reclassified as Stdlib",
+      "identical_runtime_stdlib_paths_use_one_server_owned_probe did not compile before the server-owned product existed"
+    ],
+    "green": {
+      "runtime_stdlib_tests": 10,
+      "runtime_stdlib_failures": 0,
+      "root_library_tests": 1339,
+      "root_library_failures": 0
+    }
+  },
+  "contract": {
+    "runtime_selection": "Invoke only the owning project's exact selected executable, with exact JAVA_HOME and Ruby/Bundler/Gem environment variables removed. Never fall back to server PATH or scan guessed runtime homes.",
+    "stub_ownership": "Bundled core stubs are installed independently as SourceKind::Stub. Runtime stdlib discovery never returns bundled stubs and may not replace another source kind at the same canonical path.",
+    "no_runtime": "Without an exact executable, retain bundled core stubs and skip runtime-dependent stdlib inputs.",
+    "key": "Canonical runtime executable path plus byte length and modified time, and canonical Java home when present.",
+    "producer": "One server-owned producer runs the exact runtime, canonicalizes its existing load paths, verifies executable identity before and after the probe, and is independent of the initiating project waiter.",
+    "bounds": {
+      "maximum_entries": 32,
+      "maximum_estimated_retained_weight_bytes": 1048576,
+      "candidate_retained_weight_bytes": 315
+    }
+  },
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "baseline": {
+    "description": "Exact-runtime and source-ownership fix, before process-local path-product reuse; each project starts the same JRuby probe.",
+    "profiler_executable": "/private/tmp/ruby-fast-lsp-exact-stdlib-v236",
+    "profiler_executable_sha256": "10bede68c71c0707cbb234cf3a24048d3e5b788017dac9221c861c368d66f13b",
+    "runs": [
+      {
+        "id": "v236",
+        "jsonl": "/private/tmp/ruby-fast-lsp-exact-stdlib-target-v236.jsonl",
+        "jsonl_sha256": "99f4ef19ae6a8ca4c8f606ad8a9c0defec58a09c76a1897f811338e306ec440c",
+        "log_sha256": "197ece47ec16aefc0b648e007f0f367b28444ef1cbc5a4842a5e42d79facb7bc",
+        "wall_ms": 15286.819834,
+        "peak_rss_bytes": 1602306048,
+        "user_cpu_ms": 26483.576,
+        "system_cpu_ms": 2724.416,
+        "active_project_navigation_ms": 6437,
+        "active_dependency_navigation_ms": 12569,
+        "active_semantic_complete_ms": 12609,
+        "terminal_ms": 15286
+      },
+      {
+        "id": "v237",
+        "jsonl": "/private/tmp/ruby-fast-lsp-exact-stdlib-copy-v237.jsonl",
+        "jsonl_sha256": "ac06e9bb46f19e9df02c7739d801b6d820b1667181e7f9b851393a76cba715dc",
+        "log_sha256": "c295ecb6206398999572360b82e65aea3925e5d07389ee9da440157abb033400",
+        "wall_ms": 15084.895083,
+        "peak_rss_bytes": 1669513216,
+        "user_cpu_ms": 26372.809,
+        "system_cpu_ms": 2617.854,
+        "active_project_navigation_ms": 6182,
+        "active_dependency_navigation_ms": 12378,
+        "active_semantic_complete_ms": 12419,
+        "terminal_ms": 15084
+      },
+      {
+        "id": "v241",
+        "jsonl": "/private/tmp/ruby-fast-lsp-exact-stdlib-copy-v241.jsonl",
+        "jsonl_sha256": "9286322602523f041b0d3d6356f152d9bbefd1ea4d20d72ca44cba748cd0388e",
+        "log_sha256": "c922d3bac9e04e2fff35c37c4501811012356e42055e4a56fc471c78f970e49b",
+        "wall_ms": 14955.139458,
+        "peak_rss_bytes": 1587920896,
+        "user_cpu_ms": 26202.425,
+        "system_cpu_ms": 2542.232,
+        "active_project_navigation_ms": 5978,
+        "active_dependency_navigation_ms": 12047,
+        "active_semantic_complete_ms": 12085,
+        "terminal_ms": 14955
+      }
+    ],
+    "medians": {
+      "wall_ms": 15084.895083,
+      "peak_rss_bytes": 1602306048,
+      "user_cpu_ms": 26372.809,
+      "system_cpu_ms": 2617.854,
+      "active_project_navigation_ms": 6182,
+      "active_dependency_navigation_ms": 12378,
+      "active_semantic_complete_ms": 12419,
+      "terminal_ms": 15084
+    }
+  },
+  "candidate": {
+    "description": "Exact-runtime paths are a bounded server-owned process-local single-flight product shared by the two isolated projects.",
+    "profiler_executable": "/private/tmp/ruby-fast-lsp-runtime-stdlib-cache-v238",
+    "profiler_executable_sha256": "f9855b70941fea3a4b721bb5c389242a428302f638c8a1f0ac63082677a28059",
+    "runs": [
+      {
+        "id": "v238",
+        "jsonl_sha256": "981b8fc0a455fea95c126068e7f7d7086096ecd0c088743fe967a2948fdb6b8b",
+        "log_sha256": "6247713cc4019c9f84a02d5d06ac724f648e87f860c1b2eb6d1d5caac96da89d",
+        "wall_ms": 14234.052292,
+        "peak_rss_bytes": 1572323328,
+        "user_cpu_ms": 26803.038,
+        "system_cpu_ms": 2686.361,
+        "active_project_navigation_ms": 6463,
+        "active_dependency_navigation_ms": 12723,
+        "active_semantic_complete_ms": 12759,
+        "terminal_ms": 14233
+      },
+      {
+        "id": "v239",
+        "jsonl_sha256": "105decb43595c8696cadfe7c3155baf0c86acbc5190d5d0d2a8bf3b465d42098",
+        "log_sha256": "d29c43a910f4d2f9ef12a8ed12361a26a4bd7bf092a3173cebe154e86d19f068",
+        "wall_ms": 13709.696834,
+        "peak_rss_bytes": 1641512960,
+        "user_cpu_ms": 26689.303,
+        "system_cpu_ms": 2671.07,
+        "active_project_navigation_ms": 6183,
+        "active_dependency_navigation_ms": 12292,
+        "active_semantic_complete_ms": 12327,
+        "terminal_ms": 13709
+      },
+      {
+        "id": "v240",
+        "jsonl_sha256": "077c1b905303efcc4855b3995b07ad201a829d8c35a14e1610f67241231591fd",
+        "log_sha256": "05d0179530441c355c24385f5381d0e742b3ec5e105705f4ff94e93335d40419",
+        "wall_ms": 13499.443917,
+        "peak_rss_bytes": 1650327552,
+        "user_cpu_ms": 26741.955,
+        "system_cpu_ms": 2536.481,
+        "active_project_navigation_ms": 6039,
+        "active_dependency_navigation_ms": 12102,
+        "active_semantic_complete_ms": 12144,
+        "terminal_ms": 13499
+      }
+    ],
+    "medians": {
+      "wall_ms": 13709.696834,
+      "peak_rss_bytes": 1641512960,
+      "user_cpu_ms": 26741.955,
+      "system_cpu_ms": 2671.07,
+      "active_project_navigation_ms": 6183,
+      "active_dependency_navigation_ms": 12292,
+      "active_semantic_complete_ms": 12327,
+      "terminal_ms": 13709
+    },
+    "cache_each_run": {
+      "lookups": 2,
+      "producers": 1,
+      "hits": 1,
+      "failures": 0,
+      "evictions": 0,
+      "entries": 1,
+      "retained_weight_bytes": 315
+    }
+  },
+  "comparison_percent": {
+    "wall_ms": -9.116,
+    "peak_rss_bytes": 2.447,
+    "self_user_cpu_ms": 1.4,
+    "self_system_cpu_ms": 2.033,
+    "active_project_navigation_ms": 0.016,
+    "active_dependency_navigation_ms": -0.695,
+    "active_semantic_complete_ms": -0.741,
+    "note": "Self CPU excludes the removed child JRuby startup. The external time median user CPU improved from 34.53 seconds to 33.83 seconds."
+  },
+  "correctness": {
+    "semantic_export_blocks_sha256_all_six_runs": "54268a7cd555eb82ffe9ea3a233378113c2dd5da5a8d576c15fb4de1fe717513",
+    "project_semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "ebd291845022823615ba4d53306938da",
+      "/Users/naveenraj/goshposh/server-devops-5441": "a4e95dab56b27139b21e2252d6092ee7"
+    },
+    "engine": {
+      "files": 35608,
+      "estimated_heap_bytes": 685204941,
+      "source_bytes": 220321036
+    },
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "fixed_peak_rss_ceiling_bytes": 1776846438,
+    "candidate_median_headroom_bytes": 135333478
+  },
+  "packaging": {
+    "extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "vsix": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "86849b8f90a5b7c40533a6f3e6c87fa750ab3f23b3bea105199d448a231af3f5",
+    "packaged_binary_sha256": "e34c67b422441d59dd252b564d3eab4296082345ce48850ab27e94e13ae682a0",
+    "installed_binary_sha256": "e34c67b422441d59dd252b564d3eab4296082345ce48850ab27e94e13ae682a0",
+    "smoke": "passed for Rails, RSpec, Minitest, Sinatra, Cucumber, ERB host features, and verified JRuby implementation navigation"
+  },
+  "decision": "Accepted. The fix removes executable-location-dependent semantics, preserves exact per-project runtime and source provenance, reduces median terminal readiness by 9.1%, retains only 315 estimated bytes, and stays below the fixed median RSS ceiling. It does not complete the 9/10 goal: active semantic completion remains 12.327 seconds versus the five-second target, and the remaining invalidation and installed-client campaigns are still required."
+}

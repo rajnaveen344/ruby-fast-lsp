@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Remove the all-scope, all-variable ownership scan from AST-time local receiver inference by reusing FactCollector's already synchronized lexical VariableScopes cursor.",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "profile_rationale": {
+    "source_profile": "/tmp/ruby-fast-lsp-interned-id-chain-v164-symbolized-profile.json.gz",
+    "source_profile_sha256": "26abdb8f2391bf337c082c14fa4ad70cd4661c7c112993b36d7ee1ff7ea14857",
+    "variable_scopes_find_scope_for_variable_at_inclusive_percent": 1.26,
+    "variable_scopes_find_scope_for_variable_at_direct_under_get_local_var_type_percent": 1.255,
+    "variable_scopes_find_scope_at_inclusive_percent": 0.772,
+    "observation": "FactCollector called get_local_var_type while its AST visitor and VariableScopes cursor were already in the exact lexical scope. It nevertheless scanned every scope and every variable location, then frequently scanned the scope tree again because the receiver read child had not yet been visited."
+  },
+  "change": {
+    "implementation": "FactCollector::get_local_var_type starts get_type_at_position from VariableScopes::current_scope. The existing lookup still walks soft block parents, stops at hard method/class boundaries, and selects only assignments preceding the receiver offset.",
+    "boundary": "Only AST-time fact collection uses the active cursor. Cursor-driven completion, hover, rename, diagnostics, bad-splat checks, and receiver resolution retain their position-based ownership lookup.",
+    "test_instrumentation": "A cfg(test)-only Cell counter records calls to find_scope_for_variable_at. It is absent from production builds."
+  },
+  "red_green": {
+    "red": "local_receiver_inference_uses_the_active_lexical_scope resolved captured User#save and nested String#upcase correctly but observed two global ownership scans instead of zero.",
+    "green": "The same test preserves both inferred owners with zero ownership scans; all 406 ruby-analysis tests pass."
+  },
+  "controlled_canonical_ab": {
+    "method": "The baseline and optimized executables were alternated at the canonical target/release/profiler path. The source tree was restored to the optimized state before every replay; executable SHA distinguishes the two code paths.",
+    "baseline_profiler_sha256": "0e82def04416a3833e4f60a0495d4055c7e4632b54581cdecbdd3660c5f9d46a",
+    "optimized_profiler_sha256": "5e78b1fc8a393713f081a0241059db206aede570c4525d32b81e93f487d0f01e",
+    "baseline_runs": [
+      {
+        "id": "v180",
+        "jsonl": "/tmp/ruby-fast-lsp-lexical-canonical-baseline-v180.jsonl",
+        "jsonl_sha256": "92f15d08c9127429cde921601dbb6d685f8092be088554694669309814a56f00",
+        "log_sha256": "a35963197a6f9268ba490866839df6a8e0a4555f90acac7bda3864141a0b3d32",
+        "wall_ms": 13981.768208,
+        "peak_rss_bytes": 1646264320,
+        "user_cpu_ms": 27952.351,
+        "active_semantic_complete_ms": 11860,
+        "project_navigation_ms": 349,
+        "dependency_navigation_ms": 1311
+      },
+      {
+        "id": "v182",
+        "jsonl": "/tmp/ruby-fast-lsp-lexical-canonical-baseline-v182.jsonl",
+        "jsonl_sha256": "465267fb8c899dc6d55774c56f7d980e22f0546c522ef7d81c9e245aa2c3cd42",
+        "log_sha256": "f9ab5af9f9d230943da2b4bedca3bf7971135451dcc53d371c40c7d5d5826257",
+        "wall_ms": 13850.741042,
+        "peak_rss_bytes": 1594195968,
+        "user_cpu_ms": 28195.087,
+        "active_semantic_complete_ms": 11771,
+        "project_navigation_ms": 352,
+        "dependency_navigation_ms": 1307
+      },
+      {
+        "id": "v184",
+        "jsonl": "/tmp/ruby-fast-lsp-lexical-canonical-baseline-v184.jsonl",
+        "jsonl_sha256": "70c06c0d84abec0f258dff12059085df54d7de618c2a82374a636a2508e52741",
+        "log_sha256": "da07c648fb6491e61da286215e587e8cda794a39276643a1de5105012a62043b",
+        "wall_ms": 13951.754542,
+        "peak_rss_bytes": 1509851136,
+        "user_cpu_ms": 28001.115,
+        "active_semantic_complete_ms": 11812,
+        "project_navigation_ms": 357,
+        "dependency_navigation_ms": 1325
+      }
+    ],
+    "optimized_runs": [
+      {
+        "id": "v181",
+        "jsonl": "/tmp/ruby-fast-lsp-lexical-canonical-optimized-v181.jsonl",
+        "jsonl_sha256": "9e6f51a5753a03c0c9017e8bae642c70ada146f7d7f8c870bef6f76587f82a61",
+        "log_sha256": "e0209102088ffda694a783e59437b455d64cc67a0368d8b620a0e3bd8d788f77",
+        "wall_ms": 13938.494916,
+        "peak_rss_bytes": 1555070976,
+        "user_cpu_ms": 27397.237,
+        "active_semantic_complete_ms": 11729,
+        "project_navigation_ms": 356,
+        "dependency_navigation_ms": 1554
+      },
+      {
+        "id": "v183",
+        "jsonl": "/tmp/ruby-fast-lsp-lexical-canonical-optimized-v183.jsonl",
+        "jsonl_sha256": "da5098fc51ee82657daa7b07ebf18906ee69a4354ab61be6d14e4f0c1f0629d9",
+        "log_sha256": "0ae32c5ab1d29c3beaf0b5f9d92f543decebacee32def3ed7c0451eedf5f82ec",
+        "wall_ms": 13829.379583,
+        "peak_rss_bytes": 1562411008,
+        "user_cpu_ms": 27398.838,
+        "active_semantic_complete_ms": 11742,
+        "project_navigation_ms": 357,
+        "dependency_navigation_ms": 1299
+      },
+      {
+        "id": "v185",
+        "jsonl": "/tmp/ruby-fast-lsp-lexical-canonical-optimized-v185.jsonl",
+        "jsonl_sha256": "a367ff2384b846330a3a0d79c0803c8f904547753f942b57589e7246f4b3841e",
+        "log_sha256": "ced7725b8d2ffffa637645e5c090b9bdb0055ace570ebd9ad73af4474025c6e4",
+        "wall_ms": 13840.945125,
+        "peak_rss_bytes": 1576484864,
+        "user_cpu_ms": 27537.946,
+        "active_semantic_complete_ms": 11746,
+        "project_navigation_ms": 356,
+        "dependency_navigation_ms": 1329
+      }
+    ],
+    "baseline_median": {
+      "wall_ms": 13951.754542,
+      "peak_rss_bytes": 1594195968,
+      "user_cpu_ms": 28001.115,
+      "active_semantic_complete_ms": 11812,
+      "project_navigation_ms": 352,
+      "dependency_navigation_ms": 1311
+    },
+    "optimized_median": {
+      "wall_ms": 13840.945125,
+      "peak_rss_bytes": 1562411008,
+      "user_cpu_ms": 27398.838,
+      "active_semantic_complete_ms": 11742,
+      "project_navigation_ms": 356,
+      "dependency_navigation_ms": 1329
+    },
+    "optimized_change_percent": {
+      "terminal_wall": -0.794,
+      "peak_rss": -1.994,
+      "user_cpu": -2.151,
+      "active_semantic_complete": -0.593,
+      "project_navigation": 1.136,
+      "dependency_navigation": 1.373
+    }
+  },
+  "correctness_and_resource_evidence": {
+    "semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+    },
+    "semantic_manifest_sha256_all_six_runs": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
+    "gem_hits_per_run": 607,
+    "gem_lookups_per_run": 607,
+    "gem_producers_per_run": 0,
+    "java_hits_per_run": 358,
+    "java_lookups_per_run": 358,
+    "java_producers_per_run": 0,
+    "resource_leaks_at_end": 0,
+    "panicked_resource_tasks": 0,
+    "optimized_highest_peak_rss_bytes": 1576484864,
+    "minimum_peak_rss_headroom_bytes": 200361574
+  },
+  "excluded_noncanonical_ab": {
+    "runs": ["v174", "v175", "v176", "v177", "v178", "v179"],
+    "reason": "Executing copied binaries from /tmp changed bundled runtime-resource discovery. Eleven core-stub files were classified as Stub instead of runtime Stdlib, changing complete semantic fingerprints even though dataset, project source, and classpath fingerprints matched. These measurements are invalid and are not included in the accepted comparison.",
+    "unexpected_server_fingerprint": "666d41bdc22d4587e0fd6c1ebe17c09a",
+    "unexpected_sibling_fingerprint": "a2fa50ed7e8805c684a8a66b4b97ba40",
+    "measurement_rule": "Production replays that depend on development-layout bundled resources must execute through the canonical target/release/profiler path. Alternate implementations may be swapped into that path and identified by executable checksum."
+  },
+  "decision": "accepted",
+  "next_step": "Capture a new canonical symbolized profile after the active-scope change and select the next avoidable engine/indexer hot path. Do not broaden current-scope reuse into cursor-position query surfaces."
+}

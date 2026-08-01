@@ -2,16 +2,20 @@ use std::collections::HashMap;
 
 use ruby_fast_lsp::extensions::{ExtensionStatusParams, ExtensionStatusReport};
 use ruby_fast_lsp::server::RubyLanguageServer;
+use tower_lsp::jsonrpc::ErrorCode;
 use tower_lsp::lsp_types::{
     CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
     CompletionResponse, CompletionTriggerKind, DidChangeTextDocumentParams,
     DidOpenTextDocumentParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, Location,
-    PartialResultParams, Position, ReferenceContext, ReferenceParams,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
+    InitializedParams, Location, PartialResultParams, Position, ReferenceContext, ReferenceParams,
     TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
 };
 use tower_lsp::LanguageServer;
+
+const GOTO_DEFINITION_RETRIGGER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const GOTO_DEFINITION_RETRIGGER_BACKOFF: std::time::Duration = std::time::Duration::from_millis(25);
 
 pub struct FakeEditor {
     server: RubyLanguageServer,
@@ -34,6 +38,7 @@ impl FakeEditor {
             })
             .await
             .expect("INVARIANT VIOLATED: FakeEditor failed to initialize RubyLanguageServer. This is a bug because tests require a valid LSP initialization. Fix: keep server initialization valid for default params.");
+        server.initialized(InitializedParams {}).await;
 
         Self {
             server,
@@ -84,6 +89,7 @@ impl FakeEditor {
             })
             .await
             .expect("INVARIANT VIOLATED: project-aware FakeEditor failed to initialize RubyLanguageServer. This is a test harness bug because the supplied workspace and extension package are valid. Fix: inspect initialization routing.");
+        server.initialized(InitializedParams {}).await;
 
         Self {
             server,
@@ -192,18 +198,56 @@ impl FakeEditor {
     ) -> Vec<Location> {
         self.assert_open(filename, "goto_definition");
         let uri = filename_to_uri(filename);
-        let response = self
-            .server
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .expect("INVARIANT VIOLATED: goto_definition request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.");
+        let response = {
+            let deadline = tokio::time::Instant::now() + GOTO_DEFINITION_RETRIGGER_TIMEOUT;
+            let mut retriggers = 0;
+            loop {
+                let remaining = deadline
+                    .checked_duration_since(tokio::time::Instant::now())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "INVARIANT VIOLATED: goto_definition exceeded the bounded {:?} retrigger window after {retriggers} retriggers. This is a bug because a valid indexing generation must reach a target or terminal absence. Fix: inspect the stuck project phase and demand lifecycle.",
+                            GOTO_DEFINITION_RETRIGGER_TIMEOUT
+                        )
+                    });
+                let result = tokio::time::timeout(
+                    remaining,
+                    self.server.goto_definition(GotoDefinitionParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: Position { line, character },
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    }),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "INVARIANT VIOLATED: goto_definition exceeded the bounded {:?} retrigger window after {retriggers} retriggers. This is a bug because a valid indexing generation must reach a target or terminal absence. Fix: inspect the stuck project phase and demand lifecycle.",
+                        GOTO_DEFINITION_RETRIGGER_TIMEOUT
+                    )
+                });
+                match result {
+                    Ok(response) => break response,
+                    Err(error)
+                        if error.code == ErrorCode::ServerError(-32802)
+                            && error.data.as_ref().is_some_and(|data| {
+                                data.get("retriggerRequest")
+                                    .and_then(serde_json::Value::as_bool)
+                                    == Some(true)
+                            })
+                            && tokio::time::Instant::now() < deadline =>
+                    {
+                        retriggers += 1;
+                        tokio::time::sleep(GOTO_DEFINITION_RETRIGGER_BACKOFF).await;
+                    }
+                    Err(error) => panic!(
+                        "INVARIANT VIOLATED: goto_definition request failed after {retriggers} retriggers: {error:?}. This is a bug because FakeEditor accepts only the server's exact bounded retrigger contract during indexing. Fix: inspect the request error or make the indexing fixture reach a terminal stage."
+                    ),
+                }
+            }
+        };
 
         match response {
             Some(GotoDefinitionResponse::Scalar(location)) => vec![location],

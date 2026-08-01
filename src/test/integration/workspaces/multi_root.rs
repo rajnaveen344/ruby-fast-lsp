@@ -3,6 +3,9 @@
 
 use crate::test::harness::FakeEditor;
 use ruby_analysis::core::SourceKind;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{PartialResultParams, WorkDoneProgressParams, WorkspaceSymbolParams};
 
 #[tokio::test]
@@ -50,6 +53,95 @@ async fn each_workspace_gets_its_own_index() {
         !method_fact_in_path(editor.server(), "name_a", "workspace_b/user.rb"),
         "workspace_b file must not own workspace_a method fact"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ready_project_definition_stays_responsive_while_sibling_workers_are_saturated() {
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("ready");
+    editor
+        .open(
+            "ready/service.rb",
+            "class ReadyService\n  def target; end\n  def call; target; end\nend\n",
+        )
+        .await;
+    let initial = editor.goto_def_at("ready/service.rb", 2, 14).await;
+    assert_eq!(
+        initial.len(),
+        1,
+        "the ready-project fixture must resolve before saturation"
+    );
+
+    let started = Arc::new(AtomicUsize::new(0));
+    let mut workers = Vec::new();
+    for index in 0..2 {
+        let scheduler = editor.server().indexing_scheduler.clone();
+        let started = started.clone();
+        workers.push(tokio::spawn(async move {
+            let _permit = scheduler
+                .acquire(
+                    format!("/busy/project-{index}").into(),
+                    crate::indexing_scheduler::IndexingPriority::Background,
+                )
+                .await;
+            tokio::task::spawn_blocking(move || {
+                started.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(150));
+            })
+            .await
+            .expect("bounded sibling worker must complete");
+        }));
+    }
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while started.load(Ordering::SeqCst) != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("both scheduler slots must become saturated");
+
+    let query_started = Instant::now();
+    let definitions = editor.goto_def_at("ready/service.rb", 2, 14).await;
+    let query_elapsed = query_started.elapsed();
+    assert_eq!(
+        definitions, initial,
+        "sibling indexing must not change a ready engine's semantic answer"
+    );
+    assert!(
+        query_elapsed < Duration::from_millis(100),
+        "ready-project definition was starved for {query_elapsed:?} while sibling indexing was saturated"
+    );
+
+    let hover_started = Instant::now();
+    assert!(
+        editor.hover_at("ready/service.rb", 2, 14).await.is_some(),
+        "ready-project hover must remain available while sibling indexing is saturated"
+    );
+    assert!(
+        hover_started.elapsed() < Duration::from_millis(100),
+        "ready-project hover was starved while sibling indexing was saturated"
+    );
+
+    let edit_started = Instant::now();
+    editor
+        .set(
+            "ready/service.rb",
+            "class ReadyService\n  def target; end\n  def call; target; end\nend\n# body-only edit\n",
+        )
+        .await;
+    let definitions_after_edit = editor.goto_def_at("ready/service.rb", 2, 14).await;
+    assert_eq!(
+        definitions_after_edit, initial,
+        "a ready-project body edit must preserve its semantic answer during sibling indexing"
+    );
+    assert!(
+        edit_started.elapsed() < Duration::from_millis(500),
+        "ready-project edit and definition refresh exceeded the 500 ms interactive budget during sibling indexing"
+    );
+
+    for worker in workers {
+        worker.await.expect("sibling indexing task must complete");
+    }
 }
 
 #[tokio::test]
