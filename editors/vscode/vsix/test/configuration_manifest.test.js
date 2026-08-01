@@ -39,6 +39,12 @@ test('one right-hand status item renders structured indexing state', () => {
     assert.doesNotMatch(extensionSource, /statusBarItem\.hide/);
 });
 
+test('definition middleware logs client invoke vs finish for slow-goto blame', () => {
+    assert.match(extensionSource, /provideDefinition:\s*async/);
+    assert.match(extensionSource, /\[CLIENT\] definition provider invoked/);
+    assert.match(extensionSource, /\[CLIENT\] definition provider finished/);
+});
+
 test('every language-client restart resets the authoritative indexing session', () => {
     const directRestarts = extensionSource.match(/await client\.restart\(\)/g) || [];
     const governedRestarts = extensionSource.match(

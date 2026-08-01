@@ -1969,6 +1969,48 @@ mod tests {
     }
 
     #[test]
+    fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
+        let server = RubyLanguageServer::default();
+        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let helpers_uri = Url::parse("file:///project/helpers.rb").unwrap();
+        let app_uri = Url::parse("file:///project/app.rb").unwrap();
+        let helpers = "module API\n  module Consignments\n    def get_images\n    end\n  end\n\n  include Consignments\nend\n";
+        let app = "class Base\n  include API\nend\n\nclass PlatformApp < Base\n  def route\n    get_images\n  end\nend\n";
+
+        processor
+            .process_file_current_file_resolution_forced(&helpers_uri, helpers, &server)
+            .unwrap();
+        processor
+            .process_file_current_file_resolution_forced(&app_uri, app, &server)
+            .unwrap();
+        // Second pass mirrors didOpen-then-cold-index: the class constant already
+        // carries a ClassReference from the first declaration of this same file.
+        processor
+            .process_file_current_file_resolution_forced(&app_uri, app, &server)
+            .unwrap();
+
+        let platform_app =
+            FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
+        let method = RubyMethod::new("get_images").unwrap();
+        let engine = server.analysis_engine.read();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        assert!(
+            query.namespace_exists(&platform_app),
+            "reindexing class PlatformApp must keep its graph node so mixin lookup remains possible"
+        );
+        let callees = query
+            .resolve_method_callees(&platform_app, &method)
+            .expect("PlatformApp must remain a resolvable method owner after reindex");
+        assert!(
+            callees.iter().any(|callee| {
+                callee.owner.to_string().contains("Consignments")
+                    && !callee.definition_ranges.is_empty()
+            }),
+            "helper method must remain reachable through Base/API includes after reindex, got {callees:?}"
+        );
+    }
+
+    #[test]
     fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
         let server = RubyLanguageServer::default();
         let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());

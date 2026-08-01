@@ -766,7 +766,36 @@ function activate(context) {
             fileEvents: watchedFileEvents
         },
         initializationOptions,
-        outputChannel: outputChannel
+        outputChannel: outputChannel,
+        // Split slow-goto blame: log when VS Code invokes our provider vs when
+        // the language client finishes waiting on the server. Delay before the
+        // "provider invoked" line is editor/extension-host; delay between that
+        // and the server "request received" line is client transport/queue.
+        middleware: {
+            provideDefinition: async (document, position, token, next) => {
+                const startedAt = Date.now();
+                outputChannel.appendLine(
+                    `[CLIENT] definition provider invoked ${document.uri.fsPath}:${position.line}:${position.character}`
+                );
+                try {
+                    const result = await next(document, position, token);
+                    const count = Array.isArray(result)
+                        ? result.length
+                        : result
+                          ? 1
+                          : 0;
+                    outputChannel.appendLine(
+                        `[CLIENT] definition provider finished in ${Date.now() - startedAt}ms locations=${count}`
+                    );
+                    return result;
+                } catch (error) {
+                    outputChannel.appendLine(
+                        `[CLIENT] definition provider failed in ${Date.now() - startedAt}ms: ${error}`
+                    );
+                    throw error;
+                }
+            }
+        }
     };
 
     client = new LanguageClient(

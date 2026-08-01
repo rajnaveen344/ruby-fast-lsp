@@ -1,0 +1,110 @@
+require "platform/errors/errors"
+require "platform/platform_helpers"
+require "platform/helpers/email_helpers"
+require "platform/users"
+require "platform/posts"
+require 'platform/shows'
+require 'platform/similar_posts'
+require "platform/follow"
+require "platform/feed"
+require "platform/feed_v2"
+require "platform/commerce"
+require "platform/metadata"
+require "platform/events"
+require "platform/short_urls"
+require "platform/campaigns"
+require "platform/analytics"
+require "platform/user_development_actions"
+require "platform/helpers/queue_helper"
+require 'platform/helpers/tracking_helpers'
+require "platform/collections"
+require 'platform/aesthetics'
+require "platform/feature_settings_api"
+require "platform/brands"
+require "platform/discover"
+require "platform/content_moderation"
+require "platform/recruit"
+require "platform/locations"
+require 'platform/auth'
+require 'platform/channels'
+require "platform/colleges"
+require 'platform/shop'
+require 'platform/stories'
+require 'platform/orders'
+require 'platform/helpers/util'
+require 'platform/shipments'
+require 'platform/accounts'
+require 'platform/admin'
+require 'platform/auctions'
+require 'platform/clickwrap'
+require 'platform/videos'
+require 'platform/shows_feed'
+require 'platform/events_feed'
+require 'platform/related_posts_feed'
+require 'platform/promoted_posts_promotions/promoted_posts_promotions'
+require 'platform/prospect_posts/prospect_posts'
+require 'platform/support_cases/support_cases'
+require 'platform/consignments/consignments'
+require 'platform/giveaways'
+require 'platform/compliance'
+require 'platform/looks/looks'
+require 'platform/search_feed/search_feed_helper'
+require 'platform/sourcing_insights'
+require 'platform/cassie_helper'
+require 'platform/seller_hub'
+
+module GoshPosh
+  module Platform
+    module API
+      include Users
+      include Posts
+      include SimilarPosts
+      include Follow
+      include Commerce
+      include Feed
+      include Metadata
+      include Events
+      include ShortUrls
+      include Campaigns
+      include UserDevelopmentActions
+      include Helpers
+      include GoshPosh::Platform::Email
+      include Analytics
+      include Collections
+      include Aesthetics
+      include FeatureSettings
+      include Brands
+      include Discover
+      include Recruit
+      include Locations
+      include Auth
+      include Channels
+      include Colleges
+      include Shop
+      include ShowsFeed
+      include EventsFeed
+      include ContentModeration
+      include Stories
+      include Orders
+      include Shipments
+      include Accounts
+      include PlatformAdmin
+      include Auctions
+      include Shows
+      include Clickwrap
+      include Videos
+      include PromotedPostPromotions
+      include Consignments
+      include RelatedPostsFeed
+      include ProspectPosts
+      include SupportCases
+      include Giveaways
+      include Compliance
+      include Looks
+      include SearchFeed::SearchFeedHelper
+      include SourcingInsights
+      include CassieHelper
+      include SellerHub
+    end
+  end
+end

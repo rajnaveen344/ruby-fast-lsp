@@ -249,6 +249,54 @@ end
 }
 
 #[tokio::test]
+async fn goto_helper_method_with_unresolved_sinatra_superclass_and_nested_api() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "sinatra.rb",
+            include_str!("../../fixtures/goshposh_helpers_goto/sinatra.rb"),
+        )
+        .await;
+    editor
+        .open(
+            "platform_consignments.rb",
+            include_str!("../../fixtures/goshposh_helpers_goto/platform_consignments.rb"),
+        )
+        .await;
+    editor
+        .open(
+            "consignments.rb",
+            include_str!("../../fixtures/goshposh_helpers_goto/consignments.rb"),
+        )
+        .await;
+    editor
+        .open(
+            "platform_api.rb",
+            include_str!("../../fixtures/goshposh_helpers_goto/platform_api.rb"),
+        )
+        .await;
+    editor
+        .open(
+            "base.rb",
+            include_str!("../../fixtures/goshposh_helpers_goto/base.rb"),
+        )
+        .await;
+    let api_app = include_str!("../../fixtures/goshposh_helpers_goto/api_app.rb");
+    editor.open("api_app.rb", api_app).await;
+    // Cold project indexing reprocesses already-open buffers. Re-apply the same
+    // content so ClassReference-from-prior-declaration cannot drop the class node.
+    editor.set("api_app.rb", api_app).await;
+
+    let defs = editor.goto_def_at("api_app.rb", 9, 12).await;
+    let diags = editor.diagnostics("api_app.rb").await;
+    assert!(
+        defs.iter()
+            .any(|loc| loc.uri.path().ends_with("/consignments.rb")),
+        "expected definition through real GoshPosh helpers include chain after reindex, got {defs:?}; diags={diags:?}"
+    );
+}
+
+#[tokio::test]
 async fn goto_explicit_receiver_private_method_does_not_resolve() {
     let mut editor = FakeEditor::new().await;
     editor

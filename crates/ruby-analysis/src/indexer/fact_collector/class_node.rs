@@ -56,6 +56,12 @@ impl FactCollector {
         {
             reopened_target = None;
         }
+        // A prior index of this same `class Name` leaves a ClassReference for
+        // `Name`. That must not be treated as an alias reopen: skipping the
+        // graph node would let replace_facts delete the only class identity.
+        if reopened_target.as_ref() == Some(&syntactic_fqn) {
+            reopened_target = None;
+        }
 
         // Handle namespace setup
         if let Some(target) = &reopened_target {

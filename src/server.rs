@@ -654,6 +654,39 @@ impl RubyLanguageServer {
         }
     }
 
+    /// Optional 1s reactor heartbeat for diagnosing slow goto clicks.
+    /// Enable with `RUBY_FAST_LSP_REACTOR_HEARTBEAT=1`. Continuing ticks with no
+    /// request log mean the client held the request; missing ticks mean the
+    /// reactor stalled. Process-wide once so FakeEditor suites do not spawn
+    /// overlapping tickers.
+    pub fn start_reactor_heartbeat(&self) {
+        use std::sync::Once;
+        static START: Once = Once::new();
+        let enabled = std::env::var_os("RUBY_FAST_LSP_REACTOR_HEARTBEAT")
+            .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+        if !enabled {
+            return;
+        }
+        START.call_once(|| {
+            info!(
+                "[REACTOR] starting 1s heartbeat — during a slow goto: continuing ticks with no \
+                 request log means the client held the request; missing ticks mean the reactor stalled"
+            );
+            tokio::spawn(async move {
+                let mut tick = 0u64;
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                // Interval fires immediately; skip the zero-delay first tick.
+                interval.tick().await;
+                loop {
+                    interval.tick().await;
+                    tick = tick.saturating_add(1);
+                    info!("[REACTOR] heartbeat tick={tick}");
+                }
+            });
+        });
+    }
+
     /// Start a background task that monitors the parent process.
     /// If the parent process is no longer running, exit the server.
     fn start_parent_process_monitor(&self, parent_pid: u32) {

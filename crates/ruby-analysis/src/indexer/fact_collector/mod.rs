@@ -2536,8 +2536,8 @@ impl Visit<'_> for FactCollector {
 #[cfg(test)]
 mod execution_context_tests {
     use super::*;
-    use crate::core::{GeneratedOwnerId, SourceKind};
-    use crate::engine::SourceFileInput;
+    use crate::core::{GeneratedOwnerId, GraphNodeKind, SourceKind, TypeProvenance};
+    use crate::engine::{FileFacts, ResolveMode, SourceFileInput};
     use std::path::PathBuf;
     use tower_lsp::lsp_types::Url;
 
@@ -2841,6 +2841,72 @@ mod execution_context_tests {
                     || edge.source != source
                     || edge.target != source),
             "declaring the class must not make it its own superclass"
+        );
+    }
+
+    #[test]
+    fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
+        let source = "class PlatformApp < Object\nend\n";
+        let uri = Url::parse("file:///workspace/lib/api_app.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/api_app.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let platform_app =
+            FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
+        let constant = FullyQualifiedName::constant(vec![RubyConstant::new("PlatformApp").unwrap()]);
+        // Prior didOpen / earlier pass left the ordinary class ClassReference in the engine.
+        engine.replace_facts(
+            file_id,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    platform_app.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 0, 5),
+                )],
+                types: vec![TypeFact::new(
+                    TypeSubject::Constant(constant.clone()),
+                    RubyType::ClassReference(constant),
+                    TextRange::new(file_id, 0, 5),
+                    TypeProvenance::Inferred,
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Deferred,
+        );
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+        collector.visit(&parse.node());
+
+        assert!(
+            collector
+                .direct_facts
+                .graph_nodes
+                .iter()
+                .any(|fact| fact.fqn == platform_app && fact.kind == GraphNodeKind::Class),
+            "recollecting class PlatformApp while its ClassReference remains visible must still emit the class graph node; nodes={:?}",
+            collector
+                .direct_facts
+                .graph_nodes
+                .iter()
+                .map(|fact| fact.fqn.to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            collector.direct_facts.graph_edges.iter().any(|edge| {
+                edge.kind == GraphEdgeKind::Superclass && edge.source == platform_app
+            }) || collector.direct_facts.unresolved_graph_edges.iter().any(|edge| {
+                edge.kind == GraphEdgeKind::Superclass && edge.source == platform_app
+            }),
+            "superclass edge must still be emitted for the class declaration"
         );
     }
 

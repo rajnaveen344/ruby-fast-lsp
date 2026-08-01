@@ -94,6 +94,14 @@ pub async fn handle_goto_definition(
                 None
             };
             let mut deferred_reason = None;
+            if project_wait.is_some() || dependency_wait.is_some() {
+                info!(
+                    "Goto definition waiting for navigation demand (project_timeout={:?}, dependency_timeout={:?}) at {:?}",
+                    PROJECT_NAVIGATION_DEMAND_WAIT,
+                    DEPENDENCY_NAVIGATION_DEMAND_WAIT,
+                    position
+                );
+            }
             while definition.is_none() && (project_wait.is_some() || dependency_wait.is_some()) {
                 let (stage, outcome) = match (&mut project_wait, &mut dependency_wait) {
                     (Some(project_future), Some(dependency_future)) => {
@@ -167,12 +175,14 @@ pub async fn handle_goto_definition(
             if definition.is_none() {
                 let phase = project.indexing_status.snapshot().phase;
                 if phase.project_navigation_pending() || phase.dependency_navigation_pending() {
-                    return Err(indexing_in_progress_error(
-                        project,
-                        deferred_reason.unwrap_or(
-                            "the requested definition still depends on broader indexing",
-                        ),
-                    ));
+                    let reason = deferred_reason.unwrap_or(
+                        "the requested definition still depends on broader indexing",
+                    );
+                    info!(
+                        "Goto definition deferred while indexing ({reason}) at {:?}",
+                        position
+                    );
+                    return Err(indexing_in_progress_error(project, reason));
                 }
             }
         }
@@ -185,7 +195,23 @@ pub async fn handle_goto_definition(
                     lang_server.retain_external_document_project(&location.uri, project);
                 }
             }
-            trace!("Returning {} goto definition locations", locations.len());
+            let first = locations
+                .first()
+                .map(|location| {
+                    format!(
+                        "{}:{}:{}",
+                        location.uri.path(),
+                        location.range.start.line,
+                        location.range.start.character
+                    )
+                })
+                .unwrap_or_else(|| "<empty>".to_string());
+            info!(
+                "Goto definition returning {} location(s) for {:?} first={}",
+                locations.len(),
+                position,
+                first
+            );
             Ok(Some(GotoDefinitionResponse::Array(locations)))
         }
         None => {

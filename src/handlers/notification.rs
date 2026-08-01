@@ -197,6 +197,7 @@ pub async fn handle_initialize(
 
 pub async fn handle_initialized(server: &RubyLanguageServer, _params: InitializedParams) {
     info!("Language server initialized");
+    server.start_reactor_heartbeat();
 
     // Dynamically register type hierarchy capability (LSP 3.17.0)
     // lsp-types 0.94.1 doesn't have typeHierarchyProvider in ServerCapabilities,
