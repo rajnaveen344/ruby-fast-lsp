@@ -74,6 +74,11 @@ enum IndexingStatusPublicationDecision {
 #[derive(Debug, Default)]
 struct IndexingStatusPublicationState {
     last_published: Option<IndexingStatusSnapshot>,
+    /// Latest sequenced snapshot waiting for the dedicated sender task.
+    /// Intermediate updates are dropped so multi-project phase storms cannot
+    /// fill tower-lsp's capacity-1 client channel and backpressure stdin dispatch.
+    pending_send: Option<IndexingStatusSnapshot>,
+    sender_scheduled: bool,
     counter_flush_scheduled: bool,
     counter_pending: bool,
 }
@@ -107,6 +112,25 @@ impl IndexingStatusPublicationState {
         self.counter_pending = false;
         self.last_published = Some(snapshot.clone());
         true
+    }
+
+    fn queue_send(&mut self, snapshot: IndexingStatusSnapshot) -> bool {
+        self.pending_send = Some(snapshot);
+        if self.sender_scheduled {
+            return false;
+        }
+        self.sender_scheduled = true;
+        true
+    }
+
+    fn take_pending_send(&mut self) -> Option<IndexingStatusSnapshot> {
+        match self.pending_send.take() {
+            Some(snapshot) => Some(snapshot),
+            None => {
+                self.sender_scheduled = false;
+                None
+            }
+        }
     }
 }
 
@@ -596,40 +620,84 @@ impl RubyLanguageServer {
     }
 
     pub async fn publish_indexing_status(&self) {
-        let mut publication = self.indexing_status_publication.lock().await;
-        let snapshot = self.indexing_status_snapshot();
-        match publication.observe(&snapshot) {
-            IndexingStatusPublicationDecision::Immediate => {
-                let snapshot = self.sequence_indexing_status_snapshot(snapshot);
-                if let Some(client) = &self.client {
-                    let _ = client
-                        .send_notification::<IndexingStatusNotification>(snapshot)
-                        .await;
+        let schedule_sender;
+        let schedule_counter_flush;
+        {
+            let mut publication = self.indexing_status_publication.lock().await;
+            let snapshot = self.indexing_status_snapshot();
+            match publication.observe(&snapshot) {
+                IndexingStatusPublicationDecision::Immediate => {
+                    let snapshot = self.sequence_indexing_status_snapshot(snapshot);
+                    schedule_sender = publication.queue_send(snapshot);
+                    schedule_counter_flush = false;
+                }
+                IndexingStatusPublicationDecision::ScheduleCounterFlush => {
+                    schedule_sender = false;
+                    schedule_counter_flush = true;
+                }
+                IndexingStatusPublicationDecision::Coalesced => {
+                    return;
                 }
             }
-            IndexingStatusPublicationDecision::ScheduleCounterFlush => {
-                drop(publication);
-                let server = self.clone();
-                tokio::spawn(async move {
-                    sleep(INDEXING_COUNTER_PUBLICATION_INTERVAL).await;
-                    server.flush_indexing_counter_status().await;
-                });
-            }
-            IndexingStatusPublicationDecision::Coalesced => {}
+        }
+        if schedule_counter_flush {
+            let server = self.clone();
+            tokio::spawn(async move {
+                sleep(INDEXING_COUNTER_PUBLICATION_INTERVAL).await;
+                server.flush_indexing_counter_status().await;
+            });
+        }
+        if schedule_sender {
+            self.spawn_indexing_status_sender();
         }
     }
 
     async fn flush_indexing_counter_status(&self) {
-        let mut publication = self.indexing_status_publication.lock().await;
-        let snapshot = self.indexing_status_snapshot();
-        if !publication.flush_counter(&snapshot) {
-            return;
+        let schedule_sender;
+        {
+            let mut publication = self.indexing_status_publication.lock().await;
+            let snapshot = self.indexing_status_snapshot();
+            if !publication.flush_counter(&snapshot) {
+                return;
+            }
+            let snapshot = self.sequence_indexing_status_snapshot(snapshot);
+            schedule_sender = publication.queue_send(snapshot);
         }
-        let snapshot = self.sequence_indexing_status_snapshot(snapshot);
-        if let Some(client) = &self.client {
-            let _ = client
-                .send_notification::<IndexingStatusNotification>(snapshot)
-                .await;
+        if schedule_sender {
+            self.spawn_indexing_status_sender();
+        }
+    }
+
+    fn spawn_indexing_status_sender(&self) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            server.drain_indexing_status_sends().await;
+        });
+    }
+
+    async fn drain_indexing_status_sends(&self) {
+        loop {
+            let snapshot = {
+                let mut publication = self.indexing_status_publication.lock().await;
+                match publication.take_pending_send() {
+                    Some(snapshot) => snapshot,
+                    None => return,
+                }
+            };
+            if let Some(client) = &self.client {
+                let start = Instant::now();
+                let _ = client
+                    .send_notification::<IndexingStatusNotification>(snapshot)
+                    .await;
+                let elapsed = start.elapsed();
+                if elapsed >= Duration::from_millis(50) {
+                    warn!(
+                        "[PERF] indexing status notification send took {:?} — stdout backpressure \
+                         can stall LSP request dispatch when the client falls behind",
+                        elapsed
+                    );
+                }
+            }
         }
     }
 
@@ -2008,6 +2076,139 @@ mod runtime_status_tests {
     }
 
     #[test]
+    fn indexing_status_send_queue_keeps_only_the_latest_pending_snapshot() {
+        let language_server = RubyLanguageServer::default();
+        let mut publication = IndexingStatusPublicationState::default();
+        let first = language_server
+            .sequence_indexing_status_snapshot(language_server.indexing_status_snapshot());
+        assert!(
+            publication.queue_send(first.clone()),
+            "the first queued snapshot must schedule the sender"
+        );
+        let second = language_server
+            .sequence_indexing_status_snapshot(language_server.indexing_status_snapshot());
+        assert!(
+            !publication.queue_send(second.clone()),
+            "a later snapshot must replace pending state without scheduling a second sender"
+        );
+        let pending = publication
+            .take_pending_send()
+            .expect("latest snapshot must remain pending");
+        assert_eq!(pending.sequence, second.sequence);
+        assert!(pending.sequence > first.sequence);
+        assert!(
+            publication.take_pending_send().is_none(),
+            "taking the pending snapshot must clear the sender schedule"
+        );
+    }
+
+    #[tokio::test]
+    async fn multi_project_phase_storm_publishes_latest_wins_without_blocking_callers() {
+        use futures::StreamExt;
+        use serde_json::json;
+        use tower::{Service, ServiceExt};
+        use tower_lsp::jsonrpc::Request;
+        use tower_lsp::LspService;
+
+        let (mut service, mut socket) = LspService::new(|client| {
+            RubyLanguageServer::new(client).expect("test language server must initialize")
+        });
+        let initialize = Request::build("initialize")
+            .params(json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .unwrap()
+            .expect("initialize must return a response");
+
+        let received = Arc::new(Mutex::new(Vec::<IndexingStatusSnapshot>::new()));
+        let received_by_reader = received.clone();
+        let socket_reader = tokio::spawn(async move {
+            while let Some(request) = socket.next().await {
+                if request.method() == "ruby-fast-lsp/indexing/statusChanged" {
+                    received_by_reader.lock().push(
+                        serde_json::from_value::<IndexingStatusSnapshot>(
+                            request
+                                .params()
+                                .cloned()
+                                .expect("status notification must carry parameters"),
+                        )
+                        .expect("status notification must carry a valid complete snapshot"),
+                    );
+                }
+            }
+        });
+
+        let fixture = tempfile::tempdir().unwrap();
+        let language_server = service.inner().clone();
+        let mut workspaces = Vec::new();
+        for index in 0..8 {
+            let project = fixture.path().join(format!("project-{index}"));
+            std::fs::create_dir_all(&project).unwrap();
+            workspaces.push(
+                language_server.add_workspace(Url::from_directory_path(&project).unwrap()),
+            );
+        }
+
+        let publish_started = Instant::now();
+        for workspace in &workspaces {
+            let run = workspace.indexing_status.begin_run();
+            for phase in [
+                IndexingPhase::IndexingProject,
+                IndexingPhase::ProjectNavigationReady,
+                IndexingPhase::IndexingDependencies,
+                IndexingPhase::DependencyNavigationReady,
+                IndexingPhase::Ready,
+            ] {
+                workspace
+                    .indexing_status
+                    .transition(run.generation(), phase, None, None)
+                    .unwrap();
+                language_server.publish_indexing_status().await;
+            }
+        }
+        assert!(
+            publish_started.elapsed() < Duration::from_millis(200),
+            "status publication must not await client IO on the caller; elapsed={:?}",
+            publish_started.elapsed()
+        );
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        socket_reader.abort();
+        let _ = socket_reader.await;
+        let snapshots = received.lock().clone();
+        assert!(
+            !snapshots.is_empty(),
+            "at least the latest indexing snapshot must reach the client"
+        );
+        assert!(
+            snapshots.len() < 40,
+            "latest-wins publication must drop intermediate multi-project phase storms, got {}",
+            snapshots.len()
+        );
+        assert!(
+            snapshots
+                .last()
+                .unwrap()
+                .projects
+                .iter()
+                .all(|project| project.phase == IndexingPhase::Ready),
+            "the final delivered snapshot must reflect the latest ready state"
+        );
+        assert!(
+            snapshots
+                .windows(2)
+                .all(|pair| pair[0].sequence < pair[1].sequence),
+            "client-visible status sequence must remain strictly monotonic"
+        );
+    }
+
+    #[test]
     fn counter_only_status_publication_is_bounded_while_phase_changes_are_immediate() {
         let fixture = tempfile::tempdir().unwrap();
         let project = fixture.path().join("server");
@@ -2302,7 +2503,7 @@ mod runtime_status_tests {
             )
             .unwrap();
         language_server.publish_indexing_status().await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         socket_reader.abort();
         let _ = socket_reader.await;
         let snapshots = received.lock().clone();
