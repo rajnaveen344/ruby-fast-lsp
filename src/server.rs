@@ -156,6 +156,37 @@ fn same_immediate_indexing_state(
 }
 
 #[derive(Debug, Default)]
+struct DiagnosticPublicationState {
+    /// Latest diagnostics per URI waiting for the dedicated sender task.
+    /// Intermediate updates are dropped so publish storms cannot fill
+    /// tower-lsp's capacity-1 client channel and stall request dispatch.
+    pending: BTreeMap<String, (Url, Vec<Diagnostic>)>,
+    sender_scheduled: bool,
+}
+
+impl DiagnosticPublicationState {
+    fn queue(&mut self, uri: Url, diagnostics: Vec<Diagnostic>) -> bool {
+        self.pending
+            .insert(uri.to_string(), (uri, diagnostics));
+        if self.sender_scheduled {
+            return false;
+        }
+        self.sender_scheduled = true;
+        true
+    }
+
+    fn take_next(&mut self) -> Option<(Url, Vec<Diagnostic>)> {
+        match self.pending.pop_first() {
+            Some((_key, value)) => Some(value),
+            None => {
+                self.sender_scheduled = false;
+                None
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
 struct WatchedFileChangeBatch {
     generation: u64,
     changes: BTreeMap<String, FileEvent>,
@@ -360,6 +391,7 @@ pub struct RubyLanguageServer {
         Arc<crate::dependency_product::GemDependencyBindingCounters>,
     indexing_status_sequence: Arc<AtomicU64>,
     indexing_status_publication: Arc<tokio::sync::Mutex<IndexingStatusPublicationState>>,
+    diagnostic_publication: Arc<Mutex<DiagnosticPublicationState>>,
     watched_file_changes: Arc<Mutex<WatchedFileChangeBatch>>,
     pub extension_watch_dynamic_registration: Arc<AtomicBool>,
     pub extension_watch_registration: Arc<tokio::sync::Mutex<Vec<String>>>,
@@ -439,6 +471,7 @@ impl RubyLanguageServer {
             indexing_status_publication: Arc::new(tokio::sync::Mutex::new(
                 IndexingStatusPublicationState::default(),
             )),
+            diagnostic_publication: Arc::new(Mutex::new(DiagnosticPublicationState::default())),
             watched_file_changes: Arc::new(Mutex::new(WatchedFileChangeBatch::default())),
             extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
             extension_watch_registration: Arc::new(tokio::sync::Mutex::new(Vec::new())),
@@ -1162,14 +1195,55 @@ impl RubyLanguageServer {
             .map(|doc_arc| doc_arc.read().clone())
     }
 
-    /// Publish diagnostics for a document
+    /// Publish diagnostics for a document.
+    ///
+    /// Client IO is latest-wins and off the caller: awaiting every
+    /// `publishDiagnostics` on tower-lsp's capacity-1 outbound channel can
+    /// backpressure stdout and stall request dispatch (including goto).
     pub async fn publish_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
         #[cfg(test)]
         self.published_diagnostics
             .lock()
             .insert(uri.clone(), diagnostics.clone());
-        if let Some(client) = &self.client {
+        if self.client.is_none() {
+            return;
+        }
+        let schedule_sender = {
+            let mut publication = self.diagnostic_publication.lock();
+            publication.queue(uri, diagnostics)
+        };
+        if schedule_sender {
+            let server = self.clone();
+            tokio::spawn(async move {
+                server.drain_diagnostic_publishes().await;
+            });
+        }
+    }
+
+    async fn drain_diagnostic_publishes(&self) {
+        let Some(client) = &self.client else {
+            let mut publication = self.diagnostic_publication.lock();
+            publication.pending.clear();
+            publication.sender_scheduled = false;
+            return;
+        };
+        loop {
+            let Some((uri, diagnostics)) = ({
+                let mut publication = self.diagnostic_publication.lock();
+                publication.take_next()
+            }) else {
+                return;
+            };
+            let start = Instant::now();
             let _ = client.publish_diagnostics(uri, diagnostics, None).await;
+            let elapsed = start.elapsed();
+            if elapsed >= Duration::from_millis(50) {
+                warn!(
+                    "[PERF] publishDiagnostics send took {:?} — stdout backpressure can stall \
+                     LSP request dispatch when the client falls behind",
+                    elapsed
+                );
+            }
         }
     }
 
@@ -1506,6 +1580,7 @@ impl Default for RubyLanguageServer {
             indexing_status_publication: Arc::new(tokio::sync::Mutex::new(
                 IndexingStatusPublicationState::default(),
             )),
+            diagnostic_publication: Arc::new(Mutex::new(DiagnosticPublicationState::default())),
             watched_file_changes: Arc::new(Mutex::new(WatchedFileChangeBatch::default())),
             extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
             extension_watch_registration: Arc::new(tokio::sync::Mutex::new(Vec::new())),
@@ -2073,6 +2148,23 @@ mod runtime_status_tests {
                 failures: 0,
             }
         );
+    }
+
+    #[test]
+    fn diagnostic_publication_queue_keeps_only_the_latest_per_uri() {
+        let mut publication = DiagnosticPublicationState::default();
+        let first = Url::parse("file:///project/a.rb").unwrap();
+        let second = Url::parse("file:///project/b.rb").unwrap();
+        assert!(publication.queue(first.clone(), Vec::new()));
+        assert!(!publication.queue(first.clone(), vec![Diagnostic::default()]));
+        assert!(!publication.queue(second.clone(), Vec::new()));
+        let (uri, diagnostics) = publication.take_next().expect("first URI must stay pending");
+        assert_eq!(uri, first);
+        assert_eq!(diagnostics.len(), 1, "latest diagnostics for a URI must win");
+        let (uri, diagnostics) = publication.take_next().expect("second URI must stay pending");
+        assert_eq!(uri, second);
+        assert!(diagnostics.is_empty());
+        assert!(publication.take_next().is_none());
     }
 
     #[test]

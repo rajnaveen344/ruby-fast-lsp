@@ -76,7 +76,15 @@ async fn main() -> Result<()> {
 
     info!("Ruby LSP server initialized, waiting for client connections");
 
-    Server::new(stdin, stdout, socket).serve(service).await;
+    Server::new(stdin, stdout, socket)
+        // tower-lsp defaults to 4 concurrent request handlers. Completed handlers
+        // that are waiting on a backpressured stdout response slot still occupy
+        // those slots, so a small limit turns client IO stalls into multi-second
+        // goto/hover delays. Keep CPU-heavy work off the reactor; this only
+        // bounds how many LSP futures may be in flight.
+        .concurrency_level(64)
+        .serve(service)
+        .await;
 
     Ok(())
 }
