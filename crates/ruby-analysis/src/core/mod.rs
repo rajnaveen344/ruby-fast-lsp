@@ -49,7 +49,7 @@ pub use reference_store::{
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::{GeneratedOwnerId, RubyConstant};
 pub use ruby_type::RubyType;
-pub use source_file::SourceKind;
+pub use source_file::{LibraryPackageId, SourceKind};
 pub use symbol_store::{StoredSymbolFact, SymbolFact, SymbolKind, SymbolStore};
 pub use type_store::{
     SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeStore, TypeSubject,

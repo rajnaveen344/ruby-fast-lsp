@@ -42,6 +42,8 @@ pub struct SourceFile {
     pub line_index: SourceLineIndex,
     pub content_hash: u64,
     pub kind: SourceKind,
+    /// Present for `SourceKind::Gem` files bound from a locked package.
+    pub library_package: Option<crate::core::LibraryPackageId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -1019,7 +1021,37 @@ impl AnalysisEngine {
         } else {
             Some(file.content)
         };
-        self.register_indexed_file(file.path, file.kind, line_index, content_hash, source)
+        self.register_indexed_file(file.path, file.kind, line_index, content_hash, source, None)
+    }
+
+    /// Register a locked gem source with explicit package identity for library-tree grouping.
+    pub fn register_gem_file(
+        &mut self,
+        file: SourceFileInput,
+        package: crate::core::LibraryPackageId,
+    ) -> SourceFileId {
+        assert!(
+            file.kind == SourceKind::Gem,
+            "INVARIANT VIOLATED: register_gem_file received SourceKind::{:?}. \
+             This is a bug because only Gem sources carry locked package identity. \
+             Fix: use register_file for non-gem sources or pass SourceKind::Gem.",
+            file.kind
+        );
+        let line_index = SourceLineIndex::new(&file.content);
+        let content_hash = source_hash(&file.content);
+        let source = if line_index.is_ascii() {
+            None
+        } else {
+            Some(file.content)
+        };
+        self.register_indexed_file(
+            file.path,
+            file.kind,
+            line_index,
+            content_hash,
+            source,
+            Some(package),
+        )
     }
 
     /// Register source whose caller retains the owned buffer. ASCII files need
@@ -1038,7 +1070,7 @@ impl AnalysisEngine {
         } else {
             Some(content.to_string())
         };
-        self.register_indexed_file(path, kind, line_index, content_hash, source)
+        self.register_indexed_file(path, kind, line_index, content_hash, source, None)
     }
 
     fn register_indexed_file(
@@ -1048,6 +1080,7 @@ impl AnalysisEngine {
         line_index: SourceLineIndex,
         content_hash: u64,
         source: Option<String>,
+        library_package: Option<crate::core::LibraryPackageId>,
     ) -> SourceFileId {
         let id = self.sources.ids.get_or_insert(&path);
         self.sources.files.insert(
@@ -1059,6 +1092,7 @@ impl AnalysisEngine {
                 line_index,
                 content_hash,
                 kind,
+                library_package,
             },
         );
         id

@@ -1252,6 +1252,8 @@ mod tests {
             "gems/widget/1.0.0/ruby/registry/0/widget.rb".to_string(),
             physical_path.to_path_buf(),
             content.to_string(),
+            "widget",
+            "1.0.0",
         )
         .unwrap()
     }

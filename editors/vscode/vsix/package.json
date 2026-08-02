@@ -125,7 +125,7 @@
       "explorer": [
         {
           "id": "rubyIndex",
-          "name": "Ruby Index",
+          "name": "Ruby Projects",
           "visibility": "visible",
           "icon": "$(module)"
         }
@@ -144,12 +144,12 @@
       },
       {
         "command": "rubyIndex.search",
-        "title": "Search Classes/Modules",
-        "icon": "$(search)"
+        "title": "Go to Class/Module",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "rubyIndex.toggleExternalTypes",
-        "title": "Toggle External Types",
+        "title": "Standard Library & Gems",
         "icon": "$(library)"
       },
       {
@@ -207,7 +207,8 @@
         {
           "command": "rubyIndex.toggleExternalTypes",
           "when": "view == rubyIndex",
-          "group": "navigation"
+          "group": "navigation",
+          "toggled": "rubyIndex.showLibrarySections"
         },
         {
           "command": "rubyIndex.refresh",
@@ -226,7 +227,7 @@
         "command": "rubyIndex.search",
         "key": "ctrl+shift+r",
         "mac": "cmd+shift+r",
-        "when": "view.rubyIndex.visible"
+        "when": "editorTextFocus && (editorLangId == ruby || editorLangId == erb || view.rubyIndex.visible)"
       }
     ]
   },

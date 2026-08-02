@@ -30,6 +30,16 @@ const {
     indexingStatusQuickPickPlaceholder,
     indexingStatusRequestParams
 } = require('./indexing_status');
+const {
+    orderRubyIndexProjects,
+    buildWorkspaceProjectForest,
+    projectTreePresentation,
+    namespaceSearchQuickPickItems,
+    projectBrowseSections,
+    namespaceChildDescriptors,
+    namespaceHasChildren,
+    findOwningWorkspaceFolder
+} = require('./ruby_index_tree');
 
 // Create output channel for logging
 let outputChannel;
@@ -109,27 +119,26 @@ function extractZippedStubs(extensionPath) {
 
 // Ruby Index Tree Data Provider
 class RubyIndexProvider {
-    constructor() {
+    constructor(options = {}) {
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
-        // Cache for namespace data (used for search)
         this._cachedNamespaces = [];
-        // Map from FQN to TreeItem (for reveal)
         this._fqnToItem = new Map();
+        this._getIndexingProjects = options.getIndexingProjects || (() => []);
+        this._getRuntimeProjects = options.getRuntimeProjects || (() => []);
+        this._getShowExternalTypes = options.getShowExternalTypes
+            || (() => Boolean(editorState?.showExternalTypes));
     }
 
     refresh() {
-        // Clear cache on refresh
         this._cachedNamespaces = [];
         this._fqnToItem.clear();
         this._onDidChangeTreeData.fire();
     }
 
-    // Flatten all namespaces recursively for search
     _flattenNamespaces(namespaces, result = []) {
         for (const ns of namespaces) {
             result.push(ns);
-            // Recursively flatten child modules and classes
             if (ns.modules && ns.modules.length > 0) {
                 this._flattenNamespaces(ns.modules, result);
             }
@@ -140,12 +149,10 @@ class RubyIndexProvider {
         return result;
     }
 
-    // Get all namespaces for search (uses cache)
     getAllNamespaces() {
         return this._cachedNamespaces;
     }
 
-    // Get TreeItem by FQN (for reveal)
     getItemByFqn(fqn) {
         return this._fqnToItem.get(fqn);
     }
@@ -154,180 +161,329 @@ class RubyIndexProvider {
         return element;
     }
 
-    // Required for TreeView.reveal() to work with nested items
+    _resolveProjects() {
+        const indexingProjects = this._getIndexingProjects();
+        if (Array.isArray(indexingProjects) && indexingProjects.length > 0) {
+            return indexingProjects;
+        }
+        const runtimeProjects = this._getRuntimeProjects();
+        if (Array.isArray(runtimeProjects) && runtimeProjects.length > 0) {
+            return runtimeProjects;
+        }
+        const folders = vscode.workspace.workspaceFolders || [];
+        return folders.map((folder) => ({ root: folder.uri.fsPath }));
+    }
+
+    _projectRequestUri(rootPath) {
+        const normalized = rootPath.replace(/[\\/]+$/, '');
+        return vscode.Uri.file(normalized).toString();
+    }
+
+    async _fetchNamespaceTree(uri) {
+        return client.sendRequest('ruby/namespaceTree', {
+            uri: uri || '',
+            show_external_types: this._getShowExternalTypes()
+        });
+    }
+
     getParent(element) {
-        if (!element || !element.namespaceData || element.nodeType !== 'namespace') {
+        if (!element) {
+            return null;
+        }
+        if (element.nodeType === 'workspace' || element.nodeType === 'pathFolder') {
+            return element.parentItem || null;
+        }
+        if (element.nodeType === 'project') {
+            return element.parentItem || null;
+        }
+        if (element.nodeType === 'librarySection') {
+            return element.projectItem || null;
+        }
+        if (element.nodeType === 'libraryPackage') {
+            return element.libraryItem || element.projectItem || null;
+        }
+        if (element.nodeType === 'mixinSection'
+            || element.nodeType === 'includedBySection'
+            || element.nodeType === 'singleton'
+            || element.nodeType === 'mixin'
+            || element.nodeType === 'includer') {
+            return element.parentItem || null;
+        }
+        if (!element.namespaceData || element.nodeType !== 'namespace') {
             return null;
         }
 
         const fqn = element.namespaceData.fqn;
         if (!fqn || !fqn.includes('::')) {
-            return null; // Root level item
+            return element.packageItem || element.libraryItem || element.projectItem || null;
         }
 
-        // Get parent FQN (e.g., "Foo::Bar::Baz" -> "Foo::Bar")
         const parts = fqn.split('::');
         parts.pop();
         const parentFqn = parts.join('::');
-
-        // Return cached parent item if exists
         let parentItem = this._fqnToItem.get(parentFqn);
         if (parentItem) {
             return parentItem;
         }
 
-        // Build parent item from cached namespace data
         const parentNs = this._cachedNamespaces.find(ns => ns.fqn === parentFqn);
         if (parentNs) {
-            parentItem = this._buildSingleTreeItem(parentNs);
+            parentItem = this._buildSingleTreeItem(
+                parentNs,
+                element.projectItem,
+                element.libraryItem,
+                element.packageItem
+            );
             this._fqnToItem.set(parentFqn, parentItem);
             return parentItem;
         }
 
-        return null;
+        return element.packageItem || element.libraryItem || element.projectItem || null;
     }
 
-    // Build a single tree item from namespace data (used by getParent)
-    _buildSingleTreeItem(ns) {
-        const hasModules = ns.modules && ns.modules.length > 0;
-        const hasClasses = ns.classes && ns.classes.length > 0;
-        const hasChildren = hasModules || hasClasses;
-        const hasSuperclass = ns.superclass && ns.superclass.name && !ns.superclass.name.includes('(not found)');
-        const hasIncludes = ns.includes && ns.includes.length > 0;
-        const hasPrepends = ns.prepends && ns.prepends.length > 0;
-        const hasSingletonClass = ns.singleton_class != null;
-        const hasIncludedBy = ns.included_by && ns.included_by.length > 0;
-        const hasMixins = hasSuperclass || hasIncludes || hasPrepends || hasSingletonClass || hasIncludedBy;
-        const hasAnyChildren = hasChildren || hasMixins;
-
+    _buildSingleTreeItem(ns, projectItem, libraryItem = null, packageItem = null) {
         const item = new vscode.TreeItem(
             ns.name,
-            hasAnyChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+            namespaceHasChildren(ns)
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None
         );
-
         const locations = ns.locations || [];
-        if (locations.length > 1) {
-            item.description = `${ns.kind} (${locations.length} locations)`;
-        } else {
-            item.description = ns.kind;
-        }
-
+        item.description = locations.length > 1
+            ? `${ns.kind} (${locations.length} locations)`
+            : ns.kind;
         item.namespaceData = ns;
         item.nodeType = 'namespace';
-
+        item.projectItem = projectItem;
+        item.libraryItem = libraryItem;
+        item.packageItem = packageItem;
         if (ns.kind === 'Class') {
             item.iconPath = new vscode.ThemeIcon('symbol-class');
         } else if (ns.kind === 'Module') {
             item.iconPath = new vscode.ThemeIcon('symbol-module');
         }
-
         return item;
     }
 
-    async getChildren(element) {
-        if (!client) {
-            return [];
-        }
+    _buildForestItems(nodes, parentItem) {
+        const activePath = vscode.window.activeTextEditor?.document?.uri?.fsPath;
+        return (nodes || []).map((node) => {
+            if (node.kind === 'project') {
+                const presentation = projectTreePresentation(node.project, activePath);
+                const item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.Collapsed
+                );
+                item.nodeType = 'project';
+                item.projectRoot = node.project.root;
+                item.description = presentation.description;
+                item.iconPath = new vscode.ThemeIcon(presentation.iconId);
+                item.tooltip = presentation.tooltip;
+                item.contextValue = presentation.active
+                    ? 'rubyIndexProjectActive'
+                    : 'rubyIndexProject';
+                item.parentItem = parentItem;
+                return item;
+            }
 
-        // Check if client is ready
-        if (client.state !== 2) { // 2 = Running state
+            const item = new vscode.TreeItem(
+                node.label,
+                vscode.TreeItemCollapsibleState.Collapsed
+            );
+            item.nodeType = node.kind;
+            item.folderPath = node.path;
+            item.forestChildren = node.children || [];
+            item.description = node.kind === 'workspace' ? 'workspace' : 'folder';
+            item.iconPath = new vscode.ThemeIcon(
+                node.kind === 'workspace' ? 'root-folder' : 'folder'
+            );
+            item.tooltip = node.path;
+            item.contextValue = node.kind === 'workspace'
+                ? 'rubyIndexWorkspace'
+                : 'rubyIndexPathFolder';
+            item.parentItem = parentItem;
+            return item;
+        });
+    }
+
+    _buildLibrarySectionItems(sections, projectItem) {
+        return (sections || []).map((section) => {
+            const item = new vscode.TreeItem(
+                section.label,
+                vscode.TreeItemCollapsibleState.Collapsed
+            );
+            item.nodeType = 'librarySection';
+            item.librarySectionId = section.id;
+            item.projectItem = projectItem;
+            item.libraryNamespaces = section.namespaces;
+            item.libraryPackages = section.packages || [];
+            item.iconPath = new vscode.ThemeIcon(section.icon);
+            item.description = section.description;
+            item.contextValue = 'rubyIndexLibrarySection';
+            return item;
+        });
+    }
+
+    _buildLibraryPackageItems(packages, projectItem, libraryItem) {
+        return (packages || []).map((packageInfo) => {
+            const item = new vscode.TreeItem(
+                packageInfo.label,
+                vscode.TreeItemCollapsibleState.Collapsed
+            );
+            item.nodeType = 'libraryPackage';
+            item.projectItem = projectItem;
+            item.libraryItem = libraryItem;
+            item.libraryNamespaces = packageInfo.namespaces;
+            item.iconPath = new vscode.ThemeIcon('package');
+            item.description = 'gem';
+            item.tooltip = `${packageInfo.name} ${packageInfo.version}`.trim();
+            item.contextValue = 'rubyIndexLibraryPackage';
+            return item;
+        });
+    }
+
+    async getChildren(element) {
+        if (!client || client.state !== 2) {
             return [];
         }
 
         try {
             if (!element) {
-                // Root level - get namespace tree from LSP server
-                const response = await client.sendRequest('ruby/namespaceTree', {
-                    uri: vscode.window.activeTextEditor?.document.uri.toString() || '',
-                    show_external_types: editorState.showExternalTypes
-                });
-
-                if (response && (response.modules || response.classes)) {
-                    // Combine modules and classes for caching (modules first, then classes)
-                    const allNamespaces = [...(response.modules || []), ...(response.classes || [])];
-                    // Cache flattened namespaces for search
-                    this._cachedNamespaces = this._flattenNamespaces(allNamespaces);
-                    // Build tree items: modules first, then classes
-                    return this.buildTreeItems(allNamespaces);
+                const projects = orderRubyIndexProjects(this._resolveProjects());
+                if (projects.length === 0) {
+                    const response = await this._fetchNamespaceTree(
+                        vscode.window.activeTextEditor?.document.uri.toString() || ''
+                    );
+                    const sections = projectBrowseSections(
+                        response,
+                        this._getShowExternalTypes()
+                    );
+                    this._cachedNamespaces = this._flattenNamespaces([
+                        ...sections.projectNamespaces,
+                        ...sections.libraryNamespaces
+                    ]);
+                    // Libraries first (JRE / Maven analogues), then project types.
+                    return [
+                        ...this._buildLibrarySectionItems(sections.librarySections, null),
+                        ...this.buildTreeItems(sections.projectNamespaces, null)
+                    ];
                 }
-            } else if (element.nodeType === 'includedBySection') {
-                // Return individual class items (all includers are classes)
-                return element.includers.map(inc => this.buildIncluderItem(inc.name, inc.locations || [], inc.via_modules || []));
-            } else if (element.nodeType === 'includer') {
-                // Return via modules as children (intermediate modules in the include chain)
-                // viaModules is array of ViaModuleInfo objects { name, call_location }
+
+                const workspaceFolders = (vscode.workspace.workspaceFolders || [])
+                    .map((folder) => folder.uri.fsPath);
+                const forest = buildWorkspaceProjectForest(projects, workspaceFolders);
+                return this._buildForestItems(forest, null);
+            }
+
+            if (element.nodeType === 'workspace' || element.nodeType === 'pathFolder') {
+                return this._buildForestItems(element.forestChildren || [], element);
+            }
+
+            if (element.nodeType === 'project') {
+                const response = await this._fetchNamespaceTree(
+                    this._projectRequestUri(element.projectRoot)
+                );
+                const sections = projectBrowseSections(
+                    response,
+                    this._getShowExternalTypes()
+                );
+                const flattened = this._flattenNamespaces([
+                    ...sections.projectNamespaces,
+                    ...sections.libraryNamespaces
+                ]);
+                const byFqn = new Map(this._cachedNamespaces.map((ns) => [ns.fqn, ns]));
+                for (const ns of flattened) {
+                    byFqn.set(ns.fqn, ns);
+                }
+                this._cachedNamespaces = [...byFqn.values()].map((ns) => ({
+                    ...ns,
+                    projectRoot: ns.projectRoot || element.projectRoot
+                }));
+
+                // Libraries first under each project, matching Java Projects JRE/Maven.
+                return [
+                    ...this._buildLibrarySectionItems(sections.librarySections, element),
+                    ...this.buildTreeItems(sections.projectNamespaces, element)
+                ];
+            }
+
+            if (element.nodeType === 'librarySection') {
+                return [
+                    ...this._buildLibraryPackageItems(
+                        element.libraryPackages || [],
+                        element.projectItem,
+                        element
+                    ),
+                    ...this.buildTreeItems(
+                        element.libraryNamespaces || [],
+                        element.projectItem,
+                        element
+                    )
+                ];
+            }
+
+            if (element.nodeType === 'libraryPackage') {
+                return this.buildTreeItems(
+                    element.libraryNamespaces || [],
+                    element.projectItem,
+                    element.libraryItem,
+                    element
+                );
+            }
+
+            if (element.nodeType === 'includedBySection') {
+                return element.includers.map((inc) => {
+                    const item = this.buildIncluderItem(
+                        inc.name,
+                        inc.locations || [],
+                        inc.via_modules || []
+                    );
+                    item.parentItem = element;
+                    return item;
+                });
+            }
+            if (element.nodeType === 'includer') {
                 if (element.viaModules && element.viaModules.length > 0) {
-                    return element.viaModules.map(viaModule => this.buildViaModuleItem(viaModule));
+                    return element.viaModules.map((viaModule) => {
+                        const item = this.buildViaModuleItem(viaModule);
+                        item.parentItem = element;
+                        return item;
+                    });
                 }
                 return [];
-            } else if (element.nodeType === 'mixinSection') {
-                // Return individual mixin items
-                // mixins are MixinInfo objects (with name and locations)
+            }
+            if (element.nodeType === 'mixinSection') {
                 const useClassIcon = element.mixinLabel === 'Superclass';
-                return element.mixins.map(m => {
-                    // Handle MixinInfo objects
+                return element.mixins.map((m) => {
+                    let item;
                     if (typeof m === 'object' && m.name) {
-                        return this.buildMixinItem(m.name, useClassIcon, m.locations || []);
+                        item = this.buildMixinItem(m.name, useClassIcon, m.locations || []);
                     } else {
-                        return this.buildMixinItem(m, useClassIcon, []);
+                        item = this.buildMixinItem(m, useClassIcon, []);
                     }
+                    item.parentItem = element;
+                    return item;
                 });
-            } else if (element.nodeType === 'mixin') {
-                // Mixin items have no children
+            }
+            if (element.nodeType === 'mixin') {
                 return [];
-            } else if (element.nodeType === 'namespace' && element.namespaceData) {
-                // Build children: mixin sections + singleton class + nested namespaces
-                // Order: superclass, includes, prepends, singleton class, included by, modules, classes
+            }
+            if (element.nodeType === 'namespace' && element.namespaceData) {
+                return this.buildNamespaceChildren(element);
+            }
+            if (element.nodeType === 'singleton' && element.namespaceData) {
                 const ns = element.namespaceData;
                 const children = [];
-
-                // Add superclass section (superclass is now a MixinInfo object with name and location)
-                if (ns.superclass && ns.superclass.name && !ns.superclass.name.includes('(not found)')) {
-                    children.push(this.buildMixinSectionItem('Superclass', 'arrow-up', [ns.superclass]));
-                }
-
-                // Add includes section
                 if (ns.includes && ns.includes.length > 0) {
-                    children.push(this.buildMixinSectionItem('Includes', 'plug', ns.includes));
+                    const section = this.buildMixinSectionItem('Includes', 'plug', ns.includes);
+                    section.parentItem = element;
+                    children.push(section);
                 }
-
-                // Add prepends section
                 if (ns.prepends && ns.prepends.length > 0) {
-                    children.push(this.buildMixinSectionItem('Prepends', 'pinned', ns.prepends));
+                    const section = this.buildMixinSectionItem('Prepends', 'pinned', ns.prepends);
+                    section.parentItem = element;
+                    children.push(section);
                 }
-
-                // Add singleton class as a child node (contains extends as includes)
-                if (ns.singleton_class) {
-                    children.push(this.buildSingletonClassItem(ns.singleton_class));
-                }
-
-                // Add included_by section for modules (classes that include this module, directly or transitively)
-                if (ns.included_by && ns.included_by.length > 0) {
-                    children.push(this.buildIncludedBySectionItem('Included By', 'references', ns.included_by));
-                }
-
-                // Add nested modules first, then classes
-                if (ns.modules && ns.modules.length > 0) {
-                    children.push(...this.buildTreeItems(ns.modules));
-                }
-                if (ns.classes && ns.classes.length > 0) {
-                    children.push(...this.buildTreeItems(ns.classes));
-                }
-
-                return children;
-            } else if (element.nodeType === 'singleton' && element.namespaceData) {
-                // Build children for singleton class: its includes (which are the extends)
-                const ns = element.namespaceData;
-                const children = [];
-
-                if (ns.includes && ns.includes.length > 0) {
-                    children.push(this.buildMixinSectionItem('Includes', 'plug', ns.includes));
-                }
-
-                if (ns.prepends && ns.prepends.length > 0) {
-                    children.push(this.buildMixinSectionItem('Prepends', 'pinned', ns.prepends));
-                }
-
                 return children;
             }
         } catch (error) {
@@ -337,23 +493,48 @@ class RubyIndexProvider {
         return [];
     }
 
-    buildTreeItems(namespaces) {
-        return namespaces.map(ns => {
-            const hasModules = ns.modules && ns.modules.length > 0;
-            const hasClasses = ns.classes && ns.classes.length > 0;
-            const hasChildren = hasModules || hasClasses;
-            // superclass is now a MixinInfo object with name and location fields
-            const hasSuperclass = ns.superclass && ns.superclass.name && !ns.superclass.name.includes('(not found)');
-            const hasIncludes = ns.includes && ns.includes.length > 0;
-            const hasPrepends = ns.prepends && ns.prepends.length > 0;
-            const hasSingletonClass = ns.singleton_class != null;
-            const hasIncludedBy = ns.included_by && ns.included_by.length > 0;
-            const hasMixins = hasSuperclass || hasIncludes || hasPrepends || hasSingletonClass || hasIncludedBy;
-            const hasAnyChildren = hasChildren || hasMixins;
+    buildNamespaceChildren(element) {
+        const children = [];
+        for (const descriptor of namespaceChildDescriptors(element.namespaceData)) {
+            if (descriptor.kind === 'namespace') {
+                children.push(...this.buildTreeItems(
+                    [descriptor.namespace],
+                    element.projectItem,
+                    element.libraryItem,
+                    element.packageItem
+                ));
+            } else if (descriptor.kind === 'mixinSection') {
+                const section = this.buildMixinSectionItem(
+                    descriptor.label,
+                    descriptor.icon,
+                    descriptor.mixins
+                );
+                section.parentItem = element;
+                children.push(section);
+            } else if (descriptor.kind === 'singleton') {
+                const singleton = this.buildSingletonClassItem(descriptor.namespace);
+                singleton.parentItem = element;
+                children.push(singleton);
+            } else if (descriptor.kind === 'includedBySection') {
+                const section = this.buildIncludedBySectionItem(
+                    descriptor.label,
+                    descriptor.icon,
+                    descriptor.includers
+                );
+                section.parentItem = element;
+                children.push(section);
+            }
+        }
+        return children;
+    }
 
+    buildTreeItems(namespaces, projectItem = null, libraryItem = null, packageItem = null) {
+        return namespaces.map(ns => {
             const item = new vscode.TreeItem(
                 ns.name,
-                hasAnyChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+                namespaceHasChildren(ns)
+                    ? vscode.TreeItemCollapsibleState.Collapsed
+                    : vscode.TreeItemCollapsibleState.None
             );
 
             // Show location count in description if multiple
@@ -367,6 +548,9 @@ class RubyIndexProvider {
             // Store namespace data for building mixin children
             item.namespaceData = ns;
             item.nodeType = 'namespace';
+            item.projectItem = projectItem;
+            item.libraryItem = libraryItem;
+            item.packageItem = packageItem;
 
             // Set icon based on kind
             if (ns.kind === 'Class') {
@@ -907,6 +1091,9 @@ function activate(context) {
             if (editor && ['ruby', 'erb'].includes(editor.document.languageId)) {
                 renderCachedRuntimeStatus(editor);
             }
+            if (typeof scheduleRubyProjectsRefresh === 'function') {
+                scheduleRubyProjectsRefresh();
+            }
         }
     );
     context.subscriptions.push(
@@ -939,15 +1126,37 @@ function activate(context) {
     );
 
     // Register Ruby Index Tree
-    const indexProvider = new RubyIndexProvider();
+    const indexProvider = new RubyIndexProvider({
+        getIndexingProjects: () => indexingStatusSession.snapshot().projects,
+        getRuntimeProjects: () => runtimeProjects || [],
+        getShowExternalTypes: () => Boolean(editorState?.showExternalTypes)
+    });
     const treeView = vscode.window.createTreeView('rubyIndex', {
         treeDataProvider: indexProvider,
         showCollapseAll: true
     });
 
+    let rubyProjectsRefreshTimer;
+    const updateLibrarySectionsMessage = () => {
+        treeView.message = editorState.showExternalTypes
+            ? undefined
+            : 'Standard Library & Gems are hidden — click the library icon in this view’s toolbar to show them.';
+    };
+    const scheduleRubyProjectsRefresh = () => {
+        if (rubyProjectsRefreshTimer) {
+            clearTimeout(rubyProjectsRefreshTimer);
+        }
+        rubyProjectsRefreshTimer = setTimeout(() => {
+            indexProvider.refresh();
+            updateLibrarySectionsMessage();
+        }, 250);
+    };
+    updateLibrarySectionsMessage();
+
     // Register refresh command
     const refreshCommand = vscode.commands.registerCommand('rubyIndex.refresh', () => {
         indexProvider.refresh();
+        updateLibrarySectionsMessage();
     });
 
     // Register export command to download inheritance graph as JSON
@@ -1050,74 +1259,109 @@ function activate(context) {
         }
     });
 
-    // Register search command to find and reveal namespaces in tree
+    // Ctrl+P-style Go to Class/Module for Ruby Projects (Cmd/Ctrl+Shift+R).
     const searchCommand = vscode.commands.registerCommand('rubyIndex.search', async () => {
         if (!client || client.state !== 2) {
             vscode.window.showWarningMessage('Ruby Fast LSP is not ready yet. Please wait for indexing to complete.');
             return;
         }
 
-        // Get all namespaces from cache
-        let namespaces = indexProvider.getAllNamespaces();
+        const activeUri = vscode.window.activeTextEditor?.document?.uri;
+        const activePath = activeUri?.fsPath;
+        const workspaceFolders = (vscode.workspace.workspaceFolders || [])
+            .map((folder) => folder.uri.fsPath);
+        const projects = orderRubyIndexProjects(indexProvider._resolveProjects());
+        const activeProjectRoot = activePath
+            ? (findOwningWorkspaceFolder(activePath, projects.map((project) => project.root))
+                || findOwningWorkspaceFolder(activePath, workspaceFolders))
+            : null;
 
-        // If cache is empty, trigger a refresh and wait for data
-        if (namespaces.length === 0) {
-            // Fetch fresh data
-            try {
-                const response = await client.sendRequest('ruby/namespaceTree', {
-                    uri: vscode.window.activeTextEditor?.document.uri.toString() || '',
-                    show_external_types: editorState.showExternalTypes
-                });
-                if (response && (response.modules || response.classes)) {
-                    const allNamespaces = [...(response.modules || []), ...(response.classes || [])];
-                    namespaces = indexProvider._flattenNamespaces(allNamespaces);
-                }
-            } catch (error) {
-                vscode.window.showErrorMessage(`Failed to fetch namespaces: ${error.message}`);
-                return;
+        const byFqn = new Map();
+        const remember = (namespaces, projectRoot) => {
+            for (const ns of indexProvider._flattenNamespaces(namespaces)) {
+                byFqn.set(ns.fqn, { ...ns, projectRoot: projectRoot || ns.projectRoot });
             }
+        };
+
+        for (const ns of indexProvider.getAllNamespaces()) {
+            remember([ns], ns.projectRoot);
         }
 
-        if (namespaces.length === 0) {
-            vscode.window.showInformationMessage('No namespaces found in the Ruby Index.');
+        const requestUri = activeUri?.toString()
+            || (activeProjectRoot
+                ? vscode.Uri.file(activeProjectRoot).toString()
+                : (projects[0] ? vscode.Uri.file(projects[0].root).toString() : ''));
+
+        try {
+            const response = await client.sendRequest('ruby/namespaceTree', {
+                uri: requestUri,
+                show_external_types: editorState.showExternalTypes
+            });
+            if (response && (response.modules || response.classes || response.libraries)) {
+                const sections = projectBrowseSections(
+                    response,
+                    editorState.showExternalTypes
+                );
+                const projectRoot = activeProjectRoot || projects[0]?.root;
+                remember([
+                    ...sections.projectNamespaces,
+                    ...sections.libraryNamespaces
+                ], projectRoot);
+                indexProvider._cachedNamespaces = [...byFqn.values()];
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to fetch namespaces: ${error.message}`);
             return;
         }
 
-        // Build QuickPick items from namespaces
-        const items = namespaces.map(ns => {
-            const icon = ns.kind === 'Class' ? '$(symbol-class)' : '$(symbol-module)';
-            return {
-                label: `${icon} ${ns.name}`,
-                description: ns.fqn !== ns.name ? ns.fqn : '',
-                detail: ns.kind,
-                fqn: ns.fqn,
-                namespaceData: ns
-            };
+        const namespaces = [...byFqn.values()];
+        if (namespaces.length === 0) {
+            vscode.window.showInformationMessage('No namespaces found in Ruby Projects.');
+            return;
+        }
+
+        const items = namespaceSearchQuickPickItems(namespaces, {
+            activeProjectRoot
         });
 
         const selected = await vscode.window.showQuickPick(items, {
-            placeHolder: 'Search for a class or module...',
-            matchOnDescription: true,  // Match on FQN
-            matchOnDetail: false
+            title: 'Go to Class/Module in Ruby Projects',
+            placeHolder: 'Type a class or module name (like Ctrl+P)',
+            matchOnDescription: true,
+            matchOnDetail: true
         });
 
-        if (selected) {
-            // Try to reveal the item in the tree
-            // First, ensure the tree has built the item
-            let item = indexProvider.getItemByFqn(selected.fqn);
+        if (!selected) {
+            return;
+        }
 
-            if (!item) {
-                // Item not in cache yet (tree not expanded), build it
-                item = indexProvider._buildSingleTreeItem(selected.namespaceData);
-                indexProvider._fqnToItem.set(selected.fqn, item);
-            }
+        let item = indexProvider.getItemByFqn(selected.fqn);
+        if (!item) {
+            item = indexProvider._buildSingleTreeItem(
+                selected.namespaceData,
+                null,
+                null,
+                null
+            );
+            indexProvider._fqnToItem.set(selected.fqn, item);
+        }
 
-            // Reveal the item in the tree (expand parents if needed)
-            try {
-                await treeView.reveal(item, { select: true, focus: true, expand: true });
-            } catch (error) {
-                outputChannel.appendLine(`[Ruby Index] Failed to reveal item: ${error.message}`);
-                // Fallback: just show a message
+        try {
+            await treeView.reveal(item, { select: true, focus: true, expand: 3 });
+        } catch (error) {
+            outputChannel.appendLine(`[Ruby Index] Failed to reveal item: ${error.message}`);
+            const locations = selected.namespaceData?.locations || [];
+            if (locations.length > 0) {
+                const loc = locations[0];
+                const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(loc.uri));
+                const editor = await vscode.window.showTextDocument(doc);
+                const position = new vscode.Position(loc.line || 0, loc.character || 0);
+                editor.selection = new vscode.Selection(position, position);
+                editor.revealRange(
+                    new vscode.Range(position, position),
+                    vscode.TextEditorRevealType.InCenter
+                );
+            } else {
                 vscode.window.showInformationMessage(`Found: ${selected.fqn}`);
             }
         }
@@ -1221,17 +1465,28 @@ function activate(context) {
         }
     );
 
-    // Register toggle external types command
+    const syncLibrarySectionsContext = () => {
+        void vscode.commands.executeCommand(
+            'setContext',
+            'rubyIndex.showLibrarySections',
+            Boolean(editorState?.showExternalTypes)
+        );
+    };
+    syncLibrarySectionsContext();
+
+    // View title (top-right) library icon toggles Standard Library & Gems sections.
     const toggleExternalTypesCommand = vscode.commands.registerCommand('rubyIndex.toggleExternalTypes', async () => {
         editorState.showExternalTypes = !editorState.showExternalTypes;
         await context.workspaceState.update(
             STATE_KEYS.showExternalTypes,
             editorState.showExternalTypes
         );
+        syncLibrarySectionsContext();
+        updateLibrarySectionsMessage();
         vscode.window.showInformationMessage(
             editorState.showExternalTypes
-                ? 'Ruby Index: Now showing external types (core, stdlib, gems)'
-                : 'Ruby Index: Now showing only project types'
+                ? 'Ruby Projects: Showing Ruby Standard Library & Gems'
+                : 'Ruby Projects: Hiding Ruby Standard Library & Gems — use the library toolbar icon to show them again'
         );
         indexProvider.refresh();
     });

@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use super::EngineQuery;
 
 pub use ruby_analysis::engine::{
-    IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
+    IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
+    MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
 
 #[derive(Debug, Serialize, Deserialize)]

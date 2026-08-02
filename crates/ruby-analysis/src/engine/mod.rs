@@ -43,7 +43,8 @@ pub use lookup_types::{
     MixinUsage, MixinUsageKind, VariableTypeKind,
 };
 pub use namespace_tree_types::{
-    IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
+    IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
+    MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
 pub use query::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};

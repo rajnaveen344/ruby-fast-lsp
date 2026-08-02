@@ -6,8 +6,8 @@ use tower_lsp::lsp_types::Url;
 
 // Re-export types for external consumers
 pub use crate::query::namespace_tree::{
-    IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeParams,
-    NamespaceTreeResponse, ViaModuleInfo,
+    IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
+    MixinInfo, NamespaceNode, NamespaceTreeParams, NamespaceTreeResponse, ViaModuleInfo,
 };
 
 pub async fn handle_namespace_tree(

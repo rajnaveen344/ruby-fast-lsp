@@ -22,6 +22,36 @@ pub enum SourceKind {
     Gem,
 }
 
+/// Locked gem package identity for library-tree grouping (Maven-style).
+///
+/// Attached to `SourceKind::Gem` files at bind time from Bundler/GemInfo — never
+/// guessed from filesystem path layout.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LibraryPackageId {
+    pub name: String,
+    pub version: String,
+}
+
+impl LibraryPackageId {
+    pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
+        let name = name.into();
+        let version = version.into();
+        assert!(
+            !name.is_empty(),
+            "INVARIANT VIOLATED: library package name is empty. \
+             This is a bug because gem package identity requires a Bundler/GemInfo name. \
+             Fix: pass gem_info.name when constructing LibraryPackageId."
+        );
+        assert!(
+            !version.is_empty(),
+            "INVARIANT VIOLATED: library package version is empty. \
+             This is a bug because gem package identity requires a locked version. \
+             Fix: pass gem_info.locked_version when constructing LibraryPackageId."
+        );
+        Self { name, version }
+    }
+}
+
 impl SourceKind {
     /// Lower values are preferred for Go to Definition. Implementations and
     /// ordinary dependency sources outrank bundled declaration stubs, while

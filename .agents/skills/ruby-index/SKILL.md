@@ -7,6 +7,12 @@ description: "Debug the Ruby Index tree view, namespace graph, exported JSON, mi
 
 Use this skill for the VS Code Ruby Index tree, namespace hierarchy, mixins, `included_by`, MRO, or graph export debugging.
 
+## Current Product Goal
+
+`goal.md` treats hierarchical Ruby Projects as **done (M7)**. Indexing
+performance is maintenance: defend RSS/fingerprints/readiness, do not open
+endless wall-clock micro-opt campaigns.
+
 ## Current Ownership
 
 - UI/tree behavior lives in the VS Code extension under `vsix/`.

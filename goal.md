@@ -1,112 +1,98 @@
-# Ruby Fast LSP: Fast, Deterministic Multi-Root Indexing
+# Ruby Fast LSP: Hierarchical Ruby Index Explorer
 
 ## Reusable Goal Text
 
-Elevate Ruby Fast LSP's multi-root workspace indexing to an evidence-backed
-9/10 production level. Opening an umbrella folder containing several isolated
-Ruby projects must not cause unbounded competing scans, repeated parsing of
-identical dependencies, misleading readiness, or racing status-bar updates.
-Build one server-owned indexing scheduler with bounded concurrency,
-active-project priority, explicit per-project state, monotonic progress
-generations, deterministic failure handling, and cancellation/replacement for
-workspace and runtime changes. Keep CPU-heavy work off the async LSP reactor and
-place scheduler admission, blocking workers, Rayon, extension guests, and JVM
-work under one measured process-wide resource budget. Coalesce watcher storms
-and counter-only status updates, and bound both resident cache memory and owned
-persistent-cache disk use. Preserve one isolated `AnalysisEngine` and exact
-runtime, Bundler, extension, and external-document provenance per Ruby project.
-Eliminate redundant discovery, reads, parsing, and fact construction through
-validated immutable caches without merging semantic ownership or weakening
-diagnostics. Coalesce concurrent identical gem, runtime, stub, extension,
-JAR/JMOD, extraction, signature, and decompilation work through one
-single-flight producer, then persist only checksum-verified derived products
-under a bounded, automatically cleaned Ruby Fast LSP cache; reuse package
-manager artifacts in place and never modify or delete them. Persist only
-immutable external/runtime products in this goal, never workspace-owned source,
-unsaved buffers, diagnostics, or mutable project semantic state. Make the
-single bottom-right Ruby Fast LSP item follow the active document's deepest
-owning project and render only authoritative server state; queued, indexing,
-ready, failed, and no-project states must never overwrite one another out of
-order.
-Reject cyclic or contradictory inheritance facts at the semantic graph write
-boundary with deterministic, source-attributed behavior; real dependency code,
-conditional compatibility branches, or generated facts must never panic an
-indexing worker or leave the workspace in a misleading partial-ready state.
-Make same-file navigation available within 500 ms, project navigation within
-five seconds cold, dependency navigation within fifteen seconds cold, and keep
-exhaustive sibling work in the background. Treat interactive latency and
-process RSS as co-equal acceptance gates: never trade correctness, project
-isolation, or staged readiness for either. The north star is time-to-useful
-navigation under bounded memory, not minimum wall-clock of finishing every
-dependency or minimum RSS via merged engines. Measure cold, warm,
-active-project, all-project, memory, CPU, disk, and incremental behavior on
-synthetic fixtures and `/Users/naveenraj/goshposh`, then enforce the resulting
-local performance budgets in tests and the packaged VSIX. Attribute RSS to the
-`ruby-fast-lsp` process (peak during indexing and steady after ready), not the
-editor host aggregate.
+Make the VS Code **Ruby Index** a navigable project explorer, not a flat dump of
+every class and module. The reference experience is the Java Projects / Package
+Explorer shape: owning projects as roots, nested structure underneath, and
+external libraries kept in a separate collapsed section—not thousands of
+sibling “X Module / Y Class” rows competing for attention.
+
+Ruby Fast LSP already indexes `goshposh`-scale workspaces with isolated
+engines, staged readiness, bounded resources, and a fixed peak-RSS ceiling.
+Treat that multi-root indexing work as **accepted and in maintenance**: defend
+correctness, fingerprints, interactive latency, and the RSS gate; do not open
+new open-ended indexing micro-optimization campaigns merely to chase stretch
+wall-clock numbers. The new product north star is **discoverability of the
+semantic namespace tree in the editor**.
+
+Preserve engine ownership of namespace/mixin/MRO truth. The VS Code adapter owns
+tree presentation, reveal, search UX, and grouping. Do not invent a second
+semantic store for the sidebar. Project-only projection remains the default;
+external types stay opt-in and must not flatten into the project browse path.
 
 ## Product Outcome
 
-A developer opening a multi-service folder should observe:
+A developer opening a multi-service Ruby folder should observe:
 
-- The extension acknowledges startup and shows the owning project within 100
-  milliseconds of receiving the active document.
-- The open file's syntax, symbols, and same-file navigation work within 500
-  milliseconds without waiting for workspace indexing.
-- Project-source Go to Definition becomes available within five seconds on the
-  reference `goshposh` workspace, even while dependencies continue indexing.
-- After project navigation is ready, caret-driven Document Highlight,
-  Go to Definition, hover, and sibling interactive requests on a large open
-  file remain fast: highlight must use same-document work only and must not
-  block the LSP request loop behind a project-wide reference walk. Measured
-  on `goshposh` `server/lib/api_app.rb`, a ~10.5 s full-project highlight
-  stalled F12 until it finished even though goto itself completed in ~1–2 ms.
-- The Ruby project containing the active file becomes useful first.
-- Other projects index with bounded CPU, memory, and disk pressure.
-- Switching the active editor immediately shows that file's owning project and
-  its true phase.
-- Progress for one project cannot move another project's percentage backward,
-  mark it ready, hide its status, or replace its error.
-- A project reports ready only after its required semantic inputs have
-  completed successfully.
-- Already-ready projects remain queryable while other projects are queued,
-  indexing, rebuilding, failing, being added, or being removed.
-- Identical immutable runtime, stub, gem, JAR, and extension inputs are not
-  repeatedly read and parsed for every isolated project.
-- No constants, methods, diagnostics, runtime choices, or external-document
-  provenance leak between project engines.
-- The language-server process stays inside the recorded peak-RSS ceiling on the
-  reference two-project `goshposh` workspace (fixed A/B gate **1,776,846,438**
-  bytes / ~1.777 GB). A ~3 GB resident `ruby-fast-lsp` process after ordinary
-  warm indexing is a P0 budget break, not an acceptable steady state.
-- Logs and a detailed status command explain what is queued, running, reused,
-  failed, cancelled, and complete without flooding the bottom bar.
+- **Ruby Projects reads like Java Projects**, not like an alphabetical symbol dump
+  or a flat list of every Gemfile.
+- The workspace folder is a container; Gemfile-owned projects nest under it by
+  relative path (`devops/tools/capistrano`), with stable path order that does not
+  jump when the active editor changes.
+- Each Gemfile-owned Ruby project remains an isolated engine leaf (namespaces,
+  Ruby Standard Library, Gems), matching how Java Projects shows modules under a
+  parent without merging classpaths.
+- Under a project, namespaces nest by Ruby nesting (`GoshPosh` → `Platform` →
+  `API` → `ProspectPosts`), matching breadcrumbs and source structure. Expanding
+  a parent reveals children; the root is not a wall of every leaf type.
+- External types live under per-project library sections analogous to Java
+  Projects: **Ruby Standard Library** (core/stdlib/runtime, like JRE) and
+  **Gems** grouped by locked gem package (like Maven Dependencies). A gem that
+  reopens a core type (e.g. ActiveSupport → `String`) shows that reopen under
+  the gem package while the canonical type stays under Ruby Standard Library.
+  Collapsed by default; still controlled by the library-sections toggle.
+- Mixin metadata (Includes, Included By, Superclass, Prepends, singleton) remains
+  available on a type, but is secondary to the nested namespace browse path—not
+  the primary reason every root row looks like a flat catalog entry.
+- Search and reveal still find deep FQNs quickly; reveal expands ancestors
+  instead of requiring the user to scroll a flat list.
+- Multi-root workspaces show the active document’s owning project first without
+  merging engines or leaking provenance across projects.
+- Tree refresh follows ordinary indexing lifecycle; it must not stall the LSP
+  request loop or re-query unbounded work on every keystroke.
 
-The target is **9/10 multi-root indexing**, not instant indexing of arbitrary
-repositories. First-time parsing of genuinely different source remains real
-work. The product must make that work bounded, prioritized, observable, and
-free from avoidable duplication.
+### Explicit non-goals for this phase
 
-### Readiness is staged
+- Further open-ended warm-index wall-clock chasing below the already-useful
+  project-navigation / dependency-navigation staged budgets.
+- Merging isolated project engines for a prettier tree.
+- Turning Ruby Index into a filesystem file browser (that is Explorer); the tree
+  is semantic, with optional project/source grouping only when it aids
+  navigation.
+- Dumping methods of every type at the root level.
 
-Do not use one boolean named `ready` for several materially different product
-states:
+## Previous Goal Status (Multi-Root Indexing)
 
-1. **Document ready**: the active buffer is parsed and same-file navigation is
-   available.
-2. **Project navigation ready**: project-owned definitions and references are
-   indexed; ordinary work may begin.
-3. **Dependency navigation ready**: the locked gem, runtime, stdlib, JRuby, and
-   JVM/JAR inputs required by the owning project are navigable.
-4. **Semantically complete**: graph resolution and complete diagnostics for the
-   project are published.
-5. **Workspace complete**: every discovered project has reached a terminal
-   ready or failed state.
+The prior north star—fast, deterministic multi-root indexing on `goshposh` with
+staged readiness, bounded concurrency, immutable product reuse, and a fixed
+**1,776,846,438**-byte peak-RSS ceiling—is **accepted as good enough for
+maintenance**. Keep defending:
 
-Requests arriving before their required stage must not return a false “not
-found.” They should use already-valid facts, prioritize the missing bounded
-input, or report that the owning project is still indexing according to the
-LSP feature's contract.
+- Document / project-navigation / dependency-navigation staged readiness.
+- Interactive same-file usefulness (~500 ms) and post-ready request latency.
+- Peak RSS under the fixed ceiling; semantic-result fingerprint stability.
+- No cross-project semantic leakage.
+
+Do **not** treat “shave another percent off active semantic completion” as the
+active product goal. Recorded performance evidence under `support/performance/`
+remains the authority for regressions and rejected shapes.
+
+## Completed Indexing Product Outcome (retained)
+
+A developer opening a multi-service folder should continue to observe the
+accepted indexing behavior:
+
+- Owning-project status within 100 ms of the active document.
+- Same-file navigation within 500 ms without waiting for workspace indexing.
+- Project-source Go to Definition on the reference workspace while dependencies
+  continue.
+- Bounded CPU/memory/disk pressure across isolated projects.
+- Authoritative bottom-bar state; no cross-project progress races.
+- Peak RSS under the fixed two-project `goshposh` ceiling.
+
+Readiness remains staged: document → project navigation → dependency
+navigation → semantically complete → workspace complete.
 
 ## Original Failure and Current Checkpoint
 
@@ -1787,11 +1773,32 @@ the wrong project, or claim false readiness.
 
 Exit: measured budgets pass from the installed artifact.
 
+### M7 — Hierarchical Ruby Index (done)
+
+- Stop presenting Ruby Index as a flat dump of every root class/module label.
+- Group by owning Ruby project with path nesting under the workspace (no
+  redundant single-folder wrapper); keep Gemfile engines isolated.
+- Make nested namespace hierarchy the primary expand path under each project.
+- Park external types under per-project **Ruby Standard Library** and
+  per-gem-package **Gems** sections (JRE / Maven shape), still gated by the
+  library-sections toggle.
+- Keep Includes / Superclass / Prepends as secondary detail on a type; skip
+  library-section Included-By BFS so `namespaceTree` stays interactive.
+- Prove search + reveal reach deep FQNs such as
+  `GoshPosh::Platform::API::ProspectPosts` on the reference workspace.
+- Add VS Code adapter tests for tree shape; keep engine namespace-tree truth in
+  `ruby-analysis` and avoid a second semantic store.
+
+Exit: on `goshposh`, Ruby Projects is browsable like Java Projects—path-nested
+projects, nested namespaces, libraries separate—without regressing indexing
+isolation, fingerprints, or the RSS ceiling.
+
 ## Required Performance Budgets
 
-M0 must record exact machine and dataset fingerprints before optimizing. The
-final budgets are then checked into the profiler fixture and must satisfy at
-least:
+These budgets remain the **maintenance regression gate** for indexing. They are
+not the active product chase for this phase. M0 must retain exact machine and
+dataset fingerprints before changing budgets. Checked-in profiler fixtures must
+continue to satisfy at least:
 
 - Status ownership and the initial phase appear within **100 ms** after the
   server receives the active document.
@@ -1868,31 +1875,35 @@ lowering the bar.
 
 ## Definition of 9/10
 
-The rating may reach 9/10 only when:
+### Active product: Ruby Index explorer
 
-- All milestones and recorded budgets pass, including the co-equal interactive
-  latency and peak-RSS gates on the reference workspace.
-- The server is the sole owner of project indexing lifecycle and aggregate
-  scheduling.
-- Bottom-bar state is active-project-correct, monotonic, generation-safe, and
-  failure-aware.
-- Concurrency is bounded and active-project-first.
+The rating may reach 9/10 for this phase only when:
+
+- Ruby Index is hierarchical and project-scoped in the Java Projects sense:
+  project roots, nested namespaces, separate libraries—not a flat dump.
+- Deep FQNs are reachable by expand/reveal without scrolling an unbounded root
+  list of every type.
+- External types never pollute the default project browse path.
+- Engine namespace-tree / mixin / MRO truth remains single-sourced; the adapter
+  only projects.
+- Multi-root isolation and provenance are unchanged.
+- Focused VS Code tree tests and a recorded `goshposh` walkthrough pass.
+
+### Completed product: multi-root indexing (maintenance)
+
+The prior indexing 9/10 bar remains the regression gate:
+
+- Staged readiness, bounded active-project-first scheduling, and authoritative
+  status remain correct.
 - Reused immutable work cannot leak semantic ownership.
-- Workspace, runtime, lockfile, and extension changes invalidate exactly the
-  affected project and cache identities.
-- Real umbrella-folder evidence and installed-VSIX evidence are recorded,
-  including `ruby-fast-lsp` peak RSS during indexing and steady RSS after the
-  active project is semantically complete (not editor-host totals).
-- Warm two-project `goshposh` profiler and installed-VSIX runs remain under the
-  fixed **1,776,846,438**-byte peak-RSS ceiling unless a new measured design
-  raises that ceiling with explicit evidence.
+- Warm two-project `goshposh` stays under the fixed **1,776,846,438**-byte
+  peak-RSS ceiling unless a new measured design raises it with evidence.
+- Semantic-result fingerprints remain stable across equivalent warm repeats.
 - The full local gate passes.
 
-The remaining 1/10 may include adaptive scheduling across unusual storage
-devices, distributed/shared team caches, perfect progress estimation for
-previously unseen repositories, and every third-party filesystem watcher edge
-case. Do not spend the remaining 1/10 on accepting unbounded RSS or merging
-isolated project engines for memory reuse.
+The remaining 1/10 may include adaptive scheduling curiosities and filesystem
+watcher edge cases. Do not spend it on open-ended index micro-opts or on
+merging isolated engines for memory or tree cosmetics.
 
 ## Local Completion Gate
 
@@ -1955,109 +1966,27 @@ Completed foundation:
 
 Next work, in order:
 
-1. Extend the accepted persistent derived-product protocol to the next measured
-   immutable inputs after the completed per-artifact JAR/JMOD and compiled-Wasm
-   products, the completed process-local classpath descriptor cache, and the
-   completed bounded shared parsed-class metadata cache:
-   runtime/stdlib signatures, exact source maps, extraction, and bounded
-   decompilation. Key reusable JVM work by artifact
-   checksum; retain project-specific classpath ordering, duplicate-class
-   selection, imports, overload resolution, provenance, and engine insertion.
-   Reuse package-manager artifacts in place. Do not reintroduce the rejected
-   monolithic composed Java catalog on the active readiness path. Do not wrap
-   every persistent Java artifact lookup in the rejected zero-retention flight:
-   the current two-project schedule produced zero joins. Keep the accepted
-   per-artifact Arc sharing bounded and target the remaining runtime/signature,
-   source-map, extraction, and decompilation products without duplicating
-   project semantic ownership.
-2. Preserve the accepted exact request-driven navigation path and the passing
-   **12.485-second** warm workspace completion while reducing active semantic
-   completion from **11.011 seconds** to five seconds. The current
-   512-file project checkpoints
-   preserve mid-pass demand observation but add terminal overhead. The measured
-   extension-dispatch prefilter is already accepted; shared or retained local
-   method-return contexts and local type-subject indexing experiments regressed
-   and were reverted. The retained method-return lifetime was rejected with
-   both a hash table and compact sorted vector, so do not repeat it by changing
-   only the container.
-   Exact resolved-callee reuse is now accepted at a 64-entry per-source bound;
-   do not grow it beyond the measured memory ceiling. The exact JRuby provider
-   now reaches later project batches and leaves only 18 active-frontier files
-   for replay. The measured YARD scan, single-owned name registry, and borrowed
-   latest-known constant-type lookup, file-owned bucket splice, and borrowed
-   known-method-return view are also accepted. Stable 128-bit semantic
-   fingerprints traverse each field once while retaining the exact legacy
-   bytes. The latest symbolized profile no longer contains the full type-fact
-   expansion, shared symbol/type bucket sorts, or whole-file local-variable
-   fallback as hot paths; file fact collection remains dominant at **39.30%**,
-   followed by call handling and final engine resolution. Exact owner/name fact expansion has been
-   removed, resolution borrows its cached chain rather than cloning the
-   vector, and that cache now stores interned owner IDs. A direct ID-domain MRO
-   traversal was measured, exposed an edge-only namespace trap, and was
-   rejected after its corrected form still regressed production timing; do not
-   repeat that shape without a new profile and data structure. The first
-   fact-pass context-reuse slice is accepted: local receiver inference now
-   starts from the collector's active lexical scope. The second slice removes
-   the semantically invalid whole-file text fallback and establishes corrected,
-   deterministic semantic-result fingerprints. Per-file lazy extension
-   applicability is also accepted and removes the repeated semver path without
-   retaining registry ownership. The project dependency applicability identity
-   is now computed once per exact lock snapshot rather than once per file.
-   Gem cache-key preparation now uses one combined Prism traversal rather than
-   three independent parses. Broad borrowed file-type facts were measured and
-   rejected; do not repeat that shape.
-   Schema-14 `ResolvePassStats` instrumentation is accepted and records final
-   resolve cache hit/miss cardinalities plus coarse subphase timings; keep it
-   for future profiles. A cache-hit fast path inside
-   `resolve_reference_candidates` was measured and rejected: resolve-phase
-   median improved about 6.6%, but warm semantic completion, dependency
-   navigation, project navigation, and wall all regressed. Evidence is in
-   `support/performance/resolve-pass-cache-cardinality-2026-08-01.json` and
-   `support/performance/resolve-cache-hit-fast-path-rejection-2026-08-01.json`.
-   Do not retry hit-path micro-optimizations there without a new profile showing
-   resolve dominates the remaining semantic gap; prefer dependency rebinding /
-   phase overlap / fact-collection targets next, with RSS co-equal to latency.
-   Select the next distinct target from the recorded v282 profile. The v283
-   profile belongs to the reverted lazy-context experiment and is useful only
-   as rejection evidence. Do not repeat the regressing shared local
-   type-subject shape, retained per-file return context, discarded-snapshot
-   special mode, or the rejected combined extension call-classification shapes.
-   Do not retry lazy per-file extension-context materialization without a
-   narrower call-classification or compact-context design proven independently.
-   Extending the active five-lane reservation through the exhaustive project
-   tail was also measured and rejected: it regressed terminal wall time by
-   **8.8%**, active semantic completion by **5.1%**, and breached the fixed RSS
-   ceiling in one run. Evidence is in
-   `support/performance/active-project-reservation-tail-rejection-2026-08-01.json`.
-   Binding gem products into the live project engine while exhaustive project
-   fact collection is still running was attempted and rejected: it delayed
-   project-navigation readiness behind the gem stream, contended for indexing
-   lanes, and drifted semantic-result fingerprints versus the accepted warm
-   baseline because collectors observed a mid-pass gem world. Do not restore
-   concurrent engine insertion. The accepted next overlap shape is to prefetch
-   immutable gem-product load/deserialize while remaining project work runs,
-   then bind only after remaining project facts and project-navigation replay
-   have finished; keep Gemfile-declared roots available at discovery/configure
-   time so that prefetch does not wait on exhaustive project `gem` scans.
-   Dependency rebinding remains open without broad path heuristics,
-   mutable project caches, unbounded checkpoints, weaker absence semantics, or
-   completed in-process gem-product retention (already rejected).
-   Treat a measured ~3 GB `ruby-fast-lsp` resident set after ordinary warm
-   multi-root indexing as a P0 RSS regression against the ~1.777 GB ceiling.
-   First attribute peak vs steady and language-server vs editor-host totals,
-   then reduce retained engine ownership (not by merging isolated engines).
-3. Add exact invalidation/rejection evidence with every new persistent product,
-   then prove the completed watcher generation gate emits only the final
-   filesystem state in the packaged client.
-4. Run cold, warm-process, fresh-process persistent-cache,
-   one-project-change, runtime-change, failure, and active-priority acceptance
-   on `goshposh`; require the completed per-project semantic-result fingerprint
-   to remain equal across equivalent runs; pass the full local gate; reuse the
-   installed checksum-verified VSIX and repeat real-workspace navigation/status
-   acceptance without developer paths, recording language-server peak and
-   post-ready steady RSS under the fixed ceiling.
+1. **Indexing maintenance only.** Do not open a new warm-index micro-opt
+   campaign. Defend RSS ceiling, fingerprints, staged readiness, and
+   interactive latency. Revisit fact-collection or dependency overlap only when
+   a user-visible regression or budget breach appears, using
+   `support/performance/` evidence and the existing reject/accept discipline.
+   The historical open items (persistent runtime/signature products, dependency
+   rebinding, fact-collection hotspots) stay parked behind that bar—not the
+   active product roadmap.
+2. Keep exact invalidation/rejection evidence for any new persistent product,
+   and keep the watcher generation gate emitting only the final filesystem
+   state in the packaged client.
+3. When packaging, continue cold/warm/`goshposh` acceptance under the fixed RSS
+   ceiling with stable semantic-result fingerprints—as a gate, not as the
+   feature being chased.
 
 Already completed and not to be repeated unless a regression appears:
+
+- Hierarchical Ruby Projects (M7): path-nested Gemfile projects, nested
+  namespaces, Ruby Standard Library + per-gem Gems sections, active/phase
+  cues, Ctrl+P-style Go to Class/Module, and interactive `namespaceTree`
+  with library Included-By BFS skipped.
 
 - The reproduced `StringScanner` alias/self-superclass crash is fixed at the
   graph-fact write boundary with focused regressions.
@@ -2071,6 +2000,7 @@ Already completed and not to be repeated unless a regression appears:
   removed most of that repeated work. Do not restart with a speculative generic
   parse cache.
 
-Every slice follows red-green-refactor. Do not begin by merging engines,
-silencing diagnostics, indexing fewer locked dependencies without a completeness
-contract, or adding more user settings.
+Every slice follows red-green-refactor. For the active Ruby Index work, prefer
+adapter/projection tests and a real `goshposh` tree walkthrough. Do not begin by
+merging engines, silencing diagnostics, indexing fewer locked dependencies
+without a completeness contract, or adding more user settings.

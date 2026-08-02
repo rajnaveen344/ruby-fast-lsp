@@ -2,10 +2,12 @@ use std::collections::{hash_map::DefaultHasher, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, TextRange,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
+    LibraryPackageId, SourceKind, TextRange,
 };
 use crate::engine::namespace_tree_types::{
-    IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
+    IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
+    MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
 use crate::engine::query::AnalysisQuery;
 use crate::AnalysisEngine;
@@ -78,6 +80,214 @@ fn compute_namespace_tree(
     engine: &AnalysisEngine,
     show_external_types: bool,
 ) -> NamespaceTreeResponse {
+    if !show_external_types {
+        let project_tree = build_namespace_tree(collect_project_namespace_map(engine, false));
+        return NamespaceTreeResponse {
+            modules: project_tree.modules,
+            classes: project_tree.classes,
+            external_modules: Vec::new(),
+            external_classes: Vec::new(),
+            libraries: Vec::new(),
+        };
+    }
+
+    let partitioned = partition_namespace_nodes(engine);
+    // Project types keep Included By. Library/gem sections skip that BFS — it
+    // dominated namespaceTree with show_external_types on large lockfiles.
+    let project_tree = build_namespace_tree(build_namespace_map_from_grouped_nodes(
+        engine,
+        partitioned.project,
+        true,
+        true,
+    ));
+    let mut libraries = Vec::new();
+    let runtime = build_namespace_tree(build_namespace_map_from_grouped_nodes(
+        engine,
+        partitioned.runtime,
+        true,
+        false,
+    ));
+    if !runtime.modules.is_empty() || !runtime.classes.is_empty() {
+        libraries.push(LibraryNamespaceTree {
+            id: LibrarySectionId::Runtime,
+            modules: runtime.modules,
+            classes: runtime.classes,
+            packages: Vec::new(),
+        });
+    }
+
+    let mut packages = partitioned
+        .gem_packages
+        .into_iter()
+        .filter_map(|(package, nodes)| {
+            let tree = build_namespace_tree(build_namespace_map_from_grouped_nodes(
+                engine, nodes, true, false,
+            ));
+            if tree.modules.is_empty() && tree.classes.is_empty() {
+                return None;
+            }
+            Some(LibraryPackageTree {
+                name: package.name,
+                version: package.version,
+                modules: tree.modules,
+                classes: tree.classes,
+            })
+        })
+        .collect::<Vec<_>>();
+    packages.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.version.cmp(&right.version))
+    });
+    let ungrouped = build_namespace_tree(build_namespace_map_from_grouped_nodes(
+        engine,
+        partitioned.gem_ungrouped,
+        true,
+        false,
+    ));
+    if !packages.is_empty() || !ungrouped.modules.is_empty() || !ungrouped.classes.is_empty() {
+        libraries.push(LibraryNamespaceTree {
+            id: LibrarySectionId::Gems,
+            modules: ungrouped.modules,
+            classes: ungrouped.classes,
+            packages,
+        });
+    }
+
+    let excluded = build_namespace_tree(build_namespace_map_from_grouped_nodes(
+        engine,
+        partitioned.excluded,
+        true,
+        false,
+    ));
+    if !excluded.modules.is_empty() || !excluded.classes.is_empty() {
+        libraries.push(LibraryNamespaceTree {
+            id: LibrarySectionId::Excluded,
+            modules: excluded.modules,
+            classes: excluded.classes,
+            packages: Vec::new(),
+        });
+    }
+
+    let (external_modules, external_classes) = flatten_library_namespaces(&libraries);
+    NamespaceTreeResponse {
+        modules: project_tree.modules,
+        classes: project_tree.classes,
+        external_modules,
+        external_classes,
+        libraries,
+    }
+}
+
+struct PartitionedNamespaceNodes {
+    project: HashMap<FullyQualifiedName, Vec<GraphNodeFact>>,
+    runtime: HashMap<FullyQualifiedName, Vec<GraphNodeFact>>,
+    excluded: HashMap<FullyQualifiedName, Vec<GraphNodeFact>>,
+    gem_ungrouped: HashMap<FullyQualifiedName, Vec<GraphNodeFact>>,
+    gem_packages: HashMap<LibraryPackageId, HashMap<FullyQualifiedName, Vec<GraphNodeFact>>>,
+}
+
+fn partition_namespace_nodes(engine: &AnalysisEngine) -> PartitionedNamespaceNodes {
+    let mut partitioned = PartitionedNamespaceNodes {
+        project: HashMap::new(),
+        runtime: HashMap::new(),
+        excluded: HashMap::new(),
+        gem_ungrouped: HashMap::new(),
+        gem_packages: HashMap::new(),
+    };
+
+    for node in engine.all_graph_nodes() {
+        if node.fqn.has_generated_owner() {
+            continue;
+        }
+        if node.fqn.namespace_kind() == Some(crate::core::NamespaceKind::Singleton) {
+            continue;
+        }
+        if analysis_range_is_project(engine, node.range) {
+            partitioned
+                .project
+                .entry(node.fqn.clone())
+                .or_default()
+                .push(node);
+            continue;
+        }
+        let Some(file) = engine.file(node.range.file_id) else {
+            continue;
+        };
+        match source_kind_library_section(file.kind) {
+            Some(LibrarySectionId::Runtime) => {
+                partitioned
+                    .runtime
+                    .entry(node.fqn.clone())
+                    .or_default()
+                    .push(node);
+            }
+            Some(LibrarySectionId::Excluded) => {
+                partitioned
+                    .excluded
+                    .entry(node.fqn.clone())
+                    .or_default()
+                    .push(node);
+            }
+            Some(LibrarySectionId::Gems) => match file.library_package.clone() {
+                Some(package) => {
+                    partitioned
+                        .gem_packages
+                        .entry(package)
+                        .or_default()
+                        .entry(node.fqn.clone())
+                        .or_default()
+                        .push(node);
+                }
+                None => {
+                    partitioned
+                        .gem_ungrouped
+                        .entry(node.fqn.clone())
+                        .or_default()
+                        .push(node);
+                }
+            },
+            None => {}
+        }
+    }
+
+    partitioned
+}
+
+fn flatten_library_namespaces(
+    libraries: &[LibraryNamespaceTree],
+) -> (Vec<NamespaceNode>, Vec<NamespaceNode>) {
+    let mut modules = Vec::new();
+    let mut classes = Vec::new();
+    for section in libraries {
+        modules.extend(section.modules.iter().cloned());
+        classes.extend(section.classes.iter().cloned());
+        for package in &section.packages {
+            modules.extend(package.modules.iter().cloned());
+            classes.extend(package.classes.iter().cloned());
+        }
+    }
+    modules.sort_by(|a, b| a.name.cmp(&b.name));
+    classes.sort_by(|a, b| a.name.cmp(&b.name));
+    (modules, classes)
+}
+
+fn source_kind_library_section(kind: SourceKind) -> Option<LibrarySectionId> {
+    match kind {
+        SourceKind::Project => None,
+        SourceKind::Gem => Some(LibrarySectionId::Gems),
+        SourceKind::Stub
+        | SourceKind::Stdlib
+        | SourceKind::External
+        | SourceKind::Signature => Some(LibrarySectionId::Runtime),
+        SourceKind::Excluded => Some(LibrarySectionId::Excluded),
+    }
+}
+
+fn collect_project_namespace_map(
+    engine: &AnalysisEngine,
+    show_external_mixins: bool,
+) -> HashMap<String, NamespaceNode> {
     let mut nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>> = HashMap::new();
 
     for node in engine.all_graph_nodes() {
@@ -87,12 +297,21 @@ fn compute_namespace_tree(
         if node.fqn.namespace_kind() == Some(crate::core::NamespaceKind::Singleton) {
             continue;
         }
-        if !show_external_types && !analysis_range_is_project(engine, node.range) {
+        if !analysis_range_is_project(engine, node.range) {
             continue;
         }
         nodes_by_fqn.entry(node.fqn.clone()).or_default().push(node);
     }
 
+    build_namespace_map_from_grouped_nodes(engine, nodes_by_fqn, show_external_mixins, true)
+}
+
+fn build_namespace_map_from_grouped_nodes(
+    engine: &AnalysisEngine,
+    nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>>,
+    show_external_mixins: bool,
+    compute_included_by: bool,
+) -> HashMap<String, NamespaceNode> {
     let mut namespace_map = HashMap::new();
     for (fqn, mut nodes) in nodes_by_fqn {
         nodes.sort_by_key(|node| (node.kind, node.range.file_id, node.range.start_byte));
@@ -115,24 +334,24 @@ fn compute_namespace_tree(
         let superclass = analysis_edges_to_mixins(
             engine,
             &analysis_edges_from(engine, &fqn, GraphEdgeKind::Superclass),
-            show_external_types,
+            show_external_mixins,
         )
         .into_iter()
         .next();
         let includes = analysis_edges_to_mixins(
             engine,
             &analysis_edges_from(engine, &fqn, GraphEdgeKind::Include),
-            show_external_types,
+            show_external_mixins,
         );
         let prepends = analysis_edges_to_mixins(
             engine,
             &analysis_edges_from(engine, &fqn, GraphEdgeKind::Prepend),
-            show_external_types,
+            show_external_mixins,
         );
         let extends = analysis_edges_to_mixins(
             engine,
             &analysis_edges_from(engine, &fqn, GraphEdgeKind::Extend),
-            show_external_types,
+            show_external_mixins,
         );
         let singleton_class = if extends.is_empty() {
             None
@@ -153,8 +372,8 @@ fn compute_namespace_tree(
             }))
         };
 
-        let included_by = if first_node.kind == GraphNodeKind::Module {
-            analysis_find_includers(engine, &fqn, show_external_types)
+        let included_by = if compute_included_by && first_node.kind == GraphNodeKind::Module {
+            analysis_find_includers(engine, &fqn, show_external_mixins)
         } else {
             Vec::new()
         };
@@ -177,11 +396,7 @@ fn compute_namespace_tree(
         );
     }
 
-    let tree_result = build_namespace_tree(namespace_map);
-    NamespaceTreeResponse {
-        modules: tree_result.modules,
-        classes: tree_result.classes,
-    }
+    namespace_map
 }
 
 fn analysis_edges_from(
@@ -386,8 +601,9 @@ mod tests {
     use super::*;
     use crate::core::{
         FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
-        GraphNodeKind, RubyConstant, SourceKind, TextRange,
+        GraphNodeKind, LibraryPackageId, RubyConstant, SourceKind, TextRange,
     };
+    use crate::engine::namespace_tree_types::LibrarySectionId;
     use crate::{FileFacts, ResolveMode, SourceFileInput};
 
     fn constant(name: &str) -> RubyConstant {
@@ -446,11 +662,203 @@ mod tests {
         assert_eq!(project_only.classes.len(), 1);
         assert_eq!(project_only.classes[0].fqn, "User");
         assert_eq!(project_only.classes[0].includes.len(), 0);
+        assert!(project_only.external_modules.is_empty());
+        assert!(project_only.external_classes.is_empty());
 
         let with_external = query.namespace_tree(true);
-        assert_eq!(with_external.modules.len(), 1);
-        assert_eq!(with_external.modules[0].fqn, "Auth");
+        assert_eq!(with_external.modules.len(), 0);
+        assert_eq!(with_external.classes.len(), 1);
+        assert_eq!(with_external.classes[0].fqn, "User");
         assert_eq!(with_external.classes[0].includes[0].name, "Auth");
+        assert_eq!(with_external.external_modules.len(), 1);
+        assert_eq!(with_external.external_modules[0].fqn, "Auth");
+        assert!(with_external.external_classes.is_empty());
+        assert_eq!(with_external.libraries.len(), 1);
+        assert_eq!(with_external.libraries[0].id, LibrarySectionId::Gems);
+        assert_eq!(with_external.libraries[0].modules[0].fqn, "Auth");
+        assert!(with_external.libraries[0].packages.is_empty());
+    }
+
+    #[test]
+    fn namespace_tree_splits_runtime_and_gem_libraries() {
+        let mut engine = AnalysisEngine::new();
+        let user_file = engine.register_file(SourceFileInput {
+            path: "/tmp/project/user.rb".into(),
+            content: "class User; end".into(),
+            kind: SourceKind::Project,
+        });
+        let string_file = engine.register_file(SourceFileInput {
+            path: "/tmp/stubs/string.rb".into(),
+            content: "class String; end".into(),
+            kind: SourceKind::Stub,
+        });
+        let auth_file = engine.register_gem_file(
+            SourceFileInput {
+                path: "/tmp/gems/auth.rb".into(),
+                content: "module Auth; end".into(),
+                kind: SourceKind::Gem,
+            },
+            LibraryPackageId::new("auth", "1.0.0"),
+        );
+        let user = FullyQualifiedName::namespace(vec![constant("User")]);
+        let string = FullyQualifiedName::namespace(vec![constant("String")]);
+        let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
+        engine.replace_facts(
+            user_file,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    user,
+                    GraphNodeKind::Class,
+                    TextRange::new(user_file, 0, 10),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        engine.replace_facts(
+            string_file,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    string,
+                    GraphNodeKind::Class,
+                    TextRange::new(string_file, 0, 12),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        engine.replace_facts(
+            auth_file,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    auth,
+                    GraphNodeKind::Module,
+                    TextRange::new(auth_file, 0, 11),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+
+        let tree = AnalysisQuery::new(&engine).namespace_tree(true);
+        assert_eq!(tree.classes[0].fqn, "User");
+        assert_eq!(tree.libraries.len(), 2);
+        assert_eq!(tree.libraries[0].id, LibrarySectionId::Runtime);
+        assert_eq!(tree.libraries[0].classes[0].fqn, "String");
+        assert_eq!(tree.libraries[1].id, LibrarySectionId::Gems);
+        assert!(tree.libraries[1].modules.is_empty());
+        assert_eq!(tree.libraries[1].packages.len(), 1);
+        assert_eq!(tree.libraries[1].packages[0].name, "auth");
+        assert_eq!(tree.libraries[1].packages[0].version, "1.0.0");
+        assert_eq!(tree.libraries[1].packages[0].modules[0].fqn, "Auth");
+        assert_eq!(tree.external_classes[0].fqn, "String");
+        assert_eq!(tree.external_modules[0].fqn, "Auth");
+    }
+
+    #[test]
+    fn namespace_tree_shows_gem_reopen_of_stdlib_class_under_package() {
+        let mut engine = AnalysisEngine::new();
+        let stub_string = engine.register_file(SourceFileInput {
+            path: "/tmp/stubs/string.rb".into(),
+            content: "class String; end".into(),
+            kind: SourceKind::Stub,
+        });
+        let as_string = engine.register_gem_file(
+            SourceFileInput {
+                path: "/tmp/gems/activesupport-7.1.0/lib/active_support/core_ext/string.rb"
+                    .into(),
+                content: "class String; def blank?; end; end".into(),
+                kind: SourceKind::Gem,
+            },
+            LibraryPackageId::new("activesupport", "7.1.0"),
+        );
+        let string = FullyQualifiedName::namespace(vec![constant("String")]);
+        engine.replace_facts(
+            stub_string,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    string.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(stub_string, 0, 12),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        engine.replace_facts(
+            as_string,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    string,
+                    GraphNodeKind::Class,
+                    TextRange::new(as_string, 0, 12),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+
+        let tree = AnalysisQuery::new(&engine).namespace_tree(true);
+        assert_eq!(tree.libraries.len(), 2);
+        assert_eq!(tree.libraries[0].id, LibrarySectionId::Runtime);
+        assert_eq!(tree.libraries[0].classes[0].fqn, "String");
+        assert_eq!(tree.libraries[0].classes[0].locations.len(), 1);
+        assert_eq!(tree.libraries[1].id, LibrarySectionId::Gems);
+        assert_eq!(tree.libraries[1].packages.len(), 1);
+        assert_eq!(tree.libraries[1].packages[0].name, "activesupport");
+        assert_eq!(tree.libraries[1].packages[0].classes[0].fqn, "String");
+        assert!(tree.libraries[1].packages[0].classes[0].locations[0]
+            .uri
+            .contains("activesupport"));
+    }
+
+    #[test]
+    fn namespace_tree_nests_project_modules_by_fqn() {
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: "/tmp/project/platform.rb".into(),
+            content: "module GoshPosh; module Platform; module API; end; end; end".into(),
+            kind: SourceKind::Project,
+        });
+        let gosh = FullyQualifiedName::namespace(vec![constant("GoshPosh")]);
+        let platform =
+            FullyQualifiedName::namespace(vec![constant("GoshPosh"), constant("Platform")]);
+        let api = FullyQualifiedName::namespace(vec![
+            constant("GoshPosh"),
+            constant("Platform"),
+            constant("API"),
+        ]);
+        engine.replace_facts(
+            file_id,
+            FileFacts {
+                graph_nodes: vec![
+                    GraphNodeFact::new(
+                        gosh,
+                        GraphNodeKind::Module,
+                        TextRange::new(file_id, 0, 8),
+                    ),
+                    GraphNodeFact::new(
+                        platform,
+                        GraphNodeKind::Module,
+                        TextRange::new(file_id, 10, 18),
+                    ),
+                    GraphNodeFact::new(api, GraphNodeKind::Module, TextRange::new(file_id, 20, 23)),
+                ],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+
+        let tree = AnalysisQuery::new(&engine).namespace_tree(false);
+        assert_eq!(tree.modules.len(), 1);
+        assert_eq!(tree.modules[0].fqn, "GoshPosh");
+        assert_eq!(tree.modules[0].modules.len(), 1);
+        assert_eq!(tree.modules[0].modules[0].fqn, "GoshPosh::Platform");
+        assert_eq!(tree.modules[0].modules[0].modules.len(), 1);
+        assert_eq!(
+            tree.modules[0].modules[0].modules[0].fqn,
+            "GoshPosh::Platform::API"
+        );
     }
 
     #[test]

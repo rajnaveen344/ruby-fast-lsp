@@ -63,6 +63,8 @@ pub struct GemDependencySource {
     pub physical_path: PathBuf,
     pub content: Arc<String>,
     pub content_sha256: [u8; 32],
+    pub package_name: String,
+    pub package_version: String,
 }
 
 impl GemDependencySource {
@@ -71,6 +73,8 @@ impl GemDependencySource {
         logical_path: String,
         physical_path: PathBuf,
         content: String,
+        package_name: impl Into<String>,
+        package_version: impl Into<String>,
     ) -> Result<Self> {
         validate_logical_path(&logical_path)?;
         if !physical_path.is_absolute() {
@@ -79,6 +83,20 @@ impl GemDependencySource {
                 physical_path.display()
             ));
         }
+        let package_name = package_name.into();
+        let package_version = package_version.into();
+        assert!(
+            !package_name.is_empty(),
+            "INVARIANT VIOLATED: gem dependency source package name is empty. \
+             This is a bug because locked gem sources must carry GemInfo.name. \
+             Fix: pass gem_info.name into GemDependencySource::new."
+        );
+        assert!(
+            !package_version.is_empty(),
+            "INVARIANT VIOLATED: gem dependency source package version is empty. \
+             This is a bug because locked gem sources must carry GemInfo.locked_version. \
+             Fix: pass gem_info.locked_version into GemDependencySource::new."
+        );
         let content_sha256 = Sha256::digest(content.as_bytes()).into();
         Ok(Self {
             batch,
@@ -86,7 +104,16 @@ impl GemDependencySource {
             physical_path,
             content: Arc::new(content),
             content_sha256,
+            package_name,
+            package_version,
         })
+    }
+
+    pub fn library_package(&self) -> ruby_analysis::core::LibraryPackageId {
+        ruby_analysis::core::LibraryPackageId::new(
+            self.package_name.clone(),
+            self.package_version.clone(),
+        )
     }
 }
 
@@ -493,11 +520,14 @@ impl GemDependencyProduct {
         let insertion_started = Instant::now();
         let mut uris = Vec::with_capacity(prepared.len());
         for (source, template, uri) in prepared {
-            let file_id = engine.register_file(SourceFileInput {
-                path: source.physical_path.clone(),
-                content: source.content.to_string(),
-                kind: SourceKind::Gem,
-            });
+            let file_id = engine.register_gem_file(
+                SourceFileInput {
+                    path: source.physical_path.clone(),
+                    content: source.content.to_string(),
+                    kind: SourceKind::Gem,
+                },
+                source.library_package(),
+            );
             engine.replace_facts(
                 file_id,
                 template.facts.instantiate(file_id),
@@ -581,13 +611,17 @@ impl GemDependencyProduct {
         let insertion_started = Instant::now();
         let mut uris = Vec::with_capacity(prepared.len());
         for (source, template, uri) in prepared {
+            let package = source.library_package();
             let content =
                 Arc::try_unwrap(source.content).unwrap_or_else(|shared| shared.as_ref().clone());
-            let file_id = engine.register_file(SourceFileInput {
-                path: source.physical_path,
-                content,
-                kind: SourceKind::Gem,
-            });
+            let file_id = engine.register_gem_file(
+                SourceFileInput {
+                    path: source.physical_path,
+                    content,
+                    kind: SourceKind::Gem,
+                },
+                package,
+            );
             engine.replace_facts(
                 file_id,
                 template.facts.instantiate(file_id),
@@ -677,6 +711,8 @@ mod tests {
             path.to_string(),
             PathBuf::from(physical),
             content.to_string(),
+            "widget",
+            "1.0.0",
         )
         .unwrap()
     }

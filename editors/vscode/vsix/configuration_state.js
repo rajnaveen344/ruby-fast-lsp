@@ -14,7 +14,8 @@ const STATE_KEYS = Object.freeze({
     runtime: 'rubyFastLsp.runtime',
     linter: 'rubyFastLsp.linter',
     formatter: 'rubyFastLsp.formatter',
-    showExternalTypes: 'rubyFastLsp.showExternalTypes'
+    // New key defaults on (JRE/Gems visible). Old showExternalTypes defaulted off.
+    showExternalTypes: 'rubyFastLsp.showLibrarySections'
 });
 
 function readEditorState(workspaceState, legacyConfiguration) {
@@ -48,7 +49,7 @@ function readEditorState(workspaceState, legacyConfiguration) {
             legacyConfiguration,
             STATE_KEYS.showExternalTypes,
             'showExternalTypes',
-            false,
+            true,
             value => typeof value === 'boolean'
         )
     };

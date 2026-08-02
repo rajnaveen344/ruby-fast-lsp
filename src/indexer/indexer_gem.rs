@@ -921,6 +921,8 @@ impl IndexerGem {
                     logical_path,
                     file_path,
                     content,
+                    gem_info.name.clone(),
+                    gem_info.locked_version.clone(),
                 )?);
             }
         }
