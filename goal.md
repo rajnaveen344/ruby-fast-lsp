@@ -34,10 +34,16 @@ conditional compatibility branches, or generated facts must never panic an
 indexing worker or leave the workspace in a misleading partial-ready state.
 Make same-file navigation available within 500 ms, project navigation within
 five seconds cold, dependency navigation within fifteen seconds cold, and keep
-exhaustive sibling work in the background. Measure cold, warm, active-project,
-all-project, memory, CPU, disk, and incremental behavior on synthetic fixtures
-and `/Users/naveenraj/goshposh`, then enforce the resulting local performance
-budgets in tests and the packaged VSIX.
+exhaustive sibling work in the background. Treat interactive latency and
+process RSS as co-equal acceptance gates: never trade correctness, project
+isolation, or staged readiness for either. The north star is time-to-useful
+navigation under bounded memory, not minimum wall-clock of finishing every
+dependency or minimum RSS via merged engines. Measure cold, warm,
+active-project, all-project, memory, CPU, disk, and incremental behavior on
+synthetic fixtures and `/Users/naveenraj/goshposh`, then enforce the resulting
+local performance budgets in tests and the packaged VSIX. Attribute RSS to the
+`ruby-fast-lsp` process (peak during indexing and steady after ready), not the
+editor host aggregate.
 
 ## Product Outcome
 
@@ -69,6 +75,10 @@ A developer opening a multi-service folder should observe:
   repeatedly read and parsed for every isolated project.
 - No constants, methods, diagnostics, runtime choices, or external-document
   provenance leak between project engines.
+- The language-server process stays inside the recorded peak-RSS ceiling on the
+  reference two-project `goshposh` workspace (fixed A/B gate **1,776,846,438**
+  bytes / ~1.777 GB). A ~3 GB resident `ruby-fast-lsp` process after ordinary
+  warm indexing is a P0 budget break, not an acceptable steady state.
 - Logs and a detailed status command explain what is queued, running, reused,
   failed, cancelled, and complete without flooding the bottom bar.
 
@@ -1087,7 +1097,10 @@ production-finished until the following gaps are closed:
   seconds** rather than five seconds and active semantic completion at **11.011
   seconds** rather than five seconds. Median peak RSS is **1.671 GB**, and
   every repeat remains below the fixed 1.777 GB ceiling with **93.2 MB**
-  minimum measured headroom.
+  minimum measured headroom. Interactive latency and that RSS ceiling are
+  co-equal 9/10 gates: a ~3 GB language-server resident set on the same
+  workspace is a P0 regression to diagnose (peak vs steady, LSP vs editor host)
+  and fix without merging isolated engines.
   Cold-cache, one-project-change, failure, active-priority, and real-workspace
   installed-VSIX acceptance remain required.
 - The accepted per-gem product coalesces concurrent work but deliberately
@@ -1857,7 +1870,8 @@ lowering the bar.
 
 The rating may reach 9/10 only when:
 
-- All milestones and recorded budgets pass.
+- All milestones and recorded budgets pass, including the co-equal interactive
+  latency and peak-RSS gates on the reference workspace.
 - The server is the sole owner of project indexing lifecycle and aggregate
   scheduling.
 - Bottom-bar state is active-project-correct, monotonic, generation-safe, and
@@ -1866,13 +1880,19 @@ The rating may reach 9/10 only when:
 - Reused immutable work cannot leak semantic ownership.
 - Workspace, runtime, lockfile, and extension changes invalidate exactly the
   affected project and cache identities.
-- Real umbrella-folder evidence and installed-VSIX evidence are recorded.
+- Real umbrella-folder evidence and installed-VSIX evidence are recorded,
+  including `ruby-fast-lsp` peak RSS during indexing and steady RSS after the
+  active project is semantically complete (not editor-host totals).
+- Warm two-project `goshposh` profiler and installed-VSIX runs remain under the
+  fixed **1,776,846,438**-byte peak-RSS ceiling unless a new measured design
+  raises that ceiling with explicit evidence.
 - The full local gate passes.
 
 The remaining 1/10 may include adaptive scheduling across unusual storage
 devices, distributed/shared team caches, perfect progress estimation for
 previously unseen repositories, and every third-party filesystem watcher edge
-case.
+case. Do not spend the remaining 1/10 on accepting unbounded RSS or merging
+isolated project engines for memory reuse.
 
 ## Local Completion Gate
 
@@ -1891,7 +1911,10 @@ Also run the multi-root profiler on `/Users/naveenraj/goshposh` for cold,
 warm-cache, one-project-change, runtime-change, partial-failure, and
 active-project-priority scenarios. Record exact repository state, runtimes,
 lockfiles, platform, cache state, concurrency, phase timings, file/byte counts,
-cache results, CPU, peak RSS, query latency, and packaged VSIX checksum.
+cache results, CPU, peak RSS, post-ready steady RSS of the language-server
+process, query latency, and packaged VSIX checksum. Reject any run that
+breaches the fixed peak-RSS ceiling or whose semantic-result fingerprints drift
+across equivalent warm repeats.
 
 ## Implementation Order
 
@@ -1993,7 +2016,7 @@ Next work, in order:
    `support/performance/resolve-cache-hit-fast-path-rejection-2026-08-01.json`.
    Do not retry hit-path micro-optimizations there without a new profile showing
    resolve dominates the remaining semantic gap; prefer dependency rebinding /
-   phase overlap / fact-collection targets next.
+   phase overlap / fact-collection targets next, with RSS co-equal to latency.
    Select the next distinct target from the recorded v282 profile. The v283
    profile belongs to the reverted lazy-context experiment and is useful only
    as rejection evidence. Do not repeat the regressing shared local
@@ -2006,8 +2029,23 @@ Next work, in order:
    **8.8%**, active semantic completion by **5.1%**, and breached the fixed RSS
    ceiling in one run. Evidence is in
    `support/performance/active-project-reservation-tail-rejection-2026-08-01.json`.
+   Binding gem products into the live project engine while exhaustive project
+   fact collection is still running was attempted and rejected: it delayed
+   project-navigation readiness behind the gem stream, contended for indexing
+   lanes, and drifted semantic-result fingerprints versus the accepted warm
+   baseline because collectors observed a mid-pass gem world. Do not restore
+   concurrent engine insertion. The accepted next overlap shape is to prefetch
+   immutable gem-product load/deserialize while remaining project work runs,
+   then bind only after remaining project facts and project-navigation replay
+   have finished; keep Gemfile-declared roots available at discovery/configure
+   time so that prefetch does not wait on exhaustive project `gem` scans.
    Dependency rebinding remains open without broad path heuristics,
-   mutable project caches, unbounded checkpoints, or weaker absence semantics.
+   mutable project caches, unbounded checkpoints, weaker absence semantics, or
+   completed in-process gem-product retention (already rejected).
+   Treat a measured ~3 GB `ruby-fast-lsp` resident set after ordinary warm
+   multi-root indexing as a P0 RSS regression against the ~1.777 GB ceiling.
+   First attribute peak vs steady and language-server vs editor-host totals,
+   then reduce retained engine ownership (not by merging isolated engines).
 3. Add exact invalidation/rejection evidence with every new persistent product,
    then prove the completed watcher generation gate emits only the final
    filesystem state in the packaged client.
@@ -2016,7 +2054,8 @@ Next work, in order:
    on `goshposh`; require the completed per-project semantic-result fingerprint
    to remain equal across equivalent runs; pass the full local gate; reuse the
    installed checksum-verified VSIX and repeat real-workspace navigation/status
-   acceptance without developer paths.
+   acceptance without developer paths, recording language-server peak and
+   post-ready steady RSS under the fixed ceiling.
 
 Already completed and not to be repeated unless a regression appears:
 

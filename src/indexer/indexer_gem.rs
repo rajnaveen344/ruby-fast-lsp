@@ -1500,6 +1500,43 @@ impl IndexerGem {
         Ok(())
     }
 
+    /// Read direct `gem` roots from the owning project's Gemfile.
+    ///
+    /// Bundler projects declare their indexing roots in `Gemfile` before any
+    /// project source pass completes. Parsing that file during discovery lets
+    /// dependency product loading overlap exhaustive project fact collection
+    /// without waiting for every project file to contribute the same roots.
+    pub(crate) fn gemfile_required_roots_blocking(&self) -> Result<Vec<String>> {
+        let Some(root) = &self.workspace_root else {
+            return Ok(Vec::new());
+        };
+        let gemfile_path = root.join("Gemfile");
+        let content = match std::fs::read_to_string(&gemfile_path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to read owning project Gemfile {}",
+                        gemfile_path.display()
+                    )
+                });
+            }
+        };
+        let mut roots = Vec::new();
+        let mut seen = HashSet::new();
+        for line in content.lines() {
+            let Some(name) = parse_gemfile_gem_statement(line.trim()) else {
+                continue;
+            };
+            if seen.insert(name.clone()) {
+                roots.push(name);
+            }
+        }
+        roots.sort();
+        Ok(roots)
+    }
+
     /// Add extracted Bundler Git caches using only lockfile metadata. Gemfiles
     /// and gemspecs are project code and must not be executed by this fallback.
     fn discover_cached_git_gems(&mut self) -> Result<()> {
@@ -2237,6 +2274,25 @@ fn locked_version_for(version: &str, platform: &str) -> String {
         version.to_string()
     } else {
         format!("{version}-{platform}")
+    }
+}
+
+fn parse_gemfile_gem_statement(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.starts_with('#') || !trimmed.starts_with("gem ") {
+        return None;
+    }
+    let start = trimmed.find('"').or_else(|| trimmed.find('\''))?;
+    let quote = trimmed.as_bytes().get(start).copied()?;
+    let end = trimmed[start + 1..]
+        .as_bytes()
+        .iter()
+        .position(|byte| *byte == quote)?;
+    let name = &trimmed[start + 1..start + 1 + end];
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
     }
 }
 
@@ -3705,6 +3761,41 @@ mod tests {
         assert_eq!(compare_versions("1.0.1", "1.0.0"), Ordering::Greater);
         assert_eq!(compare_versions("1.0.0", "1.0.1"), Ordering::Less);
         assert_eq!(compare_versions("2.0.0", "1.9.9"), Ordering::Greater);
+    }
+
+    #[test]
+    fn gemfile_required_roots_parse_direct_gem_statements_in_stable_order() {
+        let workspace = TempDir::new().unwrap();
+        std::fs::write(
+            workspace.path().join("Gemfile"),
+            r#"
+source 'https://rubygems.org'
+
+# ignored
+gem 'rack', '~> 2.0'
+gem "rails"
+gem 'rack'
+group :test do
+  gem 'rspec'
+end
+"#,
+        )
+        .unwrap();
+
+        let indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
+        assert_eq!(
+            indexer.gemfile_required_roots_blocking().unwrap(),
+            vec![
+                "rack".to_string(),
+                "rails".to_string(),
+                "rspec".to_string()
+            ]
+        );
+        assert_eq!(
+            super::parse_gemfile_gem_statement("  gem 'sinatra', require: false"),
+            Some("sinatra".to_string())
+        );
+        assert_eq!(super::parse_gemfile_gem_statement("# gem 'nope'"), None);
     }
 
     #[test]

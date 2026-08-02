@@ -2348,8 +2348,17 @@ impl IndexingCoordinator {
                 .as_ref()
                 .map(|provider| provider.classpath_fingerprint().to_string()),
         );
+        let mut inferred_required = self.get_required_gems();
+        inferred_required.extend(
+            gem_indexer.gemfile_required_roots_blocking().expect(
+                "INVARIANT VIOLATED: owning-project Gemfile could not be read while configuring \
+                 discovered gems. This is a bug because Bundler projects keep Gemfile next to the \
+                 lockfile already used for discovery. Fix: keep Gemfile readable for the same \
+                 project root that produced Gemfile.lock.",
+            ),
+        );
         let (required_gems, excluded_gems) =
-            configured_gem_selection(self.get_required_gems(), &self.config.indexing);
+            configured_gem_selection(inferred_required, &self.config.indexing);
 
         gem_indexer.set_required_gems(required_gems);
         gem_indexer.set_explicitly_included_gems(
