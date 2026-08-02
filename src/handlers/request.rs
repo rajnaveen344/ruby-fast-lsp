@@ -195,23 +195,6 @@ pub async fn handle_goto_definition(
                     lang_server.retain_external_document_project(&location.uri, project);
                 }
             }
-            let first = locations
-                .first()
-                .map(|location| {
-                    format!(
-                        "{}:{}:{}",
-                        location.uri.path(),
-                        location.range.start.line,
-                        location.range.start.character
-                    )
-                })
-                .unwrap_or_else(|| "<empty>".to_string());
-            info!(
-                "Goto definition returning {} location(s) for {:?} first={}",
-                locations.len(),
-                position,
-                first
-            );
             Ok(Some(GotoDefinitionResponse::Array(locations)))
         }
         None => {

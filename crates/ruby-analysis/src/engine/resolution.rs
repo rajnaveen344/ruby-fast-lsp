@@ -1290,8 +1290,7 @@ impl<'a> AnalysisQuery<'a> {
                 );
         let same_name_non_public = self
             .method_name_has_visibility(method, MethodVisibility::Private)
-            || self.method_name_has_visibility(method, MethodVisibility::Protected)
-            || method_name_declared_private_in_source(self.engine, method);
+            || self.method_name_has_visibility(method, MethodVisibility::Protected);
         for target in self.method_reference_targets(namespace_fqn, method) {
             let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
             let target_visibility_owner =
@@ -1651,48 +1650,6 @@ fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
         );
     };
     *method
-}
-
-fn method_name_declared_private_in_source(
-    engine: &crate::AnalysisEngine,
-    method: &RubyMethod,
-) -> bool {
-    let needle = method.as_str();
-    for file in engine.files() {
-        let Some(source) = file.source.as_ref() else {
-            continue;
-        };
-        let mut visibility = MethodVisibility::Public;
-        for line in source.lines() {
-            let trimmed = line.trim_start();
-            match trimmed {
-                "private" => {
-                    visibility = MethodVisibility::Private;
-                    continue;
-                }
-                "protected" => {
-                    visibility = MethodVisibility::Protected;
-                    continue;
-                }
-                "public" => {
-                    visibility = MethodVisibility::Public;
-                    continue;
-                }
-                _ => {}
-            }
-            let Some(rest) = trimmed.strip_prefix("def ") else {
-                continue;
-            };
-            let name = rest
-                .split(|ch: char| ch.is_whitespace() || matches!(ch, '(' | ';'))
-                .next()
-                .unwrap_or("");
-            if name == needle && visibility == MethodVisibility::Private {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 pub(super) fn namespace_target_exists(

@@ -724,8 +724,7 @@ impl RubyLanguageServer {
                     .await;
                 let elapsed = start.elapsed();
                 if elapsed >= Duration::from_millis(50) {
-                    // info so VS Code Output (info-filtered) still shows the stall.
-                    info!(
+                    warn!(
                         "[PERF] indexing status notification send took {:?} — stdout backpressure \
                          can stall LSP request dispatch when the client falls behind",
                         elapsed
@@ -754,40 +753,6 @@ impl RubyLanguageServer {
         if let Some(pid) = pid {
             self.start_parent_process_monitor(pid);
         }
-    }
-
-    /// Optional 1s reactor heartbeat for diagnosing slow goto clicks.
-    /// Enabled by default while chasing request-dispatch stalls; set
-    /// `RUBY_FAST_LSP_REACTOR_HEARTBEAT=0` to disable. Continuing ticks with no
-    /// request log mean the client held the request; missing ticks mean the
-    /// reactor stalled. Process-wide once so FakeEditor suites do not spawn
-    /// overlapping tickers.
-    pub fn start_reactor_heartbeat(&self) {
-        use std::sync::Once;
-        static START: Once = Once::new();
-        let disabled = std::env::var_os("RUBY_FAST_LSP_REACTOR_HEARTBEAT")
-            .is_some_and(|value| value == "0" || value.eq_ignore_ascii_case("false"));
-        if disabled {
-            return;
-        }
-        START.call_once(|| {
-            info!(
-                "[REACTOR] starting 1s heartbeat — during a slow goto: continuing ticks with no \
-                 request log means the client held the request; missing ticks mean the reactor stalled"
-            );
-            tokio::spawn(async move {
-                let mut tick = 0u64;
-                let mut interval = tokio::time::interval(Duration::from_secs(1));
-                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                // Interval fires immediately; skip the zero-delay first tick.
-                interval.tick().await;
-                loop {
-                    interval.tick().await;
-                    tick = tick.saturating_add(1);
-                    info!("[REACTOR] heartbeat tick={tick}");
-                }
-            });
-        });
     }
 
     /// Start a background task that monitors the parent process.
@@ -1240,8 +1205,7 @@ impl RubyLanguageServer {
             let _ = client.publish_diagnostics(uri, diagnostics, None).await;
             let elapsed = start.elapsed();
             if elapsed >= Duration::from_millis(50) {
-                // info so VS Code Output (info-filtered) still shows the stall.
-                info!(
+                warn!(
                     "[PERF] publishDiagnostics send took {:?} — stdout backpressure can stall \
                      LSP request dispatch when the client falls behind",
                     elapsed
@@ -1748,24 +1712,7 @@ impl LanguageServer for RubyLanguageServer {
         &self,
         params: DocumentHighlightParams,
     ) -> LspResult<Option<Vec<DocumentHighlight>>> {
-        // Entry log proves when tower-lsp first polls this handler. A multi-second
-        // gap after the client's sendRequest middleware enter means the request
-        // sat unread or un-polled in the transport queue (not highlight work).
-        info!(
-            "Document highlight request received for {:?}",
-            params
-                .text_document_position_params
-                .text_document
-                .uri
-                .path()
-        );
-        let start_time = Instant::now();
-        let result = request::handle_document_highlight(self, params).await;
-        info!(
-            "[PERF] Document highlight completed in {:?}",
-            start_time.elapsed()
-        );
-        result
+        request::handle_document_highlight(self, params).await
     }
 
     async fn selection_range(
@@ -1786,20 +1733,7 @@ impl LanguageServer for RubyLanguageServer {
         &self,
         params: CodeActionParams,
     ) -> LspResult<Option<Vec<CodeActionOrCommand>>> {
-        // Same dispatch-vs-work split as document highlight / goto. Capture D
-        // showed ~11s client waits that may be RuboCop fix_document (10s cap)
-        // or transport stall before this line.
-        info!(
-            "Code action request received for {:?}",
-            params.text_document.uri.path()
-        );
-        let start_time = Instant::now();
-        let result = request::handle_code_actions(self, params).await;
-        info!(
-            "[PERF] Code action completed in {:?}",
-            start_time.elapsed()
-        );
-        result
+        request::handle_code_actions(self, params).await
     }
 
     async fn semantic_tokens_full(

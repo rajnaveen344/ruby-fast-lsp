@@ -11,8 +11,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Initialize the logger with millisecond timestamps so client/server
-    // stall captures can be correlated without second-rounding ambiguity.
+    // Initialize the logger.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
         .format(|buf, record| {
             use std::io::Write;

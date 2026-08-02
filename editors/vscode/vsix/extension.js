@@ -766,67 +766,7 @@ function activate(context) {
             fileEvents: watchedFileEvents
         },
         initializationOptions,
-        outputChannel: outputChannel,
-        // Split slow-goto blame across: F12 → provider invoke → sendRequest
-        // enter → pending full-doc flush → wire send → server received →
-        // provider finished. Capture C showed ~6s with healthy reactor
-        // heartbeats and no server LSP traffic after provider invoke, so the
-        // next measurement must prove where the client blocks before the
-        // definition request is written (Full sync flush is the prime suspect:
-        // every sendRequest awaits sendPendingFullTextDocumentChanges).
-        middleware: {
-            provideDefinition: async (document, position, token, next) => {
-                const startedAt = Date.now();
-                    outputChannel.appendLine(
-                        `[CLIENT] definition provider invoked at ${new Date().toISOString()} ${document.uri.fsPath}:${position.line}:${position.character}`
-                    );
-                try {
-                    const result = await next(document, position, token);
-                    const count = Array.isArray(result)
-                        ? result.length
-                        : result
-                          ? 1
-                          : 0;
-                    outputChannel.appendLine(
-                        `[CLIENT] definition provider finished in ${Date.now() - startedAt}ms locations=${count}`
-                    );
-                    return result;
-                } catch (error) {
-                    outputChannel.appendLine(
-                        `[CLIENT] definition provider failed in ${Date.now() - startedAt}ms: ${error}`
-                    );
-                    throw error;
-                }
-            },
-            didChange: async (event, next) => {
-                // Full sync only queues here; the flush happens inside the next
-                // sendRequest/sendNotification. Log queueing so a silent gap
-                // can be matched to a pending 400KB+ api_app.rb body.
-                outputChannel.appendLine(
-                    `[CLIENT] didChange queued at ${new Date().toISOString()} ${event.document.uri.fsPath} version=${event.document.version} chars=${event.document.getText().length}`
-                );
-                return next(event);
-            },
-            sendRequest: async (type, param, token, next) => {
-                const method = typeof type === 'string' ? type : type?.method;
-                const startedAt = Date.now();
-                outputChannel.appendLine(
-                    `[CLIENT] sendRequest middleware enter ${method} at ${new Date().toISOString()}`
-                );
-                try {
-                    const result = await next(type, param, token);
-                    outputChannel.appendLine(
-                        `[CLIENT] sendRequest middleware done ${method} in ${Date.now() - startedAt}ms`
-                    );
-                    return result;
-                } catch (error) {
-                    outputChannel.appendLine(
-                        `[CLIENT] sendRequest middleware failed ${method} in ${Date.now() - startedAt}ms: ${error}`
-                    );
-                    throw error;
-                }
-            }
-        }
+        outputChannel: outputChannel
     };
 
     client = new LanguageClient(
@@ -835,49 +775,6 @@ function activate(context) {
         serverOptions,
         clientOptions
     );
-
-    // sendPendingFullTextDocumentChanges runs BEFORE middleware.sendRequest.
-    // Wrap it so a Full-sync flush wait is visible as its own span.
-    const originalFlushPending = client.sendPendingFullTextDocumentChanges.bind(client);
-    client.sendPendingFullTextDocumentChanges = async function flushPendingWithTiming(connection) {
-        const startedAt = Date.now();
-        outputChannel.appendLine(
-            `[CLIENT] flushPendingFullTextDocumentChanges enter at ${new Date().toISOString()}`
-        );
-        try {
-            const result = await originalFlushPending(connection);
-            outputChannel.appendLine(
-                `[CLIENT] flushPendingFullTextDocumentChanges done in ${Date.now() - startedAt}ms`
-            );
-            return result;
-        } catch (error) {
-            outputChannel.appendLine(
-                `[CLIENT] flushPendingFullTextDocumentChanges failed in ${Date.now() - startedAt}ms: ${error}`
-            );
-            throw error;
-        }
-    };
-
-    const originalSendRequest = client.sendRequest.bind(client);
-    client.sendRequest = async function sendRequestWithTiming(type, ...params) {
-        const method = typeof type === 'string' ? type : type?.method;
-        const startedAt = Date.now();
-        outputChannel.appendLine(
-            `[CLIENT] sendRequest enter ${method} at ${new Date().toISOString()}`
-        );
-        try {
-            const result = await originalSendRequest(type, ...params);
-            outputChannel.appendLine(
-                `[CLIENT] sendRequest done ${method} in ${Date.now() - startedAt}ms`
-            );
-            return result;
-        } catch (error) {
-            outputChannel.appendLine(
-                `[CLIENT] sendRequest failed ${method} in ${Date.now() - startedAt}ms: ${error}`
-            );
-            throw error;
-        }
-    };
 
     const runtimeStatusBarItem = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,
@@ -1245,18 +1142,6 @@ function activate(context) {
         }
     );
 
-    // Timed F12: log keypress before VS Code gathers definition providers so we
-    // can split editor delay from language-client/server delay.
-    const timedRevealDefinitionCommand = vscode.commands.registerCommand(
-        'ruby-fast-lsp.debug.revealDefinition',
-        async () => {
-            outputChannel.appendLine(
-                `[CLIENT] F12 keypress at ${new Date().toISOString()}`
-            );
-            await vscode.commands.executeCommand('editor.action.revealDefinition');
-        }
-    );
-
     const runRspecCommand = vscode.commands.registerCommand('ruby-fast-lsp.rspec.run',
         (uriStr, _line, target) => {
             try {
@@ -1591,7 +1476,7 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, timedRevealDefinitionCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, indexingStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, indexingStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {

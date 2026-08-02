@@ -3,8 +3,7 @@
 //! Handles server concerns (config check, document lookup) and converts
 //! `CodeLensData` from the query layer into LSP `CodeLens` items.
 
-use log::{debug, info, warn};
-use std::time::Instant;
+use log::{debug, warn};
 use tower_lsp::lsp_types::*;
 
 use crate::query::{CodeLensData, EngineQuery};
@@ -15,7 +14,6 @@ pub async fn handle_code_lens(
     lang_server: &RubyLanguageServer,
     params: CodeLensParams,
 ) -> Option<Vec<CodeLens>> {
-    let total_start = Instant::now();
     let uri = &params.text_document.uri;
 
     // 1. Config check (server concern).
@@ -28,7 +26,6 @@ pub async fn handle_code_lens(
     }
 
     // 2. Get document content and Arc.
-    let doc_start = Instant::now();
     let (content, doc_arc) = {
         let docs = lang_server.docs.lock();
         let doc_arc = match docs.get(uri) {
@@ -41,10 +38,8 @@ pub async fn handle_code_lens(
         let doc = doc_arc.read();
         (doc.content.clone(), doc_arc.clone())
     };
-    let doc_elapsed = doc_start.elapsed();
 
     // 3. Create query with document context.
-    let engine_start = Instant::now();
     let mut lenses: Vec<CodeLens> = {
         // EngineQuery owns read-side query context. Destroy it before awaiting
         // governed extension work so the LSP future remains Send.
@@ -56,13 +51,10 @@ pub async fn handle_code_lens(
             .map(to_lsp_code_lens)
             .collect()
     };
-    let engine_count = lenses.len();
-    let engine_elapsed = engine_start.elapsed();
     let project_root = lang_server
         .analysis_workspace_for_uri(uri)
         .map(|workspace| workspace.root_path);
-    let extension_start = Instant::now();
-    let extension_count = match lang_server
+    match lang_server
         .extension_registry
         .code_lenses_governed(
             lang_server.indexing_resources.clone(),
@@ -73,30 +65,12 @@ pub async fn handle_code_lens(
         )
         .await
     {
-        Ok(extension_lenses) => {
-            let count = extension_lenses.len();
-            lenses.extend(extension_lenses);
-            count
-        }
-        Err(error) => {
-            warn!(
-                "Extension code-lens request failed for {}: {error:#}",
-                uri.path()
-            );
-            0
-        }
-    };
-    let extension_elapsed = extension_start.elapsed();
-    info!(
-        "[PERF][codeLens waterfall] file={} total={:?} doc={:?} engine_lenses={}@{:?} extension_lenses={}@{:?}",
-        uri.path(),
-        total_start.elapsed(),
-        doc_elapsed,
-        engine_count,
-        engine_elapsed,
-        extension_count,
-        extension_elapsed
-    );
+        Ok(extension_lenses) => lenses.extend(extension_lenses),
+        Err(error) => warn!(
+            "Extension code-lens request failed for {}: {error:#}",
+            uri.path()
+        ),
+    }
     Some(lenses)
 }
 
@@ -116,7 +90,6 @@ fn to_lsp_code_lens(data: CodeLensData) -> CodeLens {
         data: None,
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
