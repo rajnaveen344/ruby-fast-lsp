@@ -27,6 +27,7 @@ test('editor-managed product choices have commands instead of JSON settings', ()
     assert(commands.has('ruby-fast-lsp.indexing.status'));
     assert(commands.has('ruby-fast-lsp.linter.select'));
     assert(commands.has('ruby-fast-lsp.formatter.select'));
+    assert(commands.has('ruby-fast-lsp.indexing.configureLoadPaths'));
     assert(commands.has('rubyIndex.toggleExternalTypes'));
 });
 
@@ -50,7 +51,7 @@ test('every language-client restart resets the authoritative indexing session', 
         1,
         'client.restart must exist only inside the governed restart helper'
     );
-    assert.equal(governedRestarts.length, 3);
+    assert.equal(governedRestarts.length, 4);
     assert.match(extensionSource, /indexingStatusSession\.suspendForRestart\(\)/);
     assert.match(extensionSource, /indexingStatusSession\.completeRestart\(\)/);
     assert.match(extensionSource, /indexingStatusSession\.dispose\(\)/);

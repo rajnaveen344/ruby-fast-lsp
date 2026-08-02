@@ -1255,6 +1255,16 @@ impl IndexingCoordinator {
         // Runtime stdlib still enters the same isolated engine before the
         // dependency-ready milestone and complete semantic diagnostics.
         self.index_standard_library(server, &ruby_version).await?;
+        self.publish_dependency_require_paths(server);
+        if let Some(workspace) = server
+            .list_workspaces()
+            .into_iter()
+            .find(|workspace| workspace.root_path == self.workspace_root)
+        {
+            server
+                .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
+                .await;
+        }
         let dependencies_dur = dependencies_start.elapsed();
 
         let facts_dur = facts_start.elapsed();
@@ -1551,6 +1561,24 @@ impl IndexingCoordinator {
                     .with_jruby_import_provider(provider.clone())
             })
             .unwrap_or(processor);
+        let require_load_paths = server
+            .config
+            .lock()
+            .indexing
+            .load_paths
+            .paths_for_project(&self.workspace_root)
+            .to_vec();
+        let require_dependency_roots = server
+            .list_workspaces()
+            .into_iter()
+            .find(|workspace| workspace.root_path == self.workspace_root)
+            .map(|workspace| workspace.dependency_require_paths())
+            .unwrap_or_default();
+        let processor = processor.with_require_resolve_context(
+            self.workspace_root.clone(),
+            require_load_paths,
+            require_dependency_roots,
+        );
         self.file_processor = Some(
             server
                 .extension_project_context_seed_for_root(&self.workspace_root)
@@ -2190,6 +2218,31 @@ impl IndexingCoordinator {
             server.publish_diagnostics(uri, diagnostics).await;
         }
         Ok(())
+    }
+
+    /// Retain Bundler/RubyGems require roots for goto and unresolved-require diagnostics.
+    fn publish_dependency_require_paths(&mut self, server: &RubyLanguageServer) {
+        let mut paths = Vec::new();
+        if let Some(gem_indexer) = self.gem_indexer.as_ref() {
+            paths.extend(gem_indexer.get_gem_lib_paths());
+        }
+        if let Some(stdlib_indexer) = self.stdlib_indexer.as_ref() {
+            paths.extend(stdlib_indexer.get_stdlib_paths().iter().cloned());
+        }
+        let mut seen = std::collections::HashSet::new();
+        paths.retain(|path| {
+            !path.as_os_str().is_empty() && path.is_absolute() && seen.insert(path.clone())
+        });
+        if let Some(workspace) = server
+            .list_workspaces()
+            .into_iter()
+            .find(|workspace| workspace.root_path == self.workspace_root)
+        {
+            workspace.set_dependency_require_paths(paths.clone());
+        }
+        if let Some(processor) = self.file_processor.as_mut() {
+            processor.set_require_dependency_roots(paths);
+        }
     }
 
     /// Step 5: Index the Ruby standard library
@@ -4901,13 +4954,15 @@ end
         );
         drop(engine);
 
-        let definitions = crate::capabilities::definitions::find_definition_at_position(
-            &server,
-            uri,
-            tower_lsp::lsp_types::Position::new(2, 14),
-        )
-        .await
-        .expect("same-file definition lookup must remain available");
+        let definitions = crate::capabilities::definitions::definition_locations(
+            crate::capabilities::definitions::find_definition_at_position(
+                &server,
+                uri,
+                tower_lsp::lsp_types::Position::new(2, 14),
+            )
+            .await
+            .expect("same-file definition lookup must remain available"),
+        );
         assert_eq!(
             definitions.len(),
             1,
@@ -5000,13 +5055,15 @@ end
             ticket.wait().await,
             crate::navigation_demand::NavigationDemandOutcome::TargetProcessed
         );
-        let definitions = crate::capabilities::definitions::find_definition_at_position(
-            &server,
-            caller_uri,
-            Position::new(0, 2),
-        )
-        .await
-        .expect("the exact demanded target must resolve before project-stage completion");
+        let definitions = crate::capabilities::definitions::definition_locations(
+            crate::capabilities::definitions::find_definition_at_position(
+                &server,
+                caller_uri,
+                Position::new(0, 2),
+            )
+            .await
+            .expect("the exact demanded target must resolve before project-stage completion"),
+        );
         assert_eq!(definitions.len(), 1);
         assert_eq!(
             definitions[0].uri,

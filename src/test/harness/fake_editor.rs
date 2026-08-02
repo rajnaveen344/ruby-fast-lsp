@@ -405,6 +405,46 @@ impl FakeEditor {
         }
     }
 
+    /// Returns definition LocationLinks (preserves originSelectionRange).
+    pub async fn goto_def_links_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<tower_lsp::lsp_types::LocationLink> {
+        self.assert_open(filename, "goto_def_links_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        match self.server.goto_definition(params).await {
+            Ok(Some(GotoDefinitionResponse::Link(links))) => links,
+            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
+                vec![tower_lsp::lsp_types::LocationLink {
+                    origin_selection_range: None,
+                    target_uri: loc.uri,
+                    target_range: loc.range,
+                    target_selection_range: loc.range,
+                }]
+            }
+            Ok(Some(GotoDefinitionResponse::Array(locs))) => locs
+                .into_iter()
+                .map(|loc| tower_lsp::lsp_types::LocationLink {
+                    origin_selection_range: None,
+                    target_uri: loc.uri,
+                    target_range: loc.range,
+                    target_selection_range: loc.range,
+                })
+                .collect(),
+            _ => vec![],
+        }
+    }
+
     /// Returns all implementation locations at a 0-indexed position.
     pub async fn goto_impl_at(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {
         self.assert_open(filename, "goto_impl_at");
@@ -682,14 +722,15 @@ impl FakeEditor {
             use ruby_prism::Visit;
             use std::sync::Arc;
 
+            let analysis_engine = self.server.analysis_engine_for_uri(&uri);
             let mut visitor = FactCollector::analysis_only(
                 document.clone(),
                 Arc::new(self.server.extension_registry.clone()),
-                self.server.analysis_engine.clone(),
+                analysis_engine.clone(),
             );
             visitor.visit(&parse_result.node());
             let file_id = visitor.document.analysis_file_id();
-            let mut engine = self.server.analysis_engine.write();
+            let mut engine = analysis_engine.write();
             let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
             let facts = ruby_analysis::engine::FileFacts {
                 symbols: query.symbol_facts_in_file(file_id),
@@ -706,7 +747,40 @@ impl FakeEditor {
                     .collect(),
                 reference_candidates: visitor.reference_candidates,
                 diagnostic_candidates: visitor.diagnostic_candidates,
-                diagnostics: visitor.analysis_diagnostics,
+                diagnostics: {
+                    let mut diagnostics = visitor.analysis_diagnostics;
+                    let current_path = uri
+                        .to_file_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
+                    if let Some(project_root) = self
+                        .server
+                        .workspace_for_uri(&uri)
+                        .map(|workspace| workspace.root_path)
+                    {
+                        let load_paths = self
+                            .server
+                            .config
+                            .lock()
+                            .indexing
+                            .load_paths
+                            .paths_for_project(&project_root)
+                            .to_vec();
+                        let dependency_roots =
+                            self.server.dependency_require_paths_for_uri(&uri);
+                        diagnostics.extend(
+                            crate::indexer::require_paths::unresolved_require_diagnostics(
+                                &document.content,
+                                file_id,
+                                &current_path,
+                                &project_root,
+                                &load_paths,
+                                &dependency_roots,
+                                Some(&engine),
+                            ),
+                        );
+                    }
+                    diagnostics
+                },
                 execution_contexts: visitor.extension_execution_context_facts,
             };
             engine.replace_facts(
@@ -718,7 +792,9 @@ impl FakeEditor {
 
         // Add unresolved entry diagnostics
         {
-            let query = crate::query::EngineQuery::with_engine(self.server.analysis_engine.clone());
+            let query = crate::query::EngineQuery::with_engine(
+                self.server.analysis_engine_for_uri(&uri),
+            );
             diagnostics.extend(query.get_unresolved_diagnostics(&uri));
         }
 

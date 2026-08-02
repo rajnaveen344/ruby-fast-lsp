@@ -86,6 +86,92 @@ pub struct IndexingConfig {
 
     #[serde(rename = "includedGems")]
     pub included_gems: Vec<String>,
+
+    /// Extra project-relative directories searched for `require` path goto.
+    ///
+    /// Navigation only: these paths are not scanned during indexing.
+    /// Prefer per-project entries; `default` is the workspace fallback.
+    #[serde(rename = "loadPaths", deserialize_with = "deserialize_load_paths")]
+    pub load_paths: LoadPathsConfig,
+}
+
+/// Per-project require load-path configuration.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadPathsConfig {
+    /// Workspace-wide fallback when a project has no explicit entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default: Vec<String>,
+    /// Absolute project-root keyed path lists (same root identity as runtime).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<ProjectLoadPaths>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectLoadPaths {
+    pub root: String,
+    pub paths: Vec<String>,
+}
+
+impl LoadPathsConfig {
+    /// Resolve the configured relative load paths for one owning project root.
+    pub fn paths_for_project(&self, project_root: &std::path::Path) -> &[String] {
+        if let Some(entry) = self
+            .projects
+            .iter()
+            .find(|project| std::path::Path::new(&project.root) == project_root)
+        {
+            return &entry.paths;
+        }
+        &self.default
+    }
+}
+
+fn deserialize_load_paths<'de, D>(deserializer: D) -> Result<LoadPathsConfig, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Null => Ok(LoadPathsConfig::default()),
+        serde_json::Value::Array(entries) => {
+            let mut paths = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let path = entry.as_str().ok_or_else(|| {
+                    serde::de::Error::custom(
+                        "legacy indexing.loadPaths array entries must be strings",
+                    )
+                })?;
+                paths.push(path.to_string());
+            }
+            // Legacy flat list becomes the workspace default so umbrellas keep
+            // prior behavior until projects specialize their own entries.
+            Ok(LoadPathsConfig {
+                default: paths,
+                projects: Vec::new(),
+            })
+        }
+        serde_json::Value::Object(_) => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct RawLoadPaths {
+                #[serde(default)]
+                default: Vec<String>,
+                #[serde(default)]
+                projects: Vec<ProjectLoadPaths>,
+            }
+            let raw: RawLoadPaths =
+                serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+            Ok(LoadPathsConfig {
+                default: raw.default,
+                projects: raw.projects,
+            })
+        }
+        other => Err(serde::de::Error::custom(format!(
+            "indexing.loadPaths must be an object or legacy string array, got {other}"
+        ))),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

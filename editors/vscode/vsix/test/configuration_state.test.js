@@ -3,9 +3,12 @@ const test = require('node:test');
 
 const {
     DEFAULT_INDEXING,
+    DEFAULT_LOAD_PATHS,
     STATE_KEYS,
+    pathsForProject,
     readEditorState,
     serverConfiguration,
+    updateLoadPaths,
     updateRuntime
 } = require('../configuration_state');
 
@@ -41,13 +44,18 @@ test('migrates valid legacy editor choices into private workspace state', async 
         runtime,
         linter: 'rubocop',
         formatter: 'standard',
-        showExternalTypes: true
+        showExternalTypes: true,
+        loadPaths: { default: [], projects: [] }
     });
     await Promise.resolve();
     assert.deepEqual(workspaceState.values.get(STATE_KEYS.runtime), runtime);
     assert.equal(workspaceState.values.get(STATE_KEYS.linter), 'rubocop');
     assert.equal(workspaceState.values.get(STATE_KEYS.formatter), 'standard');
     assert.equal(workspaceState.values.get(STATE_KEYS.showExternalTypes), true);
+    assert.deepEqual(workspaceState.values.get(STATE_KEYS.loadPaths), {
+        default: [],
+        projects: []
+    });
 });
 
 test('private state wins over obsolete settings and invalid values fail closed', () => {
@@ -72,7 +80,11 @@ test('server configuration exposes only product choices and deterministic defaul
         runtime: { mode: 'auto', projects: [] },
         linter: 'rubocop',
         formatter: 'standard',
-        showExternalTypes: true
+        showExternalTypes: true,
+        loadPaths: {
+            default: [],
+            projects: [{ root: '/repo/server', paths: ['custom_lib'] }]
+        }
     };
     const config = serverConfiguration({
         editorState,
@@ -87,11 +99,78 @@ test('server configuration exposes only product choices and deterministic defaul
     assert.equal(config.formatter, 'standard');
     assert.deepEqual(config.linterCommand, []);
     assert.deepEqual(config.formatterCommand, []);
-    assert.deepEqual(config.indexing, DEFAULT_INDEXING);
+    assert.deepEqual(config.indexing, {
+        ...DEFAULT_INDEXING,
+        loadPaths: {
+            default: [],
+            projects: [{ root: '/repo/server', paths: ['custom_lib'] }]
+        }
+    });
     assert.deepEqual(config.extensionSettings, {});
     assert.equal(config.projectExtensionsEnabled, true);
     assert.equal(config.showExternalTypes, undefined);
     assert.equal(config.stubsPath, undefined);
+});
+
+test('legacy flat loadPaths private state migrates into workspace default', async () => {
+    const workspaceState = state({
+        [STATE_KEYS.loadPaths]: ['custom_lib', 'shared/lib']
+    });
+    const editorState = readEditorState(workspaceState, configuration({}));
+    assert.deepEqual(editorState.loadPaths, {
+        default: ['custom_lib', 'shared/lib'],
+        projects: []
+    });
+    await Promise.resolve();
+    assert.deepEqual(workspaceState.values.get(STATE_KEYS.loadPaths), {
+        default: ['custom_lib', 'shared/lib'],
+        projects: []
+    });
+});
+
+test('loadPaths private state rejects absolute and parent traversal entries', () => {
+    const workspaceState = state({
+        [STATE_KEYS.loadPaths]: ['/abs', '../escape', 'ok/lib']
+    });
+    const editorState = readEditorState(workspaceState, configuration({}));
+    assert.deepEqual(editorState.loadPaths, DEFAULT_LOAD_PATHS);
+});
+
+test('loadPaths updates are isolated by project root', () => {
+    const updated = updateLoadPaths(
+        {
+            default: ['shared'],
+            projects: [{ root: '/repo/server', paths: ['custom'] }]
+        },
+        { projectRoot: '/repo/admin', paths: ['other'] }
+    );
+
+    assert.deepEqual(updated, {
+        default: ['shared'],
+        projects: [
+            { root: '/repo/admin', paths: ['other'] },
+            { root: '/repo/server', paths: ['custom'] }
+        ]
+    });
+    assert.deepEqual(pathsForProject(updated, '/repo/admin'), ['other']);
+    assert.deepEqual(pathsForProject(updated, '/repo/server'), ['custom']);
+    assert.deepEqual(pathsForProject(updated, '/repo/web'), ['shared']);
+});
+
+test('clearing project loadPaths falls back to workspace default', () => {
+    const updated = updateLoadPaths(
+        {
+            default: ['shared'],
+            projects: [{ root: '/repo/server', paths: ['custom'] }]
+        },
+        { projectRoot: '/repo/server', paths: [] }
+    );
+
+    assert.deepEqual(updated, {
+        default: ['shared'],
+        projects: []
+    });
+    assert.deepEqual(pathsForProject(updated, '/repo/server'), ['shared']);
 });
 
 test('runtime replacement is deterministic and isolated by project root', () => {

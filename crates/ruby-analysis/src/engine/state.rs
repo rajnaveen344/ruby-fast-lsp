@@ -1922,6 +1922,55 @@ impl AnalysisEngine {
         self.facts.diagnostics.resolved.facts_in_file(file_id)
     }
 
+    /// Replace only `unresolved-require` diagnostics for one file.
+    ///
+    /// Keeps every other resolved diagnostic fact, candidates, and semantic
+    /// stores intact. Used when dependency require roots become available after
+    /// project files were already indexed with incomplete load-path context.
+    pub fn replace_unresolved_require_diagnostics(
+        &mut self,
+        file_id: SourceFileId,
+        require_diagnostics: Vec<DiagnosticFact>,
+    ) {
+        self.assert_known_file_id(
+            file_id,
+            "unresolved-require refresh references unknown source file id",
+        );
+        for fact in &require_diagnostics {
+            assert_eq!(
+                fact.range.file_id, file_id,
+                "INVARIANT VIOLATED: unresolved-require diagnostic belongs to a different file. \
+                 This is a bug because require diagnostic refresh is file-local. \
+                 Fix: construct DiagnosticFact ranges from the owning SourceFileId."
+            );
+            assert_eq!(
+                fact.code, "unresolved-require",
+                "INVARIANT VIOLATED: replace_unresolved_require_diagnostics received code `{}`. \
+                 This is a bug because this API only swaps unresolved-require facts. \
+                 Fix: filter non-require diagnostics before calling this method.",
+                fact.code
+            );
+        }
+        self.semantic_revision = self.semantic_revision.checked_add(1).expect(
+            "INVARIANT VIOLATED: analysis engine semantic revision exhausted u64. \
+             This is a bug because cached queries require monotonic invalidation. \
+             Fix: widen the semantic revision before performing u64::MAX replacements.",
+        );
+        let mut diagnostics = self
+            .facts
+            .diagnostics
+            .resolved
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter(|fact| fact.code != "unresolved-require")
+            .collect::<Vec<_>>();
+        diagnostics.extend(require_diagnostics);
+        self.facts
+            .diagnostics
+            .resolved
+            .replace_file(file_id, diagnostics);
+    }
+
     pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {
         self.facts.diagnostics.resolved.all_facts()
     }

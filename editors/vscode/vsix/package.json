@@ -195,6 +195,10 @@
       {
         "command": "ruby-fast-lsp.formatter.select",
         "title": "Ruby Fast LSP: Select Formatter"
+      },
+      {
+        "command": "ruby-fast-lsp.indexing.configureLoadPaths",
+        "title": "Ruby Fast LSP: Configure Require Load Paths"
       }
     ],
     "menus": {

@@ -5,3 +5,4 @@ mod constants;
 mod locals;
 mod methods;
 mod mixins;
+mod requires;

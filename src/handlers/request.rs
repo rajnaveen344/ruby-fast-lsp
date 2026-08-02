@@ -189,13 +189,13 @@ pub async fn handle_goto_definition(
     }
 
     match definition {
-        Some(locations) => {
+        Some(response) => {
             if let Some(project) = &project {
-                for location in &locations {
-                    lang_server.retain_external_document_project(&location.uri, project);
+                for target_uri in definitions::definition_target_uris(&response) {
+                    lang_server.retain_external_document_project(&target_uri, project);
                 }
             }
-            Ok(Some(GotoDefinitionResponse::Array(locations)))
+            Ok(Some(response))
         }
         None => {
             info!("No definition found for position {:?}", position);

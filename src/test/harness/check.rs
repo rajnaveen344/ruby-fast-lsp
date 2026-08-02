@@ -46,6 +46,7 @@ use tower_lsp::lsp_types::{
     TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
     WorkDoneProgressParams,
 };
+use std::path::PathBuf;
 
 use super::fake_editor::FakeEditor;
 use super::fixture::{extract_cursor, extract_tags, extract_tags_with_attributes, Tag};
@@ -1044,7 +1045,37 @@ async fn run_diagnostics_check(
                 .collect(),
             reference_candidates: visitor.reference_candidates,
             diagnostic_candidates: visitor.diagnostic_candidates,
-            diagnostics: visitor.analysis_diagnostics,
+            diagnostics: {
+                let mut diagnostics = visitor.analysis_diagnostics;
+                let current_path = uri
+                    .to_file_path()
+                    .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+                if let Some(project_root) = server
+                    .workspace_for_uri(uri)
+                    .map(|workspace| workspace.root_path)
+                {
+                    let load_paths = server
+                        .config
+                        .lock()
+                        .indexing
+                        .load_paths
+                        .paths_for_project(&project_root)
+                        .to_vec();
+                    let dependency_roots = server.dependency_require_paths_for_uri(uri);
+                    diagnostics.extend(
+                        crate::indexer::require_paths::unresolved_require_diagnostics(
+                            content,
+                            file_id,
+                            &current_path,
+                            &project_root,
+                            &load_paths,
+                            &dependency_roots,
+                            Some(&engine),
+                        ),
+                    );
+                }
+                diagnostics
+            },
             execution_contexts: visitor.extension_execution_context_facts,
         };
         engine.replace_facts(

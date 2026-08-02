@@ -1063,6 +1063,7 @@ async fn sample_definitions(
         let started = Instant::now();
         let locations = definitions::find_definition_at_position(server, uri.clone(), position)
             .await
+            .map(definitions::definition_locations)
             .unwrap_or_default();
         println!(
             "{}",
@@ -2229,7 +2230,9 @@ async fn run_production_benchmark(
             definitions::find_definition_at_position(server, uri.clone(), method_position).await;
         definition_samples.push(start.elapsed());
         assert!(
-            result.as_ref().is_some_and(|locations| !locations.is_empty()),
+            result
+                .as_ref()
+                .is_some_and(|response| !definitions::definition_locations(response.clone()).is_empty()),
             "INVARIANT VIOLATED: benchmark definition returned no locations. This is a bug because timing an empty query would produce misleading evidence. Fix: repair the deterministic corpus or definition position."
         );
     }

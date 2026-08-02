@@ -32,14 +32,46 @@ mod tests {
                 "includedPatterns": ["bin/*"],
                 "excludedGems": ["debug"],
                 "includedGems": ["rails"],
-                "projectRoots": ["services/billing", "services/identity"]
+                "projectRoots": ["services/billing", "services/identity"],
+                "loadPaths": {
+                    "default": ["shared/lib"],
+                    "projects": [
+                        {
+                            "root": "/repo/server",
+                            "paths": ["custom_lib"]
+                        }
+                    ]
+                }
             }
         });
 
         let config: RubyFastLspConfig = serde_json::from_value(input.clone()).unwrap();
+        assert_eq!(
+            config.indexing.load_paths.paths_for_project(std::path::Path::new("/repo/server")),
+            &["custom_lib".to_string()]
+        );
+        assert_eq!(
+            config.indexing.load_paths.paths_for_project(std::path::Path::new("/repo/admin")),
+            &["shared/lib".to_string()]
+        );
         let output = serde_json::to_value(config).unwrap();
-
         assert_eq!(output["indexing"], input["indexing"]);
+    }
+
+    #[test]
+    fn legacy_flat_load_paths_become_workspace_default() {
+        let config: RubyFastLspConfig = serde_json::from_value(json!({
+            "indexing": {
+                "loadPaths": ["custom_lib", "shared/lib"]
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.indexing.load_paths.default,
+            vec!["custom_lib".to_string(), "shared/lib".to_string()]
+        );
+        assert!(config.indexing.load_paths.projects.is_empty());
     }
 
     #[test]

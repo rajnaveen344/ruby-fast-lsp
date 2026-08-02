@@ -24,5 +24,6 @@ pub mod indexer_project;
 pub mod indexer_stdlib;
 pub mod interner;
 pub mod project_roots;
+pub mod require_paths;
 
 pub mod version;

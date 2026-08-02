@@ -2,12 +2,14 @@
 
 const DEFAULT_RUNTIME = Object.freeze({ mode: 'auto', projects: [] });
 const DEFAULT_JRUBY = Object.freeze({ mode: 'auto', projects: [] });
+const DEFAULT_LOAD_PATHS = Object.freeze({ default: [], projects: [] });
 const DEFAULT_INDEXING = Object.freeze({
     projectRoots: [],
     excludedPatterns: [],
     includedPatterns: [],
     excludedGems: [],
-    includedGems: []
+    includedGems: [],
+    loadPaths: { ...DEFAULT_LOAD_PATHS, projects: [] }
 });
 
 const STATE_KEYS = Object.freeze({
@@ -15,7 +17,8 @@ const STATE_KEYS = Object.freeze({
     linter: 'rubyFastLsp.linter',
     formatter: 'rubyFastLsp.formatter',
     // New key defaults on (JRE/Gems visible). Old showExternalTypes defaulted off.
-    showExternalTypes: 'rubyFastLsp.showLibrarySections'
+    showExternalTypes: 'rubyFastLsp.showLibrarySections',
+    loadPaths: 'rubyFastLsp.indexing.loadPaths'
 });
 
 function readEditorState(workspaceState, legacyConfiguration) {
@@ -51,7 +54,8 @@ function readEditorState(workspaceState, legacyConfiguration) {
             'showExternalTypes',
             true,
             value => typeof value === 'boolean'
-        )
+        ),
+        loadPaths: readLoadPaths(workspaceState, legacyConfiguration)
     };
 }
 
@@ -65,6 +69,52 @@ function readMigrated(workspaceState, configuration, stateKey, legacyKey, fallba
     const value = legacy !== undefined && validate(legacy) ? legacy : fallback;
     void workspaceState.update(stateKey, value);
     return value;
+}
+
+function readLoadPaths(workspaceState, configuration) {
+    const stored = workspaceState.get(STATE_KEYS.loadPaths);
+    if (stored !== undefined) {
+        const migrated = migrateLoadPaths(stored);
+        if (!migrated) {
+            return { default: [], projects: [] };
+        }
+        if (Array.isArray(stored)) {
+            void workspaceState.update(STATE_KEYS.loadPaths, migrated);
+        }
+        return migrated;
+    }
+
+    const legacy = configuration.get('loadPaths');
+    const migrated = migrateLoadPaths(legacy);
+    const value = migrated || { default: [], projects: [] };
+    void workspaceState.update(STATE_KEYS.loadPaths, value);
+    return value;
+}
+
+function migrateLoadPaths(value) {
+    if (Array.isArray(value)) {
+        // Legacy flat list becomes the workspace default so umbrellas keep
+        // prior behavior until projects specialize their own entries.
+        return validPathList(value)
+            ? { default: [...value], projects: [] }
+            : null;
+    }
+    return validLoadPaths(value) ? normalizeLoadPaths(value) : null;
+}
+
+function normalizeLoadPaths(value) {
+    const projects = Array.isArray(value.projects)
+        ? value.projects
+            .map(project => ({
+                root: project.root,
+                paths: [...project.paths]
+            }))
+            .sort((left, right) => left.root.localeCompare(right.root))
+        : [];
+    return {
+        default: Array.isArray(value.default) ? [...value.default] : [],
+        projects
+    };
 }
 
 function serverConfiguration({
@@ -89,7 +139,10 @@ function serverConfiguration({
         linterCommand: [],
         formatter: editorState.formatter,
         formatterCommand: [],
-        indexing: DEFAULT_INDEXING
+        indexing: {
+            ...DEFAULT_INDEXING,
+            loadPaths: normalizeLoadPaths(editorState.loadPaths || DEFAULT_LOAD_PATHS)
+        }
     };
 }
 
@@ -105,6 +158,28 @@ function updateRuntime(runtimeConfig, selection) {
     return { mode: 'auto', projects };
 }
 
+function updateLoadPaths(loadPathsConfig, selection) {
+    const current = normalizeLoadPaths(loadPathsConfig || DEFAULT_LOAD_PATHS);
+    const projects = current.projects.filter(project => project.root !== selection.projectRoot);
+    if (Array.isArray(selection.paths) && selection.paths.length > 0) {
+        projects.push({
+            root: selection.projectRoot,
+            paths: [...selection.paths]
+        });
+    }
+    projects.sort((left, right) => left.root.localeCompare(right.root));
+    return {
+        default: [...current.default],
+        projects
+    };
+}
+
+function pathsForProject(loadPathsConfig, projectRoot) {
+    const current = normalizeLoadPaths(loadPathsConfig || DEFAULT_LOAD_PATHS);
+    const match = current.projects.find(project => project.root === projectRoot);
+    return match ? [...match.paths] : [...current.default];
+}
+
 function validRuntime(value) {
     return value !== null
         && typeof value === 'object'
@@ -116,11 +191,38 @@ function validTool(value) {
     return value === 'none' || value === 'rubocop' || value === 'standard';
 }
 
+function validPathList(value) {
+    return Array.isArray(value)
+        && value.every(entry => typeof entry === 'string'
+            && entry.length > 0
+            && !entry.startsWith('/')
+            && !entry.includes('..'));
+}
+
+function validLoadPaths(value) {
+    if (Array.isArray(value)) {
+        return validPathList(value);
+    }
+    return value !== null
+        && typeof value === 'object'
+        && validPathList(value.default || [])
+        && Array.isArray(value.projects)
+        && value.projects.every(project => project !== null
+            && typeof project === 'object'
+            && typeof project.root === 'string'
+            && project.root.length > 0
+            && validPathList(project.paths || []));
+}
+
 module.exports = {
     DEFAULT_INDEXING,
+    DEFAULT_LOAD_PATHS,
     STATE_KEYS,
+    pathsForProject,
     readEditorState,
     serverConfiguration,
+    updateLoadPaths,
     updateRuntime,
+    validLoadPaths,
     validTool
 };

@@ -297,6 +297,8 @@ pub struct Workspace {
     pub(crate) jruby_import_provider: Arc<RwLock<Option<Arc<JrubyImportProvider>>>>,
     pub(crate) extension_project_context_seed: Arc<RwLock<ProjectContextSeed>>,
     pub(crate) navigation_demands: NavigationDemandController,
+    /// Absolute gem/stdlib require roots for this project (`spec.require_paths`).
+    dependency_require_paths: Arc<RwLock<Vec<PathBuf>>>,
     workspace_folder_uris: Arc<RwLock<std::collections::HashSet<Url>>>,
 }
 
@@ -330,6 +332,7 @@ impl Workspace {
             jruby_import_provider: Arc::new(RwLock::new(None)),
             extension_project_context_seed,
             navigation_demands: NavigationDemandController::default(),
+            dependency_require_paths: Arc::new(RwLock::new(Vec::new())),
             workspace_folder_uris: Arc::new(RwLock::new(std::collections::HashSet::from([
                 workspace_folder_uri,
             ]))),
@@ -347,6 +350,15 @@ impl Workspace {
         let generation = self.indexing_status.snapshot().generation;
         let _ = self.indexing_status.cancel_current();
         self.navigation_demands.cancel_generation(generation);
+    }
+
+    /// Absolute gem/stdlib require roots retained after dependency indexing.
+    pub fn dependency_require_paths(&self) -> Vec<PathBuf> {
+        self.dependency_require_paths.read().clone()
+    }
+
+    pub(crate) fn set_dependency_require_paths(&self, paths: Vec<PathBuf>) {
+        *self.dependency_require_paths.write() = paths;
     }
 }
 
@@ -809,6 +821,107 @@ impl RubyLanguageServer {
         self.analysis_workspace_for_uri(uri)
             .map(|workspace| workspace.analysis_engine)
             .unwrap_or_else(|| self.analysis_engine.clone())
+    }
+
+    /// Absolute gem/stdlib require roots for the workspace that owns `uri`.
+    pub fn dependency_require_paths_for_uri(&self, uri: &Url) -> Vec<PathBuf> {
+        self.workspace_for_uri(uri)
+            .map(|workspace| workspace.dependency_require_paths())
+            .unwrap_or_default()
+    }
+
+    /// Recompute `unresolved-require` after dependency require roots change.
+    ///
+    /// Project files may be indexed before gem/stdlib roots exist, which leaves
+    /// false-positive require diagnostics in the engine and on open documents.
+    /// After roots are published, refresh those facts and republish open-file
+    /// diagnostics — including empty clears — so the client does not keep red
+    /// squiggles until the user edits.
+    pub async fn refresh_unresolved_require_diagnostics_for_workspace(
+        &self,
+        workspace: &Workspace,
+    ) {
+        use crate::indexer::require_paths::{
+            unresolved_require_diagnostics, UNRESOLVED_REQUIRE_CODE,
+        };
+        use crate::query::EngineQuery;
+
+        let dependency_roots = workspace.dependency_require_paths();
+        let load_paths = self
+            .config
+            .lock()
+            .indexing
+            .load_paths
+            .paths_for_project(&workspace.root_path)
+            .to_vec();
+        let project_root = workspace.root_path.clone();
+
+        let open_content_by_path: HashMap<PathBuf, (Url, String)> = {
+            let docs = self.docs.lock();
+            docs.iter()
+                .filter_map(|(uri, doc)| {
+                    let path = uri.to_file_path().ok()?;
+                    if !path.starts_with(&project_root) {
+                        return None;
+                    }
+                    Some((path, (uri.clone(), doc.read().content.clone())))
+                })
+                .collect()
+        };
+
+        let updates = {
+            let engine = workspace.analysis_engine.read();
+            engine
+                .files()
+                .filter(|file| file.kind.contributes_project_diagnostics())
+                .filter(|file| {
+                    open_content_by_path.contains_key(&file.path)
+                        || engine
+                            .diagnostic_facts_in_file(file.id)
+                            .iter()
+                            .any(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
+                })
+                .filter_map(|file| {
+                    let content = open_content_by_path
+                        .get(&file.path)
+                        .map(|(_, content)| content.clone())
+                        .or_else(|| file.source_text().map(str::to_string))
+                        .or_else(|| std::fs::read_to_string(&file.path).ok())?;
+                    let open_uri = open_content_by_path
+                        .get(&file.path)
+                        .map(|(uri, _)| uri.clone());
+                    let diagnostics = unresolved_require_diagnostics(
+                        &content,
+                        file.id,
+                        &file.path,
+                        &project_root,
+                        &load_paths,
+                        &dependency_roots,
+                        Some(&engine),
+                    );
+                    Some((file.id, open_uri, diagnostics))
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut refreshed_open = Vec::new();
+        {
+            let mut engine = workspace.analysis_engine.write();
+            for (file_id, open_uri, diagnostics) in updates {
+                engine.replace_unresolved_require_diagnostics(file_id, diagnostics);
+                if let Some(uri) = open_uri {
+                    refreshed_open.push(uri);
+                }
+            }
+        }
+
+        refreshed_open.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        refreshed_open.dedup();
+        for uri in refreshed_open {
+            let diagnostics = EngineQuery::with_engine(workspace.analysis_engine.clone())
+                .get_unresolved_diagnostics(&uri);
+            self.publish_diagnostics(uri, diagnostics).await;
+        }
     }
 
     pub(crate) fn extension_project_context_for_uri(

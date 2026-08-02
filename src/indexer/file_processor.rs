@@ -19,6 +19,7 @@ use crate::extensions::{
     analysis_ruby_type_from_extension, ExtensionApplicabilitySnapshot, ExtensionRegistryHandle,
     ProjectContextSeed,
 };
+use crate::indexer::require_paths::unresolved_require_diagnostics;
 use crate::runtime::jruby::imports::{
     JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
 };
@@ -204,6 +205,12 @@ pub struct FileProcessor {
     extension_registry: ExtensionRegistryHandle,
     extension_project_context_seed: Option<Arc<parking_lot::RwLock<ProjectContextSeed>>>,
     jruby_import_provider: Option<Arc<JrubyImportProvider>>,
+    /// Owning project root used for require-path diagnostics during batch collection.
+    require_project_root: Option<PathBuf>,
+    /// Per-project configured load paths for require-path diagnostics.
+    require_load_paths: Vec<String>,
+    /// Absolute gem/stdlib require roots for require-path diagnostics.
+    require_dependency_roots: Vec<PathBuf>,
 }
 
 impl FileProcessor {
@@ -212,6 +219,9 @@ impl FileProcessor {
             extension_registry: ExtensionRegistryHandle::from_environment(),
             extension_project_context_seed: None,
             jruby_import_provider: None,
+            require_project_root: None,
+            require_load_paths: Vec::new(),
+            require_dependency_roots: Vec::new(),
         }
     }
 
@@ -220,6 +230,9 @@ impl FileProcessor {
             extension_registry,
             extension_project_context_seed: None,
             jruby_import_provider: None,
+            require_project_root: None,
+            require_load_paths: Vec::new(),
+            require_dependency_roots: Vec::new(),
         }
     }
 
@@ -234,6 +247,22 @@ impl FileProcessor {
     pub(crate) fn with_jruby_import_provider(mut self, provider: Arc<JrubyImportProvider>) -> Self {
         self.jruby_import_provider = Some(provider);
         self
+    }
+
+    pub(crate) fn with_require_resolve_context(
+        mut self,
+        project_root: PathBuf,
+        load_paths: Vec<String>,
+        dependency_roots: Vec<PathBuf>,
+    ) -> Self {
+        self.require_project_root = Some(project_root);
+        self.require_load_paths = load_paths;
+        self.require_dependency_roots = dependency_roots;
+        self
+    }
+
+    pub(crate) fn set_require_dependency_roots(&mut self, dependency_roots: Vec<PathBuf>) {
+        self.require_dependency_roots = dependency_roots;
     }
 
     pub(crate) fn jruby_import_provider(&self) -> Option<&Arc<JrubyImportProvider>> {
@@ -462,6 +491,40 @@ impl FileProcessor {
         rehome_execution_context_type_facts(&visitor_type_facts, &mut type_facts);
         merge_precise_visitor_type_facts(visitor_type_facts, &mut type_facts);
         let replace_start = Instant::now();
+        let mut file_diagnostics = if source_kind.contributes_project_diagnostics() {
+            visitor.analysis_diagnostics
+        } else {
+            Vec::new()
+        };
+        if source_kind.contributes_project_diagnostics() {
+            let current_path = uri
+                .to_file_path()
+                .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+            if let Some(project_root) = server
+                .workspace_for_uri(uri)
+                .map(|workspace| workspace.root_path)
+                .or_else(|| self.require_project_root.clone())
+            {
+                let load_paths = server
+                    .config
+                    .lock()
+                    .indexing
+                    .load_paths
+                    .paths_for_project(&project_root)
+                    .to_vec();
+                let dependency_roots = server.dependency_require_paths_for_uri(uri);
+                let engine = analysis_engine.read();
+                file_diagnostics.extend(unresolved_require_diagnostics(
+                    content,
+                    analysis_file_id,
+                    &current_path,
+                    &project_root,
+                    &load_paths,
+                    &dependency_roots,
+                    Some(&engine),
+                ));
+            }
+        }
         replace_file_analysis(
             &analysis_engine,
             updated_document.analysis_file_id(),
@@ -483,11 +546,7 @@ impl FileProcessor {
                 } else {
                     Vec::new()
                 },
-                diagnostics: if source_kind.contributes_project_diagnostics() {
-                    visitor.analysis_diagnostics
-                } else {
-                    Vec::new()
-                },
+                diagnostics: file_diagnostics,
                 execution_contexts: visitor.extension_execution_context_facts,
             },
             resolution,
@@ -1191,6 +1250,7 @@ impl FileProcessor {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+        let require_current_path = path.clone();
         let registration_started = Instant::now();
         let analysis_file_id = if retain_collected_facts {
             analysis_engine.read().file_id(&path).unwrap_or_else(|| {
@@ -1339,10 +1399,20 @@ impl FileProcessor {
         };
         let (diagnostic_candidates, diagnostics) = if source_kind.contributes_project_diagnostics()
         {
-            (
-                fact_collector.diagnostic_candidates,
-                fact_collector.analysis_diagnostics,
-            )
+            let mut diagnostics = fact_collector.analysis_diagnostics;
+            if let Some(project_root) = self.require_project_root.as_ref() {
+                let engine = analysis_engine.read();
+                diagnostics.extend(unresolved_require_diagnostics(
+                    document.content.as_str(),
+                    analysis_file_id,
+                    &require_current_path,
+                    project_root,
+                    &self.require_load_paths,
+                    &self.require_dependency_roots,
+                    Some(&engine),
+                ));
+            }
+            (fact_collector.diagnostic_candidates, diagnostics)
         } else {
             (Vec::new(), Vec::new())
         };

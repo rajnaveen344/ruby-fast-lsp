@@ -13,9 +13,12 @@ const {
 } = require('./runtime_selector');
 const {
     STATE_KEYS,
+    pathsForProject,
     readEditorState,
     serverConfiguration,
-    updateRuntime
+    updateLoadPaths,
+    updateRuntime,
+    validLoadPaths
 } = require('./configuration_state');
 const {
     debugConfiguration,
@@ -1730,8 +1733,62 @@ function activate(context) {
             });
         }
     );
+    const configureLoadPathsCommand = vscode.commands.registerCommand(
+        'ruby-fast-lsp.indexing.configureLoadPaths',
+        async () => {
+            if (!activeRuntimeProjectRoot) {
+                await vscode.window.showErrorMessage(
+                    'The active document is not owned by a discovered Ruby project.'
+                );
+                return;
+            }
+            const projectLabel = path.basename(activeRuntimeProjectRoot);
+            const currentPaths = pathsForProject(editorState.loadPaths, activeRuntimeProjectRoot);
+            const input = await vscode.window.showInputBox({
+                title: `Require Load Paths — ${projectLabel}`,
+                prompt: `Editing ${activeRuntimeProjectRoot} · comma-separated project-relative dirs (restart required)`,
+                value: currentPaths.join(', '),
+                placeHolder: 'custom_lib, shared/lib'
+            });
+            if (input === undefined) {
+                return;
+            }
+            const paths = input
+                .split(',')
+                .map(entry => entry.trim())
+                .filter(entry => entry.length > 0);
+            if (!validLoadPaths(paths)) {
+                vscode.window.showErrorMessage(
+                    'Load paths must be project-relative paths without parent traversal.'
+                );
+                return;
+            }
+            editorState.loadPaths = updateLoadPaths(editorState.loadPaths, {
+                projectRoot: activeRuntimeProjectRoot,
+                paths
+            });
+            await context.workspaceState.update(STATE_KEYS.loadPaths, editorState.loadPaths);
+            initializationOptions.indexing = {
+                ...initializationOptions.indexing,
+                loadPaths: {
+                    default: [...(editorState.loadPaths.default || [])],
+                    projects: (editorState.loadPaths.projects || []).map(project => ({
+                        root: project.root,
+                        paths: [...project.paths]
+                    }))
+                }
+            };
+            const restart = await vscode.window.showInformationMessage(
+                `Require load paths updated for ${projectLabel}. Restart Ruby Fast LSP to apply.`,
+                'Restart'
+            );
+            if (restart === 'Restart') {
+                await restartClientWithFreshIndexingStatus();
+            }
+        }
+    );
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, indexingStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand, selectRuntimeCommand, runtimeStatusCommand, indexingStatusCommand, configureRuntimeCommand, selectLinterCommand, selectFormatterCommand, configureLoadPathsCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {

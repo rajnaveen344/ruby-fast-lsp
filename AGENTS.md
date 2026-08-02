@@ -170,12 +170,19 @@ restart the server after changing them so removed sources cannot leave stale
 engine facts.
 
 The VS Code Settings page exposes only `rubyFastLsp.logLevel`. Runtime
-selection, linter selection, formatter selection, and Ruby Index external-type
-visibility are editor commands backed by private workspace state; they must not
-be serialized into user `settings.json`. The adapter sends deterministic server
-defaults for indexing policy, JRuby attachments, extension settings, custom
-tool argv, and project-local extension enablement. Keep internal initialization
-transport fields out of the contributed configuration schema.
+selection, linter selection, formatter selection, per-project require load
+paths, and Ruby Index external-type visibility are editor commands backed by
+private workspace state; they must not be serialized into user `settings.json`.
+The adapter sends deterministic server defaults for indexing policy, JRuby
+attachments, extension settings, custom tool argv, and project-local extension
+enablement. Keep internal initialization transport fields out of the
+contributed configuration schema.
+Static `require` / `require_relative` goto and `unresolved-require` diagnostics
+are implemented (project `loadPaths`, `lib`, project root, then gem/stdlib
+require roots; content-only underlines; refresh after dependency roots
+publish). Known gaps and intentional non-goals live in
+`src/indexer/require_paths.rs` module docs — notably missing stdlib/default-gem
+integration coverage and a full cold-index coordinator refresh regression.
 The bottom-right runtime status follows the active document's deepest owning
 project and opens the project runtime workflow. An explicit runtime selection
 persists privately for the VS Code workspace. Saving it to `.ruby-version` is a
