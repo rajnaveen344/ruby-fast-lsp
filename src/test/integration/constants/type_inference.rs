@@ -96,3 +96,36 @@ async fn constant_type_fact_replaced_after_edit() {
         .check("test.rb", r#"A<type label="String" kind="const"> = "Ada""#)
         .await;
 }
+
+#[tokio::test]
+async fn constant_or_write_type_is_value_type() {
+    check(
+        r#"
+A<type label="Integer" kind="const"> ||= 1
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn constant_path_or_write_type_is_value_type() {
+    check(
+        r#"
+module Foo
+end
+
+Foo::A<type label="Integer" kind="const"> ||= 1
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn multi_assign_constant_types() {
+    check(
+        r#"
+A<type label="Integer" kind="const">, B<type label="String" kind="const"> = 1, "x"
+"#,
+    )
+    .await;
+}

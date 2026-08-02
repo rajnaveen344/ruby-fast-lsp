@@ -1817,12 +1817,12 @@ end
 
     #[tokio::test]
     async fn test_check_no_hints() {
-        // <hint none>...</hint> explicitly asserts no inlay hints in the wrapped range
-        // Constants and simple expressions don't get type hints
+        // <hint none>...</hint> explicitly asserts no inlay hints in the wrapped range.
+        // Untyped value constants stay silent (typed-only constant policy).
         check(
             r#"
 <hint none>
-FOO = 42
+FOO = some_unknown_method
 </hint>
 "#,
         )

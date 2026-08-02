@@ -65,6 +65,9 @@ pub struct FactCollector {
     pub direct_facts: AnalysisIndex,
     pub block_param_type_stack: Vec<Vec<RubyType>>,
     pub pattern_capture_type_stack: Vec<HashMap<String, RubyType>>,
+    /// Positional RHS element types for the active `MultiWriteNode`, consumed by
+    /// `ConstantTargetNode` in left-to-right order.
+    pub multi_write_lhs_types: Vec<Vec<RubyType>>,
     pub yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
     pub proc_return_types_by_local: HashMap<String, RubyType>,
     direct_known_namespaces: HashSet<FullyQualifiedName>,
@@ -208,6 +211,7 @@ impl FactCollector {
             direct_facts: AnalysisIndex::default(),
             block_param_type_stack: Vec::new(),
             pattern_capture_type_stack: Vec::new(),
+            multi_write_lhs_types: Vec::new(),
             yield_param_types_by_method: HashMap::new(),
             proc_return_types_by_local: HashMap::new(),
             direct_known_namespaces: HashSet::new(),
@@ -2061,6 +2065,20 @@ fn join_non_diverging_types(branches: &[(RubyType, bool)]) -> RubyType {
 }
 
 impl FactCollector {
+    /// Positional RHS element types for `A, B = 1, "x"` / `A, B = [1, "x"]`.
+    ///
+    /// Non-array RHS (e.g. method call) yields an empty vec so targets stay untyped.
+    fn multi_write_element_types(&self, value: &Node<'_>) -> Vec<RubyType> {
+        let Some(array) = value.as_array_node() else {
+            return Vec::new();
+        };
+        array
+            .elements()
+            .iter()
+            .map(|element| self.infer_assignment_type_from_value(&element))
+            .collect()
+    }
+
     fn pattern_capture_types_for_value(
         &self,
         pattern: &Node<'_>,
@@ -2394,10 +2412,77 @@ impl Visit<'_> for FactCollector {
         self.process_constant_write_node_exit(node);
     }
 
+    fn visit_constant_or_write_node(&mut self, node: &ConstantOrWriteNode) {
+        self.process_constant_or_write_node_entry(node);
+        visit_constant_or_write_node(self, node);
+        self.process_constant_or_write_node_exit(node);
+    }
+
+    fn visit_constant_and_write_node(&mut self, node: &ConstantAndWriteNode) {
+        self.process_constant_and_write_node_entry(node);
+        visit_constant_and_write_node(self, node);
+        self.process_constant_and_write_node_exit(node);
+    }
+
+    fn visit_constant_operator_write_node(&mut self, node: &ConstantOperatorWriteNode) {
+        self.process_constant_operator_write_node_entry(node);
+        visit_constant_operator_write_node(self, node);
+        self.process_constant_operator_write_node_exit(node);
+    }
+
+    fn visit_constant_target_node(&mut self, node: &ConstantTargetNode) {
+        self.process_constant_target_node_entry(node);
+        visit_constant_target_node(self, node);
+        self.process_constant_target_node_exit(node);
+    }
+
     fn visit_constant_path_write_node(&mut self, node: &ConstantPathWriteNode) {
         self.process_constant_path_write_node_entry(node);
         visit_constant_path_write_node(self, node);
         self.process_constant_path_write_node_exit(node);
+    }
+
+    fn visit_constant_path_or_write_node(&mut self, node: &ConstantPathOrWriteNode) {
+        self.process_constant_path_or_write_node_entry(node);
+        visit_constant_path_or_write_node(self, node);
+        self.process_constant_path_or_write_node_exit(node);
+    }
+
+    fn visit_constant_path_and_write_node(&mut self, node: &ConstantPathAndWriteNode) {
+        self.process_constant_path_and_write_node_entry(node);
+        visit_constant_path_and_write_node(self, node);
+        self.process_constant_path_and_write_node_exit(node);
+    }
+
+    fn visit_constant_path_operator_write_node(
+        &mut self,
+        node: &ConstantPathOperatorWriteNode,
+    ) {
+        self.process_constant_path_operator_write_node_entry(node);
+        visit_constant_path_operator_write_node(self, node);
+        self.process_constant_path_operator_write_node_exit(node);
+    }
+
+    fn visit_multi_write_node(&mut self, node: &MultiWriteNode) {
+        // Visit the RHS first so expression/method-return facts exist, then
+        // push positional element types for ConstantTarget consumers.
+        self.visit(&node.value());
+        let element_types = self.multi_write_element_types(&node.value());
+        self.multi_write_lhs_types.push(element_types);
+        for target in node.lefts().iter() {
+            self.visit(&target);
+        }
+        if let Some(rest) = node.rest() {
+            self.visit(&rest);
+        }
+        for target in node.rights().iter() {
+            self.visit(&target);
+        }
+        self.multi_write_lhs_types.pop().expect(
+            "INVARIANT VIOLATED: multi-write LHS type stack underflow. \
+             This is a bug because each MultiWriteNode push must be balanced by one pop. \
+             Fix: keep FactCollector::visit_multi_write_node stack frames paired.",
+        );
     }
 
     fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode) {

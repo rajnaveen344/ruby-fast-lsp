@@ -4,8 +4,10 @@
 //! AST nodes. Editor adapters convert these byte offsets into protocol positions.
 
 use ruby_prism::{
-    visit_call_node, visit_class_node, visit_module_node, CallNode, ClassNode, ConstantWriteNode,
-    DefNode, ModuleNode, Node, Visit,
+    visit_call_node, visit_class_node, visit_module_node, CallNode, ClassNode,
+    ConstantAndWriteNode, ConstantOperatorWriteNode, ConstantOrWriteNode, ConstantPathAndWriteNode,
+    ConstantPathOperatorWriteNode, ConstantPathOrWriteNode, ConstantPathWriteNode,
+    ConstantTargetNode, ConstantWriteNode, DefNode, ModuleNode, Node, Visit,
 };
 
 /// Represents nodes collected from AST that are relevant for inlay hints.
@@ -311,6 +313,18 @@ impl<'a> InlayNodeCollector<'a> {
             self.collected.push(InlayNode::ImplicitReturn { offset });
         }
     }
+
+    fn push_constant_name_write(&mut self, name: &[u8], name_end_offset: usize) {
+        let name_end_offset = Self::to_u32_offset(name_end_offset);
+        if self.is_in_range(name_end_offset) {
+            let name = String::from_utf8_lossy(name).to_string();
+            self.collected.push(InlayNode::VariableWrite {
+                kind: VariableKind::Constant,
+                name,
+                name_end_offset,
+            });
+        }
+    }
 }
 
 impl<'a> Visit<'a> for InlayNodeCollector<'a> {
@@ -442,16 +456,58 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
     }
 
     fn visit_constant_write_node(&mut self, node: &ConstantWriteNode<'a>) {
-        let name_end_offset = Self::to_u32_offset(node.name_loc().end_offset());
+        self.push_constant_name_write(node.name().as_slice(), node.name_loc().end_offset());
+    }
 
-        if self.is_in_range(name_end_offset) {
-            let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            self.collected.push(InlayNode::VariableWrite {
-                kind: VariableKind::Constant,
-                name,
-                name_end_offset,
-            });
-        }
+    fn visit_constant_or_write_node(&mut self, node: &ConstantOrWriteNode<'a>) {
+        self.push_constant_name_write(node.name().as_slice(), node.name_loc().end_offset());
+    }
+
+    fn visit_constant_and_write_node(&mut self, node: &ConstantAndWriteNode<'a>) {
+        self.push_constant_name_write(node.name().as_slice(), node.name_loc().end_offset());
+    }
+
+    fn visit_constant_operator_write_node(&mut self, node: &ConstantOperatorWriteNode<'a>) {
+        self.push_constant_name_write(node.name().as_slice(), node.name_loc().end_offset());
+    }
+
+    fn visit_constant_target_node(&mut self, node: &ConstantTargetNode<'a>) {
+        self.push_constant_name_write(node.name().as_slice(), node.location().end_offset());
+    }
+
+    fn visit_constant_path_write_node(&mut self, node: &ConstantPathWriteNode<'a>) {
+        let target = node.target();
+        let Some(name_bytes) = target.name() else {
+            return;
+        };
+        self.push_constant_name_write(name_bytes.as_slice(), target.location().end_offset());
+    }
+
+    fn visit_constant_path_or_write_node(&mut self, node: &ConstantPathOrWriteNode<'a>) {
+        let target = node.target();
+        let Some(name_bytes) = target.name() else {
+            return;
+        };
+        self.push_constant_name_write(name_bytes.as_slice(), target.location().end_offset());
+    }
+
+    fn visit_constant_path_and_write_node(&mut self, node: &ConstantPathAndWriteNode<'a>) {
+        let target = node.target();
+        let Some(name_bytes) = target.name() else {
+            return;
+        };
+        self.push_constant_name_write(name_bytes.as_slice(), target.location().end_offset());
+    }
+
+    fn visit_constant_path_operator_write_node(
+        &mut self,
+        node: &ConstantPathOperatorWriteNode<'a>,
+    ) {
+        let target = node.target();
+        let Some(name_bytes) = target.name() else {
+            return;
+        };
+        self.push_constant_name_write(name_bytes.as_slice(), target.location().end_offset());
     }
 
     fn visit_call_node(&mut self, node: &CallNode<'a>) {

@@ -354,6 +354,48 @@ impl Visit<'_> for IdentifierVisitor {
         self.process_constant_write_node_exit(node);
     }
 
+    fn visit_constant_or_write_node(&mut self, node: &ruby_prism::ConstantOrWriteNode<'_>) {
+        self.process_constant_or_write_node_entry(node);
+        visit_constant_or_write_node(self, node);
+        self.process_constant_or_write_node_exit(node);
+    }
+
+    fn visit_constant_and_write_node(&mut self, node: &ruby_prism::ConstantAndWriteNode<'_>) {
+        self.process_constant_and_write_node_entry(node);
+        visit_constant_and_write_node(self, node);
+        self.process_constant_and_write_node_exit(node);
+    }
+
+    fn visit_constant_operator_write_node(
+        &mut self,
+        node: &ruby_prism::ConstantOperatorWriteNode<'_>,
+    ) {
+        self.process_constant_operator_write_node_entry(node);
+        visit_constant_operator_write_node(self, node);
+        self.process_constant_operator_write_node_exit(node);
+    }
+
+    fn visit_constant_target_node(&mut self, node: &ruby_prism::ConstantTargetNode<'_>) {
+        self.process_constant_target_node_entry(node);
+        visit_constant_target_node(self, node);
+        self.process_constant_target_node_exit(node);
+    }
+
+    fn visit_multi_write_node(&mut self, node: &ruby_prism::MultiWriteNode<'_>) {
+        // Match FactCollector: visit RHS first so nested identifiers under the
+        // value resolve before LHS targets claim the cursor position.
+        self.visit(&node.value());
+        for target in node.lefts().iter() {
+            self.visit(&target);
+        }
+        if let Some(rest) = node.rest() {
+            self.visit(&rest);
+        }
+        for target in node.rights().iter() {
+            self.visit(&target);
+        }
+    }
+
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
         self.process_constant_path_node_entry(node);
         visit_constant_path_node(self, node);

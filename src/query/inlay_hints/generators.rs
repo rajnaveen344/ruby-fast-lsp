@@ -94,16 +94,17 @@ pub fn generate_variable_type_hints(
             name_end_offset,
         } = node
         {
-            // Skip constants - they don't get type hints
-            if *kind == VariableKind::Constant {
-                continue;
-            }
-
             let ruby_type = infer_variable_type(*kind, name, context, *name_end_offset);
 
-            let label = match &ruby_type {
-                Some(ty) if *ty != RubyType::Unknown => format!(": {}", ty),
-                _ => ": ?".to_string(),
+            // Value constants are typed-only: skip Unknown so dynamic RHS stays quiet.
+            // Locals/ivars keep the existing ": ?" placeholder.
+            let label = match (&ruby_type, kind) {
+                (Some(ty), VariableKind::Constant) if *ty != RubyType::Unknown => {
+                    format!(": {}", ty)
+                }
+                (_, VariableKind::Constant) => continue,
+                (Some(ty), _) if *ty != RubyType::Unknown => format!(": {}", ty),
+                (_, _) => ": ?".to_string(),
             };
 
             hints.push(InlayHintData {
@@ -235,14 +236,13 @@ fn infer_variable_type(
 
             variable_type_from_analysis_facts(kind, name, context, byte_offset)
         }
-        VariableKind::Instance | VariableKind::Class | VariableKind::Global => {
+        VariableKind::Instance
+        | VariableKind::Class
+        | VariableKind::Global
+        | VariableKind::Constant => {
             if let Some(ty) = variable_type_from_analysis_facts(kind, name, context, byte_offset) {
                 return Some(ty);
             }
-            None
-        }
-        VariableKind::Constant => {
-            // Constants don't typically show type hints
             None
         }
     }

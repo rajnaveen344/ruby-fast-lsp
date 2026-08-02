@@ -272,6 +272,11 @@ impl<'a> AnalysisQuery<'a> {
                 {
                     Some(fact)
                 }
+                (TypeSubject::Constant(fqn), VariableTypeKind::Constant)
+                    if fqn.name() == name && fact.ruby_type != RubyType::Unknown =>
+                {
+                    Some(fact)
+                }
                 (
                     TypeSubject::Constant(_)
                     | TypeSubject::Local { .. }
