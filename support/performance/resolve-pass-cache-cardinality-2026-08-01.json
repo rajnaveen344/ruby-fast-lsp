@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Measure final AnalysisEngine::resolve subphase cost and reference-resolution cache cardinalities after the accepted one-pass JRuby gem prefilter.",
+  "decision": "instrumentation_accepted",
+  "profile_basis": {
+    "previous_accepted": "support/performance/one-pass-jruby-gem-prefilter-2026-08-01.json",
+    "symbolized_profile": "/tmp/ruby-fast-lsp-semantic-seed-v282-symbolized-profile.json.gz",
+    "finding": "AnalysisEngine::resolve remains a measured hotspot after method-chain borrow work. Schema 13 already counted ~1.5M reference candidates; subphase and cache hit/miss detail was missing."
+  },
+  "change": {
+    "scope": "Added ResolvePassStats on AnalysisEngine::resolve and profiler schema 14 engine.resolve_pass counters. No semantic policy change.",
+    "preserved_semantics": "Reference/diagnostic resolution order, project isolation, and fact ownership are unchanged.",
+    "ownership": "Measurement only. Production resolve behavior remains the existing full-pass policy."
+  },
+  "measurement": {
+    "executable": "/tmp/ruby-fast-lsp-profiler-resolve-pass-v14",
+    "executable_sha256": "1b222e9730fdb63a65ee915bf7014e621540fc7bb0e3318e200f62a53f0a6d63",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 /tmp/ruby-fast-lsp-profiler-resolve-pass-v14 --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "raw_jsonl": "/tmp/ruby-fast-lsp-resolve-pass-v14.jsonl",
+    "note": "This single run is cardinality/subphase evidence only. Persistent gem products were partially cold (512 misses), so wall timing is not an accepted warm A/B sample.",
+    "reference_candidates": 1495905,
+    "constant_reference_candidates": 847012,
+    "method_reference_candidates": 648013,
+    "phase_resolve_ms": 2590.677167,
+    "resolve_pass_totals": {
+      "graph_retry_ns": 43444708,
+      "diagnostic_seed_ns": 9421250,
+      "constant_candidates_ns": 598724341,
+      "method_candidates_ns": 1738240632,
+      "sort_all_ns": 63028333,
+      "diagnostic_rebuild_ns": 3844541,
+      "constant_cache_hits": 691201,
+      "constant_cache_misses": 155811,
+      "constant_cache_unique_keys": 155811,
+      "method_cache_hits": 561048,
+      "method_cache_misses": 86965,
+      "method_cache_unique_keys": 86965,
+      "method_lookup_chain_cache_entries": 13276,
+      "method_namespace_exists_cache_entries": 11319,
+      "method_suggestion_cache_entries": 7504,
+      "incomplete_method_chain_cache_entries": 5019
+    },
+    "constant_hit_rate": 0.8160462897810185,
+    "method_hit_rate": 0.8657974454216196,
+    "semantic_fingerprints": {
+      "server": "317d721b898519ec8f70cc4e903085d4",
+      "server-devops-5441": "da83054abb868876fc801768d643f79a"
+    }
+  },
+  "gate": {
+    "resolve_material": true,
+    "hit_dominated": true,
+    "next_slice": "Tried cache-hit fast path; see resolve-cache-hit-fast-path-rejection-2026-08-01.json"
+  }
+}

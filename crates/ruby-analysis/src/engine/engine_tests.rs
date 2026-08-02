@@ -556,6 +556,55 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
 }
 
 #[test]
+fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
+    let mut engine = AnalysisEngine::new();
+    let def_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
+    let first_ref = register_project_file(&mut engine, "app/first.rb", "User");
+    let second_ref = register_project_file(&mut engine, "app/second.rb", "User");
+    let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+
+    engine.replace_facts(
+        def_file,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                user.clone(),
+                SymbolKind::Class,
+                TextRange::new(def_file, 0, 14),
+            )],
+            graph_nodes: vec![GraphNodeFact::new(
+                user.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(def_file, 0, 14),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+    for file_id in [first_ref, second_ref] {
+        engine.replace_facts(
+            file_id,
+            FileFacts {
+                reference_candidates: vec![ReferenceCandidate::constant(
+                    TextRange::new(file_id, 0, 4),
+                    user.namespace_parts(),
+                    Vec::new(),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Deferred,
+        );
+    }
+
+    engine.resolve();
+
+    let resolve_pass = engine.last_resolve_stats();
+    assert_eq!(resolve_pass.constant_cache_misses, 1);
+    assert_eq!(resolve_pass.constant_cache_hits, 1);
+    assert_eq!(resolve_pass.constant_cache_unique_keys, 1);
+    assert_eq!(engine.reference_facts_for(&user).len(), 2);
+}
+
+#[test]
 fn resolve_files_materializes_only_selected_open_document_candidates() {
     let mut engine = AnalysisEngine::new();
     let first_ref = register_project_file(&mut engine, "app/first.rb", "User.new");

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use crate::core::{
     ConstLookupId, DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FqnId,
@@ -11,12 +12,13 @@ use crate::engine::diagnostic_helpers::{
     EXCEPTION_WHITELIST, NON_EXCEPTION_TYPES,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
+use crate::engine::state::{elapsed_ns, ResolvePassStats};
 use crate::{AnalysisEngine, AnalysisQuery};
 
 type MethodReferenceCacheKey = (ConstLookupId, NamespaceKind, RubyMethod, bool);
 
 impl AnalysisEngine {
-    pub(super) fn resolve_reference_candidates(&mut self) {
+    pub(super) fn resolve_reference_candidates(&mut self, stats: &mut ResolvePassStats) {
         let mut candidate_file_ids = self.facts.references.candidates.file_ids();
         for file_id in self.facts.diagnostics.candidates.file_ids() {
             if !candidate_file_ids.contains(&file_id) {
@@ -25,7 +27,9 @@ impl AnalysisEngine {
         }
 
         let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
+        let diagnostic_seed_started = Instant::now();
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
+        stats.diagnostic_seed_ns = elapsed_ns(diagnostic_seed_started);
         let mut method_fact_cache: HashMap<MethodReferenceCacheKey, MethodLookupResult> =
             HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
@@ -36,6 +40,7 @@ impl AnalysisEngine {
         let unresolved_method_edge_sources = self.unresolved_method_edge_sources();
         let mut incomplete_method_chain_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         self.facts.references.resolved.clear();
+        let candidate_loop_started = Instant::now();
         for candidate in reference_candidate_store.iter_candidates() {
             match candidate {
                 StoredReferenceCandidateRef::Resolved(candidate) => {
@@ -45,14 +50,11 @@ impl AnalysisEngine {
                     );
                 }
                 StoredReferenceCandidateRef::Constant(candidate) => {
-                    let lookup = self
-                        .names
-                        .const_lookup(candidate.lookup)
-                        .expect(
-                            "INVARIANT VIOLATED: reference candidate points to missing constant lookup. \
-                             This is a bug because stored reference candidates must only contain interned lookup ids. \
-                             Fix: intern constant lookups before inserting candidates.",
-                        );
+                    let lookup = self.names.const_lookup(candidate.lookup).expect(
+                        "INVARIANT VIOLATED: reference candidate points to missing constant lookup. \
+                         This is a bug because stored reference candidates must only contain interned lookup ids. \
+                         Fix: intern constant lookups before inserting candidates.",
+                    );
                     let parts = lookup.path.to_vec();
                     let context = self.names.fqn(lookup.context).expect(
                         "INVARIANT VIOLATED: constant lookup points to missing context FQN id. \
@@ -61,8 +63,19 @@ impl AnalysisEngine {
                     );
                     let target = if let Some(target) = constant_target_cache.get(&candidate.lookup)
                     {
+                        stats.constant_cache_hits = stats.constant_cache_hits.checked_add(1).expect(
+                            "INVARIANT VIOLATED: constant resolve-cache hit counter overflowed usize. \
+                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
+                             Fix: inspect corrupt resolve instrumentation.",
+                        );
                         *target
                     } else {
+                        stats.constant_cache_misses =
+                            stats.constant_cache_misses.checked_add(1).expect(
+                                "INVARIANT VIOLATED: constant resolve-cache miss counter overflowed usize. \
+                                 This is a bug because one resolve pass cannot exceed addressable memory operations. \
+                                 Fix: inspect corrupt resolve instrumentation.",
+                            );
                         let target = self
                             .resolve_constant_reference(
                                 &parts,
@@ -100,6 +113,7 @@ impl AnalysisEngine {
                         candidate.method,
                         candidate.is_super,
                     );
+                    let cached = method_fact_cache.contains_key(&method_cache_key);
                     let fact = method_fact_cache
                         .entry(method_cache_key)
                         .or_insert_with(|| {
@@ -125,8 +139,21 @@ impl AnalysisEngine {
                                     &mut method_lookup_chain_cache,
                                 )
                             }
-                        })
-                        .clone();
+                        });
+                    if cached {
+                        stats.method_cache_hits = stats.method_cache_hits.checked_add(1).expect(
+                            "INVARIANT VIOLATED: method resolve-cache hit counter overflowed usize. \
+                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
+                             Fix: inspect corrupt resolve instrumentation.",
+                        );
+                    } else {
+                        stats.method_cache_misses = stats.method_cache_misses.checked_add(1).expect(
+                            "INVARIANT VIOLATED: method resolve-cache miss counter overflowed usize. \
+                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
+                             Fix: inspect corrupt resolve instrumentation.",
+                        );
+                    }
+                    let fact = fact.clone();
                     if let Some((owner, resolved_method, fact)) = fact.reference_parts() {
                         let target =
                             FullyQualifiedName::method(owner.namespace_parts(), resolved_method);
@@ -242,9 +269,17 @@ impl AnalysisEngine {
                 }
             }
         }
+        // method_candidates_ns holds the full candidate-loop duration after the
+        // one-shot per-arm Instant split was removed (it inflated production A/B).
+        // The detailed constant-vs-method split remains in
+        // support/performance/resolve-pass-cache-cardinality-2026-08-01.json.
+        stats.method_candidates_ns = elapsed_ns(candidate_loop_started);
         self.facts.references.candidates = reference_candidate_store;
+        let sort_started = Instant::now();
         self.facts.references.resolved.sort_all();
+        stats.sort_all_ns = elapsed_ns(sort_started);
 
+        let diagnostic_rebuild_started = Instant::now();
         for file_id in candidate_file_ids {
             let mut diagnostics = self
                 .facts
@@ -267,6 +302,13 @@ impl AnalysisEngine {
                 .resolved
                 .replace_file(file_id, diagnostics);
         }
+        stats.diagnostic_rebuild_ns = elapsed_ns(diagnostic_rebuild_started);
+        stats.constant_cache_unique_keys = constant_target_cache.len();
+        stats.method_cache_unique_keys = method_fact_cache.len();
+        stats.method_lookup_chain_cache_entries = method_lookup_chain_cache.len();
+        stats.method_namespace_exists_cache_entries = method_namespace_exists_cache.len();
+        stats.method_suggestion_cache_entries = method_suggestion_cache.len();
+        stats.incomplete_method_chain_cache_entries = incomplete_method_chain_cache.len();
     }
 
     pub(super) fn resolve_reference_candidates_in_file(&mut self, file_id: SourceFileId) {

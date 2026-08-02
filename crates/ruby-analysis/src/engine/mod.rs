@@ -48,7 +48,7 @@ pub use namespace_tree_types::{
 pub use query::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
 pub use state::{
-    AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, SemanticChange,
+    AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, ResolvePassStats, SemanticChange,
     SemanticExportFingerprint, SemanticResultFingerprint, SourceFile, SourceFileInput,
 };
 pub use types::AnalysisQueryCache;

@@ -1,0 +1,146 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-08-01",
+  "purpose": "Avoid per-candidate constant path/context materialization and MethodLookupResult cloning on resolve-cache hits inside resolve_reference_candidates.",
+  "decision": "rejected",
+  "profile_basis": {
+    "measurement": "support/performance/resolve-pass-cache-cardinality-2026-08-01.json",
+    "finding": "Final resolve was material (~2.59 s summed) and hit-dominated (~81.6% constant hits, ~86.6% method hits), so a cache-hit fast path was the first exact slice."
+  },
+  "change": {
+    "scope": "On constant cache hits, skip lookup.path.to_vec()/context materialization until an unresolved diagnostic needs a name. On method cache hits, borrow MethodLookupResult instead of cloning MethodFact.",
+    "preserved_semantics": "Exact fingerprints and full semantic export manifests remained identical across warm baseline/candidate runs.",
+    "ownership": "Engine-owned resolve policy only; no incremental resolve_files invalidation and no already-resolved candidate store."
+  },
+  "red_green": {
+    "focused_tests": [
+      "cargo test -p ruby-analysis resolve_pass_stats_record_cache_cardinality",
+      "cargo test -p ruby-analysis reference_candidate_resolves_when_definition"
+    ],
+    "result": "passed"
+  },
+  "controlled_ab": {
+    "dataset": "/Users/naveenraj/goshposh",
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "runtime": "jruby-9.2.21.0",
+    "scheduler_concurrency": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "baseline_executable": "/tmp/ruby-fast-lsp-profiler-one-pass-jruby-gem-prefilter",
+    "baseline_executable_sha256": "24fe6d7a18a8a1e886c7734f310c9f37e6864c0af2a82544549938d84c762f88",
+    "candidate_executable": "/tmp/ruby-fast-lsp-profiler-resolve-cache-hit-fast-path",
+    "candidate_executable_sha256": "2e2dcbe0007e92f7be57a84848a13cf712d23f61af34831980fa73b849fc9714",
+    "cache_root": "/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731",
+    "baseline_gem_products": "/tmp/ruby-fast-lsp-resolve-fast-path-baseline-warm-products",
+    "candidate_gem_products": "/tmp/ruby-fast-lsp-resolve-fast-path-candidate-products",
+    "raw_dir": "/tmp/ruby-fast-lsp-resolve-fast-path-ab-warm",
+    "pairs": 3,
+    "correctness": {
+      "server_semantic_fingerprint": "317d721b898519ec8f70cc4e903085d4",
+      "server_devops_semantic_fingerprint": "da83054abb868876fc801768d643f79a",
+      "semantic_export_manifest_sha256": "ef17fe146a5685d99b6b8e5150a71f96b212a330d540fcd3d118d64422e1ec13",
+      "persistent_gem_hits": "607/607",
+      "persistent_java_hits": "168/168",
+      "panicked_resource_tasks": 0,
+      "leaked_active_tasks_at_end": 0
+    },
+    "baseline_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-resolve-fast-path-ab-warm/baseline-1.jsonl",
+        "wall_ms": 14219.910541,
+        "user_cpu_ms": 24092.9,
+        "system_cpu_ms": 2844.112,
+        "peak_rss_bytes": 1305722880,
+        "phase_resolve_ms": 2657.221292,
+        "active_project_navigation_ms": 5112,
+        "active_dependency_navigation_ms": 12015,
+        "active_semantic_complete_ms": 12102,
+        "live_project_probe_ms": 355,
+        "live_dependency_probe_ms": 1231
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-resolve-fast-path-ab-warm/baseline-2.jsonl",
+        "wall_ms": 13093.621541,
+        "user_cpu_ms": 24121.394,
+        "system_cpu_ms": 2684.928,
+        "peak_rss_bytes": 1544863744,
+        "phase_resolve_ms": 2626.43675,
+        "active_project_navigation_ms": 5247,
+        "active_dependency_navigation_ms": 11489,
+        "active_semantic_complete_ms": 11526,
+        "live_project_probe_ms": 359,
+        "live_dependency_probe_ms": 1272
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-resolve-fast-path-ab-warm/baseline-3.jsonl",
+        "wall_ms": 17557.602209,
+        "user_cpu_ms": 27213.296,
+        "system_cpu_ms": 4519.947,
+        "peak_rss_bytes": 1226866688,
+        "phase_resolve_ms": 3051.247084,
+        "active_project_navigation_ms": 6330,
+        "active_dependency_navigation_ms": 15970,
+        "active_semantic_complete_ms": 16153,
+        "live_project_probe_ms": 360,
+        "live_dependency_probe_ms": 1311
+      }
+    ],
+    "candidate_runs": [
+      {
+        "path": "/tmp/ruby-fast-lsp-resolve-fast-path-ab-warm/candidate-1.jsonl",
+        "wall_ms": 15295.571458,
+        "user_cpu_ms": 25598.275,
+        "system_cpu_ms": 3527.367,
+        "peak_rss_bytes": 1177337856,
+        "phase_resolve_ms": 2480.849042,
+        "active_project_navigation_ms": 6386,
+        "active_dependency_navigation_ms": 13765,
+        "active_semantic_complete_ms": 13810,
+        "live_project_probe_ms": 463,
+        "live_dependency_probe_ms": 1557
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-resolve-fast-path-ab-warm/candidate-2.jsonl",
+        "wall_ms": 13113.935875,
+        "user_cpu_ms": 24179.35,
+        "system_cpu_ms": 2660.579,
+        "peak_rss_bytes": 1427292160,
+        "phase_resolve_ms": 2427.819418,
+        "active_project_navigation_ms": 5549,
+        "active_dependency_navigation_ms": 11536,
+        "active_semantic_complete_ms": 11569,
+        "live_project_probe_ms": 419,
+        "live_dependency_probe_ms": 1402
+      },
+      {
+        "path": "/tmp/ruby-fast-lsp-resolve-fast-path-ab-warm/candidate-3.jsonl",
+        "wall_ms": 15419.852916,
+        "user_cpu_ms": 25781.663,
+        "system_cpu_ms": 3721.605,
+        "peak_rss_bytes": 1305788416,
+        "phase_resolve_ms": 2772.270416,
+        "active_project_navigation_ms": 6104,
+        "active_dependency_navigation_ms": 13912,
+        "active_semantic_complete_ms": 13961,
+        "live_project_probe_ms": 443,
+        "live_dependency_probe_ms": 1464
+      }
+    ],
+    "medians": {
+      "wall_ms": { "baseline": 14219.910541, "candidate": 15295.571458, "change_percent": 7.564 },
+      "user_cpu_ms": { "baseline": 24121.394, "candidate": 25598.275, "change_percent": 6.123 },
+      "system_cpu_ms": { "baseline": 2844.112, "candidate": 3527.367, "change_percent": 24.023 },
+      "phase_resolve_ms": { "baseline": 2657.221292, "candidate": 2480.849042, "change_percent": -6.637 },
+      "active_project_navigation_ms": { "baseline": 5247.0, "candidate": 6104.0, "change_percent": 16.333 },
+      "active_dependency_navigation_ms": { "baseline": 12015.0, "candidate": 13765.0, "change_percent": 14.565 },
+      "active_semantic_complete_ms": { "baseline": 12102.0, "candidate": 13810.0, "change_percent": 14.113 },
+      "live_project_probe_ms": { "baseline": 359.0, "candidate": 443.0, "change_percent": 23.398 },
+      "live_dependency_probe_ms": { "baseline": 1272.0, "candidate": 1464.0, "change_percent": 15.094 },
+      "peak_rss_bytes": { "baseline": 1305722880, "candidate": 1305788416, "change_percent": 0.005 }
+    }
+  },
+  "rejection_reason": "Resolve-phase median improved 6.6%, but warm active semantic completion, dependency navigation, project navigation, and terminal wall all regressed by 7–16%. Exact semantics were preserved and RSS stayed under the fixed ceiling, yet the slice does not move the five-second semantic frontier and therefore is not accepted. The fast-path mutation was reverted; schema-14 ResolvePassStats instrumentation remains.",
+  "follow_up": "Resolve is only ~2.5 s of the ~12 s warm semantic gap and is already hit-dominated. Prefer the next measured non-resolve target (dependency rebinding / phase overlap / fact collection) rather than another hit-path micro-optimization inside resolve_reference_candidates. Do not restore incremental resolve_files without a red cross-file invalidation proof."
+}

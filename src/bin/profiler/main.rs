@@ -1413,6 +1413,22 @@ fn indexing_summary_json(
     let mut constant_reference_candidates = 0usize;
     let mut method_reference_candidates = 0usize;
     let mut resolved_reference_candidates = 0usize;
+    let mut resolve_pass_graph_retry_ns = 0u64;
+    let mut resolve_pass_diagnostic_seed_ns = 0u64;
+    let mut resolve_pass_constant_candidates_ns = 0u64;
+    let mut resolve_pass_method_candidates_ns = 0u64;
+    let mut resolve_pass_sort_all_ns = 0u64;
+    let mut resolve_pass_diagnostic_rebuild_ns = 0u64;
+    let mut resolve_pass_constant_cache_hits = 0usize;
+    let mut resolve_pass_constant_cache_misses = 0usize;
+    let mut resolve_pass_constant_cache_unique_keys = 0usize;
+    let mut resolve_pass_method_cache_hits = 0usize;
+    let mut resolve_pass_method_cache_misses = 0usize;
+    let mut resolve_pass_method_cache_unique_keys = 0usize;
+    let mut resolve_pass_method_lookup_chain_cache_entries = 0usize;
+    let mut resolve_pass_method_namespace_exists_cache_entries = 0usize;
+    let mut resolve_pass_method_suggestion_cache_entries = 0usize;
+    let mut resolve_pass_incomplete_method_chain_cache_entries = 0usize;
     let mut project_evidence = Vec::new();
     let status_by_root = server
         .indexing_status_snapshot()
@@ -1452,6 +1468,90 @@ fn indexing_summary_json(
             .expect(
                 "INVARIANT VIOLATED: profiler aggregate exact-resolved-candidate count overflowed usize. This is a bug because measured engine facts must fit the process address space. Fix: inspect corrupt engine stats.",
             );
+        let resolve_pass = engine.last_resolve_stats();
+        resolve_pass_graph_retry_ns = resolve_pass_graph_retry_ns
+            .checked_add(resolve_pass.graph_retry_ns)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate resolve graph-retry timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_diagnostic_seed_ns = resolve_pass_diagnostic_seed_ns
+            .checked_add(resolve_pass.diagnostic_seed_ns)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate resolve diagnostic-seed timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_constant_candidates_ns = resolve_pass_constant_candidates_ns
+            .checked_add(resolve_pass.constant_candidates_ns)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate resolve constant-candidate timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_candidates_ns = resolve_pass_method_candidates_ns
+            .checked_add(resolve_pass.method_candidates_ns)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate resolve method-candidate timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_sort_all_ns = resolve_pass_sort_all_ns
+            .checked_add(resolve_pass.sort_all_ns)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate resolve sort_all timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_diagnostic_rebuild_ns = resolve_pass_diagnostic_rebuild_ns
+            .checked_add(resolve_pass.diagnostic_rebuild_ns)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate resolve diagnostic-rebuild timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_constant_cache_hits = resolve_pass_constant_cache_hits
+            .checked_add(resolve_pass.constant_cache_hits)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate constant-cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_constant_cache_misses = resolve_pass_constant_cache_misses
+            .checked_add(resolve_pass.constant_cache_misses)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate constant-cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_constant_cache_unique_keys = resolve_pass_constant_cache_unique_keys
+            .checked_add(resolve_pass.constant_cache_unique_keys)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate constant-cache unique keys overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_cache_hits = resolve_pass_method_cache_hits
+            .checked_add(resolve_pass.method_cache_hits)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_cache_misses = resolve_pass_method_cache_misses
+            .checked_add(resolve_pass.method_cache_misses)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_cache_unique_keys = resolve_pass_method_cache_unique_keys
+            .checked_add(resolve_pass.method_cache_unique_keys)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-cache unique keys overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_lookup_chain_cache_entries =
+            resolve_pass_method_lookup_chain_cache_entries
+                .checked_add(resolve_pass.method_lookup_chain_cache_entries)
+                .expect(
+                    "INVARIANT VIOLATED: profiler aggregate method-lookup-chain cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                );
+        resolve_pass_method_namespace_exists_cache_entries =
+            resolve_pass_method_namespace_exists_cache_entries
+                .checked_add(resolve_pass.method_namespace_exists_cache_entries)
+                .expect(
+                    "INVARIANT VIOLATED: profiler aggregate method-namespace-exists cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                );
+        resolve_pass_method_suggestion_cache_entries = resolve_pass_method_suggestion_cache_entries
+            .checked_add(resolve_pass.method_suggestion_cache_entries)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-suggestion cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_incomplete_method_chain_cache_entries =
+            resolve_pass_incomplete_method_chain_cache_entries
+                .checked_add(resolve_pass.incomplete_method_chain_cache_entries)
+                .expect(
+                    "INVARIANT VIOLATED: profiler aggregate incomplete-method-chain cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                );
         estimated_engine_heap_bytes = estimated_engine_heap_bytes
             .checked_add(engine.estimated_memory_stats().total())
             .expect(
@@ -1553,7 +1653,7 @@ fn indexing_summary_json(
     let gem_binding = server.gem_dependency_binding_counters.snapshot();
 
     serde_json::json!({
-        "schema_version": 13,
+        "schema_version": 14,
         "ruby_fast_lsp_version": env!("CARGO_PKG_VERSION"),
         "target_os": std::env::consts::OS,
         "target_arch": std::env::consts::ARCH,
@@ -1618,6 +1718,24 @@ fn indexing_summary_json(
             "constant_reference_candidates": constant_reference_candidates,
             "method_reference_candidates": method_reference_candidates,
             "resolved_reference_candidates": resolved_reference_candidates,
+            "resolve_pass": {
+                "graph_retry_ns": resolve_pass_graph_retry_ns,
+                "diagnostic_seed_ns": resolve_pass_diagnostic_seed_ns,
+                "constant_candidates_ns": resolve_pass_constant_candidates_ns,
+                "method_candidates_ns": resolve_pass_method_candidates_ns,
+                "sort_all_ns": resolve_pass_sort_all_ns,
+                "diagnostic_rebuild_ns": resolve_pass_diagnostic_rebuild_ns,
+                "constant_cache_hits": resolve_pass_constant_cache_hits,
+                "constant_cache_misses": resolve_pass_constant_cache_misses,
+                "constant_cache_unique_keys": resolve_pass_constant_cache_unique_keys,
+                "method_cache_hits": resolve_pass_method_cache_hits,
+                "method_cache_misses": resolve_pass_method_cache_misses,
+                "method_cache_unique_keys": resolve_pass_method_cache_unique_keys,
+                "method_lookup_chain_cache_entries": resolve_pass_method_lookup_chain_cache_entries,
+                "method_namespace_exists_cache_entries": resolve_pass_method_namespace_exists_cache_entries,
+                "method_suggestion_cache_entries": resolve_pass_method_suggestion_cache_entries,
+                "incomplete_method_chain_cache_entries": resolve_pass_incomplete_method_chain_cache_entries
+            }
         },
         "process": resource_delta,
         "process_local_core_templates": {
@@ -2298,6 +2416,29 @@ fn print_stats(server: &RubyLanguageServer) {
             stats.constant_reference_candidates,
             stats.method_reference_candidates,
             stats.resolved_reference_candidates
+        );
+        let resolve_pass = engine.last_resolve_stats();
+        info!(
+            "Resolve pass ns: graph_retry={}, diagnostic_seed={}, constants={}, methods={}, sort_all={}, diagnostic_rebuild={}",
+            resolve_pass.graph_retry_ns,
+            resolve_pass.diagnostic_seed_ns,
+            resolve_pass.constant_candidates_ns,
+            resolve_pass.method_candidates_ns,
+            resolve_pass.sort_all_ns,
+            resolve_pass.diagnostic_rebuild_ns
+        );
+        info!(
+            "Resolve caches: constant hits/misses/unique={}/{}/{}, method hits/misses/unique={}/{}/{}, chain={}, namespace_exists={}, suggestion={}, incomplete_chain={}",
+            resolve_pass.constant_cache_hits,
+            resolve_pass.constant_cache_misses,
+            resolve_pass.constant_cache_unique_keys,
+            resolve_pass.method_cache_hits,
+            resolve_pass.method_cache_misses,
+            resolve_pass.method_cache_unique_keys,
+            resolve_pass.method_lookup_chain_cache_entries,
+            resolve_pass.method_namespace_exists_cache_entries,
+            resolve_pass.method_suggestion_cache_entries,
+            resolve_pass.incomplete_method_chain_cache_entries
         );
         info!("Resolved references: {}", stats.references);
         info!("Type facts: {}", stats.types);

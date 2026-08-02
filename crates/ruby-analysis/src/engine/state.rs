@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::method_store::StoredMethodFactMatch;
@@ -740,6 +741,40 @@ pub struct AnalysisStats {
     pub unresolved_graph_edges: usize,
 }
 
+/// Measurement counters for the most recent full `AnalysisEngine::resolve` pass.
+///
+/// These are process-local profiler evidence only. They must not change semantic
+/// resolution policy, diagnostic emission, or project ownership.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResolvePassStats {
+    pub graph_retry_ns: u64,
+    pub diagnostic_seed_ns: u64,
+    pub constant_candidates_ns: u64,
+    pub method_candidates_ns: u64,
+    pub sort_all_ns: u64,
+    pub diagnostic_rebuild_ns: u64,
+    pub constant_cache_hits: usize,
+    pub constant_cache_misses: usize,
+    pub constant_cache_unique_keys: usize,
+    pub method_cache_hits: usize,
+    pub method_cache_misses: usize,
+    pub method_cache_unique_keys: usize,
+    pub method_lookup_chain_cache_entries: usize,
+    pub method_namespace_exists_cache_entries: usize,
+    pub method_suggestion_cache_entries: usize,
+    pub incomplete_method_chain_cache_entries: usize,
+}
+
+pub(super) fn elapsed_ns(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_nanos()).unwrap_or_else(|_| {
+        panic!(
+            "INVARIANT VIOLATED: resolve-pass elapsed nanoseconds overflowed u64. \
+             This is a bug because one resolution pass cannot exceed u64::MAX nanoseconds. \
+             Fix: inspect hung resolve instrumentation or widen the counter type."
+        )
+    })
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisMemoryStats {
     pub names: usize,
@@ -916,6 +951,7 @@ pub struct AnalysisEngine {
     execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
     semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
     top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
+    last_resolve_pass: ResolvePassStats,
 }
 
 static NEXT_ANALYSIS_ENGINE_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -947,6 +983,7 @@ impl Default for AnalysisEngine {
             execution_contexts: HashMap::new(),
             semantic_export_fingerprints: HashMap::new(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
+            last_resolve_pass: ResolvePassStats::default(),
         }
     }
 }
@@ -964,6 +1001,7 @@ impl Clone for AnalysisEngine {
             execution_contexts: self.execution_contexts.clone(),
             semantic_export_fingerprints: self.semantic_export_fingerprints.clone(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
+            last_resolve_pass: ResolvePassStats::default(),
         }
     }
 }
@@ -1046,8 +1084,17 @@ impl AnalysisEngine {
     }
 
     pub fn resolve(&mut self) {
+        let mut stats = ResolvePassStats::default();
+        let graph_retry_started = Instant::now();
         self.retry_unresolved_graph_edges();
-        self.resolve_reference_candidates();
+        stats.graph_retry_ns = elapsed_ns(graph_retry_started);
+        self.resolve_reference_candidates(&mut stats);
+        self.last_resolve_pass = stats;
+    }
+
+    /// Profiler evidence for the most recent full `resolve()` pass.
+    pub fn last_resolve_stats(&self) -> &ResolvePassStats {
+        &self.last_resolve_pass
     }
 
     pub fn resolve_file(&mut self, file_id: SourceFileId) {
