@@ -1185,18 +1185,9 @@ impl FactCollector {
             return None;
         }
 
-        let expression_subject =
-            TypeSubject::Expression(self.direct_range(&receiver_node.location()));
-        if let Some(fact) = self
-            .direct_facts
-            .types
-            .iter()
-            .rev()
-            .find(|fact| fact.subject == expression_subject)
-        {
-            return Some(fact.ruby_type.clone());
-        }
-
+        // Local/ivar receivers never receive `TypeSubject::Expression` facts (those are
+        // recorded for call/expression ranges). Resolve them before the O(n) expression
+        // scan so every `user.save`-style receiver does not rescan file type facts.
         if let Some(local_var) = receiver_node.as_local_variable_read_node() {
             let var_name = utf8_str(local_var.name().as_slice());
             return self.get_local_var_type(var_name, &local_var.location());
@@ -1216,6 +1207,18 @@ impl FactCollector {
                 self.document.analysis_file_id(),
                 byte_offset,
             );
+        }
+
+        let expression_subject =
+            TypeSubject::Expression(self.direct_range(&receiver_node.location()));
+        if let Some(fact) = self
+            .direct_facts
+            .types
+            .iter()
+            .rev()
+            .find(|fact| fact.subject == expression_subject)
+        {
+            return Some(fact.ruby_type.clone());
         }
 
         if let Some(call) = receiver_node.as_call_node() {

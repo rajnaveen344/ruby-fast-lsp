@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-02",
+  "purpose": "Test whether loading immutable gem products beside exhaustive project remaining, then binding only after remaining and JRuby catalog replay, improves warm active semantic completion without breaching the fixed RSS ceiling.",
+  "experiment": {
+    "baseline": "bb4a884 sequential index_configured_gems after remaining/replay; Gemfile roots already available at configure time.",
+    "candidate": "prefetch_configured_gem_products (manifest prepare + persistent load/deserialize into Vec<LoadedGemDependencyProduct>) joined with project remaining+replay; bind_prefetched_gem_products only after that join; supplemental project-inferred gems via index_configured_gems.",
+    "method": "Same two-project goshposh warm persistent cache, identical profiler args and definition probes, back-to-back baseline then candidate on one machine. Candidate held all loaded products (~303/301) until bind."
+  },
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "configuration": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "active_project": "/Users/naveenraj/goshposh/server",
+    "runtime": "jruby-9.2.21.0",
+    "persistent_cache_state": "valid fully warm fresh process",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "allowed_peak_rss_ceiling_bytes": 1776846438
+  },
+  "baseline": {
+    "source_revision": "bb4a884832912cf6e12d6012869149b1f73fe720",
+    "profiler_executable_sha256": "b71f561cd04f291e422dde5862d0c369985307693363fc1202ecb3e52c2e5927",
+    "log": "/tmp/ruby-fast-lsp-goshposh-baseline-bb4a884-warm-2p-20260802.log",
+    "wall_ms": 13613.373833,
+    "active_project_navigation_ms": 5709,
+    "active_dependency_navigation_ms": 11900,
+    "active_semantic_complete_ms": 11940,
+    "process_peak_rss_bytes": 1346453504,
+    "external_peak_rss_bytes": 1540210688,
+    "phase_sum_dependencies_ms": 8756.895959
+  },
+  "candidate": {
+    "source_revision": "bb4a884832912cf6e12d6012869149b1f73fe720",
+    "source_worktree": "uncommitted prefetch-during-remaining coordinator/indexer_gem split",
+    "profiler_executable_sha256": "99b1ca29a6a0992a62a0f29a4d8248023a2cd0b8e206a4cdc61e710d5bcef35b",
+    "log": "/tmp/ruby-fast-lsp-goshposh-prefetch-bind-warm-2p-20260802.log",
+    "wall_ms": 14966.770667,
+    "active_project_navigation_ms": 6956,
+    "active_dependency_navigation_ms": 14929,
+    "active_semantic_complete_ms": 14966,
+    "process_peak_rss_bytes": 1793032192,
+    "external_peak_rss_bytes": 2030223360,
+    "phase_sum_dependencies_ms": 19623.620833,
+    "prefetch_evidence": {
+      "server_products_loaded": 303,
+      "server_prefetch_pipeline_s": 7.269097333,
+      "server_product_load_s": 5.059067642,
+      "server_bind_s": 2.346196458,
+      "devops_products_loaded": 301,
+      "devops_prefetch_pipeline_s": 5.797439584,
+      "supplemental_gems_per_project": 6
+    }
+  },
+  "delta_percent_candidate_vs_baseline": {
+    "wall_ms": 9.942,
+    "active_project_navigation_ms": 21.843,
+    "active_dependency_navigation_ms": 25.454,
+    "active_semantic_complete_ms": 25.343,
+    "process_peak_rss_bytes": 33.167,
+    "external_peak_rss_bytes": 31.815
+  },
+  "correctness": {
+    "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
+    "project_semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "14c870a7f0e89ee6963eb8d9905919cb",
+      "/Users/naveenraj/goshposh/server-devops-5441": "13af335a5731429169b37103661a096c"
+    },
+    "fingerprints_equal_to_baseline": true,
+    "fixed_peak_rss_ceiling_bytes": 1776846438,
+    "candidate_process_peak_rss_excess_bytes": 16185754
+  },
+  "decision": "Rejected and reverted. Unbounded in-process retention of every loaded gem product during remaining project work preserved exact semantic-result fingerprints, but contended for indexing lanes, raised process peak RSS above the fixed 1.777 GB ceiling, and regressed active project/dependency/semantic readiness by about 22–25%. Do not restore all-product prefetch-during-remaining. A future overlap must bound retained product weight (priority subset, disk-backed reservation without Arc retention, or a measured producer that does not overlap the remaining CPU claim)."
+}

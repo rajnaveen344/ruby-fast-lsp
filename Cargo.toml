@@ -31,6 +31,10 @@ name = "profile_indexer"
 path = "src/bin/profile_indexer.rs"
 
 [[bin]]
+name = "profile_project_collection"
+path = "src/bin/profile_project_collection.rs"
+
+[[bin]]
 name = "profiler"
 path = "src/bin/profiler/main.rs"
 

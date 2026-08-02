@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-02",
+  "purpose": "Clean sync FileProcessor project-collection profile to cut inside the project fact-collection hotspot",
+  "harness": {
+    "binary": "profile_project_collection",
+    "corpus": "/Users/naveenraj/goshposh/server",
+    "files": 2619,
+    "notes": [
+      "Sequential collect+replace; RAYON_NUM_THREADS=1",
+      "FileProcessor::new() without JRuby import provider or Wasm extension packages",
+      "Mirrors deferred project-batch collection (single FactCollector visit; no collect_direct_facts seed walk)",
+      "Symbolicate with symbol_table RVA spans; known_addresses mislabels inlined frames and must not be trusted alone"
+    ]
+  },
+  "timers": {
+    "wall_s": 5.697652,
+    "read_ms": 371.97,
+    "ranks_pct_of_denom": {
+      "visitor": 74.1,
+      "parse": 9.1,
+      "replacement": 7.4,
+      "jruby_plan": 6.5,
+      "registration": 2.4,
+      "assembly": 0.3,
+      "semantic_seed": 0.1
+    },
+    "visitor_s": 4.164923723,
+    "parse_s": 0.51351707,
+    "replacement_s": 0.415767224,
+    "jruby_plan_s": 0.368222993
+  },
+  "profile": {
+    "path": "/tmp/ruby-fast-lsp-sync-project-collection-v1-profile.json.gz",
+    "syms": "/tmp/ruby-fast-lsp-sync-project-collection-v1-profile.json.syms.json",
+    "samples_main_thread": 585,
+    "inclusive_pct_of_all_samples": {
+      "collect_file_facts": 87.7,
+      "Visit::visit": 70.8,
+      "visit_call_node": 44.4,
+      "process_call_node_entry": 32.8,
+      "handle_receiver_node_with_info": 17.8,
+      "infer_expression_receiver_type": 12.8,
+      "visit_def_node": 46.3,
+      "infer_type_from_value": 14.9,
+      "ruby_prism::parse": 7.0,
+      "replace_facts": 8.0,
+      "extensions::call_context": 6.3
+    }
+  },
+  "chosen_cut": {
+    "rank": 1,
+    "path": "FactCollector::visit \u2192 visit_call_node \u2192 process_call_node_entry / receiver-type inference",
+    "why": "Timers put visitor at 74% of sync project collection (~4.16s). Symbolized sync flame puts Visit::visit at ~71% of samples; visit_call_node ~44%, process_call_node_entry ~33%, receiver inference ~13\u201318%. Parse (~9% timer / ~7% flame) and replace_facts (~7\u20138%) are secondary.",
+    "not_yet": "Do not chase JRuby call-host handlers, gem prefetch, or dual collect_direct_facts on the deferred project batch path (that seed walk is already skipped when resolve_references=false)."
+  },
+  "next_change_candidates": [
+    "Cheapen process_call_node_entry / handle_receiver_node_with_info / infer_expression_receiver_type on the deferred project-batch path",
+    "Reduce infer_type_from_value / assignment inference work during FactCollector visit",
+    "Only after call/receiver path: inspect process_def_node_entry and method-return resolution"
+  ]
+}

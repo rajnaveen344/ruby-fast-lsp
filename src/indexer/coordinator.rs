@@ -1003,6 +1003,7 @@ impl IndexingCoordinator {
         // remains isolated and waits until the exact owning-project inputs exist.
         info!("Collecting analysis facts");
         let facts_start = Instant::now();
+        crate::runtime::jruby::imports::reset_jruby_call_host_probe();
 
         self.transition_indexing_status(
             server,
@@ -1226,6 +1227,10 @@ impl IndexingCoordinator {
                 Duration::default()
             };
             drop(project_navigation_reservation.take());
+            crate::runtime::jruby::imports::log_jruby_call_host_probe(
+                "project_navigation_ready",
+                &self.workspace_root,
+            );
             self.transition_indexing_status(
                 server,
                 crate::indexing_status::IndexingPhase::ProjectNavigationReady,
@@ -1242,6 +1247,10 @@ impl IndexingCoordinator {
             tokio::join!(project_completion, gem_indexing);
         project_dur += project_completion_result?;
         self.gem_indexer = Some(gem_indexing_result?);
+        crate::runtime::jruby::imports::log_jruby_call_host_probe(
+            "after_dependencies",
+            &self.workspace_root,
+        );
 
         // Runtime stdlib still enters the same isolated engine before the
         // dependency-ready milestone and complete semantic diagnostics.

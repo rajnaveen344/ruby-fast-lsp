@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-02",
+  "purpose": "Measure inside JrubyImportProvider::process_call_node so the next change attaches to a real handler cost, not the provider name on a flamegraph.",
+  "instrumentation": {
+    "file": "src/runtime/jruby/imports.rs",
+    "mechanism": "process-wide AtomicU64 entry counts and per-handler nanosecond sums around the ten call-host steps; PERF log at project_navigation_ready and after_dependencies",
+    "overhead_note": "Instant::now around every CallNode adds some probe cost; totals are still far below the project phase wall."
+  },
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-one-server-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "log": "/tmp/ruby-fast-lsp-one-server-call-host-probe-20260802.log",
+  "run_note": "This particular run rebuilt persistent gem products (306 misses); dependency wall is not a warm A/B sample. project_navigation_ready call-host numbers still attribute the project-file path.",
+  "project_navigation_ready": {
+    "entries": 628583,
+    "total_handler_ms": 233.71,
+    "handlers_ms": {
+      "seed_static_proxy": 68.381,
+      "java_ctor": 76.007,
+      "include_package": 16.182,
+      "java_interface": 11.698,
+      "import": 11.042,
+      "import_dispatch": 10.464,
+      "to_java": 10.109,
+      "java_alias": 9.964,
+      "java_package": 9.936,
+      "java_dispatch": 9.926
+    },
+    "seed_dotted_candidates": 150690,
+    "seed_catalog_hits": 258,
+    "java_ctor_inferred": 85,
+    "phase_project_ms": 5904.5
+  },
+  "after_dependencies": {
+    "entries": 1274542,
+    "total_handler_ms": 832.643,
+    "java_ctor_ms": 493.09,
+    "seed_ms": 124.229,
+    "note": "Gem fact collection roughly doubles entries; java_ctor becomes the dominant host cost via .new + type inference."
+  },
+  "interpretation": {
+    "verdict": "Inside the JRuby call host, project-time cost is only ~0.23s of CPU-sum versus ~5.9s project phase. Samply showed the provider name often, but the door is cheap; most project time is still FactCollector/Prism/other work outside these handlers.",
+    "inside_host_ranking_at_project_ready": [
+      "java_ctor (~76ms) and seed (~68ms) lead",
+      "name-gated import/package/dispatch handlers are ~10–16ms each (mostly enter+name check)",
+      "seed sees 150690 dotted candidates but only 258 catalog hits"
+    ],
+    "do_not": "Optimize call-host scheduling or remove handlers expecting multi-second wins on the project phase.",
+    "next_measure": "Profile FactCollector walk / collect_direct_facts / double AST pass / Prism visitation for the remaining ~5.7s project gap; optionally inspect gem-path java_ctor (~0.5s) as a secondary deps target."
+  }
+}

@@ -71,18 +71,18 @@ struct CollectedFileFactsOutput {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct ProjectFileCollectionTiming {
-    pub(crate) total: Duration,
-    pub(crate) registration: Duration,
-    pub(crate) parse: Duration,
-    pub(crate) jruby_plan: Duration,
-    pub(crate) semantic_seed: Duration,
-    pub(crate) visitor: Duration,
-    pub(crate) assembly: Duration,
-    pub(crate) replacement: Duration,
+pub struct ProjectFileCollectionTiming {
+    pub total: Duration,
+    pub registration: Duration,
+    pub parse: Duration,
+    pub jruby_plan: Duration,
+    pub semantic_seed: Duration,
+    pub visitor: Duration,
+    pub assembly: Duration,
+    pub replacement: Duration,
 }
 
-pub(crate) struct CollectedProjectFileFacts {
+pub struct CollectedProjectFileFacts {
     pub file_facts: FileFacts,
     pub jruby_navigation_plan: StaticJavaNavigationPlan,
     pub jruby_source_hint: StaticJavaSourceHint,
@@ -988,7 +988,7 @@ impl FileProcessor {
         Ok(())
     }
 
-    pub(crate) fn collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution(
+    pub fn collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution(
         &self,
         uri: &Url,
         content: String,
@@ -1035,7 +1035,7 @@ impl FileProcessor {
         }
     }
 
-    pub(crate) fn replace_collected_project_file_facts_as_deferred_resolution(
+    pub fn replace_collected_project_file_facts_as_deferred_resolution(
         &self,
         path: &Path,
         analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,

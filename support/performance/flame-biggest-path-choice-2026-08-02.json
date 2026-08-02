@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-02",
+  "purpose": "Choose the biggest indexing path from flame + timers after the JRuby call-host probe showed that door is cheap.",
+  "profiles": {
+    "parallel_v285": "/tmp/ruby-fast-lsp-one-server-warm-v285-symbolized-profile.json.gz",
+    "serial_v286": "/tmp/ruby-fast-lsp-one-server-warm-serial-v286-symbolized-profile.json.gz",
+    "serial_note": "RAYON_NUM_THREADS=1 and one CPU lane. Wall ~19s. Samply self-time is dominated by Tokio idle (~66% unsafe_cell), so serial whole-process flames are not a clean CPU map."
+  },
+  "flame_limitations": [
+    "Parallel Rayon stacks often lose FactCollector frames; Prism ModuleNode::body / prism.c appear as ~60–97% inclusive without naming the Rust owner.",
+    "Serial whole-process samply mixes reactor wait with CPU work.",
+    "JrubyImportProvider name on earlier flames was frequent but stopwatch-proved ~0.23s of handler CPU vs ~5.9s project wall."
+  ],
+  "trusted_combined_ranking": [
+    {
+      "rank": 1,
+      "path": "project file fact collection (Prism parse + AST walk / FactCollector dual pass)",
+      "why": "Warm one-server phase timer: project ~5.3–5.9s of ~10.7–11s ready. Flame consistently shows Prism visitation as the deep CPU leaf during that phase. Prior accepted symbolized profile (v195) attributed file fact collection ~39.3% inclusive and call handling ~15.1%.",
+      "not": "JRuby call-host handlers (~0.23s measured), resolve-cache, gem prefetch overlap"
+    },
+    {
+      "rank": 2,
+      "path": "dependency gem bind / postcard deserialize (warm) or produce (cold)",
+      "why": "Dependencies phase ~3.7s warm; postcard appears in flames; cold gem rebuild can dominate wall."
+    },
+    {
+      "rank": 3,
+      "path": "runtime / Java catalog companion",
+      "why": "Runtime phase ~2.5s; classpath/java product timers material."
+    }
+  ],
+  "chosen_next_path": "rank 1 — project file fact collection / Prism AST walk under FileProcessor (including the measured double walk: collect_direct_facts then FactCollector::visit)",
+  "next_measurement_shape": "Prefer a synchronous FileProcessor-only microbench/profile over whole-process samply so Rayon/Tokio cannot hide the owner; or add phase timers around parse vs seed walk vs full visit vs replace_facts per file batch."
+}

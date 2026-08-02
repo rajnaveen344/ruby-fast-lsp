@@ -23,13 +23,143 @@ use ruby_prism::{
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 #[cfg(test)]
 std::thread_local! {
     static SEMANTIC_PREFILTER_PARSE_COUNT: std::cell::Cell<usize> = const {
         std::cell::Cell::new(0)
     };
+}
+
+/// Process-wide probe for JRuby call-host cost during fact collection.
+///
+/// Every Prism `CallNode` on a file with an installed provider enters
+/// [`JrubyImportProvider::process_call_node`]. These counters attribute wall
+/// time inside that door so the next optimization attaches to a measured
+/// handler rather than the whole provider name.
+static CALL_HOST_ENTRIES: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_SEED_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_IMPORT_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_IMPORT_DISPATCH_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_INCLUDE_PACKAGE_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_JAVA_INTERFACE_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_JAVA_PACKAGE_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_JAVA_ALIAS_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_JAVA_DISPATCH_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_TO_JAVA_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_JAVA_CTOR_NS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_SEED_DOTTED: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_SEED_CATALOG_HITS: AtomicU64 = AtomicU64::new(0);
+static CALL_HOST_JAVA_CTOR_INFERRED: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JrubyCallHostProbeSnapshot {
+    pub entries: u64,
+    pub seed_ns: u64,
+    pub import_ns: u64,
+    pub import_dispatch_ns: u64,
+    pub include_package_ns: u64,
+    pub java_interface_ns: u64,
+    pub java_package_ns: u64,
+    pub java_alias_ns: u64,
+    pub java_dispatch_ns: u64,
+    pub to_java_ns: u64,
+    pub java_ctor_ns: u64,
+    pub seed_dotted_candidates: u64,
+    pub seed_catalog_hits: u64,
+    pub java_ctor_inferred: u64,
+}
+
+impl JrubyCallHostProbeSnapshot {
+    pub fn total_handler_ns(self) -> u64 {
+        self.seed_ns
+            + self.import_ns
+            + self.import_dispatch_ns
+            + self.include_package_ns
+            + self.java_interface_ns
+            + self.java_package_ns
+            + self.java_alias_ns
+            + self.java_dispatch_ns
+            + self.to_java_ns
+            + self.java_ctor_ns
+    }
+}
+
+pub fn jruby_call_host_probe_snapshot() -> JrubyCallHostProbeSnapshot {
+    JrubyCallHostProbeSnapshot {
+        entries: CALL_HOST_ENTRIES.load(Ordering::Relaxed),
+        seed_ns: CALL_HOST_SEED_NS.load(Ordering::Relaxed),
+        import_ns: CALL_HOST_IMPORT_NS.load(Ordering::Relaxed),
+        import_dispatch_ns: CALL_HOST_IMPORT_DISPATCH_NS.load(Ordering::Relaxed),
+        include_package_ns: CALL_HOST_INCLUDE_PACKAGE_NS.load(Ordering::Relaxed),
+        java_interface_ns: CALL_HOST_JAVA_INTERFACE_NS.load(Ordering::Relaxed),
+        java_package_ns: CALL_HOST_JAVA_PACKAGE_NS.load(Ordering::Relaxed),
+        java_alias_ns: CALL_HOST_JAVA_ALIAS_NS.load(Ordering::Relaxed),
+        java_dispatch_ns: CALL_HOST_JAVA_DISPATCH_NS.load(Ordering::Relaxed),
+        to_java_ns: CALL_HOST_TO_JAVA_NS.load(Ordering::Relaxed),
+        java_ctor_ns: CALL_HOST_JAVA_CTOR_NS.load(Ordering::Relaxed),
+        seed_dotted_candidates: CALL_HOST_SEED_DOTTED.load(Ordering::Relaxed),
+        seed_catalog_hits: CALL_HOST_SEED_CATALOG_HITS.load(Ordering::Relaxed),
+        java_ctor_inferred: CALL_HOST_JAVA_CTOR_INFERRED.load(Ordering::Relaxed),
+    }
+}
+
+pub fn reset_jruby_call_host_probe() {
+    for counter in [
+        &CALL_HOST_ENTRIES,
+        &CALL_HOST_SEED_NS,
+        &CALL_HOST_IMPORT_NS,
+        &CALL_HOST_IMPORT_DISPATCH_NS,
+        &CALL_HOST_INCLUDE_PACKAGE_NS,
+        &CALL_HOST_JAVA_INTERFACE_NS,
+        &CALL_HOST_JAVA_PACKAGE_NS,
+        &CALL_HOST_JAVA_ALIAS_NS,
+        &CALL_HOST_JAVA_DISPATCH_NS,
+        &CALL_HOST_TO_JAVA_NS,
+        &CALL_HOST_JAVA_CTOR_NS,
+        &CALL_HOST_SEED_DOTTED,
+        &CALL_HOST_SEED_CATALOG_HITS,
+        &CALL_HOST_JAVA_CTOR_INFERRED,
+    ] {
+        counter.store(0, Ordering::Relaxed);
+    }
+}
+
+fn record_call_host_ns(counter: &AtomicU64, started: Instant) {
+    let nanos = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    counter.fetch_add(nanos, Ordering::Relaxed);
+}
+
+pub(crate) fn log_jruby_call_host_probe(label: &str, project: &Path) {
+    let snap = jruby_call_host_probe_snapshot();
+    let total_ms = snap.total_handler_ns() as f64 / 1_000_000.0;
+    log::info!(
+        "[PERF][jruby call host] label={} project={} entries={} total_handler={:.3}ms \
+         seed={:.3}ms import={:.3}ms import_dispatch={:.3}ms include_package={:.3}ms \
+         java_interface={:.3}ms java_package={:.3}ms java_alias={:.3}ms \
+         java_dispatch={:.3}ms to_java={:.3}ms java_ctor={:.3}ms \
+         seed_dotted={} seed_catalog_hits={} java_ctor_inferred={}",
+        label,
+        project.display(),
+        snap.entries,
+        total_ms,
+        snap.seed_ns as f64 / 1_000_000.0,
+        snap.import_ns as f64 / 1_000_000.0,
+        snap.import_dispatch_ns as f64 / 1_000_000.0,
+        snap.include_package_ns as f64 / 1_000_000.0,
+        snap.java_interface_ns as f64 / 1_000_000.0,
+        snap.java_package_ns as f64 / 1_000_000.0,
+        snap.java_alias_ns as f64 / 1_000_000.0,
+        snap.java_dispatch_ns as f64 / 1_000_000.0,
+        snap.to_java_ns as f64 / 1_000_000.0,
+        snap.java_ctor_ns as f64 / 1_000_000.0,
+        snap.seed_dotted_candidates,
+        snap.seed_catalog_hits,
+        snap.java_ctor_inferred,
+    );
 }
 
 const MAX_INCLUDED_PACKAGE_CLASSES: usize = 4_096;
@@ -466,12 +596,14 @@ impl JrubyImportProvider {
         let Some(dotted_name) = dotted_call_name(&call) else {
             return;
         };
+        CALL_HOST_SEED_DOTTED.fetch_add(1, Ordering::Relaxed);
         let Ok(java_name) = JavaClassName::parse(&dotted_name) else {
             return;
         };
         if !self.catalog.classes.contains_key(java_name.internal_name()) {
             return;
         }
+        CALL_HOST_SEED_CATALOG_HITS.fetch_add(1, Ordering::Relaxed);
         let proxy = FullyQualifiedName::constant(
             java_name
                 .ruby_namespace_parts()
@@ -1111,6 +1243,7 @@ impl JrubyImportProvider {
         else {
             return;
         };
+        CALL_HOST_JAVA_CTOR_INFERRED.fetch_add(1, Ordering::Relaxed);
         visitor.direct_push_expression_type(
             &node.as_node(),
             RubyType::Class(proxy),
@@ -1546,16 +1679,47 @@ fn supplemental_implementation_location(
 
 impl FactCollectorExtensionHost for JrubyImportProvider {
     fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode<'_>) {
+        CALL_HOST_ENTRIES.fetch_add(1, Ordering::Relaxed);
+
+        let started = Instant::now();
         self.seed_static_proxy_expression(visitor, &node.as_node());
+        record_call_host_ns(&CALL_HOST_SEED_NS, started);
+
+        let started = Instant::now();
         self.process_import_call(visitor, node);
+        record_call_host_ns(&CALL_HOST_IMPORT_NS, started);
+
+        let started = Instant::now();
         self.process_import_dispatch(visitor, node);
+        record_call_host_ns(&CALL_HOST_IMPORT_DISPATCH_NS, started);
+
+        let started = Instant::now();
         self.process_include_package_call(visitor, node);
+        record_call_host_ns(&CALL_HOST_INCLUDE_PACKAGE_NS, started);
+
+        let started = Instant::now();
         self.process_java_interface_call(visitor, node);
+        record_call_host_ns(&CALL_HOST_JAVA_INTERFACE_NS, started);
+
+        let started = Instant::now();
         self.process_java_package_call(visitor, node);
+        record_call_host_ns(&CALL_HOST_JAVA_PACKAGE_NS, started);
+
+        let started = Instant::now();
         self.process_java_alias_call(visitor, node);
+        record_call_host_ns(&CALL_HOST_JAVA_ALIAS_NS, started);
+
+        let started = Instant::now();
         self.process_java_dispatch_call(visitor, node);
+        record_call_host_ns(&CALL_HOST_JAVA_DISPATCH_NS, started);
+
+        let started = Instant::now();
         self.process_to_java_call(visitor, node);
+        record_call_host_ns(&CALL_HOST_TO_JAVA_NS, started);
+
+        let started = Instant::now();
         self.process_java_constructor_call(visitor, node);
+        record_call_host_ns(&CALL_HOST_JAVA_CTOR_NS, started);
     }
 }
 
@@ -2913,6 +3077,42 @@ mod tests {
             ],
             "exact source/decompilation work is needed only for explicit imports and referenced \
              package proxies"
+        );
+    }
+
+    #[test]
+    fn call_host_probe_attributes_seed_and_import_handlers() {
+        reset_jruby_call_host_probe();
+        let before = jruby_call_host_probe_snapshot();
+        assert_eq!(before.entries, 0);
+
+        let provider = Arc::new(JrubyImportProvider::new(catalog(&["java/lang/String"])));
+        let _ = collect_with_provider(
+            "java_import java.lang.String\n\
+             VALUE = Java::JavaLang::String.new\n\
+             plain.save\n",
+            provider,
+        );
+        let after = jruby_call_host_probe_snapshot();
+        assert!(
+            after.entries >= 3,
+            "java_import, String.new, and plain.save must each enter the call host: {after:?}"
+        );
+        assert!(
+            after.seed_ns > 0 && after.import_ns > 0 && after.java_ctor_ns > 0,
+            "probe must record time in seed, import, and constructor handlers: {after:?}"
+        );
+        assert!(
+            after.seed_catalog_hits >= 1,
+            "Java::JavaLang::String must count as a seed catalog hit: {after:?}"
+        );
+        assert!(
+            after.java_ctor_inferred >= 1,
+            "String.new on a Java proxy must count as an inferred constructor: {after:?}"
+        );
+        assert!(
+            after.total_handler_ns() > 0,
+            "handler times must sum to a positive total: {after:?}"
         );
     }
 

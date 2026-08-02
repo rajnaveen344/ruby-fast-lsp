@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-02",
+  "experiment": "local-ivar-receiver-before-expression-type-scan",
+  "decision": "accepted",
+  "purpose": "Attach a change to infer_expression_receiver_type (~13% of sync project-collection samples): resolve LocalVariableRead and InstanceVariableRead receivers before the O(n) TypeSubject::Expression scan, which those node kinds never populate.",
+  "profile_basis": {
+    "evidence": "support/performance/sync-project-collection-flame-2026-08-02.json",
+    "infer_expression_receiver_type_inclusive_percent": 12.8,
+    "handle_receiver_node_with_info_inclusive_percent": 17.8,
+    "visitor_timer_percent": 74.1
+  },
+  "change": {
+    "file": "crates/ruby-analysis/src/indexer/fact_collector/call_node/mod.rs",
+    "function": "FactCollector::infer_expression_receiver_type",
+    "implementation": "Check local/ivar receivers first and return get_local_var_type / variable_type_before. Keep the Expression-subject reverse scan before CallNode / infer_type_from_value paths so yielding/proc Expression facts retain priority for non-variable receivers.",
+    "semantic_boundary": "Expression facts are recorded for call/expression ranges (record_call_expression_type / direct_push_expression_type), not local or ivar reads. Variable receivers already used VariableScopes / engine variable_type_before as the sole authority after a usually-miss Expression scan."
+  },
+  "red_green": {
+    "focused_command": "cargo test -p ruby-analysis local_receiver --release",
+    "result": "2 passed; 0 failed (local_receiver_inference_does_not_borrow_an_assignment_from_another_method, local_receiver_inference_uses_the_active_lexical_scope)"
+  },
+  "executables": {
+    "sync_baseline_sha256": "30b7320d699375ccc735cf99b9668bfddcb9c24e97dbb6bc8f83aa6cca24421e",
+    "sync_candidate_sha256": "c0125e66b5f9571e865e8ecf6cd5eab0d53141648e870967b8a9328a0d6859c2",
+    "profiler_baseline_sha256": "5a9166061a80bfb4d6a774fa7a1ae369cf5d0a1abb62211aeffcd513ba16af36",
+    "profiler_candidate_sha256": "e1b650a273a6753fd880ed4c92eaf2068c4b2396694b1fe92f52aab8f8b27850"
+  },
+  "sync_project_collection_ab": {
+    "corpus": "/Users/naveenraj/goshposh/server",
+    "files": 2619,
+    "methods_unchanged": 26135,
+    "n_pairs": 3,
+    "baseline_median_s": {
+      "wall": 5.636186958,
+      "visitor": 4.111677158,
+      "cpu_total": 5.567774664
+    },
+    "candidate_median_s": {
+      "wall": 5.515045042,
+      "visitor": 3.962614497,
+      "cpu_total": 5.428603675
+    },
+    "delta_pct": {
+      "wall": -2.15,
+      "visitor": -3.63,
+      "cpu_total": -2.50
+    }
+  },
+  "warm_one_server_ab_clean": {
+    "config": "/tmp/ruby-fast-lsp-one-server-jruby-9.2.21.json",
+    "cache": "/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731",
+    "warmup": true,
+    "n_pairs": 3,
+    "semantic_result_fingerprint_hex": "18685e2fa028e8ff66cf2c57383cc408",
+    "fingerprints_equal": true,
+    "allowed_peak_rss_ceiling_bytes": 1776846438,
+    "baseline_median": {
+      "wall_ms": 10139.129542,
+      "user_cpu_ms": 12804.734,
+      "peak_rss_bytes": 919470080,
+      "semantic_complete_ms": 10139,
+      "project_navigation_ready_ms": 4955,
+      "dependency_navigation_ready_ms": 10101
+    },
+    "candidate_median": {
+      "wall_ms": 10180.93,
+      "user_cpu_ms": 12857.03,
+      "peak_rss_bytes": 1024032768,
+      "semantic_complete_ms": 10180,
+      "project_navigation_ready_ms": 5039,
+      "dependency_navigation_ready_ms": 10145
+    },
+    "delta_pct": {
+      "wall_ms": 0.41,
+      "user_cpu_ms": 0.41,
+      "peak_rss_bytes": 11.37,
+      "semantic_complete_ms": 0.40,
+      "project_navigation_ready_ms": 1.70,
+      "dependency_navigation_ready_ms": 0.44
+    },
+    "rss_note": "Median RSS moved up but stayed under the fixed ceiling. The change retains no new structures; treat the RSS median delta as run-to-run allocator noise on this three-pair sample."
+  },
+  "warm_one_server_ab_noisy_first_series": {
+    "note": "First three-pair series without warmup mixed ~17s cold-adjacent outliers and produced a false ~15% median wall regression; discarded for decision. Fingerprints still matched (14c870a7f0e89ee6963eb8d9905919cb).",
+    "decision_if_used_alone": "would_have_rejected"
+  },
+  "reason": "Identical semantic-result fingerprints. Sync FileProcessor visitor CPU improved ~3.6% on the attached hotspot with unchanged method fact counts. Clean warm one-server latency is neutral (~+0.4%). RSS remains under the fixed ceiling; no retained-structure risk. Keep the reorder.",
+  "not_repeated": [
+    "extension-call-classification-rejection-2026-08-01.json",
+    "fact-collector-source-ordered-local-receivers text-fallback",
+    "borrowed-method-return-context-rejection-2026-08-01.json"
+  ],
+  "next_cut_if_still_needed": "process_call_node_entry / nested CallNode resolve_method_return_type / Expression-subject index for non-variable receivers; or lazy extension resolved_callees"
+}
