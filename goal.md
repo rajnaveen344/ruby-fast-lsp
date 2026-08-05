@@ -543,6 +543,32 @@ and peak RSS.
   local-flow expressions, reviewed diagnostic precision with reduced
   real-project fixtures, and the complete alternating release-build
   baseline/candidate cold/warm/edit/query/allocation/peak-RSS matrix.
+- A production-blocking panic was diagnosed and fixed on the real
+  `~/goshposh/server` umbrella: every workspace aborted exhaustive
+  collection during initial indexing with
+  `INVARIANT VIOLATED: TypeInferenceOutcome::proven received RubyType::Unknown`
+  inside gem dependency product construction. The backtrace pinned it to the
+  SCC solver: a YARD return such as `[Array [Array, String]]` produced
+  `Union([Unknown, String])` because `YardTypeConverter` built unions without
+  the Unknown-absorption rule; the exact-variant equality checks in
+  `MethodReturnEquation::from_ruby_type` and `TypeInferenceOutcome::proven`
+  missed that shape, the solver's `RubyType::union` flattened it into
+  `Proven(Unknown)`, and the strict invariant panicked. The YARD converter now
+  absorbs Unknown members, the equation boundary rejects union-with-Unknown
+  through a shared `RubyType::union_members_contain_unknown` predicate, the
+  solver fails closed to `Unknown[unresolved_method_return]` instead of
+  constructing `Proven(Unknown)`, and the outcome invariant covers union
+  members. `Array([Unknown])`/`Hash([Unknown], [Unknown])` remain legitimate
+  proven outer shapes. Regression tests cover the converter, the invariant,
+  and the solver; the failing method now reports an explained Unknown with
+  YARD parameter types intact. The masked-error path was also fixed: the
+  frontier task's own failure now surfaces before the receiver-side
+  "active dependency frontier ended" message, and partitioned worker errors
+  carry the panic payload. The installed release binary cold-checks
+  `~/goshposh/server` (2,619 files) end-to-end in **29.2 s cold / 19.1 s warm**
+  with 6,910 proven method returns, 17,116 explained Unknowns, and zero
+  suppressed dependency diagnostics; the alternating base-vs-candidate matrix
+  and goshposh RSS ceiling measurement remain open.
 
 ## Correct Architecture
 
