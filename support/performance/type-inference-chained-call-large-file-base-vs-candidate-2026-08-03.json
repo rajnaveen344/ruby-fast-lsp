@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-first-type-inference-large-single-file-base-vs-candidate",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "candidate_worktree_has_changes": true,
+    "fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "fixture_bytes": 225569,
+    "fixture_lines": 5095
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776,
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820e 2025-10-10)"
+  },
+  "method": {
+    "binary": "target/release/profile_single_file",
+    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "release_compilation_excluded": true,
+    "phase_alternating_pairs": 15,
+    "resource_alternating_pairs": 7,
+    "pair_order": "candidate/base order alternated on every pair",
+    "resource_command": "/usr/bin/time -l"
+  },
+  "phase_samples_ms": {
+    "profile_total": {
+      "candidate": [111.331458, 109.113375, 109.888792, 109.567459, 109.350667, 110.575292, 113.616125, 110.062667, 108.587417, 108.836042, 109.199208, 109.220625, 110.481542, 108.915291, 109.020542],
+      "base": [112.261625, 107.685334, 108.108125, 107.896709, 109.2835, 108.153458, 109.70325, 108.271333, 108.848959, 107.489208, 107.666417, 109.164333, 108.117625, 107.942417, 107.686375],
+      "candidate_median": 109.350667,
+      "base_median": 108.117625,
+      "median_change_percent": 1.14
+    },
+    "file_processor_total": {
+      "candidate": [110.777667, 108.647625, 109.424083, 109.101458, 108.877709, 110.115833, 113.107541, 109.610458, 108.132791, 108.393334, 108.72275, 108.775584, 110.029417, 108.462209, 108.556834],
+      "base": [111.795375, 107.250209, 107.66375, 107.459042, 108.828917, 107.732333, 109.172334, 107.818416, 108.40075, 107.033625, 107.212875, 108.68875, 107.603291, 107.501041, 107.239458],
+      "candidate_median": 108.877709,
+      "base_median": 107.66375,
+      "median_change_percent": 1.13
+    },
+    "parse": {
+      "candidate_median": 4.078167,
+      "base_median": 4.015708,
+      "median_change_percent": 1.56
+    },
+    "direct_facts": {
+      "candidate_median": 5.329583,
+      "base_median": 5.317208,
+      "median_change_percent": 0.23
+    },
+    "semantic_visitor": {
+      "candidate_median": 88.025666,
+      "base_median": 87.34625,
+      "median_change_percent": 0.78
+    },
+    "replace_and_resolve": {
+      "candidate_median": 11.295541,
+      "base_median": 10.769458,
+      "median_change_percent": 4.88,
+      "median_absolute_change_ms": 0.526083
+    }
+  },
+  "process_resource_samples": {
+    "profile_total_ms": {
+      "candidate": [106.934, 107.365875, 106.449042, 108.232458, 111.678042, 107.406334, 107.654208],
+      "base": [105.9825, 106.575416, 106.553708, 106.240542, 107.56075, 106.513208, 107.387042],
+      "candidate_median": 107.406334,
+      "base_median": 106.553708,
+      "median_change_percent": 0.80
+    },
+    "real_seconds": {
+      "candidate": [0.84, 0.85, 0.84, 0.84, 0.86, 0.85, 0.84],
+      "base": [0.84, 0.84, 0.86, 0.85, 0.88, 0.87, 0.84],
+      "candidate_median": 0.84,
+      "base_median": 0.85,
+      "median_change_percent": -1.18
+    },
+    "cpu_seconds": {
+      "candidate": [0.82, 0.83, 0.82, 0.83, 0.85, 0.84, 0.82],
+      "base": [0.82, 0.82, 0.85, 0.84, 0.86, 0.85, 0.82],
+      "candidate_median": 0.83,
+      "base_median": 0.84,
+      "median_change_percent": -1.19
+    },
+    "maximum_resident_set_size_bytes": {
+      "candidate": [79052800, 78970880, 78774272, 79724544, 85213184, 79822848, 79691776],
+      "base": [78495744, 78594048, 81281024, 79052800, 79265792, 82329600, 78921728],
+      "candidate_median": 79691776,
+      "base_median": 79052800,
+      "median_change_percent": 0.81,
+      "candidate_max": 85213184,
+      "base_max": 82329600
+    }
+  },
+  "assessment": {
+    "three_percent_median_file_processor_gate_passed": true,
+    "three_percent_median_process_wall_gate_passed": true,
+    "three_percent_median_cpu_gate_passed": true,
+    "three_percent_median_rss_gate_passed": true,
+    "large_multiline_chain_fixture_covered": true,
+    "full_performance_matrix_still_required": true
+  },
+  "limitations": [
+    "This measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual query latency, allocations, or the full goshposh RSS ceiling.",
+    "The 15 phase pairs characterize medians but do not establish stable p95 latency.",
+    "The replace-and-resolve subphase increased by 0.53 ms at the median even though end-to-end file processing stayed within the three-percent gate.",
+    "The candidate includes the cumulative proof-first inference worktree, so this is not a microbenchmark of chained-call expression facts alone.",
+    "Correctness, deterministic output, scorecard, edit lifecycle, CLI/LSP parity, and the complete performance matrix are verified separately."
+  ]
+}

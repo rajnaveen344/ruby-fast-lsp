@@ -16,11 +16,13 @@ pub trait CompletionSemanticQuery {
         method: &RubyMethod,
     ) -> Option<RubyType>;
 
-    fn variable_type_in_file(
+    fn variable_type_before(
         &self,
         kind: CompletionVariableKind,
         name: &str,
+        owner: &FullyQualifiedName,
         file_id: crate::core::SourceFileId,
+        byte_offset: u32,
     ) -> Option<RubyType>;
 
     fn implicit_receiver_at(
@@ -49,6 +51,7 @@ pub fn receiver_type_from_context(
     document: &RubyDocument,
     content: &str,
     position: Position,
+    namespace_kind: NamespaceKind,
     identifier: &Option<Identifier>,
 ) -> Option<RubyType> {
     if let Some(Identifier::RubyMethod {
@@ -93,6 +96,7 @@ pub fn receiver_type_from_context(
             position,
             inner_receiver,
             namespace,
+            namespace_kind,
         );
         if let Some(inner_type) = inner_type {
             if method_name == "new" {
@@ -117,13 +121,24 @@ pub fn receiver_type_from_context(
         return Some(ty.clone());
     }
 
-    if let Some(Identifier::RubyMethod { receiver, .. }) = identifier {
+    if let Some(Identifier::RubyMethod {
+        receiver,
+        namespace,
+        ..
+    }) = identifier
+    {
         let var_type = match receiver {
             MethodReceiver::InstanceVariable(name)
             | MethodReceiver::ClassVariable(name)
-            | MethodReceiver::GlobalVariable(name) => {
-                lookup_variable_type(query, document, name, receiver)
-            }
+            | MethodReceiver::GlobalVariable(name) => lookup_variable_type(
+                query,
+                document,
+                name,
+                receiver,
+                namespace,
+                namespace_kind,
+                position,
+            ),
             MethodReceiver::None
             | MethodReceiver::SelfReceiver
             | MethodReceiver::Super
@@ -224,6 +239,41 @@ pub fn rbs_method_matches_for_type(
     partial_method: &str,
     kind: NamespaceKind,
 ) -> Vec<CompletionMethodMatch> {
+    if let RubyType::Union(types) = receiver_type {
+        let Some((first, rest)) = types.split_first() else {
+            return Vec::new();
+        };
+        let mut common = rbs_method_matches_for_type(first, partial_method, kind)
+            .into_iter()
+            .map(|candidate| (candidate.name.clone(), candidate))
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        for member in rest {
+            let member_matches = rbs_method_matches_for_type(member, partial_method, kind)
+                .into_iter()
+                .map(|candidate| (candidate.name.clone(), candidate))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            common.retain(|name, candidate| {
+                let Some(member_candidate) = member_matches.get(name) else {
+                    return false;
+                };
+                if candidate.params != member_candidate.params {
+                    return false;
+                }
+                candidate.return_type = match (
+                    candidate.return_type.take(),
+                    member_candidate.return_type.clone(),
+                ) {
+                    (Some(left), Some(right)) => RubyType::union_from_proven([left, right], Some),
+                    (Some(_), None) | (None, Some(_)) | (None, None) => None,
+                };
+                true
+            });
+        }
+
+        return common.into_values().collect();
+    }
+
     let mut matches = Vec::new();
     let mut seen_methods = std::collections::HashSet::new();
     let is_singleton = kind == NamespaceKind::Singleton;
@@ -273,6 +323,7 @@ fn resolve_method_receiver_type(
     position: Position,
     receiver: &MethodReceiver,
     current_namespace: &[RubyConstant],
+    namespace_kind: NamespaceKind,
 ) -> Option<RubyType> {
     match receiver {
         MethodReceiver::Constant(parts) => query
@@ -297,9 +348,15 @@ fn resolve_method_receiver_type(
         MethodReceiver::SelfReceiver | MethodReceiver::Super => None,
         MethodReceiver::InstanceVariable(name)
         | MethodReceiver::ClassVariable(name)
-        | MethodReceiver::GlobalVariable(name) => {
-            lookup_variable_type(query, document, name, receiver)
-        }
+        | MethodReceiver::GlobalVariable(name) => lookup_variable_type(
+            query,
+            document,
+            name,
+            receiver,
+            current_namespace,
+            namespace_kind,
+            position,
+        ),
         MethodReceiver::MethodCall {
             inner_receiver,
             method_name,
@@ -311,6 +368,7 @@ fn resolve_method_receiver_type(
                 position,
                 inner_receiver,
                 current_namespace,
+                namespace_kind,
             )?;
             if method_name == "new" {
                 if let RubyType::ClassReference(fqn) = &inner_type {
@@ -329,6 +387,12 @@ fn infer_method_call_return_type(
     receiver_type: &RubyType,
     method_name: &str,
 ) -> Option<RubyType> {
+    if let RubyType::Union(types) = receiver_type {
+        return crate::inference::method::return_type::resolve_proven_union(types, |member| {
+            infer_method_call_return_type(query, member, method_name)
+        });
+    }
+
     if method_name == "new" {
         if let RubyType::ClassReference(fqn) = receiver_type {
             return Some(RubyType::Class(fqn.clone()));
@@ -395,17 +459,9 @@ fn infer_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> 
             infer_generic_rbs_method_return_type(receiver_type, method_name)
         }
         RubyType::Union(types) => {
-            let mut return_types = types
-                .iter()
-                .filter_map(|ty| infer_method_call_return_type_fallback(ty, method_name))
-                .collect::<Vec<_>>();
-            return_types.sort_by_key(|ty| ty.to_string());
-            return_types.dedup();
-            match return_types.len() {
-                0 => None,
-                1 => return_types.pop(),
-                _ => Some(RubyType::union(return_types)),
-            }
+            crate::inference::method::return_type::resolve_proven_union(types, |ty| {
+                infer_method_call_return_type_fallback(ty, method_name)
+            })
         }
         RubyType::Unknown => None,
     }
@@ -535,6 +591,9 @@ fn lookup_variable_type(
     document: &RubyDocument,
     name: &str,
     receiver: &MethodReceiver,
+    current_namespace: &[RubyConstant],
+    namespace_kind: NamespaceKind,
+    position: Position,
 ) -> Option<RubyType> {
     let kind = match receiver {
         MethodReceiver::InstanceVariable(_) => CompletionVariableKind::Instance,
@@ -550,7 +609,14 @@ fn lookup_variable_type(
         | MethodReceiver::Expression => return None,
     };
 
-    query.variable_type_in_file(kind, name, document.analysis_file_id())
+    let file_id = document.analysis_file_id();
+    let byte_offset = document.position_to_analysis_offset(position);
+    let owner = query
+        .implicit_receiver_at(file_id, byte_offset)
+        .unwrap_or_else(|| {
+            FullyQualifiedName::namespace_with_kind(current_namespace.to_vec(), namespace_kind)
+        });
+    query.variable_type_before(kind, name, &owner, file_id, byte_offset)
 }
 
 pub fn infer_constructor_assignment_type(content: &str, var_name: &str) -> Option<RubyType> {
@@ -703,15 +769,11 @@ fn infer_array_element_types(inner: &str) -> Vec<RubyType> {
         } else {
             RubyType::Unknown
         };
-        if ty != RubyType::Unknown && !types.contains(&ty) {
+        if !types.contains(&ty) {
             types.push(ty);
         }
     }
-    if types.is_empty() {
-        vec![RubyType::Unknown]
-    } else {
-        types
-    }
+    RubyType::canonical_union_members(types)
 }
 
 #[cfg(test)]
@@ -746,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn rbs_method_matches_include_union_type_methods() {
+    fn rbs_method_matches_for_union_require_every_member() {
         let ty = RubyType::union(vec![RubyType::string(), RubyType::integer()]);
         let matches = rbs_method_matches_for_type(&ty, "", NamespaceKind::Instance);
         let names = matches
@@ -754,8 +816,17 @@ mod tests {
             .map(|candidate| candidate.name.as_str())
             .collect::<Vec<_>>();
 
-        assert!(names.contains(&"upcase"));
-        assert!(names.contains(&"abs"));
+        assert!(names.contains(&"to_s"));
+        assert!(!names.contains(&"upcase"));
+        assert!(!names.contains(&"abs"));
+    }
+
+    #[test]
+    fn unresolved_array_literal_does_not_drop_unknown_elements() {
+        assert_eq!(
+            infer_literal_type_from_expression("[1, dynamic_value]"),
+            Some(RubyType::Array(vec![RubyType::Unknown]))
+        );
     }
 
     #[test]

@@ -1,8 +1,9 @@
 use crate::core::{
     DiagnosticFact, DiagnosticSeverity, FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact,
-    GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodCalleeResolution, MethodFact, NamespaceKind,
-    ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SymbolFact, SymbolKind, TypeFact,
-    TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
+    GraphEdgeKind, GraphNodeFact, GraphNodeKind, InferenceEvidence, InferenceTelemetry,
+    MethodCalleeResolution, MethodFact, MethodReturnEquation, NamespaceKind, ReferenceCandidate,
+    RubyConstant, RubyMethod, RubyType, SymbolFact, SymbolKind, TypeFact, TypeInferenceOutcome,
+    TypeProvenance, TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
 };
 
 use super::*;
@@ -422,6 +423,48 @@ fn type_at_reads_engine_owned_store() {
         TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::integer()),
         other => panic!("expected resolved type fact, got {other:?}"),
     }
+}
+
+#[test]
+fn expression_query_preserves_an_exact_unknown_proof_barrier() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "app/user.rb", "@value");
+    let range = engine.text_range(file_id, 0, 6);
+
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            types: vec![TypeFact::new(
+                TypeSubject::Expression(range),
+                RubyType::Unknown,
+                range,
+                TypeProvenance::Flow,
+            )],
+            inference: InferenceEvidence {
+                expression_unknown_reasons: vec![(range, UnknownReason::NoReachingAssignment)],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(
+        engine.query().expression_type_at(file_id, 2),
+        Some(RubyType::Unknown),
+        "an exact Unknown expression must stop adapters from borrowing another concrete type"
+    );
+    assert_eq!(
+        engine.query().expression_unknown_reason(range),
+        Some(UnknownReason::NoReachingAssignment)
+    );
+    assert_eq!(
+        engine.query().expression_unknown_reason_at(file_id, 2),
+        Some(UnknownReason::NoReachingAssignment)
+    );
+
+    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    assert_eq!(engine.query().expression_unknown_reason(range), None);
 }
 
 #[test]
@@ -899,6 +942,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
                     is_super: false,
                     access: crate::core::MethodReferenceAccess::VisibilityBypass,
                     caller: None,
+                    call_expression_range: None,
                     preferred_definition_range: Some(int_range),
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: reference_range,
@@ -1028,6 +1072,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
                     is_super: false,
                     access: crate::core::MethodReferenceAccess::ExplicitReceiver,
                     caller: None,
+                    call_expression_range: None,
                     preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: TextRange::new(ref_file, 5, 9),
@@ -1308,6 +1353,81 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
             .query()
             .constant_definition_ranges(&[RubyConstant::new("Widget").unwrap()], &[],),
         vec![TextRange::new(implementation_file, 0, 37)]
+    );
+}
+
+#[test]
+fn reopened_method_return_requires_every_definition_to_resolve() {
+    let mut engine = AnalysisEngine::new();
+    let known_file = register_project_file(
+        &mut engine,
+        "lib/known.rb",
+        "class Service\n  def value = 'known'\nend\n",
+    );
+    let unresolved_file = register_project_file(
+        &mut engine,
+        "lib/unresolved.rb",
+        "class Service\n  def value = dynamic_value\nend\n",
+    );
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Service").unwrap()]);
+    let method_name = RubyMethod::new("value").unwrap();
+    let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
+    let known_range = TextRange::new(known_file, 16, 35);
+    let unresolved_range = TextRange::new(unresolved_file, 16, 42);
+
+    engine.replace_facts(
+        known_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(known_file, 0, 40),
+            )],
+            methods: vec![MethodFact::new(method.clone(), owner.clone(), known_range)],
+            types: vec![TypeFact::new(
+                TypeSubject::MethodReturn(method.clone()),
+                RubyType::string(),
+                known_range,
+                TypeProvenance::Inferred,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+    engine.replace_facts(
+        unresolved_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(unresolved_file, 0, 47),
+            )],
+            methods: vec![MethodFact::new(method, owner.clone(), unresolved_range)],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let callees = engine
+        .query()
+        .resolve_method_callees(&owner, &method_name)
+        .expect("reopened Service#value must resolve");
+    assert_eq!(callees.len(), 1);
+    assert_eq!(
+        engine
+            .query()
+            .method_return_type_for_receiver(&owner, &method_name),
+        None,
+        "INVARIANT VIOLATED: receiver return inference discarded an unresolved reopened method \
+         definition. This is a bug because every definition is a reachable static outcome. Fix: \
+         return Unknown/None unless every matching definition proves a return type."
+    );
+    assert_eq!(
+        engine.query().method_return_type_for_callee(&callees[0]),
+        None,
+        "INVARIANT VIOLATED: resolved-callee return inference discarded an unresolved reopened \
+         method definition. This is a bug because chained calls would consume a partial concrete \
+         type. Fix: require a return type for every resolved definition range."
     );
 }
 
@@ -1971,4 +2091,80 @@ fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
 
     engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
     assert_eq!(engine.query().execution_context_at(file_id, 30), None);
+}
+
+#[test]
+fn inference_telemetry_replaces_with_its_owning_file() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "types.rb", "class Types; end\n");
+    let method = FullyQualifiedName::method(
+        vec![RubyConstant::new("Types").unwrap()],
+        RubyMethod::new("value").unwrap(),
+    );
+    let unknown = TypeInferenceOutcome::unknown(UnknownReason::UnprovenRecursiveCycle);
+    let mut recursive = InferenceTelemetry::default();
+    recursive.observe_method_return(&unknown);
+    recursive.recursive_components = 1;
+    recursive.recursive_methods = 1;
+    recursive.solver_iterations = 1;
+
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            inference: InferenceEvidence {
+                method_return_outcomes: [(method.clone(), unknown)].into_iter().collect(),
+                method_return_equations: vec![MethodReturnEquation::from_ruby_type(
+                    method.clone(),
+                    RubyType::Unknown,
+                    UnknownReason::UnprovenRecursiveCycle,
+                )],
+                telemetry: recursive,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    assert_eq!(engine.inference_telemetry().unknown_method_returns, 1);
+    assert_eq!(
+        engine
+            .method_return_outcomes_in_file(file_id)
+            .and_then(|outcomes| outcomes.get(&method))
+            .and_then(TypeInferenceOutcome::unknown_reason),
+        Some(UnknownReason::UnprovenRecursiveCycle)
+    );
+
+    let concrete = TypeInferenceOutcome::proven(RubyType::string());
+    let mut proven = InferenceTelemetry::default();
+    proven.observe_method_return(&concrete);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            inference: InferenceEvidence {
+                method_return_outcomes: [(method.clone(), concrete)].into_iter().collect(),
+                method_return_equations: vec![MethodReturnEquation::proven(
+                    method.clone(),
+                    RubyType::string(),
+                )],
+                telemetry: proven,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let current = engine.inference_telemetry();
+    assert_eq!(current.method_return_outcomes, 1);
+    assert_eq!(current.proven_method_returns, 1);
+    assert_eq!(current.unknown_method_returns, 0);
+    assert!(current.unknown_reasons.is_empty());
+    assert_eq!(current.recursive_components, 0);
+    assert_eq!(
+        engine
+            .method_return_outcomes_in_file(file_id)
+            .and_then(|outcomes| outcomes.get(&method))
+            .and_then(TypeInferenceOutcome::proven_type),
+        Some(&RubyType::string())
+    );
 }

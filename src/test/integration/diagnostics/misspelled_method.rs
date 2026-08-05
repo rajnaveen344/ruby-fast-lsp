@@ -56,3 +56,25 @@ u = User.new
     )
     .await;
 }
+
+#[tokio::test]
+async fn unknown_reassignment_does_not_emit_a_receiver_method_diagnostic() {
+    check(
+        r#"
+class Target
+  def known
+    true
+  end
+end
+
+class Consumer
+  def run
+    @value = Target.new
+    @value = dynamic_value
+    <warn none code="unresolved-method">@value.known</warn>
+  end
+end
+"#,
+    )
+    .await;
+}

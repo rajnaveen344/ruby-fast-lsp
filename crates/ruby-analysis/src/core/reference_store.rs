@@ -71,6 +71,7 @@ pub enum ReferenceCandidateKind {
         is_super: bool,
         access: MethodReferenceAccess,
         caller: Option<FullyQualifiedName>,
+        call_expression_range: Option<TextRange>,
         preferred_definition_range: Option<TextRange>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     },
@@ -114,6 +115,7 @@ pub struct MethodReferenceCandidate {
     pub is_super: bool,
     pub access: MethodReferenceAccess,
     pub caller: Option<FullyQualifiedName>,
+    pub call_expression_range: Option<TextRange>,
     pub preferred_definition_range: Option<TextRange>,
     pub diagnostics: MethodReferenceDiagnostics,
 }
@@ -151,6 +153,7 @@ pub struct StoredMethodReferenceCandidate {
     pub is_super: bool,
     pub access: MethodReferenceAccess,
     pub caller: Option<FqnId>,
+    pub call_expression_range: Option<TextRange>,
     pub preferred_definition_range: Option<TextRange>,
     pub diagnostics: Option<Box<MethodReferenceDiagnostics>>,
 }
@@ -191,6 +194,7 @@ pub enum StoredReferenceCandidateKind {
         is_super: bool,
         access: MethodReferenceAccess,
         caller: Option<FqnId>,
+        call_expression_range: Option<TextRange>,
         preferred_definition_range: Option<TextRange>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     },
@@ -216,6 +220,7 @@ impl StoredReferenceCandidate {
         is_super: bool,
         access: MethodReferenceAccess,
         caller: Option<FqnId>,
+        call_expression_range: Option<TextRange>,
         preferred_definition_range: Option<TextRange>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     ) -> Self {
@@ -228,6 +233,7 @@ impl StoredReferenceCandidate {
                 is_super,
                 access,
                 caller,
+                call_expression_range,
                 preferred_definition_range,
                 diagnostics,
             },
@@ -275,6 +281,14 @@ impl ReferenceCandidate {
     }
 
     pub fn method(reference_range: TextRange, candidate: MethodReferenceCandidate) -> Self {
+        if let Some(expression_range) = candidate.call_expression_range {
+            assert!(
+                expression_range.file_id == reference_range.file_id
+                    && expression_range.start_byte <= reference_range.start_byte
+                    && expression_range.end_byte >= reference_range.end_byte,
+                "INVARIANT VIOLATED: method reference range is outside its call expression. This is a bug because deferred call-type finalization must update the AST call that owns the referenced message. Fix: attach the full enclosing CallNode range to the candidate."
+            );
+        }
         Self {
             range: reference_range,
             kind: ReferenceCandidateKind::Method {
@@ -284,6 +298,7 @@ impl ReferenceCandidate {
                 is_super: candidate.is_super,
                 access: candidate.access,
                 caller: candidate.caller,
+                call_expression_range: candidate.call_expression_range,
                 preferred_definition_range: candidate.preferred_definition_range,
                 diagnostics: Some(Box::new(candidate.diagnostics)),
             },
@@ -312,6 +327,7 @@ impl ReferenceCandidate {
                 is_super: false,
                 access: MethodReferenceAccess::Normal,
                 caller,
+                call_expression_range: None,
                 preferred_definition_range: None,
                 diagnostics: None,
             },
@@ -371,6 +387,7 @@ impl ReferenceCandidateStore {
                     is_super,
                     access,
                     caller,
+                    call_expression_range,
                     preferred_definition_range,
                     diagnostics,
                 } => methods.push(StoredMethodReferenceCandidate {
@@ -381,6 +398,7 @@ impl ReferenceCandidateStore {
                     is_super,
                     access,
                     caller,
+                    call_expression_range,
                     preferred_definition_range,
                     diagnostics,
                 }),
@@ -431,6 +449,7 @@ impl ReferenceCandidateStore {
                         is_super: candidate.is_super,
                         access: candidate.access,
                         caller: candidate.caller,
+                        call_expression_range: candidate.call_expression_range,
                         preferred_definition_range: candidate.preferred_definition_range,
                         diagnostics: candidate.diagnostics.clone(),
                     },
@@ -466,6 +485,7 @@ impl ReferenceCandidateStore {
                     is_super: candidate.is_super,
                     access: candidate.access,
                     caller: candidate.caller,
+                    call_expression_range: candidate.call_expression_range,
                     preferred_definition_range: candidate.preferred_definition_range,
                     diagnostics: candidate.diagnostics.clone(),
                 },

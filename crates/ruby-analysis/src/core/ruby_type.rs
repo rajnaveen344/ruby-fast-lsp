@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 
 /// Represents Ruby types in the type inference system
 /// Following Ruby's object model where everything is an object
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RubyType {
     // Built-in Ruby classes (everything is an object in Ruby)
     Class(FullyQualifiedName),
@@ -56,7 +56,35 @@ impl RubyType {
     }
 
     pub fn boolean() -> Self {
-        RubyType::Union(vec![Self::true_class(), Self::false_class()])
+        // `FalseClass` sorts before `TrueClass`; construct this closed language
+        // union directly instead of paying the general flatten/sort/dedup cost.
+        RubyType::Union(vec![Self::false_class(), Self::true_class()])
+    }
+
+    /// Construct `inner | NilClass` without guessing when `inner` is Unknown.
+    ///
+    /// The common concrete case needs only one comparison. Existing unions
+    /// still use the general constructor so nested alternatives are flattened
+    /// and deduplicated canonically.
+    pub fn optional(inner: RubyType) -> Self {
+        match inner {
+            RubyType::Unknown => RubyType::Unknown,
+            RubyType::Union(types) => RubyType::union(
+                types
+                    .into_iter()
+                    .chain(std::iter::once(RubyType::nil_class())),
+            ),
+            inner => {
+                let nil = RubyType::nil_class();
+                if inner == nil {
+                    inner
+                } else if inner < nil {
+                    RubyType::Union(vec![inner, nil])
+                } else {
+                    RubyType::Union(vec![nil, inner])
+                }
+            }
+        }
     }
 
     pub fn array_of(element_type: RubyType) -> Self {
@@ -65,6 +93,57 @@ impl RubyType {
 
     pub fn hash_of(key_type: RubyType, value_type: RubyType) -> Self {
         RubyType::Hash(vec![key_type], vec![value_type])
+    }
+
+    /// Normalize an exhaustive set of alternatives for use inside a
+    /// structured type such as `Array` or `Hash`.
+    ///
+    /// Unknown absorbs the alternatives because retaining the known members
+    /// beside it would let consumers silently select a partial answer. Empty
+    /// sets also become one explicit Unknown type argument.
+    pub fn canonical_union_members(types: impl IntoIterator<Item = RubyType>) -> Vec<RubyType> {
+        let mut types = types.into_iter();
+        let Some(first) = types.next() else {
+            return vec![RubyType::Unknown];
+        };
+        let Some(second) = types.next() else {
+            return match first {
+                RubyType::Union(_) => match RubyType::union([first]) {
+                    RubyType::Union(types) => types,
+                    ty => vec![ty],
+                },
+                ty => vec![ty],
+            };
+        };
+
+        match RubyType::union(
+            std::iter::once(first)
+                .chain(std::iter::once(second))
+                .chain(types),
+        ) {
+            RubyType::Union(types) => types,
+            ty => vec![ty],
+        }
+    }
+
+    /// Resolve every reachable alternative before constructing its union.
+    /// Missing or Unknown evidence fails closed instead of being filtered out.
+    pub fn union_from_proven<T>(
+        alternatives: impl IntoIterator<Item = T>,
+        mut resolve: impl FnMut(T) -> Option<RubyType>,
+    ) -> Option<RubyType> {
+        let mut resolved = Vec::new();
+        for alternative in alternatives {
+            let ruby_type = resolve(alternative)?;
+            if ruby_type == RubyType::Unknown {
+                return None;
+            }
+            resolved.push(ruby_type);
+        }
+        if resolved.is_empty() {
+            return None;
+        }
+        Some(RubyType::union(resolved))
     }
 
     /// Create a new union type from a collection of types
@@ -90,7 +169,7 @@ impl RubyType {
         }
 
         // Remove duplicates
-        type_vec.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+        type_vec.sort();
         type_vec.dedup();
 
         match type_vec.len() {
@@ -189,7 +268,7 @@ impl RubyType {
         if self.is_nilable() {
             self
         } else {
-            RubyType::union([self, RubyType::nil_class()])
+            RubyType::optional(self)
         }
     }
 
@@ -254,9 +333,13 @@ impl RubyType {
 
     /// Create a class type from a name
     pub fn class(name: &str) -> Self {
-        RubyType::Class(FullyQualifiedName::try_from(name).unwrap_or_else(|_| {
-            // Fallback for complex names
-            FullyQualifiedName::try_from("Object").unwrap()
+        RubyType::Class(FullyQualifiedName::try_from(name).unwrap_or_else(|error| {
+            panic!(
+                "INVARIANT VIOLATED: RubyType::class received invalid Ruby name `{name}`: \
+                 {error}. This is a bug because replacing an invalid type identity with Object \
+                 would publish a wrong concrete type. Fix: validate source names at the domain \
+                 boundary and construct RubyType only from a valid FullyQualifiedName."
+            )
         }))
     }
 }
@@ -313,12 +396,44 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "INVARIANT VIOLATED: RubyType::class received invalid Ruby name")]
+    fn invalid_class_name_does_not_fall_back_to_object() {
+        let _ = RubyType::class("not::a::valid::constant");
+    }
+
+    #[test]
     fn test_collection_types() {
         let array_type = RubyType::array_of(RubyType::integer());
         assert_eq!(array_type.to_string(), "Array<Integer>");
 
         let hash_type = RubyType::hash_of(RubyType::string(), RubyType::integer());
         assert_eq!(hash_type.to_string(), "Hash<String, Integer>");
+    }
+
+    #[test]
+    fn specialized_closed_unions_remain_canonical_and_proof_first() {
+        assert_eq!(RubyType::boolean().to_string(), "(FalseClass | TrueClass)");
+        assert_eq!(
+            RubyType::optional(RubyType::array_of(RubyType::string())).to_string(),
+            "(NilClass | Array<String>)"
+        );
+        assert_eq!(
+            RubyType::optional(RubyType::nil_class()),
+            RubyType::nil_class()
+        );
+        assert_eq!(RubyType::optional(RubyType::Unknown), RubyType::Unknown);
+    }
+
+    #[test]
+    fn single_canonical_collection_member_avoids_changing_its_type() {
+        assert_eq!(
+            RubyType::canonical_union_members([RubyType::string()]),
+            vec![RubyType::string()]
+        );
+        assert_eq!(
+            RubyType::canonical_union_members(std::iter::empty()),
+            vec![RubyType::Unknown]
+        );
     }
 
     #[test]

@@ -121,6 +121,7 @@ impl<'a> AnalysisQuery<'a> {
                         is_super,
                         access,
                         caller,
+                        call_expression_range: _,
                         preferred_definition_range,
                         diagnostics,
                     } => {

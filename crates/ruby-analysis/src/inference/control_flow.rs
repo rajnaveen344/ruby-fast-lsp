@@ -133,8 +133,12 @@ pub fn analyze(node: &Node<'_>) -> Reachability {
 /// Earlier statements that diverge make later ones unreachable; that is the
 /// `unreachable-code` consumer's concern, not this function's.
 pub fn analyze_statements(stmts: &StatementsNode<'_>) -> Reachability {
-    let body: Vec<_> = stmts.body().iter().collect();
-    body.last().map_or(Reachability::Falls, analyze)
+    stmts
+        .body()
+        .iter()
+        .last()
+        .as_ref()
+        .map_or(Reachability::Falls, analyze)
 }
 
 /// Convenience: does any path exit?

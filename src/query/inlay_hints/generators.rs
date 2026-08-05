@@ -91,10 +91,12 @@ pub fn generate_variable_type_hints(
         if let InlayNode::VariableWrite {
             kind,
             name,
+            name_start_offset,
             name_end_offset,
         } = node
         {
-            let ruby_type = infer_variable_type(*kind, name, context, *name_end_offset);
+            let ruby_type =
+                infer_variable_type(*kind, name, context, *name_start_offset, *name_end_offset);
 
             // Value constants are typed-only: skip Unknown so dynamic RHS stays quiet.
             // Locals/ivars keep the existing ": ?" placeholder.
@@ -184,31 +186,34 @@ pub fn generate_chained_call_hints(
     nodes: &[InlayNode],
     context: &HintContext,
 ) -> Vec<InlayHintData> {
+    let Some(engine) = context.analysis_engine.as_ref() else {
+        return Vec::new();
+    };
+    let engine = engine.read();
+    let query = AnalysisQuery::new(&engine);
     let mut hints = Vec::new();
 
     for node in nodes {
         if let InlayNode::ChainedCall { call_end_offset } = node {
-            // TODO: Implement proper type inference for chained calls
-            // This requires:
-            // 1. Inferring the receiver type
-            // 2. Looking up the method's return type
-            // For now, we'll leave this as a placeholder
+            let Some(ruby_type) =
+                query.proven_expression_type_ending_at(context.file_id, *call_end_offset)
+            else {
+                continue;
+            };
             hints.push(InlayHintData {
                 position: context
                     .document
                     .offset_to_position(*call_end_offset as usize),
-                label: ": ?".to_string(), // Placeholder
+                label: format!(": {ruby_type}"),
                 kind: InlayHintKind::ChainedMethodType,
-                tooltip: Some("Type at this point in method chain".to_string()),
+                tooltip: Some("Proven intermediate type in method chain".to_string()),
                 padding_left: true,
                 padding_right: false,
             });
         }
     }
 
-    // Return empty for now - chained call type inference needs more work
-    // Remove this line and return hints when properly implemented
-    Vec::new()
+    hints
 }
 
 /// Infer the type of a variable from context.
@@ -216,11 +221,14 @@ fn infer_variable_type(
     kind: VariableKind,
     name: &str,
     context: &HintContext,
-    byte_offset: u32,
+    name_start_offset: u32,
+    name_end_offset: u32,
 ) -> Option<RubyType> {
     match kind {
         VariableKind::Local => {
-            let position = context.document.offset_to_position(byte_offset as usize);
+            let position = context
+                .document
+                .offset_to_position(name_end_offset as usize);
 
             // Try VariableScopes tree
             if let Some(scope_id) = context.document.scope_at_position(position) {
@@ -234,13 +242,25 @@ fn infer_variable_type(
                 }
             }
 
-            variable_type_from_analysis_facts(kind, name, context, byte_offset)
+            variable_type_from_analysis_facts(
+                kind,
+                name,
+                context,
+                name_start_offset,
+                name_end_offset,
+            )
         }
         VariableKind::Instance
         | VariableKind::Class
         | VariableKind::Global
         | VariableKind::Constant => {
-            if let Some(ty) = variable_type_from_analysis_facts(kind, name, context, byte_offset) {
+            if let Some(ty) = variable_type_from_analysis_facts(
+                kind,
+                name,
+                context,
+                name_start_offset,
+                name_end_offset,
+            ) {
                 return Some(ty);
             }
             None
@@ -278,15 +298,17 @@ fn variable_type_from_analysis_facts(
     kind: VariableKind,
     name: &str,
     context: &HintContext,
-    byte_offset: u32,
+    name_start_offset: u32,
+    name_end_offset: u32,
 ) -> Option<RubyType> {
     let engine = context.analysis_engine.as_ref()?;
     let engine = engine.read();
-    AnalysisQuery::new(&engine).variable_type_before(
+    AnalysisQuery::new(&engine).variable_assignment_type_at(
         variable_type_kind(kind),
         name,
         context.file_id,
-        byte_offset,
+        name_start_offset,
+        name_end_offset,
     )
 }
 

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::InferenceTelemetry;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LookupEntry {
     pub fqn: String,
@@ -68,6 +70,7 @@ pub struct InferenceStatsResponse {
     pub methods_without_return_type: usize,
     pub inference_coverage_percent: f64,
     pub top_files_by_method_count: Vec<FileMethodCount>,
+    pub proof_telemetry: InferenceTelemetry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

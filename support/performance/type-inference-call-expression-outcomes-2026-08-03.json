@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-first-call-expression-outcomes",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "candidate_worktree_has_changes": true,
+    "fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "fixture_bytes": 225569,
+    "fixture_lines": 5095
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776
+  },
+  "method": {
+    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "release_compilation_excluded": true,
+    "alternating_process_pairs": 15,
+    "baseline_binary_sha256": "e7995512f9a3d4c870606b25d68f339e5cb52b6011023ab1de13416a1fa34c92",
+    "candidate_binary_sha256": "edcdb309fdfb135ef6f67600e8b7511e4ece2c95a4a371fafdc1c5b91ed11c03",
+    "focused_end_to_end_gate_percent": 3.0
+  },
+  "result": {
+    "file_processor_total_ms": {
+      "baseline_samples": [121.82875, 118.141708, 113.653708, 114.258584, 115.375458, 112.315875, 114.136292, 112.398792, 115.479625, 114.117833, 113.322625, 113.8045, 126.548375, 116.060584, 116.342459],
+      "candidate_samples": [121.117334, 115.986834, 118.011791, 114.428875, 114.49225, 127.803458, 115.264458, 118.42575, 121.937959, 114.709291, 115.48925, 115.462166, 114.454375, 114.648125, 115.920291],
+      "baseline_median": 114.258584,
+      "candidate_median": 115.48925,
+      "median_change_percent": 1.08,
+      "gate_passed": true
+    },
+    "profile_total_ms": {
+      "baseline_median": 114.821292,
+      "candidate_median": 115.978875,
+      "median_change_percent": 1.01,
+      "gate_passed": true
+    },
+    "semantic_visitor_ms": {
+      "baseline_median": 91.133083,
+      "candidate_median": 91.776416,
+      "median_change_percent": 0.71,
+      "gate_passed": true
+    },
+    "replace_and_resolve_ms": {
+      "baseline_median": 11.255542,
+      "candidate_median": 11.734625,
+      "median_change_percent": 4.26,
+      "focused_subphase_gate_passed": false
+    }
+  },
+  "interactive_queries": {
+    "command": "target/release/profiler --workspace tests/fixtures/type_inference_query_benchmark --benchmark-iterations 500 --check-budgets",
+    "candidate_profiler_sha256": "b667853268a0e47150b59b39dd16f1f62c7fcae77c3f8e7eee170a0350e24dbb",
+    "candidate_processes": 14,
+    "iterations_per_process": 500,
+    "comparison_artifact": "support/performance/type-inference-nonlocal-read-parity-2026-08-03.json",
+    "median_p95_us": {
+      "edit": {"predecessor": 1142.125, "candidate": 1190.938, "change_percent": 4.27},
+      "completion": {"predecessor": 24.167, "candidate": 24.042, "change_percent": -0.52},
+      "hover": {"predecessor": 11.792, "candidate": 11.833, "change_percent": 0.35},
+      "definition": {"predecessor": 17.459, "candidate": 17.958, "change_percent": 2.86},
+      "references": {"predecessor": 5153.208, "candidate": 5360.792, "change_percent": 4.03},
+      "diagnostics": {"predecessor": 2.333, "candidate": 2.292, "change_percent": -1.76}
+    },
+    "candidate_cold_indexing_median_ms": 602.663625,
+    "candidate_engine_heap_mb": 6.1,
+    "all_fourteen_fixed_budget_runs_passed": true,
+    "all_query_median_p95_deltas_within_three_percent": false,
+    "excluded_profiler_sha256": "4e126c899ee450b4edcb8c4f78485a82ecda82f541e84640cdee849d5ca5762f",
+    "excluded_reason": "The retained older profiler reported 0 MB engine heap and microsecond reference queries because it indexed a materially smaller semantic universe; it is not a valid alternating baseline."
+  },
+  "semantic_evidence": {
+    "ruby_analysis_tests": "444/444",
+    "check_cli_tests": "18/18",
+    "call_hover_tests": "50/50",
+    "scorecard": "68/68 cases, 100/100 points, score_eligible=false",
+    "covered_outcomes": [
+      "unknown_receiver",
+      "invalid_method_name",
+      "unresolved_method_return",
+      "incomplete_union_member",
+      "deferred complete-graph proof",
+      "protected/public/private visibility and overrides",
+      "specialized JRuby, generated, method-object, and reopened-definition proof fallback",
+      "didChange proven-to-Unknown replacement"
+    ]
+  },
+  "rejected_designs": [
+    {
+      "design": "Store a TypeFact for every call and repeat full call inference at CallNode exit",
+      "baseline_file_processor_ms": 117.827,
+      "candidate_file_processor_ms": 206.953,
+      "baseline_visitor_ms": 93.375,
+      "candidate_visitor_ms": 148.152,
+      "baseline_replace_and_resolve_ms": 11.52,
+      "candidate_replace_and_resolve_ms": 16.246,
+      "decision": "Rejected and removed. It duplicated receiver/method work and polluted the global TypeStore."
+    },
+    {
+      "design": "Pass-local hash cache for call outcomes",
+      "alternating_process_pairs": 15,
+      "file_processor_median_change_percent": 5.13,
+      "replace_and_resolve_median_change_percent": 18.65,
+      "decision": "Rejected and removed. The corpus had too few identical keys for hashing to repay its cost."
+    }
+  ],
+  "accepted_design": {
+    "summary": "Retain compact file-owned call outcomes, derive deferred results from the navigation resolver's existing method result and MRO chain, reuse effective visibility, consult already-solved return evidence, and merge sorted outcomes linearly.",
+    "why": "Covered CLI and LSP call cases receive the same exact proof or Unknown reason without another AST walk, another semantic store, or a second method-resolution policy. Hover permits a concrete specialized engine proof to supersede a compact candidate's provisional Unknown.",
+    "performance_assessment": "The focused large-file end-to-end median remains within the fixed three-percent gate. Replace-and-resolve is 0.48 ms slower at the median; the focused edit and references p95 comparisons are 4.27% and 4.03% above the immediate predecessor artifact despite passing their fixed production budgets. Full no-regression acceptance therefore remains open."
+  },
+  "limitations": [
+    "The large-file evidence is one same-file semantic pass, and the query evidence is one focused project fixture. They do not replace warm workspace, allocation, worker-schedule, or fixed two-project peak-RSS measurements.",
+    "The scorecard remains diagnostic and score_eligible=false until the broader parity, real-project precision, and complete performance gates are met."
+  ],
+  "decision": "Semantically accepted, performance acceptance still open. The compact resolver-owned design passes the complete bounded workspace suite and the focused large-file gate, but edit and references p95 comparisons remain above the three-percent comparison threshold."
+}

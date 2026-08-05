@@ -1,17 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+use crate::core::method_store::MethodVisibility;
 use crate::core::{
     ConstLookupId, DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FqnId,
     FullyQualifiedName, GraphEdgeKind, MethodAvailability, MethodCallSignatureCandidate,
-    MethodFact, NamespaceKind, RaiseArgCandidate, ReferenceFact, RubyConstant, RubyMethod,
-    RubyType, SourceFileId, StoredReferenceCandidateKind, StoredReferenceCandidateRef, TextRange,
+    MethodFact, MethodReferenceAccess, NamespaceKind, RaiseArgCandidate, ReferenceFact,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, StoredReferenceCandidateKind,
+    StoredReferenceCandidateRef, TextRange,
 };
 use crate::engine::diagnostic_helpers::{
     arity_mismatch, closest_keyword, levenshtein, suggestion_threshold, MethodArity,
     EXCEPTION_WHITELIST, NON_EXCEPTION_TYPES,
 };
-use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
+use crate::engine::resolution::{
+    effective_method_visibility_for_chain, method_lookup_chain, protected_method_visible_from,
+    MethodLookupChainCache, MethodLookupResult,
+};
 use crate::engine::state::{elapsed_ns, ResolvePassStats};
 use crate::{AnalysisEngine, AnalysisQuery};
 
@@ -39,6 +44,7 @@ impl AnalysisEngine {
         let mut method_lookup_chain_cache: MethodLookupChainCache = HashMap::new();
         let unresolved_method_edge_sources = self.unresolved_method_edge_sources();
         let mut incomplete_method_chain_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
+        let mut resolved_call_outcomes = Vec::new();
         self.facts.references.resolved.clear();
         let candidate_loop_started = Instant::now();
         for candidate in reference_candidate_store.iter_candidates() {
@@ -154,6 +160,18 @@ impl AnalysisEngine {
                         );
                     }
                     let fact = fact.clone();
+                    if let Some(expression_range) = candidate.call_expression_range {
+                        let outcome = self.call_expression_outcome_from_method_resolution(
+                            candidate.owner,
+                            candidate.owner_kind,
+                            candidate.method,
+                            candidate.access,
+                            candidate.caller,
+                            &method_lookup_chain_cache,
+                            &fact,
+                        );
+                        resolved_call_outcomes.push((expression_range, outcome));
+                    }
                     if let Some((owner, resolved_method, fact)) = fact.reference_parts() {
                         let target =
                             FullyQualifiedName::method(owner.namespace_parts(), resolved_method);
@@ -275,6 +293,7 @@ impl AnalysisEngine {
         // support/performance/resolve-pass-cache-cardinality-2026-08-01.json.
         stats.method_candidates_ns = elapsed_ns(candidate_loop_started);
         self.facts.references.candidates = reference_candidate_store;
+        self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
         let sort_started = Instant::now();
         self.facts.references.resolved.sort_all();
         stats.sort_all_ns = elapsed_ns(sort_started);
@@ -326,6 +345,7 @@ impl AnalysisEngine {
         let unresolved_method_edge_sources = self.unresolved_method_edge_sources();
         let mut incomplete_method_chain_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         let mut resolved_refs = Vec::new();
+        let mut resolved_call_outcomes = Vec::new();
 
         for candidate in reference_candidates {
             match candidate.kind {
@@ -373,10 +393,12 @@ impl AnalysisEngine {
                     is_super,
                     access,
                     caller,
+                    call_expression_range,
                     preferred_definition_range: _,
                     diagnostics,
                 } => {
-                    let owner_lookup = self.names.const_lookup(owner).expect(
+                    let owner_lookup_id = owner;
+                    let owner_lookup = self.names.const_lookup(owner_lookup_id).expect(
                         "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
                          This is a bug because stored reference candidates must only contain interned lookup ids. \
                          Fix: intern constant lookups before inserting candidates.",
@@ -398,6 +420,18 @@ impl AnalysisEngine {
                             }
                         })
                         .clone();
+                    if let Some(expression_range) = call_expression_range {
+                        let outcome = self.call_expression_outcome_from_method_resolution(
+                            owner_lookup_id,
+                            owner_kind,
+                            method,
+                            access,
+                            caller,
+                            &method_lookup_chain_cache,
+                            &fact,
+                        );
+                        resolved_call_outcomes.push((expression_range, outcome));
+                    }
                     if let Some((owner, resolved_method, fact)) = fact.reference_parts() {
                         let target =
                             FullyQualifiedName::method(owner.namespace_parts(), resolved_method);
@@ -500,6 +534,7 @@ impl AnalysisEngine {
             .references
             .resolved
             .replace_file(file_id, resolved_refs);
+        self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
         let mut diagnostics = self
             .facts
             .diagnostics
@@ -520,6 +555,127 @@ impl AnalysisEngine {
             .diagnostics
             .resolved
             .replace_file(file_id, diagnostics);
+    }
+
+    fn call_expression_outcome_from_method_resolution(
+        &self,
+        owner: ConstLookupId,
+        owner_kind: NamespaceKind,
+        method: RubyMethod,
+        access: MethodReferenceAccess,
+        caller: Option<FqnId>,
+        method_lookup_chain_cache: &MethodLookupChainCache,
+        resolution: &MethodLookupResult,
+    ) -> crate::core::TypeInferenceOutcome {
+        let return_type = match (access, resolution) {
+            (
+                MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass,
+                MethodLookupResult::Unique(fact),
+            ) => AnalysisQuery::new(self).method_return_type(fact),
+            (MethodReferenceAccess::ExplicitReceiver, MethodLookupResult::Unique(fact)) => {
+                let owner_lookup = self.names.const_lookup(owner).expect(
+                    "INVARIANT VIOLATED: call-expression candidate points to a missing owner lookup. This is a bug because reference candidates contain only interned lookup IDs. Fix: retain the owner lookup for the candidate lifetime.",
+                );
+                let owner =
+                    FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind);
+                let query = AnalysisQuery::new(self);
+                let ancestor_chain = method_lookup_chain_cache
+                    .get(&owner)
+                    .map(|owner_ids| {
+                        owner_ids
+                            .iter()
+                            .map(|owner_id| {
+                                self.fqn_for_id(*owner_id)
+                                    .expect(
+                                        "INVARIANT VIOLATED: call-expression lookup-chain owner ID is absent from the name registry. This is a bug because the resolution-local cache contains only IDs from that registry. Fix: invalidate lookup-chain caches when names change.",
+                                    )
+                                    .clone()
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| method_lookup_chain(self, &owner));
+                let (visibility, visibility_owner) =
+                    effective_method_visibility_for_chain(self, &ancestor_chain, fact, &method);
+                match visibility {
+                    MethodVisibility::Public => query.method_return_type(fact),
+                    MethodVisibility::Protected => caller
+                        .and_then(|caller| self.call_expression_caller_namespace(caller))
+                        .and_then(|caller| {
+                            protected_method_visible_from(self, &visibility_owner, &caller)
+                                .then(|| query.method_return_type(fact))
+                                .flatten()
+                        }),
+                    MethodVisibility::Private => None,
+                }
+            }
+            (
+                MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass,
+                MethodLookupResult::Ambiguous { .. },
+            ) => {
+                let owner_lookup = self.names.const_lookup(owner).expect(
+                    "INVARIANT VIOLATED: ambiguous call-expression candidate points to a missing owner lookup. This is a bug because reference candidates contain only interned lookup IDs. Fix: retain the owner lookup for the candidate lifetime.",
+                );
+                let owner =
+                    FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind);
+                AnalysisQuery::new(self).method_return_type_for_receiver(&owner, &method)
+            }
+            (MethodReferenceAccess::ExplicitReceiver, MethodLookupResult::Ambiguous { .. }) => {
+                let owner_lookup = self.names.const_lookup(owner).expect(
+                    "INVARIANT VIOLATED: ambiguous call-expression candidate points to a missing owner lookup. This is a bug because reference candidates contain only interned lookup IDs. Fix: retain the owner lookup for the candidate lifetime.",
+                );
+                let owner =
+                    FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind);
+                let query = AnalysisQuery::new(self);
+                let all_callees = query.resolve_method_callees(&owner, &method);
+                match caller.and_then(|caller| self.call_expression_caller_namespace(caller)) {
+                    Some(caller) => {
+                        let visible_callees =
+                            query.resolve_protected_method_callees(&owner, &method, &caller);
+                        (all_callees == visible_callees)
+                            .then(|| {
+                                query.method_return_type_for_protected_receiver(
+                                    &owner, &method, &caller,
+                                )
+                            })
+                            .flatten()
+                    }
+                    None => {
+                        let visible_callees = query.resolve_public_method_callees(&owner, &method);
+                        (all_callees == visible_callees)
+                            .then(|| query.method_return_type_for_public_receiver(&owner, &method))
+                            .flatten()
+                    }
+                }
+            }
+            (
+                MethodReferenceAccess::Normal
+                | MethodReferenceAccess::ExplicitReceiver
+                | MethodReferenceAccess::VisibilityBypass,
+                MethodLookupResult::Missing,
+            ) => None,
+        };
+        crate::core::TypeInferenceOutcome::from_optional(
+            return_type,
+            crate::core::UnknownReason::UnresolvedMethodReturn,
+        )
+    }
+
+    fn call_expression_caller_namespace(&self, caller: FqnId) -> Option<FullyQualifiedName> {
+        let caller = self.fqn_for_id(caller)?;
+        let mut owners = self
+            .method_facts_for(caller)
+            .into_iter()
+            .map(|fact| fact.owner)
+            .collect::<Vec<_>>();
+        owners.sort_by_key(ToString::to_string);
+        owners.dedup();
+        Some(if owners.len() == 1 {
+            owners.pop().expect(
+                "INVARIANT VIOLATED: one call-expression caller owner disappeared after length validation. This is a bug because protected return-type lookup needs a stable caller namespace. Fix: keep caller-owner selection atomic.",
+            )
+        } else {
+            FullyQualifiedName::namespace(caller.namespace_parts())
+        })
     }
 
     fn unresolved_method_edge_sources(&self) -> HashSet<Vec<RubyConstant>> {

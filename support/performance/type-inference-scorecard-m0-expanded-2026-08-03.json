@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "measurement": "type-inference-scorecard-warm-release",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "worktree_has_candidate_changes": true,
+    "scorecard_revision": "m0-seed-2",
+    "scorecard_cases": 50,
+    "score": 93
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776,
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820e 2025-10-10)"
+  },
+  "command": "cargo test --release inference_scorecard::report_m0_scorecard -- --ignored",
+  "warmup": {
+    "release_build_seconds": 35.86,
+    "scorecard_test_seconds": 0.19
+  },
+  "warm_process_measurements_seconds": {
+    "real": [0.58, 0.47, 0.46, 0.47, 0.48, 0.44, 0.47],
+    "user": [0.29, 0.29, 0.29, 0.28, 0.29, 0.29, 0.28],
+    "sys": [0.14, 0.13, 0.13, 0.12, 0.12, 0.12, 0.12],
+    "real_median": 0.47,
+    "real_min": 0.44,
+    "real_max": 0.58
+  },
+  "single_warm_resource_sample": {
+    "real_seconds": 0.44,
+    "user_seconds": 0.29,
+    "sys_seconds": 0.13,
+    "maximum_resident_set_size_bytes": 100974592,
+    "peak_memory_footprint_bytes": 84181544
+  },
+  "limitations": [
+    "This is a candidate-worktree M0 measurement, not a base-versus-candidate comparison.",
+    "The earlier 15-case seed timing is not a performance baseline for this 50-case workload; the two medians are intentionally not compared.",
+    "The command includes Cargo and ten test-binary launches; the scorecard test itself reported 0.19 seconds after release compilation.",
+    "The scorecard remains non-claim-eligible because recursive returns, edit sequences, CLI/LSP parity, real-project reductions, Unknown counters, and the full performance matrix are incomplete.",
+    "Cold workspace indexing, warm workspace indexing, didChange latency, hover/completion query latency, allocations, full-project CPU, and goshposh peak RSS remain unmeasured for this goal."
+  ]
+}

@@ -99,7 +99,7 @@ async fn independent_extension_package_uses_only_public_contracts() {
     assert!(
         return_type_hover
             .as_ref()
-            .is_some_and(|hover| format!("{:?}", hover.contents).contains("(Array<String> | NilClass)")),
+            .is_some_and(|hover| format!("{:?}", hover.contents).contains("(NilClass | Array<String>)")),
         "extension-declared return type must make the generated method hover as nilable Array<String>, got {return_type_hover:?}"
     );
 

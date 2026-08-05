@@ -1,4 +1,3 @@
-use crate::core::FullyQualifiedName;
 use crate::r#type::ruby::RubyType;
 use ruby_prism::*;
 
@@ -64,19 +63,12 @@ impl CollectionAnalyzer {
                 if let Some(element_type) = self.infer_element_type(&element) {
                     element_types.push(element_type);
                 } else {
-                    // If we can't infer the type, assume it's Object
-                    element_types.push(RubyType::Class(
-                        FullyQualifiedName::try_from("Object").unwrap(),
-                    ));
+                    element_types.push(RubyType::Unknown);
                 }
             }
 
             let is_homogeneous = self.are_types_homogeneous(&element_types);
-            let common_type = if is_homogeneous && !element_types.is_empty() {
-                Some(element_types[0].clone())
-            } else {
-                self.find_common_supertype(&element_types)
-            };
+            let common_type = self.exhaustive_type(&element_types);
 
             Some(ArrayTypeInfo {
                 element_types,
@@ -118,36 +110,26 @@ impl CollectionAnalyzer {
                     if let Some(key_type) = self.infer_element_type(&assoc_node.key()) {
                         key_types.push(key_type);
                     } else {
-                        key_types.push(RubyType::Class(
-                            FullyQualifiedName::try_from("Object").unwrap(),
-                        ));
+                        key_types.push(RubyType::Unknown);
                     }
 
                     // Analyze value
                     if let Some(value_type) = self.infer_element_type(&assoc_node.value()) {
                         value_types.push(value_type);
                     } else {
-                        value_types.push(RubyType::Class(
-                            FullyQualifiedName::try_from("Object").unwrap(),
-                        ));
+                        value_types.push(RubyType::Unknown);
                     }
+                } else {
+                    key_types.push(RubyType::Unknown);
+                    value_types.push(RubyType::Unknown);
                 }
             }
 
             let is_homogeneous_keys = self.are_types_homogeneous(&key_types);
             let is_homogeneous_values = self.are_types_homogeneous(&value_types);
 
-            let common_key_type = if is_homogeneous_keys && !key_types.is_empty() {
-                Some(key_types[0].clone())
-            } else {
-                self.find_common_supertype(&key_types)
-            };
-
-            let common_value_type = if is_homogeneous_values && !value_types.is_empty() {
-                Some(value_types[0].clone())
-            } else {
-                self.find_common_supertype(&value_types)
-            };
+            let common_key_type = self.exhaustive_type(&key_types);
+            let common_value_type = self.exhaustive_type(&value_types);
 
             Some(HashTypeInfo {
                 key_types,
@@ -171,15 +153,14 @@ impl CollectionAnalyzer {
 
         // Handle nested arrays
         if node.as_array_node().is_some() {
-            return Some(RubyType::Class(
-                FullyQualifiedName::try_from("Array").unwrap(),
-            ));
+            return Some(RubyType::Array(vec![RubyType::Unknown]));
         }
 
         // Handle nested hashes
         if node.as_hash_node().is_some() {
-            return Some(RubyType::Class(
-                FullyQualifiedName::try_from("Hash").unwrap(),
+            return Some(RubyType::Hash(
+                vec![RubyType::Unknown],
+                vec![RubyType::Unknown],
             ));
         }
 
@@ -198,58 +179,30 @@ impl CollectionAnalyzer {
         types.iter().all(|t| t == first_type)
     }
 
-    /// Find a common supertype for a collection of types
-    fn find_common_supertype(&self, types: &[RubyType]) -> Option<RubyType> {
+    /// Return the exhaustive element type. This is a union of every proven
+    /// alternative, or Unknown when any alternative is unresolved.
+    fn exhaustive_type(&self, types: &[RubyType]) -> Option<RubyType> {
         if types.is_empty() {
             return None;
         }
+        Some(RubyType::union(types.iter().cloned()))
+    }
 
-        // Simple heuristic: if all types are numeric, return Numeric
-        let all_numeric = types.iter().all(|t| {
-            matches!(t, RubyType::Class(name) if
-                name.to_string() == "Integer" ||
-                name.to_string() == "Float" ||
-                name.to_string() == "Numeric"
-            )
-        });
-
-        if all_numeric {
-            return Some(RubyType::Class(
-                FullyQualifiedName::try_from("Numeric").unwrap(),
-            ));
-        }
-
-        // If all types are strings, return String
-        let all_strings = types
-            .iter()
-            .all(|t| matches!(t, RubyType::Class(name) if name.to_string() == "String"));
-
-        if all_strings {
-            return Some(RubyType::string());
-        }
-
-        // Default to Object as the common supertype
-        Some(RubyType::Class(
-            FullyQualifiedName::try_from("Object").unwrap(),
+    /// Get the inferred structured array type without widening or dropping
+    /// unresolved elements.
+    pub fn get_array_type(&self, array_info: &ArrayTypeInfo) -> RubyType {
+        RubyType::Array(RubyType::canonical_union_members(
+            array_info.element_types.iter().cloned(),
         ))
     }
 
-    /// Get the inferred type for an array with polymorphic elements
-    pub fn get_array_type(&self, array_info: &ArrayTypeInfo) -> RubyType {
-        if let Some(_common_type) = &array_info.common_type {
-            // Array[CommonType]
-            RubyType::Class(FullyQualifiedName::try_from("Array").unwrap())
-        } else {
-            // Array[Object] for mixed types
-            RubyType::Class(FullyQualifiedName::try_from("Array").unwrap())
-        }
-    }
-
-    /// Get the inferred type for a hash with polymorphic keys/values
-    pub fn get_hash_type(&self, _hash_info: &HashTypeInfo) -> RubyType {
-        // For now, just return Hash - in a full implementation,
-        // this could be Hash[KeyType, ValueType]
-        RubyType::Class(FullyQualifiedName::try_from("Hash").unwrap())
+    /// Get the inferred structured hash type without widening or dropping
+    /// unresolved keys or values.
+    pub fn get_hash_type(&self, hash_info: &HashTypeInfo) -> RubyType {
+        RubyType::Hash(
+            RubyType::canonical_union_members(hash_info.key_types.iter().cloned()),
+            RubyType::canonical_union_members(hash_info.value_types.iter().cloned()),
+        )
     }
 }
 
@@ -290,12 +243,21 @@ mod tests {
             let array_info = analyzer.analyze_array(node).unwrap();
             assert!(!array_info.is_homogeneous);
             assert_eq!(array_info.element_types.len(), 3);
-            // Should find Object as common supertype
             assert_eq!(
                 array_info.common_type,
-                Some(RubyType::Class(
-                    FullyQualifiedName::try_from("Object").unwrap()
-                ))
+                Some(RubyType::union([
+                    RubyType::integer(),
+                    RubyType::string(),
+                    RubyType::true_class(),
+                ]))
+            );
+            assert_eq!(
+                analyzer.get_array_type(&array_info),
+                RubyType::Array(vec![
+                    RubyType::integer(),
+                    RubyType::string(),
+                    RubyType::true_class(),
+                ])
             );
         });
     }
@@ -306,12 +268,26 @@ mod tests {
             let array_info = analyzer.analyze_array(node).unwrap();
             assert!(!array_info.is_homogeneous);
             assert_eq!(array_info.element_types.len(), 2);
-            // Should find Numeric as common supertype
             assert_eq!(
                 array_info.common_type,
-                Some(RubyType::Class(
-                    FullyQualifiedName::try_from("Numeric").unwrap()
-                ))
+                Some(RubyType::union([RubyType::integer(), RubyType::float()]))
+            );
+        });
+    }
+
+    #[test]
+    fn test_unresolved_array_element_stays_unknown() {
+        test_with_code("[1, dynamic_value]", |analyzer, node| {
+            let array_info = analyzer.analyze_array(node).unwrap();
+
+            assert_eq!(
+                array_info.element_types,
+                vec![RubyType::integer(), RubyType::Unknown]
+            );
+            assert_eq!(array_info.common_type, Some(RubyType::Unknown));
+            assert_eq!(
+                analyzer.get_array_type(&array_info),
+                RubyType::Array(vec![RubyType::Unknown])
             );
         });
     }
@@ -335,6 +311,14 @@ mod tests {
             assert!(!hash_info.is_homogeneous_values);
             assert_eq!(hash_info.key_types.len(), 2);
             assert_eq!(hash_info.value_types.len(), 2);
+            assert_eq!(
+                hash_info.common_key_type,
+                Some(RubyType::union([RubyType::string(), RubyType::symbol()]))
+            );
+            assert_eq!(
+                hash_info.common_value_type,
+                Some(RubyType::union([RubyType::string(), RubyType::integer()]))
+            );
         });
     }
 
@@ -356,12 +340,7 @@ mod tests {
             assert_eq!(array_info.element_types.len(), 2);
             // All elements should be Array type with Integer elements
             for element_type in &array_info.element_types {
-                assert_eq!(
-                    *element_type,
-                    RubyType::Array(vec![RubyType::Class(
-                        FullyQualifiedName::try_from("Integer").unwrap()
-                    )])
-                );
+                assert_eq!(*element_type, RubyType::Array(vec![RubyType::integer()]));
             }
         });
     }

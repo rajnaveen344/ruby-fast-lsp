@@ -3,7 +3,8 @@ use crate::core::{
     DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeKind,
     KeywordArgCandidate, MethodCallSignatureCandidate, MethodFact, MethodParamFact,
     MethodParamKind, MethodReferenceAccess, NamespaceKind, RaiseArgCandidate, ReferenceCandidate,
-    RubyConstant, RubyMethod, TypeFact, TypeProvenance, TypeSubject,
+    RubyConstant, RubyMethod, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
+    UnknownReason,
 };
 use crate::engine::{AnalysisQuery, VariableTypeKind};
 use crate::{build_constant_path_name, mixin_ref_from_node, utf8_str};
@@ -435,6 +436,7 @@ impl FactCollector {
                     is_super: false,
                     access: MethodReferenceAccess::Normal,
                     caller: self.scope_tracker.current_method_fqn().cloned(),
+                    call_expression_range: None,
                     preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: old_range,
@@ -773,13 +775,17 @@ impl FactCollector {
             .as_ref()
             .map(|(name, _range)| name.as_str())
             .unwrap_or_else(|| utf8_str(node.name().as_slice()));
+        let call_range =
+            self.text_range_from_prism_location(&node.location(), "method reference candidate");
         if !RubyMethod::is_valid_ruby_method_name(method_name) {
+            self.call_expression_outcomes.push((
+                call_range,
+                TypeInferenceOutcome::unknown(UnknownReason::InvalidMethodName),
+            ));
             trace!("Skipping method call with invalid name: {}", method_name);
             return;
         }
 
-        let call_range =
-            self.text_range_from_prism_location(&node.location(), "method reference candidate");
         let message_range = static_send_target
             .as_ref()
             .map(|(_name, range)| *range)
@@ -804,7 +810,9 @@ impl FactCollector {
         let inference_failed = matches!(
             receiver_info,
             ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath
-        ) && inferred_expr_type.is_none()
+        ) && inferred_expr_type
+            .as_ref()
+            .is_none_or(|ruby_type| *ruby_type == RubyType::Unknown)
             && target_namespace == current_namespace;
 
         let method = match RubyMethod::new(method_name) {
@@ -814,6 +822,69 @@ impl FactCollector {
                 return;
             }
         };
+
+        let receiver_type = inferred_expr_type
+            .as_ref()
+            .filter(|ruby_type| **ruby_type != RubyType::Unknown)
+            .cloned()
+            .or_else(|| match &receiver_info {
+                ReceiverInfo::ConstantReceiver(_)
+                | ReceiverInfo::NoReceiver
+                | ReceiverInfo::SelfReceiver
+                    if !target_namespace.is_empty() =>
+                {
+                    let target = FullyQualifiedName::constant(target_namespace.clone());
+                    Some(match namespace_kind {
+                        NamespaceKind::Instance => RubyType::Class(target),
+                        NamespaceKind::Singleton => RubyType::ClassReference(target),
+                    })
+                }
+                ReceiverInfo::NoReceiver
+                | ReceiverInfo::SelfReceiver
+                | ReceiverInfo::ConstantReceiver(_)
+                | ReceiverInfo::ExpressionReceiver
+                | ReceiverInfo::InvalidConstantPath => None,
+            });
+        let immediate_outcome = if inference_failed {
+            Some(TypeInferenceOutcome::unknown(
+                UnknownReason::UnknownReceiver,
+            ))
+        } else if let Some(receiver_type) = receiver_type {
+            if method_name == "freeze" {
+                Some(TypeInferenceOutcome::proven(receiver_type))
+            } else {
+                let outcome = crate::inference::method::method_call_type_outcome(
+                    None,
+                    &receiver_type,
+                    method_name,
+                );
+                match outcome.unknown_reason() {
+                    None | Some(UnknownReason::IncompleteUnionMember) => Some(outcome),
+                    Some(
+                        UnknownReason::NoReachingAssignment
+                        | UnknownReason::UnresolvedAssignmentValue
+                        | UnknownReason::AmbiguousReachingAssignment
+                        | UnknownReason::UnknownReceiver
+                        | UnknownReason::InvalidMethodName
+                        | UnknownReason::UnresolvedMethodReturn
+                        | UnknownReason::UnprovenRecursiveCycle,
+                    ) => None,
+                }
+            }
+        } else if matches!(
+            receiver_info,
+            ReceiverInfo::NoReceiver | ReceiverInfo::SelfReceiver
+        ) {
+            None
+        } else {
+            Some(TypeInferenceOutcome::unknown(
+                UnknownReason::UnknownReceiver,
+            ))
+        };
+        let defer_call_outcome = immediate_outcome.is_none();
+        if let Some(outcome) = immediate_outcome {
+            self.call_expression_outcomes.push((call_range, outcome));
+        }
 
         if !inference_failed {
             let receiver_label = match (&receiver_info, inferred_expr_type.as_ref()) {
@@ -852,6 +923,7 @@ impl FactCollector {
                     is_super: false,
                     access,
                     caller: self.scope_tracker.current_method_fqn().cloned(),
+                    call_expression_range: defer_call_outcome.then_some(call_range),
                     preferred_definition_range: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: message_range,
@@ -978,6 +1050,7 @@ impl FactCollector {
                 is_super: false,
                 access: MethodReferenceAccess::Normal,
                 caller: self.scope_tracker.current_method_fqn().cloned(),
+                call_expression_range: None,
                 preferred_definition_range: None,
                 diagnostics: crate::core::MethodReferenceDiagnostics {
                     diagnostic_range: range,
@@ -1200,11 +1273,48 @@ impl FactCollector {
                  This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
                  Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
             );
-            let engine = self.analysis_engine.read();
-            return AnalysisQuery::new(&engine).variable_type_before(
+            let owner = FullyQualifiedName::namespace_with_kind(
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.current_method_context(),
+            );
+            return self.collected_nonlocal_variable_type_before(
                 VariableTypeKind::Instance,
                 var_name,
-                self.document.analysis_file_id(),
+                &owner,
+                byte_offset,
+            );
+        }
+
+        if let Some(class_var) = receiver_node.as_class_variable_read_node() {
+            let var_name = utf8_str(class_var.name().as_slice());
+            let byte_offset = u32::try_from(class_var.location().start_offset()).expect(
+                "INVARIANT VIOLATED: Prism location offset exceeded u32. This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            );
+            let owner = FullyQualifiedName::namespace_with_kind(
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.current_method_context(),
+            );
+            return self.collected_nonlocal_variable_type_before(
+                VariableTypeKind::Class,
+                var_name,
+                &owner,
+                byte_offset,
+            );
+        }
+
+        if let Some(global_var) = receiver_node.as_global_variable_read_node() {
+            let var_name = utf8_str(global_var.name().as_slice());
+            let byte_offset = u32::try_from(global_var.location().start_offset()).expect(
+                "INVARIANT VIOLATED: Prism location offset exceeded u32. This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            );
+            let owner = FullyQualifiedName::namespace_with_kind(
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.current_method_context(),
+            );
+            return self.collected_nonlocal_variable_type_before(
+                VariableTypeKind::Global,
+                var_name,
+                &owner,
                 byte_offset,
             );
         }

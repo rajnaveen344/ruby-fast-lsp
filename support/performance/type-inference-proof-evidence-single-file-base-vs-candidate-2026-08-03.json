@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-evidence-type-inference-single-file-base-vs-candidate",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "candidate_worktree_has_changes": true,
+    "fixture": "src/test/fixtures/goshposh_helpers_goto/api_app.rb",
+    "fixture_bytes": 242
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776,
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820e 2025-10-10)"
+  },
+  "method": {
+    "binary": "target/release/profile_single_file",
+    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/api_app.rb src/test/fixtures/goshposh_helpers_goto",
+    "release_compilation_excluded": true,
+    "warmup_runs_per_revision": 1,
+    "alternating_pairs": 7,
+    "pair_order": "candidate_then_base"
+  },
+  "profile_single_file_total_ms": {
+    "candidate": [74.732709, 74.464250, 74.127583, 73.678917, 73.870917, 74.726541, 74.378542],
+    "base": [74.302500, 75.545625, 73.984750, 78.107375, 75.136417, 74.536458, 75.017792],
+    "candidate_median": 74.378542,
+    "base_median": 75.017792,
+    "median_change_percent": -0.85
+  },
+  "process_resource_samples": {
+    "real_seconds": {
+      "candidate": [0.84, 0.84, 0.84, 0.84, 0.86, 0.85, 0.85],
+      "base": [0.86, 0.85, 0.84, 0.89, 0.86, 0.84, 0.84],
+      "candidate_median": 0.84,
+      "base_median": 0.85,
+      "median_change_percent": -1.18
+    },
+    "maximum_resident_set_size_bytes": {
+      "candidate": [73678848, 73891840, 73908224, 73908224, 85164032, 75595776, 75563008],
+      "base": [76414976, 80183296, 74514432, 79118336, 74153984, 75022336, 74235904],
+      "candidate_median": 73908224,
+      "base_median": 75022336,
+      "median_change_percent": -1.49,
+      "candidate_max": 85164032,
+      "base_max": 80183296
+    },
+    "peak_memory_footprint_bytes": {
+      "candidate": [60735992, 60932576, 60965368, 60981776, 72253992, 62636512, 62636560],
+      "base": [63570400, 67322312, 61702672, 66290168, 61358632, 62194168, 61391328],
+      "candidate_median": 60981776,
+      "base_median": 62194168,
+      "median_change_percent": -1.95
+    }
+  },
+  "assessment": {
+    "three_percent_median_wall_gate_passed": true,
+    "median_rss_regressed": false,
+    "method_return_proof_output_retained": true,
+    "full_performance_matrix_still_required": true
+  },
+  "limitations": [
+    "This focused fixture measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual hover/completion queries, allocations, or the goshposh RSS ceiling.",
+    "Seven pairs characterize the median but are insufficient for a stable p95 claim.",
+    "Candidate ran before base in every pair; filesystem cache ordering was held constant rather than randomized.",
+    "One candidate RSS sample reached 85,164,032 bytes, above the 80,183,296-byte base maximum; the candidate median remained 1.49 percent lower, but the full memory matrix must investigate tail behavior.",
+    "The candidate includes the broader proof-first inference worktree, not only the proof-evidence map, so this is a cumulative base comparison rather than a microbenchmark of one data structure.",
+    "Exact method-return outcomes are retained only for project files; dependency inputs retain counters but clear the outcome map before engine replacement.",
+    "Correctness, deterministic output, scorecard, edit-lifecycle, and CLI/LSP parity tests are required separately."
+  ]
+}

@@ -37,8 +37,6 @@ pub struct MethodSignature {
     pub visibility: MethodVisibility,
     /// Whether this is a class method
     pub class_method: bool,
-    /// Confidence level of the signature inference
-    pub confidence: f32,
 }
 
 /// Method visibility levels
@@ -161,25 +159,6 @@ impl MethodSignature {
             accepts_block: false,
             visibility: MethodVisibility::Public,
             class_method: false,
-            confidence: 1.0,
-        }
-    }
-
-    /// Create a new method signature with confidence level
-    pub fn new_inferred(
-        name: String,
-        parameters: Vec<Parameter>,
-        return_type: RubyType,
-        confidence: f32,
-    ) -> Self {
-        Self {
-            name,
-            parameters,
-            return_type,
-            accepts_block: false,
-            visibility: MethodVisibility::Public,
-            class_method: false,
-            confidence,
         }
     }
 
@@ -284,39 +263,30 @@ impl MethodSignature {
         true
     }
 
-    /// Merge this signature with another (for method overloading)
-    pub fn merge_with(&self, other: &MethodSignature) -> MethodSignature {
-        if self.name != other.name {
-            panic!("Cannot merge signatures with different method names");
+    /// Merge return outcomes only when both signatures prove the same call
+    /// contract. Different parameter, visibility, receiver, or block shapes
+    /// are overloads and cannot be represented by one `MethodSignature`.
+    pub fn merge_with(&self, other: &MethodSignature) -> Option<MethodSignature> {
+        if self.name != other.name
+            || self.parameters != other.parameters
+            || self.accepts_block != other.accepts_block
+            || self.visibility != other.visibility
+            || self.class_method != other.class_method
+        {
+            return None;
         }
 
-        // Create a union of return types
         let merged_return_type =
             RubyType::union(vec![self.return_type.clone(), other.return_type.clone()]);
 
-        // For now, use the signature with higher confidence
-        // TODO: Implement more sophisticated parameter merging
-        if self.confidence >= other.confidence {
-            MethodSignature {
-                name: self.name.clone(),
-                parameters: self.parameters.clone(),
-                return_type: merged_return_type,
-                accepts_block: self.accepts_block || other.accepts_block,
-                visibility: self.visibility.clone(),
-                class_method: self.class_method,
-                confidence: (self.confidence + other.confidence) / 2.0,
-            }
-        } else {
-            MethodSignature {
-                name: other.name.clone(),
-                parameters: other.parameters.clone(),
-                return_type: merged_return_type,
-                accepts_block: self.accepts_block || other.accepts_block,
-                visibility: other.visibility.clone(),
-                class_method: other.class_method,
-                confidence: (self.confidence + other.confidence) / 2.0,
-            }
-        }
+        Some(MethodSignature {
+            name: self.name.clone(),
+            parameters: self.parameters.clone(),
+            return_type: merged_return_type,
+            accepts_block: self.accepts_block,
+            visibility: self.visibility.clone(),
+            class_method: self.class_method,
+        })
     }
 }
 
@@ -526,30 +496,27 @@ mod tests {
 
     #[test]
     fn test_signature_merging() {
-        let sig1 = MethodSignature::new_inferred(
+        let sig1 = MethodSignature::new(
             "test".to_string(),
             vec![Parameter::new_required(
                 "x".to_string(),
                 RubyType::integer(),
             )],
             RubyType::string(),
-            0.8,
         );
 
-        let sig2 = MethodSignature::new_inferred(
+        let sig2 = MethodSignature::new(
             "test".to_string(),
             vec![Parameter::new_required(
                 "x".to_string(),
                 RubyType::integer(),
             )],
             RubyType::integer(),
-            0.9,
         );
 
-        let merged = sig1.merge_with(&sig2);
-
-        // Should use the signature with higher confidence
-        assert_eq!(merged.confidence, 0.85); // Average of 0.8 and 0.9
+        let merged = sig1
+            .merge_with(&sig2)
+            .expect("identical parameter contracts should merge");
 
         // Return type should be a union
         match merged.return_type {
@@ -559,5 +526,24 @@ mod tests {
             }
             _ => panic!("Expected union type"),
         }
+    }
+
+    #[test]
+    fn test_signature_merge_rejects_different_parameter_contracts() {
+        let integer_parameter = MethodSignature::new(
+            "test".to_string(),
+            vec![Parameter::new_required(
+                "x".to_string(),
+                RubyType::integer(),
+            )],
+            RubyType::string(),
+        );
+        let string_parameter = MethodSignature::new(
+            "test".to_string(),
+            vec![Parameter::new_required("x".to_string(), RubyType::string())],
+            RubyType::string(),
+        );
+
+        assert_eq!(integer_parameter.merge_with(&string_parameter), None);
     }
 }

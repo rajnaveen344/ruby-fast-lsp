@@ -37,6 +37,7 @@ impl EngineQuery {
         let identifier = identifier_opt?;
 
         // Step 2: Convert Identifier to HoverTarget (analysis-domain representation)
+        let hover_namespace = namespace.clone();
         let target = identifier_to_hover_target(
             identifier,
             identifier_type,
@@ -50,6 +51,9 @@ impl EngineQuery {
         let context = HoverContext {
             document: self.doc.as_ref(),
             analysis_engine: self.analysis_engine.as_ref(),
+            current_namespace: &hover_namespace,
+            namespace_kind,
+            position,
         };
 
         // Step 4: Generate hover content based on node type

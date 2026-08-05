@@ -7,6 +7,11 @@ async fn test_hover_array_mixed() {
 }
 
 #[tokio::test]
+async fn unresolved_array_member_collapses_the_element_type_to_unknown() {
+    check(r#"x<hover label="Array<?>"> = [1, dynamic_value]"#).await;
+}
+
+#[tokio::test]
 async fn test_hover_new_method() {
     // Hovering over .new should show the class instance type "Foo"
     check(

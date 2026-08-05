@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-first-nonlocal-read-parity",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "baseline_artifact": "support/performance/type-inference-chained-call-large-file-base-vs-candidate-2026-08-03.json",
+    "query_baseline_artifact": "support/performance/type-inference-nonlocal-proof-query-budget-2026-08-03.json",
+    "large_fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_fixture_bytes": 225569,
+    "large_fixture_lines": 5095,
+    "query_fixture": "tests/fixtures/type_inference_query_benchmark/app/controllers/users_controller.rb"
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776
+  },
+  "large_single_file": {
+    "command": "target/release/profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "release_compilation_excluded": true,
+    "candidate_processes": 15,
+    "file_processor_total_ms": {
+      "baseline_median": 108.877709,
+      "candidate_samples": [107.264709, 106.736625, 104.195208, 104.129875, 104.4215, 107.706167, 104.88525, 107.700709, 104.334958, 105.124375, 107.923083, 108.909792, 104.979125, 105.108125, 106.590833],
+      "candidate_median": 105.124375,
+      "median_change_percent": -3.45
+    },
+    "profile_total_ms": {
+      "baseline_median": 109.350667,
+      "candidate_samples": [107.742917, 107.1835, 104.620375, 104.5445, 104.83725, 108.178458, 105.355167, 108.365792, 104.768792, 105.55325, 108.460292, 109.360875, 105.398542, 105.56225, 107.041958],
+      "candidate_median": 105.56225,
+      "median_change_percent": -3.46
+    },
+    "semantic_visitor_ms": {
+      "baseline_median": 88.025666,
+      "candidate_samples": [85.048167, 85.218833, 82.680875, 83.099333, 83.160333, 85.594625, 83.356541, 84.986958, 83.089708, 83.705667, 85.789458, 87.441541, 83.619083, 83.642583, 84.647792],
+      "candidate_median": 83.705667,
+      "median_change_percent": -4.91
+    },
+    "replace_and_resolve_ms": {
+      "baseline_median": 11.295541,
+      "candidate_samples": [11.006542, 10.647541, 10.523041, 10.2775, 10.534875, 10.967458, 10.768208, 11.69825, 10.465667, 10.381625, 10.757417, 10.747, 10.341584, 10.686458, 10.953917],
+      "candidate_median": 10.686458,
+      "median_change_percent": -5.39
+    }
+  },
+  "interactive_queries": {
+    "command": "target/release/profiler --workspace tests/fixtures/type_inference_query_benchmark --benchmark-iterations 500 --check-budgets",
+    "release_processes": 7,
+    "iterations_per_process": 500,
+    "median_p95_us": {
+      "edit": {
+        "baseline": 1117.291,
+        "candidate": 1142.125,
+        "change_percent": 2.22
+      },
+      "completion": {
+        "baseline": 23.792,
+        "candidate": 24.167,
+        "change_percent": 1.58
+      },
+      "hover": {
+        "baseline": 11.75,
+        "candidate": 11.792,
+        "change_percent": 0.36
+      },
+      "definition": {
+        "baseline": 18.792,
+        "candidate": 17.459,
+        "change_percent": -7.09
+      },
+      "references": {
+        "baseline": 5114.25,
+        "candidate": 5153.208,
+        "change_percent": 0.76
+      },
+      "diagnostics": {
+        "baseline": 2.292,
+        "candidate": 2.333,
+        "change_percent": 1.79
+      }
+    },
+    "candidate_cold_indexing_median_ms": 640.482167,
+    "candidate_engine_heap_mb": 6.1,
+    "all_seven_fixed_budget_runs_passed": true
+  },
+  "assessment": {
+    "large_file_median_gate_passed": true,
+    "edit_p95_gate_passed": true,
+    "completion_p95_gate_passed": true,
+    "hover_p95_gate_passed": true,
+    "definition_p95_gate_passed": true,
+    "diagnostics_p95_gate_passed": true,
+    "fixed_production_budgets_passed": true,
+    "full_performance_matrix_still_required": true
+  },
+  "limitations": [
+    "The immediate pre-change baselines are checked-in candidate artifacts rather than alternating binaries retained in this process. The only older hashed profiler still present indexed a much smaller semantic universe (0 MiB reported engine heap and microsecond references), so it was explicitly excluded.",
+    "The candidate cold-process median is above the historical focused median, but those samples include core/runtime discovery and a changed semantic-producer fingerprint/cache generation. The same-fixture large semantic pass improved, every fixed cold budget passed, and the interactive p95 comparisons stayed within the three-percent gates.",
+    "This slice does not replace the required warm workspace, allocation, worker-schedule, real-project diagnostic, or fixed two-project goshposh peak-RSS matrix."
+  ],
+  "decision": "Accepted. Exact nonlocal-read facts close a CLI/LSP semantic gap while the relevant large-file pass improves, ready-query p95 deltas stay within three percent, and every fixed production budget passes."
+}

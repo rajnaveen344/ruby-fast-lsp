@@ -1075,15 +1075,16 @@ impl AnalysisIndexer {
 impl Visit<'_> for AnalysisIndexer {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {
         let lexical_context = self.namespace_stack.clone();
-        let syntactic_fqn = constant_parts_and_absolute(&node.constant_path()).map(|(parts, absolute)| {
-            if absolute {
-                FullyQualifiedName::namespace(parts)
-            } else {
-                let mut probe = lexical_context.clone();
-                probe.extend(parts);
-                FullyQualifiedName::namespace(probe)
-            }
-        });
+        let syntactic_fqn =
+            constant_parts_and_absolute(&node.constant_path()).map(|(parts, absolute)| {
+                if absolute {
+                    FullyQualifiedName::namespace(parts)
+                } else {
+                    let mut probe = lexical_context.clone();
+                    probe.extend(parts);
+                    FullyQualifiedName::namespace(probe)
+                }
+            });
         let mut reopened_target = constant_parts_and_absolute(&node.constant_path())
             .and_then(|(parts, absolute)| {
                 self.resolve_declaration_constant_value_type_from(
@@ -2126,58 +2127,33 @@ fn literal_type(node: &Node<'_>) -> Option<RubyType> {
         return Some(RubyType::nil_class());
     }
     if let Some(array) = node.as_array_node() {
-        let mut element_types = array
+        let element_types = array
             .elements()
             .iter()
-            .filter_map(|element| literal_type(&element))
+            .map(|element| literal_type(&element).unwrap_or(RubyType::Unknown))
             .collect::<Vec<_>>();
-        dedup_types(&mut element_types);
-        return Some(if element_types.is_empty() {
-            RubyType::Array(vec![RubyType::Unknown])
-        } else {
-            RubyType::Array(element_types)
-        });
+        return Some(RubyType::Array(RubyType::canonical_union_members(
+            element_types,
+        )));
     }
     if let Some(hash) = node.as_hash_node() {
         let mut key_types = Vec::new();
         let mut value_types = Vec::new();
         for element in hash.elements().iter() {
-            let Some(assoc) = element.as_assoc_node() else {
-                continue;
-            };
-            if let Some(key_type) = literal_type(&assoc.key()) {
-                key_types.push(key_type);
-            }
-            if let Some(value_type) = literal_type(&assoc.value()) {
-                value_types.push(value_type);
+            if let Some(assoc) = element.as_assoc_node() {
+                key_types.push(literal_type(&assoc.key()).unwrap_or(RubyType::Unknown));
+                value_types.push(literal_type(&assoc.value()).unwrap_or(RubyType::Unknown));
+            } else {
+                key_types.push(RubyType::Unknown);
+                value_types.push(RubyType::Unknown);
             }
         }
-        dedup_types(&mut key_types);
-        dedup_types(&mut value_types);
         return Some(RubyType::Hash(
-            if key_types.is_empty() {
-                vec![RubyType::Unknown]
-            } else {
-                key_types
-            },
-            if value_types.is_empty() {
-                vec![RubyType::Unknown]
-            } else {
-                value_types
-            },
+            RubyType::canonical_union_members(key_types),
+            RubyType::canonical_union_members(value_types),
         ));
     }
     None
-}
-
-fn dedup_types(types: &mut Vec<RubyType>) {
-    let mut unique = Vec::new();
-    for ty in types.drain(..) {
-        if !unique.contains(&ty) {
-            unique.push(ty);
-        }
-    }
-    *types = unique;
 }
 
 fn method_body_literal_type(node: &DefNode<'_>) -> Option<RubyType> {
@@ -2415,6 +2391,30 @@ mod tests {
         assert!(index.types.iter().any(|fact| {
             fact.subject == TypeSubject::GlobalVariable("$debug".to_string())
                 && fact.ruby_type == RubyType::false_class()
+        }));
+    }
+
+    #[test]
+    fn unresolved_collection_members_do_not_publish_partial_types() {
+        let index = AnalysisIndexer::new(file())
+            .index_source("values = [1, dynamic_value]\nmapping = {known: 1, **dynamic_hash}\n");
+
+        assert!(index.types.iter().any(|fact| {
+            fact.subject
+                == TypeSubject::Local {
+                    scope_id: 0,
+                    name: "values".to_string(),
+                }
+                && fact.ruby_type == RubyType::Array(vec![RubyType::Unknown])
+        }));
+        assert!(index.types.iter().any(|fact| {
+            fact.subject
+                == TypeSubject::Local {
+                    scope_id: 0,
+                    name: "mapping".to_string(),
+                }
+                && fact.ruby_type
+                    == RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown])
         }));
     }
 

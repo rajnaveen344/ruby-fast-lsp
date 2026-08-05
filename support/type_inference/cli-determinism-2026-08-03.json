@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-first-check-cli-json-determinism",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "candidate_worktree_has_changes": true,
+    "fixture": "src/test/fixtures/goshposh_helpers_goto/api_app.rb",
+    "fixture_bytes": 242
+  },
+  "method": {
+    "binary": "target/release/ruby-fast-lsp",
+    "command": "ruby-fast-lsp check src/test/fixtures/goshposh_helpers_goto/api_app.rb --format json",
+    "release_compilation_excluded": true,
+    "fresh_process_runs": 5,
+    "json_parse_required": true,
+    "exact_stdout_comparison": true
+  },
+  "result": {
+    "all_outputs_identical": true,
+    "stdout_sha256": "c6006c0ff7ef772d6cbcc347a0eb7f950e30f4897ec3a53f2828308093e244bf",
+    "schema_version": 4,
+    "inferred_type_count": 7,
+    "inferred_method_outcomes": 1,
+    "proven_method_outcomes": 1,
+    "unknown_method_outcomes": 0
+  },
+  "nonlocal_read_projection": {
+    "fixture": "tests/fixtures/type_inference_query_benchmark/app/controllers/users_controller.rb",
+    "command": "ruby-fast-lsp check tests/fixtures/type_inference_query_benchmark/app/controllers/users_controller.rb --format json",
+    "fresh_process_runs": 5,
+    "all_outputs_identical": true,
+    "stdout_sha256": "1c1735f19bbaad6bf5099932f4b0810b69bbd2a1c811dd4b1cfeaa5efc103191"
+  },
+  "unknown_reason_projection": {
+    "fixture": "tests/fixtures/type_inference_unknown_reasons",
+    "command": "ruby-fast-lsp check tests/fixtures/type_inference_unknown_reasons --format json",
+    "fresh_process_runs": 5,
+    "json_parse_required": true,
+    "all_outputs_identical": true,
+    "stdout_sha256": "aaf2910458328e8021ebb5c7e1669a4daec4a23152bb219da0deffb9713432c0",
+    "inferred_type_count": 17,
+    "unknown_expression_reasons": [
+      "incomplete_union_member",
+      "no_reaching_assignment",
+      "unknown_receiver",
+      "unresolved_assignment_value",
+      "unresolved_method_return"
+    ]
+  },
+  "limitations": [
+    "These exact-output checks cover three focused project fixtures and one host path; the JSON root field intentionally contains the canonical absolute project path.",
+    "The conformance scorecard separately exercises repeatable concrete types, canonical union order, edit lifecycle, Unknown explanations, deferred complete-graph call finalization, exhaustive reopened-call unions, visibility-complete dispatch, and differential CLI/LSP parity for method returns, parameters, value constants, variables, and proven or unresolved call expressions.",
+    "Full claim eligibility still requires normalized parity across the remaining query surfaces, worker-schedule coverage, and real-project deterministic reductions."
+  ]
+}

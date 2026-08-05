@@ -1,4 +1,5 @@
 pub mod capabilities;
+pub mod check;
 pub mod config;
 mod dependency_product;
 pub mod extensions;

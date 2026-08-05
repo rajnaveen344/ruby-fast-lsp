@@ -1,8 +1,7 @@
 # Codex CLI config template for this repo.
 # Codex loads this shape from ~/.codex/config.toml.
 
-model = "gpt-5.5"
-model_reasoning_effort = "medium"
+model = "gpt-5.6-sol"
 
 # Equivalent intent to running with --full-auto:
 # no approval prompts and no Codex sandbox.

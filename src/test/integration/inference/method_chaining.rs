@@ -2,7 +2,7 @@
 //!
 //! Tests type-aware method lookup for chained method calls like `a.b.c`.
 
-use crate::test::harness::check;
+use crate::test::harness::{check, FakeEditor};
 
 // ============================================================================
 // Type-Aware Method Chaining
@@ -43,6 +43,134 @@ result = obj.unwrap.process$0
 "#,
     )
     .await;
+}
+
+/// An instance variable belongs to its lexical execution owner. Reopening a
+/// class after another class assigned the same variable name must not let the
+/// intervening assignment redirect method navigation.
+#[tokio::test]
+async fn goto_instance_variable_receiver_uses_source_ordered_owner_fact() {
+    check(
+        r#"
+class IntegerValue
+  <def>def pick
+    1
+  end</def>
+end
+
+class StringValue
+  def pick
+    "wrong owner"
+  end
+end
+
+class Consumer
+  def initialize
+    @value = IntegerValue.new
+  end
+end
+
+class Other
+  def initialize
+    @value = StringValue.new
+  end
+end
+
+class Consumer
+  def run
+    @value.pick$0
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_instance_variable_receiver_fails_closed_after_unknown_reassignment() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "main.rb",
+            r#"class Target
+  def upcase
+    "target"
+  end
+end
+
+class Types
+  def convert
+    @value = Target.new
+    @value = dynamic_value
+    @value.upcase
+  end
+end
+"#,
+        )
+        .await;
+
+    let definitions = editor.goto_def_at("main.rb", 10, 13).await;
+    assert!(
+        definitions.is_empty(),
+        "an Unknown reassignment must invalidate the earlier receiver proof, got {definitions:?}"
+    );
+}
+
+#[tokio::test]
+async fn goto_class_variable_receiver_fails_closed_after_unknown_reassignment() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "main.rb",
+            r#"class Target
+  def known
+    true
+  end
+end
+
+class Consumer
+  @@value = Target.new
+  @@value = dynamic_value
+
+  def run
+    @@value.known
+  end
+end
+"#,
+        )
+        .await;
+
+    let definitions = editor.goto_def_at("main.rb", 11, 14).await;
+    assert!(
+        definitions.is_empty(),
+        "an Unknown class-variable write must invalidate the earlier receiver proof, got {definitions:?}"
+    );
+}
+
+#[tokio::test]
+async fn goto_global_variable_receiver_fails_closed_after_unknown_reassignment() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "main.rb",
+            r#"class Target
+  def known
+    true
+  end
+end
+
+$global = Target.new
+$global = dynamic_value
+$global.known
+"#,
+        )
+        .await;
+
+    let definitions = editor.goto_def_at("main.rb", 8, 10).await;
+    assert!(
+        definitions.is_empty(),
+        "an Unknown global-variable write must invalidate the earlier receiver proof, got {definitions:?}"
+    );
 }
 
 /// Goto definition for chained method call from constructor.
@@ -252,6 +380,30 @@ class Second
 end
 
 First.new.to_second$0
+"#,
+    )
+    .await;
+}
+
+/// A chained call on a union receiver is concrete only when every reachable
+/// receiver member proves the called method's return type. String#length is
+/// known, but Integer#length is not a valid call, so the chain must stay
+/// Unknown instead of silently discarding the Integer branch.
+#[tokio::test]
+async fn union_chain_does_not_publish_a_partial_return_type() {
+    check(
+        r#"
+class Choice
+  def value(flag)
+    if flag
+      "text"
+    else
+      1
+    end
+  end
+end
+
+result<hint label=": ?"> = Choice.new.value(true).length
 "#,
     )
     .await;

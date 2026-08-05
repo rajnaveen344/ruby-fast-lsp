@@ -13,7 +13,7 @@ use crate::{FullyQualifiedName, RubyType};
 pub struct SourceFileId(pub u32);
 
 /// Byte range in a source file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct TextRange {
     pub file_id: SourceFileId,
     pub start_byte: u32,
@@ -245,6 +245,55 @@ impl TypeStore {
                 | TypeSubject::Expression(_) => None,
             }
         })
+    }
+
+    /// Update inferred method-return facts without rebuilding the file-owned
+    /// type store.
+    ///
+    /// SCC solving runs after a namespace has been traversed. Its results
+    /// replace only the Ruby type payload of matching inferred facts; ranges,
+    /// provenance, subject indexes, and facts from other files stay unchanged.
+    pub fn update_inferred_method_return_types_in_file<'a>(
+        &mut self,
+        file_id: SourceFileId,
+        updates: impl IntoIterator<Item = (&'a FullyQualifiedName, RubyType)>,
+    ) -> usize {
+        let mut updated = 0usize;
+        for (method, ruby_type) in updates {
+            let subject = TypeSubject::MethodReturn(method.clone());
+            let Some(subject_id) = self.subject_ids.get(&subject).copied() else {
+                continue;
+            };
+            let Some(fact_ids) = self.facts_by_subject.get(&subject_id).cloned() else {
+                continue;
+            };
+            for fact_id in fact_ids {
+                let fact = self.facts.get_mut(fact_id.0).unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: method-return type index points outside the fact arena. \
+                         This is a bug because indexed type ids must reference allocated slots. \
+                         Fix: update every TypeStore index when facts are removed or reused."
+                    )
+                });
+                let fact = fact.as_mut().unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: method-return type index points to a vacant fact slot. \
+                         This is a bug because removed type facts must be removed from every index. \
+                         Fix: keep TypeStore subject indexes synchronized with the fact arena."
+                    )
+                });
+                if fact.range.file_id != file_id || fact.provenance != TypeProvenance::Inferred {
+                    continue;
+                }
+                fact.ruby_type = ruby_type.clone();
+                updated = updated.checked_add(1).expect(
+                    "INVARIANT VIOLATED: inferred method-return update count overflowed usize. \
+                     This is a bug because the count cannot exceed the bounded fact arena. \
+                     Fix: keep TypeStore fact counts within addressable memory.",
+                );
+            }
+        }
+        updated
     }
 
     pub fn fact_count(&self) -> usize {
@@ -684,6 +733,58 @@ mod tests {
                 (&second_fqn, &RubyType::integer()),
             ]
         );
+    }
+
+    #[test]
+    fn updates_only_matching_inferred_method_returns_in_place() {
+        let inferred = method_return_subject("Target", "call");
+        let contracted = method_return_subject("Contracted", "call");
+        let other_file = method_return_subject("Other", "call");
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            inferred.clone(),
+            RubyType::Unknown,
+            TextRange::new(file(), 0, 8),
+            TypeProvenance::Inferred,
+        ));
+        store.add(TypeFact::new(
+            contracted.clone(),
+            RubyType::string(),
+            TextRange::new(file(), 10, 18),
+            TypeProvenance::Rbs,
+        ));
+        store.add(TypeFact::new(
+            other_file.clone(),
+            RubyType::Unknown,
+            TextRange::new(SourceFileId(2), 0, 8),
+            TypeProvenance::Inferred,
+        ));
+
+        let TypeSubject::MethodReturn(inferred_fqn) = &inferred else {
+            panic!("test subject must be a method return")
+        };
+        let TypeSubject::MethodReturn(contracted_fqn) = &contracted else {
+            panic!("test subject must be a method return")
+        };
+        let TypeSubject::MethodReturn(other_fqn) = &other_file else {
+            panic!("test subject must be a method return")
+        };
+        let updated = store.update_inferred_method_return_types_in_file(
+            file(),
+            [
+                (inferred_fqn, RubyType::integer()),
+                (contracted_fqn, RubyType::boolean()),
+                (other_fqn, RubyType::boolean()),
+            ],
+        );
+
+        assert_eq!(updated, 1);
+        assert_eq!(store.facts_for(&inferred)[0].ruby_type, RubyType::integer());
+        assert_eq!(
+            store.facts_for(&contracted)[0].ruby_type,
+            RubyType::string()
+        );
+        assert_eq!(store.facts_for(&other_file)[0].ruby_type, RubyType::Unknown);
     }
 
     #[test]

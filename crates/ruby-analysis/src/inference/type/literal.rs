@@ -193,12 +193,7 @@ impl LiteralAnalyzer {
             return RubyType::Array(vec![RubyType::Unknown]);
         }
 
-        // Remove duplicate types
-        element_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
-        element_types.dedup();
-
-        // Return Array with deduplicated element types
-        RubyType::Array(element_types)
+        RubyType::Array(RubyType::canonical_union_members(element_types))
     }
 
     /// Analyze a hash literal and infer key and value types
@@ -223,22 +218,31 @@ impl LiteralAnalyzer {
                 }
             } else if let Some(assoc_splat_node) = element.as_assoc_splat_node() {
                 // Handle splat operator (**hash)
-                if let Some(value) = assoc_splat_node.value() {
-                    if let Some(splat_type) = self.analyze_literal(&value) {
-                        // If it's a hash type, extract its key/value types
-                        match splat_type {
-                            RubyType::Hash(keys, values) => {
-                                key_types.extend(keys);
-                                value_types.extend(values);
-                            }
-                            _ => {
-                                // Unknown hash splat, assume Unknown types
-                                key_types.push(RubyType::Unknown);
-                                value_types.push(RubyType::Unknown);
-                            }
-                        }
+                match assoc_splat_node
+                    .value()
+                    .and_then(|value| self.analyze_literal(&value))
+                {
+                    Some(RubyType::Hash(keys, values)) => {
+                        key_types.extend(keys);
+                        value_types.extend(values);
+                    }
+                    Some(
+                        RubyType::Class(_)
+                        | RubyType::Module(_)
+                        | RubyType::ClassReference(_)
+                        | RubyType::ModuleReference(_)
+                        | RubyType::Array(_)
+                        | RubyType::Union(_)
+                        | RubyType::Unknown,
+                    )
+                    | None => {
+                        key_types.push(RubyType::Unknown);
+                        value_types.push(RubyType::Unknown);
                     }
                 }
+            } else {
+                key_types.push(RubyType::Unknown);
+                value_types.push(RubyType::Unknown);
             }
         }
 
@@ -247,16 +251,10 @@ impl LiteralAnalyzer {
             return RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]);
         }
 
-        // Remove duplicate key types
-        key_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
-        key_types.dedup();
-
-        // Remove duplicate value types
-        value_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
-        value_types.dedup();
-
-        // Return Hash with deduplicated key and value types
-        RubyType::Hash(key_types, value_types)
+        RubyType::Hash(
+            RubyType::canonical_union_members(key_types),
+            RubyType::canonical_union_members(value_types),
+        )
     }
 
     /// Check if a node represents a literal value
@@ -423,6 +421,16 @@ mod tests {
     }
 
     #[test]
+    fn test_array_with_unresolved_element_has_unknown_element_type() {
+        test_with_code("[1, dynamic_value]", |analyzer, node| {
+            assert_eq!(
+                analyzer.analyze_literal(node),
+                Some(RubyType::Array(vec![RubyType::Unknown]))
+            );
+        });
+    }
+
+    #[test]
     fn test_hash_literal() {
         test_with_code("{a: 1, b: 2}", |analyzer, node| {
             assert!(analyzer.is_literal(node));
@@ -437,6 +445,19 @@ mod tests {
                         FullyQualifiedName::try_from("Integer").unwrap()
                     )]
                 )
+            );
+        });
+    }
+
+    #[test]
+    fn test_hash_with_unresolved_splat_has_unknown_key_and_value_types() {
+        test_with_code("{known: 1, **dynamic_hash}", |analyzer, node| {
+            assert_eq!(
+                analyzer.analyze_literal(node),
+                Some(RubyType::Hash(
+                    vec![RubyType::Unknown],
+                    vec![RubyType::Unknown]
+                ))
             );
         });
     }

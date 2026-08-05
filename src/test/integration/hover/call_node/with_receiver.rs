@@ -453,6 +453,52 @@ MetaTarget.new.patched<hover label="?">
 }
 
 #[tokio::test]
+async fn call_expression_proof_outcome_is_replaced_after_edit() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open_and_check_fixture(
+            "call_outcome_lifecycle.rb",
+            r#"class User
+  def profile
+    dynamic_profile
+  end
+end
+
+User.new.profile<hover label="Unknown[unresolved_method_return]">
+"#,
+        )
+        .await;
+
+    editor
+        .set_and_check_fixture(
+            "call_outcome_lifecycle.rb",
+            r#"class User
+  def profile
+    "ready"
+  end
+end
+
+User.new.profile<hover label="String">
+"#,
+        )
+        .await;
+
+    editor
+        .set_and_check_fixture(
+            "call_outcome_lifecycle.rb",
+            r#"class User
+  def profile
+    dynamic_profile
+  end
+end
+
+User.new.profile<hover label="Unknown[unresolved_method_return]">
+"#,
+        )
+        .await;
+}
+
+#[tokio::test]
 async fn const_get_define_method_call_uses_block_method_return_type() {
     check(
         r#"

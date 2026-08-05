@@ -151,6 +151,61 @@ end
 }
 
 #[tokio::test]
+async fn instance_variable_completion_uses_the_source_ordered_owner_fact() {
+    check(
+        r#"
+class Types
+  def convert
+    @value = "early"
+    @value.u$0
+    @value = 1
+  end
+end
+<complete items="upcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn instance_variable_completion_does_not_borrow_another_owner_type() {
+    check(
+        r#"
+class First
+  def write
+    @value = "first"
+  end
+end
+
+class Second
+  def read
+    @value.u$0
+  end
+end
+<complete excludes="upcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn unknown_instance_variable_reassignment_invalidates_completion_receiver() {
+    check(
+        r#"
+class Types
+  def convert
+    @value = "early"
+    @value = dynamic_value
+    @value.u$0
+  end
+end
+<complete excludes="upcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn array_each_block_param_completion() {
     check(
         r#"
@@ -445,6 +500,27 @@ async fn chain_array_methods() {
 arr = [1, 2, 3]
 arr.first.a$0
 <complete items="abs">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn union_receiver_offers_only_methods_proven_for_every_member() {
+    check(
+        r#"
+class Choice
+  def value(flag)
+    if flag
+      "text"
+    else
+      1
+    end
+  end
+end
+
+Choice.new.value(true).$0
+<complete items="to_s" excludes="upcase,abs">
 "#,
     )
     .await;

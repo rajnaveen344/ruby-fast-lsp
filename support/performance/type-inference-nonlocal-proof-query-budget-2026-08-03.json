@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-03",
+  "purpose": "Measure interactive budgets after source-ordered, owner-aware nonlocal-variable proofs and Unknown assignment barriers were connected to hover, completion, navigation, references, diagnostics, and edit reindexing.",
+  "fixture": "tests/fixtures/type_inference_query_benchmark/app/controllers/users_controller.rb",
+  "candidate": {
+    "command": "target/release/profiler --workspace tests/fixtures/type_inference_query_benchmark --benchmark-iterations 500 --check-budgets",
+    "release_processes": 7,
+    "iterations_per_process": 500,
+    "p95_samples_us": {
+      "edit": [1117.291, 1127.292, 1101.75, 1100.333, 1096.25, 1125.208, 1131.666],
+      "completion": [24.375, 23.5, 23.541, 23.667, 26.25, 23.792, 24.625],
+      "hover": [11.875, 11.416, 11.791, 11.666, 11.75, 11.5, 14.958],
+      "definition": [18.167, 17.25, 21.459, 19.083, 19.708, 17.584, 18.792],
+      "references": [5060.834, 5148.458, 5114.25, 5178.792, 5030.875, 5214.25, 5030.125],
+      "diagnostics": [2.292, 2.209, 2.25, 2.292, 2.292, 2.333, 2.292]
+    },
+    "median_p95_us": {
+      "edit": 1117.291,
+      "completion": 23.792,
+      "hover": 11.75,
+      "definition": 18.792,
+      "references": 5114.25,
+      "diagnostics": 2.292
+    },
+    "cold_indexing_median_ms": 588.794208,
+    "engine_heap_mb": 6.0,
+    "fresh_budget_gate": {
+      "cold_indexing_ms": 632.825166,
+      "edit_p95_ms": 1.108375,
+      "completion_p95_us": 23.708,
+      "hover_p95_us": 11.5,
+      "definition_p95_us": 17.459,
+      "references_p95_ms": 5.064875,
+      "diagnostics_p95_us": 2.542,
+      "engine_heap_mb": 6.0,
+      "result": "PASS"
+    }
+  },
+  "production_budgets": {
+    "cold_indexing_ms": 2000,
+    "edit_p95_ms": 100,
+    "completion_p95_ms": 50,
+    "hover_p95_ms": 25,
+    "definition_p95_ms": 25,
+    "references_p95_ms": 50,
+    "diagnostics_p95_ms": 25,
+    "engine_heap_mb": 32
+  },
+  "base_orientation": {
+    "source_revision": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "release_processes": 7,
+    "iterations_per_process": 500,
+    "median_p95_us": {
+      "edit": 125.083,
+      "completion": 14.75,
+      "hover": 14.75,
+      "definition": 14.334,
+      "diagnostics": 1.625
+    },
+    "cold_indexing_median_ms": 494.560625,
+    "limitations": [
+      "The untouched base profiler rejected this fixture because its reference query returned no locations. The base-only instrumentation was changed to continue timing that empty reference query; base reference numbers are therefore excluded.",
+      "The base indexed two files and about 8 KiB of engine facts, while the candidate indexed bundled core semantics and retained about 6 MiB. Relative edit, completion, definition, diagnostic, cold-index, and heap deltas describe the cumulative proof-first worktree and are not attributable to this nonlocal-variable slice.",
+      "The candidate hover median p95 is lower than base, while the other comparable median p95 values are higher but remain far below their fixed production budgets. This evidence proves budget compliance, not a zero-percent relative regression against the much smaller base semantic universe."
+    ]
+  },
+  "decision": "Accepted as a bounded interactive-query safety slice. All seven candidate processes stay below every fixed production latency and engine-heap budget, and an independent --check-budgets run passes. This does not make the overall 9/10 claim eligible: a like-for-like full semantic-universe base comparison, warm workspace and edit matrix, allocations, real-project diagnostic review, and fixed goshposh peak-RSS gate remain open."
+}

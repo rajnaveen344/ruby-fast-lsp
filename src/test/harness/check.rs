@@ -39,6 +39,7 @@
 //! "#).await;
 //! ```
 
+use std::path::PathBuf;
 use tower_lsp::lsp_types::{
     CodeLensParams, CompletionParams, CompletionResponse, Diagnostic, DiagnosticSeverity,
     GotoDefinitionParams, InlayHintParams, NumberOrString, PartialResultParams, Position, Range,
@@ -46,7 +47,6 @@ use tower_lsp::lsp_types::{
     TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
     WorkDoneProgressParams,
 };
-use std::path::PathBuf;
 
 use super::fake_editor::FakeEditor;
 use super::fixture::{extract_cursor, extract_tags, extract_tags_with_attributes, Tag};
@@ -1028,6 +1028,7 @@ async fn run_diagnostics_check(
         );
         visitor.visit(&parse_result.node());
         let file_id = visitor.document.analysis_file_id();
+        let inference = visitor.inference_evidence();
         let mut engine = analysis_engine.write();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let facts = ruby_analysis::engine::FileFacts {
@@ -1077,6 +1078,7 @@ async fn run_diagnostics_check(
                 diagnostics
             },
             execution_contexts: visitor.extension_execution_context_facts,
+            inference,
         };
         engine.replace_facts(
             file_id,

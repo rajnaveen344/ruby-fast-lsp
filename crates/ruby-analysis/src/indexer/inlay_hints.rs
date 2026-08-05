@@ -10,6 +10,29 @@ use ruby_prism::{
     ConstantTargetNode, ConstantWriteNode, DefNode, ModuleNode, Node, Visit,
 };
 
+/// Return whether `offset` is followed by a newline and a chained-call dot.
+///
+/// This syntax predicate is shared by AST hint collection and expression-type
+/// fact collection so both surfaces agree on the exact chain boundaries that
+/// may receive an intermediate type hint.
+pub(crate) fn has_multiline_chain_continuation(source: &[u8], offset: usize) -> bool {
+    let remaining = match source.get(offset..) {
+        Some(bytes) => bytes,
+        None => return false,
+    };
+
+    let mut found_newline = false;
+    for &byte in remaining.iter().take(50) {
+        match byte {
+            b'\n' => found_newline = true,
+            b' ' | b'\t' | b'\r' => {}
+            b'.' if found_newline => return true,
+            _ => break,
+        }
+    }
+    false
+}
+
 /// Represents nodes collected from AST that are relevant for inlay hints.
 #[derive(Debug)]
 pub enum InlayNode {
@@ -24,6 +47,7 @@ pub enum InlayNode {
     VariableWrite {
         kind: VariableKind,
         name: String,
+        name_start_offset: u32,
         name_end_offset: u32,
     },
 
@@ -113,25 +137,6 @@ impl<'a> InlayNodeCollector<'a> {
     #[inline]
     fn is_in_range(&self, offset: u32) -> bool {
         self.range_start <= offset && offset <= self.range_end
-    }
-
-    /// Check if there's a line break after the given offset (for chained calls).
-    fn has_line_break_after(&self, offset: usize) -> bool {
-        let remaining = match self.source.get(offset..) {
-            Some(bytes) => bytes,
-            None => return false,
-        };
-
-        let mut found_newline = false;
-        for &byte in remaining.iter().take(50) {
-            match byte {
-                b'\n' => found_newline = true,
-                b' ' | b'\t' | b'\r' => {}
-                b'.' if found_newline => return true,
-                _ => break,
-            }
-        }
-        false
     }
 
     fn to_u32_offset(offset: usize) -> u32 {
@@ -315,12 +320,17 @@ impl<'a> InlayNodeCollector<'a> {
     }
 
     fn push_constant_name_write(&mut self, name: &[u8], name_end_offset: usize) {
+        let name_start_offset = name_end_offset.checked_sub(name.len()).expect(
+            "INVARIANT VIOLATED: a constant name is longer than the source prefix ending at its Prism location. This is a bug because Prism name locations must contain the emitted name bytes. Fix: use the target's exact name location when collecting constant inlay nodes.",
+        );
+        let name_start_offset = Self::to_u32_offset(name_start_offset);
         let name_end_offset = Self::to_u32_offset(name_end_offset);
         if self.is_in_range(name_end_offset) {
             let name = String::from_utf8_lossy(name).to_string();
             self.collected.push(InlayNode::VariableWrite {
                 kind: VariableKind::Constant,
                 name,
+                name_start_offset,
                 name_end_offset,
             });
         }
@@ -400,6 +410,7 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
             self.collected.push(InlayNode::VariableWrite {
                 kind: VariableKind::Local,
                 name,
+                name_start_offset: Self::to_u32_offset(node.name_loc().start_offset()),
                 name_end_offset,
             });
         }
@@ -418,6 +429,7 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
             self.collected.push(InlayNode::VariableWrite {
                 kind: VariableKind::Instance,
                 name,
+                name_start_offset: Self::to_u32_offset(node.name_loc().start_offset()),
                 name_end_offset,
             });
         }
@@ -433,6 +445,7 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
             self.collected.push(InlayNode::VariableWrite {
                 kind: VariableKind::Class,
                 name,
+                name_start_offset: Self::to_u32_offset(node.name_loc().start_offset()),
                 name_end_offset,
             });
         }
@@ -448,6 +461,7 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
             self.collected.push(InlayNode::VariableWrite {
                 kind: VariableKind::Global,
                 name,
+                name_start_offset: Self::to_u32_offset(node.name_loc().start_offset()),
                 name_end_offset,
             });
         }
@@ -513,7 +527,7 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
     fn visit_call_node(&mut self, node: &CallNode<'a>) {
         let call_end_offset = node.location().end_offset();
 
-        if self.has_line_break_after(call_end_offset) {
+        if has_multiline_chain_continuation(self.source, call_end_offset) {
             let call_end_offset = Self::to_u32_offset(call_end_offset);
 
             if self.is_in_range(call_end_offset) {

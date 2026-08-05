@@ -1,0 +1,618 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-first-reopened-call-finalization",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "candidate_worktree_has_changes": true,
+    "large_file_fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_lines": 5095,
+    "query_fixture": "tests/fixtures/type_inference_query_benchmark"
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776
+  },
+  "large_file": {
+    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "release_compilation_excluded": true,
+    "alternating_process_pairs": 15,
+    "baseline_binary_sha256": "edcdb309fdfb135ef6f67600e8b7511e4ece2c95a4a371fafdc1c5b91ed11c03",
+    "candidate_binary_sha256": "0a4564800b093095d987a2f802a7d9516f0c3028e262668dd2b647835df0d7bb",
+    "gate_percent": 3,
+    "result": {
+      "file_processor_total_ms": {
+        "baseline_median": 116.405709,
+        "candidate_median": 117.261583,
+        "median_change_percent": 0.74,
+        "gate_passed": true,
+        "baseline_samples": [
+          116.405709,
+          114.490708,
+          117.526708,
+          116.588375,
+          115.6025,
+          117.795459,
+          112.857667,
+          113.292,
+          116.167834,
+          114.919666,
+          118.720416,
+          116.728333,
+          121.245042,
+          116.040917,
+          117.7825
+        ],
+        "candidate_samples": [
+          113.150041,
+          121.395625,
+          114.661541,
+          119.297291,
+          113.049542,
+          117.261583,
+          123.312084,
+          113.44625,
+          120.251333,
+          116.197,
+          117.309084,
+          115.139625,
+          115.353084,
+          118.4635,
+          121.214125
+        ]
+      },
+      "profile_total_ms": {
+        "baseline_median": 116.953291,
+        "candidate_median": 117.751417,
+        "median_change_percent": 0.68,
+        "gate_passed": true,
+        "baseline_samples": [
+          116.953291,
+          115.018916,
+          118.035709,
+          117.14275,
+          116.147,
+          118.29475,
+          113.353458,
+          113.819709,
+          116.724792,
+          115.429459,
+          119.297167,
+          117.224291,
+          121.797166,
+          116.637459,
+          118.347916
+        ],
+        "candidate_samples": [
+          113.6455,
+          121.996459,
+          115.157792,
+          119.845625,
+          113.527875,
+          117.751417,
+          123.909792,
+          113.950458,
+          120.743083,
+          116.736416,
+          117.867584,
+          115.688458,
+          115.86125,
+          118.99325,
+          121.784584
+        ]
+      },
+      "semantic_visitor_ms": {
+        "baseline_median": 92.358709,
+        "candidate_median": 92.885541,
+        "median_change_percent": 0.57,
+        "gate_passed": true,
+        "baseline_samples": [
+          92.333959,
+          90.720917,
+          93.259625,
+          92.358709,
+          91.694083,
+          93.478166,
+          89.59675,
+          89.657292,
+          92.518292,
+          91.3725,
+          94.517042,
+          92.880958,
+          96.667,
+          91.363125,
+          93.333042
+        ],
+        "candidate_samples": [
+          90.062834,
+          96.565209,
+          90.769125,
+          93.617125,
+          89.606875,
+          92.885541,
+          96.614709,
+          89.988333,
+          94.721,
+          92.095667,
+          93.117417,
+          91.305125,
+          91.394958,
+          93.274875,
+          95.491417
+        ]
+      },
+      "replace_and_resolve_ms": {
+        "baseline_median": 11.74275,
+        "candidate_median": 11.893792,
+        "median_change_percent": 1.29,
+        "gate_passed": true,
+        "baseline_samples": [
+          11.600042,
+          11.696917,
+          11.624292,
+          11.931292,
+          11.843791,
+          11.74275,
+          11.5065,
+          11.622916,
+          11.902625,
+          11.699041,
+          12.241125,
+          11.648959,
+          12.154708,
+          12.678084,
+          12.391583
+        ],
+        "candidate_samples": [
+          11.538916,
+          12.860542,
+          11.609542,
+          13.647416,
+          11.628208,
+          11.260416,
+          14.382542,
+          11.644041,
+          11.84775,
+          12.278583,
+          12.1515,
+          11.893792,
+          11.892125,
+          12.336292,
+          12.546334
+        ]
+      }
+    }
+  },
+  "interactive_queries": {
+    "command": "profiler --workspace tests/fixtures/type_inference_query_benchmark --benchmark-iterations 500 --check-budgets",
+    "release_compilation_excluded": true,
+    "alternating_process_pairs": 14,
+    "iterations_per_process": 500,
+    "baseline_binary_sha256": "b667853268a0e47150b59b39dd16f1f62c7fcae77c3f8e7eee170a0350e24dbb",
+    "candidate_binary_sha256": "12ba7ea92586633b8c44aeb801ff31eec159d7a9b04c79e28498ef8571595199",
+    "verified_semantic_universe": {
+      "engine_files": 134,
+      "engine_heap_mb": 6.1
+    },
+    "gate_percent": 3,
+    "result": {
+      "medians": {
+        "edit": {
+          "baseline_median_p95_us": 1187.4165,
+          "candidate_median_p95_us": 1198.7915,
+          "change_percent": 0.96,
+          "gate_passed": true
+        },
+        "completion": {
+          "baseline_median_p95_us": 23.9375,
+          "candidate_median_p95_us": 24.333,
+          "change_percent": 1.65,
+          "gate_passed": true
+        },
+        "hover": {
+          "baseline_median_p95_us": 11.875,
+          "candidate_median_p95_us": 11.8125,
+          "change_percent": -0.53,
+          "gate_passed": true
+        },
+        "definition": {
+          "baseline_median_p95_us": 17.771,
+          "candidate_median_p95_us": 17.7915,
+          "change_percent": 0.12,
+          "gate_passed": true
+        },
+        "references": {
+          "baseline_median_p95_us": 5421.603999999999,
+          "candidate_median_p95_us": 5349.853999999999,
+          "change_percent": -1.32,
+          "gate_passed": true
+        },
+        "diagnostics": {
+          "baseline_median_p95_us": 2.292,
+          "candidate_median_p95_us": 2.2705,
+          "change_percent": -0.94,
+          "gate_passed": true
+        }
+      },
+      "cold_indexing": {
+        "baseline_median_ms": 589.6910415,
+        "candidate_median_ms": 591.846354,
+        "change_percent": 0.37,
+        "gate_passed": true
+      },
+      "engine_heap_mb": {
+        "baseline_median": 6.1,
+        "candidate_median": 6.1
+      },
+      "all_fixed_budget_runs_passed": true,
+      "samples": {
+        "baseline": [
+          {
+            "p95_us": {
+              "edit": 1187.083,
+              "completion": 23.75,
+              "hover": 11.667,
+              "definition": 17.833,
+              "references": 5281.917,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 604.702875,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1182.8339999999998,
+              "completion": 23.833,
+              "hover": 11.833,
+              "definition": 17.75,
+              "references": 5469.792,
+              "diagnostics": 2.25
+            },
+            "cold_indexing_ms": 609.51175,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1211.75,
+              "completion": 25.5,
+              "hover": 12.125,
+              "definition": 17.625,
+              "references": 5298.583,
+              "diagnostics": 2.333
+            },
+            "cold_indexing_ms": 575.620666,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1167.875,
+              "completion": 23.959,
+              "hover": 11.917,
+              "definition": 17.792,
+              "references": 5413.708,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 583.227625,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1165.875,
+              "completion": 24.208,
+              "hover": 12.209,
+              "definition": 17.541,
+              "references": 5388.459,
+              "diagnostics": 2.334
+            },
+            "cold_indexing_ms": 564.165958,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1187.75,
+              "completion": 23.875,
+              "hover": 11.75,
+              "definition": 17.708,
+              "references": 5601.833,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 588.089958,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1177.25,
+              "completion": 23.875,
+              "hover": 11.75,
+              "definition": 17.708,
+              "references": 5310.833,
+              "diagnostics": 2.375
+            },
+            "cold_indexing_ms": 609.197,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1234.125,
+              "completion": 24,
+              "hover": 11.875,
+              "definition": 17.917,
+              "references": 5429.5,
+              "diagnostics": 2.833
+            },
+            "cold_indexing_ms": 581.723375,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1179.75,
+              "completion": 24.417,
+              "hover": 11.875,
+              "definition": 18.042,
+              "references": 5429.5,
+              "diagnostics": 2.25
+            },
+            "cold_indexing_ms": 572.164042,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1206.833,
+              "completion": 23.833,
+              "hover": 11.708,
+              "definition": 17.625,
+              "references": 5630.583,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 591.292125,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1198.708,
+              "completion": 24.583,
+              "hover": 11.958,
+              "definition": 17.875,
+              "references": 5302.708,
+              "diagnostics": 2.334
+            },
+            "cold_indexing_ms": 600.328333,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1269.916,
+              "completion": 23.875,
+              "hover": 11.875,
+              "definition": 17.542,
+              "references": 5680.416,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 591.782042,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1199.8329999999999,
+              "completion": 23.916,
+              "hover": 11.875,
+              "definition": 17.833,
+              "references": 5362.625,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 613.511292,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1179.584,
+              "completion": 24.333,
+              "hover": 12.083,
+              "definition": 18.167,
+              "references": 5589.584000000001,
+              "diagnostics": 2.333
+            },
+            "cold_indexing_ms": 586.486458,
+            "engine_heap_mb": 6.1
+          }
+        ],
+        "candidate": [
+          {
+            "p95_us": {
+              "edit": 1179.166,
+              "completion": 24.333,
+              "hover": 11.875,
+              "definition": 17.916,
+              "references": 5373.583,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 590.125958,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1198.458,
+              "completion": 24.917,
+              "hover": 11.75,
+              "definition": 17.708,
+              "references": 5321.833,
+              "diagnostics": 2.334
+            },
+            "cold_indexing_ms": 583.850333,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1325.542,
+              "completion": 23.709,
+              "hover": 11.833,
+              "definition": 18.083,
+              "references": 5423.0419999999995,
+              "diagnostics": 2.25
+            },
+            "cold_indexing_ms": 627.1675,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1202.667,
+              "completion": 24.208,
+              "hover": 11.791,
+              "definition": 17.667,
+              "references": 5311.583,
+              "diagnostics": 2.333
+            },
+            "cold_indexing_ms": 587.409334,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1198.2079999999999,
+              "completion": 24,
+              "hover": 11.875,
+              "definition": 17.916,
+              "references": 5496.834,
+              "diagnostics": 2.25
+            },
+            "cold_indexing_ms": 616.486042,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1198.083,
+              "completion": 24.125,
+              "hover": 11.875,
+              "definition": 17.833,
+              "references": 5270,
+              "diagnostics": 2.25
+            },
+            "cold_indexing_ms": 581.190833,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1203.375,
+              "completion": 30.083,
+              "hover": 11.792,
+              "definition": 17.584,
+              "references": 5369.2919999999995,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 619.306334,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1221.75,
+              "completion": 24.333,
+              "hover": 11.708,
+              "definition": 18.416,
+              "references": 5279.208,
+              "diagnostics": 2.291
+            },
+            "cold_indexing_ms": 597.303542,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1180.333,
+              "completion": 28.75,
+              "hover": 13.959,
+              "definition": 18,
+              "references": 5525.5,
+              "diagnostics": 2.209
+            },
+            "cold_indexing_ms": 608.237625,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1190.667,
+              "completion": 24.125,
+              "hover": 11.833,
+              "definition": 17.75,
+              "references": 5277.292,
+              "diagnostics": 2.25
+            },
+            "cold_indexing_ms": 578.099,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1199.125,
+              "completion": 31.083,
+              "hover": 15.417,
+              "definition": 23.208,
+              "references": 5414.6669999999995,
+              "diagnostics": 2.25
+            },
+            "cold_indexing_ms": 612.69325,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1205.042,
+              "completion": 24.125,
+              "hover": 11.75,
+              "definition": 17.709,
+              "references": 5221,
+              "diagnostics": 2.25
+            },
+            "cold_indexing_ms": 589.023834,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1178.542,
+              "completion": 24.666,
+              "hover": 11.667,
+              "definition": 17.542,
+              "references": 5397.583,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 590.00425,
+            "engine_heap_mb": 6.1
+          },
+          {
+            "p95_us": {
+              "edit": 1243.625,
+              "completion": 24.5,
+              "hover": 11.625,
+              "definition": 17.667,
+              "references": 5330.415999999999,
+              "diagnostics": 2.292
+            },
+            "cold_indexing_ms": 593.56675,
+            "engine_heap_mb": 6.1
+          }
+        ]
+      }
+    }
+  },
+  "semantic_evidence": {
+    "ruby_analysis_tests": "444/444",
+    "check_cli_tests": "21/21",
+    "call_hover_tests": "50/50",
+    "scorecard": "71/71 cases, 100/100 points, score_eligible=false",
+    "covered_outcomes": [
+      "top-level implicit reopened dispatch proves an exhaustive return union",
+      "explicit reopened dispatch proves a union only when unrestricted and visible callee sets are identical",
+      "explicit private reopened dispatch remains Unknown[unresolved_method_return]",
+      "CLI and LSP project the same engine-finalized outcomes"
+    ]
+  },
+  "accepted_design": {
+    "summary": "Leave receiver-less implicit/self outcomes deferred when no first-pass receiver type exists, finalize them from the engine-owned method lookup result, and prove ambiguous returns only from exhaustive receiver queries. Explicit-receiver ambiguity additionally requires exact equality between unrestricted and visibility-allowed callee sets.",
+    "why": "This reuses the existing MRO, visibility, method-return, and reference-resolution policies; it neither guesses a receiver nor drops inaccessible candidates.",
+    "performance_assessment": "Every focused large-file, interactive p95, cold-indexing, heap, and fixed-budget comparison passed the three-percent incremental gate."
+  },
+  "limitations": [
+    "This artifact proves no measurable regression for the reopened-call increment, not completion of the goal-wide performance program.",
+    "The broader call-expression artifact still records edit and references comparisons above three percent relative to its predecessor, so full performance acceptance remains open.",
+    "The scorecard remains diagnostic and score_eligible=false until remaining query-surface parity, representative real-project precision, and complete performance gates are satisfied."
+  ],
+  "decision": "Semantically accepted and incrementally performance-safe. The full type-inference goal remains open."
+}

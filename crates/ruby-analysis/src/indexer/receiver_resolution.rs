@@ -27,11 +27,20 @@ pub fn resolve_receiver_to_namespace(
                 context.namespace_kind,
             ))
         }
-        MethodReceiver::LocalVariable(name)
-        | MethodReceiver::InstanceVariable(name)
-        | MethodReceiver::ClassVariable(name)
-        | MethodReceiver::GlobalVariable(name) => {
+        MethodReceiver::LocalVariable(name) => {
             let var_type = variable_receiver_type(name, context)?;
+            type_to_namespace(&var_type, context)
+        }
+        MethodReceiver::InstanceVariable(name) => {
+            let var_type = variable_type_before(name, VariableTypeKind::Instance, context)?;
+            type_to_namespace(&var_type, context)
+        }
+        MethodReceiver::ClassVariable(name) => {
+            let var_type = variable_type_before(name, VariableTypeKind::Class, context)?;
+            type_to_namespace(&var_type, context)
+        }
+        MethodReceiver::GlobalVariable(name) => {
+            let var_type = variable_type_before(name, VariableTypeKind::Global, context)?;
             type_to_namespace(&var_type, context)
         }
         MethodReceiver::MethodCall {
@@ -90,15 +99,15 @@ pub fn resolve_receiver_type(
             variable_receiver_type(name, context).unwrap_or(RubyType::Unknown)
         }
         MethodReceiver::InstanceVariable(name) => {
-            variable_type_in_file(name, VariableTypeKind::Instance, context)
+            variable_type_before(name, VariableTypeKind::Instance, context)
                 .unwrap_or(RubyType::Unknown)
         }
         MethodReceiver::ClassVariable(name) => {
-            variable_type_in_file(name, VariableTypeKind::Class, context)
+            variable_type_before(name, VariableTypeKind::Class, context)
                 .unwrap_or(RubyType::Unknown)
         }
         MethodReceiver::GlobalVariable(name) => {
-            variable_type_in_file(name, VariableTypeKind::Global, context)
+            variable_type_before(name, VariableTypeKind::Global, context)
                 .unwrap_or(RubyType::Unknown)
         }
         MethodReceiver::MethodCall {
@@ -160,26 +169,37 @@ fn variable_receiver_type(
                 file_id,
                 context.byte_offset,
             ) {
-                if *ruby_type != RubyType::Unknown {
-                    return Some(ruby_type.clone());
-                }
+                return Some(ruby_type.clone());
             }
+
+            let query = context.query?;
+            let scope_id = u32::try_from(scope_id).expect(
+                "INVARIANT VIOLATED: local variable scope id exceeded u32. This is a bug because analysis TypeSubject stores scope ids as u32. Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
+            );
+            return query.local_variable_type_at(var_name, scope_id, file_id, context.byte_offset);
         }
     }
-
-    let document = context.document?;
-    let query = context.query?;
-    query.variable_type_any_before(var_name, document.analysis_file_id(), context.byte_offset)
+    None
 }
 
-fn variable_type_in_file(
+fn variable_type_before(
     name: &str,
     kind: VariableTypeKind,
     context: &ReceiverResolutionContext<'_, '_>,
 ) -> Option<RubyType> {
     let document = context.document?;
     let query = context.query?;
-    query.variable_type_in_file(kind, name, document.analysis_file_id())
+    let owner = FullyQualifiedName::namespace_with_kind(
+        context.current_namespace.to_vec(),
+        context.namespace_kind,
+    );
+    query.variable_type_before_in_owner(
+        kind,
+        name,
+        &owner,
+        document.analysis_file_id(),
+        context.byte_offset,
+    )
 }
 
 fn method_call_receiver_type(

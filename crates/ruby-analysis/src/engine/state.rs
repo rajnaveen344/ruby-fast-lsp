@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -8,21 +8,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
+use crate::core::method_return_equation::MethodReturnBase;
 use crate::core::method_store::StoredMethodFactMatch;
 use crate::core::{
     ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateStore,
     DiagnosticFact, DiagnosticSeverity, DiagnosticStore, ExecutionContextFact, ExecutionScopeMode,
     FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
-    MethodAvailability, MethodFact, MethodParamKind, MethodReferenceAccess, MethodStore,
-    MethodVisibilityOverrideFact, NamespaceKind, ReferenceCandidate, ReferenceCandidateKind,
-    ReferenceCandidateStore, ReferenceFact, ReferenceStore, RubyConstant, RubyMethod, RubyType,
-    SemanticGraph, SourceFileId, SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact,
-    StoredMethodFact, StoredReferenceCandidate, StoredSymbolFact, StoredUnresolvedGraphEdgeFact,
-    SymbolFact, SymbolKind, SymbolStore, TextRange, TypeFact, TypeProvenance, TypeResolution,
-    TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
+    InferenceEvidence, InferenceTelemetry, MethodAvailability, MethodFact, MethodParamKind,
+    MethodReferenceAccess, MethodStore, MethodVisibilityOverrideFact, NamespaceKind,
+    ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact,
+    ReferenceStore, RubyConstant, RubyMethod, RubyType, SemanticGraph, SourceFileId, SourceKind,
+    StoredGraphEdgeFact, StoredGraphNodeFact, StoredMethodFact, StoredReferenceCandidate,
+    StoredSymbolFact, StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolKind, SymbolStore,
+    TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeResolution, TypeStore,
+    TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
+use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
 use crate::method_store::MethodVisibility;
 use crate::FileIdMap;
 use indexmap::IndexSet;
@@ -143,6 +146,7 @@ pub struct FileFacts {
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
     pub diagnostics: Vec<DiagnosticFact>,
     pub execution_contexts: Vec<ExecutionContextFact>,
+    pub inference: InferenceEvidence,
 }
 
 impl SemanticExportFingerprint {
@@ -203,6 +207,27 @@ impl SemanticExportFingerprint {
                     stable_type_provenance(hasher, fact.provenance);
                 }));
             }
+        }
+        for equation in &facts.inference.method_return_equations {
+            exports.push(export_hash(|hasher| {
+                stable_u8(hasher, 8);
+                stable_fqn(hasher, equation.method());
+                match equation.base() {
+                    MethodReturnBase::Bottom => stable_u8(hasher, 0),
+                    MethodReturnBase::Proven(ruby_type) => {
+                        stable_u8(hasher, 1);
+                        stable_ruby_type(hasher, ruby_type);
+                    }
+                    MethodReturnBase::Unknown(reason) => {
+                        stable_u8(hasher, 2);
+                        stable_string(hasher, reason.code());
+                    }
+                }
+                stable_len(hasher, equation.dependencies().len());
+                for dependency in equation.dependencies() {
+                    stable_fqn(hasher, dependency);
+                }
+            }));
         }
         for fact in &facts.graph_nodes {
             exports.push(export_hash(|hasher| {
@@ -749,6 +774,7 @@ pub struct AnalysisStats {
 /// resolution policy, diagnostic emission, or project ownership.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvePassStats {
+    pub method_return_equation_solve_runs: usize,
     pub graph_retry_ns: u64,
     pub diagnostic_seed_ns: u64,
     pub constant_candidates_ns: u64,
@@ -951,6 +977,9 @@ pub struct AnalysisEngine {
     pub(super) graph: SemanticGraph,
     pub(super) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
     execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
+    inference_by_file: HashMap<SourceFileId, InferenceEvidence>,
+    method_return_equations_dirty: bool,
+    method_return_solution_spans_files: bool,
     semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
     top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
     last_resolve_pass: ResolvePassStats,
@@ -983,6 +1012,9 @@ impl Default for AnalysisEngine {
             graph: SemanticGraph::default(),
             method_visibility_overrides: Vec::new(),
             execution_contexts: HashMap::new(),
+            inference_by_file: HashMap::new(),
+            method_return_equations_dirty: false,
+            method_return_solution_spans_files: false,
             semantic_export_fingerprints: HashMap::new(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
             last_resolve_pass: ResolvePassStats::default(),
@@ -1001,6 +1033,9 @@ impl Clone for AnalysisEngine {
             graph: self.graph.clone(),
             method_visibility_overrides: self.method_visibility_overrides.clone(),
             execution_contexts: self.execution_contexts.clone(),
+            inference_by_file: self.inference_by_file.clone(),
+            method_return_equations_dirty: self.method_return_equations_dirty,
+            method_return_solution_spans_files: self.method_return_solution_spans_files,
             semantic_export_fingerprints: self.semantic_export_fingerprints.clone(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
             last_resolve_pass: ResolvePassStats::default(),
@@ -1119,6 +1154,8 @@ impl AnalysisEngine {
 
     pub fn resolve(&mut self) {
         let mut stats = ResolvePassStats::default();
+        stats.method_return_equation_solve_runs =
+            usize::from(self.resolve_method_return_equations());
         let graph_retry_started = Instant::now();
         self.retry_unresolved_graph_edges();
         stats.graph_retry_ns = elapsed_ns(graph_retry_started);
@@ -1154,6 +1191,7 @@ impl AnalysisEngine {
         if file_ids.is_empty() {
             return;
         }
+        self.resolve_method_return_equations();
         self.retry_unresolved_graph_edges();
         for file_id in file_ids {
             self.resolve_reference_candidates_in_file(*file_id);
@@ -1182,6 +1220,7 @@ impl AnalysisEngine {
         self.facts.references.resolved.shrink_to_fit();
         self.facts.diagnostics.candidates.shrink_to_fit();
         self.facts.diagnostics.resolved.shrink_to_fit();
+        self.inference_by_file.shrink_to_fit();
     }
 
     pub fn query(&self) -> AnalysisQuery<'_> {
@@ -1255,6 +1294,13 @@ impl AnalysisEngine {
                 .sum::<usize>()
             + self.semantic_export_fingerprints.capacity()
                 * (size_of::<SourceFileId>() + size_of::<SemanticExportFingerprint>() + 1)
+            + self.inference_by_file.capacity()
+                * (size_of::<SourceFileId>() + size_of::<InferenceEvidence>() + 1)
+            + self
+                .inference_by_file
+                .values()
+                .map(InferenceEvidence::estimated_heap_bytes)
+                .sum::<usize>()
     }
 
     pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
@@ -1535,7 +1581,7 @@ impl AnalysisEngine {
         self.sources.files.values()
     }
 
-    fn replace_facts_deferred(&mut self, file_id: SourceFileId, facts: FileFacts) {
+    fn replace_facts_deferred(&mut self, file_id: SourceFileId, mut facts: FileFacts) {
         self.semantic_revision = self.semantic_revision.checked_add(1).expect(
             "INVARIANT VIOLATED: analysis engine semantic revision exhausted u64. \
              This is a bug because cached queries require monotonic invalidation. \
@@ -1543,6 +1589,29 @@ impl AnalysisEngine {
         );
         *self.top_level_method_lookup_chain_cache.get_mut() = None;
         self.assert_known_file_id(file_id, "file analysis references unknown source file id");
+        let equations_changed = match self.inference_by_file.get(&file_id) {
+            Some(previous) => {
+                previous.method_return_equations != facts.inference.method_return_equations
+            }
+            None => !facts.inference.method_return_equations.is_empty(),
+        };
+        if !equations_changed {
+            if let Some(previous) = self.inference_by_file.get(&file_id) {
+                facts.inference.method_return_outcomes = previous.method_return_outcomes.clone();
+                facts.inference.telemetry = previous.telemetry.clone();
+                for fact in &mut facts.types {
+                    if fact.provenance != TypeProvenance::Inferred {
+                        continue;
+                    }
+                    let TypeSubject::MethodReturn(method) = &fact.subject else {
+                        continue;
+                    };
+                    if let Some(outcome) = previous.method_return_outcomes.get(method) {
+                        fact.ruby_type = outcome.clone().into_ruby_type();
+                    }
+                }
+            }
+        }
         let symbols = self.intern_symbol_facts(facts.symbols);
         self.facts
             .definitions
@@ -1579,6 +1648,263 @@ impl AnalysisEngine {
             .diagnostics
             .resolved
             .replace_file(file_id, facts.diagnostics);
+        self.inference_by_file.insert(file_id, facts.inference);
+        self.method_return_equations_dirty |= equations_changed;
+    }
+
+    /// Solve the complete project-owned method-return equation graph once per
+    /// equation change, before any call reference consumes method returns.
+    ///
+    /// Ordinary `resolve()` calls are O(1) when method bodies did not change.
+    /// Equations contain no AST nodes and follow the same per-file replacement
+    /// lifecycle as the inferred type facts they update.
+    fn resolve_method_return_equations(&mut self) -> bool {
+        if !self.method_return_equations_dirty {
+            return false;
+        }
+
+        let mut file_ids = self
+            .inference_by_file
+            .iter()
+            .filter_map(|(file_id, evidence)| {
+                (!evidence.method_return_equations.is_empty()).then_some(*file_id)
+            })
+            .collect::<Vec<_>>();
+        file_ids.sort_unstable();
+
+        if file_ids.len() == 1 && !self.method_return_solution_spans_files {
+            self.method_return_equations_dirty = false;
+            return false;
+        }
+
+        let equations = file_ids
+            .iter()
+            .flat_map(|file_id| {
+                self.inference_by_file
+                    .get(file_id)
+                    .expect(
+                        "INVARIANT VIOLATED: a selected method-equation file disappeared during immutable collection. This is a bug because resolution owns the engine write lock. Fix: keep equation collection inside one resolution pass.",
+                    )
+                    .method_return_equations
+                    .iter()
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+
+        if equations.is_empty() {
+            self.method_return_equations_dirty = false;
+            self.method_return_solution_spans_files = false;
+            return false;
+        }
+
+        let solve_result = solve_method_return_equations_with_telemetry(&equations);
+        for file_id in &file_ids {
+            let methods = self
+                .inference_by_file
+                .get(file_id)
+                .expect(
+                    "INVARIANT VIOLATED: a method-equation owner disappeared before result projection. This is a bug because resolution owns the engine write lock. Fix: keep equation solving and projection atomic.",
+                )
+                .method_return_equations
+                .iter()
+                .map(|equation| equation.method().clone())
+                .collect::<std::collections::BTreeSet<_>>();
+            let outcomes = methods
+                .iter()
+                .map(|method| {
+                    let outcome = solve_result.outcomes.get(method).unwrap_or_else(|| {
+                        panic!(
+                            "INVARIANT VIOLATED: method-return solver omitted equation `{method}`. This is a bug because every grouped method must produce exactly one proof outcome. Fix: keep SCC emission and result insertion exhaustive."
+                        )
+                    });
+                    (method.clone(), outcome.clone())
+                })
+                .collect::<BTreeMap<_, _>>();
+            self.facts
+                .types
+                .update_inferred_method_return_types_in_file(
+                    *file_id,
+                    outcomes
+                        .iter()
+                        .map(|(method, outcome)| (method, outcome.clone().into_ruby_type())),
+                );
+            let evidence = self.inference_by_file.get_mut(file_id).expect(
+                "INVARIANT VIOLATED: a method-equation owner disappeared before evidence replacement. This is a bug because resolution owns the engine write lock. Fix: keep equation solving and evidence projection atomic.",
+            );
+            evidence.method_return_outcomes = outcomes;
+            evidence.telemetry = InferenceTelemetry::default();
+        }
+
+        let telemetry_owner = *file_ids.first().expect(
+            "INVARIANT VIOLATED: a non-empty method-equation solve has no file owner. This is a bug because equations are collected exclusively from sorted file evidence. Fix: preserve the owner while flattening equations.",
+        );
+        self.inference_by_file
+            .get_mut(&telemetry_owner)
+            .expect(
+                "INVARIANT VIOLATED: the deterministic method-solver telemetry owner disappeared. This is a bug because resolution owns the engine write lock. Fix: assign telemetry before leaving the atomic solve pass.",
+            )
+            .telemetry = solve_result.telemetry;
+        self.method_return_equations_dirty = false;
+        self.method_return_solution_spans_files = file_ids.len() > 1;
+        true
+    }
+
+    pub fn inference_telemetry(&self) -> InferenceTelemetry {
+        let mut file_ids = self.inference_by_file.keys().copied().collect::<Vec<_>>();
+        file_ids.sort_unstable();
+        let mut aggregate = InferenceTelemetry::default();
+        for file_id in file_ids {
+            aggregate.merge(&self.inference_by_file.get(&file_id).expect(
+                "INVARIANT VIOLATED: inference telemetry file key disappeared during immutable aggregation. This is a bug because engine queries hold a stable shared borrow. Fix: keep telemetry replacement behind the engine write lock.",
+            ).telemetry);
+        }
+        aggregate
+    }
+
+    pub fn inference_telemetry_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&InferenceTelemetry> {
+        self.inference_by_file
+            .get(&file_id)
+            .map(|evidence| &evidence.telemetry)
+    }
+
+    pub fn method_return_outcomes_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&BTreeMap<FullyQualifiedName, TypeInferenceOutcome>> {
+        self.inference_by_file
+            .get(&file_id)
+            .map(|evidence| &evidence.method_return_outcomes)
+    }
+
+    pub fn method_return_equations_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&[crate::core::MethodReturnEquation]> {
+        self.inference_by_file
+            .get(&file_id)
+            .map(|evidence| evidence.method_return_equations.as_slice())
+    }
+
+    pub fn inference_evidence_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&InferenceEvidence> {
+        self.inference_by_file.get(&file_id)
+    }
+
+    pub(crate) fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool {
+        self.inference_by_file.values().any(|evidence| {
+            evidence
+                .method_return_equations
+                .iter()
+                .any(|equation| equation.method() == method)
+        })
+    }
+
+    pub(super) fn expression_unknown_reason(&self, range: TextRange) -> Option<UnknownReason> {
+        self.inference_by_file
+            .get(&range.file_id)
+            .and_then(|evidence| {
+                evidence
+                    .call_expression_outcomes
+                    .binary_search_by_key(&range, |(evidence_range, _)| *evidence_range)
+                    .ok()
+                    .and_then(|index| evidence.call_expression_outcomes[index].1.unknown_reason())
+                    .or_else(|| {
+                        evidence
+                            .expression_unknown_reasons
+                            .binary_search_by_key(&range, |(evidence_range, _)| *evidence_range)
+                            .ok()
+                            .map(|index| evidence.expression_unknown_reasons[index].1)
+                    })
+            })
+    }
+
+    pub(super) fn call_expression_outcomes_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&[(TextRange, TypeInferenceOutcome)]> {
+        self.inference_by_file
+            .get(&file_id)
+            .map(|evidence| evidence.call_expression_outcomes.as_slice())
+    }
+
+    pub(super) fn replace_resolved_call_expression_outcomes(
+        &mut self,
+        mut outcomes: Vec<(TextRange, TypeInferenceOutcome)>,
+    ) {
+        outcomes.sort_unstable_by_key(|(range, _)| *range);
+        for adjacent in outcomes.windows(2) {
+            assert!(
+                adjacent[0].0 != adjacent[1].0,
+                "INVARIANT VIOLATED: one call expression resolved through multiple method candidates. This is a bug because one runtime dispatch must have one proof outcome. Fix: attach the call range only to the candidate representing the invoked method."
+            );
+        }
+        let mut outcomes = outcomes.into_iter().peekable();
+        while let Some((first_range, first_outcome)) = outcomes.next() {
+            let file_id = first_range.file_id;
+            let mut incoming = vec![(first_range, first_outcome)];
+            while outcomes
+                .peek()
+                .is_some_and(|(range, _)| range.file_id == file_id)
+            {
+                incoming.push(outcomes.next().expect(
+                    "INVARIANT VIOLATED: a peeked call-expression outcome disappeared before consumption. This is a bug because the local iterator is not shared. Fix: keep grouping and consumption in one loop.",
+                ));
+            }
+
+            let evidence = self.inference_by_file.get_mut(&file_id).expect(
+                "INVARIANT VIOLATED: resolved call outcome belongs to a file without inference evidence. This is a bug because file facts are installed before their method candidates resolve. Fix: replace inference evidence atomically with reference candidates.",
+            );
+            let existing = std::mem::take(&mut evidence.call_expression_outcomes);
+            let mut existing = existing.into_iter().peekable();
+            let mut incoming = incoming.into_iter().peekable();
+            let mut merged = Vec::with_capacity(existing.len() + incoming.len());
+            loop {
+                match (existing.peek(), incoming.peek()) {
+                    (Some((existing_range, _)), Some((incoming_range, _))) => {
+                        match existing_range.cmp(incoming_range) {
+                            std::cmp::Ordering::Less => merged.push(existing.next().expect(
+                                "INVARIANT VIOLATED: a peeked existing call outcome disappeared before merge consumption. This is a bug because the local iterator is not shared. Fix: keep comparison and consumption atomic.",
+                            )),
+                            std::cmp::Ordering::Equal => {
+                                existing.next().expect(
+                                    "INVARIANT VIOLATED: an equal existing call outcome disappeared before replacement. This is a bug because the local iterator is not shared. Fix: keep comparison and consumption atomic.",
+                                );
+                                merged.push(incoming.next().expect(
+                                    "INVARIANT VIOLATED: an equal incoming call outcome disappeared before replacement. This is a bug because the local iterator is not shared. Fix: keep comparison and consumption atomic.",
+                                ));
+                            }
+                            std::cmp::Ordering::Greater => merged.push(incoming.next().expect(
+                                "INVARIANT VIOLATED: a peeked incoming call outcome disappeared before merge consumption. This is a bug because the local iterator is not shared. Fix: keep comparison and consumption atomic.",
+                            )),
+                        }
+                    }
+                    (Some(_), None) => {
+                        merged.extend(existing);
+                        break;
+                    }
+                    (None, Some(_)) => {
+                        merged.extend(incoming);
+                        break;
+                    }
+                    (None, None) => break,
+                }
+            }
+            evidence.call_expression_outcomes = merged;
+        }
+    }
+
+    pub(super) fn expression_unknown_reasons_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&[(TextRange, UnknownReason)]> {
+        self.inference_by_file
+            .get(&file_id)
+            .map(|evidence| evidence.expression_unknown_reasons.as_slice())
     }
 
     pub(super) fn query_cache_identity(&self) -> (u64, u64) {
@@ -2051,6 +2377,7 @@ impl AnalysisEngine {
                     is_super,
                     access,
                     caller,
+                    call_expression_range,
                     preferred_definition_range,
                     diagnostics,
                 } => {
@@ -2069,6 +2396,7 @@ impl AnalysisEngine {
                         is_super,
                         access,
                         caller,
+                        call_expression_range,
                         preferred_definition_range,
                         diagnostics,
                     )

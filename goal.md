@@ -1,2006 +1,1058 @@
-# Ruby Fast LSP: Hierarchical Ruby Index Explorer
+# Ruby Fast LSP: 9/10 Type Inference and Standalone Type Checking
 
 ## Reusable Goal Text
 
-Make the VS Code **Ruby Index** a navigable project explorer, not a flat dump of
-every class and module. The reference experience is the Java Projects / Package
-Explorer shape: owning projects as roots, nested structure underneath, and
-external libraries kept in a separate collapsed section—not thousands of
-sibling “X Module / Y Class” rows competing for attention.
+Build a modular, editor-agnostic, **proof-first and deterministic** type
+inference engine for Ruby Fast LSP. It must infer precise, explainable Ruby
+types across local flow, methods, chained calls, blocks, files, RBS declarations,
+and supported framework-generated APIs, then use the same semantic result for
+hover, inlay hints, completion, method resolution, navigation, signature help,
+diagnostics, and a standalone **`ruby-fast-lsp check`** CLI.
 
-Ruby Fast LSP already indexes `goshposh`-scale workspaces with isolated
-engines, staged readiness, bounded resources, and a fixed peak-RSS ceiling.
-Treat that multi-root indexing work as **accepted and in maintenance**: defend
-correctness, fingerprints, interactive latency, and the RSS gate; do not open
-new open-ended indexing micro-optimization campaigns merely to chase stretch
-wall-clock numbers. The new product north star is **discoverability of the
-semantic namespace tree in the editor**.
+Reach a measured **9/10 for type inference**: at least 90/100 on a checked-in
+Ruby conformance scorecard, with no critical category below 85%, no silent
+wrong-type guesses, and exact CLI/LSP semantic parity. A concrete type may be
+published only when complete, current static evidence proves it. If any
+required premise, lookup edge, branch, overload, dependency, or solver step is
+missing, stale, unsupported, or ambiguous, the result must be an explicit,
+machine-explainable **Unknown**. Unknown is safer than a plausible guess and
+does not earn precision credit; improve the score by proving more cases, never
+by weakening the proof rule or widening an unproven value to `Object`.
 
-Preserve engine ownership of namespace/mixin/MRO truth. The VS Code adapter owns
-tree presentation, reveal, search UX, and grouping. Do not invent a second
-semantic store for the sidebar. Project-only projection remains the default;
-external types stay opt-in and must not flatten into the project browse path.
+For identical source, signatures, configuration, and dependency state, results
+must be identical regardless of indexing order, worker scheduling, cache state,
+or whether analysis runs through the CLI or LSP. Follow Pyrefly's useful
+architectural principles—separate fact/binding collection from solving, model
+flow and recursion explicitly, and share one engine between CLI and editor—but
+adapt them to Ruby rather than porting Python semantics.
+
+Achieve this without regressing performance. Keep inference incremental and
+bounded, preserve existing interactive readiness and memory budgets, and
+require recorded before/after evidence for every material inference expansion.
 
 ## Product Outcome
 
-A developer opening a multi-service Ruby folder should observe:
+A Ruby developer should be able to:
 
-- **Ruby Projects reads like Java Projects**, not like an alphabetical symbol dump
-  or a flat list of every Gemfile.
-- The workspace folder is a container; Gemfile-owned projects nest under it by
-  relative path (`devops/tools/capistrano`), with stable path order that does not
-  jump when the active editor changes.
-- Each Gemfile-owned Ruby project remains an isolated engine leaf (namespaces,
-  Ruby Standard Library, Gems), matching how Java Projects shows modules under a
-  parent without merging classpaths.
-- Under a project, namespaces nest by Ruby nesting (`GoshPosh` → `Platform` →
-  `API` → `ProspectPosts`), matching breadcrumbs and source structure. Expanding
-  a parent reveals children; the root is not a wall of every leaf type.
-- External types live under per-project library sections analogous to Java
-  Projects: **Ruby Standard Library** (core/stdlib/runtime, like JRE) and
-  **Gems** grouped by locked gem package (like Maven Dependencies). A gem that
-  reopens a core type (e.g. ActiveSupport → `String`) shows that reopen under
-  the gem package while the canonical type stays under Ruby Standard Library.
-  Collapsed by default; still controlled by the library-sections toggle.
-- Mixin metadata (Includes, Included By, Superclass, Prepends, singleton) remains
-  available on a type, but is secondary to the nested namespace browse path—not
-  the primary reason every root row looks like a flat catalog entry.
-- Search and reveal still find deep FQNs quickly; reveal expands ancestors
-  instead of requiring the user to scroll a flat list.
-- Multi-root workspaces show the active document’s owning project first without
-  merging engines or leaking provenance across projects.
-- Tree refresh follows ordinary indexing lifecycle; it must not stall the LSP
-  request loop or re-query unbounded work on every keystroke.
+- Open an unannotated or partially annotated project and receive useful,
+  conservative types without first adopting a full RBS codebase.
+- See the same inferred type in hover, inlay hints, completion, navigation,
+  signature help, diagnostics, and CLI output.
+- Follow types through assignments, branches, guards, loops, blocks, method
+  calls, constructors, inheritance, mixins, constants, and multiple files.
+- Use RBS, YARD, bundled core signatures, JRuby signatures, and extension facts
+  as typed inputs without creating a second lookup or precedence policy.
+- Run ruby-fast-lsp check locally or in CI without starting an LSP client.
+- Trust that a reported type error is backed by a complete lookup and an
+  explainable evidence chain, not a guess caused by missing code.
+- Edit a ready project without project-wide type checking entering the typing
+  critical path.
 
-### Explicit non-goals for this phase
+## Meaning of “Infer and Use Type”
 
-- Further open-ended warm-index wall-clock chasing below the already-useful
-  project-navigation / dependency-navigation staged budgets.
-- Merging isolated project engines for a prettier tree.
-- Turning Ruby Index into a filesystem file browser (that is Explorer); the tree
-  is semantic, with optional project/source grouping only when it aids
-  navigation.
-- Dumping methods of every type at the root level.
+Inference is not complete when a type is merely stored. A type must affect the
+appropriate semantic consumers:
 
-## Previous Goal Status (Multi-Root Indexing)
+| Inferred knowledge | Required consumers |
+| --- | --- |
+| Expression and variable type | hover, inlay hints, completion receiver |
+| Call receiver and selected overload | definition, references, completion, diagnostics |
+| Parameter and block contract | signature help, argument diagnostics, block inference |
+| Method return type | chained calls, assignments, hover, cross-file callers |
+| Narrowed flow type | branch-local hover, completion, diagnostics |
+| Constant or attribute value type | navigation, completion, downstream calls |
+| Public inferred signature | dependent-file invalidation and CLI checking |
 
-The prior north star—fast, deterministic multi-root indexing on `goshposh` with
-staged readiness, bounded concurrency, immutable product reuse, and a fixed
-**1,776,846,438**-byte peak-RSS ceiling—is **accepted as good enough for
-maintenance**. Keep defending:
+One consumer must not independently re-infer a conflicting type. If a feature
+needs a different projection, it maps the shared domain result rather than
+creating another semantic algorithm.
 
-- Document / project-navigation / dependency-navigation staged readiness.
-- Interactive same-file usefulness (~500 ms) and post-ready request latency.
-- Peak RSS under the fixed ceiling; semantic-result fingerprint stability.
-- No cross-project semantic leakage.
+## Proof-First Determinism
 
-Do **not** treat “shave another percent off active semantic completion” as the
-active product goal. Recorded performance evidence under `support/performance/`
-remains the authority for regressions and rejected shapes.
+Determinism is necessary but not sufficient. It means byte-identical inputs and
+configuration always produce the same types and diagnostics regardless of file
+order, hash iteration, worker scheduling, cache state, or CLI/LSP surface.
 
-## Completed Indexing Product Outcome (retained)
+The stronger rule is **proof-first inference**:
 
-A developer opening a multi-service folder should continue to observe the
-accepted indexing behavior:
+- A concrete type may be published only when every premise in its derivation is
+  present, current, and statically defensible.
+- Method and chained-call types require a complete receiver lookup chain and one
+  unique method/overload result. If one link is Unknown or ambiguous, that
+  call's result and every dependent chain segment remain Unknown.
+- A union is concrete only when its members exhaust every reachable proven
+  outcome. An incomplete branch does not become a partial union; it makes the
+  result Unknown.
+- Narrowing is concrete only while the guard, reachability, mutation, and alias
+  assumptions remain proven.
+- A structured partial result such as Array[Unknown] is allowed only when the
+  outer Array shape is proven and the unknown type argument stays explicit. It
+  must never be displayed or consumed as Array[Object].
+- Explicit RBS, YARD, bundled runtime, and validated extension types are
+  contracts/evidence. Inferred bodies are checked against them rather than
+  silently replacing them.
+- Evidence exhaustion, solver bounds, incomplete dependencies, unsupported
+  syntax, dynamic dispatch, and invalid source all resolve to Unknown with a
+  machine-readable reason.
 
-- Owning-project status within 100 ms of the active document.
-- Same-file navigation within 500 ms without waiting for workspace indexing.
-- Project-source Go to Definition on the reference workspace while dependencies
-  continue.
-- Bounded CPU/memory/disk pressure across isolated projects.
-- Authoritative bottom-bar state; no cross-project progress races.
-- Peak RSS under the fixed two-project `goshposh` ceiling.
+Never use confidence scores, naming conventions, popularity, observed runtime
+behavior, the first convenient call site, a common superclass, Object, or an
+arbitrary overload as a substitute for proof. A stable guess is still wrong.
+Every concrete inferred type must be able to expose a bounded derivation from
+source/signature facts to the final result.
 
-Readiness remains staged: document → project navigation → dependency
-navigation → semantically complete → workspace complete.
+## Pyrefly as a Reference, Not a Port
 
-## Original Failure and Current Checkpoint
+Pyrefly is a useful reference because its public architecture describes a
+clear pipeline:
 
-The original implementation had two coupled defects:
+1. Compute module exports.
+2. Lower a module to bindings containing static and flow information.
+3. Solve bindings, using type variables as placeholders for recursive
+   dependencies.
 
-1. Initial workspace indexing spawns one independent task per discovered Ruby
-   project. Each coordinator performs runtime, dependency, stub, stdlib, gem,
-   JVM, extension, and project work without a server-owned scheduling policy.
-2. Every coordinator publishes its local message and percentage through the
-   same LSP work-done token, `"indexing"`. The VS Code adapter renders those
-   interleaved reports directly and also owns a separate runtime item.
+It deliberately favors complete module-level solving, module-level
+incrementality, and parallel checking over a highly fine-grained demand solver.
+It also exposes one type engine through a CLI and a language server, infers
+unannotated return types, refines flow types, and offers first-use inference for
+empty collections.
 
-Consequences confirmed in the original code:
+Adopt those principles where they fit:
 
-- A percentage is local to one project but displayed as global progress.
-- Concurrent reports can move the visible percentage backward or switch labels
-  unpredictably.
-- The final task sends `Indexing complete` even when another project failed;
-  the failure is represented only by a boolean left false.
-- VS Code schedules an untracked three-second hide after an end event. A newer
-  indexing run can begin before that timer fires, allowing the old timer to hide
-  live progress.
-- Runtime status exposes only `indexingComplete: bool`, so the editor cannot
-  distinguish queued, discovering, indexing dependencies, indexing project
-  code, resolving, cancelled, failed, or stale generations.
-- The active-editor runtime refresh rejects stale request responses, but raw
-  indexing progress does not have an equivalent generation or sequence guard.
-- Two status-bar items present partially overlapping indexing/runtime state.
+- Separate binding collection from type solving.
+- Represent joins and recursion explicitly instead of relying on traversal
+  order.
+- Make an editor-independent project/session API the shared entry point for
+  the LSP and CLI.
+- Recheck only invalidated modules/files and their semantic dependents.
+- Prefer simple module/file-level units until profiling proves finer-grained
+  incrementality is necessary.
+- Infer checked unannotated method bodies by default.
 
-This is a real ownership and concurrency bug, not merely a wording problem in
-the editor.
+Do not adopt first-use fixation as a Ruby heuristic. An empty collection gains
+an element type only when complete, source-ordered flow evidence proves its
+contents at that program point; otherwise its element remains Unknown.
 
-The current working tree has implemented the first corrective slices:
+Do not copy Python semantics or assume Python's module model. Ruby requires
+first-class handling for reopened classes, include/prepend/extend, singleton
+classes, dynamic dispatch, blocks/yield, RBS, refinements where supported, and
+framework-generated declarations. Ruby Fast LSP must remain conservative when
+those relationships are incomplete.
 
-- Typed per-project phases, generations, sequences, terminal failure/cancel
-  states, aggregate snapshots, and structured request/notification transport.
-- A server-owned bounded scheduler with deterministic priority ordering and
-  active-document reprioritization. Admission is also exclusive per project, so
-  replacement generations cannot mutate one isolated engine concurrently.
-- Scheduler priority has bounded starvation behavior: one active/open-document
-  admission may bypass waiting background work, then the oldest admissible
-  background project receives the next slot. Deterministic selector and
-  asynchronous queue tests cover the policy.
-- Cancellable generation tokens for queued and active work. Replacement,
-  workspace removal, runtime rebuild, and shutdown cancel the exact prior run;
-  cancelled queued work wakes without admission, and coordinators validate
-  their immutable generation at explicit phase and diagnostic-publication
-  checkpoints.
-- Each coordinator retains the exact isolated engine captured at launch.
-  Removing or replacing its workspace cannot dynamically reroute late writes
-  into the orphan engine or a newer project engine.
-- Staged coordinator ordering that indexes project-owned sources before
-  exhaustive dependencies and delays complete diagnostics until final
-  resolution.
-- Ruby version detection, project dependency scanning, Rayon project fact
-  collection, core-stub construction, runtime stdlib indexing, JRuby
-  classpath/catalog and runtime-source/signature materialization, gem
-  discovery/product-manifest preparation, final semantic resolution, and engine
-  compaction run on blocking workers. The unused coordinator-wide Ruby
-  load-path subprocess probes were removed from production startup. Current-
-  thread Tokio regressions prove both a worker boundary and scheduler-saturated
-  CPU work leave the async reactor responsive while respecting the project
-  concurrency limit.
-- The server-owned worker boundary now has one fairness-aware weighted
-  admission queue. Task count, CPU weight, conservative transient-memory
-  bytes, and I/O slots are reserved atomically under one lock and released by
-  one exact RAII lease; impossible requests panic instead of waiting forever.
-  Nested Rayon phases reserve the complete owned pool, sequential phases claim
-  one CPU lane, active-project intent is retained before enqueue, and queued
-  cancellation releases no partial resource. Cold coordinator phases plus
-  checksum-keyed gem product construction, binding, and resolution carry their
-  owning project and resource class through this path. Six focused governor
-  tests cover nested bounds, atomic multi-dimensional admission, no
-  head-of-line blocking for a request whose complete claim fits, cancellation,
-  active priority, and invalid accounting.
-- Profiler schema 6 records the configured CPU/task/transient-memory/I/O
-  budget and exact peak/end usage. The deterministic built-in sample completed
-  nine governed tasks with zero panics, no leaked active or queued leases, a
-  four-lane CPU peak, 256 MiB transient-memory peak, one I/O-slot peak, and
-  1.138-second semantic completion. This validates accounting and evidence
-  shape only; it does not establish production defaults. Sanitized evidence is
-  checked in at
-  `support/performance/indexing-resource-governor-2026-07-30.json`.
-- The governor now supports async external work without converting it into a
-  blocking worker. Its exact lease spans the future lifetime and records
-  post-admission cancellation separately from normal completion and panic.
-  Runtime installation scans/version probes, trusted extension watched-file
-  child processes, and RuboCop/Standard lint, safe-fix, and formatting
-  subprocesses use that path. Contention tests prove each waits for the complete
-  weighted claim and releases CPU, transient-memory, I/O, and task accounting
-  exactly once. The redundant global system-Ruby subprocess was removed;
-  runtime selection remains project-owned.
-- Open, change, and save semantic replacement now serializes per document and
-  executes the complete parser/indexer pass on a blocking worker under one
-  weighted open-document lease. Index-time Wasm guest calls are covered by that
-  outer lease without nested admission. Weak per-URI async locks preserve the
-  newest document version while allowing inactive locks to be reclaimed. A
-  current-thread saturation regression proves didOpen queues for the complete
-  resource claim without blocking the reactor; an overlapping didChange
-  regression proves an older queued version cannot overwrite newer semantic
-  facts.
-- Extension discovery, loading, activation, settings reload, and replacement
-  now run off the async reactor under one background weighted lease.
-  Request-time document-symbol and code-lens guest calls use open-document
-  leases, while response surfaces with no loaded supporting guest bypass
-  admission. Reconfiguration is serialized without holding the registry write
-  lock during guest construction or old-guest deactivation. Project
-  coordinators no longer load configured packages independently: every
-  isolated engine consumes the one server-owned registry. Current-thread
-  saturation tests cover load/reload and both request surfaces.
-- The exact JRuby import provider built for an isolated project is retained on
-  that project workspace and selected by ordinary URI ownership/provenance.
-  didOpen, didChange, and didSave therefore materialize lazy Java signatures,
-  verified sources, and bounded decompiler output through the same outer
-  open-document lease as the semantic replacement. A real edit-lifecycle
-  regression proves a newly added `java_import` becomes navigable after cold
-  indexing without cross-project provider leakage or nested resource
-  admission.
-- Cold project indexing no longer performs a separate eager JRuby preflight
-  read/parse over every project file. The ordinary project pass derives a
-  bounded Java-navigation plan from its existing Prism tree, behind an exact
-  catalog-package/Java-DSL source prefilter, and materializes required
-  signatures or implementation sources before the pass's normal deferred
-  resolution. A cold-batch regression proves `java_import` navigation exists
-  without an interactive reindex, while the existing edit regression proves
-  later additions still materialize on demand.
-- The corresponding two-project `goshposh` JRuby profile eliminated the false
-  core-phase cost: summed core work fell from **71.363 seconds** to **646 ms**
-  while exact `BSON::ObjectId` navigation still reached the locked Java gem.
-  This slice is accepted for correctness and phase ownership, but the overall
-  performance result is rejected: active-project navigation was **72.766
-  seconds**, dependency navigation **107.570 seconds**, semantic completion
-  **109.202 seconds**, external peak RSS **1.892 GB**, and total internal wall
-  time **109.202 seconds**. Full six-lane project passes serialized the two
-  siblings, while deliberately ephemeral gem products recorded 604 producers
-  and no completed reuse. Evidence and the next bottlenecks are recorded in
-  `support/performance/jruby-single-pass-project-index-2026-07-30.json`.
-- Cooperative project-source admission now divides the default six-lane pool
-  into two exact three-lane Rayon pools, each still covered by the one atomic
-  task/CPU/memory/I/O governor. The same two-project run overlapped both source
-  passes and reduced active-project navigation to **42.602 seconds**,
-  dependency navigation to **77.184 seconds**, and total internal wall time to
-  **78.681 seconds**. External peak RSS grew **9.7%**, within the comparison
-  ceiling, and both semantic probes remained exact. The lane partition is
-  accepted; the five- and fifteen-second targets remain open. All 604 gem
-  products were still independent ephemeral producers, making demand-loaded
-  persistent reuse the next measured bottleneck. Evidence is in
-  `support/performance/cooperative-project-lanes-2026-07-30.json`.
-- The demand-loaded persistent gem cache and subsequent engine hot-path work
-  now produce 604 checksum-validated fresh-process hits for the same two
-  isolated JRuby projects without retaining completed gem products in process.
-  Exact project and locked Java-platform BSON navigation remain intact.
-- Exact gem input preparation is now streamed in deterministic direct-root
-  then transitive breadth-first order. Discovery runs once, but each gem's
-  source manifest is read, checksum-validated, cache-loaded, and rebound into
-  the owning isolated engine before the next manifest is prepared; one final
-  global resolution still completes the batch. With the corrected cross-file
-  `UserPmm` and locked `BSON::ObjectId` probes, a fully warm fresh-process
-  two-project run produced project navigation at **3.166 seconds**, BSON
-  navigation at **12.536 seconds**, active semantic completion at **24.240
-  seconds**, and all-project completion at **31.589 seconds**. BSON became
-  navigable 10.116 seconds before the active dependency stage completed, with
-  604/604 gem and 358/358 Java persistent hits and 1.839 GB internal peak RSS.
-  Removing the subsequently measured but unused `Gem.path` subprocess reduced
-  BSON navigation again to **10.937 seconds**, active semantic completion to
-  **22.504 seconds**, all-project completion to **30.258 seconds**, and internal
-  peak RSS to **1.740 GB**; exact locations and hit counts were unchanged.
-  Exact gem discovery now overlaps the active project source pass as a bounded
-  five-lane plus one-lane partition while the active-navigation reservation
-  continues to block sibling project passes. A corrected profiler dataset
-  identity excludes readiness results and hashes only stable project,
-  runtime/classpath, and source inputs. On the identical
-  `8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73`
-  dataset, the controlled overlap reduced locked BSON navigation from
-  **10.819 seconds** to **8.653 seconds**, active semantic completion from
-  **22.555 seconds** to **20.167 seconds**, and all-project completion from
-  **30.523 seconds** to **27.852 seconds**. External peak RSS increased only
-  **2.963%**, from 1.737 GB to 1.789 GB, and resource peaks remained exactly
-  six CPU lanes, two tasks, 512 MiB transient memory, and two I/O slots.
-  Both definitions stayed exact with 604/604 gem and 358/358 Java persistent
-  hits.
-  Auto-scope installed-gem discovery now performs Bundler resolution and its
-  RubyGems fallback inside one selected-runtime process instead of launching a
-  failed Bundler process followed by a second global process. On the same
-  dataset, active installed discovery fell from **1.927 seconds** to **1.298
-  seconds** and sibling discovery from **2.111 seconds** to **1.082 seconds**.
-  The repeat produced exact `UserPmm` navigation at **2.991 seconds**, BSON
-  navigation at **8.272 seconds**, active semantic completion at **20.026
-  seconds**, and all-project completion at **28.303 seconds**. This is accepted
-  as redundant-process removal, not as proof of a terminal latency gain,
-  because discovery is currently hidden behind the longer project pass.
-  A subsequent directory-priority experiment is explicitly rejected and
-  removed: prioritizing conventional implementation roots plus the active
-  document's top-level root selected 1,982 of 2,618 files, regressed `UserPmm`
-  navigation to **3.515 seconds**, and added a batch barrier without producing
-  a genuinely bounded navigation set. Future warm project work must use exact
-  semantic export/fingerprint reuse or demand identity, not broad path
-  heuristics.
-  A follow-up experiment that persisted complete workspace-owned project
-  semantic facts is explicitly rejected and removed. Although its best warm
-  run reached 19.874 seconds terminal wall, it retained roughly 2.19 GB RSS,
-  missed the project/dependency readiness budgets, and violated this goal's
-  ownership boundary by persisting mutable project semantics. The rejected
-  cache namespace and serialization dependency were removed; the accepted
-  external-only architecture was revalidated on dataset
-  `8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73`
-  with 604/604 gem and 358/358 Java persistent hits. Exact `UserPmm`
-  navigation was live at **3.038 seconds**, locked `BSON::ObjectId`
-  navigation at **8.033 seconds**, the active project was semantically
-  complete at **19.304 seconds**, and both projects completed at **27.345
-  seconds**, with **1.642 GB** internal peak RSS.
-  Initial project admission is now registered as one synchronous batch before
-  any coordinator awaits a permit. A measured concurrency-one control exposed
-  that asynchronous per-task registration could admit a background sibling
-  before the already-known active project; the resource governor then blocked
-  that sibling's project pass while the active coordinator remained queued.
-  The batch boundary removes this scheduler/resource deadlock and has a
-  deterministic regression. A corrected concurrency-one run admitted the
-  active `server` project first, produced `UserPmm` at **2.909 seconds** and
-  BSON at **8.011 seconds**, then completed both projects in **38.864
-  seconds**. The normal concurrency-two repeat remained exact at **27.844
-  seconds** terminal wall.
-  Instrumented JRuby startup shows the next immutable-product bottleneck
-  precisely: each large project spends about **2.335 seconds** before source
-  work, including roughly **1.18 seconds** establishing exact classpath
-  checksums and **1.05 seconds** decoding/composing the already cached
-  per-artifact class metadata. A checksum-keyed composed-catalog product was
-  implemented, tested across fresh processes and consumer paths, measured, and
-  then rejected and removed. Its zero-copy warm path reduced the catalog
-  subphase to **0.82–0.85 seconds** per project and kept RSS within the
-  comparison ceiling, but did not improve dependency or semantic readiness.
-  More importantly, first publication serialized the two projects behind one
-  producer, delayed exact `UserPmm` navigation to **5.294 seconds**, and moved
-  it beyond the five-second target. The accepted per-artifact cache remains.
-  Do not retry a monolithic catalog product unless publication is demonstrably
-  outside active-project readiness and consumers cannot hold governed work
-  while waiting. Evidence is in
-  `support/performance/java-catalog-product-rejection-2026-07-31.json`.
-  The streaming slice is accepted, but this valid-warm run still fails the
-  one-second project, three-second dependency, and fifteen-second workspace
-  warm-cache targets; it does not prove the cold-cache gate. Evidence is in
-  `support/performance/streamed-gem-binding-2026-07-31.json`.
-- JRuby Java source navigation no longer rereads or hashes a complete source
-  archive for every imported class after classpath discovery established its
-  checksum. Discovery records a stable file identity, resolution streams only
-  the selected entry, central-directory comparisons do not instantiate every
-  ZIP entry, and one verified parsed source archive is retained lazily per
-  project resolver. The final two-project run reduced project navigation from
-  **42.777 seconds** to **15.152 seconds**, dependency navigation from
-  **60.438 seconds** to **32.246 seconds**, and internal wall time from
-  **62.077 seconds** to **33.824 seconds**. Same-file work remained below the
-  500 ms budget and both semantic probes were exact. This targeted cache is
-  accepted, but the overall performance result is rejected: the 5-second
-  project, 15-second dependency, and 30-second semantic-completion budgets are
-  still missed. Evidence is in
-  `support/performance/jruby-source-navigation-cache-2026-07-31.json`.
-- CFR decompilation now has a measured 256 MiB total resident-memory ceiling in
-  addition to its process-count, timeout, input, output, and checksum bounds.
-  The JVM uses explicit 128 MiB heap plus direct-memory, metaspace, code-cache,
-  and compressed-class-space limits. Native RSS inspection uses
-  `proc_pidinfo` on macOS, `/proc/<pid>/statm` on Linux, and
-  `GetProcessMemoryInfo` on Windows; inspection failure, overage, or timeout
-  kills and reaps the child before returning an isolated error. The checked-in
-  representative CFR campaign measured 69.4–70.0 MB peak RSS across 96–256 MiB
-  heap settings and selected 128 MiB heap/256 MiB RSS to match the existing
-  JRuby work claim. Evidence is in
-  `support/performance/jruby-decompiler-memory-2026-07-30.json`.
-- Completed shared core-engine templates now use a weighted single-flight cache
-  bounded to eight entries and 128 MiB of engine-estimated heap. In-flight
-  consumers retain their immutable value safely across eviction. Completed
-  gem products remain deliberately ephemeral after controlled evidence showed
-  that retaining them cost 112 MB for only 3.3 MB of second-project reuse.
-  Profiler schema 6 records retained core and gem product weight plus core
-  evictions. Isolated project engines remain separately owned semantic truth;
-  their aggregate heap and process RSS are measured rather than evicted or
-  merged.
-- Shared core-template installation no longer replaces an engine after an open
-  document has contributed live facts. The coordinator retains the empty-engine
-  clone fast path, rechecks after the single-flight wait, and otherwise indexes
-  core stubs additively. A red/green lifecycle regression proves exact unsaved
-  content and same-file definition navigation survive startup core binding.
-- Reusable dependency seeds are now isolated from that same open-document
-  race. Core templates always yield a separate clean seed, JRuby runtime
-  implementation inputs are added to both the project and seed engines through
-  ordinary file-owned facts, and a production invariant rejects project,
-  excluded, or previously bound gem sources from the seed. On a new isolated
-  cache, the two configured `goshposh` JRuby projects reused 95 exact gem
-  products instead of producing all 604 independently; locked
-  `BSON::ObjectId` navigation reached **14.628 seconds**, inside the cold
-  dependency budget. Cold project navigation (**9.433 seconds**), active
-  semantic completion (**31.018 seconds**), and all-project completion
-  (**56.880 seconds**) remain over their absolute targets. The paired
-  fresh-process warm run retained exact answers with 604/604 gem and 358/358
-  Java hits, but also remains above the strict warm budgets. Evidence is in
-  `support/performance/dependency-seed-isolation-2026-07-31.json`.
-- Independent checksum-keyed Java artifact products now resolve in the
-  governor-owned six-lane Rayon pool, while final project catalog composition
-  remains sequential in exact classpath order. A focused duplicate-class
-  regression proves deterministic winner and shadowed provenance. On paired
-  isolated cold caches, active catalog preparation fell from **6.225 seconds**
-  to **4.312 seconds**, project definition navigation from **9.433 seconds** to
-  **7.229 seconds**, BSON navigation from **14.628 seconds** to **12.864
-  seconds**, and all-project completion from **56.880 seconds** to **54.443
-  seconds**. Internal peak RSS fell **19.7%** in the cold comparison and exact
-  governed peaks remained six CPU lanes, two tasks, 512 MiB transient memory,
-  and two I/O slots. Two warm repeats kept exact 604/604 gem and 358/358 Java
-  hits and completed in about 27.9 seconds, but still miss the strict warm
-  budgets. Evidence is in
-  `support/performance/parallel-java-artifact-resolution-2026-07-31.json`.
-- JAR manifest classpath expansion now consumes the same bounded,
-  metadata-stable byte buffer used to establish the artifact checksum instead
-  of rereading the complete archive immediately. All ten classpath tests pass.
-  The adjacent warm profile left classpath discovery at approximately 1.16
-  seconds, so this is accepted only as redundant-I/O removal and carries no
-  latency claim. Evidence is in
-  `support/performance/classpath-manifest-single-read-2026-07-31.json`.
-- Early Go to Definition now uses one bounded, generation-scoped navigation
-  demand controller instead of returning a false not-found response while the
-  owning project is still indexing. The ordinary query runs first. On a miss,
-  exact project and dependency identities are requested concurrently; project
-  files are promoted into a bounded fact batch, locked gems are promoted at
-  both the startup and streaming dependency frontiers, and the same isolated
-  engine performs the retry. Replacement generations supersede stale waiters,
-  cancellation has the corresponding LSP result, saturation or a still-pending
-  stage returns a retriggerable `ServerCancelled`, and no side engine or
-  semantically incomplete lookup path exists. Zero-candidate project demands
-  remain pending until the complete project stage proves absence.
-  On the exact warm two-project JRuby dataset
-  `3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657`,
-  Exact bounded project demands are now consumed immediately at the project
-  frontier before dependency discovery; a file already handled by the startup
-  frontier completes the same demand without being parsed twice. Exhaustive
-  batches now collect against one immutable post-frontier namespace context,
-  preventing earlier batches from changing the semantic input of later ones
-  and reducing batch-stream time without weakening the final resolve. Across
-  two identical fresh-process warm-cache repeats, `UserPmm` became navigable
-  in **964-1,012 ms** (**988 ms median**) and locked Java-platform
-  `BSON::ObjectId` in **1.616-1.678 seconds** (**1.647 seconds median**), both
-  while the owning project still
-  reported `indexingProject`. All 607 gem and 358 Java products were validated
-  fresh-process cache hits, governed resource peaks remained exact, and both
-  definition locations retained Project/Gem provenance. The slice is accepted
-  for staged usefulness and correctness, not terminal throughput: both
-  projects completed in **21.695-21.756 seconds**, above the 15-second warm
-  target, active semantic completion remained **19.010-19.755 seconds**, and
-  peak RSS was **1.942-1.974 GB**. Terminal time is now within 0.3% of the
-  original full-ahead baseline, but RSS still exceeds the allowed baseline
-  increase. One project-navigation repeat exceeded the strict one-second
-  threshold by 12 ms, so the target is median-passing rather than fully
-  accepted at p95. Evidence is in
-  `support/performance/request-driven-navigation-2026-07-31.json`.
-  The adjacent full local code gate passes 1,312 root library tests, 11
-  profiler tests, every non-root workspace/framework test, 43 VS Code adapter
-  tests, formatting, and an optimized release build. That gate also made
-  runtime stdlib collection deterministic by collecting against one immutable
-  namespace snapshot and committing in sorted order, and made the black-box
-  editor exercise the real `initialize`/`initialized` plus bounded
-  `retriggerRequest` lifecycle. Packaged-VSIX acceptance remains separate.
-- Warm project collection now moves each freshly read source buffer into its
-  `RubyDocument`, registers it with the engine by borrow, and no longer stores
-  a duplicate source inside `SourceDocument`. ASCII engine sources retain only
-  their line index and content hash; non-ASCII sources retain exactly one
-  engine-owned copy for UTF-16 conversion. Prism comment ranges are initialized
-  lazily and invalidated on document update, while shebang masking remains
-  unchanged. Across two identical exact-workspace repeats, median peak RSS fell
-  from **1.958 GB** to **1.588 GB** (**18.90%**) and is **1.70% below** the
-  original full-ahead baseline. Terminal completion was **22.034 seconds**,
-  only **1.49% above** that baseline; active semantic completion was **19.541
-  seconds**. Dependency navigation remained within budget at a **1.573-second**
-  median, while project navigation measured **1.101-1.116 seconds** and
-  therefore still does not satisfy the one-second p95 target. Evidence is in
-  `support/performance/borrowed-source-registration-2026-07-31.json`.
-- Exact project demands already queued when project discovery begins now form
-  a bounded micro-frontier ahead of unrelated active-document candidates. The
-  same `IndexerProject` retains the deterministic active and exhaustive
-  complements, generation-owned waiters wake only after their candidate facts
-  enter the isolated engine, zero-candidate/ambiguous requests retain complete
-  absence semantics, and requests arriving during the micro-frontier still use
-  the existing post-frontier drain. On the same exact two-project warm JRuby
-  dataset, `UserPmm` became navigable in **517-631 ms** (**574 ms median**), a
-  **48.22%** median reduction from the allocation-optimized repeats and now
-  fully inside the strict one-second target. Locked `BSON::ObjectId` remained
-  navigable in **1.607-1.796 seconds**. Median terminal wall time improved to
-  **21.890 seconds** and peak RSS remained within the accepted ceiling at
-  **5.36% above** the original full-ahead baseline. The full root library suite
-  passes with **1,313 tests**. Exhaustive throughput remains open: active
-  semantic completion is **19.399 seconds** and all-project completion is
-  **21.890 seconds**. Evidence is in
-  `support/performance/initial-project-demand-frontier-2026-07-31.json`.
-- A symbolized native sample then showed ordinary call-node traversal entering
-  the extension dispatcher for every Ruby call before learning that no loaded
-  extension tracked most method names. The dispatcher now rejects names absent
-  from its complete deterministic `tracked_call_names` set before cloning or
-  scanning extension state. Across two exact repeats, median project-file
-  visitor CPU fell **6.85%** for the active project and **5.39%** for its
-  sibling; median peak RSS fell **12.07%** to **1.496 GB**. Exact project
-  navigation remained below one second at a **531 ms median**, dependency
-  navigation remained below three seconds at **1.721 seconds**, and all 607 gem
-  plus 358 Java products were fresh-process hits with no producer, panic, or
-  governed-resource leak. Terminal wall time remained effectively flat at
-  **21.867 seconds** and active semantic completion at **19.604 seconds**, so
-  the slice is accepted as a measured hot-path improvement rather than closure
-  of the exhaustive target. A shared local method-return-map experiment was
-  measured, regressed terminal time to a **23.721-second median**, and was
-  reverted. A lazy current-file type-subject index was also measured and
-  reverted after hashing/synchronization increased terminal time to a
-  **23.676-second median**. Evidence is in
-  `support/performance/extension-call-prefilter-2026-07-31.json`.
-- FactCollector now reuses the exact declaration already selected by ordinary
-  MRO and visibility resolution instead of resolving that declaration owner as
-  a second receiver. A revision-bound resolved-callee cache is capped at 64
-  entries per source collection; excess unique calls compute normally, and an
-  engine semantic replacement invalidates the cache. Across two exact repeats,
-  active-project semantic completion improved **4.285%** to an **18.764-second
-  median**, dependency navigation improved to **1.676 seconds**, and project
-  navigation remained **530.5 ms**. Terminal wall remained effectively flat at
-  **21.804 seconds**. Median peak RSS was **1.759 GB**, **8.879%** above the
-  original full-ahead baseline and 18.1 MB below the explicit 10% ceiling. The
-  unbounded, duplicated-return, 256-entry, and 128-entry variants were rejected
-  before accepting the 64-entry shape. All **390** `ruby-analysis` tests and
-  **1,313** root library tests pass. Evidence is in
-  `support/performance/resolved-callee-query-cache-2026-07-31.json`.
-- The exact immutable JRuby provider is now handed to its owning generation as
-  soon as catalog construction completes. Later bounded project batches use
-  the provider through the ordinary visitor and per-file replacement path;
-  only files collected before the handoff retain compact replay hints. On the
-  same exact two-project warm dataset, replay fell from **60 to 18 files** for
-  the active project and from **59 to 0 files** for the sibling. Across two
-  repeats, terminal wall improved **3.642%** to **21.010 seconds**, active
-  semantic completion improved **9.033%** to **17.069 seconds**, and dependency
-  navigation improved to **1.659 seconds**. Project navigation remained below
-  one second at a **608.5 ms median**. Median peak RSS fell to **1.737 GB**,
-  **7.559%** above the full-ahead baseline and 39.4 MB below the explicit 10%
-  ceiling. A semantic-context fingerprint regression proves that mixed
-  provider-aware batches plus bounded replay converge to the same file-owned
-  facts as a fully providerless pass plus full replay. All **1,314** root
-  library tests pass. Evidence is in
-  `support/performance/jruby-provider-batch-handoff-2026-07-31.json`.
-- Activation-scoped extension guests now retain their owning project context on
-  the isolated guest instance rather than cloning and serializing the same
-  project payload for every matching call. Legacy ABI-v1 per-call guests still
-  receive one complete lazily constructed context. Across two exact warm
-  `goshposh` repeats, Minitest guest time fell **37.633%**, user CPU fell
-  **5.377%**, median peak RSS fell **3.378%**, and terminal wall improved
-  **1.275%** to **18.621 seconds**. Project navigation remained at a **571 ms**
-  median and dependency navigation at **1.606 seconds**. Both complete semantic
-  fingerprints and the per-file manifest hash stayed identical. This slice is
-  accepted as bounded hot-path work; the 15-second workspace and five-second
-  active semantic targets remain open. Evidence is in
-  `support/performance/extension-project-context-delivery-2026-08-01.json`.
-- YARD extraction now receives the method line already owned by the source
-  document and scans only the attached preceding comment block instead of
-  allocating every preceding line for every method. The engine name registry
-  now keeps each `FullyQualifiedName` and `ConstLookup` once in insertion order
-  rather than cloning it into both a map key and an ID vector. A YARD-only
-  candidate reduced CPU but missed the fixed RSS ceiling, so it was not
-  accepted alone. With the single-owned registry, three exact warm `goshposh`
-  repeats preserved both semantic fingerprints and the complete manifest,
-  achieved 607/607 gem and 358/358 Java hits, and improved median wall by
-  **7.242%** to **17.273 seconds**, user CPU by **8.255%**, and active semantic
-  completion by **7.375%** to **14.594 seconds**. The registry estimate fell
-  about **54%**, median peak RSS fell to **1.641 GB**, and the fixed ceiling has
-  **135.4 MB** of headroom. Evidence is in
-  `support/performance/yard-line-scan-and-name-registry-2026-08-01.json`.
-- Constant-value inference now asks `TypeStore` for the borrowed latest known
-  fact for one subject instead of expanding every matching fact, and compares
-  that result with borrowed current-file facts using the exact prior
-  deterministic range precedence. Three exact warm `goshposh` repeats preserve
-  both complete semantic fingerprints and the whole exported manifest, achieve
-  607/607 gem and 358/358 Java hits, improve median wall another **2.379%** to
-  **16.862 seconds**, user CPU by **7.444%**, and active semantic completion by
-  **4.385%** to **13.954 seconds**. Project navigation remains **392 ms** and
-  dependency navigation **1.649 seconds**. Median peak RSS is **1.736 GB**,
-  **40.8 MB** below the fixed ceiling. All **394** `ruby-analysis` and **1,318**
-  root library tests pass. Evidence is in
-  `support/performance/borrowed-constant-type-lookup-2026-08-01.json`.
-- Stable semantic export and result fingerprints now update both existing
-  64-bit FNV lanes during one field traversal instead of walking every FQN,
-  type, method parameter, and graph component twice. A focused regression
-  proves byte-for-byte equivalence with both legacy lanes. Three exact warm
-  `goshposh` repeats preserve both complete semantic-result fingerprints and
-  the whole manifest, improve median terminal readiness **1.307%** to
-  **16.642 seconds**, project navigation to **377 ms**, dependency navigation
-  to **1.527 seconds**, and user CPU **0.425%**. Active semantic completion is
-  effectively flat at **14.034 seconds** and median peak RSS rises to
-  **1.757 GB**, leaving **20.0 MB** below the fixed ceiling; those remain
-  explicit constraints. All **395** `ruby-analysis` and **1,318** root library
-  tests pass. Evidence is in
-  `support/performance/dual-lane-semantic-fingerprint-2026-08-01.json`.
-- Shared symbol/type subject buckets no longer re-sort every existing fact
-  after replacing one file. Replacement-only stores stable-sort the appended
-  file tail, binary-search its `SourceFileId`, and rotate the complete stable
-  group into place; a `TypeStore` that has ever used append-only `add` retains
-  the original full-sort path so the optimization cannot assume a false prefix
-  invariant. Three exact warm `goshposh` candidate repeats preserved both
-  semantic-result fingerprints and the whole manifest while improving median
-  terminal readiness **9.536%** to **15.055 seconds**, user CPU **7.548%**,
-  active semantic completion **7.567%** to **12.972 seconds**, and median peak
-  RSS **2.751%**. Evidence is in
-  `support/performance/file-owned-index-splice-2026-08-01.json`.
-- FactCollector now seeds its per-method inference map from a borrowed
-  `TypeStore` domain view that selects only known method returns in the exact
-  prior arena order; it no longer expands and clones every unrelated type fact
-  first. The earlier shared mutable return-map experiment remains rejected.
-  After the mixed-store safety qualification, three exact warm fresh-process
-  repeats preserved the two complete semantic-result fingerprints, whole
-  manifest hash, exact Project/Gem definitions, 607/607 gem and 358/358 Java
-  hits, and zero resource leaks. Median terminal readiness is now **14.430
-  seconds**, crossing the strict 15-second warm workspace target; active
-  semantic completion is **12.217 seconds**, project navigation **357 ms**,
-  dependency navigation **1.455 seconds**, and median peak RSS **1.662 GB**,
-  leaving **115.3 MB** below the fixed ceiling. All **400** `ruby-analysis`
-  tests pass. Evidence is in
-  `support/performance/borrowed-method-return-view-2026-08-01.json`.
-- Exact owner/name method resolution now selects a borrowed effective fact
-  directly from MethodStore's already ordered bucket, applies the existing
-  `Absent`/`Unavailable` precedence, collapses exact duplicates, and expands
-  only one unique winner. MRO, execution-context applications,
-  `method_missing`, ambiguity, and diagnostics remain engine-resolution owned.
-  Three exact warm `goshposh` repeats preserve both semantic fingerprints, the
-  whole manifest, exact Project/Gem definitions, all 607 gem and 358 Java hits,
-  and zero resource leaks. Median terminal readiness improves another
-  **1.886%** to **14.158 seconds**, user CPU **1.754%**, and active semantic
-  completion **1.326%** to **12.055 seconds**; project navigation is **363 ms**
-  and dependency navigation **1.443 seconds**. Median peak RSS is **1.740 GB**,
-  **37.3 MB** below the fixed ceiling. The post-change profile reduces the old
-  expanded exact-fact path from about **2.95%** to **0.07%** inclusive and
-  final engine resolution from **9.68%** to **8.85%**. All **402**
-  `ruby-analysis` tests pass. Evidence is in
-  `support/performance/borrowed-exact-method-match-2026-08-01.json`.
-- Method-reference resolution now borrows an already cached lookup chain rather
-  than cloning its vector and FQNs for every method name. Chain construction
-  remains single-sourced in engine resolution, and the borrow ends before
-  recursive execution-context and `method_missing` lookup. Three exact warm
-  `goshposh` repeats preserve both semantic fingerprints, the historical whole
-  manifest, exact Project/Gem definitions, all 607 gem and 358 Java hits, and
-  zero resource leaks. Median terminal readiness improves **1.514%** to
-  **13.944 seconds**, active semantic completion **1.742%** to **11.845
-  seconds**, and dependency navigation **7.831%** to **1.330 seconds**; project
-  navigation is **361 ms**. Median peak RSS falls to **1.675 GB**, leaving
-  **101.7 MB** below the fixed ceiling. The post-change profile contains no
-  chain-vector clone below method-reference resolution. All **403**
-  `ruby-analysis` tests pass. Evidence is in
-  `support/performance/borrowed-method-lookup-chain-2026-08-01.json`.
-- That resolution-local cache now stores compact interned owner IDs instead of
-  cloning owner FQNs back into every exact method lookup. A test-only interner
-  counter proves a cached Child-to-Parent chain performs one receiver
-  existence probe for a second method, rather than one probe per owner. Three
-  exact warm `goshposh` repeats preserve both complete semantic fingerprints,
-  exact Project/Gem definitions, all 607 gem and 358 Java persistent hits, and
-  zero resource leaks. Relative to the borrowed-chain checkpoint, median
-  terminal readiness improves another **0.411%** to **13.886 seconds**, user
-  CPU **0.733%**, active semantic completion **0.253%** to **11.815 seconds**,
-  project navigation to **357 ms**, dependency navigation to **1.315
-  seconds**, and median peak RSS **4.600%** to **1.598 GB**. Every run remains
-  below the fixed 1.777 GB ceiling, with 24.2 MB minimum headroom. The
-  symbolized profile reduces `NameRegistry::fqn_id` **20.6%** to **1.962%**
-  inclusive, method-reference resolution **17.1%** to **3.455%**, and final
-  engine resolution **10.0%** to **7.441%**. A broader direct-ID MRO traversal
-  was rejected and reverted: the semantic fingerprint gate first caught an
-  edge-only namespace promotion, and even after that boundary was fixed its
-  three-run median regressed wall, CPU, and every readiness milestone. The
-  focused edge-only regression remains. All **405** `ruby-analysis` tests
-  pass. Evidence, including both rejected shapes, is in the same performance
-  record.
-- AST-time local receiver inference now reuses the lexical `VariableScopes`
-  cursor already maintained by `FactCollector`, rather than scanning every
-  scope, variable, and recorded location before most receiver lookups. The
-  existing lookup still captures outer block locals, stops at method/class
-  boundaries, and honors assignment order; editor-position query surfaces
-  remain location based. A red regression observed two global scans for exact
-  captured `User#save` and nested `String#upcase` receivers; green preserves
-  both owners with zero scans, and all **406** `ruby-analysis` tests pass.
-  A canonical-path, interleaved three-versus-three `goshposh` A/B preserves
-  both complete semantic fingerprints, the exact manifest, 607/607 gem hits,
-  358/358 Java hits, and zero resource leaks. Against its immediate control,
-  median user CPU improves **2.151%**, wall **0.794%** to **13.841 seconds**,
-  active semantic completion **0.593%** to **11.742 seconds**, and peak RSS
-  **1.994%** to **1.562 GB**. Project and dependency probes remain within
-  measurement noise at **356 ms** and **1.329 seconds**. Copied `/tmp`
-  executables were explicitly excluded after their changed bundled-resource
-  discovery altered stub/stdlib provenance and semantic fingerprints. Evidence
-  is in `support/performance/fact-collector-active-scope-2026-08-01.json`.
-- The follow-up fact-pass slice removes the lazy whole-file textual assignment
-  fallback after exact lexical receiver lookup fails. The fallback reparsed
-  right-hand-side fragments, ignored hard Ruby method boundaries, and could
-  borrow a later same-named assignment from another method. A red regression
-  proves that an untyped `user` parameter no longer becomes `User` because a
-  different method later assigns `user = User.new`; captured block locals still
-  resolve through `VariableScopes`. All **407** `ruby-analysis` tests pass. A
-  canonical-path, interleaved three-versus-three `goshposh` A/B improves median
-  user CPU **2.436%**, wall **1.555%** to **13.664 seconds**, active semantic
-  completion **2.778%** to **11.550 seconds**, and peak RSS **8.409%** to
-  **1.536 GB**. Project and dependency probes remain fast at **358 ms** and
-  **1.338 seconds**. The exact semantic export manifest, dataset, Project/Gem
-  definitions, 607/607 gem hits, 358/358 Java hits, and resource invariants are
-  unchanged. Complete semantic-result fingerprints intentionally change because
-  the invalid cross-method fallback had invented about 36,000 method candidates
-  and 11,000 diagnostics per project; the corrected fingerprints are exact in
-  all candidate runs. The post-change symbolized profile contains neither
-  removed fallback function. Evidence is in
-  `support/performance/fact-collector-source-ordered-local-receivers-2026-08-01.json`.
-- A profile-driven attempt to share extension `tracked_call_names`
-  classification between patch dispatch and enclosing-frame tracking was
-  rejected and fully reverted. A long-lived registry snapshot improved median
-  wall **1.222%** but raised median RSS **24.728%**, with every candidate above
-  the fixed ceiling. A second design preserved the original short-lived
-  registry ownership and improved wall **1.149%**, but median RSS still
-  regressed **5.133%**, median CPU regressed **0.115%**, and one run reached
-  **1.818 GB**—41.2 MB over the ceiling. Both designs preserved exact semantic
-  fingerprints, manifest, extension tests, and navigation, but neither meets
-  the production resource contract. The temporary probe and production changes
-  were removed; evidence is in
-  `support/performance/extension-call-classification-rejection-2026-08-01.json`.
-- A subsequent attempt to eliminate per-method known-return map construction
-  was also rejected and fully reverted. An incrementally maintained borrowed
-  per-file `HashMap` improved median wall **2.994%**, but raised median RSS
-  **11.023%** and exceeded the fixed ceiling in two runs. Replacing that table
-  with a compact FQN-sorted vector improved wall **2.897%** and CPU **2.229%**,
-  but made lifetime overlap worse: median RSS rose **22.347%** to **2.003 GB**,
-  and every candidate run exceeded the ceiling. Both variants preserved the
-  exact manifest, semantic fingerprints, Project/Gem navigation, cache reuse,
-  and resource cleanup; neither is production-safe. Their code and temporary
-  tests were removed. Evidence is in
-  `support/performance/borrowed-method-return-context-rejection-2026-08-01.json`.
-- A narrower follow-up disabled `TypeTracker`'s per-statement variable snapshots
-  only where `FactCollector` consumes the inferred return and immediately drops
-  the tracker. It retained no new per-file state and preserved the exact
-  semantic manifest, both project fingerprints, Project/Gem navigation, all
-  607 gem and 358 Java cache hits, and resource cleanup. The controlled
-  three-pair A/B nevertheless showed no measurable production gain: median
-  wall regressed **0.283%**, user CPU **0.072%**, active semantic readiness
-  **0.381%**, and dependency navigation **0.417%**; the **1.777%** median RSS
-  improvement remained within observed variance and one candidate exceeded the
-  fixed ceiling. The profiled target was only **0.41%** inclusive. The code and
-  temporary test were removed; evidence is in
-  `support/performance/type-tracker-discarded-snapshots-rejection-2026-08-01.json`.
-- Profiler schema 9 now records a stable path-independent semantic-result
-  fingerprint for every isolated engine, covering exact declarations,
-  references and targets, graph state, types, diagnostics, execution contexts,
-  and source kind without hashing engine-local IDs. The fingerprint exposed a
-  real worker-order race: parallel files queried and mutated the same live
-  engine. Batches now pre-register every file in path order, collect complete
-  file-owned facts against one unchanged batch context, and insert those facts
-  sequentially through the ordinary deferred replacement lifecycle. JRuby
-  replay uses the same collect-then-replace rule. Two fresh-process 1,024-file
-  repeats became semantically identical but exceeded the RSS ceiling, so that
-  intermediate was rejected. The accepted 512-file policy produced identical
-  per-project fingerprints and engine counts across two fresh processes, plus
-  a four-fresh-engine parallel regression. Median wall is **21.671 seconds**,
-  active semantic completion is **17.210 seconds**, project navigation is
-  **676 ms**, dependency navigation is **1.794 seconds**, and peak RSS is
-  **1.750 GB**: **8.312%** above the full-ahead baseline and 27.3 MB below the
-  explicit ceiling. All **391** `ruby-analysis`, **1,315** root library, and
-  **12** profiler tests pass. Evidence is in
-  `support/performance/deterministic-project-batches-2026-07-31.json`.
-- A current-thread multi-root LSP regression saturates both scheduler slots
-  with sibling CPU workers, then proves an already-ready isolated engine keeps
-  the same real Go to Definition answer, produces hover, and completes a
-  body-only edit plus refreshed definition within the 500 ms interactive
-  budget. The full root library suite passes with 1,255 tests; the VS Code
-  adapter suite passes with 34 tests.
-- One right-aligned VS Code status item driven by structured snapshots; the old
-  raw `$/progress` presentation, second item, and delayed hide timer are gone.
-- Status request and notification snapshots are now sequenced under one server
-  publication lock. Active-editor requests carry the document URI and
-  reprioritize both the project scheduler and weighted resource queue, including
-  switches between already-open files. The adapter caches the accepted
-  aggregate and project vector together and rejects equal or older complete
-  snapshots, so a delayed response cannot reapply stale project phases. A
-  current-thread saturation test proves status routing and queued cancellation
-  remain under 100 ms while the sole worker is occupied; focused Node tests
-  cover the URI transport and reordered-snapshot rejection.
-- Status notifications now render directly from the accepted complete snapshot
-  instead of issuing a second runtime/status request for every transition. The
-  single bottom-right item opens runtime configuration after readiness and a
-  deterministic active-project-first Quick Pick while queued, indexing,
-  cancelled, or failed. That view exposes every project root, generation,
-  phase, progress, elapsed target, both navigation milestones, and the bounded
-  failure reason. Counter-only server snapshots are coalesced behind one
-  200-millisecond flush; generation, phase, aggregate scheduler state,
-  readiness milestones, cancellation, and failure bypass the throttle. A
-  focused publication-state regression proves fifty same-phase counters
-  schedule only one flush and cannot delay replacement generations or terminal
-  failures. The VS Code adapter suite passes with 38 tests.
-- Watched-file input now passes through one server-owned 100-millisecond
-  generation gate before extension callbacks or semantic mutation. A newer
-  batch invalidates the older timer, retains only the final event per URI, and
-  emits one deterministic URI-ordered batch. Shutdown invalidates pending
-  watcher work. Gemfile, lockfile, auto-runtime marker, trusted project
-  extension, and owning JRuby classpath changes are mapped to one replacement
-  generation per affected project; ordinary closed source/RBS changes retain
-  exact per-file replacement. Runtime replacement clears stale effective
-  runtime, compatibility, classpath, import provider, external provenance, and
-  engine state before rebuilding and reopening live documents. Focused tests
-  cover a cross-notification source storm, duplicate runtime events producing
-  one generation, project scoping, trust, auto versus explicit runtime markers,
-  shutdown, failure cleanup, and changed winning-JAR implementation removal.
-- Standalone project roots without a `Gemfile` now skip automatic installed-gem
-  discovery and retain project/core/stdlib semantics only. The deliberate
-  `includedGems` exception schedules one governed active-runtime global
-  discovery after project scanning and still exposes only explicitly requested
-  gems. Automatic Gemfile-based discovery now frames its JSON result with an
-  exact protocol marker, so Bundler UI output cannot corrupt the payload. The
-  complete release suite passes 1,277 library tests plus 11 profiler tests, and
-  focused regressions prove both standalone branches.
-- Process-local single-flight infrastructure whose producer is owned
-  independently of any initiating waiter. Focused tests cover concurrent
-  waiters, producer failure and retry, bounded retention/eviction, and
-  cancellation of the initiating waiter without restarting shared work.
-- A candidate checksum-keyed **per exact gem** dependency product now exists in
-  the working tree. The earlier whole-closure product was rejected after
-  measurement because its peak memory was not defensible. The current product
-  defines project-neutral file-fact templates, exact source and semantic
-  fingerprints, bounded collection lanes and ephemeral in-flight sharing, and
-  per-consumer rebinding through the ordinary isolated-engine replacement
-  lifecycle.
-- Product binding validates the complete manifest, checksums, URI mapping, and
-  file count before the first engine mutation, inserts all accepted gem
-  products with deferred resolution, then resolves the consumer engine once.
-  Producer collection no longer inserts dependency facts into a temporary
-  semantic graph.
-- A coordinator-level two-project semantic test proves one exact gem producer,
-  rebinding into both isolated engines, definition/type/signature equivalence,
-  consumer-correct external paths, ordinary replacement isolation, and a
-  later independent producer after the flight completes. Profiler schema 3
-  exposes producer, waiter,
-  validation, rebinding/insertion, eviction, and retained-memory evidence.
-- The concurrent dependency-product flight is accepted. Completed process
-  retention is rejected: retaining 112 MB after the first configured-JRuby
-  project made only 93 exact products totaling 3.3 MB reusable by the second
-  and did not materially improve dependency readiness. Completed products are
-  removed after overlapping waiters receive them. Sequential and fresh-process
-  reuse now belongs to the pending demand-loaded persistent cache.
-- Shared immutable known-namespace snapshots per indexing batch, eliminating a
-  full engine namespace rebuild and clone for every dependency file.
-- Stable extension applicability fingerprints that exclude per-document source
-  URI/kind, plus skipped framework-extension dispatch for external sources
-  while retaining built-in runtime providers such as JRuby.
-- Persistent compiled-Wasm products now remove the measured fresh-process
-  framework compilation bottleneck without sharing project semantics. Each
-  extension source is read once per discovery generation; its exact source
-  digest and Wasmtime target/compiler/config compatibility identity address a
-  private, checksum-validated serialized module. Source and compiled logical
-  payloads are capped at 64 MiB before allocation/decompression, invalid native
-  artifacts are removed under the exact cross-process lock and rebuilt, and
-  cache failure falls back to valid source compilation. Two controlled
-  `goshposh` cold-to-warm pairs reduced median five-extension load time from
-  **2.743 seconds** to **140 ms** (**94.9%**) and reduced peak RSS in both pairs.
-  Every run retained the exact two project semantic-result fingerprints and
-  manifest hash, 607/607 gem hits, 358/358 Java hits, and zero resource leaks.
-  The five ordinary warm repeats still exceeded the previously fixed aggregate
-  RSS ceiling, so this accepts only the extension product—not overall memory or
-  readiness. Evidence is in
-  `support/performance/persistent-compiled-wasm-2026-08-01.json`.
-- Process-local classpath file products now coalesce identical checksum and
-  bounded JAR-manifest work without sharing a project classpath or catalog.
-  The 4,096-entry/16 MiB cache retains only SHA-256 plus manifest entries; raw
-  JAR/JMOD/source bytes are dropped, and every consumer revalidates metadata and
-  reapplies its own byte limits. Real two-project JRuby `goshposh` runs produced
-  271 exact products for 360 lookups and reused 89 common runtime/JDK/Maven
-  files while retaining only **156,158 bytes**. The reusable sibling classpath
-  phase fell from **1.146 seconds** to **466 ms** with two workers and **451 ms**
-  under sequential admission (**59-61% faster**); summed classpath time fell
-  about **26%**. Both scheduling shapes preserved the exact prior project
-  classpath fingerprints, semantic-result fingerprints, and whole semantic
-  manifest hash with zero cache failures or resource leaks. Evidence is in
-  `support/performance/classpath-file-product-single-flight-2026-08-01.json`.
-- An unconditional zero-retention flight around each persistent Java artifact
-  lookup was measured and rejected. Across three candidate `goshposh` runs,
-  all **1,074** lookups became independent producers and **zero** identical
-  keys joined. The median wall result moved by only **-0.62%**, while user CPU
-  regressed **1.37%**, project/dependency/semantic readiness regressed
-  **1.1-2.1%**, internal peak RSS regressed **4.02%**, and one candidate run
-  was a severe outlier. Exact semantic manifests, project fingerprints, and
-  navigation remained equal, so the code was fully reverted rather than
-  retaining an unproductive synchronization layer. Evidence is in
-  `support/performance/java-artifact-ephemeral-flight-rejection-2026-08-01.json`.
-- Exact parsed Java class metadata now has a measured bounded sequential-reuse
-  path. A server-owned 256-entry/256-MiB cache retains checksum-keyed artifact
-  products whose archives and project declarations share immutable
-  `Arc<ClassFile>` allocations; per-project paths, classpath order, duplicate
-  winners, providers, facts, and engines remain isolated. The 128-MiB pilot was
-  rejected after cyclic eviction retained only 117 identities and reused only
-  22 of 190 repeats. Across three interleaved 256-MiB candidate/baseline pairs,
-  the accepted design retained all 168 exact identities, reused all 190
-  repeated lookups, reduced persistent reads from 358 to 168, and improved
-  median wall **4.34%**, user CPU **4.14%**, project readiness **3.86%**,
-  dependency readiness **3.23%**, internal RSS **17.13%**, and external RSS
-  **11.93%**. Every candidate stayed below the fixed 1.777-GB RSS ceiling and
-  all semantic manifests, project fingerprints, and definition results were
-  byte-identical. Process-wide reuse is exposed in profiler schema 12 and the
-  authoritative indexing detail picker. Evidence is in
-  `support/performance/shared-java-class-metadata-cache-2026-08-01.json`.
-- Runtime stdlib ownership is now exact and executable-location independent.
-  Discovery invokes only the owning project's selected executable and Java
-  home, never the server `PATH` or guessed runtime homes; bundled core stubs can
-  no longer be rediscovered or reclassified as stdlib. Identical project probes
-  share one 32-entry/1 MiB process-local single-flight product keyed by the
-  canonical runtime executable identity plus Java home. Three paired
-  `goshposh` runs preserved byte-identical semantic exports while reducing
-  median terminal readiness from **15.085 seconds** to **13.710 seconds**
-  (**9.1%**) and retaining only **315 bytes**. Evidence is in
-  `support/performance/runtime-stdlib-path-single-flight-2026-08-01.json`.
-- Project-source collection now consumes each owned `(URI, source)` input and
-  moves the source buffer directly into its `RubyDocument`; the parallel
-  priority and exhaustive partitions no longer clone every project file before
-  fact collection. Three exact `goshposh` pairs preserved the complete semantic
-  manifest and both project fingerprints while improving median terminal wall
-  **1.804%**, active semantic completion **2.206%**, project collection
-  **3.159%**, and peak RSS **2.278%**. Evidence is in
-  `support/performance/project-source-move-ownership-2026-08-01.json`.
-  A broader attempt to share the remaining `RubyDocument` source allocation
-  through `Arc<String>` was rejected and reverted: its timing gain was below
-  one half percent while median RSS increased **21.105%**. Do not repeat that
-  ownership shape without new lifetime evidence. The rejection is recorded in
-  `support/performance/shared-ruby-document-source-rejection-2026-08-01.json`.
-- Prism-location range conversion no longer eagerly allocates formatted start
-  and end overflow messages for every ordinary constant, method, diagnostic,
-  raise, and `super` reference. A typed boundary preserves the complete
-  fail-fast invariant message only on actual `u32` overflow. Three interleaved
-  warm-cache pairs preserved the complete semantic manifest, both project
-  fingerprints, exact Project/Gem definitions, 607/607 gem hits, 168/168
-  persistent Java hits, and zero resource leaks. Median project collection
-  improved **3.116%**, user CPU **2.866%**, active semantic completion
-  **1.806%** to **11.853 seconds**, and terminal wall **1.537%** to **13.319
-  seconds**. Median external RSS moved **1.647%**, but every candidate remained
-  at least 217 MB below the fixed ceiling. Evidence is in
-  `support/performance/text-range-overflow-formatting-2026-08-01.json`.
-- Extension applicability is now evaluated lazily once per file traversal and
-  reused by enclosing-frame tracking, frame ownership, and Wasm dispatch. The
-  snapshot is only a registry-fingerprinted bit vector; it retains no Wasm
-  instances, registry snapshot, project context clone, engine, or semantic
-  facts. A changed exact locked-gem version receives a new fail-closed
-  decision, while a racing registry replacement falls back to exact current
-  applicability. The symbolized `goshposh` profile reduces locked-gem
-  applicability from **1.64%** of total application CPU to **0.04%**. Three
-  valid fully warm baseline/candidate pairs preserve both complete semantic
-  fingerprints, the sorted full semantic export manifest, exact Project/Gem
-  definitions, 607/607 gem hits, 168/168 persistent Java hits, and zero
-  resource leaks. Median user CPU improves **3.191%**, wall **0.693%** to
-  **13.082 seconds**, and active semantic completion **0.534%** to **11.539
-  seconds**. Median RSS moves **3.518%** amid wide allocator variance, but every
-  candidate remains below the fixed ceiling with at least 72.8 MB headroom.
-  This is distinct from the rejected long-lived extension registry snapshots
-  and combined call-classification shapes. Evidence is in
-  `support/performance/extension-applicability-snapshot-2026-08-01.json`.
-- Extension semantic-target seeding now carries one dependency applicability
-  fingerprint computed by the isolated project's existing
-  `ProjectContextSeed`, rather than serializing and hashing the complete locked
-  gem vector once per project file. The 32-byte identity changes on an exact
-  dependency refresh; the ordinary synthetic Stub file is then replaced in
-  the same isolated engine, removing stale targets when a framework version no
-  longer applies. It retains no engine, extension instance, registry snapshot,
-  source buffer, or semantic fact. The formerly sampled
-  `ensure_semantic_seed_facts` path falls from **2.03%** of application CPU to
-  no samples in the post-change 1 kHz symbolized profile. Three valid
-  interleaved warm `goshposh` pairs preserve both project fingerprints, the
-  complete semantic manifest, exact Project/Gem definitions, 607/607 gem hits,
-  168/168 Java hits, and zero resource leaks. Median wall improves **1.900%**
-  to **13.136 seconds**, user CPU **2.028%**, active project navigation
-  **1.863%** to **5.269 seconds**, dependency navigation **1.440%** to **11.502
-  seconds**, and active semantic completion **1.427%** to **11.539 seconds**.
-  Median RSS moves **1.349%**, while every candidate stays below the fixed
-  ceiling with at least 138.4 MB headroom. Evidence is in
-  `support/performance/extension-semantic-seed-fingerprint-2026-08-01.json`.
-- A follow-up that delayed each file's complete extension `ProjectContext`
-  until its first syntactically tracked call was measured and rejected. Common
-  names such as `include`, `extend`, `before`, and framework DSL calls meant
-  nearly every real `goshposh` file still materialized the context. The exact
-  symbolized path moved only from **56.953 ms** to **55.331 ms** of sampled CPU.
-  Three valid fully warm pairs preserved the complete semantic manifest and
-  exact Project/Gem navigation, but median active dependency readiness
-  regressed **0.255%**, active semantic completion regressed **0.359%**, median
-  RSS rose **2.167%**, and one candidate exceeded the fixed RSS ceiling by
-  57.5 MB. The slice was reverted; the restored release profiler is
-  byte-identical to the accepted semantic-seed binary. Do not retry this shape
-  without first narrowing the syntactic tracking set or proving a compact ABI
-  context that does not weaken extension applicability or provenance. Evidence
-  is in
-  `support/performance/lazy-extension-context-rejection-2026-08-01.json`.
-- A broad borrowed file-type-fact iterator was measured and rejected. It
-  reduced median terminal wall **1.671%** and user CPU **1.797%**, but did not
-  improve active-project readiness, slowed the live dependency probe
-  **5.977%**, and increased median peak RSS **4.091%**. The experiment was
-  fully reverted and its release profiler is byte-identical to the accepted
-  semantic-seed checkpoint. Do not repeat broad per-file borrowing; any future
-  type lookup must be an exact owner/name/position query with independent
-  evidence. The rejection is recorded in
-  `support/performance/borrowed-file-type-facts-rejection-2026-08-01.json`.
-- Gem product cache-key preparation now derives static Java imports, dotted
-  and canonical proxy references, and the remaining JRuby DSL markers from one
-  Prism parse and one combined visitor. A plain gem source previously paid
-  three parses solely to return `false`. The focused red test observed three
-  parses and now proves exactly one. Three interleaved fully warm `goshposh`
-  pairs preserve both project semantic fingerprints, the complete semantic
-  export manifest, exact provenance, 607/607 gem hits, 168/168 Java hits, and
-  zero resource leaks. Median terminal wall improves **3.878%** to **12.485
-  seconds**, user CPU **1.846%**, active project readiness **4.092%** to
-  **5.157 seconds**, active dependency readiness **5.035%** to **10.977
-  seconds**, and active semantic completion **5.053%** to **11.011 seconds**.
-  Every candidate remains below the fixed RSS ceiling with at least 93.2 MB
-  headroom. The parallel gem-indexer test race that mutated process-global
-  `HOME` is also serialized and the complete workspace test suite passes.
-  Evidence is in
-  `support/performance/one-pass-jruby-gem-prefilter-2026-08-01.json`.
-- A graph node-definition ownership index that prevents cold insertion of every
-  new file from scanning all existing graph nodes for nonexistent prior facts.
-- Exact resolved-callee return-type queries that avoid rebuilding an owner MRO
-  after lookup has already selected the declaration, plus a revision-bound,
-  per-collector resolved-callee query cache capped at 64 entries and invalidated
-  on semantic replacement.
-- A generation-local exact JRuby provider handoff at bounded project-batch
-  boundaries. Provider-aware batches use ordinary file-owned collection and
-  cannot enter the replay set; only earlier providerless files are replayed.
-- Deterministic per-project profiler records plus an aggregate summary with
-  machine, build, dataset, runtime, CPU, peak-RSS, engine-size, source-byte, and
-  single-flight evidence. Schema 9 includes a stable complete semantic-result
-  fingerprint per isolated project rather than relying on aggregate counts and
-  spot probes alone.
-- The macOS ARM64 VSIX is built from the dirty checkout's freshly rebuilt
-  target binary, smoke-tested from the extracted archive, and installed as
-  `naveenraj.ruby-fast-lsp@0.2.6`. The packaged smoke now waits for the
-  sequenced `ruby-fast-lsp/indexing/statusChanged` ready snapshot instead of
-  the removed legacy `$/progress` presentation, then proves all five bundled
-  framework guests load, ERB host completion stays outside Ruby regions, and
-  JRuby class/member navigation, hover, completion, signature help, references,
-  and runtime identity work without developer paths. The archive installed at
-  the latest explicit editor checkpoint hashes to
-  `d1e05d3df5a5ac96fd5b95f3e5f06b9864f77b843f6ee7c6180d959a1f8f022c`;
-  its packaged and installed native binary both hash to
-  `cc120df4a30436bab3fb80afbe721185495f09534c3c77e03f0d3b21076a70fa`.
-  It includes the accepted TextRange allocation, per-file extension
-  applicability, dependency semantic-seed, and one-pass JRuby gem-prefilter
-  slices and passed the complete extracted-archive smoke at the final local
-  gate. A prior real installed-binary LSP
-  session over the two isolated JRuby `goshposh`
-  projects reached authoritative ready state in **14.456 seconds**, exposed
-  358 Java artifact lookups with 168 producers and all 190 duplicates reused,
-  and resolved both project-owned `UserPmm` and exact locked-gem
-  `BSON::ObjectId` definitions. This closes package assembly and installed
-  real-workspace validation for the current slice, not the remaining runtime
-  switching, failure, edit-isolation, or five-second project/semantic budgets.
-- Initial per-phase timing instrumentation and a real 67-project `goshposh`
-  baseline.
+Official references reviewed for this goal:
 
-These are foundations, not completion. The current evidence-backed rating is
-**8.8/10**. The current slice must not be rated 9/10 or treated as
-production-finished until the following gaps are closed:
+- [Pyrefly architecture](https://github.com/facebook/pyrefly/blob/main/ARCHITECTURE.md)
+- [Pyrefly project overview](https://github.com/facebook/pyrefly)
+- [Pyrefly configuration and inference modes](https://pyrefly.org/en/docs/configuration/)
+- [Pyrefly infer command](https://pyrefly.org/en/docs/autotype/)
+- [Pyrefly coverage reporting](https://pyrefly.org/en/docs/report/)
 
-- Same-pass inheritance validation is fixed for the reproduced alias,
-  self-cycle, cycle-closing, and conflicting-superclass cases. Engine ingestion
-  still needs equivalent lifecycle tests for cycles assembled across files,
-  unresolved-edge retries, cached products, and extension patches.
-- Scheduler fairness, starvation resistance, and ready-engine
-  definition/hover/edit responsiveness are proven with deterministic
-  multi-project tests. Retained-memory accounting and the remaining
-  request/status detail surfaces still need equivalent proof.
-- CPU-heavy indexing work is proven not to block the async LSP reactor. A
-  current-thread saturated-worker test also proves active-document status
-  routing remains responsive, updates both priority owners, and cancels queued
-  weighted work without a stale queue entry. Queries against ready facts have
-  direct saturated-worker coverage.
-- Cold coordinator and gem-product work now obey one candidate process-wide
-  CPU, transient-memory, and I/O admission policy, and nested Rayon work cannot
-  escape the owned pool. Runtime probes, extension-requested processes, and
-  editor linter/formatter processes share the same admission queue. The default
-  512 MiB transient budget and two I/O slots still require real `goshposh`
-  comparison before acceptance. Open/change/save index-time extension guest
-  calls and interactive JRuby materialization now run inside the admitted
-  semantic pass; extension registry loading/reloading and request-time
-  document-symbol/code-lens guests also have explicit weighted admission.
-  JVM subprocesses now have a measured hard resident-memory kill boundary.
-  Shared completed products are bounded by weighted retention or deliberately
-  ephemeral; isolated project-engine aggregate heap and final process RSS still
-  require acceptance on the real umbrella workspace. One large parallel phase
-  currently reserves the full indexing
-  pool; real evidence must decide whether project lane partitions are required
-  in addition to the host lanes already reserved for the reactor.
-- Request-driven navigation is now bounded, generation-safe, and exact for
-  project files and locked gems, including requests arriving at either
-  dependency frontier. The warm dependency probe passes its three-second
-  target at a current **1.253-second** three-repeat median. The exact project
-  probe passes its strict one-second warm target in all current repeats at a
-  **357 ms** median. The exact two-project workspace also passes the 15-second
-  warm terminal target at a current **12.485-second** median. The remaining
-  warm performance gaps are active project-navigation readiness at **5.157
-  seconds** rather than five seconds and active semantic completion at **11.011
-  seconds** rather than five seconds. Median peak RSS is **1.671 GB**, and
-  every repeat remains below the fixed 1.777 GB ceiling with **93.2 MB**
-  minimum measured headroom. Interactive latency and that RSS ceiling are
-  co-equal 9/10 gates: a ~3 GB language-server resident set on the same
-  workspace is a P0 regression to diagnose (peak vs steady, LSP vs editor host)
-  and fix without merging isolated engines.
-  Cold-cache, one-project-change, failure, active-priority, and real-workspace
-  installed-VSIX acceptance remain required.
-- The accepted per-gem product coalesces concurrent work but deliberately
-  retains no completed values. Shared work must now extend through a
-  demand-loaded persistent protocol and to the measured expensive immutable
-  stdlib/runtime, signature, exact source-map, extraction, and decompilation
-  products. Per-artifact JAR/JMOD metadata and compiled-Wasm modules already use
-  the accepted persistent protocol. Cache identities use content checksums and
-  every semantic fingerprint, not package version or path alone.
-- A reported cache hit is not accepted as reuse evidence until the validated
-  product has been rebound into the requesting isolated engine and real
-  definition/type queries return the same results as a cold build. Measure
-  lookup, deserialization, validation, rebinding, insertion, and retained-memory
-  cost; do not optimize a hit counter while leaving the expensive semantic work
-  unchanged.
-- Configured-JRuby cold and sequential profiles distinguish completed hits from
-  joined in-flight work. Completed retention was removed after proving that
-  only 3.3 MB of 112 MB retained after project one could be reused by project
-  two. The adjacent ephemeral run retained zero product bytes with effectively
-  unchanged total and dependency wall time, while preserving exact
-  `BSON::ObjectId` and `TimeUnit` navigation. Persistent reuse must improve
-  readiness without recreating this resident-memory cost.
-- The product identity and source-precedence contract now has focused
-  fresh-process coverage for analyzer source, parser/dependency lock, explicit
-  product and payload schemas, exact gem name/version/platform/source kind,
-  declared dependency context, runtime/platform/provider semantics, extension
-  applicability, project-neutral seed semantics, exact content, and
-  serialization format. A real stale `goshposh` cache exposed that package
-  version plus a manually bumped schema was insufficient. The accepted fix
-  embeds a build-generated SHA-256 of the complete `ruby-analysis` source tree,
-  root fact composition, and JRuby import/catalog producer code. The stale
-  cache then missed all 512 distinct gem identities while reusing all 358 Java
-  and five Wasm products; its immediate fresh-process replay hit all 607 gem
-  identities and produced the exact same semantic export SHA and both project
-  fingerprints. Evidence is in
-  `support/performance/gem-semantic-producer-identity-2026-08-01.json`.
-- Persistent cache publication, corruption recovery, schema/version
-  invalidation, cross-process contention, disk accounting, automatic bounded
-  cleanup, and a safe show/clear command are implemented and tested.
-- Persistent entries are bounded before allocation and deserialization, use
-  private user-cache permissions, and contain only immutable external/runtime
-  derived products in this goal. Workspace-owned source, unsaved buffers,
-  diagnostics, and project semantic state are not persisted or shared.
-- Source/RBS, Gemfile, lockfile, auto-runtime marker, trusted project-extension,
-  configuration, folder, and classpath lifecycle paths now invalidate the
-  owning project or exact file. Existing persistent gem products now prove that
-  source content, lock closure, core/runtime semantic seed, and JRuby classpath
-  changes reserve a new identity instead of selecting old facts. Persistent
-  Java artifact products likewise reject changed byte identities. Fresh-process
-  rebinding proves folder/path changes retain exact consumer provenance, while
-  bounded cleanup touches only Ruby Fast LSP-owned products. Every future
-  persistent product must add equivalent invalidation proof before acceptance.
-- Bursts of duplicate filesystem watcher events are normalized and coalesced
-  into one final URI batch and one owning-project replacement generation. A
-  packaged VS Code watcher-storm acceptance remains.
-- The VS Code item has generation-safe elapsed/target presentation and an
-  authoritative all-project Quick Pick. That view now joins each project's
-  exact server-reported runtime, JDK, and classpath identity and labels
-  persistent gem/Java cache plus gem single-flight counters as process-wide
-  reuse evidence. Restart now suspends the old transport, coalesces concurrent
-  callers, resets sequence only after replacement, and rejects delayed events
-  after disposal. Existing dynamic-folder rehoming, deepest-owner selection,
-  active-project reprioritization, and reordered-response tests complete the
-  focused lifecycle matrix; packaged acceptance remains.
-- Snapshot publication is bounded for counter-only changes while phase,
-  generation, scheduler aggregate, readiness, terminal, and failure changes
-  remain immediate. A real initialized LSP client-socket regression proves
-  fifty counter changes emit one bounded flush and the navigation-ready phase
-  bypasses throttling with strictly increasing sequences.
-- The profiler now records queued-to-stage readiness milestones and
-  active-document navigation probes. A probe repeatedly executes the real
-  engine definition query during indexing, records its first successful phase,
-  generation, sequence, exact locations, owning project, query latency, and
-  target source kinds, then retains the ordinary post-index result for
-  comparison. A project reaching a terminal state without a semantic answer is
-  a profiler failure rather than false readiness evidence. Persistent-cache
-  hits/misses/rejections and defensible physical disk-read evidence remain.
-- Cold, warm-process, fresh-process persistent-cache, one-project-change,
-  runtime-change, failure, and active-priority measurements pass the budgets
-  below from the packaged extension.
+## Current Checkpoint
 
-## M0 Baseline Evidence
+Ruby Fast LSP already has valuable foundations:
 
-First scheduler-backed cold run recorded on 2026-07-26 using the release
-`profiler`, `/Users/naveenraj/goshposh`, and an internal concurrency limit of
-two:
+- File-owned type facts and provenance in ruby-analysis core.
+- Engine-owned MRO, method lookup, references, diagnostics, and deterministic
+  per-file replacement.
+- Literal and collection inference, local forward tracking, flow narrowing,
+  method return inference, RBS lookup/substitution, and extension-declared
+  structured types.
+- Isolated engines per Gemfile-owned project.
+- Bounded indexing, process resource governance, edit lifecycle tests,
+  deterministic simulation, and real goshposh performance evidence.
 
-- Project discovery found **67 isolated Gemfile roots**. The set includes
-  repeated devops worktree trees plus `admin`, `server`,
-  `server-devops-5441`, `show-notifier`, and smaller tools.
-- Cold all-project completion took approximately **5 minutes 58 seconds**
-  (18:20:54–18:26:52 local profiler timestamps), versus the 90-second target.
-- Small projects commonly completed project-owned fact collection in roughly
-  **5–100 ms**, while repeatedly spending roughly **0.4–6.3 seconds** in
-  runtime/core/stdlib/gem work. Project navigation is therefore not the primary
-  umbrella bottleneck.
-- Every small MRI project rebuilt the same **132 core stub files**. Estimated
-  engine heap for a mostly core-only project was approximately **5.4–5.9 MB**.
-- `server` indexed 16,396 files and 102,656,605 source bytes with an estimated
-  333.8 MB engine heap. `server-devops-5441` concurrently indexed 16,429 files
-  and 103,133,071 source bytes with an estimated 335.6 MB engine heap.
-- Logs showed the two server trees parsing the same locked gem names and
-  versions concurrently. This proves the need for checksum-keyed gem
-  single-flight reuse rather than additional unbounded workers.
+The current implementation also exposes the next structural limits:
 
-The profiler now emits deterministic per-project evidence and a machine-readable
-aggregate with machine/build fingerprints, CPU, peak RSS, block I/O,
-source/engine bytes, project/runtime fingerprints, and process-local
-single-flight counters. The first post-change attempt exposed a local
-`StringScanner` superclass cycle while indexing real dependency code. A
-real-source-derived regression now preserves the syntactic subclass identity
-when a flow-insensitive compatibility alias would otherwise reopen its own
-superclass, and same-pass graph insertion rejects cycle-closing and conflicting
-inheritance facts before inference.
+- RubyType has a small algebra and uses Unknown for several distinct meanings.
+- Unknown currently absorbs unions, while bottom/unreachable, untyped/dynamic,
+  unresolved, and invalid types are not represented separately.
+- Class subtyping is simplified and is not consistently graph-aware.
+- Parameters still default to Unknown in important paths, and some keyword,
+  block, generic, self-type, and recursive-return behavior is incomplete.
+- Flow tracking is mostly forward traversal rather than an explicit binding
+  graph with joins and dependency-aware solving.
+- Type inference is duplicated across TypeTracker, FactCollector helpers,
+  completion helpers, and query fallbacks.
+- ruby-analysis inference still contains tower-lsp Position, Range, and Url
+  types in type_query.rs, violating the intended reusable boundary.
+- The headless checker now shares the LSP cold-index lifecycle and domain
+  diagnostics, but normalized inferred-type output and differential CLI/LSP
+  type-parity coverage are not complete.
 
-A schema-3 representative cold sample on 2026-07-28 proved the new semantic
-readiness measurement end to end. Cross-file Go to Definition from
-`app/controllers/users_controller.rb` to the project-owned
-`app/services/user_service.rb` first succeeded after **900 ms** during
-`indexingDependencies`; project-navigation readiness was also 900 ms,
-dependency-navigation readiness was 952 ms, and full semantic completion was
-964 ms. The successful target was verified as `SourceKind::Project`, and the
-same query after completion returned the identical location. This is a
-functional navigation measurement, not an inference from status timestamps.
+M0 must turn this checkpoint into measured evidence before large changes:
+current score by category, Unknown frequency/reasons, wrong-type frequency,
+diagnostic precision, cold/warm/edit costs, query latency, CPU, allocations,
+and peak RSS.
 
-The corrected schema-2 release profiler completed all 67 projects on
-2026-07-27:
+### Implementation checkpoint — 2026-08-03
 
-- Exact profiler binary SHA-256:
-  `31595435557dac39a63dd61951714f07b833e149ac359a0e124db274603bc4c5`;
-  tracked diff SHA-256:
-  `484c945de3ff2f10bbd08b9e58ff808d15d1bfe0bd4f4bdaf65e409139fca7f9`;
-  base source revision:
-  `fee94ffb7f2d1b723b9b11086de72350e5d5da09`.
-- Aggregate dataset fingerprint SHA-256:
-  `3c6835b7166c67e44bc0a563ba62d3289c76b732fd2263e9578e9103da12c836`.
-- Reference machine: Apple M4 Pro, 14 logical CPUs, 24 GiB physical memory,
-  macOS Darwin 25.2.0; scheduler concurrency remained two.
-- Complete wall time was **331.852 seconds (5m32s)**, versus the initial
-  approximately 358-second run. This is only about a 7% improvement and remains
-  far outside the 90-second budget.
-- User CPU was **513.937 seconds**, system CPU was **25.337 seconds**, and peak
-  RSS was **2,003,828,736 bytes (1.87 GiB)**. The second measured peak remains
-  within 10% of the preceding 1.873 GB run.
-- The isolated engines retained **63,310 files**, **480,674,555 source bytes**,
-  and an estimated **1,417,167,866 bytes** of engine heap.
-- Core-stub single-flight recorded 67 lookups, one producer, one joined flight,
-  65 hits, zero failures, and one retained template.
-- Summed dependency work was **566.411 seconds**. The two server trees spent
-  **227.014 seconds** and **222.547 seconds** indexing dependencies while their
-  project-owned passes took only **8.100 seconds** and **7.978 seconds**.
-- Logs directly show both large engines concurrently processing the same locked
-  vendor gem identities. Checksum-keyed gem source/fact products are therefore
-  the next measured reuse target.
-- With every project submitted at background priority, queued-to-project-ready
-  latency was **662 ms minimum, 62.225 s p50, 88.029 s p95, and 326.022 s
-  maximum**. This is not an active-project measurement; it proves why
-  active-document priority and a separate acceptance run are required.
-- Queued-to-dependency-ready latency was **10.236 s minimum, 64.073 s p50,
-  88.271 s p95, and 330.466 s maximum**.
+- The versioned M0 seed scorecard lives in
+  `support/type_inference/scorecard.toml`; its schema, category allocation,
+  proof-safety rules, and recorded outcomes are validated in normal tests.
+- The explicit reporter currently measures **100/100 on 68 reviewed seed
+  cases**, with all critical categories at 100% and no unexpected outcomes.
+  The corpus includes one real `didChange` sequence that transitions a
+  mutually recursive call chain from proven `String`, to base-free `Unknown`,
+  to proven `Integer`, including chained hover and completion behavior. The
+  minimum case-count gate is met, but `score_eligible = false`: normalized
+  CLI/LSP type parity, reviewed real-project reductions, representative
+  diagnostic precision, broader explanations, and the full performance matrix
+  are not complete. Two
+  positive diagnostic cases and four conservative-suppression cases provide
+  an initial precision signal, not a representative precision claim.
+  Supplemental breadth cases are deliberately worth zero points, so expanding
+  the corpus did not inflate the original 100-point score. This diagnostic
+  score must not yet be presented as achieving the product-level 9/10 goal.
+- `ruby-analysis::core` now exposes a proof-carrying `TypeInferenceOutcome`
+  that cannot represent `Proven(Unknown)`, plus versioned machine-readable
+  Unknown reasons. Shared method-call inference retains
+  `unknown_receiver`, `invalid_method_name`, `unresolved_method_return`,
+  `incomplete_union_member`, or `unproven_recursive_cycle`. Source-ordered
+  nonlocal reads retain `no_reaching_assignment`,
+  `unresolved_assignment_value`, or `ambiguous_reaching_assignment` in a
+  compact, sorted, file-owned evidence vector. Complete call expressions retain
+  the same proof outcomes in a second compact vector: immediate RBS/constructor,
+  union, invalid-name, and unknown-receiver results come from the shared call
+  rule, while user-method results are finalized from the engine's existing
+  navigation candidate, MRO chain, effective visibility, and solved return
+  evidence. Engine queries expose the exact range result to both CLI and LSP;
+  replacement removes it with the owning file. Existing type consumers still
+  project failed proofs to
+  `RubyType::Unknown`. File-owned
+  method-return inference telemetry records proven/Unknown outcomes, stable
+  reason-code counts, recursive component/method counts, solver iterations,
+  and bound hits. Replacement removes stale telemetry with the owning file;
+  Engine debug output and the checker aggregate it deterministically.
+  The scorecard JSON publishes reason-code schema 2; broader local/flow reasons
+  and bounded provenance chains remain M0 work.
+- The editor-independent `CheckSession` and `ruby-fast-lsp check` command now
+  run the same `IndexingCoordinator` cold-index lifecycle as LSP without
+  starting an LSP service. Runtime selection, bundled core, runtime stdlib,
+  Bundler/gems, signatures, extension inputs, project policy, umbrella-project
+  discovery, isolated engines, fact collection, resolution, and semantic
+  diagnostics are shared. A successful report sets
+  `dependency_loading_complete = true`; a loader failure aborts rather than
+  publishing absence claims from an incomplete universe. Explicit-file checks
+  index the owning project but project only that file's diagnostics, while
+  directory checks aggregate isolated projects deterministically. Human and
+  versioned JSON output retain one-based UTF-16 ranges and diagnostic exit
+  status. JSON schema 4 publishes sorted type subjects with an explicit kind:
+  method returns retain canonical concrete labels or exact Unknown reason
+  codes; nonlocal-read and call expressions retain exact engine-owned proven
+  types or Unknown reasons, while other subjects are emitted only from
+  concrete engine facts.
+  Differential tests prove method
+  returns, parameters, a value constant, local/instance/class/global
+  assignments, and a multiline chain-boundary expression match LSP inlay
+  labels and exact token positions. Additional tests prove unresolved receiver,
+  unresolved return, and incomplete-union calls expose the same reason through
+  CLI and hover; inlays remain silent where no concrete type is proven. Cold
+  deterministic project collection now retains the same visitor-derived type
+  facts as interactive indexing. YARD parameter types bind only to parameters
+  that exist in the method syntax; an unmatched annotation remains a
+  diagnostic and cannot become a concrete CLI subject. A
+  black-box test proves the installed binary reports an engine-owned
+  `wrong-arity` result. Exact method proof outcomes are retained only for
+  project files and replaced with their owning file; dependency files keep
+  counters without paying for the outcome map. Syntax diagnostics still
+  require one
+  checked-file reread/parse after cold indexing because the coordinator drops
+  source text and does not yet persist parser diagnostics as domain facts; the
+  CLI validates byte identity against the indexed content hash and fails if a
+  source changed. Eliminating that duplicate syntax parse and adding edit
+  lifecycle parity remain M6 work.
+- Union receiver return inference is now proof-complete across the shared call,
+  completion, and fact-collection paths. If any reachable member cannot prove
+  the call result, the whole call remains Unknown; an LSP chained-call
+  regression test prevents partial-union inference from returning a plausible
+  concrete type.
+- Multiline chained-call inlays now consume exact engine-owned expression facts
+  at each chain boundary. The indexer records ordinary call-expression facts
+  only where multiline-chain syntax can consume them, keeping the additional
+  work bounded; the LSP adapter performs no independent inference. Proven
+  boundaries such as `User.new` and `.profile` display their concrete
+  intermediate types, while an unresolved boundary emits no placeholder or
+  guessed hint. Both outcomes are represented in the reviewed scorecard.
+- Receiver-less implicit and `self` calls with no first-pass receiver type now
+  remain deferred until the engine's complete MRO is available instead of
+  being prematurely frozen as `Unknown[unknown_receiver]`. Reopened method
+  definitions produce an exhaustive return union only when every selected
+  definition has a proven return. Explicit-receiver ambiguity additionally
+  requires the unrestricted and visibility-allowed callee sets to be exactly
+  equal; if private or otherwise inaccessible candidates are removed, the
+  result remains `Unknown[unresolved_method_return]`. Differential CLI/LSP
+  tests cover top-level implicit calls, public explicit calls, and the private
+  fail-closed boundary, and the reviewed scorecard contains the same three
+  semantic cases.
+- Nonlocal-variable receiver proofs are now source ordered and owner aware in
+  the shared engine query used by hover, completion, method-return chaining,
+  navigation, signature help, references, call hierarchy, and diagnostics.
+  Instance-variable owners match exactly; class variables share only the same
+  namespace parts; globals remain process-wide. Index-time receiver resolution
+  consults the collector's current source-ordered facts before the previously
+  seeded engine, so a later Unknown write cannot leave a stale resolved
+  reference or false missing-method diagnostic. Unknown assignment facts are
+  retained as semantic proof barriers instead of being dropped during fact
+  merging, and lookup chooses the latest write before deciding whether its
+  payload is concrete. Assignment inlays query the exact write token and fail
+  closed on conflicting producers. Reviewed regressions cover owner isolation,
+  concrete-to-Unknown invalidation, inlay and hover output, completion,
+  navigation, and diagnostic suppression for instance variables, plus
+  navigation barriers for class and global variables.
+- Source-ordered instance, class, and global variable reads now publish exact
+  engine-owned expression facts. The CLI emits those facts with their exact
+  ranges, and LSP hover consumes the same fact before any flow-query fallback;
+  an exact Unknown therefore remains a proof barrier. Current-pass collection
+  no longer consults stale same-file engine facts when no preceding write was
+  observed. A balanced active-write stack models Ruby's RHS-before-target
+  evaluation, so a read inside `@value = @value...` sees the previous write,
+  not the pending target. Differential CLI/LSP and `didChange` regressions
+  cover concrete reads, prior-value reads, and removal of a formerly concrete
+  proof.
+- Structured collection inference no longer replaces unresolved members with
+  Object, widens mixed numerics to Numeric, or retains known members beside an
+  unknown member. The proven outer shape remains `Array[Unknown]` or
+  `Hash[Unknown, Unknown]`; exact known members remain normalized unions.
+- Completion on a union receiver now intersects method availability across
+  every member, reopened method returns require every selected definition to
+  resolve, RBS intersections no longer select the first member, and the dormant
+  confidence-based signature merge has been removed. These rules are shared
+  domain behavior rather than editor-side filtering. Distinct reopened method
+  definitions retain their own range-owned return facts deterministically,
+  while an inferred body fact cannot override an explicit contract attached to
+  the same definition.
+- Direct and same-file mutually recursive method returns now use a bounded,
+  deterministic SCC least-fixed-point solver with a private bottom value that
+  cannot enter `RubyType` or public facts. Compact return equations are emitted
+  during the existing method-body traversal, grouped in stable namespace and
+  method order, and solved synchronously without another Prism parse or AST
+  walk. A concrete terminating base can prove the component; a base-free
+  component, unresolved base, incomplete reopened definition, or
+  non-converging equation remains `unproven_recursive_cycle`. Explicit
+  `return` paths participate in a method's inferred return union, fixing two
+  old guard cases that had omitted the reachable bare-return `NilClass` result.
+  Cross-file recursive SCC solving remains future work.
+- `RubyType` union normalization now uses structural ordering instead of
+  allocating and sorting debug strings. Canonical Boolean and inferred union
+  ordering therefore follow one deterministic path.
+- Same-file equation dependencies now survive straight-line local aliases such
+  as `value = helper; value` as private solver terms rather than public
+  `Unknown`. Yielding/proc result proofs run before ordinary callee-equation
+  capture, preserving proven block-return inference. Dependency aliases inside
+  branches and loops are deliberately cleared until the private terms have a
+  real join model; those cases remain Unknown instead of borrowing a term from
+  another control-flow path. Forward mutual dependencies are also retained
+  when deterministic parallel project collection has pre-registered files but
+  has not inserted their direct method facts yet; a missing target remains an
+  unresolved dependency, while a target present in the completed equation set
+  participates in the SCC. Two core regression tests and CLI telemetry/parity
+  tests cover that batch lifecycle.
+- Canonical RBS conversion now uses proof-first union construction for unions,
+  optionals, and booleans in both inference and signature indexing. Exact
+  `Array[T]` and `Hash[K, V]` arities take allocation-bounded direct paths;
+  malformed arity, intersections without a supported proof rule, and unions
+  containing untyped/Unknown evidence fail closed. Specialized Boolean,
+  optional, and single collection-member constructors preserve structural
+  ordering without invoking the general sort path.
+- The next M0 work is to extend normalized CLI/LSP parity across the remaining
+  signature/diagnostic query projections, add machine-readable Unknown
+  explanations for the remaining local-flow expressions, and broaden
+  reviewed diagnostic precision, followed by
+  release-build base-versus-candidate cold/warm/edit/query resource baselines
+  for the expanded solver, proof evidence, and telemetry path.
+- The first non-claim-eligible release scorecard timing is recorded in
+  `support/performance/type-inference-scorecard-m0-seed-2026-08-03.json`:
+  seven warm process runs have a **0.35 s median**, and one warm sample reports
+  **100,352,000 bytes maximum RSS**. It is a candidate-worktree reference, not
+  a base-versus-candidate non-regression result; the full M0 performance matrix
+  remains required.
+- The expanded 50-case workload has its own non-comparable candidate reference
+  in `support/performance/type-inference-scorecard-m0-expanded-2026-08-03.json`:
+  seven warm release process runs have a **0.47 s median**, the scorecard test
+  itself reports **0.19 s**, and one warm sample reports **100,974,592 bytes
+  maximum RSS**. The older 15-case median is not used as a baseline for this
+  larger workload; an alternating base-versus-candidate matrix is still
+  required.
+- A first same-fixture base-versus-candidate release comparison is recorded in
+  `support/performance/type-inference-single-file-base-vs-candidate-2026-08-03.json`.
+  Across seven candidate/base pairs, the 242-byte semantic-pass fixture has a
+  **75.69 ms candidate median versus 76.07 ms base (-0.50%)**. Seven process
+  samples show **73,875,456-byte candidate median RSS versus 75,677,696-byte
+  base (-2.38%)**. This clears the focused 3% median wall gate, but one
+  candidate RSS outlier and the absence of workspace/edit/query profiles mean
+  the full M0 performance matrix remains open.
+- The recursive-solver scorecard comparison is recorded in
+  `support/performance/type-inference-recursive-solver-scorecard-2026-08-03.json`.
+  Its six warm pre/post process samples measure **0.445 s baseline versus
+  0.455 s candidate (+2.25%)** while the score rises from 93 to 100. This
+  clears the focused 3% median wall gate for the recursive slice only; it does
+  not replace the required workspace, edit, query, allocation, or peak-RSS
+  matrix.
+- The cumulative proof-evidence single-file comparison is recorded in
+  `support/performance/type-inference-proof-evidence-single-file-base-vs-candidate-2026-08-03.json`.
+  Seven alternating release pairs measure a **74.38 ms candidate median versus
+  75.02 ms base (-0.85%)**, with **73,908,224-byte candidate median RSS versus
+  75,022,336-byte base (-1.49%)**. This clears the focused 3% median wall gate
+  after adding deterministic SCC solving, proof telemetry, file-owned exact
+  outcomes, and CLI type projection. It remains a 242-byte single-file result,
+  not the required workspace/edit/query/allocation/peak-RSS acceptance matrix.
+- A larger cumulative comparison is recorded in
+  `support/performance/type-inference-chained-call-large-file-base-vs-candidate-2026-08-03.json`.
+  Fifteen alternating release pairs on the 225,569-byte, 5,095-line
+  `consignments.rb` fixture measure a **108.88 ms candidate file-processing
+  median versus 107.66 ms base (+1.13%)**. Seven independent process-resource
+  pairs measure **0.84 s candidate wall versus 0.85 s base (-1.18%)**,
+  **0.83 s CPU versus 0.84 s (-1.19%)**, and **79,691,776-byte median RSS
+  versus 79,052,800 bytes (+0.81%)**. These final-state measurements include
+  the batch/SCC proof-term fix and clear the focused 3% gates. The
+  replace-and-resolve subphase is still 0.53 ms slower at the median, and the
+  workspace/edit/query/allocation/peak-RSS matrix remains open.
+- The cold deterministic project-batch parity comparison is recorded in
+  `support/performance/type-inference-cold-project-parity-base-vs-candidate-2026-08-03.json`.
+  Fifteen alternating release pairs on the six-file
+  `goshposh_helpers_goto` fixture measure a **94.23 ms candidate wall median
+  versus 92.51 ms base (+1.86%)** and **94.02 ms candidate CPU versus 92.35 ms
+  (+1.81%)**. Seven process-resource pairs measure **33,849,344-byte candidate
+  median RSS versus 33,538,048 bytes (+0.93%)**. Retaining visitor-derived
+  proof facts adds 0.14 ms to assembly and 0.51 ms to replacement at the
+  median, while end-to-end wall, CPU, and RSS remain within the 3% gates. This
+  covers one fixed cold project collection path, not warm cache, edit/query
+  p95, allocations, or the full goshposh RSS ceiling.
+- The focused interactive nonlocal-proof budget evidence is recorded in
+  `support/performance/type-inference-nonlocal-proof-query-budget-2026-08-03.json`.
+  Seven release processes with 500 observations per query report median p95s
+  of **1.12 ms edit**, **23.79 us completion**, **11.75 us hover**, **18.79 us
+  definition**, **5.11 ms references**, and **2.29 us diagnostics**, with a
+  **588.79 ms** cold-index median and **6.0 MiB** engine heap. A separate
+  `--check-budgets` run passes every fixed production gate. The untouched base
+  profiler could not validate references on the same minimal fixture and
+  indexed a much smaller semantic universe, so its partial timings are kept
+  only as orientation rather than a like-for-like no-regression claim. The
+  full warm workspace/edit/allocation/goshposh matrix remains open.
+- The exact nonlocal-read parity slice is recorded in
+  `support/performance/type-inference-nonlocal-read-parity-2026-08-03.json`.
+  Fifteen release passes over the 225,569-byte `consignments.rb` fixture
+  measure a **105.12 ms file-processing median** versus the immediate
+  pre-change artifact's **108.88 ms (-3.45%)**. Seven processes with 500 query
+  observations each keep edit, completion, hover, references, and diagnostics
+  median p95 changes within the 3% gates; definition improves, and every fixed
+  production budget passes. A retained older hashed profiler indexed a
+  materially smaller semantic universe and was excluded rather than presented
+  as a false alternating baseline. Cold-process samples changed semantic
+  producer/cache identity, so this slice relies on the same-fixture semantic
+  pass for acceptance and leaves the full warm/allocation/goshposh matrix open.
+- The nonlocal-read Unknown-explanation slice is recorded in
+  `support/performance/type-inference-nonlocal-read-unknown-reasons-2026-08-03.json`.
+  Fifteen alternating hashed release-binary pairs isolate reason retention on
+  the same 225,569-byte fixture: the candidate improves median file processing
+  by **2.33%**, visitor time by **2.13%**, and replacement by **2.33%** versus
+  the retention-disabled binary. Seven fresh 500-iteration query processes
+  keep every median p95 delta within 3%, retain **6.1 MB** engine heap, and pass
+  every fixed production budget. Non-alternating samples that drifted beyond
+  the focused threshold were rejected rather than used as acceptance evidence.
+- The general call-expression outcome slice is recorded in
+  `support/performance/type-inference-call-expression-outcomes-2026-08-03.json`.
+  Fifteen alternating hashed release-binary pairs on the same 225,569-byte
+  fixture measure a **115.49 ms candidate file-processing median versus
+  114.26 ms baseline (+1.08%)**, with visitor time at **+0.71%**. Reusing the
+  navigation resolver's MRO and effective-visibility result plus a linear
+  sorted-outcome merge keeps the focused end-to-end result inside the fixed 3%
+  gate. Replace-and-resolve remains **0.48 ms / 4.26%** slower and is explicit
+  follow-up work. Fourteen fresh 500-iteration query processes pass every fixed
+  production budget with **6.1 MB** engine heap; completion, hover, definition,
+  and diagnostics median p95 deltas remain within 3%, while edit (**+4.27%**)
+  and references (**+4.03%**) remain above the comparison threshold. This slice
+  is therefore semantically accepted but not yet a full performance
+  non-regression result. A per-call TypeFact design that increased one exact pass from
+  117.83 ms to 206.95 ms and a pass-local hash cache at +5.13% were both
+  rejected and removed.
+- The reopened-call finalization increment is measured separately in
+  `support/performance/type-inference-reopened-call-proof-2026-08-03.json`
+  against exact pre-change binaries compiled from the same worktree state.
+  Fifteen alternating large-file pairs put file processing at **+0.74%**,
+  visitor time at **+0.57%**, and replace-and-resolve at **+1.29%**. Fourteen
+  alternating 500-iteration query pairs keep edit (**+0.96%**), completion
+  (**+1.65%**), hover (**-0.53%**), definition (**+0.12%**), references
+  (**-1.32%**), diagnostics (**-0.94%**), and cold indexing (**+0.37%**)
+  inside the 3% incremental gate; both binaries load the same 134-file,
+  **6.1 MB** semantic universe and every fixed production budget passes. This
+  proves the increment is performance-safe but does not close the broader
+  call-expression and goal-wide performance work above.
+- Five fresh release `ruby-fast-lsp check --format json` processes per fixture
+  produced byte-identical output for three focused CLI fixtures, including the
+  exact nonlocal-read and call-expression Unknown reason codes plus the newly
+  proven reopened explicit-call union; the commands, exact stdout SHA-256
+  values, and limitations are recorded in
+  `support/type_inference/cli-determinism-2026-08-03.json`. This supplements
+  the scorecard's repeatable-type, canonical-union, and edit-lifecycle cases;
+  it is not yet a broad worker-schedule determinism claim.
+- The current bounded-four-thread correctness gate passes **1,452/1,452
+  non-ignored root tests**
+  (one existing ignored test), **444/444 ruby-analysis tests**, and **71/71
+  scorecard cases** with zero unexpected outcomes. The non-root workspace
+  suite, `cargo check --workspace`, release build, and all **58/58** VS Code
+  adapter tests also pass. Default maximum-concurrency retries exposed two
+  unrelated external-process timing flakes (a Standard fixer timeout and a
+  runtime-version probe output race); each passed alone, and bounded
+  concurrency passed the complete suite. This repository-level flake still
+  needs stabilization before the final completion claim. Every Rust file
+  changed by this goal is
+  rustfmt-clean; repository-wide rustfmt has the same pre-existing drift at the
+  base commit and remains an open repository gate rather than being silently
+  reformatted as part of this inference change.
 
-Durable sanitized evidence is checked in at
-`support/performance/multi-root-m0-2026-07-27.json`. The corresponding raw local
-evidence is `/tmp/ruby-fast-lsp-goshposh-m0-schema2-20260727.jsonl` with
-diagnostics in `/tmp/ruby-fast-lsp-goshposh-m0-schema2-20260727.log`. M0 remains
-open for real active-document query probes.
-The first implemented reuse slice prepares one neutral core-stub engine template
-per compatibility identity and clones it into isolated engines. It does not yet
-deduplicate gem facts or persistent cross-process work.
+### Implementation checkpoint — 2026-08-05
 
-The first symbolized CPU-profile campaign for the real `server` dependency
-phase is also complete. It found semantic preparation and graph lifecycle work,
-not Prism parsing, to be the dominant initial cost. Three correctness-preserving
-hot-path fixes reduced the same cold `server` run as follows:
-
-- Initial symbolized run: **132.259 seconds total**, **120.860 seconds
-  dependencies**, **185.240 seconds user CPU**, and **977.7 MB peak RSS**.
-- After shared known-namespace snapshots: **67.460 seconds total** and
-  **55.836 seconds dependencies**.
-- After stable extension applicability and external-source dispatch fixes:
-  **55.010 seconds total** and **38.395 seconds dependencies**.
-- After indexed graph node-definition ownership: **40.383 seconds total**,
-  **29.206 seconds dependencies**, **77.394 seconds user CPU**, and **746.7 MB
-  peak RSS**.
-
-The final run retained the same 16,396 files and 102,656,605 source bytes, with
-effectively unchanged engine heap, while reducing total wall time by 69.5% and
-dependency time by 75.8%. It remains above the 15-second cold dependency target,
-so this is evidence for the next cache/reuse work, not completion. Local raw
-profiles live under `/tmp/ruby-fast-lsp-server-*-20260727.*`; preserve durable
-sanitized summaries before relying on temporary files.
-
-The next two measured engine slices then reduced the same cold project further:
-
-- Exact resolved-callee return-type lookup reduced total time to **32.346
-  seconds** and dependency time to **21.252 seconds**.
-- A revision-bound per-collector method-return query cache reduced total time to
-  **31.407 seconds** and dependency time to **20.812 seconds**, while retaining
-  the same project file/source coverage.
-
-A broad engine-wide MRO cache was explicitly rejected after profiling because
-its retained memory and peak RSS were not defensible. A narrower
-revision-invalidated cache for only the top-level/Object fallback chain passed
-all 378 `ruby-analysis` tests and reduced the identical cold `server` run to
-**23.512 seconds total** and **15.564 seconds for dependencies**, with
-**56.961 seconds user CPU**, **1,066,516,480 bytes peak RSS**, the same 16,396
-files and 102,656,605 source bytes, and effectively unchanged engine heap. This
-25.2% dependency improvement over the preceding accepted run is retained.
-
-Future reuse must remain bounded and must justify both latency and memory. The
-current dominant problem is no longer an unmeasured parse-cache hypothesis: it
-is construction and rebinding of reusable, project-neutral dependency semantics
-across isolated engines.
-
-The candidate gem product was then measured and redesigned rather than accepted
-on its first shape:
-
-- A closure-wide product reached roughly **51.8 seconds** wall time and
-  **1.19–1.22 GB** peak RSS, so that design was rejected.
-- Removing temporary producer-engine insertion reduced product construction,
-  but unbounded parallel collection still raised peak RSS to roughly
-  **1.30 GB** and was also rejected.
-- Splitting the cache identity and work unit per exact selected gem, validating
-  before binding, moving immutable source payloads into the consumer, and
-  bounding file collection produced the current candidate.
-- With 12 bounded collection lanes, one measured `server` dependency phase was
-  approximately **15.30 seconds**, product construction consumed approximately
-  **4.57 seconds** in aggregate, binding approximately **3.29 seconds**, and peak
-  RSS was approximately **1.02 GB** before the final retention-bound change.
-- A real concurrent `server` plus `server-devops-5441` run performed **460**
-  lookups with **230** producers, **216** joined flights, **14** completed hits,
-  zero failures, and **27,334** total bound files. This proves shared production
-  work, but not the required sequential warm-cache latency.
-- A configured JRuby 9.2.21.0 cold `server` run then completed in **81.288
-  seconds** internally (**85.35 seconds** externally), with **27.639 seconds**
-  in core/runtime preparation, **19.262 seconds** in dependencies, **24.378
-  seconds** in project indexing, and approximately **1.61 GB peak RSS**. Exact
-  `BSON::ObjectId` navigation succeeded.
-- The following scheduler-concurrency-one `server` then
-  `server-devops-5441` run completed in **159.690 seconds** internally
-  (**164.38 seconds** externally). It performed **601** gem-product lookups:
-  **508** producers, **93** completed hits, no joined flights, no failures, and
-  **232** evictions, retaining **134,102,429 bytes** across 276 entries.
-  Transactional binding succeeded 601 times for 29,035 files. Exact
-  `BSON::ObjectId` navigation resolved to the consumer's extracted locked Java
-  gem, and `TimeUnit` resolved to the consumer's exact JRuby/JDK source.
-- That sequential run reached **2,260,713,472 bytes peak RSS**, above both the
-  recorded two-project baseline and the goal's 10% growth ceiling. The second
-  project reused only 93 of 301 lookups and still required 74.929 seconds.
-  Therefore the present retention/admission shape is rejected as a production
-  default even though its semantic identity and rebinding are correct.
-- Whole-project JRuby classpath fingerprints were also proven too broad for
-  ordinary Ruby gem products. The current key includes the runtime-provider
-  fingerprint only when a gem's source actually uses Java imports, Java proxy
-  references, or Java-specific calls; Java-sensitive products retain the exact
-  classpath identity. Focused tests cover both sides of this boundary.
-- A real RxJava class exposed an overly restrictive aggregate classfile
-  attribute limit. The bounded parser now accepts the JVM's valid 65,535
-  aggregate count while retaining independent class-size, member-count,
-  per-attribute byte, annotation, and recursion bounds.
-- JRuby package imports no longer eagerly source/decompile every class in an
-  imported package. All bounded signatures remain available, but implementation
-  source is materialized only for explicit or uniquely referenced classes.
-  This reduced the measured JRuby core/runtime preparation phase from
-  approximately 119.9 seconds to 27.6 seconds.
-- A controlled adjacent preflight run proved that the 93 reusable second-project
-  products totaled only **3,317,982 bytes**, after retaining **112,127,594
-  bytes** from project one. The retained run completed in **154.528 seconds**
-  internally with **38.916 seconds** of summed dependency work.
-- The accepted ephemeral-flight run retained **zero** completed product bytes,
-  completed in **155.475 seconds** internally with **38.633 seconds** of summed
-  dependency work, and preserved exact `BSON::ObjectId` plus Java `TimeUnit`
-  definition targets. The sub-second wall difference is not a material benefit
-  for 112 MB of resident templates. macOS peak counters varied, so both RSS and
-  peak-footprint counters are preserved rather than selecting the favorable
-  one.
-
-The sanitized decision record is
-`support/performance/gem-single-flight-retention-2026-07-27.json`; its raw
-profiles remain under `/tmp`. The focused post-change gates, exact working-tree
-and binary checksums, dataset fingerprints, concurrency, cache state, semantic
-probes, and counter limitations are recorded together. Packaged behavior and
-the full local completion gate remain pending.
+- Two in-flight equation-reuse failures were fixed. The direct-facts seed
+  replacement in `src/indexer/file_processor.rs` staged facts with
+  `inference: Default::default()`, so every edit transiently wiped the
+  file's solved inference and marked the method-return solver dirty; the
+  seed write now preserves the previous engine-owned `InferenceEvidence`
+  (new `AnalysisEngine::inference_evidence_in_file` accessor) because the
+  seed pass does not own inference. An unchanged-equation edit now runs
+  **zero** equation solves, a changed recursive base runs **exactly one**,
+  and a base-free edit invalidates to `Unknown[unresolved_method_return]`.
+  The engine test that handed different outcomes with identical equations
+  contradicted the documented reuse contract (equations unchanged => the
+  previous project-solved outcomes stay authoritative) and now changes the
+  equations together with the outcomes while still proving file-owned
+  evidence replacement.
+- Normalized CLI/LSP diagnostic parity now covers the remaining
+  engine-owned projections with eight differential tests: `unresolved-method`
+  (including the Levenshtein suggestion and the conservative `User.new`
+  fact), `unresolved-constant`, `missing-kwarg`, `yard-unknown-param`,
+  `yard-rbs-mismatch` (bundled RBS contract conflicts, e.g. `String#length`
+  is `Integer` in RBS), `unresolved-require`, parser syntax errors, and a
+  multi-diagnostic fixture proving identical sorted sets. Two findings came
+  out of the fixtures: `User.new` is flagged unresolved by both CLI and LSP
+  (a parity-consistent but suspect `Class#new` resolution gap), and the CLI
+  normalizes syntax diagnostics by position/message while LSP preserves
+  prism error order, so syntax parity is asserted as full sorted sets.
+- The scorecard corpus grew to **77 cases (m0-seed-15)** with five reviewed
+  zero-point diagnostic-parity coverage cases; the explicit reporter still
+  measures **100/100** with `score_eligible = false` and every critical
+  category at 100%.
+- The full root suite passes **1,462/1,462** non-ignored tests
+  (one existing ignored test), **444/444 ruby-analysis tests**, the
+  scorecard reporter (ignored) passes with 77 cases, the black-box
+  `tests/check_cli.rs` binary test passes, and the extension harness
+  test passes. No performance artifacts were produced for this
+  parity-only slice; the alternating release matrix and the remaining
+  Unknown-explanation, precision, and real-project work stay open.
+- Next M0 work: machine-readable Unknown explanations for the remaining
+  local-flow expressions, reviewed diagnostic precision with reduced
+  real-project fixtures, and the complete alternating release-build
+  baseline/candidate cold/warm/edit/query/allocation/peak-RSS matrix.
 
 ## Correct Architecture
 
-### Ownership
-
-```text
-VS Code adapter
-  renders active-project snapshot
-  rejects stale generation/sequence
-  never computes semantic readiness
-              ▲
-              │ structured snapshot/request
-              │
-server indexing scheduler
-  owns queue, priority, concurrency, generation,
-  aggregate state, cancellation, failure, publication
-              │
-              ▼
-per-project indexing coordinator
-  performs one project's phases
-  reports typed phase counters/results upward
-              │
-              ▼
-isolated AnalysisEngine
-  owns that project's semantic truth and replacement lifecycle
-```
-
-- `src/` owns scheduling, workspace lifecycle, progress publication, and the
-  LSP/editor transport.
-- `ruby-analysis` owns semantic facts, graphs, inference, queries, and
-  diagnostics. It must not know about status bars or scheduler policy.
-- A project coordinator must not publish the global progress token directly.
-- The editor must not infer project roots, runtime mappings, readiness, or
-  percentages from logs and timing.
-- One project continues to own one isolated `AnalysisEngine`.
-- Shared caches may contain only immutable, validated, project-neutral source
-  products. Every engine still receives file-owned facts through its ordinary
-  replacement path.
-
-### Authoritative state model
-
-Represent project state explicitly rather than with a boolean:
-
-```text
-Discovered
-  -> Queued
-  -> ResolvingRuntime
-  -> DiscoveringInputs
-  -> IndexingCore
-  -> IndexingProject
-  -> ProjectNavigationReady
-  -> IndexingDependencies
-  -> DependencyNavigationReady
-  -> ResolvingSemantics
-  -> PublishingDiagnostics
-  -> Ready
-
-Any active generation may become Failed or Cancelled.
-A new generation supersedes the old generation; it does not mutate it.
-```
-
-Each published project snapshot must include:
-
-- Canonical project root and workspace-container root.
-- Run generation and monotonically increasing sequence number.
-- Current state and phase.
-- Completed and total work in a well-defined unit.
-- Whether the total is known; never invent a percentage before it is.
-- Reused versus newly processed file/byte counts.
-- Queue position and whether the project is actively scheduled.
-- Runtime summary when resolved.
-- Start time, most recent transition time, and completed time.
-- A bounded actionable failure summary when failed.
-
-The aggregate snapshot must include:
-
-- Scheduler generation.
-- Counts for discovered, queued, active, ready, failed, and cancelled projects.
-- Active worker count and concurrency limit.
-- Aggregate completed/known work with a documented weighting rule, or no
-  aggregate percentage when the work denominator is not defensible.
-
-State transitions must be validated. A stale task cannot publish into a newer
-generation. A failed project cannot transition to ready without a new
-generation. Removing a project cancels its work and clears its published state.
-
-## Scheduling and Performance Policy
-
-### Measure before changing behavior
-
-Add structured timings and counters for every project and phase:
-
-- Queue wait, wall time, and CPU time.
-- Files and source bytes discovered, read, parsed, converted to facts, resolved,
-  reused, skipped, and replaced.
-- Runtime, Bundler, stub, stdlib, gem, JVM/JAR, extension, project, graph,
-  diagnostics, and publication time.
-- Cache lookups, hits, misses, invalidations, bytes, and reason for rejection.
-- Cache producer time, waiter time, validation, deserialization, rebinding,
-  insertion, eviction, retained bytes, and whether reuse removed physical reads,
-  parsing, fact construction, or only one smaller phase.
-- Peak and final RSS plus estimated engine heap per project.
-- Scheduler active workers, task steals/reprioritizations, cancellations, and
-  failures.
-
-Record separate baselines for:
-
-1. One large project opened directly.
-2. The full `/Users/naveenraj/goshposh` umbrella folder.
-3. Cold cache.
-4. Warm process with unchanged inputs.
-5. Fresh process with valid persistent cache.
-6. One project changed.
-7. Runtime or lockfile changed in one project.
-
-Do not accept a faster all-project total that makes the active project slower
-or creates excessive peak memory and disk contention.
-
-### Interactive request latency (document highlight)
-
-VS Code requests `textDocument/documentHighlight` whenever the caret sits on a
-symbol in the active editor. That path is interactive and concurrent with
-Go to Definition, hover, folding, semantic tokens, and CodeLens.
-
-Measured on `/Users/naveenraj/goshposh` `server/lib/api_app.rb` (2026-08-01):
-
-1. Caret on a method name triggered document highlight.
-2. The handler ran project-wide `find_references` (~10.5 s) and kept one
-   same-file hit.
-3. That synchronous work blocked tower-lsp's request-poll loop
-   (`buffer_unordered`), so F12's definition request waited on the wire until
-   highlight finished even though goto itself completed in ~1–2 ms.
-4. CodeAction / Full document sync / CodeLens were not the stall (linter none;
-   flush 0 ms; CodeLens ~30 ms).
-
-Required direction:
-
-- Document Highlight must use same-document reference lookup only.
-- Multi-second or project-wide reference work must stay off the async
-  request-poll path so one feature cannot stall sibling interactive requests.
-- Re-measure caret-on-symbol then F12 on `api_app.rb` after the fix; goto must
-  no longer wait behind highlight.
-
-### Bounded, prioritized scheduler
-
-- Replace one-unbounded-task-per-project startup with a bounded scheduler.
-- Determine the default concurrency from measured CPU, memory, and disk
-  behavior. Keep it an internal policy unless evidence establishes a genuine
-  user need for configuration.
-- Prioritize the active/open document's owning project. A `didOpen` arriving
-  during startup may reprioritize queued work deterministically.
-- Within the active project, index the open document, universal core semantics,
-  and project-owned sources before exhaustively indexing external dependencies.
-  Gate completeness-dependent diagnostics until the dependency graph is
-  complete.
-- A definition request for a not-yet-indexed locked dependency may promote that
-  exact dependency ahead of ordinary background work. Demand priority must
-  remain bounded, deterministic, and scoped to the owning project.
-- Do not interrupt an engine write at an unsafe boundary. Cancellation occurs
-  only at explicit coordinator checkpoints.
-- Use deterministic tie-breaking: priority class, discovery order, then
-  canonical project root.
-- Dynamic workspace add/remove and runtime rebuild use the same scheduler and
-  state machine as initial indexing.
-- Query routing remains available independently for every ready engine.
-- CPU-heavy indexing runs on bounded worker resources rather than monopolizing
-  the async LSP reactor. Admission limits cover both task count and the measured
-  memory pressure of large projects.
-- Nested execution systems share an explicit process-wide resource policy.
-  Tokio blocking tasks, Rayon lanes, extension guests, and JVM/decompiler work
-  may not independently expand concurrency beyond the scheduler's measured CPU,
-  memory, and I/O envelope.
-- Duplicate watcher events are normalized, debounced/coalesced by owning
-  project and semantic input identity, and resolved to one replacement
-  generation that observes the final state.
-
-### Remove redundant work safely
-
-First prove duplication with counters, then eliminate it in this order:
-
-1. Avoid repeated filesystem discovery and metadata reads for identical,
-   checksum-verified inputs.
-2. Reuse byte-identical source content and parse products.
-3. Reuse project-neutral fact templates only if file IDs, source ownership,
-   extension applicability, runtime compatibility, and provenance are rebound
-   and validated before insertion into an engine.
-4. Persist only content-addressed immutable products with a schema, parser,
-   runtime, platform, extension, and policy fingerprint.
-
-Cache keys must include every input that can alter meaning. Cache entries are
-invalid on uncertainty; never use path or timestamp alone as semantic identity.
-Do not share mutable `AnalysisEngine`, diagnostics, graph state, file IDs,
-project extension state, runtime selection, or external-document ownership.
-
-Exact Gemfile/lockfile closure and source identity remain mandatory. Performance
-work must not scan unrelated global gems, promote `vendor/cache`, merge sibling
-projects, or suppress unresolved-edge safeguards merely to report readiness
-earlier.
-
-### Invalid inheritance input
-
-Superclass and mixin facts enter the same validated, file-owned engine lifecycle
-as every other semantic fact:
-
-- Reject a self-edge, cycle-closing edge, or conflicting superclass edge before
-  same-pass inference or graph resolution can observe it.
-- Attribute the rejection to the exact source fact and preserve deterministic
-  behavior across filesystem order, parallel workers, and cache reuse.
-- Distinguish invalid Ruby inheritance from analyzer artifacts caused by
-  conditional compatibility branches, aliases, generated patches, or reopened
-  declarations. Do not “fix” either case by guessing a superclass.
-- Keep the inference assertion as a last-resort invariant. Production indexing
-  must prevent user or dependency source from reaching that invariant.
-- A rejected external fact may fail or degrade only its owning project according
-  to the documented diagnostics/readiness policy; it must not panic a worker,
-  poison a shared cache entry, or cancel unrelated projects.
-
-### Artifact and derived-cache ownership
-
-Ruby Fast LSP is not another Bundler, RubyGems, JDK, or Maven package manager:
-
-- Reuse exact installed expanded gem sources, locked `.gem` archives, Bundler
-  Git/path sources, JARs, JMODs, JDK `src.zip`, and JRuby runtime artifacts in
-  place. Do not download or duplicate an artifact merely to cache it.
-- Cache owned derived products: validated `.gem` extraction, source checksums,
-  Ruby parse products, project-neutral fact templates, classfile metadata,
-  generated Java signatures, source-member maps, and bounded decompiled
-  implementation documents.
-- Raw class/JAR declarations may be reused by checksum. Project-specific
-  classpath ordering, duplicate-class selection, import aliases, overload
-  resolution, provenance, and semantic insertion remain per engine.
-- A whole runtime or classpath fingerprint may participate in a derived-product
-  key only when that product's source semantics actually depend on it.
-  Ordinary Ruby gem products must remain reusable across unrelated JRuby
-  classpaths; Java-sensitive gem, signature, source-map, and implementation
-  products must retain every exact artifact and ordering input that can change
-  their meaning.
-- Extension-generated facts may be reused only when the package fingerprint,
-  activation context, framework/version applicability, input content, and
-  semantic patch vocabulary are identical. Otherwise rerun the guest.
-
-Concurrent projects requesting one cache identity must join one
-**single-flight** producer instead of performing duplicate work:
-
-- One in-process producer owns the read, parse, extract, or decompile operation;
-  additional projects await its immutable result.
-- Producer execution is owned independently of the first caller's future. A
-  dropped, cancelled, or superseded initiating project cannot abandon the
-  shared computation while another live waiter exists.
-- Cancellation of one waiting project must not cancel a product still required
-  by another project.
-- Producer failure wakes every waiter with the same bounded error but does not
-  permanently poison the key. A later generation may retry.
-- Cross-process persistent writes use an ownership lock or equivalent atomic
-  protocol, write to a temporary path, verify the checksum and manifest, then
-  rename atomically.
-- A crash, partial write, schema mismatch, checksum mismatch, unsafe archive
-  path, or symlink escape invalidates only that entry and never becomes
-  semantic input.
-
-The cache lives only under Ruby Fast LSP's user-cache directory. It must have a
-measured internal disk budget, automatic least-recently-used and orphan cleanup,
-startup cleanup of incomplete entries, and a command to show size and clear
-only Ruby Fast LSP-owned data. It must never delete or rewrite Bundler,
-RubyGems, RVM, rbenv, asdf, JDK, Maven, Gradle, or project-owned files. Cache
-policy remains server-owned and does not add routine VS Code settings.
-Cache directories and files use private user permissions, and manifest-declared
-sizes plus hard entry limits are checked before allocation or deserialization.
-This goal persists only immutable external/runtime derived products; it does not
-persist workspace-owned source, unsaved buffers, diagnostics, or a project's
-mutable semantic engine.
-
-Process-local immutable caches also require measured byte/entry bounds and
-eviction. A completed single-flight value must not pin every gem, parse product,
-JAR index, or decompiled document for the lifetime of a large umbrella
-workspace. Eviction must never invalidate facts already rebound into an engine,
-and in-flight values must remain alive until all current consumers finish.
-
-## Bottom-Bar Product Contract
-
-Use one authoritative Ruby Fast LSP status item on the right.
-
-For the active Ruby/ERB document it shows the deepest owning project:
-
-- `$(clock) admin: queued`
-- `$(sync~spin) admin: project 3.2s / 5s`
-- `$(sync~spin) admin: dependencies 42% · 8s / 15s`
-- `$(warning) admin: slow indexing · 18s`
-- `$(ruby) JRuby 9.2.21.0`
-- `$(warning) admin: indexing failed`
-- `$(ruby) No Ruby project`
-
-Exact wording may be refined, but these semantics are required:
-
-- The compact text describes only the active document's owning project.
-- The tooltip shows the phase details and aggregate multi-project summary.
-- While work is active, show elapsed time and the applicable readiness target.
-  Show a percentage only when its denominator is known and monotonic.
-- Crossing a readiness target changes the presentation to `slow indexing` and
-  records the breached phase; it does not falsely mark valid work as failed or
-  silently stop it.
-- The runtime selector remains accessible from the item after readiness.
-- Clicking a queued/indexing/failed state exposes a detailed project-status
-  Quick Pick before offering runtime actions. It lists every discovered
-  project, phase, elapsed/target time, runtime, reused/new work, and bounded
-  failure summary; selecting a failure can open the relevant output details.
-- Logs may show all project events, but they do not drive the item.
-- A server notification carries a complete authoritative snapshot with
-  generation and sequence. The editor performs an initial status request, then
-  applies only newer snapshots.
-- Active-editor changes render the newest cached snapshot immediately and
-  request a refresh generation-safely.
-- No delayed hide timer may conceal a later state. Disposal, restart, and
-  workspace removal cancel pending editor work explicitly.
-- A failed or cancelled generation never displays a checkmark or “Ready.”
-- Do not alternate between a left global indexing item and a right runtime item
-  for the same lifecycle.
-- Intermediate counter-only snapshots are coalesced to a bounded publication
-  rate. Phase transitions, active-project changes, completion, cancellation,
-  and failures bypass that throttle and publish immediately.
-
-## Milestones
-
-### M0 — Reproducible baseline and race tests
-
-- Add the multi-project profiler dimensions and preserve raw evidence.
-- Add a minimal real-source-derived regression for cyclic/conflicting
-  superclass facts and prove real source cannot reach the inference invariant.
-- Build a deterministic fixture with at least three isolated projects, shared
-  dependencies, different runtimes, one failure, and controlled phase delays.
-- Add a VS Code test that reproduces interleaved percentages and the stale hide
-  timer before the fix.
-
-Exit: the current race and redundant-work baseline are demonstrated by failing
-tests and recorded measurements.
-
-### M1 — Typed project state and authoritative snapshots
-
-- Replace `indexing_complete: AtomicBool` as the public truth with the explicit
-  state machine.
-- Add generation/sequence validation and structured request/notification
-  transport.
-- Make success, failure, cancellation, rebuild, add, and remove transitions
-  exact and testable.
-
-Exit: no task or editor event can publish stale state or report global success
-when a project failed.
-
-### M2 — Bounded active-project-first scheduling
-
-- Route initial, added-project, and rebuild work through one scheduler.
-- Add deterministic priority and safe cancellation checkpoints.
-- Prove ready projects remain responsive while other work continues.
-
-Exit: worker count is bounded and the active project wins the documented
-priority without starvation.
-
-### M3 — Shared immutable work products
-
-- Use the baseline to identify the largest repeated reads/parses.
-- Add validated process-local reuse first.
-- Add one-producer/many-waiter single-flight coordination for identical work.
-- Add persistent content-addressed reuse only after lifecycle correctness is
-  proven.
-- Add atomic cross-process publication, corruption recovery, owned-cache disk
-  accounting, and automatic cleanup.
-- Preserve per-engine fact replacement and provenance.
-
-Exit: identical external inputs produce one measured computation, concurrent
-requesters share it, restarts produce valid cache hits, disk use remains
-bounded, cold and reused query results are semantically equivalent, a real
-navigation probe succeeds from every reused product, and no semantic
-cross-project leakage occurs.
-
-### M4 — Incremental invalidation
-
-- Reindex only the owning project for project file, Gemfile, lockfile, runtime,
-  extension, classpath, and workspace changes.
-- Invalidate only affected cache identities.
-- Cancel superseded generations and delete stale facts deterministically.
-
-Exit: changing one project does not rebuild or alter an unrelated sibling.
-
-### M5 — Single deterministic VS Code status item
-
-- Remove the competing raw progress presentation.
-- Render authoritative active-project snapshots.
-- Add fake-timer and delayed-response tests for switching editors, overlapping
-  generations, failure, restart, add/remove, and disposal.
-
-Exit: the status item cannot flicker backward, be hidden by an old timer, show
-the wrong project, or claim false readiness.
-
-### M6 — Real workspace and packaged acceptance
-
-- Profile the full `goshposh` umbrella folder cold and warm.
-- Exercise rapid active-editor switching during indexing.
-- Prove project/runtime isolation and external-document provenance.
-- Package and install the current-platform VSIX and repeat status/navigation
-  acceptance without developer paths.
-
-Exit: measured budgets pass from the installed artifact.
-
-### M7 — Hierarchical Ruby Index (done)
-
-- Stop presenting Ruby Index as a flat dump of every root class/module label.
-- Group by owning Ruby project with path nesting under the workspace (no
-  redundant single-folder wrapper); keep Gemfile engines isolated.
-- Make nested namespace hierarchy the primary expand path under each project.
-- Park external types under per-project **Ruby Standard Library** and
-  per-gem-package **Gems** sections (JRE / Maven shape), still gated by the
-  library-sections toggle.
-- Keep Includes / Superclass / Prepends as secondary detail on a type; skip
-  library-section Included-By BFS so `namespaceTree` stays interactive.
-- Prove search + reveal reach deep FQNs such as
-  `GoshPosh::Platform::API::ProspectPosts` on the reference workspace.
-- Add VS Code adapter tests for tree shape; keep engine namespace-tree truth in
-  `ruby-analysis` and avoid a second semantic store.
-
-Exit: on `goshposh`, Ruby Projects is browsable like Java Projects—path-nested
-projects, nested namespaces, libraries separate—without regressing indexing
-isolation, fingerprints, or the RSS ceiling.
-
-## Required Performance Budgets
-
-These budgets remain the **maintenance regression gate** for indexing. They are
-not the active product chase for this phase. M0 must retain exact machine and
-dataset fingerprints before changing budgets. Checked-in profiler fixtures must
-continue to satisfy at least:
-
-- Status ownership and the initial phase appear within **100 ms** after the
-  server receives the active document.
-- Active-buffer parsing and same-file Go to Definition are available within
-  **500 ms** at p95.
-- Project-owned Go to Definition is available within **5 seconds** from cold
-  start and **1 second** with a valid warm cache.
-- Required gem, runtime, stdlib, JRuby, and JAR navigation is available within
-  **15 seconds** from cold start and **3 seconds** with a valid warm cache.
-- The active project is semantically complete within **30 seconds** from cold
-  start and **5 seconds** with a valid warm cache.
-- The complete `/Users/naveenraj/goshposh` umbrella workspace reaches terminal
-  state within **90 seconds** from cold start and **15 seconds** with a valid
-  persistent cache on the recorded reference machine.
-- Active project's semantically-complete time also improves by **50% or more**
-  from the M0 umbrella baseline.
-- All-project cold completion also improves by **35% or more** from baseline.
-- Byte-identical shared external sources are parsed once per cache identity,
-  not once per project.
-- Concurrent demand for an identical gem, JAR, runtime, stub, or extension
-  product performs one producer computation; every waiter receives the same
-  verified immutable result.
-- Persistent cache size stays within its recorded internal disk budget and
-  automatic cleanup never touches externally owned artifacts.
-- Peak RSS does not exceed the cold baseline by more than **10%** and should
-  decrease when bounded concurrency replaces unbounded startup.
-- A ready project's definition, hover, completion, and edit latency remain
-  within their existing budgets while sibling indexing is active.
-- Document Highlight on a ready project file stays within the interactive
-  budget (same order as same-file navigation: **500 ms** p95) using
-  same-document reference lookup only. It must not compute project-wide
-  references and then discard cross-file hits, and it must not run multi-second
-  synchronous work on the tower-lsp request-poll path where it stalls goto,
-  hover, folding, tokens, and CodeLens.
-- A one-project source edit performs no semantic replacement in sibling
-  engines.
-- Status snapshot application is monotonic and constant-time in the number of
-  visible status items; there is only one.
-
-The 500 ms, 5-second, and 15-second interactive-navigation limits are product
-requirements and may not be replaced by relative improvements. If the
-reference machine cannot meet a full-completion limit, retain the limit as the
-9/10 target and record the remaining phase bottleneck rather than silently
-lowering the bar.
-
-## Test and Acceptance Matrix
-
-- Scheduler unit tests with deterministic fake coordinators.
-- State-machine invariant and stale-generation tests.
-- Graph-ingestion tests for direct self-edges, multi-node cycles, conflicting
-  superclass edges, alias/reopen compatibility branches, generated extension
-  facts, and deterministic source attribution.
-- Multi-root black-box LSP tests for success, partial failure, cancellation,
-  dynamic folders, runtime changes, and active-project priority.
-- Cache identity, corruption, version drift, invalidation, and provenance tests.
-- Cold-versus-reused semantic equivalence tests for definitions, types, method
-  lookup, signatures, graph edges, source precedence, and external-document
-  provenance.
-- Single-flight tests for concurrent waiters, producer failure, waiter
-  cancellation, process contention, partial writes, recovery, and cleanup.
-- Reactor-responsiveness tests while CPU workers are saturated, plus bounded
-  process-cache retention and safe eviction tests.
-- Watcher-storm tests proving duplicate/reordered events converge on one
-  generation and the final filesystem state.
-- Artifact-ownership tests proving cleanup touches only Ruby Fast LSP's cache.
-- Engine isolation tests with conflicting constants, gem versions, JRuby/JDK
-  inputs, and extensions.
-- VS Code tests with fake timers and deliberately reordered responses/events.
-- Single-project regression tests proving the scheduler adds no semantic or
-  material latency regression.
-- Real `/Users/naveenraj/goshposh` cold/warm/incremental profiling.
-- Current-platform packaged VSIX smoke and manual active-editor status
-  verification.
+### Layer ownership
+
+| Layer | Owns | Must not own |
+| --- | --- | --- |
+| ruby-analysis::core | Ruby type algebra, type IDs/variables, constraints, ranges, facts, provenance, diagnostics | Prism traversal, LSP types, CLI formatting |
+| ruby-analysis::indexer | Prism parsing, scope-aware AST traversal, binding/fact/candidate emission | Workspace truth, LSP protocol, terminal output |
+| ruby-analysis::inference | Constraint generation rules, flow environments, narrowing, joins, overload/generic solving, inferred signatures | LSP/CLI UX, persistent workspace ownership |
+| ruby-analysis::engine | File registry, semantic graph, facts, dependency/invalidation graph, deterministic queries and stored solved results | Prism traversal, tower-lsp types, output formatting |
+| reusable check session | Editor-agnostic project loading and orchestration of indexer, inference, engine, and diagnostics | LSP transport and terminal rendering |
+| ruby-fast-lsp LSP adapter | Document lifecycle, scheduling, protocol conversion and publication | Type rules or a second diagnostic policy |
+| ruby-fast-lsp check adapter | CLI arguments, exit codes, human/JSON rendering | Type rules or a second project model |
+
+The reusable check session may be a module inside ruby-analysis or a small
+crate above it. Its dependency direction must remain acyclic. Inference asks
+semantic questions through a narrow trait implemented by an engine query or
+immutable snapshot; the engine does not become an AST walker.
+
+### Hard modularity gates
+
+- ruby-analysis must not depend on tower-lsp after the boundary migration.
+- Domain APIs use SourceFileId, TextRange, Ruby names/FQNs, RubyType, and
+  domain diagnostics only.
+- The CLI must work with no LSP client, editor process, or protocol objects.
+- The LSP and CLI must call the same project/session check API.
+- There is one method/MRO/visibility/ambiguity policy:
+  AnalysisQuery resolution.
+- There is one file replacement lifecycle:
+  register_file, collect, replace_facts, resolve/check.
+- There is one source precedence policy for explicit signatures, generated
+  declarations, inferred facts, and unknowns.
+- Parsing and scope traversal remain separate from solving. New inference must
+  not introduce a second Prism parse or full AST walk per feature.
+- Public APIs expose domain views/results, not engine stores or hash maps.
+
+### Target pipeline
+
+    source + RBS + extension/runtime inputs
+                    |
+                    v
+        one offset-preserving Prism parse
+                    |
+                    v
+        scope-aware facts and typed bindings
+                    |
+                    v
+       engine graph + inference query snapshot
+                    |
+                    v
+      bounded binding/constraint solve to fixpoint
+                    |
+                    v
+      solved type facts + semantic diagnostics
+                    |
+           +--------+--------+
+           |                 |
+           v                 v
+       LSP adapter       check CLI adapter
+
+The indexer may emit binding IR beside ordinary facts during its existing
+recursive traversal. The solver consumes that IR after declarations and graph
+relationships are available. Results enter the existing file-owned fact and
+diagnostic lifecycle; there is no parallel semantic store.
+
+## Type-System Direction
+
+### A precise type algebra
+
+Evolve RubyType or its replacement to distinguish at least:
+
+- Unknown: insufficient static evidence, with a reason.
+- Untyped/dynamic: an explicit escape hatch such as RBS untyped.
+- Never/bottom: an expression or path that cannot produce a value.
+- Nil, booleans, literals, named instance types, class/module objects, and
+  self types.
+- Normalized unions and intersections where RBS or narrowing needs them.
+- Generic applications with type arguments, not special-case Array/Hash
+  vectors.
+- Tuple, record/shape, callable/block/proc, and type-variable forms needed by
+  supported Ruby/RBS semantics.
+
+Type construction must be canonical, deterministic, and cheap to compare.
+Normalize unions without debug-string sorting. Bound union width and recursive
+type depth with explicit overflow-to-Unknown rules and counters. Never silently
+substitute Object or another wider type for an invalid, incomplete, or
+over-budget inference.
+
+Unknown, Untyped, and Never must not share behavior:
+
+- Unknown blocks unsafe claims but retains evidence and may be refined later.
+- Untyped permits gradual interaction without pretending a concrete type was
+  inferred.
+- Never disappears at reachable joins and supports definite-return reasoning.
+
+### Bindings, constraints, and flow
+
+Represent definitions, uses, calls, exports, and anonymous checked expressions
+as stable binding identities scoped by source file, lexical scope, and byte
+offset. Bindings may depend on other bindings or external semantic queries.
+
+Required flow behavior includes:
+
+- Source-ordered local variables with hard method/class scope boundaries and
+  block capture.
+- Phi-style joins for if/unless, case/case-in, rescue/else/ensure, and loops.
+- Narrowing for nil/truthiness, is_a?/kind_of?, case equality, respond_to?
+  only when defensible, pattern matching, and terminating guards.
+- Correct invalidation after assignment, mutation, aliasing, or calls that make
+  a refinement unsafe.
+- Bounded loop and recursive-method fixpoints with deterministic proof
+  convergence.
+- Explicit return, implicit last expression, next/break values, raise, yield,
+  super, blocks, lambdas, procs, and forwarding arguments.
+- No dependence on file traversal, hash iteration, or Rayon scheduling order.
+
+Recursive and mutually recursive bindings use placeholders/type variables and
+solve by a bounded SCC/fixpoint policy. Hitting a bound yields Unknown with an
+explicit solver-bound reason and telemetry; it must not hang, explode a union,
+or publish a widened concrete result.
+
+### Calls, signatures, and generics
+
+Method-call inference must compose the existing engine-owned lookup chain with:
+
+- Instance, singleton, inherited, included, prepended, extended, and reopened
+  methods.
+- Public/protected/private visibility and ambiguity.
+- Positional, optional, rest, keyword, keyword-rest, block, forwarding, and
+  Ruby options-hash compatibility.
+- Overload selection by argument shape and type.
+- Generic type-variable solving from receiver, arguments, block parameters,
+  block result, and expected result when available.
+- RBS self, instance, class, interface, alias, union, intersection, optional,
+  tuple, record, proc, top, bottom, and untyped forms used by the corpus.
+- Constructor/new semantics, attr readers/writers, alias methods, super, yield,
+  and common enumerator/container propagation.
+
+An incomplete receiver hierarchy or ambiguous lookup must fail closed:
+navigation may retain diagnostic-free candidates, but type checking must not
+claim a missing method or select an arbitrary overload.
+
+### Interprocedural and cross-file inference
+
+- Infer unannotated checked method returns from every reachable return path.
+- Infer parameter contracts from explicit RBS/YARD/validated generated
+  signatures. Call-site evidence may constrain only a closed, local callable
+  when the engine proves the call set is exhaustive and has no external entry;
+  observed calls must never define a public/open-world method parameter type.
+- Propagate public method returns, constants, and attribute types across files.
+- Handle reopened owners and conflicting declarations deterministically.
+- Detect recursive call groups and stabilize them without whole-workspace
+  iteration after every edit.
+- Treat inferred public signatures as semantic exports. A changed export
+  invalidates its dependents; a body-only edit does not.
+- Keep extension/Rails/generated facts in the same graph and provenance
+  lifecycle. Framework-specific inference stays in extensions, while the core
+  solver consumes generic structured facts.
+
+Explicit annotations win as contracts. Inferred implementations are checked
+against them. A mismatch produces a type diagnostic; it does not silently
+replace the declared contract.
+
+## Standalone Type Checker
+
+The supported headless entry point is:
+
+    ruby-fast-lsp check [PATH ...]
+
+Initial CLI contract:
+
+- With no path, check the current Gemfile-owned project.
+- Accept files or directories while using the same project ownership, source
+  policy, runtime, load paths, gem, stdlib, RBS, and extension inputs as LSP.
+- Default to stable human-readable diagnostics with file, range, severity,
+  error code, message, and relevant type evidence.
+- Support a versioned JSON output for agents and CI.
+- Exit 0 when no enabled errors exist, 1 when type errors exist, and a distinct
+  nonzero code for configuration/internal failures.
+- Offer a summary containing files checked, errors/warnings, elapsed time,
+  inferred/Unknown counts, cache/incremental reuse, and peak memory when
+  available.
+- Produce deterministic diagnostic ordering by project, file, range, and code.
+- Never mutate source during check.
+
+The first phase does not need automatic annotation insertion. Keep inferred
+annotation writing and stub generation as later tools over the same solved
+types, following Pyrefly's separation between check, infer, and stub generation.
+
+CLI/LSP parity is mandatory:
+
+- Given byte-identical inputs and configuration, both surfaces produce the same
+  domain diagnostics and solved exported types.
+- LSP may publish only open-document diagnostics while the CLI prints the full
+  project result; that is a projection difference, not a semantic difference.
+- Human text, JSON, LSP ranges, and severities are adapters over stable
+  diagnostic codes and TextRange values.
+
+## The 100-Point Type Inference Scorecard
+
+Create a checked-in, machine-readable Ruby inference corpus. Every assertion
+has a category, input project, query site, expected canonical type or expected
+diagnostic, and whether a conservative Unknown is permitted. The harness emits
+the total and per-category score plus misses, wrong concrete types, unexpected
+Unknowns, and false-positive diagnostics.
+
+| Category | Points |
+| --- | ---: |
+| Literals, operators, interpolations, and collections | 10 |
+| Locals, assignments, scopes, captured variables, and attributes | 10 |
+| Branches, guards, pattern matching, rescue, loops, and reachability | 15 |
+| Calls, constructors, dispatch, visibility, MRO, mixins, and super | 15 |
+| Methods, parameters, returns, blocks, yield, proc/lambda, and forwarding | 15 |
+| RBS types, overloads, generics, substitution, and annotation checking | 15 |
+| Constants, reopened definitions, cross-file propagation, and invalidation | 10 |
+| Supported generated/framework/runtime facts, including Rails and JRuby | 5 |
+| Lifecycle determinism, malformed code, CLI/LSP parity, and explanations | 5 |
+| **Total** | **100** |
+
+Scoring rules:
+
+- Exact canonical type, including an exhaustive normalized union: full credit.
+- Supported site returning Unknown: no credit.
+- Wrong concrete type: no credit and a correctness failure, even if the total
+  remains above 90.
+- A wider superclass, Object, a partial union with an unproven branch, or a
+  heuristic call-site type is a wrong concrete result, not partial credit.
+- Correctly refusing a declared dynamic/non-goal boundary is tested for safety
+  but does not inflate the accuracy score.
+- A diagnostic assertion requires correct code, range, severity, and relevant
+  expected/actual types.
+- Fixtures must not be added or reweighted merely to raise the score. Changes
+  require a review note explaining the semantic reason.
+
+The corpus must include small table-driven cases, multi-file projects,
+edit/reindex sequences, RBS overlays, Rails/extension facts, and reduced cases
+from real open-source Ruby projects. Keep a separate reviewed diagnostic corpus
+to measure precision rather than only inference coverage.
 
 ## Definition of 9/10
 
-### Active product: Ruby Index explorer
+The type-inference goal is complete only when all of the following are true:
 
-The rating may reach 9/10 for this phase only when:
+1. The scorecard is at least **90/100** overall.
+2. Every category scores at least **85%** of its available points.
+3. There are zero known wrong-concrete-type results in the supported corpus.
+4. The deterministic simulation and reviewed real-project corpora have zero
+   known false-positive type diagnostics. A concrete diagnostic requires a
+   complete proof, not a confidence threshold.
+5. Unknown results at supported sites are below 10% overall and carry a
+   machine-readable reason.
+6. CLI and LSP domain diagnostics/types are byte-for-byte equivalent after
+   normalization on parity fixtures.
+7. Hover, inlay hints, completion, navigation, signature help, and diagnostics
+   consume the shared solved types on their acceptance cases.
+8. ruby-analysis has no tower-lsp dependency, and the check command runs
+   without initializing an LSP service.
+9. Identical inputs produce identical exported types, diagnostics, and
+   semantic fingerprints across repeated runs and worker schedules.
+10. Every performance and memory gate below passes.
 
-- Ruby Index is hierarchical and project-scoped in the Java Projects sense:
-  project roots, nested namespaces, separate libraries—not a flat dump.
-- Deep FQNs are reachable by expand/reveal without scrolling an unbounded root
-  list of every type.
-- External types never pollute the default project browse path.
-- Engine namespace-tree / mixin / MRO truth remains single-sourced; the adapter
-  only projects.
-- Multi-root isolation and provenance are unchanged.
-- Focused VS Code tree tests and a recorded `goshposh` walkthrough pass.
+The remaining 1/10 may contain explicitly documented dynamic Ruby boundaries
+such as string eval, arbitrary runtime reflection, data-dependent
+method_missing, native-extension behavior with no static declarations, and
+unbounded metaprogramming. These boundaries must degrade to explained Unknown
+without false diagnostics.
 
-### Completed product: multi-root indexing (maintenance)
+## Performance and Incrementality Policy
 
-The prior indexing 9/10 bar remains the regression gate:
+### Measure before design changes
 
-- Staged readiness, bounded active-project-first scheduling, and authoritative
-  status remain correct.
-- Reused immutable work cannot leak semantic ownership.
-- Warm two-project `goshposh` stays under the fixed **1,776,846,438**-byte
-  peak-RSS ceiling unless a new measured design raises it with evidence.
-- Semantic-result fingerprints remain stable across equivalent warm repeats.
-- The full local gate passes.
+M0 records release-build baselines on:
 
-The remaining 1/10 may include adaptive scheduling curiosities and filesystem
-watcher edge cases. Do not spend it on open-ended index micro-opts or on
-merging isolated engines for memory or tree cosmetics.
+- The checked-in inference conformance corpus.
+- A medium deterministic multi-file fixture.
+- The existing real goshposh projects and umbrella workspace.
+- Cold process, warm persistent cache, ready-project query, body-only edit,
+  exported-signature edit, RBS edit, and extension-fact edit scenarios.
+
+Record wall time, user/system CPU, allocations where available, peak/end RSS,
+parse count, AST traversal count, binding count, constraint count, solver
+iterations, proof failures, Unknown reasons, invalidated files, recomputed
+bindings, cache hits, diagnostics, and semantic fingerprints.
+
+Use symbolized profiles to choose hot paths. Do not add a general fine-grained
+query framework, whole-workspace solver, or new retained cache without evidence
+that the simpler file/module-level design cannot meet the budgets.
+
+### Non-regression gates
+
+- Existing active-buffer parsing and same-file navigation remain within
+  **500 ms p95**.
+- Existing project navigation, dependency navigation, semantic readiness,
+  all-project completion, and status budgets in AGENTS.md remain in force.
+- A ready project's body-only edit must not synchronously check closed files or
+  fan out through all semantic dependents.
+- Body-only edit median CPU and p95 latency may not regress by more than 3%
+  versus the recorded M0 baseline outside measured noise.
+- Cold and warm project indexing/checking median wall time and user CPU may not
+  regress by more than 3% versus M0.
+- Ready-project hover, completion, definition, inlay-hint, and diagnostic query
+  p95 may not regress by more than 3% versus M0.
+- Warm two-project goshposh peak RSS must remain at or below
+  **1,776,846,438 bytes**.
+- No new cache may be unbounded. Retained cache weight, entry limit, eviction,
+  identity, and invalidation require focused tests and profiler evidence.
+- The ordinary source pass parses each file once and performs one primary
+  scope-aware traversal. Type solving may revisit compact bindings, not Prism
+  trees, until profiling proves otherwise.
+- Union width, recursive type depth, SCC iterations, diagnostics per file, and
+  explanation depth have explicit bounds and telemetry. Crossing an inference
+  bound produces Unknown, never a guessed or widened concrete type.
+- Equivalent cold/warm results have identical normalized type/diagnostic
+  fingerprints.
+
+Compare release builds on the same machine, dataset, runtime, lockfiles, cache
+state, resource-governor settings, and build fingerprints. Use alternating
+baseline/candidate runs. Treat a result outside the noise envelope or above the
+hard 3%/RSS limits as rejected until redesigned.
+
+### Incremental policy
+
+- Cache solved results by exact file content plus semantic dependency/export
+  identity, not timestamps.
+- A body-only change replaces that file and refreshes the current/open
+  projection.
+- A changed exported signature invalidates only files/bindings that depend on
+  it. Closed-file work stays outside the didChange critical path.
+- RBS, superclass, mixin, method visibility, extension, runtime, and gem changes
+  invalidate the exact semantic products they affect.
+- Cancellation cannot publish stale types or diagnostics into a newer document
+  version or project generation.
+- Multi-root engines remain isolated; shared immutable products never share
+  project-specific solved state.
+
+## Diagnostics Policy
+
+Start with high-value diagnostics directly enabled by solved types:
+
+- Argument and keyword type mismatch.
+- Return type mismatch.
+- Assignment/constant/attribute contract mismatch.
+- Invalid receiver or missing method only when the full lookup chain is known.
+- Incompatible block parameter/result.
+- Invalid override where RBS/Ruby contracts are complete.
+- Unreachable or impossible branches supported by Never and narrowing.
+
+Each diagnostic has a stable code, primary range, expected/actual type,
+provenance, and bounded explanation chain. The CLI and LSP select severity and
+format independently of the rule.
+
+Do not emit a type error when:
+
+- The necessary superclass/mixin/extension edge is unresolved.
+- Dispatch is genuinely ambiguous.
+- The value is explicitly Untyped.
+- A dynamic boundary is outside the supported contract.
+- The engine cannot prove the error without guessing.
+
+Unknown suppresses unsupported claims; it must not erase existing syntax,
+definite arity, or other independent diagnostics.
+
+## Milestones
+
+### M0 — Baseline, corpus, and observability
+
+- Freeze scorecard schema and representative fixtures.
+- Record current overall/per-category score and reviewed diagnostic precision.
+- Add Unknown reason/provenance and inference counters without changing
+  semantics.
+- Record cold/warm/edit/query CPU, latency, allocation, and RSS baselines.
+
+Exit: a machine-readable report shows exactly why the current system is below
+9/10 and establishes the non-regression comparison.
+
+### M1 — Domain boundary and type algebra
+
+- Remove tower-lsp types/dependency from ruby-analysis.
+- Separate Unknown, Untyped, and Never.
+- Add canonical generic, literal, callable, tuple/record, union/intersection,
+  self, and type-variable forms needed by the corpus.
+- Centralize normalization, subtyping/assignability, display, provenance, and
+  proof validation, with overflow and incomplete evidence resolving to Unknown.
+- Add the reusable project/check session facade and a skeletal check command.
+
+Exit: both CLI and LSP can query the same domain types, and the new algebra has
+focused invariant/property tests with no performance regression.
+
+### M2 — Binding IR and flow solver
+
+- Emit stable bindings and dependencies during the existing AST traversal.
+- Implement joins, narrowing, reachability, loops, rescue, pattern matching,
+  closure capture, and deterministic bounded fixpoints.
+- Remove equivalent ad-hoc rescans/fallback inference after parity tests.
+
+Exit: local/flow categories meet their thresholds; one parse/traversal and edit
+budgets remain intact.
+
+### M3 — Calls, methods, blocks, and generics
+
+- Use the sole engine lookup policy for receiver dispatch.
+- Solve arguments, keywords, blocks, yields, returns, super, forwarding,
+  overloads, and generic substitutions.
+- Complete the supported RBS type forms and check inferred bodies against
+  declared contracts.
+
+Exit: call/method/RBS categories meet their thresholds with no false missing
+method claims from incomplete lookup.
+
+### M4 — Cross-file solving and precise invalidation
+
+- Publish inferred signatures/constants/attributes as semantic exports.
+- Solve recursive method/file groups with bounded deterministic SCC logic.
+- Track dependencies and distinguish body-only from exported-type changes.
+- Prove edit, RBS, reopen, mixin, runtime, and extension invalidation.
+
+Exit: multi-file category meets its threshold; body-only editing remains
+bounded and cross-file changes converge without stale facts.
+
+### M5 — Use types consistently
+
+- Route hover, inlay hints, completion, navigation, signature help, and semantic
+  diagnostics through shared solved results.
+- Remove conflicting feature-local inference or retain it only as a tested
+  adapter fallback during migration.
+- Add bounded type explanations and stable diagnostic codes.
+
+Exit: consumer acceptance and CLI/LSP parity tests pass.
+
+### M6 — Production CLI
+
+- Complete ruby-fast-lsp check project/file discovery and configuration.
+- Add human and versioned JSON output, deterministic ordering, exit codes, and
+  summary statistics.
+- Add black-box installation and CI usage tests.
+
+Exit: the type checker works headlessly on real projects and returns the same
+domain results as the LSP.
+
+### M7 — 9/10 and performance acceptance
+
+- Reach 90/100 with every category at or above 85%.
+- Run deterministic simulations and reviewed real-project precision checks.
+- Run alternating M0/candidate cold, warm, edit, query, and goshposh profiles.
+- Preserve the fixed RSS ceiling, interactive budgets, engine isolation, and
+  deterministic fingerprints.
+
+Exit: every item in Definition of 9/10 and the local completion gate passes.
+
+## Test and Acceptance Matrix
+
+- Table-driven type algebra, normalization, assignability, proof, and
+  proof-failure-to-Unknown tests.
+- Inline expression/type/diagnostic tests for every scorecard assertion.
+- Multi-file binding, recursive call, reopen, mixin, and overload tests.
+- FakeEditor open/change/save/close tests for stale-type removal and parity.
+- CLI black-box tests for output, ordering, exit codes, malformed source,
+  configuration failures, and multi-root ownership.
+- Differential tests comparing CLI domain JSON with normalized LSP results.
+- Determinism tests across insertion and worker scheduling order.
+- Simulation tests with generated call graphs, inheritance, edits, and an
+  oracle for expected types/diagnostics.
+- RBS precedence, generic substitution, overload, edit, and parse-failure tests.
+- Extension/Rails/JRuby structured fact and invalidation tests.
+- Unknown safety tests for incomplete ancestors, dynamic send, method_missing,
+  eval, ambiguous calls, and missing external declarations.
+- Performance tests for one parse/traversal, bounded solver iterations, precise
+  invalidation, cancellation, cache bounds, and RSS.
+- Real project review of inferred types and diagnostics before claiming score.
+
+Every semantic slice follows red-green-refactor: first add the smallest
+scorecard or regression case, prove it fails for the intended reason, implement
+the reusable rule, prove all consumers and performance gates, then remove any
+superseded fallback.
+
+## Explicit Non-Goals for 9/10
+
+- Executing user Ruby code, gemspecs, Rails applications, or native extensions
+  to discover types.
+- Parsing or interpreting arbitrary string eval/class_eval/module_eval.
+- Guessing through data-dependent send, const_get, method_missing, or runtime
+  reflection.
+- A second semantic engine for the CLI.
+- A type algorithm inside LSP handlers, VS Code, or framework extensions.
+- Whole-workspace rechecking on each keystroke.
+- Unbounded union growth, recursion, caches, diagnostic output, or explanation
+  graphs.
+- Automatic annotation/source rewriting in the initial check command.
+- Claiming Pyrefly's Python throughput or conformance numbers as Ruby Fast LSP
+  acceptance evidence.
 
 ## Local Completion Gate
 
-Hosted CI is not required. Before the final commit:
+Before the final 9/10 claim:
 
-```bash
-cargo fmt --all -- --check
-cargo test
-cargo test --workspace --exclude ruby-fast-lsp
-cargo build --release
-npm --prefix editors/vscode/vsix test
-./editors/vscode/create_vsix.sh --current-platform-only
-```
+    cargo fmt --all -- --check
+    cargo test
+    cargo test --workspace --exclude ruby-fast-lsp
+    cargo build --release
+    npm --prefix editors/vscode/vsix test
+    ./editors/vscode/create_vsix.sh --current-platform-only
+    ruby-fast-lsp check <checked-in-conformance-corpus> --format json
 
-Also run the multi-root profiler on `/Users/naveenraj/goshposh` for cold,
-warm-cache, one-project-change, runtime-change, partial-failure, and
-active-project-priority scenarios. Record exact repository state, runtimes,
-lockfiles, platform, cache state, concurrency, phase timings, file/byte counts,
-cache results, CPU, peak RSS, post-ready steady RSS of the language-server
-process, query latency, and packaged VSIX checksum. Reject any run that
-breaches the fixed peak-RSS ceiling or whose semantic-result fingerprints drift
-across equivalent warm repeats.
+Also run the recorded inference performance suite and the existing multi-root
+goshposh cold/warm/edit/query profiles. Preserve exact repository, binary,
+machine, runtime, lockfile, dataset, cache, and governor fingerprints with the
+score report, semantic fingerprints, latency/CPU/RSS evidence, and accepted or
+rejected design decision.
 
-## Implementation Order
-
-Completed foundation:
-
-1. Reproduce the race and record the initial incomplete baseline.
-2. Introduce typed state snapshots and staged readiness.
-3. Route indexing through one bounded scheduler with active-project priority.
-4. Remove the competing VS Code progress path and render one structured item.
-5. Add process-local single-flight infrastructure and core-stub template reuse.
-6. Make queued/active generation replacement cancellable, serialize
-   same-project admission, pin coordinators to their launch engine, and cancel
-   work on removal, runtime rebuild, and shutdown.
-7. Make single-flight producers independent of initiating waiters; add
-   cancellation, failure/retry, bounded-retention, and timing evidence.
-8. Redesign the measured whole-closure gem product into exact per-gem immutable
-   products; make binding transactional and deferred, and prove two-project
-   isolated reuse with definitions, types, signatures, provenance, and
-   replacement lifecycle.
-9. Reject completed in-memory gem-product retention after controlled
-   configured-JRuby evidence showed 112 MB retained for only 3.3 MB of
-   second-project reuse and no material readiness gain. Keep the accepted
-   ephemeral concurrent single-flight lifecycle and preserve the decision in
-   `support/performance`.
-10. Replace full-lane project-source serialization with cooperative exact lane
-    partitions under the same global governor. A deterministic test proves two
-    three-lane Rayon pools concurrently consume exactly the six-lane, two-task,
-    fixture transient-memory, and two-I/O-slot budget; real `goshposh` evidence
-    accepts the shape without claiming the remaining readiness targets.
-11. Coalesce same-process classpath checksum/manifest work by stable canonical
-    file identity. Keep only bounded descriptors, preserve project-owned
-    ordering/catalog composition, expose process-wide reuse counters, and prove
-    concurrent plus sequential reuse on the exact `goshposh` classpaths.
-12. Make runtime stdlib discovery use only the exact selected executable, keep
-    bundled stubs independently owned, and coalesce identical runtime path
-    probes through a bounded server-owned single-flight product. Prove semantics
-    are independent of the profiler executable's physical location.
-
-Next work, in order:
-
-1. **Indexing maintenance only.** Do not open a new warm-index micro-opt
-   campaign. Defend RSS ceiling, fingerprints, staged readiness, and
-   interactive latency. Revisit fact-collection or dependency overlap only when
-   a user-visible regression or budget breach appears, using
-   `support/performance/` evidence and the existing reject/accept discipline.
-   The historical open items (persistent runtime/signature products, dependency
-   rebinding, fact-collection hotspots) stay parked behind that bar—not the
-   active product roadmap.
-2. Keep exact invalidation/rejection evidence for any new persistent product,
-   and keep the watcher generation gate emitting only the final filesystem
-   state in the packaged client.
-3. When packaging, continue cold/warm/`goshposh` acceptance under the fixed RSS
-   ceiling with stable semantic-result fingerprints—as a gate, not as the
-   feature being chased.
-
-Already completed and not to be repeated unless a regression appears:
-
-- Hierarchical Ruby Projects (M7): path-nested Gemfile projects, nested
-  namespaces, Ruby Standard Library + per-gem Gems sections, active/phase
-  cues, Ctrl+P-style Go to Class/Module, and interactive `namespaceTree`
-  with library Included-By BFS skipped.
-
-- The reproduced `StringScanner` alias/self-superclass crash is fixed at the
-  graph-fact write boundary with focused regressions.
-- The schema-2 67-project M0 aggregate, exact build/dataset fingerprints,
-  staged readiness timestamps, CPU, peak RSS, engine/source bytes, and
-  process-local core-stub single-flight evidence are recorded.
-- The focused `server` profile campaign established that semantic preparation,
-  graph lifecycle, and contextual lookup—not raw Prism parsing—were the
-  dominant costs. Known-namespace snapshots, stable extension applicability,
-  graph ownership indexing, and exact resolved-callee return queries already
-  removed most of that repeated work. Do not restart with a speculative generic
-  parse cache.
-
-Every slice follows red-green-refactor. For the active Ruby Index work, prefer
-adapter/projection tests and a real `goshposh` tree walkthrough. Do not begin by
-merging engines, silencing diagnostics, indexing fewer locked dependencies
-without a completeness contract, or adding more user settings.
+Do not mark the goal complete because individual examples look good. Completion
+requires the score, precision, parity, modularity, determinism, performance,
+memory, packaging, and real-project gates together.

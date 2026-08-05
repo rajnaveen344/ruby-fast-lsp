@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-first-nonlocal-read-unknown-reasons",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "query_baseline_artifact": "support/performance/type-inference-nonlocal-read-parity-2026-08-03.json",
+    "large_fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_fixture_bytes": 225569,
+    "large_fixture_lines": 5095,
+    "query_fixture": "tests/fixtures/type_inference_query_benchmark/app/controllers/users_controller.rb"
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776
+  },
+  "implementation": {
+    "evidence_shape": "file-owned sorted Vec<(TextRange, UnknownReason)>",
+    "exact_lookup": "binary search by TextRange",
+    "position_lookup": "bounded scan matching the existing expression-fact query",
+    "adapter_policy": "CLI and LSP format the engine-owned reason without re-inference"
+  },
+  "controlled_large_file_ab": {
+    "method": "Two release binaries were built from the same restored worktree. The baseline differed by one temporary source edit that observed but did not retain the nonlocal-read Unknown reason; the candidate retained the reason in file-owned evidence. Source was restored immediately after the baseline build. Fifteen pairs alternated baseline-first and candidate-first order.",
+    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "release_compilation_excluded": true,
+    "pairs": 15,
+    "baseline_binary_sha256": "c8549d22616dbd318cb9fef4bf3b21e291e4c2c8738eb5bea8ad658ab33b9335",
+    "candidate_binary_sha256": "e7995512f9a3d4c870606b25d68f339e5cb52b6011023ab1de13416a1fa34c92",
+    "file_processor_total_ms": {
+      "baseline_samples": [111.718375, 109.027625, 125.406333, 109.726208, 121.98075, 112.539625, 119.458625, 110.384834, 113.33575, 113.944708, 111.257083, 121.051875, 112.123709, 114.8415, 108.821084],
+      "candidate_samples": [108.967042, 108.886708, 109.920583, 108.506209, 109.373667, 108.988875, 110.029709, 109.192542, 113.02675, 109.46, 109.937625, 113.763666, 110.122667, 110.354459, 113.121],
+      "baseline_median": 112.539625,
+      "candidate_median": 109.920583,
+      "median_change_percent": -2.33
+    },
+    "profile_total_ms": {
+      "baseline_samples": [112.2555, 109.491084, 126.033875, 110.233792, 122.485708, 113.084333, 120.046584, 110.903083, 113.854667, 114.627375, 111.783042, 121.569583, 112.64475, 115.325458, 109.328375],
+      "candidate_samples": [109.471958, 109.3875, 110.425958, 109.054417, 109.851709, 109.493375, 110.561042, 109.694125, 113.553417, 109.97625, 110.44625, 114.30775, 110.642708, 110.824417, 113.620042],
+      "baseline_median": 113.084333,
+      "candidate_median": 110.425958,
+      "median_change_percent": -2.35
+    },
+    "semantic_visitor_ms": {
+      "baseline_samples": [87.496709, 87.633125, 100.996917, 87.451709, 97.529, 89.334541, 95.186084, 87.763334, 90.611417, 91.110917, 88.76525, 96.677625, 89.379667, 91.279583, 86.949625],
+      "candidate_samples": [86.915333, 86.826166, 87.710917, 86.377791, 87.213625, 86.833458, 87.237834, 86.740833, 89.971167, 87.477709, 87.673083, 91.177334, 88.174875, 88.250791, 90.100375],
+      "baseline_median": 89.379667,
+      "candidate_median": 87.477709,
+      "median_change_percent": -2.13
+    },
+    "replace_and_resolve_ms": {
+      "baseline_samples": [11.214542, 10.58875, 12.739084, 10.938, 10.983416, 11.379125, 11.099042, 10.942417, 11.050292, 11.54325, 10.961375, 12.026083, 11.074583, 10.982167, 10.559584],
+      "candidate_samples": [10.730416, 10.759542, 10.92825, 10.701959, 10.792875, 10.818833, 11.332458, 10.755291, 11.015291, 10.775209, 10.863666, 11.024959, 10.508292, 10.733709, 11.111042],
+      "baseline_median": 11.050292,
+      "candidate_median": 10.792875,
+      "median_change_percent": -2.33
+    }
+  },
+  "interactive_queries": {
+    "command": "target/release/profiler --workspace tests/fixtures/type_inference_query_benchmark --benchmark-iterations 500 --check-budgets",
+    "profiler_binary_sha256": "6c3f1a065f7cbca6228474c71668c730a12a899520c3a5a18e49df7aa01ab555",
+    "release_processes": 7,
+    "iterations_per_process": 500,
+    "candidate_cold_indexing_ms": [601.71025, 590.048958, 586.54475, 586.654833, 576.945917, 589.549, 610.887083],
+    "candidate_cold_indexing_median_ms": 589.549,
+    "candidate_engine_heap_mb": 6.1,
+    "median_p95_us": {
+      "edit": {"baseline": 1142.125, "candidate": 1139.542, "change_percent": -0.23},
+      "completion": {"baseline": 24.167, "candidate": 23.542, "change_percent": -2.59},
+      "hover": {"baseline": 11.792, "candidate": 11.916, "change_percent": 1.05},
+      "definition": {"baseline": 17.459, "candidate": 17.542, "change_percent": 0.48},
+      "references": {"baseline": 5153.208, "candidate": 5156.333, "change_percent": 0.06},
+      "diagnostics": {"baseline": 2.333, "candidate": 2.292, "change_percent": -1.76}
+    },
+    "all_seven_fixed_budget_runs_passed": true
+  },
+  "assessment": {
+    "controlled_large_file_gate_passed": true,
+    "edit_p95_gate_passed": true,
+    "completion_p95_gate_passed": true,
+    "hover_p95_gate_passed": true,
+    "definition_p95_gate_passed": true,
+    "references_p95_gate_passed": true,
+    "diagnostics_p95_gate_passed": true,
+    "engine_heap_gate_passed": true,
+    "fixed_production_budgets_passed": true,
+    "full_performance_matrix_still_required": true
+  },
+  "limitations": [
+    "The controlled baseline isolates reason retention; it retains the new proof-outcome selector but omits the file-owned reason vector, so the query comparison against the immediately preceding artifact remains the broader full-slice evidence.",
+    "Non-alternating absolute large-file samples drifted by more than the focused three-percent threshold, so they were rejected as acceptance evidence in favor of the hashed alternating binaries recorded here.",
+    "This slice does not replace the required warm workspace, allocation, worker-schedule, real-project diagnostic, or fixed two-project goshposh peak-RSS matrix."
+  ],
+  "decision": "Accepted. Exact nonlocal-read Unknown explanations close a CLI/LSP semantic gap; the controlled large-file candidate does not regress, every focused query p95 delta stays within three percent, engine heap remains 6.1 MB, and every fixed production budget passes."
+}

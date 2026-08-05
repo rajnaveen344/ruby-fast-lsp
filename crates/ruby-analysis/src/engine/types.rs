@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind, ResolvedMethodCallee,
-    RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeResolution, TypeSubject,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange, TypeFact, TypeResolution,
+    TypeSubject, UnknownReason,
 };
 use parking_lot::Mutex;
 
@@ -118,6 +119,173 @@ use crate::engine::resolution::{
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
 
 impl<'a> AnalysisQuery<'a> {
+    /// Return the proof failure attached to one exact Unknown expression.
+    pub fn expression_unknown_reason(&self, range: TextRange) -> Option<UnknownReason> {
+        self.engine.expression_unknown_reason(range)
+    }
+
+    /// Return the reason for the most specific Unknown expression covering a
+    /// source position. Proven expressions never inherit an enclosing reason.
+    pub fn expression_unknown_reason_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<UnknownReason> {
+        if self.expression_type_at(file_id, byte_offset) != Some(RubyType::Unknown) {
+            return None;
+        }
+
+        let reasons = self
+            .engine
+            .expression_unknown_reasons_in_file(file_id)
+            .unwrap_or_default();
+        let call_outcomes = self
+            .engine
+            .call_expression_outcomes_in_file(file_id)
+            .unwrap_or_default();
+        let mut best: Option<(u32, TextRange, UnknownReason)> = None;
+        let mut ambiguous = false;
+        for (range, reason) in
+            reasons
+                .iter()
+                .copied()
+                .chain(call_outcomes.iter().filter_map(|(range, outcome)| {
+                    outcome.unknown_reason().map(|reason| (*range, reason))
+                }))
+        {
+            if !range.contains_offset(file_id, byte_offset) {
+                continue;
+            }
+            let span = range.end_byte.checked_sub(range.start_byte).expect(
+                "INVARIANT VIOLATED: an expression Unknown reason has an inverted range. This is a bug because TextRange producers must emit start <= end. Fix: validate the indexer range before recording proof evidence.",
+            );
+            match best {
+                None => {
+                    best = Some((span, range, reason));
+                    ambiguous = false;
+                }
+                Some((best_span, _, _)) if span < best_span => {
+                    best = Some((span, range, reason));
+                    ambiguous = false;
+                }
+                Some((best_span, best_range, _)) if span == best_span && range != best_range => {
+                    ambiguous = true;
+                }
+                Some(_) => {}
+            }
+        }
+        if ambiguous {
+            None
+        } else {
+            best.map(|(_, _, reason)| reason)
+        }
+    }
+
+    /// Return the exact expression fact covering a source position.
+    ///
+    /// Unknown remains observable so adapters cannot fall back to an older or
+    /// independently inferred concrete type. If equally specific distinct
+    /// expression ranges overlap, the result fails closed to Unknown.
+    pub fn expression_type_at(&self, file_id: SourceFileId, byte_offset: u32) -> Option<RubyType> {
+        let mut best_span = None;
+        let mut best_range = None;
+        let mut best_types = Vec::new();
+        let mut ambiguous_range = false;
+
+        let mut consider = |range: TextRange, ruby_type: RubyType| {
+            if !range.contains_offset(file_id, byte_offset) {
+                return;
+            }
+            let span = range.end_byte.checked_sub(range.start_byte).expect(
+                "INVARIANT VIOLATED: an expression type fact has an inverted range. This is a bug because TextRange producers must emit start <= end. Fix: validate the indexer range before inserting the expression fact.",
+            );
+            match best_span {
+                None => {
+                    best_span = Some(span);
+                    best_range = Some(range);
+                    best_types.push(ruby_type);
+                    ambiguous_range = false;
+                }
+                Some(best) if span < best => {
+                    best_span = Some(span);
+                    best_range = Some(range);
+                    best_types.clear();
+                    best_types.push(ruby_type);
+                    ambiguous_range = false;
+                }
+                Some(best) if span == best && best_range == Some(range) => {
+                    best_types.push(ruby_type);
+                }
+                Some(best) if span == best => {
+                    ambiguous_range = true;
+                }
+                Some(_) => {}
+            }
+        };
+
+        for fact in self.engine.type_store().facts_in_file(file_id) {
+            let TypeSubject::Expression(range) = fact.subject else {
+                continue;
+            };
+            consider(range, fact.ruby_type);
+        }
+        if let Some(outcomes) = self.engine.call_expression_outcomes_in_file(file_id) {
+            for (range, outcome) in outcomes {
+                consider(*range, outcome.clone().into_ruby_type());
+            }
+        }
+
+        if best_span.is_none() {
+            return None;
+        }
+        if ambiguous_range {
+            return Some(RubyType::Unknown);
+        }
+        Some(RubyType::union(best_types))
+    }
+
+    pub fn call_expression_outcomes_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&[(TextRange, crate::core::TypeInferenceOutcome)]> {
+        self.engine.call_expression_outcomes_in_file(file_id)
+    }
+
+    /// Return the proven type of the most specific expression ending at the
+    /// exact byte boundary.
+    ///
+    /// Multiple facts for that expression are exhaustive alternatives. Every
+    /// alternative must be concrete; Unknown or missing evidence fails closed.
+    pub fn proven_expression_type_ending_at(
+        &self,
+        file_id: SourceFileId,
+        end_byte: u32,
+    ) -> Option<RubyType> {
+        let mut expression_facts = self
+            .engine
+            .type_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter_map(|fact| match fact.subject {
+                TypeSubject::Expression(range) if range.end_byte == end_byte => Some(fact),
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let most_specific_start = expression_facts
+            .iter()
+            .map(|fact| fact.range.start_byte)
+            .max()?;
+        expression_facts.retain(|fact| fact.range.start_byte == most_specific_start);
+        RubyType::union_from_proven(expression_facts, |fact| Some(fact.ruby_type))
+    }
+
     pub fn method_return_type_at(
         &self,
         name: &str,
@@ -235,47 +403,47 @@ impl<'a> AnalysisQuery<'a> {
             .map(|fact| fact.ruby_type)
     }
 
-    pub fn variable_type_before(
+    pub fn variable_type_before_in_owner(
         &self,
         kind: VariableTypeKind,
         name: &str,
+        owner: &FullyQualifiedName,
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> Option<RubyType> {
-        self.engine
+        assert!(
+            matches!(
+                kind,
+                VariableTypeKind::Instance
+                    | VariableTypeKind::Class
+                    | VariableTypeKind::Global
+            ),
+            "INVARIANT VIOLATED: an owner-aware variable query received a local or constant kind. This is a bug because locals require a lexical scope and constants require lexical constant resolution. Fix: use local_variable_type_at or the constant query instead."
+        );
+
+        let matching = self
+            .engine
             .type_store()
             .facts_in_file(file_id)
             .into_iter()
             .filter(|fact| fact.range.start_byte <= byte_offset)
-            .filter_map(|fact| match (&fact.subject, kind) {
-                (
-                    TypeSubject::Local {
-                        scope_id: _,
-                        name: fact_name,
-                    },
-                    VariableTypeKind::Local,
-                ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+            .filter(|fact| match (&fact.subject, kind) {
                 (
                     TypeSubject::InstanceVariable {
-                        name: fact_name, ..
+                        owner: fact_owner,
+                        name: fact_name,
                     },
                     VariableTypeKind::Instance,
-                ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+                ) => fact_name == name && fact_owner == owner,
                 (
                     TypeSubject::ClassVariable {
-                        name: fact_name, ..
+                        owner: fact_owner,
+                        name: fact_name,
                     },
                     VariableTypeKind::Class,
-                ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-                (TypeSubject::GlobalVariable(fact_name), VariableTypeKind::Global)
-                    if fact_name == name && fact.ruby_type != RubyType::Unknown =>
-                {
-                    Some(fact)
-                }
-                (TypeSubject::Constant(fqn), VariableTypeKind::Constant)
-                    if fqn.name() == name && fact.ruby_type != RubyType::Unknown =>
-                {
-                    Some(fact)
+                ) => fact_name == name && fact_owner.namespace_parts() == owner.namespace_parts(),
+                (TypeSubject::GlobalVariable(fact_name), VariableTypeKind::Global) => {
+                    fact_name == name
                 }
                 (
                     TypeSubject::Constant(_)
@@ -291,50 +459,115 @@ impl<'a> AnalysisQuery<'a> {
                     | VariableTypeKind::Class
                     | VariableTypeKind::Global
                     | VariableTypeKind::Constant,
-                ) => None,
-            })
-            .max_by_key(|fact| fact.range.start_byte)
-            .map(|fact| fact.ruby_type)
+                ) => false,
+            });
+
+        Self::latest_unambiguous_concrete_type(matching)
     }
 
-    pub fn variable_type_any_before(
+    /// Return the type fact attached to one exact variable write token.
+    ///
+    /// Unlike a flow lookup, an assignment inlay must describe this write's
+    /// right-hand side. Falling back to an earlier concrete write when this
+    /// exact write is Unknown would publish a type with no proof. Duplicate
+    /// producers may agree on the same fact; any conflicting payload fails
+    /// closed to Unknown.
+    pub fn variable_assignment_type_at(
         &self,
+        kind: VariableTypeKind,
         name: &str,
         file_id: SourceFileId,
-        byte_offset: u32,
+        name_start_offset: u32,
+        name_end_offset: u32,
     ) -> Option<RubyType> {
-        self.engine
+        assert!(
+            name_start_offset <= name_end_offset,
+            "INVARIANT VIOLATED: a variable assignment name range is reversed. This is a bug because exact-write type queries require a normalized source range. Fix: pass the Prism name location without swapping its offsets."
+        );
+        let mut best_span = None;
+        let mut best_type = None;
+        let mut conflicting_best_type = false;
+        for fact in self
+            .engine
             .type_store()
             .facts_in_file(file_id)
             .into_iter()
-            .filter(|fact| fact.range.start_byte <= byte_offset)
-            .filter_map(|fact| match &fact.subject {
-                TypeSubject::Local {
-                    scope_id: _,
-                    name: fact_name,
-                }
-                | TypeSubject::InstanceVariable {
-                    name: fact_name, ..
-                }
-                | TypeSubject::ClassVariable {
-                    name: fact_name, ..
-                } if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-                TypeSubject::GlobalVariable(fact_name)
-                    if fact_name == name && fact.ruby_type != RubyType::Unknown =>
-                {
-                    Some(fact)
-                }
-                TypeSubject::Constant(_)
-                | TypeSubject::Local { .. }
-                | TypeSubject::InstanceVariable { .. }
-                | TypeSubject::ClassVariable { .. }
-                | TypeSubject::GlobalVariable(_)
-                | TypeSubject::MethodReturn(_)
-                | TypeSubject::Parameter { .. }
-                | TypeSubject::Expression(_) => None,
+            .filter(|fact| {
+                fact.range.start_byte <= name_start_offset && name_end_offset <= fact.range.end_byte
             })
-            .max_by_key(|fact| fact.range.start_byte)
-            .map(|fact| fact.ruby_type)
+        {
+            let matches = match (&fact.subject, kind) {
+                (
+                    TypeSubject::Local {
+                        scope_id: _,
+                        name: fact_name,
+                    },
+                    VariableTypeKind::Local,
+                ) => fact_name == name,
+                (
+                    TypeSubject::InstanceVariable {
+                        owner: _,
+                        name: fact_name,
+                    },
+                    VariableTypeKind::Instance,
+                ) => fact_name == name,
+                (
+                    TypeSubject::ClassVariable {
+                        owner: _,
+                        name: fact_name,
+                    },
+                    VariableTypeKind::Class,
+                ) => fact_name == name,
+                (TypeSubject::GlobalVariable(fact_name), VariableTypeKind::Global) => {
+                    fact_name == name
+                }
+                (TypeSubject::Constant(fqn), VariableTypeKind::Constant) => fqn.name() == name,
+                (
+                    TypeSubject::Constant(_)
+                    | TypeSubject::Local { .. }
+                    | TypeSubject::InstanceVariable { .. }
+                    | TypeSubject::ClassVariable { .. }
+                    | TypeSubject::GlobalVariable(_)
+                    | TypeSubject::MethodReturn(_)
+                    | TypeSubject::Parameter { .. }
+                    | TypeSubject::Expression(_),
+                    VariableTypeKind::Local
+                    | VariableTypeKind::Instance
+                    | VariableTypeKind::Class
+                    | VariableTypeKind::Global
+                    | VariableTypeKind::Constant,
+                ) => false,
+            };
+            if !matches {
+                continue;
+            }
+            let span = fact.range.end_byte.checked_sub(fact.range.start_byte).expect(
+                    "INVARIANT VIOLATED: a stored type fact range is reversed. This is a bug because TypeFact ranges must remain normalized. Fix: construct type facts through TextRange::new and preserve that invariant during replacement.",
+                );
+            match best_span {
+                None => {
+                    best_span = Some(span);
+                    best_type = Some(fact.ruby_type);
+                }
+                Some(current_span) if span < current_span => {
+                    best_span = Some(span);
+                    best_type = Some(fact.ruby_type);
+                    conflicting_best_type = false;
+                }
+                Some(current_span) if span == current_span => {
+                    if best_type.as_ref() != Some(&fact.ruby_type) {
+                        conflicting_best_type = true;
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+
+        if conflicting_best_type {
+            Some(RubyType::Unknown)
+        } else {
+            best_type
+        }
     }
 
     pub fn local_variable_type_at(
@@ -376,21 +609,6 @@ impl<'a> AnalysisQuery<'a> {
                 | TypeSubject::Parameter { .. }
                 | TypeSubject::Expression(_) => None,
             })
-            .max_by_key(|fact| fact.range.start_byte)
-            .map(|fact| fact.ruby_type)
-    }
-
-    pub fn variable_type_in_file(
-        &self,
-        kind: VariableTypeKind,
-        name: &str,
-        file_id: SourceFileId,
-    ) -> Option<RubyType> {
-        self.engine
-            .type_store()
-            .facts_in_file(file_id)
-            .into_iter()
-            .filter_map(|fact| Self::variable_type_fact_match(fact, kind, name))
             .max_by_key(|fact| fact.range.start_byte)
             .map(|fact| fact.ruby_type)
     }
@@ -571,17 +789,9 @@ impl<'a> AnalysisQuery<'a> {
         facts.dedup();
 
         let mut seen = HashSet::new();
-        let mut return_types = facts
-            .iter()
-            .filter_map(|fact| self.method_return_type_inner(fact, &mut seen))
-            .collect::<Vec<_>>();
-        return_types.sort_by_key(ToString::to_string);
-        return_types.dedup();
-        match return_types.len() {
-            0 => None,
-            1 => return_types.pop(),
-            2.. => Some(RubyType::union(return_types)),
-        }
+        RubyType::union_from_proven(facts.iter(), |fact| {
+            self.method_return_type_inner(fact, &mut seen)
+        })
     }
 
     fn method_return_type_inner(
@@ -615,7 +825,7 @@ impl<'a> AnalysisQuery<'a> {
                 fact.fqn
             );
         };
-        let mut signature_types = self
+        let signatures = self
             .engine
             .method_facts_matching_owner_name(&fact.owner, method)
             .into_iter()
@@ -630,7 +840,9 @@ impl<'a> AnalysisQuery<'a> {
                     .kind
                     == crate::core::SourceKind::Signature
             })
-            .filter_map(|signature| {
+            .collect::<Vec<_>>();
+        if !signatures.is_empty() {
+            return RubyType::union_from_proven(signatures, |signature| {
                 match self.engine.type_at(
                     &TypeSubject::MethodReturn(signature.fqn),
                     signature.range.file_id,
@@ -639,12 +851,7 @@ impl<'a> AnalysisQuery<'a> {
                     TypeResolution::Resolved(type_fact) => Some(type_fact.ruby_type),
                     TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => None,
                 }
-            })
-            .collect::<Vec<_>>();
-        signature_types.sort_by_key(|ruby_type| ruby_type.to_string());
-        signature_types.dedup();
-        if !signature_types.is_empty() {
-            return Some(RubyType::union(signature_types));
+            });
         }
 
         self.delegate_method_return_type(fact, seen)
@@ -757,42 +964,22 @@ impl<'a> AnalysisQuery<'a> {
             allow_private,
             protected_caller,
         ) {
-            let mut return_types = facts
-                .into_iter()
-                .filter_map(|fact| self.method_return_type_inner(&fact, seen))
-                .collect::<Vec<_>>();
-
-            if return_types.is_empty() {
-                return None;
-            }
-
-            return_types.sort_by_key(|ruby_type| ruby_type.to_string());
-            return_types.dedup();
-            return match return_types.len() {
-                1 => return_types.pop(),
-                _ => Some(crate::core::RubyType::union(return_types)),
-            };
+            return RubyType::union_from_proven(facts, |fact| {
+                self.method_return_type_inner(&fact, seen)
+            });
         }
 
-        let mut application_types =
-            execution_context_application_targets(self.engine, namespace_fqn)
-                .into_iter()
-                .filter_map(|application| {
-                    self.method_return_type_for_receiver_inner(
-                        &application,
-                        method,
-                        allow_private,
-                        protected_caller,
-                        seen,
-                    )
-                })
-                .collect::<Vec<_>>();
-        application_types.sort_by_key(ToString::to_string);
-        application_types.dedup();
-        match application_types.len() {
-            0 => {}
-            1 => return application_types.pop(),
-            _ => return Some(crate::core::RubyType::union(application_types)),
+        let applications = execution_context_application_targets(self.engine, namespace_fqn);
+        if !applications.is_empty() {
+            return RubyType::union_from_proven(applications, |application| {
+                self.method_return_type_for_receiver_inner(
+                    &application,
+                    method,
+                    allow_private,
+                    protected_caller,
+                    seen,
+                )
+            });
         }
 
         if *method != method_missing_method() {
@@ -825,9 +1012,9 @@ impl<'a> AnalysisQuery<'a> {
             seen,
         )?;
 
-        let mut return_types = AnalysisQuery::receiver_type_to_method_namespaces(&receiver_type)
-            .into_iter()
-            .filter_map(|namespace| {
+        RubyType::union_from_proven(
+            AnalysisQuery::receiver_type_to_method_namespaces(&receiver_type),
+            |namespace| {
                 self.method_return_type_for_receiver_inner(
                     &namespace,
                     delegated_method,
@@ -835,62 +1022,39 @@ impl<'a> AnalysisQuery<'a> {
                     None,
                     seen,
                 )
-            })
-            .collect::<Vec<_>>();
-        return_types.sort_by_key(|ruby_type| ruby_type.to_string());
-        return_types.dedup();
-        match return_types.len() {
-            0 => None,
-            1 => return_types.pop(),
-            _ => Some(RubyType::union(return_types)),
-        }
+            },
+        )
     }
 
-    fn variable_type_fact_match(
-        fact: TypeFact,
-        kind: VariableTypeKind,
-        name: &str,
-    ) -> Option<TypeFact> {
-        match (&fact.subject, kind) {
-            (
-                TypeSubject::Local {
-                    scope_id: _,
-                    name: fact_name,
-                },
-                VariableTypeKind::Local,
-            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-            (
-                TypeSubject::InstanceVariable {
-                    name: fact_name, ..
-                },
-                VariableTypeKind::Instance,
-            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-            (
-                TypeSubject::ClassVariable {
-                    name: fact_name, ..
-                },
-                VariableTypeKind::Class,
-            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-            (TypeSubject::GlobalVariable(fact_name), VariableTypeKind::Global)
-                if fact_name == name && fact.ruby_type != RubyType::Unknown =>
-            {
-                Some(fact)
+    fn latest_unambiguous_concrete_type(facts: impl Iterator<Item = TypeFact>) -> Option<RubyType> {
+        let mut latest_start = None;
+        let mut latest_type = None;
+        let mut ambiguous = false;
+        for fact in facts {
+            match latest_start {
+                None => {
+                    latest_start = Some(fact.range.start_byte);
+                    latest_type = Some(fact.ruby_type);
+                }
+                Some(start) if fact.range.start_byte > start => {
+                    latest_start = Some(fact.range.start_byte);
+                    latest_type = Some(fact.ruby_type);
+                    ambiguous = false;
+                }
+                Some(start) if fact.range.start_byte == start => {
+                    if latest_type.as_ref() != Some(&fact.ruby_type) {
+                        ambiguous = true;
+                    }
+                }
+                Some(_) => {}
             }
-            (
-                TypeSubject::Constant(_)
-                | TypeSubject::Local { .. }
-                | TypeSubject::InstanceVariable { .. }
-                | TypeSubject::ClassVariable { .. }
-                | TypeSubject::GlobalVariable(_)
-                | TypeSubject::MethodReturn(_)
-                | TypeSubject::Parameter { .. }
-                | TypeSubject::Expression(_),
-                VariableTypeKind::Local
-                | VariableTypeKind::Instance
-                | VariableTypeKind::Class
-                | VariableTypeKind::Global
-                | VariableTypeKind::Constant,
-            ) => None,
+        }
+
+        let latest_type = latest_type?;
+        if latest_type == RubyType::Unknown || ambiguous {
+            None
+        } else {
+            Some(latest_type)
         }
     }
 }

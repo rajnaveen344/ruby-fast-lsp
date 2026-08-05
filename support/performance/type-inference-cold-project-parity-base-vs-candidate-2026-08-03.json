@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-first-cold-project-type-parity-base-vs-candidate",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "candidate_worktree_has_changes": true,
+    "fixture": "src/test/fixtures/goshposh_helpers_goto",
+    "project_file_count": 6,
+    "resolved_method_count": 133
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776,
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820e 2025-10-10)"
+  },
+  "method": {
+    "binary": "target/release/profile_project_collection",
+    "command": "profile_project_collection src/test/fixtures/goshposh_helpers_goto",
+    "release_compilation_excluded": true,
+    "warmup_runs_per_binary": 1,
+    "phase_alternating_pairs": 15,
+    "resource_alternating_pairs": 7,
+    "pair_order": "candidate/base order alternated on every pair",
+    "resource_command": "/usr/bin/time -l"
+  },
+  "phase_samples_ms": {
+    "wall": {
+      "candidate": [93.151458, 95.623166, 92.68175, 98.115375, 92.705334, 94.49875, 97.951834, 94.741042, 92.962708, 96.221125, 94.620458, 93.357541, 94.225166, 93.096916, 93.5915],
+      "base": [93.915417, 91.725709, 92.660958, 92.516084, 90.334417, 100.628666, 96.662584, 92.508625, 91.002916, 91.382959, 92.805708, 91.304334, 92.823833, 91.870334, 91.560666],
+      "candidate_median": 94.225166,
+      "base_median": 92.508625,
+      "median_change_percent": 1.86,
+      "median_absolute_change_ms": 1.716541
+    },
+    "cpu_total": {
+      "candidate": [92.982751, 95.442958, 92.538792, 97.950083, 92.542289, 94.304621, 97.758877, 94.520998, 92.786374, 96.036252, 94.450625, 93.175418, 94.023044, 92.884874, 93.422666],
+      "base": [93.713793, 91.564916, 92.551792, 92.35075, 90.189957, 100.451753, 96.498333, 92.367794, 90.849584, 91.213207, 92.649583, 91.156376, 92.677917, 91.687624, 91.384458],
+      "candidate_median": 94.023044,
+      "base_median": 92.35075,
+      "median_change_percent": 1.81,
+      "median_absolute_change_ms": 1.672294
+    },
+    "assembly": {
+      "candidate": [0.197042, 0.207835, 0.190667, 0.221459, 0.207458, 0.204208, 0.192124, 0.20183, 0.194666, 0.204541, 0.182209, 0.186625, 0.198751, 0.184624, 0.181668],
+      "base": [0.063749, 0.062625, 0.054543, 0.061873, 0.057585, 0.056042, 0.060376, 0.055543, 0.060707, 0.064583, 0.060418, 0.0555, 0.056125, 0.057292, 0.055042],
+      "candidate_median": 0.197042,
+      "base_median": 0.057585,
+      "median_change_percent": 242.18,
+      "median_absolute_change_ms": 0.139457
+    },
+    "replacement": {
+      "candidate": [1.833, 1.786581, 1.74375, 1.807207, 1.775208, 1.729999, 1.784959, 1.755041, 1.755167, 1.758002, 1.669874, 1.736502, 1.784836, 1.772291, 1.779958],
+      "base": [1.356376, 1.247873, 1.279041, 1.254416, 1.183957, 1.33617, 1.291, 1.272335, 1.261001, 1.245084, 1.287541, 1.235041, 1.216542, 1.283749, 1.229459],
+      "candidate_median": 1.772291,
+      "base_median": 1.261001,
+      "median_change_percent": 40.55,
+      "median_absolute_change_ms": 0.51129
+    }
+  },
+  "process_resource_samples": {
+    "real_seconds": {
+      "candidate": [0.10, 0.11, 0.09, 0.11, 0.10, 0.10, 0.10],
+      "base": [0.11, 0.10, 0.10, 0.11, 0.11, 0.11, 0.10],
+      "candidate_median": 0.10,
+      "base_median": 0.11,
+      "median_change_percent": -9.09
+    },
+    "user_seconds": {
+      "candidate": [0.09, 0.09, 0.09, 0.09, 0.09, 0.09, 0.09],
+      "base": [0.09, 0.09, 0.09, 0.09, 0.09, 0.09, 0.09],
+      "candidate_median": 0.09,
+      "base_median": 0.09,
+      "median_change_percent": 0.0
+    },
+    "maximum_resident_set_size_bytes": {
+      "candidate": [33570816, 33914880, 33505280, 33849344, 33816576, 33882112, 33947648],
+      "base": [33439744, 33423360, 33538048, 33603584, 33767424, 33587200, 33538048],
+      "candidate_median": 33849344,
+      "base_median": 33538048,
+      "median_change_percent": 0.93,
+      "median_absolute_change_bytes": 311296
+    }
+  },
+  "assessment": {
+    "three_percent_median_wall_gate_passed": true,
+    "three_percent_median_cpu_gate_passed": true,
+    "three_percent_median_rss_gate_passed": true,
+    "cold_project_batch_path_covered": true,
+    "full_performance_matrix_still_required": true
+  },
+  "limitations": [
+    "This fixed six-file project fixture covers deterministic cold project fact collection and replacement, not warm persistent-cache indexing, didChange, query p95, allocations, or the full goshposh RSS ceiling.",
+    "The assembly and replacement subphases grew by 0.14 ms and 0.51 ms at the median because the cold batch now retains visitor-derived proof facts that interactive indexing already retained; end-to-end wall, CPU, and RSS remained within the three-percent gate.",
+    "The 15 phase pairs characterize medians but do not establish stable p95 latency.",
+    "The candidate includes the cumulative proof-first inference worktree, so this is not an isolated microbenchmark of parameter range retention.",
+    "Correctness, scorecard, deterministic output, editor lifecycle, diagnostic precision, and the remaining performance matrix require separate evidence."
+  ]
+}

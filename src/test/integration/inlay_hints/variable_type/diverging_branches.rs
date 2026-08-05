@@ -6,7 +6,9 @@
 //! `ruby_analysis::inference::control_flow`.
 //!
 //! These assertions target the method return-type hint (the consumer that
-//! actually flows through TypeTracker's union).
+//! actually flows through TypeTracker's union). A `raise` path contributes no
+//! return value, while an explicit `return` path still contributes its value
+//! to the enclosing method even though it is pruned from the local join point.
 
 use crate::test::harness::check;
 
@@ -63,10 +65,10 @@ end
 }
 
 #[tokio::test]
-async fn if_else_return_prunes_to_then_type() {
+async fn if_else_return_includes_the_explicit_nil_result() {
     check(
         r#"
-def m(cond)<hint label=" -> Integer">
+def m(cond)<hint label=" -> (Integer | NilClass)">
   if cond then 1 else return end
 end
 "#,

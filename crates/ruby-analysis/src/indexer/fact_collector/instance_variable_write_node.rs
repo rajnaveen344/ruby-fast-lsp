@@ -46,24 +46,20 @@ impl FactCollector {
             self.scope_tracker.get_ns_stack(),
             self.scope_tracker.current_method_context(),
         );
-        self.direct_push_assignment_type(
-            TypeSubject::InstanceVariable {
-                owner: owner.clone(),
-                name: variable_name.clone(),
-            },
-            inferred_type.clone(),
-            &name_loc,
-        );
+        let subject = TypeSubject::InstanceVariable {
+            owner,
+            name: variable_name.clone(),
+        };
+        let range = self.document.prism_location_to_text_range(&name_loc);
+        self.direct_push_assignment_type(subject.clone(), inferred_type.clone(), &name_loc);
 
         self.type_store.add(TypeFact::new(
-            TypeSubject::InstanceVariable {
-                owner,
-                name: variable_name.clone(),
-            },
-            inferred_type.clone(),
-            self.document.prism_location_to_text_range(&name_loc),
+            subject.clone(),
+            inferred_type,
+            range,
             TypeProvenance::Assignment,
         ));
+        self.begin_nonlocal_write(subject, range);
     }
 
     // InstanceVariableWriteNode
@@ -76,7 +72,7 @@ impl FactCollector {
     }
 
     pub fn process_instance_variable_write_node_exit(&mut self, _node: &InstanceVariableWriteNode) {
-        // No-op for now
+        self.finish_nonlocal_write();
     }
 
     // InstanceVariableTargetNode
@@ -91,7 +87,7 @@ impl FactCollector {
         &mut self,
         _node: &InstanceVariableTargetNode,
     ) {
-        // No-op for now
+        self.finish_nonlocal_write();
     }
 
     // InstanceVariableOrWriteNode
@@ -110,7 +106,7 @@ impl FactCollector {
         &mut self,
         _node: &InstanceVariableOrWriteNode,
     ) {
-        // No-op for now
+        self.finish_nonlocal_write();
     }
 
     // InstanceVariableAndWriteNode
@@ -129,7 +125,7 @@ impl FactCollector {
         &mut self,
         _node: &InstanceVariableAndWriteNode,
     ) {
-        // No-op for now
+        self.finish_nonlocal_write();
     }
 
     // InstanceVariableOperatorWriteNode
@@ -148,6 +144,6 @@ impl FactCollector {
         &mut self,
         _node: &InstanceVariableOperatorWriteNode,
     ) {
-        // No-op for now
+        self.finish_nonlocal_write();
     }
 }

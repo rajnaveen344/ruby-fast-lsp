@@ -1,4 +1,6 @@
+use ruby_fast_lsp::check::{render_report, CheckOutputFormat, CheckSession};
 use ruby_fast_lsp::server::RubyLanguageServer;
+use std::path::PathBuf;
 use std::process::exit;
 
 use anyhow::{anyhow, Result};
@@ -7,7 +9,10 @@ use tower_lsp::{LspService, Server};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if run_cache_command_if_requested()? {
+    if let Some(exit_code) = run_cli_command_if_requested().await? {
+        if exit_code != 0 {
+            exit(exit_code);
+        }
         return Ok(());
     }
 
@@ -101,14 +106,29 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_cache_command_if_requested() -> Result<bool> {
+async fn run_cli_command_if_requested() -> Result<Option<i32>> {
     let mut arguments = std::env::args().skip(1);
     let Some(command) = arguments.next() else {
-        return Ok(false);
+        return Ok(None);
     };
-    if command != "cache" {
-        return Ok(false);
+    match command.as_str() {
+        "cache" => run_cache_command(arguments).map(|()| Some(0)),
+        "check" => run_check_command(arguments).await.map(Some),
+        "--stdio" => {
+            if let Some(unexpected) = arguments.next() {
+                return Err(anyhow!(
+                    "LSP --stdio mode received unexpected argument `{unexpected}`"
+                ));
+            }
+            Ok(None)
+        }
+        _ => Err(anyhow!(
+            "unknown command `{command}`; expected `check`, `cache`, `--stdio`, or no command for LSP mode"
+        )),
     }
+}
+
+fn run_cache_command(mut arguments: impl Iterator<Item = String>) -> Result<()> {
     let operation = arguments
         .next()
         .ok_or_else(|| anyhow!("cache command requires `show` or `clear`"))?;
@@ -143,5 +163,40 @@ fn run_cache_command_if_requested() -> Result<bool> {
             "bytes": summary.bytes,
         }))?
     );
-    Ok(true)
+    Ok(())
+}
+
+async fn run_check_command(mut arguments: impl Iterator<Item = String>) -> Result<i32> {
+    let mut path = None;
+    let mut format = CheckOutputFormat::Human;
+
+    while let Some(argument) = arguments.next() {
+        if argument == "--format" {
+            let value = arguments
+                .next()
+                .ok_or_else(|| anyhow!("check --format requires `human` or `json`"))?;
+            format = CheckOutputFormat::parse(&value)?;
+            continue;
+        }
+        if let Some(value) = argument.strip_prefix("--format=") {
+            format = CheckOutputFormat::parse(value)?;
+            continue;
+        }
+        if argument.starts_with('-') {
+            return Err(anyhow!(
+                "unknown check option `{argument}`; supported option: --format human|json"
+            ));
+        }
+        if let Some(previous) = path.replace(PathBuf::from(&argument)) {
+            return Err(anyhow!(
+                "check accepts one file or project path; received both `{}` and `{argument}`",
+                previous.display()
+            ));
+        }
+    }
+
+    let path = path.unwrap_or(std::env::current_dir()?);
+    let report = CheckSession::default().check_path(&path).await?;
+    println!("{}", render_report(&report, format)?);
+    Ok(i32::from(report.has_failures()))
 }

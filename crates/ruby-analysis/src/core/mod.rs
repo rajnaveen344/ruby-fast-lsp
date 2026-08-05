@@ -13,6 +13,7 @@ pub mod fully_qualified_name;
 pub mod graph_store;
 pub mod memory_estimate;
 pub mod method_resolution;
+pub mod method_return_equation;
 pub mod method_store;
 pub mod reference_store;
 pub mod ruby_method;
@@ -20,6 +21,7 @@ pub mod ruby_namespace;
 pub mod ruby_type;
 pub mod source_file;
 pub mod symbol_store;
+pub mod type_inference_outcome;
 pub mod type_store;
 
 pub use diagnostic_candidate_store::{
@@ -34,6 +36,7 @@ pub use graph_store::{
     StoredGraphNodeFact, StoredUnresolvedGraphEdgeFact, UnresolvedGraphEdgeFact,
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
+pub use method_return_equation::MethodReturnEquation;
 pub use method_store::{
     MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, MethodStore,
     MethodVisibilityOverrideFact, StoredMethodFact,
@@ -51,6 +54,9 @@ pub use ruby_namespace::{GeneratedOwnerId, RubyConstant};
 pub use ruby_type::RubyType;
 pub use source_file::{LibraryPackageId, SourceKind};
 pub use symbol_store::{StoredSymbolFact, SymbolFact, SymbolKind, SymbolStore};
+pub use type_inference_outcome::{
+    InferenceEvidence, InferenceTelemetry, TypeInferenceOutcome, UnknownReason,
+};
 pub use type_store::{
     SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeStore, TypeSubject,
 };

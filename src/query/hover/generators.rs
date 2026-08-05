@@ -5,7 +5,7 @@
 
 use parking_lot::RwLock;
 use ruby_analysis::core::{
-    FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, TypeSubject,
+    FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, UnknownReason,
 };
 use ruby_analysis::engine::{
     AnalysisEngine, AnalysisQuery, ConstantHover, ConstantHoverKind, VariableTypeKind,
@@ -24,6 +24,9 @@ use tower_lsp::lsp_types::Position;
 pub struct HoverContext<'a> {
     pub document: Option<&'a Arc<parking_lot::RwLock<RubyDocument>>>,
     pub analysis_engine: Option<&'a Arc<RwLock<AnalysisEngine>>>,
+    pub current_namespace: &'a [RubyConstant],
+    pub namespace_kind: NamespaceKind,
+    pub position: Position,
 }
 
 /// Hover information for a symbol.
@@ -208,6 +211,23 @@ pub fn generate_method_hover(node: &HoverTarget, context: &HoverContext) -> Opti
         );
     }
 
+    // A concrete file-owned expression result is final. An Unknown reason is
+    // retained while the remaining engine-owned proof sources run: generated
+    // runtime facts, method objects, and reopened definitions can carry valid
+    // return evidence that is not represented by the compact call candidate.
+    let exact_unknown_reason =
+        match expression_type_from_analysis(context, *position) {
+            Some((RubyType::Unknown, unknown_reason)) => unknown_reason,
+            Some((ruby_type, None)) => {
+                return Some(HoverInfo::ruby_code(ruby_type.to_string()));
+            }
+            Some((ruby_type, Some(reason))) => panic!(
+                "INVARIANT VIOLATED: concrete call type `{ruby_type}` carried Unknown reason `{}`. This is a bug because proof-failure evidence belongs only to RubyType::Unknown. Fix: attach expression reasons only when the exact call outcome is Unknown.",
+                reason.code()
+            ),
+            None => None,
+        };
+
     // For method calls, resolve receiver type and infer return type
     let return_type = method_call_return_type_from_receiver(
         context,
@@ -220,7 +240,14 @@ pub fn generate_method_hover(node: &HoverTarget, context: &HoverContext) -> Opti
 
     match return_type {
         Some(t) if t != RubyType::Unknown => Some(HoverInfo::ruby_code(t.to_string())),
-        _ => Some(HoverInfo::text("?".to_string())),
+        Some(RubyType::Unknown) | None => Some(HoverInfo::text(
+            exact_unknown_reason
+                .map(format_unknown_type)
+                .unwrap_or_else(|| "?".to_string()),
+        )),
+        Some(t) => panic!(
+            "INVARIANT VIOLATED: method hover matched an unhandled concrete return type `{t}`. This is a bug because the preceding guard accepts every non-Unknown RubyType. Fix: keep hover return projection exhaustive."
+        ),
     }
 }
 
@@ -233,11 +260,23 @@ pub fn generate_variable_hover(node: &HoverTarget, context: &HoverContext) -> Op
         _ => return None,
     };
 
-    if let Some(ruby_type) = variable_type_from_analysis(context, name, variable_kind) {
-        return Some(HoverInfo::text(format!("{}: {}", name, ruby_type)));
+    if let Some((ruby_type, unknown_reason)) =
+        variable_type_from_analysis(context, name, variable_kind)
+    {
+        return Some(HoverInfo::text(match (ruby_type, unknown_reason) {
+            (RubyType::Unknown, Some(reason)) => {
+                format!("{}: {}", name, format_unknown_type(reason))
+            }
+            (RubyType::Unknown, None) => format!("{}: ?", name),
+            (ruby_type, None) => format!("{}: {}", name, ruby_type),
+            (ruby_type, Some(reason)) => panic!(
+                "INVARIANT VIOLATED: concrete variable type `{ruby_type}` carried Unknown reason `{}`. This is a bug because proof-failure evidence belongs only to RubyType::Unknown. Fix: return a reason only when the exact expression type is Unknown.",
+                reason.code()
+            ),
+        }));
     }
     if context.analysis_engine.is_some() {
-        return Some(HoverInfo::text(name.to_string()));
+        return Some(HoverInfo::text(format!("{}: ?", name)));
     }
     Some(HoverInfo::text(name.to_string()))
 }
@@ -273,17 +312,53 @@ fn variable_type_from_analysis(
     context: &HoverContext,
     name: &str,
     variable_kind: VariableHoverKind,
-) -> Option<RubyType> {
+) -> Option<(RubyType, Option<UnknownReason>)> {
+    if let Some(outcome) = expression_type_from_analysis(context, context.position) {
+        return Some(outcome);
+    }
+
     let doc = context.document?.read();
     let file_id = doc.analysis_file_id();
+    let byte_offset = doc.position_to_analysis_offset(context.position);
     drop(doc);
 
     let engine = context.analysis_engine?.read();
-    AnalysisQuery::new(&engine).variable_type_in_file(
-        variable_type_kind(variable_kind),
-        name,
-        file_id,
-    )
+    let query = AnalysisQuery::new(&engine);
+    let owner = FullyQualifiedName::namespace_with_kind(
+        context.current_namespace.to_vec(),
+        context.namespace_kind,
+    );
+    query
+        .variable_type_before_in_owner(
+            variable_type_kind(variable_kind),
+            name,
+            &owner,
+            file_id,
+            byte_offset,
+        )
+        .map(|ruby_type| (ruby_type, None))
+}
+
+fn expression_type_from_analysis(
+    context: &HoverContext,
+    position: Position,
+) -> Option<(RubyType, Option<UnknownReason>)> {
+    let doc = context.document?.read();
+    let file_id = doc.analysis_file_id();
+    let byte_offset = doc.position_to_analysis_offset(position);
+    drop(doc);
+
+    let engine = context.analysis_engine?.read();
+    let query = AnalysisQuery::new(&engine);
+    let ruby_type = query.expression_type_at(file_id, byte_offset)?;
+    let unknown_reason = (ruby_type == RubyType::Unknown)
+        .then(|| query.expression_unknown_reason_at(file_id, byte_offset))
+        .flatten();
+    Some((ruby_type, unknown_reason))
+}
+
+fn format_unknown_type(reason: UnknownReason) -> String {
+    format!("?\nUnknown[{}]: {}", reason.code(), reason.explanation())
 }
 
 fn constant_hover_from_analysis(
@@ -368,10 +443,7 @@ fn method_call_return_type_from_receiver(
         }
     };
 
-    match method_return_type {
-        Some(return_type) if return_type != RubyType::Unknown => Some(return_type),
-        Some(_) | None => expression_type_at_position(context, position),
-    }
+    method_return_type.filter(|return_type| *return_type != RubyType::Unknown)
 }
 
 fn static_send_symbol_at_position(content: &str, position: Position) -> bool {
@@ -382,37 +454,6 @@ fn static_send_symbol_at_position(content: &str, position: Position) -> bool {
         || line.contains(".__send__(:")
         || line.contains(".send(\"")
         || line.contains(".__send__(\"")
-}
-
-fn expression_type_at_position(context: &HoverContext, position: Position) -> Option<RubyType> {
-    let doc = context.document?.read();
-    let file_id = doc.analysis_file_id();
-    let byte_offset = doc.position_to_analysis_offset(position);
-    drop(doc);
-
-    let engine = context.analysis_engine?.read();
-    engine
-        .type_store()
-        .facts_in_file(file_id)
-        .into_iter()
-        .filter_map(|fact| match fact.subject {
-            TypeSubject::Expression(range)
-                if range.contains_offset(file_id, byte_offset)
-                    && fact.ruby_type != RubyType::Unknown =>
-            {
-                Some(fact)
-            }
-            TypeSubject::Constant(_)
-            | TypeSubject::Local { .. }
-            | TypeSubject::InstanceVariable { .. }
-            | TypeSubject::ClassVariable { .. }
-            | TypeSubject::GlobalVariable(_)
-            | TypeSubject::MethodReturn(_)
-            | TypeSubject::Parameter { .. }
-            | TypeSubject::Expression(_) => None,
-        })
-        .max_by_key(|fact| fact.range.start_byte)
-        .map(|fact| fact.ruby_type)
 }
 
 fn super_method_return_type_from_analysis(

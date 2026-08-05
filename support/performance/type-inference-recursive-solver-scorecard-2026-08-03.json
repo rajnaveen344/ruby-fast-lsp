@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "measurement": "recursive-return-solver-scorecard-base-vs-candidate",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "baseline_state": "candidate worktree immediately before the recursive-return solver",
+    "candidate_state": "same worktree immediately after the recursive-return solver",
+    "scorecard_revision": "m0-seed-3",
+    "scorecard_cases": 52,
+    "baseline_score": 93,
+    "candidate_score": 100
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776,
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820e 2025-10-10)"
+  },
+  "method": {
+    "command": "cargo test --release -q inference_scorecard::report_m0_scorecard -- --ignored",
+    "release_compilation_excluded": true,
+    "process_startup_and_all_test-binary_launches_included": true,
+    "measurements_per_state": 7,
+    "first_measurement_excluded_as_cold_runner_outlier": true
+  },
+  "real_seconds": {
+    "baseline_all": [6.12, 0.47, 0.45, 0.44, 0.45, 0.44, 0.44],
+    "candidate_all": [3.70, 0.48, 0.45, 0.46, 0.46, 0.45, 0.45],
+    "baseline_warm_median": 0.445,
+    "candidate_warm_median": 0.455,
+    "warm_median_change_percent": 2.25
+  },
+  "assessment": {
+    "three_percent_median_wall_gate_passed": true,
+    "score_improved_within_three_percent_warm_process_budget": true,
+    "full_performance_matrix_still_required": true
+  },
+  "limitations": [
+    "This isolates the 52-case scorecard process and is not a full workspace, edit, query, allocation, or peak-RSS comparison.",
+    "The baseline and candidate were measured sequentially in one dirty worktree rather than from immutable commits; the exact semantic states and raw timings are recorded above.",
+    "Six warm samples per state support only a focused median gate, not a p95 claim.",
+    "The scorecard remains non-claim-eligible until CLI/LSP lifecycle parity, real-project reductions, Unknown counters, and the complete performance matrix are checked in."
+  ]
+}

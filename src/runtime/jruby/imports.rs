@@ -1154,6 +1154,7 @@ impl JrubyImportProvider {
                     is_super: false,
                     access: MethodReferenceAccess::VisibilityBypass,
                     caller: visitor.scope_tracker.current_method_fqn().cloned(),
+                    call_expression_range: None,
                     preferred_definition_range: self
                         .preferred_method_definition_range(&selected.owner, &selected.method),
                     diagnostics: MethodReferenceDiagnostics {
@@ -1479,6 +1480,7 @@ impl JrubyImportProvider {
                     is_super: false,
                     access: MethodReferenceAccess::Normal,
                     caller: visitor.scope_tracker.current_method_fqn().cloned(),
+                    call_expression_range: None,
                     preferred_definition_range: None,
                     diagnostics: MethodReferenceDiagnostics {
                         diagnostic_range: old_name_range,

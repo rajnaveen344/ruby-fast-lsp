@@ -325,7 +325,10 @@ fn ruby_type(rbs_type: &RbsType) -> RubyType {
     match rbs_type {
         RbsType::Class(name) => named_type(name),
         RbsType::ClassInstance { name, args } if name.trim_start_matches(':') == "Array" => {
-            RubyType::Array(args.iter().map(ruby_type).collect())
+            match args.as_slice() {
+                [element] => RubyType::array_of(ruby_type(element)),
+                _ => RubyType::Unknown,
+            }
         }
         RbsType::ClassInstance { name, args } if name.trim_start_matches(':') == "Hash" => {
             match args.as_slice() {
@@ -334,10 +337,10 @@ fn ruby_type(rbs_type: &RbsType) -> RubyType {
             }
         }
         RbsType::ClassInstance { name, .. } => named_type(name),
-        RbsType::Union(types) => RubyType::Union(types.iter().map(ruby_type).collect()),
-        RbsType::Optional(inner) => RubyType::Union(vec![ruby_type(inner), RubyType::nil_class()]),
+        RbsType::Union(types) => RubyType::union(types.iter().map(ruby_type)),
+        RbsType::Optional(inner) => RubyType::optional(ruby_type(inner)),
         RbsType::Nil | RbsType::Void => RubyType::nil_class(),
-        RbsType::Bool => RubyType::Union(vec![RubyType::true_class(), RubyType::false_class()]),
+        RbsType::Bool => RubyType::boolean(),
         RbsType::Literal(rbs_parser::Literal::String(_)) => RubyType::string(),
         RbsType::Literal(rbs_parser::Literal::Integer(_)) => RubyType::integer(),
         RbsType::Literal(rbs_parser::Literal::Symbol(_)) => RubyType::symbol(),

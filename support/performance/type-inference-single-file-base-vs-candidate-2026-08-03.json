@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "measurement": "proof-first-type-inference-single-file-base-vs-candidate",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "candidate_worktree_has_changes": true,
+    "fixture": "src/test/fixtures/goshposh_helpers_goto/api_app.rb",
+    "fixture_bytes": 242
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776,
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820e 2025-10-10)"
+  },
+  "method": {
+    "binary": "target/release/profile_single_file",
+    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/api_app.rb src/test/fixtures/goshposh_helpers_goto",
+    "release_compilation_excluded": true,
+    "warmup_runs_per_revision": 1,
+    "alternating_pairs": 7,
+    "pair_order": "candidate_then_base"
+  },
+  "profile_single_file_total_ms": {
+    "candidate": [76.473208, 75.024334, 75.449084, 76.195208, 75.828291, 75.689750, 74.457292],
+    "base": [77.786083, 76.066708, 76.480541, 75.901792, 76.113459, 75.745125, 75.761375],
+    "candidate_median": 75.689750,
+    "base_median": 76.066708,
+    "median_change_percent": -0.50
+  },
+  "file_processor_total_ms": {
+    "candidate": [76.459833, 75.010459, 75.433208, 76.183458, 75.816792, 75.677458, 74.445958],
+    "base": [77.772833, 76.055125, 76.469834, 75.891333, 76.103125, 75.732416, 75.750791],
+    "candidate_median": 75.677458,
+    "base_median": 76.055125,
+    "median_change_percent": -0.50
+  },
+  "process_resource_samples": {
+    "real_seconds": {
+      "candidate": [0.83, 0.83, 0.82, 0.84, 0.86, 0.84, 0.83],
+      "base": [0.85, 0.83, 0.83, 0.87, 0.84, 0.84, 0.85],
+      "candidate_median": 0.83,
+      "base_median": 0.84,
+      "median_change_percent": -1.19
+    },
+    "maximum_resident_set_size_bytes": {
+      "candidate": [73515008, 74006528, 74039296, 73875456, 84934656, 73695232, 73678848],
+      "base": [74563584, 76857344, 75677696, 76087296, 74563584, 74465280, 76234752],
+      "candidate_median": 73875456,
+      "base_median": 75677696,
+      "median_change_percent": -2.38,
+      "candidate_max": 84934656,
+      "base_max": 76857344
+    },
+    "peak_memory_footprint_bytes": {
+      "candidate": [60686840, 61161952, 61194720, 61063696, 72106488, 60883472, 60850680],
+      "base": [61751800, 64061968, 62882320, 63291920, 61751800, 61653496, 63406560],
+      "candidate_median": 61063696,
+      "base_median": 62882320,
+      "median_change_percent": -2.89
+    }
+  },
+  "assessment": {
+    "three_percent_median_wall_gate_passed": true,
+    "median_rss_regressed": false,
+    "semantic_fixture_tests_required_separately": true
+  },
+  "limitations": [
+    "This focused fixture measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual hover/completion queries, or the goshposh RSS ceiling.",
+    "Seven pairs characterize the median but are insufficient for a stable p95 claim.",
+    "Candidate ran before base in every pair; this can favor the base through filesystem cache warmth, so the non-regressing candidate median is conservative for this ordering.",
+    "One candidate RSS sample was an 84,934,656-byte outlier; the candidate median remained 2.38 percent below base, but the full memory matrix is still required.",
+    "The CLI check path is not exercised by this LSP single-file profile and needs a separate base-independent budget once its runtime/dependency loader is complete."
+  ]
+}

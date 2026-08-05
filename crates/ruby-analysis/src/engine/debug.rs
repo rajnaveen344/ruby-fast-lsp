@@ -186,6 +186,7 @@ impl<'a> AnalysisQuery<'a> {
             methods_without_return_type,
             inference_coverage_percent,
             top_files_by_method_count,
+            proof_telemetry: self.engine.inference_telemetry(),
         }
     }
 

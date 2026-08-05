@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, RubyConstant, RubyMethod, TypeResolution, TypeSubject,
+    FullyQualifiedName, GraphEdgeKind, RubyConstant, RubyMethod, TypeInferenceOutcome,
+    TypeResolution, TypeSubject, UnknownReason,
 };
 use crate::engine::AnalysisQuery;
 
@@ -27,44 +28,62 @@ impl FactCollector {
         method_name: &str,
         allow_private: bool,
     ) -> Option<RubyType> {
+        self.resolve_method_return_type_outcome_with_private(
+            receiver_type,
+            method_name,
+            allow_private,
+        )
+        .into_proven_type()
+    }
+
+    pub(super) fn resolve_method_return_type_outcome_with_private(
+        &self,
+        receiver_type: &RubyType,
+        method_name: &str,
+        allow_private: bool,
+    ) -> TypeInferenceOutcome {
         if *receiver_type == RubyType::Unknown {
-            return None;
+            return TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver);
         }
 
         if let RubyType::Union(types) = receiver_type {
-            let mut return_types = Vec::new();
+            let mut return_types = Vec::with_capacity(types.len());
             for ty in types {
-                if let Some(return_type) =
-                    self.resolve_method_return_type_with_private(ty, method_name, allow_private)
-                {
-                    if !return_types.contains(&return_type) {
-                        return_types.push(return_type);
-                    }
-                }
+                let outcome = self.resolve_method_return_type_outcome_with_private(
+                    ty,
+                    method_name,
+                    allow_private,
+                );
+                let Some(return_type) = outcome.into_proven_type() else {
+                    return TypeInferenceOutcome::unknown(UnknownReason::IncompleteUnionMember);
+                };
+                return_types.push(return_type);
             }
-            return match return_types.len() {
-                0 => None,
-                1 => return_types.pop(),
-                2.. => Some(RubyType::union(return_types)),
-            };
+            return TypeInferenceOutcome::from_optional(
+                (!return_types.is_empty()).then(|| RubyType::union(return_types)),
+                UnknownReason::IncompleteUnionMember,
+            );
         }
 
         if method_name == "new" {
             if let RubyType::ClassReference(fqn) = receiver_type {
-                return Some(RubyType::Class(fqn.clone()));
+                return TypeInferenceOutcome::proven(RubyType::Class(fqn.clone()));
             }
         }
 
-        if matches!(receiver_type, RubyType::Array(_) | RubyType::Hash(_, _)) {
-            return resolve_rbs_method_return_type(receiver_type, method_name);
+        if RubyMethod::new(method_name).is_err() {
+            return TypeInferenceOutcome::unknown(UnknownReason::InvalidMethodName);
         }
 
-        if self.resolve_analysis_method_returns {
+        let return_type = if matches!(receiver_type, RubyType::Array(_) | RubyType::Hash(_, _)) {
+            resolve_rbs_method_return_type(receiver_type, method_name)
+        } else if self.resolve_analysis_method_returns {
             self.resolve_method_return_type_from_analysis(receiver_type, method_name, allow_private)
                 .or_else(|| resolve_rbs_method_return_type(receiver_type, method_name))
         } else {
             resolve_rbs_method_return_type(receiver_type, method_name)
-        }
+        };
+        TypeInferenceOutcome::from_optional(return_type, UnknownReason::UnresolvedMethodReturn)
     }
 
     fn resolve_method_return_type_from_analysis(

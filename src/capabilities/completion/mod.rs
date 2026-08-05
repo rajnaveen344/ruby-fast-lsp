@@ -63,7 +63,7 @@ pub async fn find_completion_at_position(
         .nth(position.line as usize)
         .unwrap_or("");
 
-    let (partial_name, _, _, _lv_scope_id, _namespace_kind) = analyzer.get_identifier(position);
+    let (partial_name, _, _, _lv_scope_id, namespace_kind) = analyzer.get_identifier(position);
 
     // Check if we're in a :: (scope resolution) context
     let is_scope_resolution_context = if is_trigger_character && trigger_character == Some(":") {
@@ -248,6 +248,7 @@ pub async fn find_completion_at_position(
             &document,
             &document.content,
             position,
+            namespace_kind,
             &partial_name,
         );
 
@@ -343,11 +344,13 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
             .method_return_type_for_receiver(namespace, method)
     }
 
-    fn variable_type_in_file(
+    fn variable_type_before(
         &self,
         kind: CompletionVariableKind,
         name: &str,
+        owner: &FullyQualifiedName,
         file_id: SourceFileId,
+        byte_offset: u32,
     ) -> Option<RubyType> {
         let kind = match kind {
             CompletionVariableKind::Instance => ruby_analysis::engine::VariableTypeKind::Instance,
@@ -355,8 +358,13 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
             CompletionVariableKind::Global => ruby_analysis::engine::VariableTypeKind::Global,
         };
         let engine = self.analysis_engine.read();
-        ruby_analysis::engine::AnalysisQuery::new(&engine)
-            .variable_type_in_file(kind, name, file_id)
+        ruby_analysis::engine::AnalysisQuery::new(&engine).variable_type_before_in_owner(
+            kind,
+            name,
+            owner,
+            file_id,
+            byte_offset,
+        )
     }
 
     fn implicit_receiver_at(

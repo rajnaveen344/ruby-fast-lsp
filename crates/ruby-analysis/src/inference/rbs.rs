@@ -193,41 +193,36 @@ fn rbs_type_to_ruby_type_with_substitutions(
             class_name_to_ruby_type(name)
         }
         // For compound types, recurse with substitutions
-        RbsType::Union(types) => {
-            let ruby_types: Vec<RubyType> = types
+        RbsType::Union(types) => RubyType::union(
+            types
                 .iter()
-                .map(|t| rbs_type_to_ruby_type_with_substitutions(t, substitutions))
-                .collect();
-            if ruby_types.len() == 1 {
-                ruby_types.into_iter().next().unwrap()
-            } else {
-                RubyType::Union(ruby_types)
-            }
-        }
+                .map(|t| rbs_type_to_ruby_type_with_substitutions(t, substitutions)),
+        ),
         RbsType::Optional(inner) => {
             let inner_type = rbs_type_to_ruby_type_with_substitutions(inner, substitutions);
-            RubyType::Union(vec![inner_type, RubyType::nil_class()])
+            RubyType::optional(inner_type)
         }
         RbsType::ClassInstance { name, args } => {
             let clean_name = name.strip_prefix("::").unwrap_or(name);
             match clean_name {
                 "Array" => {
-                    let element_types: Vec<RubyType> = args
-                        .iter()
-                        .map(|t| rbs_type_to_ruby_type_with_substitutions(t, substitutions))
-                        .collect();
-                    RubyType::Array(element_types)
+                    let element_type = match args.as_slice() {
+                        [element] => {
+                            rbs_type_to_ruby_type_with_substitutions(element, substitutions)
+                        }
+                        [] | [_, _, ..] => RubyType::Unknown,
+                    };
+                    RubyType::Array(vec![element_type])
                 }
                 "Hash" => {
-                    let key_types: Vec<RubyType> = args
-                        .first()
-                        .map(|t| vec![rbs_type_to_ruby_type_with_substitutions(t, substitutions)])
-                        .unwrap_or_default();
-                    let value_types: Vec<RubyType> = args
-                        .get(1)
-                        .map(|t| vec![rbs_type_to_ruby_type_with_substitutions(t, substitutions)])
-                        .unwrap_or_default();
-                    RubyType::Hash(key_types, value_types)
+                    let (key_type, value_type) = match args.as_slice() {
+                        [key, value] => (
+                            rbs_type_to_ruby_type_with_substitutions(key, substitutions),
+                            rbs_type_to_ruby_type_with_substitutions(value, substitutions),
+                        ),
+                        [] | [_] | [_, _, _, ..] => (RubyType::Unknown, RubyType::Unknown),
+                    };
+                    RubyType::Hash(vec![key_type], vec![value_type])
                 }
                 _ => class_name_to_ruby_type(clean_name),
             }
@@ -267,7 +262,7 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
     match rbs_type {
         RbsType::Void => RubyType::nil_class(),
         RbsType::Nil => RubyType::nil_class(),
-        RbsType::Bool => RubyType::Union(vec![RubyType::true_class(), RubyType::false_class()]),
+        RbsType::Bool => RubyType::boolean(),
         RbsType::Top | RbsType::Bot | RbsType::Untyped => RubyType::Unknown,
         RbsType::SelfType => RubyType::Unknown, // TODO: Track self type in context
         RbsType::Instance => RubyType::Unknown, // TODO: Track instance type in context
@@ -278,20 +273,18 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
             // Handle generic types like Array[String]
             match clean_name {
                 "Array" => {
-                    let element_types: Vec<RubyType> =
-                        args.iter().map(rbs_type_to_ruby_type).collect();
-                    RubyType::Array(element_types)
+                    let element_type = match args.as_slice() {
+                        [element] => rbs_type_to_ruby_type(element),
+                        [] | [_, _, ..] => RubyType::Unknown,
+                    };
+                    RubyType::Array(vec![element_type])
                 }
                 "Hash" => {
-                    let key_types: Vec<RubyType> = args
-                        .first()
-                        .map(|t| vec![rbs_type_to_ruby_type(t)])
-                        .unwrap_or_default();
-                    let value_types: Vec<RubyType> = args
-                        .get(1)
-                        .map(|t| vec![rbs_type_to_ruby_type(t)])
-                        .unwrap_or_default();
-                    RubyType::Hash(key_types, value_types)
+                    let (key_type, value_type) = match args.as_slice() {
+                        [key, value] => (rbs_type_to_ruby_type(key), rbs_type_to_ruby_type(value)),
+                        [] | [_] | [_, _, _, ..] => (RubyType::Unknown, RubyType::Unknown),
+                    };
+                    RubyType::Hash(vec![key_type], vec![value_type])
                 }
                 _ => class_name_to_ruby_type(clean_name),
             }
@@ -300,42 +293,16 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
             // The `class` type - represents a class object
             RubyType::Unknown
         }
-        RbsType::Union(types) => {
-            let ruby_types: Vec<RubyType> = types.iter().map(rbs_type_to_ruby_type).collect();
-            if ruby_types.len() == 1 {
-                ruby_types.into_iter().next().unwrap()
-            } else {
-                RubyType::Union(ruby_types)
-            }
-        }
-        RbsType::Intersection(types) => {
-            // For intersections, we just take the first type for now
-            types
-                .first()
-                .map(rbs_type_to_ruby_type)
-                .unwrap_or(RubyType::Unknown)
-        }
+        RbsType::Union(types) => RubyType::union(types.iter().map(rbs_type_to_ruby_type)),
+        RbsType::Intersection(_) => RubyType::Unknown,
         RbsType::Optional(inner) => {
             let inner_type = rbs_type_to_ruby_type(inner);
-            RubyType::Union(vec![inner_type, RubyType::nil_class()])
+            RubyType::optional(inner_type)
         }
-        RbsType::Tuple(types) => {
-            // Represent tuple as Array for now
-            let element_types: Vec<RubyType> = types.iter().map(rbs_type_to_ruby_type).collect();
-            if element_types.is_empty() {
-                RubyType::Array(vec![])
-            } else if element_types.iter().all(|t| *t == element_types[0]) {
-                // Homogeneous tuple
-                RubyType::Array(vec![element_types.into_iter().next().unwrap()])
-            } else {
-                // Heterogeneous tuple - use union of types
-                RubyType::Array(vec![RubyType::Union(element_types)])
-            }
-        }
-        RbsType::Record(_) => {
-            // Record types become Hash
-            RubyType::Hash(vec![], vec![])
-        }
+        RbsType::Tuple(types) => RubyType::Array(RubyType::canonical_union_members(
+            types.iter().map(rbs_type_to_ruby_type),
+        )),
+        RbsType::Record(_) => RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]),
         RbsType::Proc { .. } => {
             // Proc types - just use Proc class for now
             if let Ok(constant) = RubyConstant::new("Proc") {
@@ -806,6 +773,23 @@ mod tests {
             "String#downcase should have a return type"
         );
         println!("String#downcase return type: {:?}", return_type);
+    }
+
+    #[test]
+    fn intersection_type_does_not_select_an_arbitrary_member() {
+        let rbs_type = RbsType::Intersection(vec![
+            RbsType::Class("String".to_string()),
+            RbsType::Class("Integer".to_string()),
+        ]);
+
+        assert_eq!(rbs_type_to_ruby_type(&rbs_type), RubyType::Unknown);
+    }
+
+    #[test]
+    fn union_with_untyped_member_remains_unknown() {
+        let rbs_type = RbsType::Union(vec![RbsType::Class("String".to_string()), RbsType::Untyped]);
+
+        assert_eq!(rbs_type_to_ruby_type(&rbs_type), RubyType::Unknown);
     }
 
     #[test]

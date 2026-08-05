@@ -175,7 +175,7 @@ impl FactCollectorExtensionHost for ProjectFactCollectorHost {
     }
 }
 
-fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
+pub(crate) fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
     if is_erb_path(uri.path()) {
         let mut source = mask_erb(content).source().to_string();
         if source.starts_with("#!") {
@@ -474,6 +474,11 @@ impl FileProcessor {
 
         let extension_index_patches = visitor.extension_index_patches.clone();
         let updated_document = visitor.document.clone();
+        let mut inference = visitor.inference_evidence();
+        if !source_kind.contributes_project_diagnostics() {
+            inference.method_return_outcomes.clear();
+            inference.method_return_equations.clear();
+        }
         let mut direct_facts = direct_facts_seed;
         merge_execution_context_direct_facts(&visitor.direct_facts, &mut direct_facts);
         merge_runtime_direct_facts(&visitor.direct_facts, &mut direct_facts);
@@ -487,9 +492,7 @@ impl FileProcessor {
         let symbol_facts = direct_facts.symbols;
         let method_facts = direct_facts.methods;
         let mut type_facts = direct_facts.types;
-        let visitor_type_facts = visitor.type_store.all_facts();
-        rehome_execution_context_type_facts(&visitor_type_facts, &mut type_facts);
-        merge_precise_visitor_type_facts(visitor_type_facts, &mut type_facts);
+        merge_collected_visitor_type_facts(&visitor, &mut type_facts);
         let replace_start = Instant::now();
         let mut file_diagnostics = if source_kind.contributes_project_diagnostics() {
             visitor.analysis_diagnostics
@@ -548,6 +551,7 @@ impl FileProcessor {
                 },
                 diagnostics: file_diagnostics,
                 execution_contexts: visitor.extension_execution_context_facts,
+                inference,
             },
             resolution,
         );
@@ -1374,6 +1378,11 @@ impl FileProcessor {
         let visitor_started = Instant::now();
         fact_collector.visit(&node);
         let visitor_elapsed = visitor_started.elapsed();
+        let mut inference = fact_collector.inference_evidence();
+        if !source_kind.contributes_project_diagnostics() {
+            inference.method_return_outcomes.clear();
+            inference.method_return_equations.clear();
+        }
 
         let assembly_started = Instant::now();
         let mut direct_facts = if resolve_references {
@@ -1392,6 +1401,7 @@ impl FileProcessor {
             extension_project_context.as_ref(),
             &mut direct_facts,
         );
+        merge_collected_visitor_type_facts(&fact_collector, &mut direct_facts.types);
         let reference_candidates = if source_kind.contributes_references() {
             fact_collector.reference_candidates
         } else {
@@ -1428,6 +1438,7 @@ impl FileProcessor {
             diagnostic_candidates,
             diagnostics,
             execution_contexts: fact_collector.extension_execution_context_facts,
+            inference,
         };
         let assembly_elapsed = assembly_started.elapsed();
         let replacement_started = Instant::now();
@@ -1737,14 +1748,23 @@ fn rehome_execution_context_type_facts(extension_aware: &[TypeFact], merged: &mu
     }
 }
 
+fn merge_collected_visitor_type_facts(visitor: &FactCollector, merged: &mut Vec<TypeFact>) {
+    let visitor_facts = visitor.type_store.all_facts();
+    rehome_execution_context_type_facts(&visitor_facts, merged);
+    merge_precise_visitor_type_facts(visitor_facts, merged);
+}
+
 fn merge_precise_visitor_type_facts(visitor_facts: Vec<TypeFact>, merged: &mut Vec<TypeFact>) {
-    let existing_type_subjects = merged
-        .iter()
-        .map(|fact| fact.subject.clone())
-        .collect::<HashSet<_>>();
     for visitor_fact in visitor_facts {
-        if visitor_fact.provenance != TypeProvenance::Runtime {
-            if !existing_type_subjects.contains(&visitor_fact.subject) {
+        if visitor_fact.provenance != TypeProvenance::Runtime
+            && !type_subject_is_assignment_slot(&visitor_fact.subject)
+        {
+            let has_same_slot = merged.iter().any(|fact| {
+                fact.subject == visitor_fact.subject
+                    && (!type_subject_is_definition_slot(&visitor_fact.subject)
+                        || assignment_ranges_identify_same_write(fact.range, visitor_fact.range))
+            });
+            if !has_same_slot {
                 merged.push(visitor_fact);
             }
             continue;
@@ -1759,12 +1779,11 @@ fn merge_precise_visitor_type_facts(visitor_facts: Vec<TypeFact>, merged: &mut V
             })
             .collect::<Vec<_>>();
         if matching_slot_indexes.is_empty() {
-            if merged
-                .iter()
-                .all(|fact| fact.subject != visitor_fact.subject)
-            {
-                merged.push(visitor_fact);
-            }
+            // A different source range is a different write, even when the
+            // variable subject is identical. Unknown writes are semantic kill
+            // facts: dropping one would let a query resurrect an obsolete
+            // concrete type from an earlier assignment.
+            merged.push(visitor_fact);
             continue;
         }
         if visitor_fact.ruby_type == RubyType::Unknown {
@@ -1776,10 +1795,42 @@ fn merge_precise_visitor_type_facts(visitor_facts: Vec<TypeFact>, merged: &mut V
         {
             continue;
         }
+        if visitor_fact.provenance != TypeProvenance::Runtime {
+            // Two non-runtime producers disagreeing about the same write are
+            // retained as ambiguity. TypeStore queries must fail closed rather
+            // than silently selecting either derivation.
+            merged.push(visitor_fact);
+            continue;
+        }
         for index in matching_slot_indexes.into_iter().rev() {
             merged.remove(index);
         }
         merged.push(visitor_fact);
+    }
+}
+
+fn type_subject_is_assignment_slot(subject: &TypeSubject) -> bool {
+    match subject {
+        TypeSubject::Constant(_)
+        | TypeSubject::Local { .. }
+        | TypeSubject::InstanceVariable { .. }
+        | TypeSubject::ClassVariable { .. }
+        | TypeSubject::GlobalVariable(_) => true,
+        TypeSubject::MethodReturn(_)
+        | TypeSubject::Parameter { .. }
+        | TypeSubject::Expression(_) => false,
+    }
+}
+
+fn type_subject_is_definition_slot(subject: &TypeSubject) -> bool {
+    match subject {
+        TypeSubject::MethodReturn(_) | TypeSubject::Parameter { .. } => true,
+        TypeSubject::Constant(_)
+        | TypeSubject::Local { .. }
+        | TypeSubject::InstanceVariable { .. }
+        | TypeSubject::ClassVariable { .. }
+        | TypeSubject::GlobalVariable(_)
+        | TypeSubject::Expression(_) => false,
     }
 }
 
@@ -1837,10 +1888,16 @@ fn replace_analysis_facts_for_file(
     facts: &ruby_analysis::indexer::AnalysisIndex,
     resolve_references: bool,
 ) {
+    let mut file_facts = file_analysis_facts_from_index(facts);
+    if file_facts.inference == ruby_analysis::core::InferenceEvidence::default() {
+        if let Some(previous) = analysis_engine.read().inference_evidence_in_file(file_id) {
+            file_facts.inference = previous.clone();
+        }
+    }
     replace_file_analysis(
         analysis_engine,
         file_id,
-        file_analysis_facts_from_index(facts),
+        file_facts,
         if resolve_references {
             FileResolution::Full
         } else {
@@ -1867,7 +1924,9 @@ fn replace_file_analysis(
     }
 }
 
-fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex) -> FileFacts {
+pub(crate) fn file_analysis_facts_from_index(
+    facts: &ruby_analysis::indexer::AnalysisIndex,
+) -> FileFacts {
     FileFacts {
         symbols: facts.symbols.clone(),
         methods: facts.methods.clone(),
@@ -1880,6 +1939,7 @@ fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex)
         diagnostic_candidates: Vec::new(),
         diagnostics: Vec::new(),
         execution_contexts: Vec::new(),
+        inference: Default::default(),
     }
 }
 
@@ -2022,6 +2082,80 @@ mod tests {
             merged[0].ruby_type, precise,
             "a later unknown fact must never erase an existing precise type"
         );
+    }
+
+    #[test]
+    fn later_unknown_visitor_assignment_is_retained_as_a_proof_kill() {
+        let file_id = ruby_analysis::core::SourceFileId(9);
+        let owner = FullyQualifiedName::namespace_with_kind(
+            vec![RubyConstant::new("Owner").unwrap()],
+            ruby_analysis::core::NamespaceKind::Instance,
+        );
+        let subject = TypeSubject::InstanceVariable {
+            owner,
+            name: "@value".to_string(),
+        };
+        let mut merged = vec![TypeFact::new(
+            subject.clone(),
+            RubyType::Class(FullyQualifiedName::try_from("String").unwrap()),
+            TextRange::new(file_id, 4, 10),
+            TypeProvenance::Assignment,
+        )];
+
+        merge_precise_visitor_type_facts(
+            vec![TypeFact::new(
+                subject,
+                RubyType::Unknown,
+                TextRange::new(file_id, 20, 42),
+                TypeProvenance::Assignment,
+            )],
+            &mut merged,
+        );
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[1].ruby_type, RubyType::Unknown);
+        assert_eq!(merged[1].range, TextRange::new(file_id, 20, 42));
+    }
+
+    #[test]
+    fn distinct_method_definitions_retain_their_return_facts() {
+        let file_id = ruby_analysis::core::SourceFileId(10);
+        let method = FullyQualifiedName::method(
+            vec![RubyConstant::new("Owner").unwrap()],
+            RubyMethod::new("value").unwrap(),
+        );
+        let subject = TypeSubject::MethodReturn(method);
+        let first_range = TextRange::new(file_id, 4, 20);
+        let second_range = TextRange::new(file_id, 30, 46);
+        let mut merged = vec![TypeFact::new(
+            subject.clone(),
+            RubyType::string(),
+            first_range,
+            TypeProvenance::Yard,
+        )];
+
+        merge_precise_visitor_type_facts(
+            vec![
+                TypeFact::new(
+                    subject.clone(),
+                    RubyType::integer(),
+                    first_range,
+                    TypeProvenance::Inferred,
+                ),
+                TypeFact::new(
+                    subject,
+                    RubyType::integer(),
+                    second_range,
+                    TypeProvenance::Yard,
+                ),
+            ],
+            &mut merged,
+        );
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].ruby_type, RubyType::string());
+        assert_eq!(merged[1].ruby_type, RubyType::integer());
+        assert_eq!(merged[1].range, second_range);
     }
 
     #[test]

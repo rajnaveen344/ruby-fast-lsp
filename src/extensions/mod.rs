@@ -8187,7 +8187,7 @@ commands = ["standardrb"]
                 .expect("valid structured type must convert")
                 .expect("structured type must produce an analysis type")
                 .to_string(),
-            "(Array<String> | NilClass)"
+            "(NilClass | Array<String>)"
         );
     }
 

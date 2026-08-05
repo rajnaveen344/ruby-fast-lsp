@@ -8,3 +8,4 @@
 pub mod call_node;
 pub mod constant;
 pub mod local_variable;
+pub mod variable;

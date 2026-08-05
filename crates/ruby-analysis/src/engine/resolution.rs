@@ -124,6 +124,7 @@ impl<'a> AnalysisQuery<'a> {
                 is_super,
                 access,
                 caller,
+                call_expression_range,
                 preferred_definition_range,
                 diagnostics,
             } = candidate.kind
@@ -138,6 +139,7 @@ impl<'a> AnalysisQuery<'a> {
                 is_super,
                 access,
                 caller,
+                call_expression_range,
                 preferred_definition_range,
                 diagnostics,
             };

@@ -1,23 +1,25 @@
 use crate::core::method_store::{MethodVisibility, MethodVisibilityOverrideFact};
 use crate::core::{
     DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ExecutionContextFact,
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
-    MethodParamFact, NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, SymbolFact,
-    SymbolKind, TextRange, TypeFact, TypeProvenance, TypeStore, TypeSubject,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
+    InferenceEvidence, InferenceTelemetry, MethodFact, MethodParamFact, MethodReturnEquation,
+    NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, SymbolFact, SymbolKind, TextRange,
+    TypeFact, TypeInferenceOutcome, TypeProvenance, TypeStore, TypeSubject, UnknownReason,
     UnresolvedGraphEdgeFact,
 };
-use crate::engine::{AnalysisEngine, AnalysisQueryCache};
+use crate::engine::{AnalysisEngine, AnalysisQueryCache, VariableTypeKind};
 use ruby_fast_lsp_extension_api::{IndexPatch, Receiver, ResolvedCall, SourceRange};
 use ruby_prism::*;
 
 use super::AnalysisIndex;
+use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
 use crate::inference::r#type::literal::LiteralAnalyzer;
 use crate::inference::RubyType;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 use crate::RubyDocument;
 use crate::{control_flow, utf8_str, ScopeTracker};
 use parking_lot::RwLock;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 mod alias_method_node;
@@ -40,6 +42,7 @@ mod module_node;
 mod parameters_node;
 mod singleton_class_node;
 mod super_node;
+mod variable_read_node;
 
 pub struct FactCollector {
     pub document: RubyDocument,
@@ -70,6 +73,19 @@ pub struct FactCollector {
     pub multi_write_lhs_types: Vec<Vec<RubyType>>,
     pub yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
     pub proc_return_types_by_local: HashMap<String, RubyType>,
+    /// Nonlocal writes currently being traversed. Their target facts are
+    /// collected before Prism visits the RHS, but reads inside that RHS must
+    /// observe the previous value rather than the not-yet-completed write.
+    active_nonlocal_writes: Vec<(TypeSubject, TextRange)>,
+    /// Compact method-return equations collected during the ordinary semantic
+    /// traversal and solved once when the program traversal completes.
+    method_return_equations: BTreeMap<Vec<RubyConstant>, Vec<MethodReturnEquation>>,
+    finalized_method_return_equation_counts: HashMap<Vec<RubyConstant>, usize>,
+    method_return_telemetry_by_namespace: BTreeMap<Vec<RubyConstant>, InferenceTelemetry>,
+    method_return_outcomes: BTreeMap<FullyQualifiedName, TypeInferenceOutcome>,
+    call_expression_outcomes: Vec<(TextRange, TypeInferenceOutcome)>,
+    expression_unknown_reasons: Vec<(TextRange, UnknownReason)>,
+    local_method_candidates: Arc<HashSet<FullyQualifiedName>>,
     direct_known_namespaces: HashSet<FullyQualifiedName>,
     shared_direct_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
 }
@@ -187,6 +203,15 @@ impl FactCollector {
         analysis_engine: Arc<RwLock<AnalysisEngine>>,
     ) -> Self {
         let scope_tracker = ScopeTracker::new();
+        let file_id = document.analysis_file_id();
+        let local_method_candidates = Arc::new(
+            analysis_engine
+                .read()
+                .method_facts_in_file(file_id)
+                .into_iter()
+                .map(|fact| fact.fqn)
+                .collect(),
+        );
         Self {
             document,
             scope_tracker,
@@ -214,6 +239,14 @@ impl FactCollector {
             multi_write_lhs_types: Vec::new(),
             yield_param_types_by_method: HashMap::new(),
             proc_return_types_by_local: HashMap::new(),
+            active_nonlocal_writes: Vec::new(),
+            method_return_equations: BTreeMap::new(),
+            finalized_method_return_equation_counts: HashMap::new(),
+            method_return_telemetry_by_namespace: BTreeMap::new(),
+            method_return_outcomes: BTreeMap::new(),
+            call_expression_outcomes: Vec::new(),
+            expression_unknown_reasons: Vec::new(),
+            local_method_candidates,
             direct_known_namespaces: HashSet::new(),
             shared_direct_known_namespaces: None,
         }
@@ -1028,11 +1061,10 @@ impl FactCollector {
             return match args.len() {
                 0 => RubyType::nil_class(),
                 1 => self.infer_type_from_value_with_locals(&args[0], local_types),
-                2.. => RubyType::Array(
+                2.. => RubyType::Array(RubyType::canonical_union_members(
                     args.iter()
-                        .map(|arg| self.infer_type_from_value_with_locals(arg, local_types))
-                        .collect(),
-                ),
+                        .map(|arg| self.infer_type_from_value_with_locals(arg, local_types)),
+                )),
             };
         }
 
@@ -1048,69 +1080,75 @@ impl FactCollector {
             return RubyType::Unknown;
         }
 
-        // 5. Method call: recursively infer receiver type, then resolve method
+        // 5. Method call: recursively infer receiver type, then resolve method.
+        // Keep the proof outcome until the final RubyType projection so the
+        // indexing pass can retain the exact reason for every withheld call.
         if let Some(call_node) = value_node.as_call_node() {
-            if let Some(const_get_type) = self.const_get_reference_type(&call_node) {
-                return const_get_type;
-            }
-            if let Some(block_return_type) =
-                self.infer_yielding_block_return_type_for_call(&call_node)
-            {
-                return block_return_type;
-            }
-
-            let method_name = String::from_utf8_lossy(call_node.name().as_slice()).to_string();
-            if let Some(proc_return_type) = self.infer_proc_call_return_type(&call_node) {
-                return proc_return_type;
-            }
-
-            // Determine receiver type
-            let receiver_type = if let Some(receiver) = call_node.receiver() {
-                // Has explicit receiver - recursively infer its type
-                self.infer_type_from_value_with_locals(&receiver, local_types)
-            } else {
-                // No receiver means `self`, which may differ from lexical
-                // constant scope inside eval- or extension-provided execution
-                // contexts.
-                let (namespace, kind) = self.scope_tracker.implicit_receiver_context();
-                if namespace.is_empty() {
-                    return RubyType::Unknown;
-                }
-                let current_fqn = FullyQualifiedName::namespace(namespace);
-                match kind {
-                    NamespaceKind::Instance => RubyType::Class(current_fqn),
-                    NamespaceKind::Singleton => RubyType::ClassReference(current_fqn),
-                }
-            };
-
-            if receiver_type == RubyType::Unknown {
-                return RubyType::Unknown;
-            }
-
-            // Object#freeze preserves the receiver identity and type. RBS
-            // expresses this as `self`, which is a substitution contract rather
-            // than a named return type.
-            if method_name == "freeze" {
-                return receiver_type;
-            }
-
-            // Special case: `.new` on a ClassReference returns an instance
-            if method_name == "new" {
-                if let RubyType::ClassReference(fqn) = &receiver_type {
-                    return RubyType::Class(fqn.clone());
-                }
-            }
-
-            if let Some(return_type) = self.resolve_method_return_type_with_private(
-                &receiver_type,
-                &method_name,
-                call_node.receiver().is_none(),
-            ) {
-                return return_type;
-            }
+            return self
+                .infer_call_type_outcome_with_locals(&call_node, local_types)
+                .into_ruby_type();
         }
 
         RubyType::Unknown
+    }
+
+    fn infer_call_type_outcome_with_locals(
+        &self,
+        call_node: &CallNode<'_>,
+        local_types: &HashMap<String, RubyType>,
+    ) -> TypeInferenceOutcome {
+        let expression_subject = TypeSubject::Expression(self.direct_range(&call_node.location()));
+        if let Some(fact) =
+            self.direct_facts.types.iter().rev().find(|fact| {
+                fact.subject == expression_subject && fact.ruby_type != RubyType::Unknown
+            })
+        {
+            return TypeInferenceOutcome::proven(fact.ruby_type.clone());
+        }
+
+        if let Some(const_get_type) = self.const_get_reference_type(call_node) {
+            return TypeInferenceOutcome::proven(const_get_type);
+        }
+        if let Some(block_return_type) = self.infer_yielding_block_return_type_for_call(call_node) {
+            return TypeInferenceOutcome::proven(block_return_type);
+        }
+        if let Some(proc_return_type) = self.infer_proc_call_return_type(call_node) {
+            return TypeInferenceOutcome::proven(proc_return_type);
+        }
+
+        let method_name = String::from_utf8_lossy(call_node.name().as_slice());
+        let receiver_type = if let Some(receiver) = call_node.receiver() {
+            self.infer_type_from_value_with_locals(&receiver, local_types)
+        } else {
+            // No receiver means `self`, which may differ from lexical constant
+            // scope inside eval- or extension-provided execution contexts.
+            let (namespace, kind) = self.scope_tracker.implicit_receiver_context();
+            if namespace.is_empty() {
+                return TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver);
+            }
+            let current_fqn = FullyQualifiedName::namespace(namespace);
+            match kind {
+                NamespaceKind::Instance => RubyType::Class(current_fqn),
+                NamespaceKind::Singleton => RubyType::ClassReference(current_fqn),
+            }
+        };
+
+        if receiver_type == RubyType::Unknown {
+            return TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver);
+        }
+
+        // Object#freeze preserves the receiver identity and type. RBS
+        // expresses this as `self`, which is a substitution contract rather
+        // than a named return type.
+        if method_name == "freeze" {
+            return TypeInferenceOutcome::proven(receiver_type);
+        }
+
+        self.resolve_method_return_type_outcome_with_private(
+            &receiver_type,
+            &method_name,
+            call_node.receiver().is_none(),
+        )
     }
 
     fn infer_yielding_block_return_type_for_call(
@@ -1369,16 +1407,12 @@ impl FactCollector {
     }
 
     fn infer_array_type_from_elements(&self, array_node: &ArrayNode<'_>) -> RubyType {
-        let mut element_types = array_node
+        let element_types = array_node
             .elements()
             .iter()
             .map(|element| self.infer_type_from_value(&element))
             .collect::<Vec<_>>();
-        if element_types.is_empty() {
-            return RubyType::Array(vec![RubyType::Unknown]);
-        }
-        normalize_type_list(&mut element_types);
-        RubyType::Array(element_types)
+        RubyType::Array(RubyType::canonical_union_members(element_types))
     }
 
     fn infer_hash_type_from_elements(&self, hash_node: &HashNode<'_>) -> RubyType {
@@ -1393,15 +1427,10 @@ impl FactCollector {
             key_types.push(self.infer_type_from_value(&assoc.key()));
             value_types.push(self.infer_type_from_value(&assoc.value()));
         }
-        if key_types.is_empty() {
-            key_types.push(RubyType::Unknown);
-        }
-        if value_types.is_empty() {
-            value_types.push(RubyType::Unknown);
-        }
-        normalize_type_list(&mut key_types);
-        normalize_type_list(&mut value_types);
-        RubyType::Hash(key_types, value_types)
+        RubyType::Hash(
+            RubyType::canonical_union_members(key_types),
+            RubyType::canonical_union_members(value_types),
+        )
     }
 
     pub fn infer_assignment_type_from_value(&self, value_node: &Node) -> RubyType {
@@ -1611,10 +1640,40 @@ impl FactCollector {
         let Some(return_type) = self
             .infer_yielding_block_return_type_for_call(node)
             .or_else(|| self.infer_proc_call_return_type(node))
+            .or_else(|| {
+                crate::indexer::inlay_hints::has_multiline_chain_continuation(
+                    self.document.analysis_content().as_bytes(),
+                    node.location().end_offset(),
+                )
+                .then(|| self.infer_type_from_value(&node.as_node()))
+                .filter(|ruby_type| *ruby_type != RubyType::Unknown)
+            })
         else {
             return;
         };
         let range = self.direct_range(&node.location());
+        self.call_expression_outcomes
+            .retain(|(outcome_range, _)| *outcome_range != range);
+        let mut suppressed_candidates = 0usize;
+        for candidate in &mut self.reference_candidates {
+            let crate::core::ReferenceCandidateKind::Method {
+                call_expression_range,
+                ..
+            } = &mut candidate.kind
+            else {
+                continue;
+            };
+            if *call_expression_range == Some(range) {
+                *call_expression_range = None;
+                suppressed_candidates = suppressed_candidates.checked_add(1).expect(
+                    "INVARIANT VIOLATED: suppressed call candidate count overflowed usize. This is a bug because one file cannot contain more candidates than addressable memory. Fix: bound candidate collection by the source size.",
+                );
+            }
+        }
+        assert!(
+            suppressed_candidates <= 1,
+            "INVARIANT VIOLATED: one proven special call suppressed multiple deferred outcomes. This is a bug because each CallNode owns at most one method candidate. Fix: emit exactly one candidate for the runtime dispatch."
+        );
         let fact = TypeFact::new(
             TypeSubject::Expression(range),
             return_type,
@@ -2007,11 +2066,6 @@ fn numbered_parameter_names(params: NumberedParametersNode<'_>) -> Vec<String> {
         .collect()
 }
 
-fn normalize_type_list(types: &mut Vec<RubyType>) {
-    types.sort_by_key(|ty| format!("{ty:?}"));
-    types.dedup();
-}
-
 fn merge_position_types(existing: &mut Vec<RubyType>, incoming: Vec<RubyType>) {
     for (index, incoming_type) in incoming.into_iter().enumerate() {
         if incoming_type == RubyType::Unknown {
@@ -2065,6 +2119,246 @@ fn join_non_diverging_types(branches: &[(RubyType, bool)]) -> RubyType {
 }
 
 impl FactCollector {
+    fn finalize_method_return_equations_for_namespace(&mut self, namespace: &[RubyConstant]) {
+        let Some(equations) = self.method_return_equations.get(namespace) else {
+            return;
+        };
+        let equation_count = equations.len();
+        if self
+            .finalized_method_return_equation_counts
+            .get(namespace)
+            .is_some_and(|finalized| *finalized == equation_count)
+        {
+            return;
+        }
+        let solve_result = solve_method_return_equations_with_telemetry(equations);
+        let solved = solve_result.outcomes;
+        let file_id = self.document.analysis_file_id();
+        self.type_store.update_inferred_method_return_types_in_file(
+            file_id,
+            solved
+                .iter()
+                .map(|(method, outcome)| (method, outcome.clone().into_ruby_type())),
+        );
+        self.method_return_outcomes.extend(solved);
+        self.method_return_telemetry_by_namespace
+            .insert(namespace.to_vec(), solve_result.telemetry);
+        self.finalized_method_return_equation_counts
+            .insert(namespace.to_vec(), equation_count);
+    }
+
+    fn finalize_all_method_return_equations(&mut self) {
+        let namespaces = self
+            .method_return_equations
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for namespace in namespaces {
+            self.finalize_method_return_equations_for_namespace(&namespace);
+        }
+    }
+
+    pub fn method_return_outcomes(&self) -> &BTreeMap<FullyQualifiedName, TypeInferenceOutcome> {
+        &self.method_return_outcomes
+    }
+
+    pub fn inference_telemetry(&self) -> InferenceTelemetry {
+        let mut aggregate = InferenceTelemetry::default();
+        for telemetry in self.method_return_telemetry_by_namespace.values() {
+            aggregate.merge(telemetry);
+        }
+        aggregate
+    }
+
+    /// Return the exact file-owned proof results consumed by all adapters.
+    pub fn inference_evidence(&self) -> InferenceEvidence {
+        let mut deferred_call_ranges = self
+            .reference_candidates
+            .iter()
+            .filter_map(|candidate| match &candidate.kind {
+                crate::core::ReferenceCandidateKind::Method {
+                    call_expression_range,
+                    ..
+                } => *call_expression_range,
+                crate::core::ReferenceCandidateKind::Constant { .. }
+                | crate::core::ReferenceCandidateKind::Resolved { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        deferred_call_ranges.sort_unstable();
+        for adjacent in deferred_call_ranges.windows(2) {
+            assert!(
+                adjacent[0] != adjacent[1],
+                "INVARIANT VIOLATED: one call expression produced multiple deferred method-return candidates. This is a bug because final resolution cannot choose one runtime dispatch from competing candidates. Fix: attach exactly one method candidate to each CallNode outcome."
+            );
+        }
+
+        let mut call_expression_outcomes = self.call_expression_outcomes.clone();
+        call_expression_outcomes.sort_unstable_by_key(|(range, _)| *range);
+        for adjacent in call_expression_outcomes.windows(2) {
+            assert!(
+                adjacent[0].0 != adjacent[1].0,
+                "INVARIANT VIOLATED: one call expression produced more than one immediate proof outcome. This is a bug because one AST call has exactly one result. Fix: classify an immediate call once and leave all other calls to deferred engine resolution."
+            );
+        }
+
+        let mut expression_unknown_reasons = self.expression_unknown_reasons.clone();
+        expression_unknown_reasons.sort_unstable();
+        for adjacent in expression_unknown_reasons.windows(2) {
+            assert!(
+                adjacent[0].0 != adjacent[1].0,
+                "INVARIANT VIOLATED: one expression range produced more than one Unknown reason. This is a bug because one AST expression has exactly one proof result. Fix: record expression evidence once during its node-entry callback."
+            );
+        }
+        let mut method_return_equations = self
+            .method_return_equations
+            .values()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        method_return_equations.sort_unstable();
+
+        InferenceEvidence {
+            method_return_outcomes: self.method_return_outcomes.clone(),
+            method_return_equations,
+            call_expression_outcomes,
+            expression_unknown_reasons,
+            telemetry: self.inference_telemetry(),
+        }
+    }
+
+    pub(super) fn begin_nonlocal_write(&mut self, subject: TypeSubject, range: TextRange) {
+        self.active_nonlocal_writes.push((subject, range));
+    }
+
+    pub(super) fn finish_nonlocal_write(&mut self) {
+        self.active_nonlocal_writes.pop().expect(
+            "INVARIANT VIOLATED: nonlocal write traversal stack underflowed. This is a bug because every variable-write exit must match one entry. Fix: keep FactCollector variable write callbacks balanced.",
+        );
+    }
+
+    /// Resolve a nonlocal variable from facts collected before this exact
+    /// source position. A write whose RHS is still being traversed is excluded
+    /// because Ruby evaluates the RHS before updating the target.
+    pub(super) fn collected_nonlocal_variable_type_before(
+        &self,
+        kind: VariableTypeKind,
+        name: &str,
+        owner: &FullyQualifiedName,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        let outcome =
+            self.collected_nonlocal_variable_outcome_before(kind, name, owner, byte_offset);
+        if let Some(ruby_type) = outcome.proven_type() {
+            return Some(ruby_type.clone());
+        }
+        match outcome.unknown_reason().expect(
+            "INVARIANT VIOLATED: an unproven nonlocal-variable result lost its Unknown reason. This is a bug because TypeInferenceOutcome cannot represent a reasonless failure. Fix: construct every failed reaching-assignment proof with TypeInferenceOutcome::unknown.",
+        ) {
+            UnknownReason::NoReachingAssignment => None,
+            UnknownReason::UnresolvedAssignmentValue
+            | UnknownReason::AmbiguousReachingAssignment => Some(RubyType::Unknown),
+            UnknownReason::UnknownReceiver
+            | UnknownReason::InvalidMethodName
+            | UnknownReason::UnresolvedMethodReturn
+            | UnknownReason::IncompleteUnionMember
+            | UnknownReason::UnprovenRecursiveCycle => panic!(
+                "INVARIANT VIOLATED: nonlocal reaching-assignment inference produced a method-call Unknown reason. This is a bug because the selector owns only assignment proof failures. Fix: keep reaching-assignment and method-call reason construction in their respective inference paths."
+            ),
+        }
+    }
+
+    pub(super) fn collected_nonlocal_variable_outcome_before(
+        &self,
+        kind: VariableTypeKind,
+        name: &str,
+        owner: &FullyQualifiedName,
+        byte_offset: u32,
+    ) -> TypeInferenceOutcome {
+        self.collected_variable_type_outcome_before(byte_offset, |subject| match (subject, kind) {
+            (
+                TypeSubject::InstanceVariable {
+                    owner: fact_owner,
+                    name: fact_name,
+                },
+                VariableTypeKind::Instance,
+            ) => fact_owner == owner && fact_name == name,
+            (
+                TypeSubject::ClassVariable {
+                    owner: fact_owner,
+                    name: fact_name,
+                },
+                VariableTypeKind::Class,
+            ) => fact_owner.namespace_parts() == owner.namespace_parts() && fact_name == name,
+            (TypeSubject::GlobalVariable(fact_name), VariableTypeKind::Global) => fact_name == name,
+            (
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_),
+                VariableTypeKind::Local
+                | VariableTypeKind::Instance
+                | VariableTypeKind::Class
+                | VariableTypeKind::Global
+                | VariableTypeKind::Constant,
+            ) => false,
+        })
+    }
+
+    fn collected_variable_type_outcome_before(
+        &self,
+        byte_offset: u32,
+        matches_subject: impl Fn(&TypeSubject) -> bool,
+    ) -> TypeInferenceOutcome {
+        let mut latest_start = None;
+        let mut latest_type = None;
+        let mut ambiguous = false;
+        for fact in
+            self.type_store
+                .facts_in_file(self.document.analysis_file_id())
+                .into_iter()
+                .filter(|fact| {
+                    fact.range.start_byte <= byte_offset
+                        && matches_subject(&fact.subject)
+                        && !self.active_nonlocal_writes.iter().any(|(subject, range)| {
+                            *subject == fact.subject && *range == fact.range
+                        })
+                })
+        {
+            match latest_start {
+                None => {
+                    latest_start = Some(fact.range.start_byte);
+                    latest_type = Some(fact.ruby_type);
+                }
+                Some(start) if fact.range.start_byte > start => {
+                    latest_start = Some(fact.range.start_byte);
+                    latest_type = Some(fact.ruby_type);
+                    ambiguous = false;
+                }
+                Some(start) if fact.range.start_byte == start => {
+                    if latest_type.as_ref() != Some(&fact.ruby_type) {
+                        ambiguous = true;
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+
+        let Some(latest_type) = latest_type else {
+            return TypeInferenceOutcome::unknown(UnknownReason::NoReachingAssignment);
+        };
+        if ambiguous {
+            TypeInferenceOutcome::unknown(UnknownReason::AmbiguousReachingAssignment)
+        } else if latest_type == RubyType::Unknown {
+            TypeInferenceOutcome::unknown(UnknownReason::UnresolvedAssignmentValue)
+        } else {
+            TypeInferenceOutcome::proven(latest_type)
+        }
+    }
+
     /// Positional RHS element types for `A, B = 1, "x"` / `A, B = [1, "x"]`.
     ///
     /// Non-array RHS (e.g. method call) yields an empty vec so targets stay untyped.
@@ -2161,6 +2455,15 @@ fn u32_offset(offset: usize) -> u32 {
 }
 
 impl Visit<'_> for FactCollector {
+    fn visit_program_node(&mut self, node: &ProgramNode<'_>) {
+        visit_program_node(self, node);
+        assert!(
+            self.active_nonlocal_writes.is_empty(),
+            "INVARIANT VIOLATED: nonlocal write traversal remained active after the program walk. This is a bug because every variable-write entry must have a matching exit. Fix: balance the FactCollector write callbacks for every Prism write-node form."
+        );
+        self.finalize_all_method_return_equations();
+    }
+
     fn visit_case_match_node(&mut self, node: &CaseMatchNode) {
         let predicate = node.predicate();
         if let Some(predicate) = &predicate {
@@ -2368,6 +2671,8 @@ impl Visit<'_> for FactCollector {
             return;
         }
         visit_module_node(self, node);
+        let namespace = self.scope_tracker.get_ns_stack();
+        self.finalize_method_return_equations_for_namespace(&namespace);
         self.process_module_node_exit(node);
     }
 
@@ -2377,12 +2682,16 @@ impl Visit<'_> for FactCollector {
             return;
         }
         visit_class_node(self, node);
+        let namespace = self.scope_tracker.get_ns_stack();
+        self.finalize_method_return_equations_for_namespace(&namespace);
         self.process_class_node_exit(node);
     }
 
     fn visit_singleton_class_node(&mut self, node: &SingletonClassNode) {
         self.process_singleton_class_node_entry(node);
         visit_singleton_class_node(self, node);
+        let namespace = self.scope_tracker.get_ns_stack();
+        self.finalize_method_return_equations_for_namespace(&namespace);
         self.process_singleton_class_node_exit(node);
     }
 
@@ -2454,10 +2763,7 @@ impl Visit<'_> for FactCollector {
         self.process_constant_path_and_write_node_exit(node);
     }
 
-    fn visit_constant_path_operator_write_node(
-        &mut self,
-        node: &ConstantPathOperatorWriteNode,
-    ) {
+    fn visit_constant_path_operator_write_node(&mut self, node: &ConstantPathOperatorWriteNode) {
         self.process_constant_path_operator_write_node_entry(node);
         visit_constant_path_operator_write_node(self, node);
         self.process_constant_path_operator_write_node_exit(node);
@@ -2527,6 +2833,11 @@ impl Visit<'_> for FactCollector {
         self.process_class_variable_write_node_exit(node);
     }
 
+    fn visit_class_variable_read_node(&mut self, node: &ClassVariableReadNode) {
+        self.process_class_variable_read_node_entry(node);
+        visit_class_variable_read_node(self, node);
+    }
+
     fn visit_class_variable_target_node(&mut self, node: &ClassVariableTargetNode) {
         self.process_class_variable_target_node_entry(node);
         visit_class_variable_target_node(self, node);
@@ -2555,6 +2866,11 @@ impl Visit<'_> for FactCollector {
         self.process_instance_variable_write_node_entry(node);
         visit_instance_variable_write_node(self, node);
         self.process_instance_variable_write_node_exit(node);
+    }
+
+    fn visit_instance_variable_read_node(&mut self, node: &InstanceVariableReadNode) {
+        self.process_instance_variable_read_node_entry(node);
+        visit_instance_variable_read_node(self, node);
     }
 
     fn visit_instance_variable_target_node(&mut self, node: &InstanceVariableTargetNode) {
@@ -2588,6 +2904,11 @@ impl Visit<'_> for FactCollector {
         self.process_global_variable_write_node_entry(node);
         visit_global_variable_write_node(self, node);
         self.process_global_variable_write_node_exit(node);
+    }
+
+    fn visit_global_variable_read_node(&mut self, node: &GlobalVariableReadNode) {
+        self.process_global_variable_read_node_entry(node);
+        visit_global_variable_read_node(self, node);
     }
 
     fn visit_global_variable_target_node(&mut self, node: &GlobalVariableTargetNode) {
@@ -2941,7 +3262,8 @@ mod execution_context_tests {
         });
         let platform_app =
             FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
-        let constant = FullyQualifiedName::constant(vec![RubyConstant::new("PlatformApp").unwrap()]);
+        let constant =
+            FullyQualifiedName::constant(vec![RubyConstant::new("PlatformApp").unwrap()]);
         // Prior didOpen / earlier pass left the ordinary class ClassReference in the engine.
         engine.replace_facts(
             file_id,
@@ -2988,9 +3310,13 @@ mod execution_context_tests {
         assert!(
             collector.direct_facts.graph_edges.iter().any(|edge| {
                 edge.kind == GraphEdgeKind::Superclass && edge.source == platform_app
-            }) || collector.direct_facts.unresolved_graph_edges.iter().any(|edge| {
-                edge.kind == GraphEdgeKind::Superclass && edge.source == platform_app
-            }),
+            }) || collector
+                .direct_facts
+                .unresolved_graph_edges
+                .iter()
+                .any(|edge| {
+                    edge.kind == GraphEdgeKind::Superclass && edge.source == platform_app
+                }),
             "superclass edge must still be emitted for the class declaration"
         );
     }

@@ -1,6 +1,7 @@
 use crate::core::{
     FullyQualifiedName, GraphEdgeKind, MethodAvailability, MethodParamFact, MethodParamKind,
-    NamespaceKind, RubyMethod, TypeFact, TypeProvenance, TypeSubject,
+    MethodReturnEquation, NamespaceKind, RubyMethod, TextRange, TypeFact, TypeProvenance,
+    TypeSubject, UnknownReason,
 };
 use crate::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use log::warn;
@@ -18,11 +19,12 @@ use super::FactCollector;
 struct MethodParamInfo {
     name: String,
     kind: MethodParamKind,
+    range: TextRange,
 }
 
 impl MethodParamInfo {
-    fn new(name: String, kind: MethodParamKind) -> Self {
-        Self { name, kind }
+    fn new(name: String, kind: MethodParamKind, range: TextRange) -> Self {
+        Self { name, kind, range }
     }
 }
 
@@ -225,16 +227,17 @@ impl FactCollector {
             } else {
                 None
             };
-            let param_types = doc
-                .params
+            let param_types = params
                 .iter()
-                .filter_map(|p| {
-                    if p.types.is_empty() {
+                .filter_map(|param| {
+                    let yard_param = doc.find_param(&param.name)?;
+                    if yard_param.types.is_empty() {
                         None
                     } else {
                         Some((
-                            p.name.clone(),
-                            YardTypeConverter::convert_multiple(&p.types),
+                            param.name.clone(),
+                            YardTypeConverter::convert_multiple(&yard_param.types),
+                            param.range,
                         ))
                     }
                 })
@@ -273,14 +276,34 @@ impl FactCollector {
         // Always store the inferred type - Unknown displays as "?" in hints
         // For owner_fqn in inference, use instance namespace for proper class resolution
         let instance_owner_fqn = FullyQualifiedName::namespace(namespace_parts.clone());
-        let (return_type, return_type_provenance) = if let Some(return_type) = rbs_return_type {
-            (Some(return_type), TypeProvenance::Rbs)
+        let (return_type, return_type_provenance, return_equation) = if let Some(return_type) =
+            rbs_return_type
+        {
+            (
+                Some(return_type.clone()),
+                TypeProvenance::Rbs,
+                Some(MethodReturnEquation::from_ruby_type(
+                    fqn.clone(),
+                    return_type,
+                    UnknownReason::UnresolvedMethodReturn,
+                )),
+            )
         } else if let Some(return_type) = yard_return_type {
-            (Some(return_type), TypeProvenance::Yard)
+            (
+                Some(return_type.clone()),
+                TypeProvenance::Yard,
+                Some(MethodReturnEquation::from_ruby_type(
+                    fqn.clone(),
+                    return_type,
+                    UnknownReason::UnresolvedMethodReturn,
+                )),
+            )
         } else if !self.resolve_analysis_method_returns {
-            (None, TypeProvenance::Inferred)
+            (None, TypeProvenance::Inferred, None)
         } else {
-            // Infer return type from method body using TypeTracker
+            // Collect a compact return equation from the existing traversal.
+            // The program-level solver resolves same-file SCCs after every
+            // method equation is available, without another Prism walk.
             let mut tracker = TypeTracker::new(self.document.content.as_bytes());
             tracker = tracker.with_analysis_engine(self.analysis_engine.clone());
             tracker = tracker.with_analysis_query_cache(self.analysis_query_cache.clone());
@@ -291,8 +314,25 @@ impl FactCollector {
             if !namespace_parts.is_empty() {
                 tracker.set_current_class(Some(instance_owner_fqn.clone()));
             }
-            (Some(tracker.track_method(node)), TypeProvenance::Inferred)
+            let equation = tracker.track_method_equation(
+                node,
+                fqn.clone(),
+                self.local_method_candidates_for_tracker(),
+            );
+            let immediate = equation.immediate_outcome();
+            (
+                Some(immediate.into_ruby_type()),
+                TypeProvenance::Inferred,
+                Some(equation),
+            )
         };
+
+        if let Some(return_equation) = return_equation {
+            self.method_return_equations
+                .entry(namespace_parts.clone())
+                .or_default()
+                .push(return_equation);
+        }
 
         if let Some(return_type) = &return_type {
             self.type_store.add(TypeFact::new(
@@ -302,7 +342,7 @@ impl FactCollector {
                 return_type_provenance,
             ));
         }
-        for (param_name, param_type) in &param_types {
+        for (param_name, param_type, param_range) in &param_types {
             if *param_type == RubyType::Unknown {
                 continue;
             }
@@ -312,7 +352,7 @@ impl FactCollector {
                     name: param_name.clone(),
                 },
                 param_type.clone(),
-                self.document.prism_location_to_text_range(&full_location),
+                *param_range,
                 TypeProvenance::Yard,
             ));
         }
@@ -370,7 +410,11 @@ impl FactCollector {
         for required in params_node.requireds().iter() {
             if let Some(param) = required.as_required_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                params.push(MethodParamInfo::new(param_name, MethodParamKind::Required));
+                params.push(MethodParamInfo::new(
+                    param_name,
+                    MethodParamKind::Required,
+                    self.direct_range(&param.location()),
+                ));
             }
         }
 
@@ -379,7 +423,11 @@ impl FactCollector {
             if let Some(param) = optional.as_optional_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                 // For optional params, position after the name, not after the default value
-                params.push(MethodParamInfo::new(param_name, MethodParamKind::Optional));
+                params.push(MethodParamInfo::new(
+                    param_name,
+                    MethodParamKind::Optional,
+                    self.direct_range(&param.name_loc()),
+                ));
             }
         }
 
@@ -388,17 +436,23 @@ impl FactCollector {
             if let Some(param) = rest.as_rest_parameter_node() {
                 if let Some(name) = param.name() {
                     let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
-                    params.push(MethodParamInfo::new(param_name, MethodParamKind::Rest));
+                    params.push(MethodParamInfo::new(
+                        param_name,
+                        MethodParamKind::Rest,
+                        self.direct_range(&param.location()),
+                    ));
                 } else {
                     params.push(MethodParamInfo::new(
                         "*".to_string(),
                         MethodParamKind::AnonymousRest,
+                        self.direct_range(&param.location()),
                     ));
                 }
-            } else if rest.as_forwarding_parameter_node().is_some() {
+            } else if let Some(param) = rest.as_forwarding_parameter_node() {
                 params.push(MethodParamInfo::new(
                     "...".to_string(),
                     MethodParamKind::Forwarding,
+                    self.direct_range(&param.location()),
                 ));
             }
         }
@@ -413,6 +467,7 @@ impl FactCollector {
                 params.push(MethodParamInfo::new(
                     param_name,
                     MethodParamKind::RequiredKeyword,
+                    self.direct_range(&param.name_loc()),
                 ));
             } else if let Some(param) = keyword.as_optional_keyword_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
@@ -421,6 +476,7 @@ impl FactCollector {
                 params.push(MethodParamInfo::new(
                     param_name,
                     MethodParamKind::OptionalKeyword,
+                    self.direct_range(&param.name_loc()),
                 ));
             }
         }
@@ -433,17 +489,20 @@ impl FactCollector {
                     params.push(MethodParamInfo::new(
                         param_name,
                         MethodParamKind::KeywordRest,
+                        self.direct_range(&param.location()),
                     ));
                 } else {
                     params.push(MethodParamInfo::new(
                         "**".to_string(),
                         MethodParamKind::AnonymousKeywordRest,
+                        self.direct_range(&param.location()),
                     ));
                 }
-            } else if kwrest.as_forwarding_parameter_node().is_some() {
+            } else if let Some(param) = kwrest.as_forwarding_parameter_node() {
                 params.push(MethodParamInfo::new(
                     "...".to_string(),
                     MethodParamKind::Forwarding,
+                    self.direct_range(&param.location()),
                 ));
             }
         }
@@ -452,7 +511,11 @@ impl FactCollector {
         if let Some(block) = params_node.block() {
             if let Some(name) = block.name() {
                 let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
-                params.push(MethodParamInfo::new(param_name, MethodParamKind::Block));
+                params.push(MethodParamInfo::new(
+                    param_name,
+                    MethodParamKind::Block,
+                    self.direct_range(&block.location()),
+                ));
             }
         }
 
@@ -513,6 +576,12 @@ impl FactCollector {
             .known_method_return_types()
             .map(|(fqn, ruby_type)| (fqn.clone(), ruby_type.clone()))
             .collect()
+    }
+
+    fn local_method_candidates_for_tracker(
+        &self,
+    ) -> std::sync::Arc<std::collections::HashSet<FullyQualifiedName>> {
+        std::sync::Arc::clone(&self.local_method_candidates)
     }
 
     fn local_superclasses_for_tracker(

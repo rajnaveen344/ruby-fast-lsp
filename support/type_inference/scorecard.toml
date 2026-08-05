@@ -1,0 +1,1772 @@
+schema_version = 1
+name = "Ruby Fast LSP type inference conformance"
+corpus_revision = "m0-seed-15"
+score_eligible = false
+target_score = 90
+critical_category_minimum = 85
+minimum_cases_for_claim = 50
+notes = "M0 seed corpus with 77 reviewed cases. Proven multiline chained-call inlays, source-ordered owner isolation, exact nonlocal-read and call-expression proof outcomes, deferred complete-graph finalization, exhaustive reopened-call unions, visibility-complete explicit dispatch, cross-file recursive return components, Unknown reassignment invalidation, and fail-closed unresolved or inaccessible chains are covered. Differential CLI/LSP parity covers method returns, parameters, constants, local and nonlocal variable assignments, concrete and explained-Unknown variable reads and calls, proven chain expressions, deferred mixin dispatch, reopened implicit/explicit dispatch, and cross-file recursive calls. Differential CLI/LSP diagnostic parity now covers unresolved-method with suggestions, unresolved-constant, missing-kwarg, unmatched YARD parameters, YARD/RBS return conflicts, unresolved require, parser syntax errors, and deterministic multi-diagnostic order; the measured score is diagnostic only until real-project reductions, representative diagnostic precision, and full performance baselines are complete."
+
+[[categories]]
+id = "literals_collections"
+title = "Literals, operators, interpolations, and collections"
+points = 10
+critical = true
+
+[[categories]]
+id = "locals_scopes_attributes"
+title = "Locals, assignments, scopes, captured variables, and attributes"
+points = 10
+critical = true
+
+[[categories]]
+id = "flow"
+title = "Branches, guards, pattern matching, rescue, loops, and reachability"
+points = 15
+critical = true
+
+[[categories]]
+id = "calls_dispatch"
+title = "Calls, constructors, dispatch, visibility, MRO, mixins, and super"
+points = 15
+critical = true
+
+[[categories]]
+id = "methods_blocks"
+title = "Methods, parameters, returns, blocks, yield, proc/lambda, and forwarding"
+points = 15
+critical = true
+
+[[categories]]
+id = "rbs"
+title = "RBS types, overloads, generics, substitution, and annotation checking"
+points = 15
+critical = true
+
+[[categories]]
+id = "cross_file"
+title = "Constants, reopened definitions, cross-file propagation, and invalidation"
+points = 10
+critical = true
+
+[[categories]]
+id = "generated_runtime"
+title = "Supported generated/framework/runtime facts, including Rails and JRuby"
+points = 5
+critical = true
+
+[[categories]]
+id = "lifecycle_parity"
+title = "Lifecycle determinism, malformed code, CLI/LSP parity, and explanations"
+points = 5
+critical = true
+
+[[cases]]
+id = "literal_and_collection_types"
+category = "literals_collections"
+points = 10
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "Literal and heterogeneous collection shapes are directly proven by syntax."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+name<hint label="String"> = "Ada"
+values<hover label="Array<Integer | String>"> = [1, "two"]
+'''
+
+[[cases]]
+id = "unresolved_collection_member_fails_closed"
+category = "literals_collections"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "The Array shape is proven, but one unresolved element makes its entire element type Unknown. Safety cases are intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+values<hover label="Array<?>"> = [1, dynamic_value]
+'''
+
+[[cases]]
+id = "local_assignment_and_capture"
+category = "locals_scopes_attributes"
+points = 10
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "Assignments and lexically captured locals retain their proven value type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+name = "Ada"
+1.times do
+  copy<hint label="String"> = name
+end
+'''
+
+[[cases]]
+id = "exhaustive_if_expression_union"
+category = "flow"
+points = 8
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "Both reachable branches are present, so the exhaustive union is proven."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def choose(cond)
+  result<hint label="(Integer | String)"> = if cond then 1 else "ok" end
+end
+'''
+
+[[cases]]
+id = "hash_pattern_capture"
+category = "flow"
+points = 7
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "A matched hash value binds the pattern variable to the exact value type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User
+end
+
+case {user: User.new}
+in {user: user}
+  copy<hint label="User"> = user
+end
+'''
+
+[[cases]]
+id = "inferred_chained_call"
+category = "calls_dispatch"
+points = 15
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "Each method in the chain has a unique receiver and inferred return."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Product
+  def name
+    "widget"
+  end
+end
+
+class Builder
+  def build
+    Product.new
+  end
+end
+
+Builder.new.build.name<hover label="String">
+'''
+
+[[cases]]
+id = "partial_union_call_fails_closed"
+category = "calls_dispatch"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "String#length is known but Integer#length is unresolved; dropping the Integer branch would be a wrong concrete type. Safety cases are intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Choice
+  def value(flag)
+    if flag
+      "text"
+    else
+      1
+    end
+  end
+end
+
+result<hint label=": ?"> = Choice.new.value(true).length<hover label="Unknown[incomplete_union_member]">
+'''
+
+[[cases]]
+id = "multiline_chain_inlays_use_proven_intermediate_types"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Each multiline chain boundary publishes the exact engine-proven intermediate expression type; the editor adapter does not re-infer it."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Profile
+  def name
+    "Ada"
+  end
+end
+
+class User
+  def profile
+    Profile.new
+  end
+end
+
+User.new<hint label=": User">
+  .profile<hint label=": Profile">
+  .name
+'''
+
+[[cases]]
+id = "unresolved_multiline_chain_emits_no_type_inlay"
+category = "calls_dispatch"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "An unresolved chain boundary has no proven expression fact, so the LSP stays silent rather than publishing a question-mark placeholder or guessed concrete type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+<hint none>unresolved_source
+  .profile</hint>
+'''
+
+[[cases]]
+id = "union_completion_requires_every_member"
+category = "calls_dispatch"
+points = 0
+expectation = "proof_safety"
+allow_unknown = false
+baseline = "pass"
+rationale = "Completion on String | Integer offers only methods proven on both receiver members; partial member methods are excluded. Safety cases are intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Choice
+  def value(flag)
+    if flag
+      "text"
+    else
+      1
+    end
+  end
+end
+
+Choice.new.value(true).$0
+<complete items="to_s" excludes="upcase,abs">
+'''
+
+[[cases]]
+id = "nonlocal_receiver_queries_are_source_ordered_and_owner_isolated"
+category = "calls_dispatch"
+points = 0
+expectation = "proof_safety"
+allow_unknown = false
+baseline = "pass"
+rationale = "Hover and completion resolve an instance variable from the latest fact belonging to its execution owner, not a later same-named write in another class. Safety cases are intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Consumer
+  def seed
+    @value = 1
+  end
+end
+
+class Other
+  def seed
+    @value = "wrong owner"
+  end
+end
+
+class Consumer
+  def use
+    @value<hover label="Integer">.a$0
+  end
+end
+<complete items="abs" excludes="upcase">
+'''
+
+[[cases]]
+id = "unknown_nonlocal_reassignment_invalidates_downstream_proof"
+category = "calls_dispatch"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A later Unknown instance-variable write is retained as a proof barrier: its inlay and hover remain Unknown, completion excludes methods from the obsolete earlier type, and diagnostics do not claim a method is missing on an unproven receiver."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Target
+  def known
+    true
+  end
+end
+
+class Consumer
+  def run
+    @value = Target.new
+    @value<hint label=": ?"> = dynamic_value
+    @value<hover label="?">.k$0
+    <warn none code="unresolved-method">@value.known</warn>
+  end
+end
+<complete excludes="known">
+'''
+
+[[cases]]
+id = "literal_method_return"
+category = "methods_blocks"
+points = 8
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "An unannotated method with a literal body has a directly proven return type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Greeter
+  def greet<hint label=" -> String">
+    "hello"
+  end
+end
+'''
+
+[[cases]]
+id = "recursive_method_return"
+category = "methods_blocks"
+points = 7
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "A bounded least-fixed-point solver proves direct recursion from its concrete terminating base without publishing its private bottom state."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Counter
+  # @param n [Integer]
+  def count_down(n)
+    return 0 if n == 0
+    count_down(n - 1)
+  end
+end
+
+Counter.new.count_down<hover label="Integer">(2)
+'''
+
+[[cases]]
+id = "mutually_recursive_method_returns"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A deterministic SCC solver proves mutually recursive same-file methods from their concrete terminating bases. Supplemental breadth is intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Parity
+  # @param n [Integer]
+  def even(n)
+    return true if n == 0
+    odd(n - 1)
+  end
+
+  # @param n [Integer]
+  def odd(n)
+    return false if n == 0
+    even(n - 1)
+  end
+end
+
+Parity.new.even<hover label="(FalseClass | TrueClass)">(4)
+Parity.new.odd<hover label="(FalseClass | TrueClass)">(3)
+'''
+
+[[cases]]
+id = "base_free_mutual_recursion_stays_unknown"
+category = "methods_blocks"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A mutually recursive component with no concrete base has no proven value-producing path and must remain Unknown."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Cycle
+  def left
+    right
+  end
+
+  def right
+    left
+  end
+end
+
+value<hint label=": ?"> = Cycle.new.left
+'''
+
+[[cases]]
+id = "rbs_generic_substitution"
+category = "rbs"
+points = 8
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "Array[Integer] substitutes its element type into Array#first."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+first<hint label="Integer"> = [1, 2, 3].first
+'''
+
+[[cases]]
+id = "rbs_self_return"
+category = "rbs"
+points = 7
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "RBS self-like returns exposed by core signatures resolve against the concrete String receiver."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+"hello".upcase<hover label="String">
+'''
+
+[[cases]]
+id = "cross_file_reopened_return_union"
+category = "cross_file"
+points = 10
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "All reopened method definitions across files contribute to one exhaustive return union."
+
+[[cases.files]]
+path = "first.rb"
+fixture = '''
+class Service
+  def val<type label="Integer | String" kind="return">ue
+    1
+  end
+end
+'''
+
+[[cases.files]]
+path = "second.rb"
+fixture = '''
+class Service
+  def value
+    "two"
+  end
+end
+'''
+
+[[cases]]
+id = "rails_delegate_return"
+category = "generated_runtime"
+points = 5
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+rationale = "The supported Rails delegate fact reuses the target method's proven return type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User
+  def name
+    "Ada"
+  end
+end
+
+class Order
+  delegate :name, to: :user
+
+  def user
+    User.new
+  end
+end
+
+Order.new.name<hover label="String">
+'''
+
+[[cases]]
+id = "repeatable_concrete_type"
+category = "lifecycle_parity"
+points = 5
+expectation = "concrete_type"
+allow_unknown = false
+baseline = "pass"
+repeat = 3
+rationale = "Repeated identical sessions must publish the same concrete type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+value<hint label="String"> = "stable"
+'''
+
+[[cases]]
+id = "recursive_edit_lifecycle_refreshes_chained_types"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A didChange sequence removes a prior recursive proof, withholds chained methods while the cycle is base-free, and publishes only the newly reproven Integer result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Cycle
+  def left(n)<hint label=" -> String">
+    return "left" if n == 0
+    right(n - 1)
+  end
+
+  def right(n)<hint label=" -> String">
+    return "right" if n == 0
+    left(n - 1)
+  end
+end
+
+Cycle.new.left(2).upcase<hover label="String">
+'''
+
+[[cases.edits]]
+path = "main.rb"
+fixture = '''
+class Cycle
+  def left<hint label=" -> ?">
+    right
+  end
+
+  def right<hint label=" -> ?">
+    left
+  end
+end
+
+Cycle.new.left.$0
+<complete excludes="upcase,abs">
+'''
+
+[[cases.edits]]
+path = "main.rb"
+fixture = '''
+class Cycle
+  def left(n)<hint label=" -> Integer">
+    return 1 if n == 0
+    right(n - 1)
+  end
+
+  def right(n)<hint label=" -> Integer">
+    return 2 if n == 0
+    left(n - 1)
+  end
+end
+
+Cycle.new.left(2).abs<hover label="Integer">
+'''
+
+[[cases]]
+id = "cli_lsp_local_and_expression_type_parity"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Schema-4 check output projects the same engine-owned local and multiline-chain expression facts as LSP inlays; a differential test also verifies unresolved-expression silence."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User
+end
+
+user<hint label="String"> = "shadow"
+user<hint label="User"> = User.new
+User.new<hint label=": User">
+  .to_s
+'''
+
+[[cases]]
+id = "cli_lsp_parameter_and_nonlocal_type_parity"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Cold check and interactive LSP indexing retain the same exact parameter, constant, instance-variable, class-variable, and global-variable facts; a differential test compares normalized labels and token positions."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Types
+  # @param value [String]
+  def record(value<hint label="String">)
+    @current<hint label="Integer"> = 1
+    @@last<hint label="String"> = "last"
+    $global<hint label="Symbol"> = :symbol
+  end
+end
+VALUE<hint label="Float"> = 1.0
+'''
+
+[[cases]]
+id = "cli_lsp_nonlocal_read_type_parity"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Instance, class, and global variable reads retain exact engine-owned expression facts. A differential test compares normalized CLI ranges and labels with LSP hover output."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Types
+  def record
+    @current = 1
+    @current<hover label="Integer">
+    @@last = "last"
+    @@last<hover label="String">
+    $global = :symbol
+    $global<hover label="Symbol">
+  end
+end
+'''
+
+[[cases]]
+id = "nonlocal_read_proof_is_replaced_after_edit"
+category = "lifecycle_parity"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "Removing the source write replaces the exact read proof with Unknown; the next generation cannot borrow a stale fact from the previous engine state."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Types
+  def read
+    @value = "ready"
+    @value<hover label="String">
+  end
+end
+'''
+
+[[cases.edits]]
+path = "main.rb"
+fixture = '''
+class Types
+  def read
+    @value<hover label="?">
+  end
+end
+'''
+
+# Supplemental reviewed coverage cases are unscored. They broaden M0 without
+# changing the original 100-point weighting or granting accuracy credit for
+# conservative refusal. Claim eligibility remains disabled until normalized
+# full CLI/LSP type parity, real-project review, and performance baselines exist.
+
+[[cases]]
+id = "string_literal_hover"
+category = "literals_collections"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A string literal has an exact syntax-proven class."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+value<hover label="String"> = "hello"
+'''
+
+[[cases]]
+id = "float_literal_hover"
+category = "literals_collections"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A float literal has an exact syntax-proven class."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+value<hover label="Float"> = 3.14
+'''
+
+[[cases]]
+id = "homogeneous_array_type"
+category = "literals_collections"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Every array member proves the same element type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+values<hover label="Array<Integer>"> = [1, 2, 3]
+'''
+
+[[cases]]
+id = "symbol_keyed_hash_type"
+category = "literals_collections"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Every hash entry proves its key and value types."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+values<hover label="Hash<Symbol, Integer>"> = {one: 1, two: 2}
+'''
+
+[[cases]]
+id = "local_reassignment_uses_latest_type"
+category = "locals_scopes_attributes"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A later unconditional assignment replaces the local's earlier type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+value = 1
+value = "ready"
+copy<hint label="String"> = value
+'''
+
+[[cases]]
+id = "nested_block_captures_outer_local"
+category = "locals_scopes_attributes"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Nested soft block scopes retain the proven outer local type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def calculate
+  total = 0
+  [1, 2].each do
+    [3, 4].each do
+      copy<hint label="Integer"> = total
+    end
+  end
+end
+'''
+
+[[cases]]
+id = "array_each_parameter_type"
+category = "locals_scopes_attributes"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Array element evidence flows into an each block parameter."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+[1, 2, 3].each do |item|
+  copy<hint label="Integer"> = item
+end
+'''
+
+[[cases]]
+id = "hash_each_parameter_types"
+category = "locals_scopes_attributes"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Hash key and value evidence flows into both each block parameters."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+{name: "Ada"}.each do |key, value|
+  key_copy<hint label="Symbol"> = key
+  value_copy<hint label="String"> = value
+end
+'''
+
+[[cases]]
+id = "nil_guard_narrows_surviving_path"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A nil guard narrows the surviving path to String while the explicit bare return remains a reachable NilClass method result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def value<hint label=" -> (NilClass | String)">
+  result = if cond then "ok" else nil end
+  return if result.nil?
+  result
+end
+'''
+
+[[cases]]
+id = "is_a_guard_narrows_surviving_path"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An is_a? guard narrows the surviving path to String while the explicit bare return remains a reachable NilClass method result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def value<hint label=" -> (NilClass | String)">
+  result = if cond then "ok" else 42 end
+  return unless result.is_a?(String)
+  result
+end
+'''
+
+[[cases]]
+id = "diverging_raise_prunes_branch"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A branch that always raises cannot contribute to the join type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def value(cond)<hint label=" -> Integer">
+  if cond then 1 else raise "no" end
+end
+'''
+
+[[cases]]
+id = "case_raise_prunes_else"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A raising case else leaves the exhaustive union of reachable value branches."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def value(input)<hint label=" -> (Integer | String)">
+  case input
+  when 1 then 1
+  when 2 then "two"
+  else raise "no"
+  end
+end
+'''
+
+[[cases]]
+id = "nonbreaking_loop_prunes_branch"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A loop without a reachable break diverges and cannot add a return type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def value(cond)<hint label=" -> Integer">
+  if cond then 1 else loop { work } end
+end
+'''
+
+[[cases]]
+id = "constructor_result_type"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A class-reference new call proves an instance of that class."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Widget
+end
+
+Widget.new<hover label="Widget">
+'''
+
+[[cases]]
+id = "protected_same_family_dispatch"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Protected dispatch is valid through an explicit receiver in the same family."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Vault
+  def token
+    "secret"
+  end
+  protected :token
+
+  def compare
+    other = Vault.new
+    result<hint label=": String"> = other.token
+  end
+end
+'''
+
+[[cases]]
+id = "public_mixin_visibility_override"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A class visibility override changes the usable included method contract."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+module Shared
+  private
+  def token
+    "secret"
+  end
+end
+
+class Vault
+  include Shared
+  public :token
+end
+
+result<hint label=": String"> = Vault.new.token
+'''
+
+[[cases]]
+id = "inherited_method_return"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Method lookup follows a complete superclass edge and reuses the parent return."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Parent
+  def name
+    "parent"
+  end
+end
+
+class Child < Parent
+end
+
+Child.new.name<hover label="String">
+'''
+
+[[cases]]
+id = "most_specific_override_wins"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "MRO stops at the most-specific defining ancestor instead of unioning shadowed methods."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Animal
+  def sound
+    "noise"
+  end
+end
+
+class Dog < Animal
+  def sound
+    :bark
+  end
+end
+
+result<hint label="Symbol"> = Dog.new.sound
+'''
+
+[[cases]]
+id = "yield_argument_types_block_parameter"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A proven yield argument supplies the block parameter type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User
+end
+
+def with_user
+  yield User.new
+end
+
+with_user do |user|
+  copy<hint label="User"> = user
+end
+'''
+
+[[cases]]
+id = "yielding_call_uses_block_result"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "The result of a yielding method call follows the proven block result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User
+  def name
+    "Ada"
+  end
+end
+
+def with_user
+  yield User.new
+end
+
+result<hint label="String"> = with_user do |user|
+  user.name
+end
+'''
+
+[[cases]]
+id = "lambda_call_return"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A lambda literal body proves the result of call."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+builder = -> { "ready" }
+result<hint label="String"> = builder.call
+'''
+
+[[cases]]
+id = "proc_call_return"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A Proc literal body proves the result of call."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+builder = Proc.new { 1 }
+result<hint label="Integer"> = builder.call
+'''
+
+[[cases]]
+id = "forwarded_arguments_preserve_return"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Ruby ... forwarding preserves the uniquely resolved target return type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Forwarder
+  def target(value)
+    "ok"
+  end
+
+  def wrapper(...)
+    target(...)
+  end
+end
+
+result<hint label="String"> = Forwarder.new.wrapper(1)
+'''
+
+[[cases]]
+id = "rbs_integer_abs_return"
+category = "rbs"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "The bundled Integer#abs signature supplies its exact return type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+result<hint label="Integer"> = 2.abs
+'''
+
+[[cases]]
+id = "rbs_string_chars_generic_return"
+category = "rbs"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "The bundled String#chars signature produces an Array of String."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+result<hover label="Array<String>"> = "abc".chars
+'''
+
+[[cases]]
+id = "rbs_hash_keys_generic_return"
+category = "rbs"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Hash key substitution flows through the bundled Hash#keys signature."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+result<hover label="Array<Symbol>"> = {one: 1}.keys
+'''
+
+[[cases]]
+id = "cross_file_call_chain"
+category = "cross_file"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A call chain composes proven returns owned by separate source files."
+
+[[cases.files]]
+path = "product.rb"
+fixture = '''
+class Product
+  def name
+    "widget"
+  end
+end
+'''
+
+[[cases.files]]
+path = "builder.rb"
+fixture = '''
+class Builder
+  def build
+    Product.new
+  end
+end
+'''
+
+[[cases.files]]
+path = "consumer.rb"
+fixture = '''
+Builder.new.build.name<hover label="String">
+'''
+
+[[cases]]
+id = "cross_file_inheritance_return"
+category = "cross_file"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A superclass edge and its method return remain usable across files."
+
+[[cases.files]]
+path = "parent.rb"
+fixture = '''
+class Parent
+  def name
+    "parent"
+  end
+end
+'''
+
+[[cases.files]]
+path = "child.rb"
+fixture = '''
+class Child < Parent
+end
+
+Child.new.name<hover label="String">
+'''
+
+[[cases]]
+id = "cross_file_mixin_return"
+category = "cross_file"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An included module edge and its method return remain usable across files."
+
+[[cases.files]]
+path = "named.rb"
+fixture = '''
+module Named
+  def name
+    "mixed"
+  end
+end
+'''
+
+[[cases.files]]
+path = "user.rb"
+fixture = '''
+class User
+  include Named
+end
+
+User.new.name<hover label="String">
+'''
+
+[[cases]]
+id = "active_support_concern_class_method"
+category = "generated_runtime"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "The supported ActiveSupport::Concern class_methods projection uses ordinary method facts."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+module Searchable
+  extend ActiveSupport::Concern
+
+  class_methods do
+    def find_by_term
+      "ok"
+    end
+  end
+end
+
+class Product
+  include Searchable
+end
+
+result<hint label=": String"> = Product.find_by_term
+'''
+
+[[cases]]
+id = "cross_file_rails_delegate_return"
+category = "generated_runtime"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A supported delegate uses target and receiver facts owned by separate files."
+
+[[cases.files]]
+path = "user.rb"
+fixture = '''
+class User
+  def name
+    "Ada"
+  end
+end
+'''
+
+[[cases.files]]
+path = "order.rb"
+fixture = '''
+class Order
+  delegate :name, to: :user
+
+  def user
+    User.new
+  end
+end
+'''
+
+[[cases.files]]
+path = "report.rb"
+fixture = '''
+Order.new.name<hover label="String">
+'''
+
+[[cases]]
+id = "shebang_preserves_type_offsets"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Offset-preserving shebang masking leaves the inferred type range exact."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+#!/usr/bin/env ruby
+value<hint label="String"> = "stable"
+'''
+
+[[cases]]
+id = "unresolved_method_suppresses_arity_claim"
+category = "lifecycle_parity"
+points = 0
+expectation = "proof_safety"
+allow_unknown = false
+baseline = "pass"
+rationale = "An unresolved call cannot justify a secondary wrong-arity diagnostic."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+<warn none code="wrong-arity">does_not_exist("a", "b")</warn>
+'''
+
+[[cases]]
+id = "incomplete_superclass_suppresses_missing_method"
+category = "lifecycle_parity"
+points = 0
+expectation = "proof_safety"
+allow_unknown = false
+baseline = "pass"
+rationale = "An unresolved superclass edge makes inherited method absence inconclusive."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User < ActiveRecord::Base
+  def save_record
+    <warn none code="unresolved-method">save!</warn>
+  end
+end
+'''
+
+[[cases]]
+id = "repeatable_union_normalization"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+repeat = 5
+rationale = "Repeated fresh sessions normalize an exhaustive union in the same order."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def value(flag)<hint label=" -> (Integer | String)">
+  if flag then "one" else 2 end
+end
+'''
+
+[[cases]]
+id = "proven_wrong_arity_diagnostic"
+category = "lifecycle_parity"
+points = 0
+expectation = "diagnostic"
+allow_unknown = false
+baseline = "pass"
+rationale = "A uniquely resolved method contract proves that a required positional argument is missing."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def greet(name)
+  name
+end
+
+<warn code="wrong-arity">greet</warn>
+'''
+
+[[cases]]
+id = "proven_return_mismatch_diagnostic"
+category = "lifecycle_parity"
+points = 0
+expectation = "diagnostic"
+allow_unknown = false
+baseline = "pass"
+rationale = "A literal return that contradicts a complete YARD return contract produces an exact mismatch diagnostic."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Example
+  # @return [String]
+  def value
+    <warn message="Expected return type String, but found Integer">return 1</warn>
+  end
+end
+'''
+
+[[cases]]
+id = "nonlocal_read_without_reaching_assignment_is_explained"
+category = "lifecycle_parity"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A nonlocal read without a preceding source-ordered assignment remains Unknown with a stable proof-failure code."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Types
+  def read
+    @missing<hover label="Unknown[no_reaching_assignment]">
+  end
+end
+'''
+
+[[cases]]
+id = "nonlocal_read_with_unresolved_assignment_is_explained"
+category = "lifecycle_parity"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A reaching assignment whose value is unproven remains Unknown with a distinct stable reason."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Types
+  def read
+    @value = dynamic_value
+    @value<hover label="Unknown[unresolved_assignment_value]">
+  end
+end
+'''
+
+[[cases]]
+id = "call_with_unknown_receiver_is_explained"
+category = "lifecycle_parity"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A chained call whose receiver expression has no proven result remains Unknown with the shared receiver-proof failure code."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+dynamic_user.fetch<hover label="Unknown[unknown_receiver]">
+'''
+
+[[cases]]
+id = "call_with_unresolved_method_return_is_explained"
+category = "lifecycle_parity"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A uniquely identified user method whose body has no proven return remains Unknown without being confused with an unknown receiver."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User
+  def profile
+    dynamic_profile
+  end
+end
+
+User.new.profile<hover label="Unknown[unresolved_method_return]">
+'''
+
+[[cases]]
+id = "deferred_call_proof_uses_complete_engine_graph"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Engine-owned resolution upgrades the first-pass call outcome only after an included-hook application uniquely proves the target return."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+module FeatureFlags
+  def self.included(base)
+    base.extend(ClassMethods)
+  end
+
+  module ClassMethods
+    def status
+      "on"
+    end
+  end
+end
+
+class Worker
+  include FeatureFlags
+end
+
+Worker.status<hover label="String">
+'''
+
+[[cases]]
+id = "reopened_implicit_call_uses_exhaustive_union"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An implicit call is finalized after complete MRO lookup and unions every proven reopened definition at the selected owner."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+module M
+  # @return [String]
+  def value; end
+
+  # @return [Integer]
+  def value; end
+end
+
+include M
+value<hover label="Integer | String">
+'''
+
+[[cases]]
+id = "reopened_explicit_call_requires_complete_visibility"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An explicit call publishes the exhaustive reopened return union only when visibility admits the complete callee set."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Choice
+  # @return [String]
+  def value; end
+
+  # @return [Integer]
+  def value; end
+end
+
+Choice.new.value<hover label="Integer | String">
+'''
+
+[[cases]]
+id = "reopened_private_explicit_call_fails_closed"
+category = "calls_dispatch"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "An explicit call stays Unknown when visibility removes any reopened candidate from the dispatch proof."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Secret
+  private
+
+  # @return [String]
+  def value; end
+
+  # @return [Integer]
+  def value; end
+end
+
+Secret.new.value<hover label="Unknown[unresolved_method_return]">
+'''
+
+[[cases]]
+id = "cross_file_recursive_return_component"
+category = "cross_file"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "The shared project equation solver proves a mutually recursive component split across files only after every participating definition is installed. Supplemental breadth is intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+Cycle.new.odd<hover label="String">(2)
+'''
+
+[[cases.files]]
+path = "cycle_even.rb"
+fixture = '''
+class Cycle
+  def even(n)
+    return "done" if n.zero?
+    odd(n - 1)
+  end
+end
+'''
+
+[[cases.files]]
+path = "cycle_odd.rb"
+fixture = '''
+class Cycle
+  def odd(n)
+    even(n - 1)
+  end
+end
+'''
+
+[[cases]]
+id = "cli_lsp_unresolved_method_diagnostic_parity"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "The same unresolved-method fact with its Levenshtein suggestion is projected by the check CLI and LSP diagnostics with identical messages and ranges; a differential test pins the byte-for-byte projection."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User
+  def name
+    "x"
+  end
+end
+
+u = User.new
+u.<warn code="unresolved-method" message="Did you mean `name`?">naem</warn>
+'''
+
+[[cases]]
+id = "cli_lsp_unresolved_constant_diagnostic_parity"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An unresolved constant reference projects the same engine-owned fact through check and LSP diagnostics; a differential test pins the byte-for-byte projection."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+<err code="unresolved-constant">UnknownThing</err>.new
+'''
+
+[[cases]]
+id = "cli_lsp_missing_kwarg_diagnostic_parity"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A missing required keyword argument projects the same named engine-owned diagnostic through check and LSP; a differential test pins the byte-for-byte projection."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def greet(name:, age: 0)
+  name
+end
+
+<warn code="missing-kwarg">greet</warn>(age: 30)
+'''
+
+[[cases]]
+id = "cli_lsp_yard_unknown_param_diagnostic_parity"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An unmatched YARD annotation stays a visible engine-owned diagnostic with the same exact range in check and LSP output; a differential test pins the projection."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+# <warn code="yard-unknown-param">@param ghost [String]</warn>
+def actual
+end
+'''
+
+[[cases]]
+id = "cli_lsp_yard_rbs_mismatch_diagnostic_parity"
+category = "lifecycle_parity"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A YARD return claim that conflicts with the bundled RBS contract projects the same engine-owned diagnostic through check and LSP; a differential test pins the projection."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class String
+  # @return <warn code="yard-rbs-mismatch">[String]</warn>
+  def length
+    1
+  end
+end
+'''

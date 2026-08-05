@@ -252,6 +252,21 @@ impl FakeEditor {
         run_checks_on_fixture(&self.server, &uri, buffer_content, fixture, None).await;
     }
 
+    /// Open the marker-bearing fixture and immediately run its assertions.
+    pub async fn open_and_check_fixture(&mut self, filename: &str, fixture: &str) {
+        let content = strip_all_markers(fixture);
+        self.open(filename, &content).await;
+        self.check(filename, fixture).await;
+    }
+
+    /// Replace an open buffer with a marker-bearing fixture through didChange,
+    /// then run the assertions against the new semantic generation.
+    pub async fn set_and_check_fixture(&mut self, filename: &str, fixture: &str) {
+        let content = strip_all_markers(fixture);
+        self.set(filename, &content).await;
+        self.check(filename, fixture).await;
+    }
+
     /// Get a reference to the underlying server.
     pub fn server(&self) -> &RubyLanguageServer {
         &self.server
@@ -730,6 +745,7 @@ impl FakeEditor {
             );
             visitor.visit(&parse_result.node());
             let file_id = visitor.document.analysis_file_id();
+            let inference = visitor.inference_evidence();
             let mut engine = analysis_engine.write();
             let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
             let facts = ruby_analysis::engine::FileFacts {
@@ -765,8 +781,7 @@ impl FakeEditor {
                             .load_paths
                             .paths_for_project(&project_root)
                             .to_vec();
-                        let dependency_roots =
-                            self.server.dependency_require_paths_for_uri(&uri);
+                        let dependency_roots = self.server.dependency_require_paths_for_uri(&uri);
                         diagnostics.extend(
                             crate::indexer::require_paths::unresolved_require_diagnostics(
                                 &document.content,
@@ -782,6 +797,7 @@ impl FakeEditor {
                     diagnostics
                 },
                 execution_contexts: visitor.extension_execution_context_facts,
+                inference,
             };
             engine.replace_facts(
                 file_id,
@@ -792,9 +808,8 @@ impl FakeEditor {
 
         // Add unresolved entry diagnostics
         {
-            let query = crate::query::EngineQuery::with_engine(
-                self.server.analysis_engine_for_uri(&uri),
-            );
+            let query =
+                crate::query::EngineQuery::with_engine(self.server.analysis_engine_for_uri(&uri));
             diagnostics.extend(query.get_unresolved_diagnostics(&uri));
         }
 

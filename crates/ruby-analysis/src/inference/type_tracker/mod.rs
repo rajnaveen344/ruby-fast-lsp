@@ -13,14 +13,64 @@
 mod narrow;
 
 use crate::control_flow;
-use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
+use crate::core::method_return_equation::MethodReturnBase;
+use crate::core::{
+    FullyQualifiedName, MethodReturnEquation, NamespaceKind, RubyConstant, RubyMethod,
+    TypeInferenceOutcome, UnknownReason,
+};
 use crate::engine::{AnalysisEngine, AnalysisQuery, AnalysisQueryCache};
+use crate::inference::method::recursive::MAX_RECURSIVE_RETURN_ITERATIONS;
 use crate::r#type::literal::LiteralAnalyzer;
 use crate::r#type::ruby::RubyType;
 use parking_lot::RwLock;
 use ruby_prism::*;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+
+/// Private lattice value used while solving a recursive method return.
+///
+/// `Bottom` is the empty approximation for a recursive type variable. It is
+/// intentionally not a `RubyType` variant, so it cannot escape into engine
+/// facts, hover, inlay hints, or CLI output. `Unknown` is the opposite: a
+/// required premise was not proven and therefore absorbs the equation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RecursiveReturnApproximation {
+    Bottom,
+    Proven(RubyType),
+    Unknown,
+}
+
+impl RecursiveReturnApproximation {
+    fn from_ruby_type(ruby_type: RubyType) -> Self {
+        if ruby_type == RubyType::Unknown {
+            Self::Unknown
+        } else {
+            Self::Proven(ruby_type)
+        }
+    }
+
+    fn as_ruby_type(&self) -> RubyType {
+        match self {
+            Self::Proven(ruby_type) => ruby_type.clone(),
+            Self::Bottom | Self::Unknown => RubyType::Unknown,
+        }
+    }
+
+    fn into_outcome(self, unknown_reason: UnknownReason) -> TypeInferenceOutcome {
+        match self {
+            Self::Proven(ruby_type) => TypeInferenceOutcome::proven(ruby_type),
+            Self::Bottom | Self::Unknown => TypeInferenceOutcome::unknown(unknown_reason),
+        }
+    }
+
+    fn into_equation_base(self) -> MethodReturnBase {
+        match self {
+            Self::Bottom => MethodReturnBase::Bottom,
+            Self::Proven(ruby_type) => MethodReturnBase::Proven(ruby_type),
+            Self::Unknown => MethodReturnBase::Unknown(UnknownReason::UnresolvedMethodReturn),
+        }
+    }
+}
 
 /// Simple forward type tracker with control flow merging.
 ///
@@ -73,6 +123,42 @@ pub struct TypeTracker<'a> {
 
     /// Local variables assigned lambda/proc literals, keyed by local name.
     proc_return_types_by_local: HashMap<String, RubyType>,
+
+    /// Private same-file return dependencies carried through straight-line
+    /// local aliases such as `value = helper; value`.
+    ///
+    /// Control-flow nodes clear this map conservatively until dependency terms
+    /// participate in the full branch environment. It must never become a
+    /// public Ruby type or survive a method pass.
+    local_return_terms: HashMap<String, (FullyQualifiedName, RecursiveReturnApproximation)>,
+
+    /// Dependency aliases are retained only through straight-line statements.
+    /// Branch/loop environments do not yet join private dependency terms, so
+    /// aliases created inside them are deliberately discarded.
+    inside_control_flow: bool,
+
+    /// Current private approximation for direct calls back to the method being
+    /// solved. This value must never be projected as a concrete `RubyType`.
+    recursive_return_approximation: Option<RecursiveReturnApproximation>,
+
+    /// Same-file methods eligible to become return-equation dependencies.
+    local_method_candidates: Arc<HashSet<FullyQualifiedName>>,
+
+    /// Exact same-file calls observed as explicit or fallthrough return terms.
+    observed_return_dependencies: BTreeSet<FullyQualifiedName>,
+
+    /// Call locations whose result was proven directly from a modeled block or
+    /// proc body. These are expression proofs, not dependencies on the
+    /// ordinary return equation of the invoked method.
+    direct_call_return_proofs: HashSet<usize>,
+
+    /// Explicit `return` values found during the current method pass. Ruby
+    /// methods return from these paths as well as from their fallthrough tail.
+    explicit_return_types: Vec<RecursiveReturnApproximation>,
+
+    /// Set while the ordinary method traversal observes a direct recursive
+    /// call. This avoids a separate pre-scan of every method body.
+    saw_direct_recursive_call: bool,
 }
 
 impl<'a> TypeTracker<'a> {
@@ -95,6 +181,14 @@ impl<'a> TypeTracker<'a> {
             local_superclasses: HashMap::new(),
             yield_param_types_by_method: HashMap::new(),
             proc_return_types_by_local: HashMap::new(),
+            local_return_terms: HashMap::new(),
+            inside_control_flow: false,
+            recursive_return_approximation: None,
+            local_method_candidates: Arc::new(HashSet::new()),
+            observed_return_dependencies: BTreeSet::new(),
+            direct_call_return_proofs: HashSet::new(),
+            explicit_return_types: Vec::new(),
+            saw_direct_recursive_call: false,
         }
     }
 
@@ -165,14 +259,70 @@ impl<'a> TypeTracker<'a> {
     /// 2. Tracks the method body, creating snapshots along the way
     /// 3. Returns the inferred return type (type of last expression)
     pub fn track_method(&mut self, method: &DefNode) -> RubyType {
+        self.track_method_outcome(method).into_ruby_type()
+    }
+
+    /// Infer a method return while retaining why proof was withheld.
+    ///
+    /// Direct recursion is solved as a bounded least fixed point. The private
+    /// bottom value starts with no possible return and is ignored by unions;
+    /// public `Unknown` remains absorbing. A cycle with no proven base, an
+    /// incomplete premise, or a non-converging equation therefore stays
+    /// explainable Unknown instead of becoming a guessed concrete type.
+    pub fn track_method_outcome(&mut self, method: &DefNode) -> TypeInferenceOutcome {
+        let mut approximation = RecursiveReturnApproximation::Bottom;
+        for _iteration in 0..MAX_RECURSIVE_RETURN_ITERATIONS {
+            let next = self.track_method_once(method, Some(approximation.clone()));
+            if !self.saw_direct_recursive_call {
+                return next.into_outcome(UnknownReason::UnresolvedMethodReturn);
+            }
+            if next == approximation {
+                return next.into_outcome(UnknownReason::UnprovenRecursiveCycle);
+            }
+            if next == RecursiveReturnApproximation::Unknown {
+                return TypeInferenceOutcome::unknown(UnknownReason::UnprovenRecursiveCycle);
+            }
+            approximation = next;
+        }
+
+        TypeInferenceOutcome::unknown(UnknownReason::UnprovenRecursiveCycle)
+    }
+
+    /// Collect a compact same-file return equation during the existing AST
+    /// traversal. Exact returned calls become dependencies; unsupported uses
+    /// remain absorbing Unknown rather than being mistaken for recursion.
+    pub(crate) fn track_method_equation(
+        &mut self,
+        method: &DefNode,
+        method_fqn: FullyQualifiedName,
+        local_method_candidates: Arc<HashSet<FullyQualifiedName>>,
+    ) -> MethodReturnEquation {
+        self.local_method_candidates = local_method_candidates;
+
+        let base = self.track_method_once(method, None).into_equation_base();
+        let dependencies = std::mem::take(&mut self.observed_return_dependencies);
+        self.local_method_candidates = Arc::new(HashSet::new());
+
+        MethodReturnEquation::new(method_fqn, base, dependencies)
+    }
+
+    fn track_method_once(
+        &mut self,
+        method: &DefNode,
+        recursive_return_approximation: Option<RecursiveReturnApproximation>,
+    ) -> RecursiveReturnApproximation {
+        self.vars.clear();
+        self.var_types.clear();
+        self.proc_return_types_by_local.clear();
+        self.local_return_terms.clear();
+        self.explicit_return_types.clear();
+        self.observed_return_dependencies.clear();
+        self.direct_call_return_proofs.clear();
+        self.saw_direct_recursive_call = false;
+        self.recursive_return_approximation = recursive_return_approximation;
+
         let previous_method = self.current_method.clone();
-        let method_name = String::from_utf8_lossy(method.name().as_slice());
-        let method_name = if method_name.as_ref() == "initialize" {
-            "new"
-        } else {
-            method_name.as_ref()
-        };
-        self.current_method = RubyMethod::new(method_name).ok();
+        self.current_method = Some(normalized_method_name(method));
 
         // Add parameters to environment
         if let Some(params) = method.parameters() {
@@ -180,7 +330,7 @@ impl<'a> TypeTracker<'a> {
         }
 
         // Track method body
-        let return_type = if let Some(body) = method.body() {
+        let fallthrough_type = if let Some(body) = method.body() {
             self.track_node(&body)
         } else {
             RubyType::nil_class()
@@ -192,7 +342,38 @@ impl<'a> TypeTracker<'a> {
             self.record_state(end_offset);
         }
 
+        let fallthrough_term = method
+            .body()
+            .and_then(|body| self.return_term_dependency_for_node(&body));
+        let fallthrough = match method.body() {
+            Some(body) if control_flow::diverges(&body) => RecursiveReturnApproximation::Bottom,
+            Some(_)
+                if fallthrough_term.as_ref().is_some_and(|(dependency, _)| {
+                    self.should_track_return_dependency(
+                        dependency,
+                        &fallthrough_type,
+                        self.saw_direct_recursive_call,
+                    )
+                }) =>
+            {
+                let (dependency, approximation) = fallthrough_term.expect(
+                    "INVARIANT VIOLATED: checked return term disappeared before use. This is a bug because the local result is immutable. Fix: destructure the option once instead of mutating dependency state between checks.",
+                );
+                self.observed_return_dependencies.insert(dependency);
+                approximation
+            }
+            Some(_) if fallthrough_type == RubyType::Unknown => {
+                RecursiveReturnApproximation::Unknown
+            }
+            Some(_) | None => RecursiveReturnApproximation::from_ruby_type(fallthrough_type),
+        };
+
+        let mut alternatives = std::mem::take(&mut self.explicit_return_types);
+        alternatives.push(fallthrough);
+        let return_type = join_recursive_return_approximations(alternatives);
+
         self.current_method = previous_method;
+        self.recursive_return_approximation = None;
         return_type
     }
 
@@ -223,23 +404,23 @@ impl<'a> TypeTracker<'a> {
             // If/unless conditionals
             _ if node.as_if_node().is_some() => {
                 let if_node = node.as_if_node().unwrap();
-                self.track_if(&if_node)
+                self.track_control_flow(|tracker| tracker.track_if(&if_node))
             }
 
             _ if node.as_unless_node().is_some() => {
                 let unless_node = node.as_unless_node().unwrap();
-                self.track_unless(&unless_node)
+                self.track_control_flow(|tracker| tracker.track_unless(&unless_node))
             }
 
             // Case statement
             _ if node.as_case_node().is_some() => {
                 let case_node = node.as_case_node().unwrap();
-                self.track_case(&case_node)
+                self.track_control_flow(|tracker| tracker.track_case(&case_node))
             }
 
             _ if node.as_case_match_node().is_some() => {
                 let case_match_node = node.as_case_match_node().unwrap();
-                self.track_case_match(&case_match_node)
+                self.track_control_flow(|tracker| tracker.track_case_match(&case_match_node))
             }
 
             _ if node.as_super_node().is_some() || node.as_forwarding_super_node().is_some() => {
@@ -249,28 +430,38 @@ impl<'a> TypeTracker<'a> {
             // Begin/rescue/ensure expressions
             _ if node.as_begin_node().is_some() => {
                 let begin_node = node.as_begin_node().unwrap();
-                self.track_begin(&begin_node)
+                self.track_control_flow(|tracker| tracker.track_begin(&begin_node))
             }
 
             _ if node.as_rescue_modifier_node().is_some() => {
                 let rescue_modifier = node.as_rescue_modifier_node().unwrap();
-                self.track_rescue_modifier(&rescue_modifier)
+                self.track_control_flow(|tracker| tracker.track_rescue_modifier(&rescue_modifier))
             }
 
             // Loops
             _ if node.as_while_node().is_some() => {
                 let while_node = node.as_while_node().unwrap();
-                self.track_while(&while_node)
+                self.track_control_flow(|tracker| tracker.track_while(&while_node))
             }
 
             _ if node.as_until_node().is_some() => {
                 let until_node = node.as_until_node().unwrap();
-                self.track_until(&until_node)
+                self.track_control_flow(|tracker| tracker.track_until(&until_node))
             }
 
             // Default: try to infer expression type
             _ => self.infer_expression(node),
         }
+    }
+
+    fn track_control_flow(&mut self, track: impl FnOnce(&mut Self) -> RubyType) -> RubyType {
+        self.local_return_terms.clear();
+        let was_inside_control_flow = self.inside_control_flow;
+        self.inside_control_flow = true;
+        let ruby_type = track(self);
+        self.inside_control_flow = was_inside_control_flow;
+        self.local_return_terms.clear();
+        ruby_type
     }
 
     /// Track a sequence of statements and return last expression type
@@ -298,12 +489,32 @@ impl<'a> TypeTracker<'a> {
 
         // Infer type from value
         let value = write.value();
+        let is_direct_recursive_value = value
+            .as_call_node()
+            .is_some_and(|call| call_is_direct_recursive(&call, self.current_method.as_ref()));
         let var_type = self.track_node(&value);
+        let dependency = value
+            .as_call_node()
+            .and_then(|call| self.return_term_dependency_for_call(&call));
         if let Some(return_type) = self.infer_proc_literal_return_type(&value) {
             self.proc_return_types_by_local
                 .insert(var_name.clone(), return_type);
         } else {
             self.proc_return_types_by_local.remove(&var_name);
+        }
+
+        if let Some((dependency, approximation)) = dependency.filter(|(dependency, _)| {
+            !self.inside_control_flow
+                && self.should_track_return_dependency(
+                    dependency,
+                    &var_type,
+                    is_direct_recursive_value,
+                )
+        }) {
+            self.local_return_terms
+                .insert(var_name.clone(), (dependency, approximation));
+        } else {
+            self.local_return_terms.remove(&var_name);
         }
 
         // Update environment
@@ -912,11 +1123,27 @@ impl<'a> TypeTracker<'a> {
     fn infer_call(&mut self, call: &CallNode) -> RubyType {
         let method_name = String::from_utf8_lossy(call.name().as_slice()).to_string();
 
+        // A statically modeled yielding/proc call proves the block result
+        // directly. Do not replace that proof with the callee's ordinary
+        // method-return equation: Ruby yielding APIs intentionally return the
+        // block value even when their own body contains an otherwise unknown
+        // `yield` expression.
         if let Some(block_return_type) = self.infer_yielding_block_return_type(call, &method_name) {
+            self.direct_call_return_proofs
+                .insert(call.location().start_offset());
             return block_return_type;
         }
         if let Some(proc_return_type) = self.infer_proc_call_return_type(call, &method_name) {
+            self.direct_call_return_proofs
+                .insert(call.location().start_offset());
             return proc_return_type;
+        }
+
+        if call_is_direct_recursive(call, self.current_method.as_ref()) {
+            self.saw_direct_recursive_call = true;
+            if let Some(approximation) = self.recursive_return_approximation.as_ref() {
+                return approximation.as_ruby_type();
+            }
         }
 
         // Handle .new specially - it returns an instance of the class
@@ -1002,10 +1229,12 @@ impl<'a> TypeTracker<'a> {
 
     fn infer_isolated_proc_body(&mut self, body: Option<Node<'_>>) -> Option<RubyType> {
         let previous_vars = self.vars.clone();
+        let explicit_return_count = self.explicit_return_types.len();
         let return_type = body
             .map(|body| self.track_node(&body))
             .unwrap_or_else(RubyType::nil_class);
         self.vars = previous_vars;
+        self.explicit_return_types.truncate(explicit_return_count);
         (return_type != RubyType::Unknown).then_some(return_type)
     }
 
@@ -1227,20 +1456,135 @@ impl<'a> TypeTracker<'a> {
 
     /// Infer the type of a return statement
     fn infer_return(&mut self, ret: &ReturnNode) -> RubyType {
-        if let Some(args) = ret.arguments() {
+        let return_type = if let Some(args) = ret.arguments() {
             let args_list: Vec<_> = args.arguments().iter().collect();
             if args_list.is_empty() {
-                return RubyType::nil_class();
+                RubyType::nil_class()
             } else if args_list.len() == 1 {
-                return self.infer_expression(&args_list[0]);
+                self.infer_expression(&args_list[0])
             } else {
                 // Multiple return values become an array
                 let types: Vec<RubyType> =
                     args_list.iter().map(|a| self.infer_expression(a)).collect();
-                return RubyType::Array(types);
+                RubyType::Array(RubyType::canonical_union_members(types))
+            }
+        } else {
+            RubyType::nil_class()
+        };
+
+        let returned_dependency = ret.arguments().and_then(|arguments| {
+            let mut args = arguments.arguments().iter();
+            let first = args.next();
+            let has_exactly_one = first.is_some() && args.next().is_none();
+            has_exactly_one
+                .then(|| {
+                    first.and_then(|value| {
+                        let is_direct_recursive_value = value.as_call_node().is_some_and(|call| {
+                            call_is_direct_recursive(&call, self.current_method.as_ref())
+                        });
+                        let dependency = self.return_term_dependency_for_node(&value)?;
+                        self.should_track_return_dependency(
+                            &dependency.0,
+                            &return_type,
+                            is_direct_recursive_value,
+                        )
+                        .then_some(dependency)
+                    })
+                })
+                .flatten()
+        });
+        let approximation = match returned_dependency {
+            Some((dependency, approximation)) => {
+                self.observed_return_dependencies.insert(dependency);
+                approximation
+            }
+            None => RecursiveReturnApproximation::from_ruby_type(return_type.clone()),
+        };
+        self.explicit_return_types.push(approximation);
+        return_type
+    }
+
+    fn return_term_dependency_for_call(
+        &self,
+        call: &CallNode<'_>,
+    ) -> Option<(FullyQualifiedName, RecursiveReturnApproximation)> {
+        if self
+            .direct_call_return_proofs
+            .contains(&call.location().start_offset())
+        {
+            return None;
+        }
+        let dependency = self.implicit_self_call_fqn(call)?;
+
+        if call_is_direct_recursive(call, self.current_method.as_ref()) {
+            if let Some(approximation) = self.recursive_return_approximation.as_ref() {
+                return Some((dependency, approximation.clone()));
             }
         }
-        RubyType::nil_class()
+        Some((dependency, RecursiveReturnApproximation::Bottom))
+    }
+
+    fn should_track_return_dependency(
+        &self,
+        dependency: &FullyQualifiedName,
+        inferred_type: &RubyType,
+        direct_recursive: bool,
+    ) -> bool {
+        direct_recursive
+            || *inferred_type == RubyType::Unknown
+            || self.local_method_candidates.contains(dependency)
+            || self
+                .analysis_engine
+                .as_ref()
+                .is_some_and(|engine| engine.read().has_method_return_equation(dependency))
+    }
+
+    fn return_term_dependency_for_node(
+        &self,
+        node: &Node<'_>,
+    ) -> Option<(FullyQualifiedName, RecursiveReturnApproximation)> {
+        if let Some(statements) = node.as_statements_node() {
+            return statements
+                .body()
+                .iter()
+                .last()
+                .and_then(|last| self.return_term_dependency_for_node(&last));
+        }
+        if let Some(parentheses) = node.as_parentheses_node() {
+            return parentheses
+                .body()
+                .and_then(|body| self.return_term_dependency_for_node(&body));
+        }
+        if let Some(call) = node.as_call_node() {
+            return self.return_term_dependency_for_call(&call);
+        }
+        if let Some(read) = node.as_local_variable_read_node() {
+            let name = String::from_utf8_lossy(read.name().as_slice());
+            return self.local_return_terms.get(name.as_ref()).cloned();
+        }
+        if let Some(write) = node.as_local_variable_write_node() {
+            let name = String::from_utf8_lossy(write.name().as_slice());
+            return self.local_return_terms.get(name.as_ref()).cloned();
+        }
+        None
+    }
+
+    fn implicit_self_call_fqn(&self, call: &CallNode<'_>) -> Option<FullyQualifiedName> {
+        if call
+            .receiver()
+            .is_some_and(|receiver| receiver.as_self_node().is_none())
+        {
+            return None;
+        }
+        let method_name = String::from_utf8_lossy(call.name().as_slice());
+        let method = RubyMethod::new(method_name.as_ref()).ok()?;
+        Some(FullyQualifiedName::method(
+            self.current_class
+                .as_ref()
+                .map(FullyQualifiedName::namespace_parts)
+                .unwrap_or_default(),
+            method,
+        ))
     }
 
     /// Resolve a constant path to an FQN (e.g., Foo::Bar::Baz)
@@ -1327,6 +1671,52 @@ impl<'a> TypeTracker<'a> {
                 }
             }
         }
+    }
+}
+
+fn normalized_method_name(method: &DefNode<'_>) -> RubyMethod {
+    let source_name = String::from_utf8_lossy(method.name().as_slice());
+    let semantic_name = if source_name.as_ref() == "initialize" {
+        "new"
+    } else {
+        source_name.as_ref()
+    };
+    RubyMethod::new(semantic_name).unwrap_or_else(|error| {
+        panic!(
+            "INVARIANT VIOLATED: Prism produced invalid method name `{semantic_name}` while tracking a definition: {error}. \
+             This is a bug because FactCollector validates method names before type inference. \
+             Fix: keep method-name validation and TypeTracker invocation on the same definition."
+        )
+    })
+}
+
+fn call_is_direct_recursive(call: &CallNode<'_>, method: Option<&RubyMethod>) -> bool {
+    let Some(method) = method else {
+        return false;
+    };
+    call.name().as_slice() == method.as_str().as_bytes()
+        && call
+            .receiver()
+            .is_none_or(|receiver| receiver.as_self_node().is_some())
+}
+
+fn join_recursive_return_approximations(
+    alternatives: impl IntoIterator<Item = RecursiveReturnApproximation>,
+) -> RecursiveReturnApproximation {
+    let mut proven = Vec::new();
+    for alternative in alternatives {
+        match alternative {
+            RecursiveReturnApproximation::Bottom => {}
+            RecursiveReturnApproximation::Proven(ruby_type) => proven.push(ruby_type),
+            RecursiveReturnApproximation::Unknown => {
+                return RecursiveReturnApproximation::Unknown;
+            }
+        }
+    }
+    if proven.is_empty() {
+        RecursiveReturnApproximation::Bottom
+    } else {
+        RecursiveReturnApproximation::Proven(RubyType::union(proven))
     }
 }
 
@@ -1434,6 +1824,197 @@ mod tests {
         let return_type = tracker.track_method(&def_node);
 
         assert_eq!(return_type, RubyType::integer());
+    }
+
+    #[test]
+    fn direct_recursive_return_uses_the_least_proven_fixed_point() {
+        let source = r#"def count_down(n)
+  return 0 if n == 0
+  count_down(n - 1)
+end"#;
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+
+        let outcome = tracker.track_method_outcome(&def_node);
+
+        assert_eq!(outcome.proven_type(), Some(&RubyType::integer()));
+        assert_eq!(outcome.unknown_reason(), None);
+    }
+
+    #[test]
+    fn recursive_cycle_without_a_base_stays_explainable_unknown() {
+        let source = "def forever\n  forever\nend";
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+
+        let outcome = tracker.track_method_outcome(&def_node);
+
+        assert_eq!(outcome.proven_type(), None);
+        assert_eq!(
+            outcome.unknown_reason(),
+            Some(UnknownReason::UnprovenRecursiveCycle)
+        );
+    }
+
+    #[test]
+    fn mutual_return_equations_do_not_require_preinserted_method_facts() {
+        let source = r#"def left
+  right
+end
+
+def right
+  left
+end"#;
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let statements = parse_result.node().as_program_node().unwrap().statements();
+        let left = FullyQualifiedName::method(
+            Vec::new(),
+            RubyMethod::new("left").expect("test method name must be valid"),
+        );
+        let right = FullyQualifiedName::method(
+            Vec::new(),
+            RubyMethod::new("right").expect("test method name must be valid"),
+        );
+        let mut equations = Vec::new();
+        for (node, method) in statements.body().iter().zip([left.clone(), right.clone()]) {
+            let definition = node
+                .as_def_node()
+                .expect("test statement must be a method definition");
+            equations.push(TypeTracker::new(source.as_bytes()).track_method_equation(
+                &definition,
+                method,
+                Arc::new(HashSet::new()),
+            ));
+        }
+
+        let solved = crate::inference::method::recursive::solve_method_return_equations(&equations);
+
+        assert_eq!(
+            solved
+                .get(&left)
+                .and_then(TypeInferenceOutcome::unknown_reason),
+            Some(UnknownReason::UnprovenRecursiveCycle)
+        );
+        assert_eq!(
+            solved
+                .get(&right)
+                .and_then(TypeInferenceOutcome::unknown_reason),
+            Some(UnknownReason::UnprovenRecursiveCycle)
+        );
+    }
+
+    #[test]
+    fn modeled_block_result_is_not_replaced_by_callee_return_dependency() {
+        let source = r#"def label
+  with_value { 1 }
+end"#;
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let definition = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let with_value = FullyQualifiedName::method(
+            Vec::new(),
+            RubyMethod::new("with_value").expect("test method name must be valid"),
+        );
+        let label = FullyQualifiedName::method(
+            Vec::new(),
+            RubyMethod::new("label").expect("test method name must be valid"),
+        );
+        let mut yield_types = HashMap::new();
+        yield_types.insert(with_value.clone(), vec![RubyType::integer()]);
+        let equation = TypeTracker::new(source.as_bytes())
+            .with_yield_param_types(yield_types)
+            .track_method_equation(&definition, label, Arc::new(HashSet::from([with_value])));
+
+        assert_eq!(
+            equation.immediate_outcome().proven_type(),
+            Some(&RubyType::integer())
+        );
+    }
+
+    #[test]
+    fn unresolved_recursive_base_stays_explainable_unknown() {
+        let source = r#"def resolve(flag)
+  return missing_value if flag
+  resolve(flag)
+end"#;
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+
+        let outcome = tracker.track_method_outcome(&def_node);
+
+        assert_eq!(outcome.proven_type(), None);
+        assert_eq!(
+            outcome.unknown_reason(),
+            Some(UnknownReason::UnprovenRecursiveCycle)
+        );
+    }
+
+    #[test]
+    fn explicit_and_fallthrough_returns_are_both_inferred() {
+        let source = r#"def value(flag)
+  return 1 if flag
+  "text"
+end"#;
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+
+        assert_eq!(
+            tracker.track_method(&def_node),
+            RubyType::union([RubyType::integer(), RubyType::string()])
+        );
     }
 
     #[test]

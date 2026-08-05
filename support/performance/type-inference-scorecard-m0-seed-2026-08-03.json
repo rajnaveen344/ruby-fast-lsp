@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "measurement": "type-inference-scorecard-warm-release",
+  "date": "2026-08-03",
+  "claim_eligible": false,
+  "source": {
+    "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
+    "worktree_has_candidate_changes": true,
+    "scorecard_revision": "m0-seed-1",
+    "scorecard_cases": 15,
+    "score": 93
+  },
+  "host": {
+    "os": "Darwin 25.2.0 arm64",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 25769803776,
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820 2025-10-10)"
+  },
+  "command": "cargo test --release inference_scorecard::report_m0_scorecard -- --ignored",
+  "warmup": {
+    "release_build_seconds": 42.55,
+    "scorecard_test_seconds": 0.14
+  },
+  "warm_process_measurements_seconds": {
+    "real": [0.64, 0.35, 0.37, 0.37, 0.34, 0.34, 0.35],
+    "user": [0.21, 0.21, 0.21, 0.21, 0.20, 0.20, 0.20],
+    "sys": [0.14, 0.10, 0.11, 0.11, 0.10, 0.10, 0.11],
+    "real_median": 0.35,
+    "real_min": 0.34,
+    "real_max": 0.64
+  },
+  "single_warm_resource_sample": {
+    "real_seconds": 0.37,
+    "user_seconds": 0.20,
+    "sys_seconds": 0.11,
+    "maximum_resident_set_size_bytes": 100352000,
+    "peak_memory_footprint_bytes": 83591720
+  },
+  "limitations": [
+    "This is the first candidate-worktree M0 seed measurement, not a base-versus-candidate comparison.",
+    "The command includes Cargo and ten test-binary launches; the scorecard test itself reported 0.14 seconds after release compilation.",
+    "The 15-case seed corpus is not representative enough for the 9/10 claim.",
+    "Cold workspace indexing, warm workspace indexing, didChange latency, hover/completion query latency, allocations, full-project CPU, and goshposh peak RSS remain unmeasured for this goal."
+  ]
+}

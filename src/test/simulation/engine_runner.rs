@@ -288,6 +288,7 @@ impl EngineSimulationRunner {
                     diagnostic_candidates: Vec::new(),
                     diagnostics: Vec::new(),
                     execution_contexts: Vec::new(),
+                    inference: Default::default(),
                 },
                 ResolveMode::Deferred,
             );
@@ -310,6 +311,7 @@ impl EngineSimulationRunner {
                 self.engine.clone(),
             );
             visitor.visit(&parse.node());
+            let inference = visitor.inference_evidence();
             let mut types = direct_facts.types;
             types.extend(visitor.direct_facts.types);
             types.extend(visitor.type_store.all_facts());
@@ -326,6 +328,7 @@ impl EngineSimulationRunner {
                 diagnostic_candidates: visitor.diagnostic_candidates,
                 diagnostics: visitor.analysis_diagnostics,
                 execution_contexts: visitor.extension_execution_context_facts,
+                inference,
             };
             self.engine
                 .write()
