@@ -1148,8 +1148,11 @@ impl IndexingCoordinator {
         let (startup_gem_result, project_result, runtime_provider_result) =
             tokio::join!(startup_gem_indexing, project_indexing, runtime_provider);
         let ((provider, runtime_archive), runtime_provider_dur) = runtime_provider_result?;
-        let mut project_dur = project_result?;
+        // Surface the frontier task's own failure first. A frontier error
+        // drops the release sender, so the project pass reports only the
+        // receiver-side message; the real cause lives in `startup_gem_result`.
         let (gem_indexer, discovery_dur) = startup_gem_result?;
+        let mut project_dur = project_result?;
 
         self.jruby_import_provider = provider;
         self.jruby_runtime_archive = runtime_archive;

@@ -547,7 +547,23 @@ impl IndexingResourceGovernor {
             output
         })
         .await
-        .with_context(|| format!("{label} partitioned blocking worker failed"))
+        .map_err(|join_error| {
+            let panic_message = join_error
+                .try_into_panic()
+                .ok()
+                .map(|payload| {
+                    if let Some(message) = payload.downcast_ref::<&str>() {
+                        (*message).to_string()
+                    } else if let Some(message) = payload.downcast_ref::<String>() {
+                        message.clone()
+                    } else {
+                        "non-string panic payload".to_string()
+                    }
+                })
+                .map(|message| format!("; panic: {message}"))
+                .unwrap_or_default();
+            anyhow::anyhow!("{label} partitioned blocking worker failed{panic_message}")
+        })
     }
 
     pub async fn run_async_with_resources<T, F>(
