@@ -126,6 +126,54 @@ impl RubyType {
         }
     }
 
+    /// True when `ruby_type` is exact `Unknown` or contains a union with an
+    /// exact `Unknown` member anywhere in the tree.
+    ///
+    /// `RubyType::union` flattens nested unions and absorbs `Unknown`, so a
+    /// union containing `Unknown` is not a stable union and must never be
+    /// published as proof. `Array([Unknown])` and `Hash([Unknown], [Unknown])`
+    /// are legitimate proven outer containers: exact `Unknown` as a container
+    /// element is a valid "unknown element" shape and is not flagged.
+    pub fn union_members_contain_unknown(ruby_type: &RubyType) -> bool {
+        match ruby_type {
+            RubyType::Unknown => true,
+            RubyType::Union(members) => members.iter().any(|member| {
+                member == &RubyType::Unknown || Self::union_members_contain_unknown(member)
+            }),
+            RubyType::Array(elements) => {
+                elements.iter().any(Self::nested_union_contains_unknown)
+            }
+            RubyType::Hash(keys, values) => {
+                keys.iter().any(Self::nested_union_contains_unknown)
+                    || values.iter().any(Self::nested_union_contains_unknown)
+            }
+            RubyType::Class(_)
+            | RubyType::Module(_)
+            | RubyType::ClassReference(_)
+            | RubyType::ModuleReference(_) => false,
+        }
+    }
+
+    fn nested_union_contains_unknown(ruby_type: &RubyType) -> bool {
+        match ruby_type {
+            RubyType::Unknown => false,
+            RubyType::Union(members) => members.iter().any(|member| {
+                member == &RubyType::Unknown || Self::nested_union_contains_unknown(member)
+            }),
+            RubyType::Array(elements) => {
+                elements.iter().any(Self::nested_union_contains_unknown)
+            }
+            RubyType::Hash(keys, values) => {
+                keys.iter().any(Self::nested_union_contains_unknown)
+                    || values.iter().any(Self::nested_union_contains_unknown)
+            }
+            RubyType::Class(_)
+            | RubyType::Module(_)
+            | RubyType::ClassReference(_)
+            | RubyType::ModuleReference(_) => false,
+        }
+    }
+
     /// Resolve every reachable alternative before constructing its union.
     /// Missing or Unknown evidence fails closed instead of being filtered out.
     pub fn union_from_proven<T>(

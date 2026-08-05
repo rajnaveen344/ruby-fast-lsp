@@ -232,7 +232,12 @@ fn evaluate_method(
     if alternatives.is_empty() {
         Approximation::Bottom
     } else {
-        Approximation::Proven(RubyType::union(alternatives))
+        let joined = RubyType::union(alternatives);
+        if joined == RubyType::Unknown {
+            Approximation::Unknown(UnknownReason::UnresolvedMethodReturn)
+        } else {
+            Approximation::Proven(joined)
+        }
     }
 }
 
@@ -454,5 +459,27 @@ mod tests {
             solved[&right].unknown_reason(),
             Some(UnknownReason::UnprovenRecursiveCycle)
         );
+    }
+
+    #[test]
+    fn union_with_unknown_member_equation_stays_unknown_instead_of_panicking() {
+        // A YARD `@return [Array [Array, String]]` can produce an untyped
+        // member beside a known one. The equation boundary must treat the
+        // whole union as failed proof; the solver must never receive a
+        // `Proven(Unknown)` approximation.
+        let target = method("ambiguous");
+        let equations = [MethodReturnEquation::from_ruby_type(
+            target.clone(),
+            RubyType::Union(vec![RubyType::Unknown, RubyType::string()]),
+            UnknownReason::UnresolvedMethodReturn,
+        )];
+
+        let solved = solve_method_return_equations(&equations);
+
+        assert_eq!(
+            solved[&target].unknown_reason(),
+            Some(UnknownReason::UnresolvedMethodReturn)
+        );
+        assert_eq!(solved[&target].proven_type(), None);
     }
 }

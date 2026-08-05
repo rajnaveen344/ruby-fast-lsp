@@ -256,15 +256,17 @@ enum TypeInferenceState {
 }
 
 impl TypeInferenceOutcome {
-    /// Construct a proven result. Passing `RubyType::Unknown` is an invariant
-    /// violation because it would erase the distinction this type enforces.
+    /// Construct a proven result. Passing `RubyType::Unknown` — exactly or as
+    /// a union member — is an invariant violation because it would erase the
+    /// distinction this type enforces: `RubyType::union` flattens unions and
+    /// absorbs `Unknown`, so a `Union` containing `Unknown` is not proof.
     pub fn proven(ruby_type: RubyType) -> Self {
         assert!(
-            ruby_type != RubyType::Unknown,
-            "INVARIANT VIOLATED: TypeInferenceOutcome::proven received RubyType::Unknown. \
-             This is a bug because a proven result must contain a concrete type and Unknown \
-             must retain a reason. Fix: construct TypeInferenceOutcome::unknown with the \
-             precise UnknownReason instead."
+            !RubyType::union_members_contain_unknown(&ruby_type),
+            "INVARIANT VIOLATED: TypeInferenceOutcome::proven received RubyType::Unknown (exactly \
+             or inside a union member). This is a bug because a proven result must contain a \
+             concrete type and Unknown must retain a reason. Fix: construct \
+             TypeInferenceOutcome::unknown with the precise UnknownReason instead."
         );
         Self {
             state: TypeInferenceState::Proven(ruby_type),
@@ -347,5 +349,16 @@ mod tests {
     )]
     fn unknown_cannot_be_constructed_as_proven() {
         let _ = TypeInferenceOutcome::proven(RubyType::Unknown);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "INVARIANT VIOLATED: TypeInferenceOutcome::proven received RubyType::Unknown"
+    )]
+    fn union_with_unknown_member_cannot_be_constructed_as_proven() {
+        let _ = TypeInferenceOutcome::proven(RubyType::Union(vec![
+            RubyType::Unknown,
+            RubyType::string(),
+        ]));
     }
 }

@@ -228,7 +228,13 @@ impl YardTypeConverter {
             }
         }
 
-        let ruby_type = if seen.len() == 1 {
+        // Proof-first union construction: an untyped/Unknown member absorbs
+        // the whole union. A `Union` containing `Unknown` would not equal the
+        // exact `RubyType::Unknown` variant, so consumers that only compare
+        // against that variant could mistake an unproven shape for proof.
+        let ruby_type = if seen.contains(&RubyType::Unknown) {
+            RubyType::Unknown
+        } else if seen.len() == 1 {
             seen.into_iter().next().unwrap()
         } else {
             RubyType::Union(seen)
@@ -403,6 +409,23 @@ mod tests {
             assert!(inner.contains(&RubyType::string()));
             assert!(inner.contains(&RubyType::nil_class()));
         }
+    }
+
+    #[test]
+    fn test_convert_multiple_unknown_member_absorbs_union() {
+        // A YARD return such as `[Array [Array, String]]` can parse into an
+        // untyped part beside a known part. Proof-first unions absorb Unknown:
+        // a Union containing Unknown must never be published as proof.
+        let types = vec!["Array [Array, String]".to_string(), "String".to_string()];
+        assert_eq!(
+            YardTypeConverter::convert_multiple(&types),
+            RubyType::Unknown
+        );
+        let types = vec!["Object".to_string(), "String".to_string()];
+        assert_eq!(
+            YardTypeConverter::convert_multiple(&types),
+            RubyType::Unknown
+        );
     }
 
     #[test]
