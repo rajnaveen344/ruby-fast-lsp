@@ -235,11 +235,26 @@ fn infer_variable_type(
 ) -> Option<RubyType> {
     match kind {
         VariableKind::Local => {
+            // Exact engine facts are the semantic authority after deferred
+            // cross-file equations resolve. The open document's VariableScopes
+            // snapshot may predate cold indexing, so it is only a fallback for
+            // local forms that do not publish an exact assignment fact yet.
+            if let Some(ty) = variable_type_from_analysis_facts(
+                kind,
+                name,
+                context,
+                name_start_offset,
+                name_end_offset,
+            )
+            .filter(|ty| *ty != RubyType::Unknown)
+            {
+                return Some(ty);
+            }
+
             let position = context
                 .document
                 .offset_to_position(name_end_offset as usize);
 
-            // Try VariableScopes tree
             if let Some(scope_id) = context.document.scope_at_position(position) {
                 if let Some(ty) = context
                     .document
@@ -250,14 +265,7 @@ fn infer_variable_type(
                     }
                 }
             }
-
-            variable_type_from_analysis_facts(
-                kind,
-                name,
-                context,
-                name_start_offset,
-                name_end_offset,
-            )
+            None
         }
         VariableKind::Instance
         | VariableKind::Class

@@ -1371,6 +1371,21 @@ impl RubyLanguageServer {
         }
     }
 
+    /// Refresh inlay hints only when this isolated project currently owns an
+    /// open document. The LSP refresh request is global, so closed projects in
+    /// an umbrella workspace must not each create redundant client work when
+    /// their cold indexing generation converges.
+    pub async fn refresh_inlay_hints_for_workspace(&self, workspace_root: &Path) {
+        let open_uris = self.docs.lock().keys().cloned().collect::<Vec<_>>();
+        let owns_open_document = open_uris.iter().any(|uri| {
+            self.workspace_for_uri(uri)
+                .is_some_and(|workspace| workspace.root_path == workspace_root)
+        });
+        if owns_open_document {
+            self.refresh_inlay_hints().await;
+        }
+    }
+
     pub async fn handle_namespace_tree_request(
         &self,
         params: NamespaceTreeParams,
@@ -2293,6 +2308,81 @@ mod runtime_status_tests {
             publication.take_pending_send().is_none(),
             "taking the pending snapshot must clear the sender schedule"
         );
+    }
+
+    #[tokio::test]
+    async fn semantic_convergence_refreshes_only_projects_with_open_documents() {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::{json, Value};
+        use tower::{Service, ServiceExt};
+        use tower_lsp::jsonrpc::{Request, Response};
+        use tower_lsp::LspService;
+
+        let (mut service, mut socket) = LspService::new(|client| {
+            RubyLanguageServer::new(client).expect("test language server must initialize")
+        });
+        let initialize = Request::build("initialize")
+            .params(json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .unwrap()
+            .expect("initialize must return a response");
+
+        let fixture = tempfile::tempdir().unwrap();
+        let open_project = fixture.path().join("open_project");
+        let closed_project = fixture.path().join("closed_project");
+        std::fs::create_dir_all(&open_project).unwrap();
+        std::fs::create_dir_all(&closed_project).unwrap();
+        let language_server = service.inner().clone();
+        language_server.add_workspace(Url::from_directory_path(&open_project).unwrap());
+        language_server.add_workspace(Url::from_directory_path(&closed_project).unwrap());
+        let open_uri = Url::from_file_path(open_project.join("consumer.rb")).unwrap();
+        language_server.docs.lock().insert(
+            open_uri.clone(),
+            Arc::new(RwLock::new(RubyDocument::new(
+                open_uri,
+                "value = Shared::LABEL\n".to_string(),
+                1,
+            ))),
+        );
+
+        language_server
+            .refresh_inlay_hints_for_workspace(&closed_project)
+            .await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), socket.next())
+                .await
+                .is_err(),
+            "a project with no open document must not issue a global inlay refresh"
+        );
+
+        let refresh_server = language_server.clone();
+        let open_project_for_refresh = open_project.clone();
+        let refresh = tokio::spawn(async move {
+            refresh_server
+                .refresh_inlay_hints_for_workspace(&open_project_for_refresh)
+                .await;
+        });
+        let request = tokio::time::timeout(Duration::from_secs(1), socket.next())
+            .await
+            .expect("an open project's semantic convergence must issue a refresh")
+            .expect("client socket must remain open");
+        assert_eq!(request.method(), "workspace/inlayHint/refresh");
+        let id = request
+            .id()
+            .cloned()
+            .expect("inlay refresh must be a request with an id");
+        socket
+            .send(Response::from_ok(id, Value::Null))
+            .await
+            .unwrap();
+        refresh.await.unwrap();
     }
 
     #[tokio::test]

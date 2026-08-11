@@ -44,6 +44,9 @@ impl FactCollector {
         full_location: &Location<'_>,
     ) {
         let (inferred_type, provenance) = self.assignment_type_and_provenance(value);
+        let dependency = self.constant_type_dependency(value);
+        let name_range = self.document.prism_location_to_text_range(name_location);
+        let full_range = self.document.prism_location_to_text_range(full_location);
         self.direct_push_type(
             TypeSubject::Constant(fqn.clone()),
             inferred_type.clone(),
@@ -51,11 +54,14 @@ impl FactCollector {
             provenance,
         );
         self.type_store.add(TypeFact::new(
-            TypeSubject::Constant(fqn),
+            TypeSubject::Constant(fqn.clone()),
             inferred_type,
-            self.document.prism_location_to_text_range(full_location),
+            full_range,
             provenance,
         ));
+        if let Some(dependency) = dependency {
+            self.push_constant_type_equation(TypeSubject::Constant(fqn), name_range, dependency);
+        }
     }
 
     fn record_constant_value_type_explicit(

@@ -1,11 +1,12 @@
 use crate::core::method_store::{MethodVisibility, MethodVisibilityOverrideFact};
 use crate::core::{
-    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ExecutionContextFact,
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact,
-    GraphNodeKind, InferenceEvidence, InferenceTelemetry, MethodAvailability, MethodFact,
-    MethodParamFact, MethodReturnEquation, NamespaceKind, ReferenceCandidate, RubyConstant,
-    RubyMethod, SymbolFact, SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance,
-    TypeStore, TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
+    ConstantTypeDependency, ConstantTypeEquation, ConstantTypeTarget, DiagnosticCandidate,
+    DiagnosticFact, DiagnosticSeverity, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact,
+    GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind, InferenceEvidence,
+    InferenceTelemetry, MethodAvailability, MethodFact, MethodParamFact, MethodReturnEquation,
+    NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, SymbolFact, SymbolKind, TextRange,
+    TypeFact, TypeInferenceOutcome, TypeProvenance, TypeStore, TypeSubject, UnknownReason,
+    UnresolvedGraphEdgeFact,
 };
 use crate::engine::{AnalysisEngine, AnalysisQueryCache, VariableTypeKind};
 use ruby_fast_lsp_extension_api::{IndexPatch, Receiver, ResolvedCall, SourceRange};
@@ -93,6 +94,7 @@ pub struct FactCollector {
     deferred_call_outcome_ranges: HashSet<TextRange>,
     local_read_types: Vec<(TextRange, RubyType)>,
     expression_unknown_reasons: Vec<(TextRange, UnknownReason)>,
+    constant_type_equations: Vec<ConstantTypeEquation>,
     local_method_candidates: Arc<HashSet<FullyQualifiedName>>,
     /// Same-pass method identities whose complete collected declaration set is
     /// currently public and available. `Arc::make_mut` keeps updates O(1) in
@@ -253,6 +255,7 @@ impl FactCollector {
             deferred_call_outcome_ranges: HashSet::new(),
             local_read_types: Vec::new(),
             expression_unknown_reasons: Vec::new(),
+            constant_type_equations: Vec::new(),
             local_method_candidates,
             local_public_method_candidates: Arc::new(HashSet::new()),
             direct_known_namespaces: HashSet::new(),
@@ -1801,6 +1804,59 @@ impl FactCollector {
         Some(FullyQualifiedName::constant(parts))
     }
 
+    pub(super) fn constant_type_dependency(
+        &self,
+        node: &Node<'_>,
+    ) -> Option<ConstantTypeDependency> {
+        if let Some(call) = node.as_call_node() {
+            if call.name().as_slice() == b"new" {
+                let receiver = call.receiver()?;
+                let reference = crate::mixin_ref_from_node(&receiver)?;
+                return Some(ConstantTypeDependency::constructor(
+                    reference.parts,
+                    reference.absolute,
+                    self.scope_tracker.get_ns_stack(),
+                ));
+            }
+        }
+        let reference = crate::mixin_ref_from_node(node)?;
+        Some(ConstantTypeDependency::new(
+            reference.parts,
+            reference.absolute,
+            self.scope_tracker.get_ns_stack(),
+        ))
+    }
+
+    pub(super) fn push_constant_type_equation(
+        &mut self,
+        subject: TypeSubject,
+        range: TextRange,
+        dependency: ConstantTypeDependency,
+    ) {
+        let equation = ConstantTypeEquation::dependency(
+            ConstantTypeTarget::Fact { subject, range },
+            dependency,
+        );
+        if !self.constant_type_equations.contains(&equation) {
+            self.constant_type_equations.push(equation);
+        }
+    }
+
+    pub(super) fn push_constant_local_assignment_equation(
+        &mut self,
+        name: String,
+        range: TextRange,
+        dependency: ConstantTypeDependency,
+    ) {
+        let equation = ConstantTypeEquation::dependency(
+            ConstantTypeTarget::LocalAssignment { name, range },
+            dependency,
+        );
+        if !self.constant_type_equations.contains(&equation) {
+            self.constant_type_equations.push(equation);
+        }
+    }
+
     fn const_get_reference_type(&self, call: &CallNode<'_>) -> Option<RubyType> {
         let parts = self.const_get_target_parts(call)?;
         let constant_fqn = FullyQualifiedName::constant(parts.clone());
@@ -2315,6 +2371,7 @@ impl FactCollector {
         InferenceEvidence {
             method_return_outcomes: self.method_return_outcomes.clone(),
             method_return_equations,
+            constant_type_equations: self.constant_type_equations.clone(),
             call_expression_outcomes,
             expression_unknown_reasons,
             telemetry: self.inference_telemetry(),

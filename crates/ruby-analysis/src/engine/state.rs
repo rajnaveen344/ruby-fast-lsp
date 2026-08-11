@@ -11,7 +11,8 @@ use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::method_return_equation::MethodReturnBase;
 use crate::core::method_store::StoredMethodFactMatch;
 use crate::core::{
-    ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateStore,
+    ConstLookup, ConstLookupId, ConstantPath, ConstantTypeDependency, ConstantTypeEquation,
+    ConstantTypeProjection, ConstantTypeTarget, DiagnosticCandidate, DiagnosticCandidateStore,
     DiagnosticFact, DiagnosticSeverity, DiagnosticStore, ExecutionContextFact, ExecutionScopeMode,
     FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact,
     GraphNodeKind, InferenceEvidence, InferenceTelemetry, MethodAvailability, MethodFact,
@@ -26,11 +27,63 @@ use crate::core::{
 };
 
 use crate::engine::AnalysisQuery;
+use crate::inference::constant::{
+    solve_constant_type_equations, ConstantFactInput, ResolvedConstantDependency,
+};
 use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
 use crate::method_store::MethodVisibility;
 use crate::FileIdMap;
 use indexmap::IndexSet;
 use parking_lot::Mutex;
+
+fn resolve_constant_dependency(
+    query: &AnalysisQuery<'_>,
+    dependency: &ConstantTypeDependency,
+) -> Option<ResolvedConstantDependency> {
+    let context = if dependency.absolute {
+        &[][..]
+    } else {
+        dependency.lexical_context.as_slice()
+    };
+    let resolved = query.resolve_constant_in_context(&dependency.parts, context)?;
+    let constant = FullyQualifiedName::constant(resolved.namespace_parts());
+    match dependency.projection() {
+        ConstantTypeProjection::Value => Some(ResolvedConstantDependency::Value(constant)),
+        ConstantTypeProjection::ConstructorInstance => {
+            if let Some(value_type) = query.constant_value_type(&constant) {
+                return match value_type {
+                    RubyType::ClassReference(target) => Some(
+                        ResolvedConstantDependency::Projected(RubyType::Class(target)),
+                    ),
+                    RubyType::Class(_)
+                    | RubyType::Module(_)
+                    | RubyType::ModuleReference(_)
+                    | RubyType::Array(_)
+                    | RubyType::Hash(_, _)
+                    | RubyType::Union(_)
+                    | RubyType::Unknown => None,
+                };
+            }
+            let namespace = FullyQualifiedName::namespace(constant.namespace_parts());
+            match query.namespace_node_kind(&namespace) {
+                Some(GraphNodeKind::Class) => Some(ResolvedConstantDependency::Projected(
+                    RubyType::Class(constant),
+                )),
+                Some(GraphNodeKind::Module) | None => None,
+            }
+        }
+    }
+}
+
+fn resolve_constant_dependency_type(
+    query: &AnalysisQuery<'_>,
+    dependency: &ConstantTypeDependency,
+) -> Option<RubyType> {
+    match resolve_constant_dependency(query, dependency)? {
+        ResolvedConstantDependency::Value(constant) => query.constant_value_type(&constant),
+        ResolvedConstantDependency::Projected(ruby_type) => Some(ruby_type),
+    }
+}
 
 pub(super) enum EffectiveMethodFactMatch {
     Missing,
@@ -1052,6 +1105,7 @@ pub struct AnalysisEngine {
     local_read_types_by_file:
         HashMap<SourceFileId, Box<[(TextRange, crate::core::type_store::RubyTypeId)]>>,
     method_return_equations_dirty: bool,
+    constant_type_equations_dirty: bool,
     method_return_solution_spans_files: bool,
     semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
     top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
@@ -1090,6 +1144,7 @@ impl Default for AnalysisEngine {
             call_expression_outcomes_by_file: HashMap::new(),
             local_read_types_by_file: HashMap::new(),
             method_return_equations_dirty: false,
+            constant_type_equations_dirty: false,
             method_return_solution_spans_files: false,
             semantic_export_fingerprints: HashMap::new(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
@@ -1114,6 +1169,7 @@ impl Clone for AnalysisEngine {
             call_expression_outcomes_by_file: self.call_expression_outcomes_by_file.clone(),
             local_read_types_by_file: self.local_read_types_by_file.clone(),
             method_return_equations_dirty: self.method_return_equations_dirty,
+            constant_type_equations_dirty: self.constant_type_equations_dirty,
             method_return_solution_spans_files: self.method_return_solution_spans_files,
             semantic_export_fingerprints: self.semantic_export_fingerprints.clone(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
@@ -1234,11 +1290,12 @@ impl AnalysisEngine {
 
     pub fn resolve(&mut self) {
         let mut stats = ResolvePassStats::default();
-        stats.method_return_equation_solve_runs =
-            usize::from(self.resolve_method_return_equations());
         let graph_retry_started = Instant::now();
         self.retry_unresolved_graph_edges();
         stats.graph_retry_ns = elapsed_ns(graph_retry_started);
+        self.resolve_constant_type_equations();
+        stats.method_return_equation_solve_runs =
+            usize::from(self.resolve_method_return_equations());
         self.resolve_reference_candidates(&mut stats);
         self.last_resolve_pass = stats;
     }
@@ -1271,8 +1328,9 @@ impl AnalysisEngine {
         if file_ids.is_empty() {
             return;
         }
-        self.resolve_method_return_equations();
         self.retry_unresolved_graph_edges();
+        self.resolve_constant_type_equations();
+        self.resolve_method_return_equations();
         for file_id in file_ids {
             self.resolve_reference_candidates_in_file(*file_id);
         }
@@ -1952,6 +2010,140 @@ impl AnalysisEngine {
                 .insert(file_id, local_read_types);
         }
         self.method_return_equations_dirty |= equations_changed;
+        self.constant_type_equations_dirty = self.inference_by_file.values().any(|evidence| {
+            !evidence.constant_type_equations.is_empty()
+                || evidence
+                    .method_return_equations
+                    .iter()
+                    .any(|equation| !equation.constant_dependencies().is_empty())
+        });
+    }
+
+    fn resolve_constant_type_equations(&mut self) -> bool {
+        if !self.constant_type_equations_dirty {
+            return false;
+        }
+        let mut equations = self
+            .inference_by_file
+            .values()
+            .flat_map(|evidence| evidence.constant_type_equations.iter().cloned())
+            .collect::<Vec<ConstantTypeEquation>>();
+        equations.sort();
+        equations.dedup();
+        if equations.is_empty() {
+            if self.inference_by_file.values().any(|evidence| {
+                evidence
+                    .method_return_equations
+                    .iter()
+                    .any(|equation| !equation.constant_dependencies().is_empty())
+            }) {
+                self.method_return_equations_dirty = true;
+            }
+            self.constant_type_equations_dirty = false;
+            return false;
+        }
+
+        let mut dependencies = equations
+            .iter()
+            .flat_map(|equation| equation.dependencies().iter().cloned())
+            .collect::<Vec<ConstantTypeDependency>>();
+        dependencies.extend(
+            self.inference_by_file
+                .values()
+                .flat_map(|evidence| evidence.method_return_equations.iter())
+                .flat_map(|equation| equation.constant_dependencies().iter().cloned()),
+        );
+        dependencies.sort();
+        dependencies.dedup();
+        let query = AnalysisQuery::new(self);
+        let resolved_dependencies = dependencies
+            .into_iter()
+            .map(|dependency| {
+                let resolved = resolve_constant_dependency(&query, &dependency);
+                (dependency, resolved)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let constant_facts = self
+            .facts
+            .types
+            .all_facts()
+            .into_iter()
+            .filter_map(|fact| {
+                let TypeSubject::Constant(constant) = &fact.subject else {
+                    return None;
+                };
+                Some(ConstantFactInput {
+                    constant: constant.clone(),
+                    target: ConstantTypeTarget::Fact {
+                        subject: fact.subject.clone(),
+                        range: fact.range,
+                    },
+                    ruby_type: fact.ruby_type,
+                    order: (
+                        fact.range.file_id.0,
+                        fact.range.start_byte,
+                        fact.range.end_byte,
+                    ),
+                })
+            })
+            .collect::<Vec<_>>();
+        let outcomes =
+            solve_constant_type_equations(&equations, &constant_facts, &resolved_dependencies);
+        for (target, ruby_type) in outcomes {
+            match target {
+                ConstantTypeTarget::Fact { subject, range } => {
+                    let updated = self
+                        .facts
+                        .types
+                        .update_equation_target(&subject, range, ruby_type);
+                    assert!(
+                        updated > 0,
+                        "INVARIANT VIOLATED: constant equation target {subject:?} has no matching type fact at {range:?}. This is a bug because equations and facts must be replaced atomically with their file. Fix: emit the equation from the same write path as its target TypeFact."
+                    );
+                }
+                ConstantTypeTarget::LocalAssignment { name, range } => {
+                    let updated = self
+                        .facts
+                        .types
+                        .update_local_assignment_equation_target(&name, range, ruby_type);
+                    assert!(
+                        updated > 0,
+                        "INVARIANT VIOLATED: local constructor equation target {name:?} has no matching assignment fact at {range:?}. This is a bug because the stable source assignment and its equation must be replaced atomically. Fix: emit the target fact and equation from the same local-write path."
+                    );
+                }
+                ConstantTypeTarget::LocalRead(range) => {
+                    self.update_constant_local_read(range, ruby_type);
+                }
+            }
+        }
+        if self.inference_by_file.values().any(|evidence| {
+            evidence
+                .method_return_equations
+                .iter()
+                .any(|equation| !equation.constant_dependencies().is_empty())
+        }) {
+            self.method_return_equations_dirty = true;
+        }
+        self.constant_type_equations_dirty = false;
+        true
+    }
+
+    fn update_constant_local_read(&mut self, range: TextRange, ruby_type: RubyType) {
+        let mut reads = self
+            .local_read_types_by_file
+            .remove(&range.file_id)
+            .unwrap_or_default()
+            .into_vec();
+        reads.retain(|(existing, _)| *existing != range);
+        if ruby_type != RubyType::Unknown {
+            let ruby_type = self.facts.types.intern_ruby_type(ruby_type);
+            reads.push((range, ruby_type));
+        }
+        reads.sort_unstable_by_key(|(range, _)| *range);
+        if !reads.is_empty() {
+            self.local_read_types_by_file
+                .insert(range.file_id, reads.into_boxed_slice());
+        }
     }
 
     /// Solve the complete project-owned method-return equation graph once per
@@ -1974,7 +2166,20 @@ impl AnalysisEngine {
             .collect::<Vec<_>>();
         file_ids.sort_unstable();
 
-        if file_ids.len() == 1 && !self.method_return_solution_spans_files {
+        let has_constant_dependencies = file_ids.iter().any(|file_id| {
+            self.inference_by_file
+                .get(file_id)
+                .expect(
+                    "INVARIANT VIOLATED: a selected method-equation file disappeared while checking constant dependencies. This is a bug because resolution owns the engine write lock. Fix: keep equation selection and dependency inspection in one immutable phase.",
+                )
+                .method_return_equations
+                .iter()
+                .any(|equation| !equation.constant_dependencies().is_empty())
+        });
+        if file_ids.len() == 1
+            && !self.method_return_solution_spans_files
+            && !has_constant_dependencies
+        {
             self.method_return_equations_dirty = false;
             return false;
         }
@@ -1989,7 +2194,14 @@ impl AnalysisEngine {
                     )
                     .method_return_equations
                     .iter()
-                    .cloned()
+                    .map(|equation| {
+                        let query = AnalysisQuery::new(self);
+                        equation.with_resolved_constant_types(
+                            equation.constant_dependencies().iter().map(|dependency| {
+                                resolve_constant_dependency_type(&query, dependency)
+                            }),
+                        )
+                    })
             })
             .collect::<Vec<_>>();
 

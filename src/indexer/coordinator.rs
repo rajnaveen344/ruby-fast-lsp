@@ -1327,6 +1327,19 @@ impl IndexingCoordinator {
         self.publish_unresolved_diagnostics(server).await?;
         let publish_dur = publish_start.elapsed();
 
+        // Open consumers may have been analyzed before a closed definition
+        // file supplied the value-constant equation that final resolution just
+        // solved. Their stored engine facts are now authoritative, but VS Code
+        // will not ask for inlay hints again without an explicit invalidation.
+        // Check the generation immediately before publishing that invalidation
+        // so a superseded cold-index run cannot refresh the client with stale
+        // semantic state.
+        self.indexing_checkpoint(server)?;
+        server
+            .refresh_inlay_hints_for_workspace(&self.workspace_root)
+            .await;
+        self.indexing_checkpoint(server)?;
+
         let total_dur = start_time.elapsed();
         info!("Complete indexing finished in {:?}", total_dur);
         let analysis_engine = self.analysis_engine(server);

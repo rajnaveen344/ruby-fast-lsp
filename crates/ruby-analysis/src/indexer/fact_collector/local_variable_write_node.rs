@@ -1,4 +1,6 @@
-use crate::core::{FullyQualifiedName, SymbolKind, TypeFact, TypeProvenance, TypeSubject};
+use crate::core::{
+    ConstantTypeProjection, FullyQualifiedName, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
+};
 use log::error;
 use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
@@ -27,6 +29,7 @@ impl FactCollector {
         } else {
             RubyType::Unknown
         };
+        let constant_dependency = value_node.and_then(|value| self.constant_type_dependency(value));
 
         // Validate the variable name
         if variable_name.is_empty() {
@@ -71,14 +74,20 @@ impl FactCollector {
         if let Ok(fqn) = FullyQualifiedName::local_variable(variable_name.clone()) {
             self.direct_push_variable_symbol(fqn, SymbolKind::LocalVariable, &name_loc);
         }
-        self.direct_push_assignment_type(
-            TypeSubject::Local {
-                scope_id: 0,
-                name: variable_name.clone(),
-            },
-            inferred_type.clone(),
-            &name_loc,
-        );
+        let root_subject = TypeSubject::Local {
+            scope_id: 0,
+            name: variable_name.clone(),
+        };
+        if inferred_type == RubyType::Unknown && constant_dependency.is_some() {
+            self.direct_facts.types.push(TypeFact::new(
+                root_subject.clone(),
+                RubyType::Unknown,
+                self.document.prism_location_to_text_range(&name_loc),
+                TypeProvenance::Assignment,
+            ));
+        } else {
+            self.direct_push_assignment_type(root_subject, inferred_type.clone(), &name_loc);
+        }
 
         self.document
             .variable_scopes_mut()
@@ -96,15 +105,38 @@ impl FactCollector {
                  This is a bug because ruby-analysis::core TypeSubject::Local stores u32 scope ids. \
                  Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
             );
+            let subject = TypeSubject::Local {
+                scope_id,
+                name: variable_name.clone(),
+            };
             self.type_store.add(TypeFact::new(
-                TypeSubject::Local {
-                    scope_id,
-                    name: variable_name.clone(),
-                },
+                subject.clone(),
                 inferred_type.clone(),
                 self.document.prism_location_to_text_range(&name_loc),
                 TypeProvenance::Assignment,
             ));
+            if let Some(dependency) = constant_dependency {
+                match dependency.projection() {
+                    ConstantTypeProjection::Value => {
+                        self.push_constant_type_equation(subject, location, dependency.clone());
+                        self.push_constant_type_equation(
+                            TypeSubject::Local {
+                                scope_id: 0,
+                                name: variable_name,
+                            },
+                            location,
+                            dependency,
+                        );
+                    }
+                    ConstantTypeProjection::ConstructorInstance => {
+                        self.push_constant_local_assignment_equation(
+                            variable_name,
+                            location,
+                            dependency,
+                        );
+                    }
+                }
+            }
         }
     }
 

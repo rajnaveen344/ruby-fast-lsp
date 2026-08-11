@@ -15,8 +15,8 @@ mod narrow;
 use crate::control_flow;
 use crate::core::method_return_equation::MethodReturnBase;
 use crate::core::{
-    FullyQualifiedName, MethodReturnEquation, NamespaceKind, RubyConstant, RubyMethod,
-    TypeInferenceOutcome, UnknownReason,
+    ConstantTypeDependency, FullyQualifiedName, MethodReturnEquation, NamespaceKind, RubyConstant,
+    RubyMethod, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::{AnalysisEngine, AnalysisQuery, AnalysisQueryCache};
 use crate::inference::method::recursive::MAX_RECURSIVE_RETURN_ITERATIONS;
@@ -25,6 +25,7 @@ use crate::r#type::ruby::RubyType;
 use parking_lot::RwLock;
 use ruby_prism::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 /// Private lattice value used while solving a recursive method return.
@@ -65,6 +66,57 @@ struct RescueEntryTypes {
     locals: HashMap<String, RubyType>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct FlowEnvironment {
+    types: HashMap<String, RubyType>,
+    constant_dependencies: HashMap<String, BTreeSet<ConstantTypeDependency>>,
+}
+
+impl FlowEnvironment {
+    fn insert(&mut self, name: String, ruby_type: RubyType) -> Option<RubyType> {
+        self.constant_dependencies.remove(&name);
+        self.types.insert(name, ruby_type)
+    }
+
+    fn clear(&mut self) {
+        self.types.clear();
+        self.constant_dependencies.clear();
+    }
+
+    fn set_constant_dependencies(
+        &mut self,
+        name: String,
+        dependencies: BTreeSet<ConstantTypeDependency>,
+    ) {
+        if dependencies.is_empty() {
+            self.constant_dependencies.remove(&name);
+        } else {
+            self.constant_dependencies.insert(name, dependencies);
+        }
+    }
+
+    fn dependencies(&self, name: &str) -> BTreeSet<ConstantTypeDependency> {
+        self.constant_dependencies
+            .get(name)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+impl Deref for FlowEnvironment {
+    type Target = HashMap<String, RubyType>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.types
+    }
+}
+
+impl DerefMut for FlowEnvironment {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.types
+    }
+}
+
 impl RescueEntryTypes {
     fn observe(&mut self, name: &str, ruby_type: &RubyType) {
         self.locals
@@ -75,10 +127,7 @@ impl RescueEntryTypes {
             .or_insert_with(|| ruby_type.clone());
     }
 
-    fn environment_from(
-        &self,
-        environment_before: &HashMap<String, RubyType>,
-    ) -> HashMap<String, RubyType> {
+    fn environment_from(&self, environment_before: &FlowEnvironment) -> FlowEnvironment {
         let mut environment = environment_before.clone();
         for (name, ruby_type) in &self.locals {
             environment.insert(name.clone(), ruby_type.clone());
@@ -98,6 +147,7 @@ pub(crate) struct LocalReadType {
     pub end_offset: usize,
     pub name: String,
     pub ruby_type: RubyType,
+    pub constant_dependencies: BTreeSet<ConstantTypeDependency>,
 }
 
 impl RecursiveReturnApproximation {
@@ -139,7 +189,7 @@ impl RecursiveReturnApproximation {
 /// cloning the environment for branches and merging at join points.
 pub struct TypeTracker<'a> {
     /// Current type environment (variable name → type)
-    vars: HashMap<String, RubyType>,
+    vars: FlowEnvironment,
 
     /// Explicit parameter contracts for the method being tracked. They seed
     /// the flow environment before the body is visited; a later assignment can
@@ -228,6 +278,10 @@ pub struct TypeTracker<'a> {
     /// Exact same-file calls observed as explicit or fallthrough return terms.
     observed_return_dependencies: BTreeSet<FullyQualifiedName>,
 
+    /// Value-constant terms returned by the current method. These stay
+    /// private until attached to the file-owned method equation.
+    observed_return_constant_dependencies: BTreeSet<ConstantTypeDependency>,
+
     /// Call locations whose result was proven directly from a modeled block or
     /// proc body. These are expression proofs, not dependencies on the
     /// ordinary return equation of the invoked method.
@@ -255,7 +309,7 @@ impl<'a> TypeTracker<'a> {
     /// Create a new type tracker for the given source.
     pub fn new(source: &'a [u8]) -> Self {
         Self {
-            vars: HashMap::new(),
+            vars: FlowEnvironment::default(),
             parameter_types: HashMap::new(),
             var_types: BTreeMap::new(),
             local_read_types: Vec::new(),
@@ -281,6 +335,7 @@ impl<'a> TypeTracker<'a> {
             recursive_return_approximation: None,
             local_method_candidates: Arc::new(HashSet::new()),
             observed_return_dependencies: BTreeSet::new(),
+            observed_return_constant_dependencies: BTreeSet::new(),
             direct_call_return_proofs: HashSet::new(),
             explicit_return_types: Vec::new(),
             saw_direct_recursive_call: false,
@@ -376,7 +431,7 @@ impl<'a> TypeTracker<'a> {
     fn record_state(&mut self, offset: usize) {
         // Only record if there are variables to track
         if !self.vars.is_empty() {
-            self.var_types.insert(offset, self.vars.clone());
+            self.var_types.insert(offset, self.vars.types.clone());
         }
     }
 
@@ -439,7 +494,9 @@ impl<'a> TypeTracker<'a> {
         let dependencies = std::mem::take(&mut self.observed_return_dependencies);
         self.local_method_candidates = Arc::new(HashSet::new());
 
+        let constant_dependencies = std::mem::take(&mut self.observed_return_constant_dependencies);
         MethodReturnEquation::new(method_fqn, base, dependencies)
+            .with_constant_dependencies(constant_dependencies)
     }
 
     fn track_method_once(
@@ -459,6 +516,7 @@ impl<'a> TypeTracker<'a> {
         self.local_return_terms.clear();
         self.explicit_return_types.clear();
         self.observed_return_dependencies.clear();
+        self.observed_return_constant_dependencies.clear();
         self.direct_call_return_proofs.clear();
         self.saw_direct_recursive_call = false;
         self.recursive_return_approximation = recursive_return_approximation;
@@ -487,6 +545,10 @@ impl<'a> TypeTracker<'a> {
         let fallthrough_term = method
             .body()
             .and_then(|body| self.return_term_dependency_for_node(&body));
+        let fallthrough_constant_dependencies = method
+            .body()
+            .map(|body| self.constant_dependencies_for_node(&body))
+            .unwrap_or_default();
         let fallthrough = match method.body() {
             Some(body) if control_flow::diverges(&body) => RecursiveReturnApproximation::Bottom,
             Some(_)
@@ -503,6 +565,15 @@ impl<'a> TypeTracker<'a> {
                 );
                 self.observed_return_dependencies.insert(dependency);
                 approximation
+            }
+            Some(_) if !fallthrough_constant_dependencies.is_empty() => {
+                self.observed_return_constant_dependencies
+                    .extend(fallthrough_constant_dependencies);
+                if fallthrough_type == RubyType::Unknown {
+                    RecursiveReturnApproximation::Bottom
+                } else {
+                    RecursiveReturnApproximation::from_ruby_type(fallthrough_type)
+                }
             }
             Some(_) if fallthrough_type == RubyType::Unknown => {
                 RecursiveReturnApproximation::Unknown
@@ -679,6 +750,7 @@ impl<'a> TypeTracker<'a> {
             .as_call_node()
             .is_some_and(|call| call_is_direct_recursive(&call, self.current_method.as_ref()));
         let var_type = self.track_node(&value);
+        let constant_dependencies = self.constant_dependencies_for_node(&value);
         let dependency = value
             .as_call_node()
             .and_then(|call| self.return_term_dependency_for_call(&call));
@@ -705,6 +777,8 @@ impl<'a> TypeTracker<'a> {
 
         // Update environment
         self.vars.insert(var_name.clone(), var_type.clone());
+        self.vars
+            .set_constant_dependencies(var_name.clone(), constant_dependencies);
         if !self.rescue_entry_types.is_empty() {
             self.observe_rescue_entry_type(&var_name, &var_type);
         }
@@ -806,7 +880,7 @@ impl<'a> TypeTracker<'a> {
         let env_before = self.vars.clone();
 
         // (env, type, diverges) per branch.
-        let mut branches: Vec<(HashMap<String, RubyType>, RubyType, bool)> = Vec::new();
+        let mut branches: Vec<(FlowEnvironment, RubyType, bool)> = Vec::new();
 
         for condition in case_node.conditions().iter() {
             if let Some(when_node) = condition.as_when_node() {
@@ -845,7 +919,7 @@ impl<'a> TypeTracker<'a> {
         }
 
         // Pick post-state from non-diverging branches only.
-        let surviving_envs: Vec<&HashMap<String, RubyType>> = branches
+        let surviving_envs: Vec<&FlowEnvironment> = branches
             .iter()
             .filter(|(_, _, d)| !*d)
             .map(|(env, _, _)| env)
@@ -874,7 +948,7 @@ impl<'a> TypeTracker<'a> {
         }
 
         let env_before = self.vars.clone();
-        let mut branches: Vec<(HashMap<String, RubyType>, RubyType, bool)> = Vec::new();
+        let mut branches: Vec<(FlowEnvironment, RubyType, bool)> = Vec::new();
 
         for condition in case_node.conditions().iter() {
             let Some(in_node) = condition.as_in_node() else {
@@ -923,7 +997,7 @@ impl<'a> TypeTracker<'a> {
             return RubyType::nil_class();
         }
 
-        let surviving_envs: Vec<&HashMap<String, RubyType>> = branches
+        let surviving_envs: Vec<&FlowEnvironment> = branches
             .iter()
             .filter(|(_, _, d)| !*d)
             .map(|(env, _, _)| env)
@@ -1331,11 +1405,13 @@ impl<'a> TypeTracker<'a> {
                 .unwrap_or(RubyType::Unknown);
             if self.record_local_read_types && self.has_seen_control_flow {
                 let location = read.location();
+                let constant_dependencies = self.vars.dependencies(&var_name);
                 self.local_read_types.push(LocalReadType {
                     start_offset: location.start_offset(),
                     end_offset: location.end_offset(),
                     name: var_name,
                     ruby_type: ruby_type.clone(),
+                    constant_dependencies,
                 });
             }
             return ruby_type;
@@ -1351,19 +1427,15 @@ impl<'a> TypeTracker<'a> {
             return self.infer_return(&ret);
         }
 
-        // Handle constant reads (class references)
-        if let Some(const_read) = node.as_constant_read_node() {
-            let const_name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
-            if let Ok(constant) = RubyConstant::new(&const_name) {
-                return RubyType::ClassReference(FullyQualifiedName::constant(vec![constant]));
+        // A Ruby constant can hold any value. Require an engine-owned value or
+        // namespace fact instead of turning unresolved syntax into a class.
+        // FactCollector's direct pass installs those facts before local-flow
+        // inference, so this also covers constants declared in the same file.
+        if let Some((parts, absolute)) = Self::constant_reference(node) {
+            if let Some(ruby_type) = self.constant_value_type(&parts, absolute) {
+                return ruby_type;
             }
-        }
-
-        // Handle constant path (namespaced constants like Foo::Bar)
-        if let Some(const_path) = node.as_constant_path_node() {
-            if let Some(fqn) = Self::resolve_constant_path(&const_path) {
-                return RubyType::ClassReference(fqn);
-            }
+            return RubyType::Unknown;
         }
 
         // Handle parenthesized expressions
@@ -1778,7 +1850,29 @@ impl<'a> TypeTracker<'a> {
                 self.observed_return_dependencies.insert(dependency);
                 approximation
             }
-            None => RecursiveReturnApproximation::from_ruby_type(return_type.clone()),
+            None => {
+                let constant_dependencies = ret
+                    .arguments()
+                    .and_then(|arguments| {
+                        let mut args = arguments.arguments().iter();
+                        let first = args.next()?;
+                        args.next()
+                            .is_none()
+                            .then(|| self.constant_dependencies_for_node(&first))
+                    })
+                    .unwrap_or_default();
+                if constant_dependencies.is_empty() {
+                    RecursiveReturnApproximation::from_ruby_type(return_type.clone())
+                } else {
+                    self.observed_return_constant_dependencies
+                        .extend(constant_dependencies);
+                    if return_type == RubyType::Unknown {
+                        RecursiveReturnApproximation::Bottom
+                    } else {
+                        RecursiveReturnApproximation::from_ruby_type(return_type.clone())
+                    }
+                }
+            }
         };
         self.explicit_return_types.push(approximation);
         return_type
@@ -1849,6 +1943,64 @@ impl<'a> TypeTracker<'a> {
         None
     }
 
+    fn constant_dependencies_for_node(&self, node: &Node<'_>) -> BTreeSet<ConstantTypeDependency> {
+        if let Some(statements) = node.as_statements_node() {
+            return statements
+                .body()
+                .iter()
+                .last()
+                .map(|last| self.constant_dependencies_for_node(&last))
+                .unwrap_or_default();
+        }
+        if let Some(parentheses) = node.as_parentheses_node() {
+            return parentheses
+                .body()
+                .map(|body| self.constant_dependencies_for_node(&body))
+                .unwrap_or_default();
+        }
+        if let Some(read) = node.as_local_variable_read_node() {
+            let name = String::from_utf8_lossy(read.name().as_slice());
+            return self.vars.dependencies(name.as_ref());
+        }
+        if let Some(write) = node.as_local_variable_write_node() {
+            let name = String::from_utf8_lossy(write.name().as_slice());
+            return self.vars.dependencies(name.as_ref());
+        }
+        if let Some(call) = node.as_call_node() {
+            if call.name().as_slice() == b"new" {
+                let Some(receiver) = call.receiver() else {
+                    return BTreeSet::new();
+                };
+                let Some((parts, absolute)) = Self::constant_reference(&receiver) else {
+                    return BTreeSet::new();
+                };
+                let lexical_context = self
+                    .current_class
+                    .as_ref()
+                    .map(FullyQualifiedName::namespace_parts)
+                    .unwrap_or_default();
+                return BTreeSet::from([ConstantTypeDependency::constructor(
+                    parts,
+                    absolute,
+                    lexical_context,
+                )]);
+            }
+        }
+        let Some((parts, absolute)) = Self::constant_reference(node) else {
+            return BTreeSet::new();
+        };
+        let lexical_context = self
+            .current_class
+            .as_ref()
+            .map(FullyQualifiedName::namespace_parts)
+            .unwrap_or_default();
+        BTreeSet::from([ConstantTypeDependency::new(
+            parts,
+            absolute,
+            lexical_context,
+        )])
+    }
+
     fn implicit_self_call_fqn(&self, call: &CallNode<'_>) -> Option<FullyQualifiedName> {
         if call
             .receiver()
@@ -1865,6 +2017,47 @@ impl<'a> TypeTracker<'a> {
                 .unwrap_or_default(),
             method,
         ))
+    }
+
+    fn constant_value_type(&self, parts: &[RubyConstant], absolute: bool) -> Option<RubyType> {
+        let analysis_engine = self.analysis_engine.as_ref()?;
+        let engine = analysis_engine.read();
+        let query = AnalysisQuery::new(&engine);
+        let constant = if absolute {
+            FullyQualifiedName::constant(parts.to_vec())
+        } else {
+            let lexical_context = self
+                .current_class
+                .as_ref()
+                .map(FullyQualifiedName::namespace_parts)
+                .unwrap_or_default();
+            let resolved = query.resolve_constant_in_context(parts, &lexical_context)?;
+            FullyQualifiedName::constant(resolved.namespace_parts())
+        };
+        query
+            .constant_value_type(&constant)
+            .or_else(|| query.constant_reference_type(constant.namespace_parts_slice()))
+    }
+
+    fn constant_reference(node: &Node<'_>) -> Option<(Vec<RubyConstant>, bool)> {
+        if let Some(constant_read) = node.as_constant_read_node() {
+            let name = String::from_utf8_lossy(constant_read.name().as_slice());
+            return Some((vec![RubyConstant::new(name.as_ref()).ok()?], false));
+        }
+
+        let constant_path = node.as_constant_path_node()?;
+        let fqn = Self::resolve_constant_path(&constant_path)?;
+        let absolute = Self::constant_path_is_absolute(&constant_path);
+        Some((fqn.namespace_parts(), absolute))
+    }
+
+    fn constant_path_is_absolute(constant_path: &ConstantPathNode<'_>) -> bool {
+        match constant_path.parent() {
+            None => true,
+            Some(parent) => parent
+                .as_constant_path_node()
+                .is_some_and(|parent| Self::constant_path_is_absolute(&parent)),
+        }
     }
 
     /// Resolve a constant path to an FQN (e.g., Foo::Bar::Baz)
@@ -1908,9 +2101,10 @@ impl<'a> TypeTracker<'a> {
     ///
     /// If `no_else_branch` is true, variables that only exist in one branch
     /// are assumed to be nil in the other branch.
-    fn merge_env(&mut self, other_env: &HashMap<String, RubyType>, no_else_branch: bool) {
+    fn merge_env(&mut self, other_env: &FlowEnvironment, no_else_branch: bool) {
+        let this_env = self.vars.clone();
         // For each variable in other environment
-        for (var, other_ty) in other_env {
+        for (var, other_ty) in &other_env.types {
             if let Some(this_ty) = self.vars.get(var) {
                 // Variable exists in both - create union if types differ
                 if this_ty != other_ty {
@@ -1936,7 +2130,7 @@ impl<'a> TypeTracker<'a> {
         if no_else_branch {
             // If there's no else branch, variables in then branch might be undefined
             // when the condition is false
-            for (var, this_ty) in self.vars.clone() {
+            for (var, this_ty) in self.vars.types.clone() {
                 if !other_env.contains_key(&var) {
                     let union = RubyType::union(vec![this_ty, RubyType::nil_class()]);
                     self.vars.insert(var, union);
@@ -1944,13 +2138,41 @@ impl<'a> TypeTracker<'a> {
             }
         } else {
             // Has else branch: variables in then but not else get nil union
-            for (var, this_ty) in self.vars.clone() {
+            for (var, this_ty) in self.vars.types.clone() {
                 if !other_env.contains_key(&var) {
                     let union = RubyType::union(vec![this_ty, RubyType::nil_class()]);
                     self.vars.insert(var, union);
                 }
             }
         }
+
+        let mut names = this_env
+            .types
+            .keys()
+            .chain(other_env.types.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut merged_dependencies = HashMap::new();
+        for name in std::mem::take(&mut names) {
+            let this_dependencies = this_env.dependencies(&name);
+            let other_dependencies = other_env.dependencies(&name);
+            // A dependency-only equation can represent this join only when
+            // every reachable branch contributes a constant term. A literal,
+            // parameter, unsupported Unknown, or implicit nil branch would
+            // require a concrete base term; drop the equation rather than
+            // publishing the known constant members as a partial union.
+            if this_dependencies.is_empty() || other_dependencies.is_empty() {
+                continue;
+            }
+            let dependencies = this_dependencies
+                .into_iter()
+                .chain(other_dependencies)
+                .collect::<BTreeSet<_>>();
+            if !dependencies.is_empty() {
+                merged_dependencies.insert(name, dependencies);
+            }
+        }
+        self.vars.constant_dependencies = merged_dependencies;
     }
 }
 
@@ -2099,8 +2321,8 @@ fn join_branch_types(branches: &[(RubyType, bool)]) -> RubyType {
 /// Do not use this for `case ... in`: an unmatched pattern case without an
 /// `else` raises `NoMatchingPatternError`, so its unmatched path diverges.
 fn push_unmatched_ordinary_case_path(
-    branches: &mut Vec<(HashMap<String, RubyType>, RubyType, bool)>,
-    env_before: &HashMap<String, RubyType>,
+    branches: &mut Vec<(FlowEnvironment, RubyType, bool)>,
+    env_before: &FlowEnvironment,
 ) {
     branches.push((env_before.clone(), RubyType::nil_class(), false));
 }

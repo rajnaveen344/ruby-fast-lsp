@@ -4,7 +4,9 @@
 //! the reason that a concrete type was withheld so non-LSP consumers can make
 //! the same decision and explain it without reimplementing inference policy.
 
-use crate::core::{FullyQualifiedName, MethodReturnEquation, RubyType, TextRange};
+use crate::core::{
+    ConstantTypeEquation, FullyQualifiedName, MethodReturnEquation, RubyType, TextRange,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
@@ -134,6 +136,10 @@ pub struct InferenceEvidence {
     /// Compact proof equations retained independently of Prism so the shared
     /// engine can solve recursive components spanning project files.
     pub method_return_equations: Vec<MethodReturnEquation>,
+    /// File-owned type equations whose terms contain lexical value-constant
+    /// lookups. The engine solves them after the complete namespace graph is
+    /// installed and before method-return equations consume their results.
+    pub constant_type_equations: Vec<ConstantTypeEquation>,
     /// Compact, file-owned results for complete call expressions. These are
     /// resolved from the same method candidates as navigation and diagnostics
     /// instead of duplicating method lookup in the AST visitor.
@@ -161,6 +167,7 @@ impl InferenceEvidence {
                 .iter()
                 .map(MethodReturnEquation::estimated_heap_bytes)
                 .sum::<usize>()
+            + self.constant_type_equations.capacity() * size_of::<ConstantTypeEquation>()
             + self.call_expression_outcomes.capacity()
                 * size_of::<(TextRange, TypeInferenceOutcome)>()
             + self

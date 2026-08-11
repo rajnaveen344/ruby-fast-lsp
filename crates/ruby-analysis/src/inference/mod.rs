@@ -20,7 +20,8 @@
 //!
 //! 1. [`crate::indexer`] performs the offset-preserving Prism traversal,
 //!    maintains lexical/execution scopes, and emits file-owned facts, call
-//!    candidates, local-flow evidence, and compact method-return equations.
+//!    candidates, local-flow evidence, and compact value-constant and
+//!    method-return equations.
 //! 2. This module derives expression, flow, method-return, block/proc, and RBS
 //!    types. It may ask semantic questions through domain query APIs, but it
 //!    does not own a workspace, parse files, or use editor protocol types.
@@ -67,7 +68,7 @@
 //! # Flow, calls, and recursion
 //!
 //! [`type_tracker`] owns forward lexical flow, joins, narrowing, block-local
-//! state, and method-body return equations. Source order and hard lexical
+//! state, value-constant dependency terms, and method-body return equations. Source order and hard lexical
 //! boundaries are semantic inputs: inference must not scan source text or
 //! borrow a later same-named assignment when scope evidence is absent.
 //!
@@ -153,6 +154,7 @@
 //!    path or retained-memory change with the release profiler.
 
 pub mod completion;
+pub(crate) mod constant;
 pub mod control_flow;
 pub mod method;
 pub mod rbs;

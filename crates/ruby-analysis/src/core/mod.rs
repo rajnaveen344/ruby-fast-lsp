@@ -4,6 +4,7 @@
 //! dependencies. It is the shared contract for future editor and agent
 //! consumers.
 
+pub mod constant_type_equation;
 pub mod diagnostic_candidate_store;
 pub mod diagnostic_store;
 pub mod execution_context;
@@ -25,6 +26,9 @@ pub mod symbol_store;
 pub mod type_inference_outcome;
 pub mod type_store;
 
+pub use constant_type_equation::{
+    ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
+};
 pub use diagnostic_candidate_store::{
     DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticCandidateStore, RaiseArgCandidate,
 };

@@ -2,6 +2,7 @@
 //!
 //! Tests the `: Type` hints shown after variable names.
 
+pub mod constant_values;
 pub mod constants;
 pub mod constructors;
 pub mod control_flow;

@@ -1,7 +1,7 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodAvailability, MethodParamFact,
-    MethodParamKind, MethodReturnEquation, NamespaceKind, RubyMethod, TextRange, TypeFact,
-    TypeProvenance, TypeSubject, UnknownReason,
+    ConstantTypeEquation, ConstantTypeTarget, FullyQualifiedName, GraphEdgeKind, GraphNodeKind,
+    MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, NamespaceKind,
+    RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
 };
 use crate::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use log::warn;
@@ -424,19 +424,21 @@ impl FactCollector {
         let scope_id = self.document.variable_scopes().current_scope().expect(
             "INVARIANT VIOLATED: TypeTracker local-read results have no active method scope. This is a bug because process_def_node_entry enters the scope before collecting its return equation. Fix: install flow evidence before exiting the definition.",
         );
-        let reads = reads
-            .into_iter()
-            .map(|read| {
-                (
-                    read.name,
-                    self.text_range_from_offsets(read.start_offset, read.end_offset),
-                    read.ruby_type,
-                )
-            })
-            .collect();
+        let mut installed_reads = Vec::with_capacity(reads.len());
+        for read in reads {
+            let range = self.text_range_from_offsets(read.start_offset, read.end_offset);
+            if !read.constant_dependencies.is_empty() {
+                self.constant_type_equations
+                    .push(ConstantTypeEquation::from_dependencies(
+                        ConstantTypeTarget::LocalRead(range),
+                        read.constant_dependencies,
+                    ));
+            }
+            installed_reads.push((read.name, range, read.ruby_type));
+        }
         self.document
             .variable_scopes_mut()
-            .install_flow_read_types(scope_id, reads);
+            .install_flow_read_types(scope_id, installed_reads);
     }
 
     fn validate_declared_return_type(

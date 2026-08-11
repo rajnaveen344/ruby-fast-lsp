@@ -8,7 +8,9 @@ use std::collections::BTreeSet;
 use std::mem::size_of;
 
 use super::memory_estimate::{fqn_heap_bytes, ruby_type_heap_bytes};
-use super::{FullyQualifiedName, RubyType, TypeInferenceOutcome, UnknownReason};
+use super::{
+    ConstantTypeDependency, FullyQualifiedName, RubyType, TypeInferenceOutcome, UnknownReason,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum MethodReturnBase {
@@ -26,6 +28,7 @@ pub struct MethodReturnEquation {
     method: FullyQualifiedName,
     base: MethodReturnBase,
     dependencies: BTreeSet<FullyQualifiedName>,
+    constant_dependencies: BTreeSet<ConstantTypeDependency>,
 }
 
 impl MethodReturnEquation {
@@ -38,7 +41,16 @@ impl MethodReturnEquation {
             method,
             base,
             dependencies,
+            constant_dependencies: BTreeSet::new(),
         }
+    }
+
+    pub(crate) fn with_constant_dependencies(
+        mut self,
+        dependencies: BTreeSet<ConstantTypeDependency>,
+    ) -> Self {
+        self.constant_dependencies = dependencies;
+        self
     }
 
     pub(crate) fn proven(method: FullyQualifiedName, ruby_type: RubyType) -> Self {
@@ -80,13 +92,63 @@ impl MethodReturnEquation {
         &self.dependencies
     }
 
+    pub fn constant_dependencies(&self) -> &BTreeSet<ConstantTypeDependency> {
+        &self.constant_dependencies
+    }
+
+    pub(crate) fn with_resolved_constant_types(
+        &self,
+        resolved: impl IntoIterator<Item = Option<RubyType>>,
+    ) -> Self {
+        if self.constant_dependencies.is_empty() {
+            return self.clone();
+        }
+        let mut members = Vec::new();
+        match &self.base {
+            MethodReturnBase::Bottom => {}
+            MethodReturnBase::Proven(ruby_type) => members.push(ruby_type.clone()),
+            MethodReturnBase::Unknown(reason) => {
+                let mut equation = self.clone();
+                equation.base = MethodReturnBase::Unknown(*reason);
+                equation.constant_dependencies.clear();
+                return equation;
+            }
+        }
+        for ruby_type in resolved {
+            let Some(ruby_type) = ruby_type else {
+                let mut equation = self.clone();
+                equation.base = MethodReturnBase::Unknown(UnknownReason::UnresolvedAssignmentValue);
+                equation.constant_dependencies.clear();
+                return equation;
+            };
+            if RubyType::union_members_contain_unknown(&ruby_type) {
+                let mut equation = self.clone();
+                equation.base = MethodReturnBase::Unknown(UnknownReason::UnresolvedAssignmentValue);
+                equation.constant_dependencies.clear();
+                return equation;
+            }
+            members.push(ruby_type);
+        }
+        let mut equation = self.clone();
+        equation.base = if members.is_empty() {
+            MethodReturnBase::Bottom
+        } else {
+            MethodReturnBase::Proven(RubyType::union(members))
+        };
+        equation.constant_dependencies.clear();
+        equation
+    }
+
     /// Project the equation before its complete dependency graph is solved.
     ///
     /// A dependency-free proven base is immediately safe to expose to later
     /// methods in the same traversal. Any dependency stays Unknown until an
     /// SCC solve has every participating equation.
     pub(crate) fn immediate_outcome(&self) -> TypeInferenceOutcome {
-        match (&self.base, self.dependencies.is_empty()) {
+        match (
+            &self.base,
+            self.dependencies.is_empty() && self.constant_dependencies.is_empty(),
+        ) {
             (MethodReturnBase::Proven(ruby_type), true) => {
                 TypeInferenceOutcome::proven(ruby_type.clone())
             }
@@ -106,5 +168,7 @@ impl MethodReturnEquation {
             }
             + self.dependencies.len() * (size_of::<FullyQualifiedName>() + 3 * size_of::<usize>())
             + self.dependencies.iter().map(fqn_heap_bytes).sum::<usize>()
+            + self.constant_dependencies.len()
+                * (size_of::<ConstantTypeDependency>() + 3 * size_of::<usize>())
     }
 }

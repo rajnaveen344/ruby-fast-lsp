@@ -447,7 +447,7 @@ The semantic path is intentionally one-way:
 
 ```text
 Prism traversal in ruby-analysis::indexer
-        -> file-owned facts, candidates, flow evidence, return equations
+        -> file-owned facts, candidates, flow evidence, constant/return equations
         -> engine graph and immutable query context
         -> bounded inference/recursive solve
         -> engine-owned solved outcomes and diagnostics
@@ -460,6 +460,27 @@ substitution, and bounded solving. The engine owns persistent project truth and
 the only method/MRO/visibility/ambiguity policy. A new feature must not bypass
 those boundaries by reparsing for one request, looking up methods locally, or
 storing a second result for one consumer.
+
+Value-constant reads retain compact lexical dependencies alongside their exact
+constant, assignment, local-read, and method-return targets. After the complete
+namespace graph is installed, the engine canonicalizes those lookups and runs
+a bounded deterministic fixed point before method-return solving. Transitive
+aliases and any number of consumer files therefore converge without rereading
+source or revisiting Prism; a base-free cycle remains Unknown.
+
+Constant constructor calls retain the same lexical dependency with an explicit
+constructor-instance projection. Final resolution performs Ruby constant
+lookup against the complete graph, requires the resolved namespace to be a
+class, and only then projects its canonical instance type. It never constructs
+a class identity by appending unresolved syntax to the current lexical scope.
+
+An unresolved constant read is never guessed to be a class object. A
+`Class<...>` or `Module<...>` result requires a corresponding namespace
+declaration in the engine; a value constant stays Unknown until its equation
+has a concrete proof. When final cold-index resolution supplies that proof for
+an already-open consumer, the generation-checked coordinator requests one LSP
+inlay refresh for that owning project. Projects with no open documents do not
+issue the protocol-wide refresh request.
 
 Inference queries accept `SourceFileId`, domain ranges, and UTF-8 byte offsets.
 Root LSP adapters convert UTF-16 positions through the current `RubyDocument`
