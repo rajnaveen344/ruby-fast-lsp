@@ -140,12 +140,32 @@ impl RubyType {
             RubyType::Union(members) => members.iter().any(|member| {
                 member == &RubyType::Unknown || Self::union_members_contain_unknown(member)
             }),
-            RubyType::Array(elements) => {
-                elements.iter().any(Self::nested_union_contains_unknown)
-            }
+            RubyType::Array(elements) => elements.iter().any(Self::nested_union_contains_unknown),
             RubyType::Hash(keys, values) => {
                 keys.iter().any(Self::nested_union_contains_unknown)
                     || values.iter().any(Self::nested_union_contains_unknown)
+            }
+            RubyType::Class(_)
+            | RubyType::Module(_)
+            | RubyType::ClassReference(_)
+            | RubyType::ModuleReference(_) => false,
+        }
+    }
+
+    /// True when any part of `ruby_type` is Unknown.
+    ///
+    /// This is intentionally stricter than `union_members_contain_unknown`:
+    /// diagnostics that compare two types require every nested type argument
+    /// to be proven. A known outer container such as `Array<?>` remains useful
+    /// inference, but it cannot prove a mismatch with `Array<String>`.
+    pub fn contains_unknown(ruby_type: &RubyType) -> bool {
+        match ruby_type {
+            RubyType::Unknown => true,
+            RubyType::Array(elements) | RubyType::Union(elements) => {
+                elements.iter().any(Self::contains_unknown)
+            }
+            RubyType::Hash(keys, values) => {
+                keys.iter().any(Self::contains_unknown) || values.iter().any(Self::contains_unknown)
             }
             RubyType::Class(_)
             | RubyType::Module(_)
@@ -160,9 +180,7 @@ impl RubyType {
             RubyType::Union(members) => members.iter().any(|member| {
                 member == &RubyType::Unknown || Self::nested_union_contains_unknown(member)
             }),
-            RubyType::Array(elements) => {
-                elements.iter().any(Self::nested_union_contains_unknown)
-            }
+            RubyType::Array(elements) => elements.iter().any(Self::nested_union_contains_unknown),
             RubyType::Hash(keys, values) => {
                 keys.iter().any(Self::nested_union_contains_unknown)
                     || values.iter().any(Self::nested_union_contains_unknown)
@@ -456,6 +474,23 @@ mod tests {
 
         let hash_type = RubyType::hash_of(RubyType::string(), RubyType::integer());
         assert_eq!(hash_type.to_string(), "Hash<String, Integer>");
+    }
+
+    #[test]
+    fn recursive_unknown_detection_distinguishes_inference_from_diagnostic_proof() {
+        let unknown_array = RubyType::Array(vec![RubyType::Unknown]);
+        let nested_unknown_hash = RubyType::Hash(
+            vec![RubyType::symbol()],
+            vec![RubyType::Array(vec![RubyType::Unknown])],
+        );
+
+        assert!(!RubyType::union_members_contain_unknown(&unknown_array));
+        assert!(RubyType::contains_unknown(&unknown_array));
+        assert!(RubyType::contains_unknown(&nested_unknown_hash));
+        assert!(!RubyType::contains_unknown(&RubyType::Array(vec![
+            RubyType::string(),
+            RubyType::integer(),
+        ])));
     }
 
     #[test]

@@ -230,7 +230,7 @@ impl<'a> Visitor<'a> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "constant" | "constant_name" => {
+                "constant" | "constant_name" | "const_name" => {
                     constant.name = self.node_text(&child).to_string();
                 }
                 _ => {

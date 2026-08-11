@@ -2,14 +2,13 @@
 
 use crate::core::{NamespaceKind, RubyConstant};
 use crate::indexer::{Identifier, IdentifierType, LVScopeId, MethodReceiver};
-use tower_lsp::lsp_types::Position;
 
 /// Represents a Ruby construct at the hover position.
 #[derive(Debug, Clone)]
 pub enum HoverTarget {
     LocalVariable {
         name: String,
-        position: Position,
+        byte_offset: u32,
         scope_id: LVScopeId,
     },
     Constant {
@@ -17,11 +16,12 @@ pub enum HoverTarget {
     },
     Method {
         name: String,
-        position: Position,
+        byte_offset: u32,
         receiver: MethodReceiver,
         namespace: Vec<RubyConstant>,
         namespace_kind: NamespaceKind,
         is_definition: bool,
+        has_call_result: bool,
     },
     InstanceVariable {
         name: String,
@@ -43,12 +43,12 @@ pub fn identifier_to_hover_target(
     namespace: Vec<RubyConstant>,
     namespace_kind: NamespaceKind,
     scope_id: LVScopeId,
-    position: Position,
+    byte_offset: u32,
 ) -> HoverTarget {
     match identifier {
         Identifier::RubyLocalVariable { name, .. } => HoverTarget::LocalVariable {
             name,
-            position,
+            byte_offset,
             scope_id,
         },
         Identifier::RubyConstant { iden, .. } => HoverTarget::Constant { path: iden },
@@ -58,6 +58,7 @@ pub fn identifier_to_hover_target(
             namespace: method_namespace,
         } => {
             let is_definition = identifier_type == Some(IdentifierType::MethodDef);
+            let has_call_result = identifier_type == Some(IdentifierType::MethodCall);
             let method_namespace_kind = if is_definition && receiver != MethodReceiver::None {
                 NamespaceKind::Singleton
             } else {
@@ -70,11 +71,12 @@ pub fn identifier_to_hover_target(
             };
             HoverTarget::Method {
                 name: iden.to_string(),
-                position,
+                byte_offset,
                 receiver,
                 namespace,
                 namespace_kind: method_namespace_kind,
                 is_definition,
+                has_call_result,
             }
         }
         Identifier::RubyInstanceVariable { name, .. } => HoverTarget::InstanceVariable { name },

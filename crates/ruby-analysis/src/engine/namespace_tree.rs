@@ -276,10 +276,9 @@ fn source_kind_library_section(kind: SourceKind) -> Option<LibrarySectionId> {
     match kind {
         SourceKind::Project => None,
         SourceKind::Gem => Some(LibrarySectionId::Gems),
-        SourceKind::Stub
-        | SourceKind::Stdlib
-        | SourceKind::External
-        | SourceKind::Signature => Some(LibrarySectionId::Runtime),
+        SourceKind::Stub | SourceKind::Stdlib | SourceKind::External | SourceKind::Signature => {
+            Some(LibrarySectionId::Runtime)
+        }
         SourceKind::Excluded => Some(LibrarySectionId::Excluded),
     }
 }
@@ -331,13 +330,13 @@ fn build_namespace_map_from_grouped_nodes(
             .filter_map(|node| analysis_location_info(engine, node.range))
             .collect::<Vec<_>>();
 
-        let superclass = analysis_edges_to_mixins(
-            engine,
-            &analysis_edges_from(engine, &fqn, GraphEdgeKind::Superclass),
-            show_external_mixins,
-        )
-        .into_iter()
-        .next();
+        let proven_superclass = engine
+            .proven_superclass_edge(&fqn)
+            .into_iter()
+            .collect::<Vec<_>>();
+        let superclass = analysis_edges_to_mixins(engine, &proven_superclass, show_external_mixins)
+            .into_iter()
+            .next();
         let includes = analysis_edges_to_mixins(
             engine,
             &analysis_edges_from(engine, &fqn, GraphEdgeKind::Include),
@@ -765,8 +764,7 @@ mod tests {
         });
         let as_string = engine.register_gem_file(
             SourceFileInput {
-                path: "/tmp/gems/activesupport-7.1.0/lib/active_support/core_ext/string.rb"
-                    .into(),
+                path: "/tmp/gems/activesupport-7.1.0/lib/active_support/core_ext/string.rb".into(),
                 content: "class String; def blank?; end; end".into(),
                 kind: SourceKind::Gem,
             },
@@ -832,11 +830,7 @@ mod tests {
             file_id,
             FileFacts {
                 graph_nodes: vec![
-                    GraphNodeFact::new(
-                        gosh,
-                        GraphNodeKind::Module,
-                        TextRange::new(file_id, 0, 8),
-                    ),
+                    GraphNodeFact::new(gosh, GraphNodeKind::Module, TextRange::new(file_id, 0, 8)),
                     GraphNodeFact::new(
                         platform,
                         GraphNodeKind::Module,

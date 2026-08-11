@@ -19,6 +19,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use super::analysis_location::{locations_for_ranges, non_empty_locations};
 use super::EngineQuery;
+use crate::utils::lsp::{lsp_text_location, source_position};
 
 impl EngineQuery {
     /// Find all references to the symbol at the given position.
@@ -30,7 +31,7 @@ impl EngineQuery {
     ) -> Option<Vec<Location>> {
         let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
-            analyzer.get_identifier(position);
+            analyzer.get_identifier_at_position(source_position(position));
 
         let identifier = identifier_opt?;
 
@@ -57,7 +58,7 @@ impl EngineQuery {
         let file_id = self.doc.as_ref()?.read().analysis_file_id();
         let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
-            analyzer.get_identifier(position);
+            analyzer.get_identifier_at_position(source_position(position));
         let identifier = identifier_opt?;
 
         self.find_document_highlights_for_identifier(
@@ -287,13 +288,13 @@ impl EngineQuery {
         let doc_arc = self.doc.as_ref()?;
         let document = doc_arc.read();
 
-        let byte_offset = document.position_to_analysis_offset(position);
+        let byte_offset = document.position_to_analysis_offset(source_position(position));
         let ranges = document.local_variable_reference_ranges_at(name, byte_offset);
         if !ranges.is_empty() {
             return Some(
                 ranges
                     .into_iter()
-                    .map(|range| document.text_range_to_lsp_location(range))
+                    .map(|range| lsp_text_location(&document, range))
                     .collect(),
             );
         }
@@ -308,7 +309,7 @@ impl EngineQuery {
         Some(
             ranges
                 .into_iter()
-                .map(|range| document.text_range_to_lsp_location(range))
+                .map(|range| lsp_text_location(&document, range))
                 .collect(),
         )
     }
@@ -654,7 +655,9 @@ impl EngineQuery {
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let targets = match mode {
-            MethodHighlightMode::AllTargets => query.method_reference_targets(namespace_fqn, method),
+            MethodHighlightMode::AllTargets => {
+                query.method_reference_targets(namespace_fqn, method)
+            }
             MethodHighlightMode::SuperOnly => query
                 .super_method_reference_target(namespace_fqn, method)
                 .into_iter()

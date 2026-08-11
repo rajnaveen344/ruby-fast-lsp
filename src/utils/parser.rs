@@ -1,18 +1,16 @@
 //! Shared utility functions for LSP capabilities
 
+use ruby_analysis::core::SourceFileId;
+use ruby_analysis::indexer::SourceDocument;
 use tower_lsp::lsp_types::Position;
 
 /// Convert LSP Position to byte offset in content
 pub fn position_to_offset(content: &str, position: Position) -> usize {
-    let mut offset = 0;
-    for (line_num, line) in content.lines().enumerate() {
-        if line_num == position.line as usize {
-            offset += position.character as usize;
-            break;
-        }
-        offset += line.len() + 1;
-    }
-    offset
+    SourceDocument::new(content, SourceFileId(0)).line_character_to_offset(
+        content,
+        position.line,
+        position.character,
+    )
 }
 
 /// Convert byte offset to 0-indexed line number

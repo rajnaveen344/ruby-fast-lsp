@@ -1,7 +1,6 @@
 use crate::core::{
-    FullyQualifiedName, MethodCallSignatureCandidate, MethodReferenceAccess,
-    MethodReferenceCandidate, MethodReferenceDiagnostics, ReferenceCandidate, RubyMethod, TypeFact,
-    TypeSubject,
+    FullyQualifiedName, MethodReferenceAccess, MethodReferenceCandidate,
+    MethodReferenceDiagnostics, ReferenceCandidate, RubyMethod, TypeFact, TypeSubject,
 };
 use ruby_prism::{AliasMethodNode, Node};
 
@@ -41,9 +40,11 @@ impl FactCollector {
                 diagnostics: MethodReferenceDiagnostics {
                     diagnostic_range: old_range,
                     receiver_label: None,
+                    receiver_expression_range: None,
+                    receiver_type: None,
                     diagnose_unresolved: false,
                     allow_unindexed_owner: false,
-                    signature: MethodCallSignatureCandidate::default(),
+                    signature: None,
                 },
             },
         ));

@@ -131,18 +131,20 @@ impl ProjectFactCollectorHost {
 }
 
 impl FactCollectorExtensionHost for ProjectFactCollectorHost {
-    fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode<'_>) {
+    fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode<'_>) -> bool {
         if let Some(provider) = &self.jruby_import_provider {
-            provider.process_call_node(visitor, node);
+            let _ = provider.process_call_node(visitor, node);
         }
         if self.extensions_enabled && self.extension_registry.tracks_call(node) {
-            self.extension_registry
+            return self
+                .extension_registry
                 .process_call_node_with_applicability(
                     visitor,
                     node,
                     self.extension_applicability(visitor.extension_project_context.as_ref()),
                 );
         }
+        false
     }
 
     fn should_track_enclosing_call(&self, visitor: &FactCollector, node: &CallNode<'_>) -> bool {
@@ -468,12 +470,16 @@ impl FileProcessor {
             self.fact_collector_host(extensions_enabled),
             analysis_engine.clone(),
         );
+        if source_kind.is_dependency_source() {
+            visitor = visitor.without_local_read_unknown_reasons();
+        }
         visitor.extension_project_context = extension_project_context.clone();
         visitor.visit(&node);
         let visitor_elapsed = visitor_start.elapsed();
 
         let extension_index_patches = visitor.extension_index_patches.clone();
         let updated_document = visitor.document.clone();
+        let local_read_types = visitor.local_read_type_evidence();
         let mut inference = visitor.inference_evidence();
         if !source_kind.contributes_project_diagnostics() {
             inference.method_return_outcomes.clear();
@@ -552,6 +558,7 @@ impl FileProcessor {
                 diagnostics: file_diagnostics,
                 execution_contexts: visitor.extension_execution_context_facts,
                 inference,
+                local_read_types,
             },
             resolution,
         );
@@ -1363,6 +1370,9 @@ impl FileProcessor {
             self.fact_collector_host(extensions_enabled),
             analysis_engine.clone(),
         );
+        if source_kind.is_dependency_source() {
+            fact_collector = fact_collector.without_local_read_unknown_reasons();
+        }
         fact_collector.extension_project_context = extension_project_context.clone();
         let shared_direct_known_namespaces = known_namespaces
             .unwrap_or_else(|| Arc::new(collect_known_namespaces(&analysis_engine)));
@@ -1378,6 +1388,7 @@ impl FileProcessor {
         let visitor_started = Instant::now();
         fact_collector.visit(&node);
         let visitor_elapsed = visitor_started.elapsed();
+        let local_read_types = fact_collector.local_read_type_evidence();
         let mut inference = fact_collector.inference_evidence();
         if !source_kind.contributes_project_diagnostics() {
             inference.method_return_outcomes.clear();
@@ -1439,6 +1450,7 @@ impl FileProcessor {
             diagnostics,
             execution_contexts: fact_collector.extension_execution_context_facts,
             inference,
+            local_read_types,
         };
         let assembly_elapsed = assembly_started.elapsed();
         let replacement_started = Instant::now();
@@ -1891,7 +1903,7 @@ fn replace_analysis_facts_for_file(
     let mut file_facts = file_analysis_facts_from_index(facts);
     if file_facts.inference == ruby_analysis::core::InferenceEvidence::default() {
         if let Some(previous) = analysis_engine.read().inference_evidence_in_file(file_id) {
-            file_facts.inference = previous.clone();
+            file_facts.inference = previous;
         }
     }
     replace_file_analysis(
@@ -1940,6 +1952,7 @@ pub(crate) fn file_analysis_facts_from_index(
         diagnostics: Vec::new(),
         execution_contexts: Vec::new(),
         inference: Default::default(),
+        local_read_types: Default::default(),
     }
 }
 
@@ -2918,11 +2931,11 @@ fn text_range_from_source_range(
     range: SourceRange,
     kind: &str,
 ) -> TextRange {
-    let start = tower_lsp::lsp_types::Position {
+    let start = ruby_analysis::core::SourcePosition {
         line: range.start.line,
         character: range.start.character,
     };
-    let end = tower_lsp::lsp_types::Position {
+    let end = ruby_analysis::core::SourcePosition {
         line: range.end.line,
         character: range.end.character,
     };

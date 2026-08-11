@@ -1,7 +1,6 @@
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
 use crate::indexer::{Identifier, MethodReceiver, RubyDocument};
 use crate::inference::RubyType;
-use tower_lsp::lsp_types::Position;
 
 pub trait CompletionSemanticQuery {
     fn constant_type_in_context(
@@ -50,7 +49,7 @@ pub fn receiver_type_from_context(
     query: &impl CompletionSemanticQuery,
     document: &RubyDocument,
     content: &str,
-    position: Position,
+    byte_offset: u32,
     namespace_kind: NamespaceKind,
     identifier: &Option<Identifier>,
 ) -> Option<RubyType> {
@@ -93,7 +92,7 @@ pub fn receiver_type_from_context(
             query,
             document,
             content,
-            position,
+            byte_offset,
             inner_receiver,
             namespace,
             namespace_kind,
@@ -137,7 +136,7 @@ pub fn receiver_type_from_context(
                 receiver,
                 namespace,
                 namespace_kind,
-                position,
+                byte_offset,
             ),
             MethodReceiver::None
             | MethodReceiver::SelfReceiver
@@ -153,13 +152,18 @@ pub fn receiver_type_from_context(
         }
     }
 
-    let line = content.lines().nth(position.line as usize)?;
-    let char_pos = position.character as usize;
-    let before_cursor = if char_pos <= line.len() {
-        &line[..char_pos]
-    } else {
-        line
-    };
+    let cursor_offset = usize::try_from(byte_offset).expect(
+        "INVARIANT VIOLATED: completion byte offset cannot fit usize. This is a bug because source buffers are indexed by usize. Fix: widen the completion offset representation together with source indexing.",
+    );
+    assert!(
+        cursor_offset <= content.len() && content.is_char_boundary(cursor_offset),
+        "INVARIANT VIOLATED: completion byte offset {cursor_offset} is not a valid UTF-8 boundary in a {}-byte source. This is a bug because the root adapter must convert the current LSP position through RubyDocument before querying inference. Fix: pass position_to_analysis_offset output for the same document generation.",
+        content.len(),
+    );
+    let line_start = content[..cursor_offset]
+        .rfind('\n')
+        .map_or(0, |newline| newline + 1);
+    let before_cursor = &content[line_start..cursor_offset];
 
     let dot_pos = before_cursor.rfind('.')?;
     let before_dot = before_cursor[..dot_pos].trim_end();
@@ -197,21 +201,35 @@ pub fn receiver_type_from_context(
     }
 
     if is_variable_name(receiver_text) {
-        let receiver_position = Position {
-            line: position.line,
-            character: (dot_pos - receiver_text.len()) as u32,
-        };
+        let receiver_start_in_line = before_dot.len().checked_sub(receiver_text.len()).expect(
+            "INVARIANT VIOLATED: completion receiver text is longer than the line prefix it was extracted from. This is a bug because receiver extraction must return a suffix of that prefix. Fix: keep receiver parsing and source-offset calculation coupled.",
+        );
+        let receiver_offset = line_start
+            .checked_add(receiver_start_in_line)
+            .and_then(|offset| u32::try_from(offset).ok())
+            .expect(
+                "INVARIANT VIOLATED: completion receiver offset overflowed its source coordinates. This is a bug because receiver text was sliced from the same bounded line prefix. Fix: keep receiver extraction and byte-offset calculation coupled.",
+            );
+        let file_id = document.analysis_file_id();
 
         if let Some(scope_id) = document
-            .find_scope_for_variable_at(receiver_text, receiver_position)
-            .or_else(|| document.scope_at_position(receiver_position))
+            .variable_scopes
+            .find_scope_for_variable_at(receiver_text, file_id, receiver_offset)
+            .or_else(|| {
+                document
+                    .variable_scopes
+                    .scope_at_position(file_id, receiver_offset)
+            })
         {
-            if let Some(ty) =
-                document.variable_type_at_position(receiver_text, scope_id, receiver_position)
-            {
-                if *ty != RubyType::Unknown {
-                    return Some(ty.clone());
-                }
+            match document.variable_scopes.get_type_at_position(
+                receiver_text,
+                scope_id,
+                file_id,
+                receiver_offset,
+            ) {
+                Some(RubyType::Unknown) => return None,
+                Some(ruby_type) => return Some(ruby_type.clone()),
+                None => {}
             }
         }
 
@@ -220,10 +238,7 @@ pub fn receiver_type_from_context(
         }
 
         if let Ok(method) = RubyMethod::new(receiver_text) {
-            let byte_offset = document.position_to_analysis_offset(receiver_position);
-            if let Some(owner) =
-                query.implicit_receiver_at(document.analysis_file_id(), byte_offset)
-            {
+            if let Some(owner) = query.implicit_receiver_at(file_id, receiver_offset) {
                 if let Some(return_type) = query.method_return_type_for_receiver(&owner, &method) {
                     return Some(return_type);
                 }
@@ -320,7 +335,7 @@ fn resolve_method_receiver_type(
     query: &impl CompletionSemanticQuery,
     document: &RubyDocument,
     content: &str,
-    position: Position,
+    byte_offset: u32,
     receiver: &MethodReceiver,
     current_namespace: &[RubyConstant],
     namespace_kind: NamespaceKind,
@@ -333,14 +348,25 @@ fn resolve_method_receiver_type(
                 Some(RubyType::ClassReference(fqn))
             }),
         MethodReceiver::LocalVariable(name) => {
+            let file_id = document.analysis_file_id();
             if let Some(scope_id) = document
-                .find_scope_for_variable_at(name, position)
-                .or_else(|| document.scope_at_position(position))
+                .variable_scopes
+                .find_scope_for_variable_at(name, file_id, byte_offset)
+                .or_else(|| {
+                    document
+                        .variable_scopes
+                        .scope_at_position(file_id, byte_offset)
+                })
             {
-                if let Some(ty) = document.variable_type_at_position(name, scope_id, position) {
-                    if *ty != RubyType::Unknown {
-                        return Some(ty.clone());
-                    }
+                match document.variable_scopes.get_type_at_position(
+                    name,
+                    scope_id,
+                    file_id,
+                    byte_offset,
+                ) {
+                    Some(RubyType::Unknown) => return None,
+                    Some(ruby_type) => return Some(ruby_type.clone()),
+                    None => {}
                 }
             }
             infer_constructor_assignment_type(content, name)
@@ -355,7 +381,7 @@ fn resolve_method_receiver_type(
             receiver,
             current_namespace,
             namespace_kind,
-            position,
+            byte_offset,
         ),
         MethodReceiver::MethodCall {
             inner_receiver,
@@ -365,7 +391,7 @@ fn resolve_method_receiver_type(
                 query,
                 document,
                 content,
-                position,
+                byte_offset,
                 inner_receiver,
                 current_namespace,
                 namespace_kind,
@@ -593,7 +619,7 @@ fn lookup_variable_type(
     receiver: &MethodReceiver,
     current_namespace: &[RubyConstant],
     namespace_kind: NamespaceKind,
-    position: Position,
+    byte_offset: u32,
 ) -> Option<RubyType> {
     let kind = match receiver {
         MethodReceiver::InstanceVariable(_) => CompletionVariableKind::Instance,
@@ -610,7 +636,6 @@ fn lookup_variable_type(
     };
 
     let file_id = document.analysis_file_id();
-    let byte_offset = document.position_to_analysis_offset(position);
     let owner = query
         .implicit_receiver_at(file_id, byte_offset)
         .unwrap_or_else(|| {

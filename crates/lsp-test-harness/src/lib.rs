@@ -242,9 +242,18 @@ impl FakeEditor {
                         retriggers += 1;
                         tokio::time::sleep(GOTO_DEFINITION_RETRIGGER_BACKOFF).await;
                     }
-                    Err(error) => panic!(
-                        "INVARIANT VIOLATED: goto_definition request failed after {retriggers} retriggers: {error:?}. This is a bug because FakeEditor accepts only the server's exact bounded retrigger contract during indexing. Fix: inspect the request error or make the indexing fixture reach a terminal stage."
-                    ),
+                    Err(error) => {
+                        let indexing_snapshots = self
+                            .server
+                            .workspaces
+                            .read()
+                            .iter()
+                            .map(|workspace| workspace.indexing_status.snapshot())
+                            .collect::<Vec<_>>();
+                        panic!(
+                            "INVARIANT VIOLATED: goto_definition request failed after {retriggers} retriggers: {error:?}; indexing snapshots: {indexing_snapshots:#?}. This is a bug because FakeEditor accepts only the server's exact bounded retrigger contract during indexing. Fix: inspect the request error and indexing failure, or make the fixture reach a terminal stage."
+                        )
+                    }
                 }
             }
         };

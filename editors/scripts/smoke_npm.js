@@ -50,8 +50,18 @@ const cfrLicense = path.join(
     'jruby-decompiler',
     'LICENSE-CFR'
 );
+const coreRuntimeConstants = path.join(
+    moduleRoot,
+    '@ruby-fast',
+    `lsp-${packageDir}`,
+    'core-rbs',
+    'constants.rbs'
+);
 if (!fs.existsSync(cfrJar) || !fs.existsSync(cfrLicense)) {
     throw new Error(`npm platform package is missing CFR or its license: ${cfrJar}`);
+}
+if (!fs.existsSync(coreRuntimeConstants)) {
+    throw new Error(`npm platform package is missing core runtime RBS: ${coreRuntimeConstants}`);
 }
 const cfrSha256 = crypto.createHash('sha256').update(fs.readFileSync(cfrJar)).digest('hex');
 if (cfrSha256 !== 'f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2') {

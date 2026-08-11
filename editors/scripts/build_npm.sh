@@ -50,6 +50,10 @@ for PLATFORM in $PLATFORMS; do
   cp "$ROOT_DIR/target/$TARGET/release/$BIN_NAME" "$NPM_DIR/$PLATFORM/bin/$BIN_NAME"
   rm -rf "$NPM_DIR/$PLATFORM/jruby-decompiler"
   cp -R "$ROOT_DIR/support/jruby/decompiler" "$NPM_DIR/$PLATFORM/jruby-decompiler"
+  rm -rf "$NPM_DIR/$PLATFORM/core-rbs"
+  mkdir -p "$NPM_DIR/$PLATFORM/core-rbs"
+  cp "$ROOT_DIR/crates/rbs-parser/rbs_types/core/constants.rbs" \
+    "$NPM_DIR/$PLATFORM/core-rbs/constants.rbs"
   CFR_SHA256=$(shasum -a 256 "$NPM_DIR/$PLATFORM/jruby-decompiler/cfr-0.152.jar" | awk '{print $1}')
   if [ "$CFR_SHA256" != "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2" ]; then
     echo "Bundled CFR checksum mismatch for $PLATFORM: $CFR_SHA256"

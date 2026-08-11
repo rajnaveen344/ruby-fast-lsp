@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-08",
+  "slice": "proof-first ordinary-case flow joins and concrete local-read evidence",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "profile_single_file_sha256": "41156b8d90838c7871495174d0b0cec029e12578be51296d1bd67a273dbc5250",
+      "profiler_sha256": "4f7c1b37db11d614a33629d5185190d8ef936f6ccea0885ca105bea16fa7b308"
+    },
+    "accepted_candidate": {
+      "profile_single_file_sha256": "5bc5b483d141d3e640ec11fbbeaaefde674b0e6c89a97bea65ea6654df46e363",
+      "profiler_sha256": "309fef1f435e1cf9036eb5504503f2c1d98f03a27e49b27c6301f7e21fff304d",
+      "tracked_code_diff_sha256_at_measurement": "8fa928503e0c0b19f29d0436ff55432e8001cc4b957fada9dabcc69db5bea2fc"
+    }
+  },
+  "inputs": {
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_pairs_per_run": 15,
+    "interactive_iterations_per_process": 500
+  },
+  "semantics": {
+    "baseline_fingerprint": "26048da84ae3a67f68351552c2829171",
+    "candidate_fingerprint": "26048da84ae3a67f68351552c2829171",
+    "ordinary_case_rule": "An ordinary case expression without else includes the unmatched nil result and the environment that entered the case. Pattern case/in remains a distinct semantic form.",
+    "local_read_rule": "Only concrete flow results are retained as local-read type evidence. Unknown remains reason evidence and a partial union with an unproven member remains Unknown."
+  },
+  "rejected_design": {
+    "shape": "store concrete local-read results beside Unknown reasons in every file's InferenceEvidence allocation",
+    "reason": "The always-present per-file storage increased the body-edit path by roughly four to five percent and added retained heap even for files with no flow-sensitive local reads.",
+    "observed_heap_increase_bytes": 5376,
+    "decision": "rejected and removed"
+  },
+  "accepted_design": {
+    "shape": "collect one range-sorted flow-read vector during the existing traversal and retain a separate engine map only for files whose concrete read evidence is nonempty",
+    "bounds": [
+      "recording begins only after control flow is encountered",
+      "loop revisits are deterministically deduplicated to the final result",
+      "immutable dependency sources skip this observability work",
+      "the engine rejects Unknown values in the concrete evidence store"
+    ],
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 119.907083,
+        "candidate": 121.024208,
+        "delta_percent": 0.93166
+      },
+      "parse": {
+        "baseline": 4.404875,
+        "candidate": 4.35775,
+        "delta_percent": -1.06984
+      },
+      "direct": {
+        "baseline": 5.648458,
+        "candidate": 5.627834,
+        "delta_percent": -0.36513
+      },
+      "visitor": {
+        "baseline": 95.2495,
+        "candidate": 96.114208,
+        "delta_percent": 0.90783
+      },
+      "replace_resolve": {
+        "baseline": 11.960792,
+        "candidate": 12.082209,
+        "delta_percent": 1.01513
+      },
+      "overall": {
+        "baseline": 120.482167,
+        "candidate": 121.600334,
+        "delta_percent": 0.92808
+      }
+    },
+    "interactive_repeat_1": {
+      "indexing_wall_ms": {
+        "baseline": 505.74775,
+        "candidate": 507.144958,
+        "delta_percent": 0.2763
+      },
+      "indexing_user_cpu_ms": {
+        "baseline": 240.156,
+        "candidate": 240.294,
+        "delta_percent": 0.05746
+      },
+      "peak_rss_bytes": {
+        "baseline": 90783744,
+        "candidate": 89587712,
+        "delta_percent": -1.31745
+      },
+      "engine_heap_bytes": {
+        "baseline": 6367645,
+        "candidate": 6367645,
+        "delta_percent": 0.0
+      },
+      "cold_wall_delta_percent": 0.35146,
+      "edit_p50_delta_percent": 1.35617,
+      "edit_p95_delta_percent": 1.70767,
+      "completion_p50_delta_percent": -0.34764,
+      "completion_p95_delta_percent": -1.06954,
+      "hover_p50_delta_percent": 0.72004,
+      "hover_p95_delta_percent": -0.95844,
+      "definition_p50_delta_percent": 0.0,
+      "definition_p95_delta_percent": -0.8262,
+      "references_p50_delta_percent": -1.3133,
+      "references_p95_delta_percent": -1.21493,
+      "diagnostics_p50_delta_percent": 1.82222,
+      "diagnostics_p95_delta_percent": -1.66802,
+      "fixed_budgets": "pass"
+    },
+    "interactive_repeat_2": {
+      "indexing_wall_ms": {
+        "baseline": 502.625708,
+        "candidate": 502.604334,
+        "delta_percent": -0.00425
+      },
+      "indexing_user_cpu_ms": {
+        "baseline": 239.204,
+        "candidate": 239.859,
+        "delta_percent": 0.27382
+      },
+      "peak_rss_bytes": {
+        "baseline": 90341376,
+        "candidate": 90357760,
+        "delta_percent": 0.01814
+      },
+      "engine_heap_bytes": {
+        "baseline": 6367645,
+        "candidate": 6367645,
+        "delta_percent": 0.0
+      },
+      "cold_wall_delta_percent": -0.61008,
+      "edit_p50_delta_percent": 1.61604,
+      "edit_p95_delta_percent": 2.2948,
+      "completion_p50_delta_percent": -0.52264,
+      "completion_p95_delta_percent": 2.31824,
+      "hover_p50_delta_percent": -0.35019,
+      "hover_p95_delta_percent": -2.14238,
+      "definition_p50_delta_percent": -0.7059,
+      "definition_p95_delta_percent": 0.82641,
+      "references_p50_delta_percent": -1.46008,
+      "references_p95_delta_percent": -1.86286,
+      "diagnostics_p50_delta_percent": 0.0,
+      "diagnostics_p95_delta_percent": 10.3434,
+      "diagnostics_candidate_p95_microseconds": 0.25,
+      "fixed_budgets": "pass"
+    },
+    "noise_note": "The second diagnostics p95 percentage is based on a 0.250 microsecond candidate observation on an unaffected path; the first repeat moved in the opposite direction. All affected medians and p95s stayed inside the fixed three-percent gate in both repeats, exact retained engine heap was unchanged, and every absolute production budget passed.",
+    "decision": "accepted as a bounded deterministic-flow slice"
+  }
+}

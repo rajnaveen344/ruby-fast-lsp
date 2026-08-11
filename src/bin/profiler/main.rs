@@ -13,7 +13,7 @@
 //!   samply record ./target/release/profiler [options]
 //!
 //!   # Memory profiling with dhat
-//!   cargo build --release --bin profiler --features memory-profiling
+//!   cargo build --release --bin profiler --no-default-features --features memory-profiling
 //!   ./target/release/profiler --memory [options]
 //!
 //! Options:
@@ -39,7 +39,7 @@
 
 mod sample_project;
 
-use log::{info, LevelFilter};
+use log::info;
 use ruby_analysis::core::{
     DiagnosticCandidate, DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
     MethodFact, ReferenceCandidate, ReferenceFact, SourceKind, StoredConstantReferenceCandidate,
@@ -71,6 +71,19 @@ use tower_lsp::lsp_types::{
 #[cfg(feature = "memory-profiling")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[cfg(all(
+    feature = "jemalloc",
+    not(feature = "memory-profiling"),
+    not(target_env = "msvc")
+))]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(all(feature = "jemalloc", feature = "memory-profiling"))]
+compile_error!(
+    "INVARIANT VIOLATED: jemalloc and memory-profiling select two global allocators. This is a build configuration bug because one binary may own only one global allocator. Fix: enable exactly one allocator feature."
+);
 
 #[derive(Debug, Clone, PartialEq)]
 enum Phase {
@@ -428,8 +441,8 @@ EXAMPLES:
     # Profile specific phase
     samply record ./target/release/profiler --phase infer /path/to/project
 
-    # Memory profiling (requires --features memory-profiling)
-    cargo build --release --bin profiler --features memory-profiling
+    # Memory profiling replaces the default jemalloc allocator with DHAT.
+    cargo build --release --bin profiler --no-default-features --features memory-profiling
     ./target/release/profiler --memory /path/to/project
 
     # Check deterministic built-in production budgets
@@ -453,12 +466,12 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Initialize logger
-    env_logger::Builder::new()
-        .filter_level(if config.benchmark_iterations.is_some() {
-            LevelFilter::Warn
-        } else {
-            LevelFilter::Info
-        })
+    let default_log_filter = if config.benchmark_iterations.is_some() {
+        "warn"
+    } else {
+        "info"
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_log_filter))
         .init();
 
     // Determine workspace path
@@ -688,6 +701,11 @@ fn print_semantic_export_manifest(server: &RubyLanguageServer) -> anyhow::Result
     workspaces.sort_by(|left, right| left.root_path.cmp(&right.root_path));
     for workspace in workspaces {
         let engine = workspace.analysis_engine.read();
+        let result_fingerprints = engine
+            .semantic_result_file_fingerprints()
+            .into_iter()
+            .collect::<std::collections::HashMap<_, _>>();
+        let resolution_fingerprints = engine.semantic_resolution_file_fingerprints();
         let mut files = engine
             .files()
             .map(|file| {
@@ -708,10 +726,27 @@ fn print_semantic_export_manifest(server: &RubyLanguageServer) -> anyhow::Result
                 let fingerprint = engine
                     .semantic_export_fingerprint(file.id)
                     .map(|fingerprint| stable_fingerprint_hex(fingerprint.stable_bytes()));
+                let result_fingerprint = result_fingerprints.get(&file.id).unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: semantic result manifest omitted registered file {}. This is a bug because result fingerprinting seeds one partition for every source. Fix: keep source registration and semantic result partitioning aligned.",
+                        file.path.display(),
+                    )
+                });
+                let [reference_fingerprint, context_fingerprint, local_read_fingerprint] =
+                    resolution_fingerprints.get(&file.id).copied().unwrap_or_else(|| {
+                        panic!(
+                            "INVARIANT VIOLATED: semantic resolution manifest omitted registered file {}. This is a bug because category fingerprinting seeds one partition for every source. Fix: keep source registration and semantic resolution partitioning aligned.",
+                            file.path.display(),
+                        )
+                    });
                 serde_json::json!({
                     "path": path,
                     "source_kind": format!("{:?}", file.kind),
                     "fingerprint_hex": fingerprint,
+                    "result_fingerprint_hex": stable_fingerprint_hex(result_fingerprint.stable_bytes()),
+                    "reference_fingerprint_hex": stable_fingerprint_hex(reference_fingerprint.stable_bytes()),
+                    "context_fingerprint_hex": stable_fingerprint_hex(context_fingerprint.stable_bytes()),
+                    "local_read_fingerprint_hex": stable_fingerprint_hex(local_read_fingerprint.stable_bytes()),
                 })
             })
             .collect::<Vec<_>>();
@@ -1430,6 +1465,18 @@ fn indexing_summary_json(
     let mut resolve_pass_method_namespace_exists_cache_entries = 0usize;
     let mut resolve_pass_method_suggestion_cache_entries = 0usize;
     let mut resolve_pass_incomplete_method_chain_cache_entries = 0usize;
+    let mut resolve_pass_deferred_receiver_candidates = 0usize;
+    let mut resolve_pass_deferred_receiver_proven = 0usize;
+    let mut resolve_pass_deferred_receiver_unknown = 0usize;
+    let mut resolve_pass_method_return_cache_hits = 0usize;
+    let mut resolve_pass_method_return_cache_misses = 0usize;
+    let mut resolve_pass_method_return_cache_entries = 0usize;
+    let mut resolve_pass_method_visibility_cache_hits = 0usize;
+    let mut resolve_pass_method_visibility_cache_misses = 0usize;
+    let mut resolve_pass_method_visibility_cache_entries = 0usize;
+    let mut resolve_pass_ambiguous_method_return_cache_hits = 0usize;
+    let mut resolve_pass_ambiguous_method_return_cache_misses = 0usize;
+    let mut resolve_pass_ambiguous_method_return_cache_entries = 0usize;
     let mut project_evidence = Vec::new();
     let status_by_root = server
         .indexing_status_snapshot()
@@ -1552,6 +1599,70 @@ fn indexing_summary_json(
                 .checked_add(resolve_pass.incomplete_method_chain_cache_entries)
                 .expect(
                     "INVARIANT VIOLATED: profiler aggregate incomplete-method-chain cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                );
+        resolve_pass_deferred_receiver_candidates = resolve_pass_deferred_receiver_candidates
+            .checked_add(resolve_pass.deferred_receiver_candidates)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate deferred-receiver candidates overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_deferred_receiver_proven = resolve_pass_deferred_receiver_proven
+            .checked_add(resolve_pass.deferred_receiver_proven)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate proven deferred receivers overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_deferred_receiver_unknown = resolve_pass_deferred_receiver_unknown
+            .checked_add(resolve_pass.deferred_receiver_unknown)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate Unknown deferred receivers overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_return_cache_hits = resolve_pass_method_return_cache_hits
+            .checked_add(resolve_pass.method_return_cache_hits)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-return cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_return_cache_misses = resolve_pass_method_return_cache_misses
+            .checked_add(resolve_pass.method_return_cache_misses)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-return cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_return_cache_entries = resolve_pass_method_return_cache_entries
+            .checked_add(resolve_pass.method_return_cache_entries)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-return cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_visibility_cache_hits = resolve_pass_method_visibility_cache_hits
+            .checked_add(resolve_pass.method_visibility_cache_hits)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-visibility cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_visibility_cache_misses = resolve_pass_method_visibility_cache_misses
+            .checked_add(resolve_pass.method_visibility_cache_misses)
+            .expect(
+                "INVARIANT VIOLATED: profiler aggregate method-visibility cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            );
+        resolve_pass_method_visibility_cache_entries =
+            resolve_pass_method_visibility_cache_entries
+                .checked_add(resolve_pass.method_visibility_cache_entries)
+                .expect(
+                    "INVARIANT VIOLATED: profiler aggregate method-visibility cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                );
+        resolve_pass_ambiguous_method_return_cache_hits =
+            resolve_pass_ambiguous_method_return_cache_hits
+                .checked_add(resolve_pass.ambiguous_method_return_cache_hits)
+                .expect(
+                    "INVARIANT VIOLATED: profiler aggregate ambiguous method-return cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                );
+        resolve_pass_ambiguous_method_return_cache_misses =
+            resolve_pass_ambiguous_method_return_cache_misses
+                .checked_add(resolve_pass.ambiguous_method_return_cache_misses)
+                .expect(
+                    "INVARIANT VIOLATED: profiler aggregate ambiguous method-return cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                );
+        resolve_pass_ambiguous_method_return_cache_entries =
+            resolve_pass_ambiguous_method_return_cache_entries
+                .checked_add(resolve_pass.ambiguous_method_return_cache_entries)
+                .expect(
+                    "INVARIANT VIOLATED: profiler aggregate ambiguous method-return cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
                 );
         estimated_engine_heap_bytes = estimated_engine_heap_bytes
             .checked_add(engine.estimated_memory_stats().total())
@@ -1735,7 +1846,19 @@ fn indexing_summary_json(
                 "method_lookup_chain_cache_entries": resolve_pass_method_lookup_chain_cache_entries,
                 "method_namespace_exists_cache_entries": resolve_pass_method_namespace_exists_cache_entries,
                 "method_suggestion_cache_entries": resolve_pass_method_suggestion_cache_entries,
-                "incomplete_method_chain_cache_entries": resolve_pass_incomplete_method_chain_cache_entries
+                "incomplete_method_chain_cache_entries": resolve_pass_incomplete_method_chain_cache_entries,
+                "deferred_receiver_candidates": resolve_pass_deferred_receiver_candidates,
+                "deferred_receiver_proven": resolve_pass_deferred_receiver_proven,
+                "deferred_receiver_unknown": resolve_pass_deferred_receiver_unknown,
+                "method_return_cache_hits": resolve_pass_method_return_cache_hits,
+                "method_return_cache_misses": resolve_pass_method_return_cache_misses,
+                "method_return_cache_entries": resolve_pass_method_return_cache_entries,
+                "method_visibility_cache_hits": resolve_pass_method_visibility_cache_hits,
+                "method_visibility_cache_misses": resolve_pass_method_visibility_cache_misses,
+                "method_visibility_cache_entries": resolve_pass_method_visibility_cache_entries,
+                "ambiguous_method_return_cache_hits": resolve_pass_ambiguous_method_return_cache_hits,
+                "ambiguous_method_return_cache_misses": resolve_pass_ambiguous_method_return_cache_misses,
+                "ambiguous_method_return_cache_entries": resolve_pass_ambiguous_method_return_cache_entries
             }
         },
         "process": resource_delta,
@@ -2442,6 +2565,24 @@ fn print_stats(server: &RubyLanguageServer) {
             resolve_pass.method_namespace_exists_cache_entries,
             resolve_pass.method_suggestion_cache_entries,
             resolve_pass.incomplete_method_chain_cache_entries
+        );
+        info!(
+            "Deferred call receivers: candidates={}, proven={}, unknown={}",
+            resolve_pass.deferred_receiver_candidates,
+            resolve_pass.deferred_receiver_proven,
+            resolve_pass.deferred_receiver_unknown
+        );
+        info!(
+            "Call outcome caches: return hits/misses/entries={}/{}/{}, visibility hits/misses/entries={}/{}/{}, ambiguous return hits/misses/entries={}/{}/{}",
+            resolve_pass.method_return_cache_hits,
+            resolve_pass.method_return_cache_misses,
+            resolve_pass.method_return_cache_entries,
+            resolve_pass.method_visibility_cache_hits,
+            resolve_pass.method_visibility_cache_misses,
+            resolve_pass.method_visibility_cache_entries,
+            resolve_pass.ambiguous_method_return_cache_hits,
+            resolve_pass.ambiguous_method_return_cache_misses,
+            resolve_pass.ambiguous_method_return_cache_entries
         );
         info!("Resolved references: {}", stats.references);
         info!("Type facts: {}", stats.types);

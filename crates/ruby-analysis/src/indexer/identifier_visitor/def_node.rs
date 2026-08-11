@@ -40,12 +40,6 @@ impl IdentifierVisitor {
             return;
         }
 
-        let _body_loc = utils::get_body_location(
-            node.body().map(|b| b.location()),
-            &node.location(),
-            &self.document,
-        );
-
         let method = method.unwrap();
         let scope_kind = match namespace_kind {
             NamespaceKind::Singleton => LVScopeKind::ClassMethod,
@@ -57,7 +51,7 @@ impl IdentifierVisitor {
                 definition_namespace.clone(),
                 method,
             )));
-        self.scope_tracker.push_execution_context(
+        self.scope_tracker.push_method_execution_context(
             definition_namespace.clone(),
             namespace_kind,
             definition_namespace.clone(),
@@ -92,13 +86,10 @@ impl IdentifierVisitor {
             return;
         }
 
-        let body_loc = utils::get_body_location(
-            node.body().map(|b| b.location()),
-            &node.location(),
-            &self.document,
-        );
+        let (body_start, body_end) =
+            utils::get_body_offsets(node.body().map(|body| body.location()), &node.location());
 
-        if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
+        if !self.is_position_in_offsets(body_start, body_end) {
             self.scope_tracker.pop_execution_context();
             self.scope_tracker.pop_scope_kind();
             self.scope_tracker.pop_method_fqn();

@@ -40,6 +40,7 @@ pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
 pub use ruby_analysis::inference::TypeQuery;
 pub use signature_help::{SignatureData, SignatureHelpData, SignatureParameterData};
 
+use crate::utils::lsp::source_position;
 use parking_lot::RwLock;
 use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::{RubyDocument, RubyPrismAnalyzer};
@@ -122,7 +123,7 @@ pub(crate) fn analyzer_for_document(
     engine: &Arc<RwLock<AnalysisEngine>>,
     position: Position,
 ) -> RubyPrismAnalyzer {
-    let byte_offset = document.position_to_analysis_offset(position);
+    let byte_offset = document.position_to_analysis_offset(source_position(position));
     let context = engine
         .read()
         .query()

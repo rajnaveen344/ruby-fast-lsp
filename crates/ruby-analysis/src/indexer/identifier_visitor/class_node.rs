@@ -45,12 +45,6 @@ impl IdentifierVisitor {
             return;
         }
 
-        let _body_loc = utils::get_body_location(
-            node.body().map(|b| b.location()),
-            &node.location(),
-            &self.document,
-        );
-
         // Add the class name to the namespace stack
         if self
             .scope_tracker
@@ -66,13 +60,10 @@ impl IdentifierVisitor {
             return;
         }
 
-        let body_loc = utils::get_body_location(
-            node.body().map(|b| b.location()),
-            &node.location(),
-            &self.document,
-        );
+        let (body_start, body_end) =
+            utils::get_body_offsets(node.body().map(|body| body.location()), &node.location());
 
-        if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
+        if !self.is_position_in_offsets(body_start, body_end) {
             self.scope_tracker.pop_ns_scope();
             self.scope_tracker.pop_scope_kind();
         }

@@ -7,9 +7,101 @@ use ruby_prism::{
 };
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use tower_lsp::lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
 
 use crate::RubyDocument;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SemanticTokenKind {
+    Namespace,
+    Type,
+    Class,
+    Enum,
+    Interface,
+    Struct,
+    TypeParameter,
+    Parameter,
+    Variable,
+    Property,
+    EnumMember,
+    Event,
+    Function,
+    Method,
+    Macro,
+    Keyword,
+    Modifier,
+    Comment,
+    String,
+    Number,
+    Regexp,
+    Operator,
+    Decorator,
+}
+
+impl SemanticTokenKind {
+    const NAMESPACE: Self = Self::Namespace;
+    const TYPE: Self = Self::Type;
+    const CLASS: Self = Self::Class;
+    const ENUM: Self = Self::Enum;
+    const INTERFACE: Self = Self::Interface;
+    const STRUCT: Self = Self::Struct;
+    const TYPE_PARAMETER: Self = Self::TypeParameter;
+    const PARAMETER: Self = Self::Parameter;
+    const VARIABLE: Self = Self::Variable;
+    const PROPERTY: Self = Self::Property;
+    const ENUM_MEMBER: Self = Self::EnumMember;
+    const EVENT: Self = Self::Event;
+    const FUNCTION: Self = Self::Function;
+    const METHOD: Self = Self::Method;
+    const MACRO: Self = Self::Macro;
+    const KEYWORD: Self = Self::Keyword;
+    const MODIFIER: Self = Self::Modifier;
+    const COMMENT: Self = Self::Comment;
+    const STRING: Self = Self::String;
+    const NUMBER: Self = Self::Number;
+    const REGEXP: Self = Self::Regexp;
+    const OPERATOR: Self = Self::Operator;
+    const DECORATOR: Self = Self::Decorator;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SemanticTokenModifierKind {
+    Declaration,
+    Definition,
+    Readonly,
+    Static,
+    Deprecated,
+    Abstract,
+    Async,
+    Modification,
+    Documentation,
+    DefaultLibrary,
+}
+
+impl SemanticTokenModifierKind {
+    const DECLARATION: Self = Self::Declaration;
+    const DEFINITION: Self = Self::Definition;
+    const READONLY: Self = Self::Readonly;
+    const STATIC: Self = Self::Static;
+    const DEPRECATED: Self = Self::Deprecated;
+    const ABSTRACT: Self = Self::Abstract;
+    const ASYNC: Self = Self::Async;
+    const MODIFICATION: Self = Self::Modification;
+    const DOCUMENTATION: Self = Self::Documentation;
+    const DEFAULT_LIBRARY: Self = Self::DefaultLibrary;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SemanticTokenData {
+    pub delta_line: u32,
+    pub delta_start: u32,
+    pub length: u32,
+    pub token_type: u32,
+    pub token_modifiers_bitset: u32,
+}
+
+use SemanticTokenData as SemanticToken;
+use SemanticTokenKind as SemanticTokenType;
+use SemanticTokenModifierKind as SemanticTokenModifier;
 
 pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
     SemanticTokenType::NAMESPACE,

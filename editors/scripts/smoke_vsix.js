@@ -55,6 +55,7 @@ for (const required of [
     path.join(extensionRoot, 'ruby_file_kinds.json'),
     path.join(extensionRoot, 'runtime_selector.js'),
     path.join(extensionRoot, 'configuration_state.js'),
+    path.join(extensionRoot, 'core-rbs', 'constants.rbs'),
     cfrJar,
     path.join(extensionRoot, 'jruby-decompiler', 'LICENSE-CFR'),
     path.join(extensionRoot, 'jruby-decompiler', 'README.md'),

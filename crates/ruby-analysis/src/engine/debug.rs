@@ -196,9 +196,9 @@ impl<'a> AnalysisQuery<'a> {
 
         for (fqn, kind) in &nodes_by_fqn {
             let outgoing = self.engine.graph_edges_from(fqn);
-            let superclass = outgoing
-                .iter()
-                .find(|edge| edge.kind == GraphEdgeKind::Superclass)
+            let superclass = self
+                .engine
+                .proven_superclass_edge(fqn)
                 .map(|edge| fqn_to_key(&edge.target));
             let includes = edge_targets(&outgoing, GraphEdgeKind::Include);
             let prepends = edge_targets(&outgoing, GraphEdgeKind::Prepend);

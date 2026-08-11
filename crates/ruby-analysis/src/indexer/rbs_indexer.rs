@@ -33,6 +33,13 @@ pub fn index_rbs(
                     GraphNodeKind::Class,
                     range,
                 ));
+                facts.graph_nodes.push(GraphNodeFact::new(
+                    namespace.to_singleton_namespace().expect(
+                        "INVARIANT VIOLATED: an RBS class namespace cannot produce its singleton namespace. This is a bug because RBS class declarations always use Namespace FQNs. Fix: validate declaration names before graph construction.",
+                    ),
+                    GraphNodeKind::Class,
+                    range,
+                ));
                 if let Some(superclass) = class.superclass.as_ref() {
                     push_unresolved_edge(
                         &mut facts,
@@ -66,6 +73,13 @@ pub fn index_rbs(
                 ));
                 facts.graph_nodes.push(GraphNodeFact::new(
                     namespace.clone(),
+                    GraphNodeKind::Module,
+                    range,
+                ));
+                facts.graph_nodes.push(GraphNodeFact::new(
+                    namespace.to_singleton_namespace().expect(
+                        "INVARIANT VIOLATED: an RBS module namespace cannot produce its singleton namespace. This is a bug because RBS module declarations always use Namespace FQNs. Fix: validate declaration names before graph construction.",
+                    ),
                     GraphNodeKind::Module,
                     range,
                 ));
@@ -465,7 +479,15 @@ mod tests {
     fn rbs_declarations_emit_navigation_signature_and_type_facts() {
         let source = "class NativeWidget\n  def initialize: (String name) -> void\n  def encode: (String value) -> String\nend\n";
         let facts = index_rbs(SourceFileId(7), source).expect("RBS fixture must parse");
-        assert_eq!(facts.graph_nodes.len(), 1);
+        assert_eq!(facts.graph_nodes.len(), 2);
+        assert!(facts.graph_nodes.iter().any(|fact| {
+            fact.fqn.namespace_kind() == Some(NamespaceKind::Instance)
+                && fact.kind == GraphNodeKind::Class
+        }));
+        assert!(facts.graph_nodes.iter().any(|fact| {
+            fact.fqn.namespace_kind() == Some(NamespaceKind::Singleton)
+                && fact.kind == GraphNodeKind::Class
+        }));
         assert_eq!(facts.methods.len(), 2);
         let constructor = facts
             .methods

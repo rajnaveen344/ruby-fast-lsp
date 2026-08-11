@@ -1,6 +1,6 @@
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
-    DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeKind,
+    DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeKind, GraphNodeKind,
     KeywordArgCandidate, MethodCallSignatureCandidate, MethodFact, MethodParamFact,
     MethodParamKind, MethodReferenceAccess, NamespaceKind, RaiseArgCandidate, ReferenceCandidate,
     RubyConstant, RubyMethod, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
@@ -32,7 +32,8 @@ enum ReceiverInfo {
 impl FactCollector {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
         let extension_host = self.extension_host.clone();
-        extension_host.process_call_node(self, node);
+        let extension_handled = extension_host.process_call_node(self, node);
+        self.extension_handled_call_marks.push(extension_handled);
 
         let track_call = extension_host.should_track_enclosing_call(self, node);
         self.extension_call_stack_marks.push(track_call);
@@ -42,12 +43,37 @@ impl FactCollector {
         }
 
         let direct_call_handled = self.process_direct_call_facts(node);
-        if !direct_call_handled {
+        if !direct_call_handled
+            && !extension_handled
+            && !node
+                .receiver()
+                .is_some_and(|receiver| receiver.as_call_node().is_some())
+        {
+            self.process_call_reference_candidate(node);
+        }
+    }
+
+    /// Collect a call-on-call reference after its receiver subtree has been
+    /// visited. Inner candidates then precede outer candidates during engine
+    /// resolution, and an inner call that already ended at terminal Unknown
+    /// does not force a retained candidate for every remaining chain segment.
+    pub fn process_nested_receiver_call_reference_candidate(&mut self, node: &CallNode) {
+        if node
+            .receiver()
+            .is_some_and(|receiver| receiver.as_call_node().is_some())
+            && !self.extension_handled_call_marks.last().copied().expect(
+                "INVARIANT VIOLATED: extension-handled call stack mark is missing while finishing a nested receiver call. This is a bug because every call entry pushes one mark before AST traversal. Fix: keep call entry/exit and nested-candidate collection balanced.",
+            )
+        {
             self.process_call_reference_candidate(node);
         }
     }
 
     fn process_direct_call_facts(&mut self, node: &CallNode) -> bool {
+        if node.receiver().is_none() && !self.scope_tracker.implicit_receiver_context_is_proven() {
+            return false;
+        }
+
         self.push_direct_included_hook_mixin_edges(node);
 
         if node.receiver().is_some() && node.name().as_slice() == b"class_attribute" {
@@ -210,7 +236,13 @@ impl FactCollector {
         } else {
             NamespaceKind::Instance
         };
-        self.direct_push_method_fact(namespace.clone(), owner_kind, method, range, Vec::new());
+        self.direct_push_method_fact_with_visibility(
+            namespace.clone(),
+            owner_kind,
+            method,
+            range,
+            self.scope_tracker.current_visibility(),
+        );
         self.push_direct_define_method_return_type(namespace, method, range, node);
     }
 
@@ -246,12 +278,12 @@ impl FactCollector {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        self.direct_push_method_fact(
+        self.direct_push_method_fact_with_visibility(
             namespace.clone(),
             NamespaceKind::Singleton,
             method,
             range,
-            Vec::new(),
+            self.scope_tracker.current_visibility(),
         );
         self.push_direct_define_method_return_type(namespace, method, range, node);
     }
@@ -290,7 +322,13 @@ impl FactCollector {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        self.direct_push_method_fact(namespace.clone(), owner_kind, method, range, Vec::new());
+        self.direct_push_method_fact_with_visibility(
+            namespace.clone(),
+            owner_kind,
+            method,
+            range,
+            self.scope_tracker.current_visibility(),
+        );
         self.push_direct_define_method_return_type(namespace, method, range, node);
     }
 
@@ -441,9 +479,11 @@ impl FactCollector {
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: old_range,
                         receiver_label: None,
+                        receiver_expression_range: None,
+                        receiver_type: None,
                         diagnose_unresolved: false,
                         allow_unindexed_owner: false,
-                        signature: crate::core::MethodCallSignatureCandidate::default(),
+                        signature: None,
                     },
                 },
             ));
@@ -452,7 +492,13 @@ impl FactCollector {
         let namespace = self.scope_tracker.get_ns_stack();
         let owner_kind = self.scope_tracker.current_macro_definition_context();
         let range = self.direct_range(&node.location());
-        self.direct_push_method_fact(namespace.clone(), owner_kind, new_method, range, Vec::new());
+        self.direct_push_method_fact_with_visibility(
+            namespace.clone(),
+            owner_kind,
+            new_method,
+            range,
+            self.scope_tracker.current_visibility(),
+        );
 
         let old_fqn = FullyQualifiedName::method(namespace.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
@@ -504,18 +550,16 @@ impl FactCollector {
                 crate::core::SymbolKind::Method,
                 range,
             ));
-            self.direct_facts
-                .methods
-                .push(MethodFact::with_delegate_receiver(
-                    fqn,
-                    owner,
-                    range,
-                    RubyMethod::new(&receiver_method).expect(
+            self.push_direct_method_fact(MethodFact::with_delegate_receiver(
+                fqn,
+                owner,
+                range,
+                RubyMethod::new(&receiver_method).expect(
                         "INVARIANT VIOLATED: delegate receiver method became invalid after validation. \
                          This is a bug because the same string was already accepted. \
                          Fix: keep delegate receiver validation single-sourced.",
-                    ),
-                ));
+                ),
+            ));
 
             let Some(receiver_type) = receiver_type.as_ref() else {
                 continue;
@@ -575,14 +619,12 @@ impl FactCollector {
                 crate::core::SymbolKind::Method,
                 range,
             ));
-            self.direct_facts
-                .methods
-                .push(MethodFact::with_delegate_receiver(
-                    fqn.clone(),
-                    owner,
-                    range,
-                    receiver_method,
-                ));
+            self.push_direct_method_fact(MethodFact::with_delegate_receiver(
+                fqn.clone(),
+                owner,
+                range,
+                receiver_method,
+            ));
 
             let (Some(receiver_type), Ok(target_method)) =
                 (receiver_type.as_ref(), RubyMethod::new(&target_name))
@@ -610,7 +652,12 @@ impl FactCollector {
         let Some(arguments) = node.arguments() else {
             return;
         };
-        let owner_kind = self.scope_tracker.current_method_context();
+        // `attr_*` executes on the current class/module object but defines
+        // methods in that lexical owner's macro-definition context. Treating
+        // the implicit receiver as the generated owner incorrectly made an
+        // ordinary class-body `attr_accessor` a singleton method during cold
+        // indexing, allowing a same-named included method to win dispatch.
+        let owner_kind = self.scope_tracker.current_macro_definition_context();
         for arg in arguments.arguments().iter() {
             let Some((name, range)) = direct_attr_name_and_range(self, &arg) else {
                 continue;
@@ -721,9 +768,7 @@ impl FactCollector {
                 .unwrap_or(fallback_range);
             let owner =
                 FullyQualifiedName::namespace_with_kind(namespace, NamespaceKind::Singleton);
-            self.direct_facts
-                .methods
-                .push(MethodFact::new(fqn, owner, range));
+            self.push_direct_method_fact(MethodFact::new(fqn, owner, range));
         }
     }
 
@@ -767,9 +812,6 @@ impl FactCollector {
     }
 
     fn process_call_reference_candidate(&mut self, node: &CallNode) {
-        self.push_const_lookup_reference_candidate(node);
-        self.push_reflected_method_reference_candidate(node);
-
         let static_send_target = static_send_target_name_and_range(self, node);
         let method_name = static_send_target
             .as_ref()
@@ -785,6 +827,21 @@ impl FactCollector {
             trace!("Skipping method call with invalid name: {}", method_name);
             return;
         }
+
+        let receiver_uses_implicit_self = node
+            .receiver()
+            .is_none_or(|receiver| receiver.as_self_node().is_some());
+        if receiver_uses_implicit_self && !self.scope_tracker.implicit_receiver_context_is_proven()
+        {
+            self.call_expression_outcomes.push((
+                call_range,
+                TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver),
+            ));
+            return;
+        }
+
+        self.push_const_lookup_reference_candidate(node);
+        self.push_reflected_method_reference_candidate(node);
 
         let message_range = static_send_target
             .as_ref()
@@ -828,9 +885,10 @@ impl FactCollector {
             .filter(|ruby_type| **ruby_type != RubyType::Unknown)
             .cloned()
             .or_else(|| match &receiver_info {
-                ReceiverInfo::ConstantReceiver(_)
-                | ReceiverInfo::NoReceiver
-                | ReceiverInfo::SelfReceiver
+                ReceiverInfo::ConstantReceiver(_) if !target_namespace.is_empty() => {
+                    self.proven_namespace_receiver_type(&target_namespace)
+                }
+                ReceiverInfo::NoReceiver | ReceiverInfo::SelfReceiver
                     if !target_namespace.is_empty() =>
                 {
                     let target = FullyQualifiedName::constant(target_namespace.clone());
@@ -845,19 +903,52 @@ impl FactCollector {
                 | ReceiverInfo::ExpressionReceiver
                 | ReceiverInfo::InvalidConstantPath => None,
             });
-        let immediate_outcome = if inference_failed {
+        let receiver_expression_range = matches!(
+            receiver_info,
+            ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath
+        )
+        .then(|| node.receiver())
+        .flatten()
+        .map(|receiver| self.direct_range(&receiver.location()));
+        // Every expression receiver is revalidated against the engine-owned
+        // solved expression at finalization. This includes locals and nonlocal
+        // reads, whose exhaustive flow result can invalidate a concrete type
+        // observed by the syntax-local collector.
+        let deferred_receiver_may_resolve = node.receiver().is_some_and(|receiver| {
+            if receiver.as_call_node().is_some() {
+                let range = self.direct_range(&receiver.location());
+                self.deferred_call_outcome_ranges.contains(&range)
+            } else {
+                receiver_type.is_some()
+            }
+        });
+        let access = method_reference_access(node, &receiver_info, static_send_target.is_some());
+        let immediate_outcome = if inference_failed && deferred_receiver_may_resolve {
+            None
+        } else if inference_failed {
             Some(TypeInferenceOutcome::unknown(
                 UnknownReason::UnknownReceiver,
             ))
-        } else if let Some(receiver_type) = receiver_type {
+        } else if let Some(receiver_type) = receiver_type.as_ref() {
             if method_name == "freeze" {
-                Some(TypeInferenceOutcome::proven(receiver_type))
+                Some(TypeInferenceOutcome::proven(receiver_type.clone()))
             } else {
-                let outcome = crate::inference::method::method_call_type_outcome(
+                let syntax_outcome = crate::inference::method::method_call_type_outcome(
                     None,
-                    &receiver_type,
+                    receiver_type,
                     method_name,
                 );
+                let outcome = if matches!(receiver_type, RubyType::Union(_))
+                    && syntax_outcome.unknown_reason() == Some(UnknownReason::IncompleteUnionMember)
+                {
+                    self.resolve_method_return_type_outcome_with_private(
+                        receiver_type,
+                        method_name,
+                        !matches!(access, MethodReferenceAccess::ExplicitReceiver),
+                    )
+                } else {
+                    syntax_outcome
+                };
                 match outcome.unknown_reason() {
                     None | Some(UnknownReason::IncompleteUnionMember) => Some(outcome),
                     Some(
@@ -873,7 +964,9 @@ impl FactCollector {
             }
         } else if matches!(
             receiver_info,
-            ReceiverInfo::NoReceiver | ReceiverInfo::SelfReceiver
+            ReceiverInfo::NoReceiver
+                | ReceiverInfo::SelfReceiver
+                | ReceiverInfo::ConstantReceiver(_)
         ) {
             None
         } else {
@@ -886,7 +979,7 @@ impl FactCollector {
             self.call_expression_outcomes.push((call_range, outcome));
         }
 
-        if !inference_failed {
+        if !inference_failed || deferred_receiver_may_resolve {
             let receiver_label = match (&receiver_info, inferred_expr_type.as_ref()) {
                 (ReceiverInfo::ConstantReceiver(name), _) => Some(name.clone()),
                 (
@@ -906,8 +999,6 @@ impl FactCollector {
             } else {
                 crate::core::MethodCallSignatureCandidate::default()
             };
-            let access =
-                method_reference_access(node, &receiver_info, static_send_target.is_some());
             let rbs_resolves_method = inferred_expr_type.as_ref().is_some_and(|ruby_type| {
                 rbs_method_exists_for_type(ruby_type, &method, namespace_kind)
             });
@@ -928,14 +1019,22 @@ impl FactCollector {
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: message_range,
                         receiver_label,
+                        receiver_expression_range,
+                        receiver_type: receiver_type.clone().map(Box::new),
                         diagnose_unresolved: self.diagnostics_enabled
                             && !rbs_resolves_method
                             && !matches!(receiver_info, ReceiverInfo::SelfReceiver),
                         allow_unindexed_owner: rbs_receiver_class_exists,
-                        signature,
+                        signature: Some(signature),
                     },
                 },
             ));
+            if defer_call_outcome {
+                assert!(
+                    self.deferred_call_outcome_ranges.insert(call_range),
+                    "INVARIANT VIOLATED: one call expression registered multiple deferred outcomes. This is a bug because one runtime call has exactly one method candidate. Fix: classify each CallNode once before retaining its deferred range."
+                );
+            }
         }
 
         if self.diagnostics_enabled && method_name == "raise" && node.receiver().is_none() {
@@ -1055,9 +1154,11 @@ impl FactCollector {
                 diagnostics: crate::core::MethodReferenceDiagnostics {
                     diagnostic_range: range,
                     receiver_label: None,
+                    receiver_expression_range: None,
+                    receiver_type: None,
                     diagnose_unresolved: false,
                     allow_unindexed_owner: false,
-                    signature: crate::core::MethodCallSignatureCandidate::default(),
+                    signature: None,
                 },
             },
         ));
@@ -1091,7 +1192,7 @@ impl FactCollector {
         } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
             if is_valid_constant_path_receiver(receiver_node) {
                 let receiver_name = build_constant_path_name(receiver_node);
-                let (ns, kind) = self.handle_constant_path_receiver(
+                let (ns, kind, inferred) = self.handle_constant_path_receiver(
                     &constant_path,
                     receiver_node,
                     current_namespace,
@@ -1100,7 +1201,7 @@ impl FactCollector {
                     ns,
                     kind,
                     ReceiverInfo::ConstantReceiver(receiver_name),
-                    None,
+                    inferred,
                 )
             } else {
                 let (ns, kind, inferred) =
@@ -1197,7 +1298,31 @@ impl FactCollector {
         _constant_path: &ruby_prism::ConstantPathNode,
         receiver_node: &Node,
         current_namespace: &[RubyConstant],
-    ) -> (Vec<RubyConstant>, NamespaceKind) {
+    ) -> (Vec<RubyConstant>, NamespaceKind, Option<RubyType>) {
+        if let Some(reference) = mixin_ref_from_node(receiver_node) {
+            let lexical_context = self.scope_tracker.get_ns_stack();
+            if let Some((_constant, ruby_type)) = self.resolve_constant_value_type_from(
+                &reference.parts,
+                reference.absolute,
+                &lexical_context,
+            ) {
+                if let Some(namespace) = self.type_to_namespace_parts(&ruby_type) {
+                    let kind = match ruby_type {
+                        RubyType::ClassReference(_) | RubyType::ModuleReference(_) => {
+                            NamespaceKind::Singleton
+                        }
+                        RubyType::Class(_)
+                        | RubyType::Module(_)
+                        | RubyType::Array(_)
+                        | RubyType::Hash(_, _)
+                        | RubyType::Union(_)
+                        | RubyType::Unknown => NamespaceKind::Instance,
+                    };
+                    return (namespace, kind, Some(ruby_type));
+                }
+            }
+        }
+
         if let Some(mixin_ref) = mixin_ref_from_node(receiver_node) {
             let context = if mixin_ref.absolute {
                 Vec::new()
@@ -1207,19 +1332,27 @@ impl FactCollector {
             if let Some(resolved_fqn) =
                 self.direct_resolve_namespace(&mixin_ref.parts, mixin_ref.absolute)
             {
-                return (resolved_fqn.namespace_parts(), NamespaceKind::Singleton);
+                return (
+                    resolved_fqn.namespace_parts(),
+                    NamespaceKind::Singleton,
+                    None,
+                );
             }
             if let Some(resolved_fqn) =
                 self.resolve_constant_from_analysis(&mixin_ref.parts, &context)
             {
-                return (resolved_fqn.namespace_parts(), NamespaceKind::Singleton);
+                return (
+                    resolved_fqn.namespace_parts(),
+                    NamespaceKind::Singleton,
+                    None,
+                );
             }
         }
 
         if let Some(mixin_ref) = mixin_ref_from_node(receiver_node) {
-            (mixin_ref.parts, NamespaceKind::Singleton)
+            (mixin_ref.parts, NamespaceKind::Singleton, None)
         } else {
-            (current_namespace.to_vec(), NamespaceKind::Instance)
+            (current_namespace.to_vec(), NamespaceKind::Instance, None)
         }
     }
 
@@ -1334,11 +1467,8 @@ impl FactCollector {
         if let Some(call) = receiver_node.as_call_node() {
             let inner_method = utf8_str(call.name().as_slice());
             let inner_type = if let Some(inner_receiver) = call.receiver() {
-                if let Some(constant_read) = inner_receiver.as_constant_read_node() {
-                    let name = utf8_str(constant_read.name().as_slice());
-                    Some(RubyType::ClassReference(FullyQualifiedName::constant(
-                        vec![RubyConstant::new(name).ok()?],
-                    )))
+                if mixin_ref_from_node(&inner_receiver).is_some() {
+                    self.infer_constant_receiver_type(&inner_receiver)
                 } else {
                     self.infer_expression_receiver_type(&inner_receiver)
                 }
@@ -1359,6 +1489,88 @@ impl FactCollector {
         }
 
         Some(self.infer_type_from_value(receiver_node)).filter(|ty| *ty != RubyType::Unknown)
+    }
+
+    fn infer_constant_receiver_type(&self, receiver_node: &Node) -> Option<RubyType> {
+        let reference = mixin_ref_from_node(receiver_node)?;
+        let lexical_context = self.scope_tracker.get_ns_stack();
+        if let Some((_constant, ruby_type)) = self.resolve_constant_value_type_from(
+            &reference.parts,
+            reference.absolute,
+            &lexical_context,
+        ) {
+            return Some(ruby_type);
+        }
+
+        let namespace = self
+            .direct_resolve_namespace_from(&reference.parts, reference.absolute, &lexical_context)
+            .or_else(|| {
+                let context = if reference.absolute {
+                    Vec::new()
+                } else {
+                    lexical_context
+                };
+                self.resolve_constant_from_analysis(&reference.parts, &context)
+            })?;
+        let namespace = FullyQualifiedName::namespace(namespace.namespace_parts());
+        let kind = self
+            .direct_facts
+            .graph_nodes
+            .iter()
+            .filter(|fact| fact.fqn == namespace)
+            .max_by_key(|fact| {
+                (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                )
+            })
+            .map(|fact| fact.kind)
+            .or_else(|| {
+                let engine = self.analysis_engine.read();
+                AnalysisQuery::new(&engine)
+                    .graph_nodes_for(&namespace)
+                    .into_iter()
+                    .max_by_key(|fact| {
+                        (
+                            fact.range.file_id,
+                            fact.range.start_byte,
+                            fact.range.end_byte,
+                        )
+                    })
+                    .map(|fact| fact.kind)
+            })?;
+        let constant = FullyQualifiedName::constant(namespace.namespace_parts());
+        Some(match kind {
+            GraphNodeKind::Class => RubyType::ClassReference(constant),
+            GraphNodeKind::Module => RubyType::ModuleReference(constant),
+        })
+    }
+
+    fn proven_namespace_receiver_type(&self, namespace_parts: &[RubyConstant]) -> Option<RubyType> {
+        let namespace = FullyQualifiedName::namespace(namespace_parts.to_vec());
+        let kind = self
+            .direct_facts
+            .graph_nodes
+            .iter()
+            .filter(|fact| fact.fqn == namespace)
+            .max_by_key(|fact| {
+                (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                )
+            })
+            .map(|fact| fact.kind)
+            .or_else(|| {
+                let engine = self.analysis_engine.read();
+                AnalysisQuery::new(&engine).namespace_node_kind(&namespace)
+            })?;
+        let constant = FullyQualifiedName::constant(namespace_parts.to_vec());
+        Some(match kind {
+            GraphNodeKind::Class => RubyType::ClassReference(constant),
+            GraphNodeKind::Module => RubyType::ModuleReference(constant),
+        })
     }
 
     fn type_to_namespace_parts(&self, ruby_type: &RubyType) -> Option<Vec<RubyConstant>> {
@@ -1390,12 +1602,24 @@ impl FactCollector {
         node: &CallNode,
         skip_positional_args: usize,
     ) -> MethodCallSignatureCandidate {
-        let mut signature = MethodCallSignatureCandidate::default();
         let Some(args) = node.arguments() else {
-            return signature;
+            return MethodCallSignatureCandidate::default();
         };
 
-        for (index, arg) in args.arguments().iter().enumerate() {
+        self.method_signature_candidate_from_arguments(
+            args.arguments().iter(),
+            skip_positional_args,
+        )
+    }
+
+    pub(super) fn method_signature_candidate_from_arguments<'prism>(
+        &self,
+        arguments: impl Iterator<Item = Node<'prism>>,
+        skip_positional_args: usize,
+    ) -> MethodCallSignatureCandidate {
+        let mut signature = MethodCallSignatureCandidate::default();
+
+        for (index, arg) in arguments.enumerate() {
             if index < skip_positional_args {
                 continue;
             }
@@ -1417,6 +1641,7 @@ impl FactCollector {
                     let Some(assoc) = elem.as_assoc_node() else {
                         continue;
                     };
+                    signature.has_nonempty_keyword_hash = true;
                     let Some(symbol) = assoc.key().as_symbol_node() else {
                         continue;
                     };
@@ -1438,6 +1663,8 @@ impl FactCollector {
                 continue;
             }
             signature.positional_count += 1;
+            signature.trailing_positional_may_be_options_hash =
+                positional_argument_may_be_options_hash(&arg);
         }
 
         signature
@@ -1473,27 +1700,23 @@ impl FactCollector {
                 .to_string();
             RaiseArgCandidate::Constant(last_segment)
         } else if let Some(local) = first_arg.as_local_variable_read_node() {
-            let var_name = utf8_str(local.name().as_slice());
-            let byte_offset = u32::try_from(first_arg.location().start_offset()).expect(
-                "INVARIANT VIOLATED: Prism location offset exceeded u32. \
-                 This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-                 Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
-            );
-            let file_id = self.document.analysis_file_id();
-            let scopes = self.document.variable_scopes();
-            let scope_id = scopes
-                .find_scope_for_variable_at(var_name, file_id, byte_offset)
-                .or_else(|| scopes.scope_at_position(file_id, byte_offset));
-            if let Some(scope_id) = scope_id {
-                if let Some(ty) =
-                    scopes.get_type_at_position(var_name, scope_id, file_id, byte_offset)
-                {
-                    RaiseArgCandidate::Type(ty.clone())
-                } else {
-                    RaiseArgCandidate::Unknown
-                }
+            if self.scope_tracker.current_method_fqn().is_some() {
+                RaiseArgCandidate::LocalRead(range)
             } else {
-                RaiseArgCandidate::Unknown
+                let var_name = utf8_str(local.name().as_slice());
+                let byte_offset = range.start_byte;
+                let file_id = self.document.analysis_file_id();
+                let scopes = self.document.variable_scopes();
+                let scope_id = scopes
+                    .find_scope_for_variable_at(var_name, file_id, byte_offset)
+                    .or_else(|| scopes.scope_at_position(file_id, byte_offset));
+                scope_id
+                    .and_then(|scope_id| {
+                        scopes.get_type_at_position(var_name, scope_id, file_id, byte_offset)
+                    })
+                    .cloned()
+                    .map(RaiseArgCandidate::Type)
+                    .unwrap_or(RaiseArgCandidate::Unknown)
             }
         } else if let Some(inner_call) = first_arg.as_call_node() {
             if inner_call.receiver().is_none() {
@@ -1520,7 +1743,7 @@ impl FactCollector {
 
     fn bad_splat_candidate(&self, entry: BadSplatCandidate) -> DiagnosticCandidate {
         DiagnosticCandidate::new(
-            self.text_range_from_lsp_range(entry.location.range, "bad splat"),
+            entry.location,
             DiagnosticCandidateKind::BadSplat {
                 operator: entry.operator,
                 arg_repr: entry.arg_repr,
@@ -1530,6 +1753,9 @@ impl FactCollector {
     }
 
     pub fn process_call_node_exit(&mut self, _node: &CallNode) {
+        self.extension_handled_call_marks.pop().expect(
+            "INVARIANT VIOLATED: extension-handled call stack mark underflow in FactCollector. This is a bug because every call-node entry must push exactly one handled mark. Fix: keep process_call_node_entry/process_call_node_exit balanced.",
+        );
         let tracked = self.extension_call_stack_marks.pop().expect(
             "INVARIANT VIOLATED: extension call stack mark underflow in FactCollector. \
              This is a bug because every call-node entry must push exactly one stack mark. \
@@ -1544,6 +1770,26 @@ impl FactCollector {
              Fix: keep process_call_node_entry/process_call_node_exit balanced.",
         );
     }
+}
+
+fn positional_argument_may_be_options_hash(arg: &Node<'_>) -> bool {
+    if arg.as_hash_node().is_some() {
+        return true;
+    }
+
+    // These literal forms are conclusively not Hash values. Every other
+    // expression remains a possible options hash until type inference proves
+    // otherwise; call-shape diagnostics must not guess its runtime value.
+    !(arg.as_string_node().is_some()
+        || arg.as_integer_node().is_some()
+        || arg.as_float_node().is_some()
+        || arg.as_array_node().is_some()
+        || arg.as_symbol_node().is_some()
+        || arg.as_true_node().is_some()
+        || arg.as_false_node().is_some()
+        || arg.as_nil_node().is_some()
+        || arg.as_range_node().is_some()
+        || arg.as_regular_expression_node().is_some())
 }
 
 fn is_valid_constant_path_receiver(node: &Node) -> bool {

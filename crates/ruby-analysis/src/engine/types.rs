@@ -2,10 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind, ResolvedMethodCallee,
-    RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange, TypeFact, TypeResolution,
-    TypeSubject, UnknownReason,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange, TypeFact, TypeInferenceOutcome,
+    TypeResolution, TypeSubject, UnknownReason,
 };
 use parking_lot::Mutex;
+
+use super::state::TypeInferenceOutcomeRef;
 
 const MAX_RESOLVED_METHOD_CACHE_ENTRIES_PER_SOURCE: usize = 64;
 
@@ -124,6 +126,58 @@ impl<'a> AnalysisQuery<'a> {
         self.engine.expression_unknown_reason(range)
     }
 
+    /// Return Unknown evidence owned by this exact expression range.
+    ///
+    /// Unlike `expression_unknown_reason_at`, this never inherits an Unknown
+    /// result from an enclosing call. Receiver consumers use it to avoid
+    /// treating an unknown call return as evidence that its proven receiver
+    /// was unknown.
+    pub fn exact_expression_unknown_reason(&self, range: TextRange) -> Option<UnknownReason> {
+        if let Some(reason) = self.expression_unknown_reason(range) {
+            return Some(reason);
+        }
+        match self.engine.call_expression_outcome_at(range) {
+            Some(TypeInferenceOutcomeRef::Unknown(reason)) => Some(reason),
+            Some(TypeInferenceOutcomeRef::Proven(_)) | None => None,
+        }
+    }
+
+    /// Return the type owned by one exact expression range.
+    ///
+    /// This query never borrows a narrower child or wider enclosing
+    /// expression. Deferred receiver resolution uses it so an enclosing call
+    /// result cannot be mistaken for the receiver's own type.
+    pub fn exact_expression_type(&self, range: TextRange) -> Option<RubyType> {
+        if let Some(outcome) = self.engine.call_expression_outcome_at(range) {
+            return Some(match outcome {
+                TypeInferenceOutcomeRef::Proven(ruby_type) => ruby_type.clone(),
+                TypeInferenceOutcomeRef::Unknown(_) => RubyType::Unknown,
+            });
+        }
+        match self.engine.type_store().type_at(
+            &TypeSubject::Expression(range),
+            range.file_id,
+            range.start_byte,
+        ) {
+            TypeResolution::Unresolved => None,
+            TypeResolution::Resolved(fact) => Some(fact.ruby_type),
+            TypeResolution::Ambiguous(facts) => {
+                let types = facts
+                    .into_iter()
+                    .map(|fact| fact.ruby_type)
+                    .collect::<Vec<_>>();
+                if types
+                    .iter()
+                    .any(|ruby_type| *ruby_type == RubyType::Unknown)
+                {
+                    Some(RubyType::Unknown)
+                } else {
+                    Some(RubyType::union(types))
+                }
+            }
+        }
+    }
+
     /// Return the reason for the most specific Unknown expression covering a
     /// source position. Proven expressions never inherit an enclosing reason.
     pub fn expression_unknown_reason_at(
@@ -131,7 +185,10 @@ impl<'a> AnalysisQuery<'a> {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> Option<UnknownReason> {
-        if self.expression_type_at(file_id, byte_offset) != Some(RubyType::Unknown) {
+        if self
+            .expression_type_at(file_id, byte_offset)
+            .is_some_and(|ruby_type| ruby_type != RubyType::Unknown)
+        {
             return None;
         }
 
@@ -139,22 +196,11 @@ impl<'a> AnalysisQuery<'a> {
             .engine
             .expression_unknown_reasons_in_file(file_id)
             .unwrap_or_default();
-        let call_outcomes = self
-            .engine
-            .call_expression_outcomes_in_file(file_id)
-            .unwrap_or_default();
         let mut best: Option<(u32, TextRange, UnknownReason)> = None;
         let mut ambiguous = false;
-        for (range, reason) in
-            reasons
-                .iter()
-                .copied()
-                .chain(call_outcomes.iter().filter_map(|(range, outcome)| {
-                    outcome.unknown_reason().map(|reason| (*range, reason))
-                }))
-        {
+        let mut consider = |range: TextRange, reason: UnknownReason| {
             if !range.contains_offset(file_id, byte_offset) {
-                continue;
+                return;
             }
             let span = range.end_byte.checked_sub(range.start_byte).expect(
                 "INVARIANT VIOLATED: an expression Unknown reason has an inverted range. This is a bug because TextRange producers must emit start <= end. Fix: validate the indexer range before recording proof evidence.",
@@ -173,12 +219,34 @@ impl<'a> AnalysisQuery<'a> {
                 }
                 Some(_) => {}
             }
+        };
+        for (range, reason) in reasons.iter().copied() {
+            consider(range, reason);
+        }
+        if let Some(outcomes) = self.engine.call_expression_outcome_views_in_file(file_id) {
+            for (range, outcome) in outcomes {
+                if let TypeInferenceOutcomeRef::Unknown(reason) = outcome {
+                    consider(range, reason);
+                }
+            }
         }
         if ambiguous {
             None
         } else {
             best.map(|(_, _, reason)| reason)
         }
+    }
+
+    /// Return compact file-owned Unknown evidence for non-call expressions.
+    ///
+    /// The evidence is range-sorted and contains at most one reason per exact
+    /// expression. It intentionally lives outside the general type store so
+    /// retaining an unproven read cannot increase graph replacement work.
+    pub fn expression_unknown_reasons_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<&[(TextRange, UnknownReason)]> {
+        self.engine.expression_unknown_reasons_in_file(file_id)
     }
 
     /// Return the exact expression fact covering a source position.
@@ -229,9 +297,22 @@ impl<'a> AnalysisQuery<'a> {
             };
             consider(range, fact.ruby_type);
         }
-        if let Some(outcomes) = self.engine.call_expression_outcomes_in_file(file_id) {
+        if let Some(outcomes) = self.engine.call_expression_outcome_views_in_file(file_id) {
             for (range, outcome) in outcomes {
-                consider(*range, outcome.clone().into_ruby_type());
+                let ruby_type = match outcome {
+                    TypeInferenceOutcomeRef::Proven(ruby_type) => ruby_type.clone(),
+                    TypeInferenceOutcomeRef::Unknown(_) => RubyType::Unknown,
+                };
+                consider(range, ruby_type);
+            }
+        }
+        // Local-variable hover asks the exact range-sorted local query first.
+        // Consult it here only when no ordinary expression or call outcome
+        // covers the position, keeping method-call hover on its established
+        // hot path while preserving the generic local-expression result.
+        if best_span.is_none() {
+            if let Some(ruby_type) = self.local_read_type_at(file_id, byte_offset) {
+                return Some(ruby_type);
             }
         }
 
@@ -247,8 +328,66 @@ impl<'a> AnalysisQuery<'a> {
     pub fn call_expression_outcomes_in_file(
         &self,
         file_id: SourceFileId,
-    ) -> Option<&[(TextRange, crate::core::TypeInferenceOutcome)]> {
+    ) -> Option<Vec<(TextRange, crate::core::TypeInferenceOutcome)>> {
         self.engine.call_expression_outcomes_in_file(file_id)
+    }
+
+    /// Return the proof result for the innermost complete call containing a
+    /// source position.
+    ///
+    /// Method hover uses this query instead of the generic expression query:
+    /// identifier-level facts may be more narrowly ranged than the complete
+    /// call, but they cannot supersede the call solver's final proof result.
+    pub fn call_expression_outcome_at_position(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<TypeInferenceOutcome> {
+        let outcomes = self.engine.call_expression_outcome_views_in_file(file_id)?;
+        let mut best: Option<(u32, TextRange, TypeInferenceOutcome)> = None;
+        for (range, outcome) in outcomes {
+            if !range.contains_offset(file_id, byte_offset) {
+                continue;
+            }
+            let span = range.end_byte.checked_sub(range.start_byte).expect(
+                "INVARIANT VIOLATED: a call-expression outcome has an inverted range. This is a bug because TextRange producers must emit start <= end. Fix: validate the call range before storing its proof outcome.",
+            );
+            let outcome = match outcome {
+                TypeInferenceOutcomeRef::Proven(ruby_type) => {
+                    TypeInferenceOutcome::proven(ruby_type.clone())
+                }
+                TypeInferenceOutcomeRef::Unknown(reason) => TypeInferenceOutcome::unknown(reason),
+            };
+            match &best {
+                None => best = Some((span, range, outcome)),
+                Some((best_span, _, _)) if span < *best_span => {
+                    best = Some((span, range, outcome));
+                }
+                Some((best_span, best_range, _)) if span == *best_span => {
+                    assert_eq!(
+                        range, *best_range,
+                        "INVARIANT VIOLATED: distinct equally specific call ranges overlap one source position. This is a bug because one syntax position cannot belong to two sibling complete calls with identical spans. Fix: emit one normalized call-expression range per AST call."
+                    );
+                }
+                Some(_) => {}
+            }
+        }
+        best.map(|(_, _, outcome)| outcome)
+    }
+
+    /// Return exact concrete local-read types solved by the shared flow
+    /// tracker. Entries are sorted by range and replaced with their file.
+    pub fn local_read_types_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<Vec<(TextRange, RubyType)>> {
+        self.engine.local_read_types_in_file(file_id)
+    }
+
+    pub fn local_read_type_at(&self, file_id: SourceFileId, byte_offset: u32) -> Option<RubyType> {
+        self.engine
+            .local_read_type_at(file_id, byte_offset)
+            .cloned()
     }
 
     /// Return the proven type of the most specific expression ending at the
@@ -261,13 +400,15 @@ impl<'a> AnalysisQuery<'a> {
         file_id: SourceFileId,
         end_byte: u32,
     ) -> Option<RubyType> {
-        let mut expression_facts = self
+        let mut expression_types = self
             .engine
             .type_store()
             .facts_in_file(file_id)
             .into_iter()
             .filter_map(|fact| match fact.subject {
-                TypeSubject::Expression(range) if range.end_byte == end_byte => Some(fact),
+                TypeSubject::Expression(range) if range.end_byte == end_byte => {
+                    Some((range, fact.ruby_type))
+                }
                 TypeSubject::Constant(_)
                 | TypeSubject::Local { .. }
                 | TypeSubject::InstanceVariable { .. }
@@ -278,12 +419,20 @@ impl<'a> AnalysisQuery<'a> {
                 | TypeSubject::Expression(_) => None,
             })
             .collect::<Vec<_>>();
-        let most_specific_start = expression_facts
+        if let Some(reads) = self.engine.local_read_types_in_file(file_id) {
+            expression_types.extend(
+                reads
+                    .iter()
+                    .filter(|(range, _)| range.end_byte == end_byte)
+                    .cloned(),
+            );
+        }
+        let most_specific_start = expression_types
             .iter()
-            .map(|fact| fact.range.start_byte)
+            .map(|(range, _)| range.start_byte)
             .max()?;
-        expression_facts.retain(|fact| fact.range.start_byte == most_specific_start);
-        RubyType::union_from_proven(expression_facts, |fact| Some(fact.ruby_type))
+        expression_types.retain(|(range, _)| range.start_byte == most_specific_start);
+        RubyType::union_from_proven(expression_types, |(_, ruby_type)| Some(ruby_type))
     }
 
     pub fn method_return_type_at(

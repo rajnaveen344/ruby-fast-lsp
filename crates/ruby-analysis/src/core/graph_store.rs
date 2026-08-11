@@ -21,6 +21,19 @@ pub enum GraphEdgeKind {
     ExecutionContextApplication,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum GraphEdgeProvenance {
+    Explicit,
+    ImplicitObject,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoredSuperclassResolution {
+    Missing,
+    Unique(StoredGraphEdgeFact),
+    Ambiguous,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphNodeFact {
     pub fqn: FullyQualifiedName,
@@ -39,6 +52,7 @@ pub struct GraphEdgeFact {
     pub source: FullyQualifiedName,
     pub target: FullyQualifiedName,
     pub kind: GraphEdgeKind,
+    pub provenance: GraphEdgeProvenance,
     pub range: TextRange,
 }
 
@@ -53,8 +67,14 @@ impl GraphEdgeFact {
             source,
             target,
             kind,
+            provenance: GraphEdgeProvenance::Explicit,
             range,
         }
+    }
+
+    pub fn with_provenance(mut self, provenance: GraphEdgeProvenance) -> Self {
+        self.provenance = provenance;
+        self
     }
 }
 
@@ -65,6 +85,7 @@ pub struct UnresolvedGraphEdgeFact {
     pub absolute: bool,
     pub context: FullyQualifiedName,
     pub kind: GraphEdgeKind,
+    pub provenance: GraphEdgeProvenance,
     pub range: TextRange,
 }
 
@@ -83,8 +104,14 @@ impl UnresolvedGraphEdgeFact {
             absolute,
             context,
             kind,
+            provenance: GraphEdgeProvenance::Explicit,
             range,
         }
+    }
+
+    pub fn with_provenance(mut self, provenance: GraphEdgeProvenance) -> Self {
+        self.provenance = provenance;
+        self
     }
 }
 
@@ -106,6 +133,7 @@ pub struct StoredGraphEdgeFact {
     pub source: FqnId,
     pub target: FqnId,
     pub kind: GraphEdgeKind,
+    pub provenance: GraphEdgeProvenance,
     pub range: TextRange,
 }
 
@@ -114,6 +142,7 @@ pub struct StoredUnresolvedGraphEdgeFact {
     pub source: FqnId,
     pub target: ConstLookupId,
     pub kind: GraphEdgeKind,
+    pub provenance: GraphEdgeProvenance,
     pub range: TextRange,
 }
 
@@ -128,8 +157,14 @@ impl StoredUnresolvedGraphEdgeFact {
             source,
             target,
             kind,
+            provenance: GraphEdgeProvenance::Explicit,
             range,
         }
+    }
+
+    pub fn with_provenance(mut self, provenance: GraphEdgeProvenance) -> Self {
+        self.provenance = provenance;
+        self
     }
 }
 
@@ -139,8 +174,14 @@ impl StoredGraphEdgeFact {
             source,
             target,
             kind,
+            provenance: GraphEdgeProvenance::Explicit,
             range,
         }
+    }
+
+    pub fn with_provenance(mut self, provenance: GraphEdgeProvenance) -> Self {
+        self.provenance = provenance;
+        self
     }
 }
 
@@ -156,7 +197,7 @@ struct GraphNodeDefinition {
 #[derive(Debug, Clone, Default)]
 pub struct GraphNode {
     definitions: Vec<GraphNodeDefinition>,
-    superclass: Option<GraphEdgeId>,
+    superclasses: Vec<GraphEdgeId>,
     includes: Vec<GraphEdgeId>,
     prepends: Vec<GraphEdgeId>,
     extends: Vec<GraphEdgeId>,
@@ -173,6 +214,7 @@ pub struct GraphEdge {
     pub source: FqnId,
     pub target: FqnId,
     pub kind: GraphEdgeKind,
+    pub provenance: GraphEdgeProvenance,
     pub range: TextRange,
 }
 
@@ -182,6 +224,7 @@ impl From<StoredGraphEdgeFact> for GraphEdge {
             source: fact.source,
             target: fact.target,
             kind: fact.kind,
+            provenance: fact.provenance,
             range: fact.range,
         }
     }
@@ -190,6 +233,7 @@ impl From<StoredGraphEdgeFact> for GraphEdge {
 impl From<GraphEdge> for StoredGraphEdgeFact {
     fn from(edge: GraphEdge) -> Self {
         StoredGraphEdgeFact::new(edge.source, edge.target, edge.kind, edge.range)
+            .with_provenance(edge.provenance)
     }
 }
 
@@ -201,6 +245,7 @@ pub struct SemanticGraph {
     node_definition_files: HashSet<SourceFileId>,
     edges_by_file: HashMap<SourceFileId, Vec<GraphEdgeId>>,
     unresolved_by_file: HashMap<SourceFileId, Vec<StoredUnresolvedGraphEdgeFact>>,
+    unresolved_explicit_superclasses_by_source: HashMap<FqnId, usize>,
 }
 
 impl SemanticGraph {
@@ -241,12 +286,49 @@ impl SemanticGraph {
             return Vec::new();
         };
         let mut ids = Vec::new();
-        ids.extend(node.superclass);
+        ids.extend(node.superclasses.iter().copied());
         ids.extend(node.includes.iter().copied());
         ids.extend(node.prepends.iter().copied());
         ids.extend(node.extends.iter().copied());
         ids.extend(node.execution_context_applications.iter().copied());
         self.edges_by_ids(&ids)
+    }
+
+    pub fn superclass_resolution(&self, source: FqnId) -> StoredSuperclassResolution {
+        let Some(node) = self.nodes.get(&source) else {
+            return StoredSuperclassResolution::Missing;
+        };
+        let has_explicit = node
+            .superclasses
+            .iter()
+            .filter_map(|id| self.edge(*id))
+            .any(|edge| edge.provenance == GraphEdgeProvenance::Explicit);
+        let mut chosen: Option<StoredGraphEdgeFact> = None;
+        for edge in node.superclasses.iter().filter_map(|id| self.edge(*id)) {
+            if has_explicit && edge.provenance != GraphEdgeProvenance::Explicit {
+                continue;
+            }
+            let fact = StoredGraphEdgeFact::from(edge);
+            let Some(previous) = chosen else {
+                chosen = Some(fact);
+                continue;
+            };
+            if previous.target != fact.target {
+                return StoredSuperclassResolution::Ambiguous;
+            }
+            if graph_edge_order_key(fact) < graph_edge_order_key(previous) {
+                chosen = Some(fact);
+            }
+        }
+        chosen.map_or(
+            StoredSuperclassResolution::Missing,
+            StoredSuperclassResolution::Unique,
+        )
+    }
+
+    pub fn has_unresolved_explicit_superclass(&self, source: FqnId) -> bool {
+        self.unresolved_explicit_superclasses_by_source
+            .contains_key(&source)
     }
 
     pub fn edges_to(&self, target: FqnId) -> Vec<StoredGraphEdgeFact> {
@@ -334,8 +416,13 @@ impl SemanticGraph {
             }
         }
 
+        if let Some(unresolved) = self.unresolved_by_file.remove(&file_id) {
+            for edge in unresolved {
+                self.remove_unresolved_explicit_superclass_source(edge);
+            }
+        }
+
         let Some(stale_edges) = self.edges_by_file.remove(&file_id) else {
-            self.unresolved_by_file.remove(&file_id);
             return;
         };
         for edge_id in stale_edges {
@@ -377,10 +464,7 @@ impl SemanticGraph {
                  This is a bug because SemanticGraph::replace_file must only receive facts for the target file. \
                  Fix: partition unresolved graph edges by SourceFileId before replacing."
             );
-            self.unresolved_by_file
-                .entry(file_id)
-                .or_default()
-                .push(edge);
+            self.add_unresolved_edge(edge);
         }
     }
 
@@ -403,6 +487,7 @@ impl SemanticGraph {
 
     pub fn take_unresolved_edges(&mut self) -> Vec<StoredUnresolvedGraphEdgeFact> {
         let pending = std::mem::take(&mut self.unresolved_by_file);
+        self.unresolved_explicit_superclasses_by_source.clear();
         pending
             .into_values()
             .flat_map(|edges| edges.into_iter())
@@ -410,10 +495,45 @@ impl SemanticGraph {
     }
 
     pub fn add_unresolved_edge(&mut self, edge: StoredUnresolvedGraphEdgeFact) {
+        if edge.kind == GraphEdgeKind::Superclass
+            && edge.provenance == GraphEdgeProvenance::Explicit
+        {
+            let count = self
+                .unresolved_explicit_superclasses_by_source
+                .entry(edge.source)
+                .or_default();
+            *count = count.checked_add(1).expect(
+                "INVARIANT VIOLATED: unresolved explicit superclass source count overflowed usize. This is a bug because one graph cannot contain more edges than addressable memory. Fix: inspect duplicate unresolved edge insertion.",
+            );
+        }
         self.unresolved_by_file
             .entry(edge.range.file_id)
             .or_default()
             .push(edge);
+    }
+
+    fn remove_unresolved_explicit_superclass_source(
+        &mut self,
+        edge: StoredUnresolvedGraphEdgeFact,
+    ) {
+        if edge.kind != GraphEdgeKind::Superclass
+            || edge.provenance != GraphEdgeProvenance::Explicit
+        {
+            return;
+        }
+        let count = self
+            .unresolved_explicit_superclasses_by_source
+            .get_mut(&edge.source)
+            .expect(
+                "INVARIANT VIOLATED: unresolved explicit superclass edge has no source count. This is a bug because the source index and file-owned edge were inserted atomically. Fix: update both indexes on every unresolved edge lifecycle operation.",
+            );
+        *count = count.checked_sub(1).expect(
+            "INVARIANT VIOLATED: unresolved explicit superclass source count underflowed. This is a bug because an edge was removed more than once. Fix: remove each file-owned unresolved edge exactly once.",
+        );
+        if *count == 0 {
+            self.unresolved_explicit_superclasses_by_source
+                .remove(&edge.source);
+        }
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
@@ -422,11 +542,13 @@ impl SemanticGraph {
             + vec_payload_bytes(&self.free_edges)
             + set_table_bytes(&self.node_definition_files)
             + map_table_bytes(&self.edges_by_file)
+            + map_table_bytes(&self.unresolved_explicit_superclasses_by_source)
             + self
                 .nodes
                 .values()
                 .map(|node| {
                     vec_payload_bytes(&node.definitions)
+                        + vec_payload_bytes(&node.superclasses)
                         + vec_payload_bytes(&node.includes)
                         + vec_payload_bytes(&node.prepends)
                         + vec_payload_bytes(&node.extends)
@@ -459,8 +581,11 @@ impl SemanticGraph {
         self.node_definition_files.shrink_to_fit();
         self.edges_by_file.shrink_to_fit();
         self.unresolved_by_file.shrink_to_fit();
+        self.unresolved_explicit_superclasses_by_source
+            .shrink_to_fit();
         for node in self.nodes.values_mut() {
             node.definitions.shrink_to_fit();
+            node.superclasses.shrink_to_fit();
             node.includes.shrink_to_fit();
             node.prepends.shrink_to_fit();
             node.extends.shrink_to_fit();
@@ -546,7 +671,7 @@ impl SemanticGraph {
 impl GraphNode {
     fn push_outgoing(&mut self, kind: GraphEdgeKind, id: GraphEdgeId) {
         match kind {
-            GraphEdgeKind::Superclass => self.superclass = Some(id),
+            GraphEdgeKind::Superclass => self.superclasses.push(id),
             GraphEdgeKind::Include => self.includes.push(id),
             GraphEdgeKind::Prepend => self.prepends.push(id),
             GraphEdgeKind::Extend => self.extends.push(id),
@@ -568,11 +693,7 @@ impl GraphNode {
 
     fn retain_outgoing(&mut self, kind: GraphEdgeKind, stale: GraphEdgeId) {
         match kind {
-            GraphEdgeKind::Superclass => {
-                if self.superclass == Some(stale) {
-                    self.superclass = None;
-                }
-            }
+            GraphEdgeKind::Superclass => self.superclasses.retain(|id| *id != stale),
             GraphEdgeKind::Include => self.includes.retain(|id| *id != stale),
             GraphEdgeKind::Prepend => self.prepends.retain(|id| *id != stale),
             GraphEdgeKind::Extend => self.extends.retain(|id| *id != stale),
@@ -596,7 +717,7 @@ impl GraphNode {
 }
 
 fn node_has_no_edges(node: &GraphNode) -> bool {
-    node.superclass.is_none()
+    node.superclasses.is_empty()
         && node.includes.is_empty()
         && node.prepends.is_empty()
         && node.extends.is_empty()
@@ -630,16 +751,29 @@ fn sort_graph_nodes(facts: &mut [StoredGraphNodeFact]) {
 }
 
 fn sort_graph_edges(facts: &mut [StoredGraphEdgeFact]) {
-    facts.sort_by_key(|fact| {
-        (
-            fact.source,
-            fact.range.file_id,
-            fact.range.start_byte,
-            fact.range.end_byte,
-            fact.kind,
-            fact.target,
-        )
-    });
+    facts.sort_by_key(|fact| graph_edge_order_key(*fact));
+}
+
+fn graph_edge_order_key(
+    fact: StoredGraphEdgeFact,
+) -> (
+    FqnId,
+    SourceFileId,
+    u32,
+    u32,
+    GraphEdgeKind,
+    GraphEdgeProvenance,
+    FqnId,
+) {
+    (
+        fact.source,
+        fact.range.file_id,
+        fact.range.start_byte,
+        fact.range.end_byte,
+        fact.kind,
+        fact.provenance,
+        fact.target,
+    )
 }
 
 #[cfg(test)]
@@ -683,6 +817,106 @@ mod tests {
         assert!(store.nodes_for(source).is_empty());
         assert!(store.edges_from(source).is_empty());
         assert_eq!(store.nodes_for(target).len(), 1);
+    }
+
+    #[test]
+    fn superclass_candidates_survive_independent_file_lifecycles() {
+        let first_file = SourceFileId(1);
+        let second_file = SourceFileId(2);
+        let source = FqnId(1);
+        let first_target = FqnId(2);
+        let second_target = FqnId(3);
+        let mut store = SemanticGraph::new();
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            first_target,
+            GraphEdgeKind::Superclass,
+            TextRange::new(first_file, 0, 10),
+        ));
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            second_target,
+            GraphEdgeKind::Superclass,
+            TextRange::new(second_file, 0, 10),
+        ));
+
+        let candidates = store.edges_from(source);
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates.iter().any(|edge| edge.target == first_target));
+        assert!(candidates.iter().any(|edge| edge.target == second_target));
+
+        store.replace_file(second_file, [], [], []);
+        assert_eq!(
+            store.edges_from(source),
+            vec![StoredGraphEdgeFact::new(
+                source,
+                first_target,
+                GraphEdgeKind::Superclass,
+                TextRange::new(first_file, 0, 10),
+            )]
+        );
+    }
+
+    #[test]
+    fn superclass_resolution_is_proof_first_and_ignores_only_implicit_object() {
+        let source = FqnId(1);
+        let object = FqnId(2);
+        let parent = FqnId(3);
+        let alternative = FqnId(4);
+        let mut store = SemanticGraph::new();
+        store.add_edge(
+            StoredGraphEdgeFact::new(
+                source,
+                object,
+                GraphEdgeKind::Superclass,
+                TextRange::new(SourceFileId(1), 0, 10),
+            )
+            .with_provenance(GraphEdgeProvenance::ImplicitObject),
+        );
+        let parent_fact = StoredGraphEdgeFact::new(
+            source,
+            parent,
+            GraphEdgeKind::Superclass,
+            TextRange::new(SourceFileId(2), 4, 10),
+        );
+        store.add_edge(parent_fact);
+        assert_eq!(
+            store.superclass_resolution(source),
+            StoredSuperclassResolution::Unique(parent_fact)
+        );
+
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            alternative,
+            GraphEdgeKind::Superclass,
+            TextRange::new(SourceFileId(3), 4, 10),
+        ));
+        assert_eq!(
+            store.superclass_resolution(source),
+            StoredSuperclassResolution::Ambiguous
+        );
+    }
+
+    #[test]
+    fn unresolved_explicit_superclass_source_index_tracks_take_and_reinsert() {
+        let file_id = SourceFileId(1);
+        let source = FqnId(1);
+        let unresolved = StoredUnresolvedGraphEdgeFact::new(
+            source,
+            ConstLookupId(1),
+            GraphEdgeKind::Superclass,
+            TextRange::new(file_id, 0, 10),
+        );
+        let mut store = SemanticGraph::new();
+        store.add_unresolved_edge(unresolved);
+        assert!(store.has_unresolved_explicit_superclass(source));
+
+        assert_eq!(store.take_unresolved_edges(), vec![unresolved]);
+        assert!(!store.has_unresolved_explicit_superclass(source));
+
+        store.add_unresolved_edge(unresolved);
+        store.replace_file(file_id, [], [], []);
+        assert!(!store.has_unresolved_explicit_superclass(source));
     }
 
     #[test]

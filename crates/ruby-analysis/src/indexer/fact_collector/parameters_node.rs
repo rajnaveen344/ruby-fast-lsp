@@ -1,6 +1,7 @@
 use log::error;
 use ruby_prism::ParametersNode;
 
+use crate::core::{TypeResolution, TypeSubject};
 use crate::inference::RubyType;
 
 use super::FactCollector;
@@ -108,17 +109,38 @@ impl FactCollector {
         }
 
         let text_range = self.document.prism_location_to_text_range(&location);
+        let parameter_type = self
+            .scope_tracker
+            .current_method_fqn()
+            .map(|method| TypeSubject::Parameter {
+                method: method.clone(),
+                name: param_name.to_string(),
+            })
+            .map(|subject| {
+                self.type_store.type_at(
+                    &subject,
+                    self.document.analysis_file_id(),
+                    text_range.start_byte,
+                )
+            })
+            .and_then(|resolution| match resolution {
+                TypeResolution::Resolved(fact) => Some(fact.ruby_type),
+                TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => None,
+            })
+            .unwrap_or(RubyType::Unknown);
         self.document
             .variable_scopes_mut()
             .define_variable(param_name, text_range);
 
-        // Dual-write: also store type in VariableScopes (Unknown for params initially)
+        // Dual-write the explicit parameter contract when one exists. An
+        // unannotated parameter remains Unknown until some other proof narrows
+        // or replaces it.
         if let Some(current_scope_id) = self.document.variable_scopes().current_scope() {
             self.document.variable_scopes_mut().add_type_assignment(
                 current_scope_id,
                 param_name,
                 text_range,
-                RubyType::Unknown,
+                parameter_type,
             );
         }
     }

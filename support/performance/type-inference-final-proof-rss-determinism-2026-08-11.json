@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "measurement": "type-inference-final-proof-rss-determinism",
+  "date": "2026-08-11",
+  "claim": "The proof-first inference candidate preserves exact semantic output, is deterministic across seven fully warm two-project runs, stays below the fixed RSS ceiling in every accepted run, and does not regress wall or CPU performance versus the immediately preceding system-allocator build.",
+  "machine": {
+    "target_os": "macos",
+    "target_arch": "aarch64",
+    "os_release": "Darwin 25.2.0",
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820 2025-10-10)",
+    "node": "v24.12.0",
+    "npm": "11.6.2"
+  },
+  "workload": {
+    "command": "RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-type-inference-candidate-cache-20260808 target/release/profiler --memory --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-type-inference-two-project-20260808.json --extension-path /Users/naveenraj/sources/devtools/ruby-fast-lsp/editors/vscode/vsix --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --diagnostic-manifest",
+    "dataset_fingerprint_sha256": "1972e0653d4aa0a20ff46e77aca0c1d8a667f2957615a155809de9573842d898",
+    "project_file_counts": [
+      2592,
+      2619
+    ],
+    "fixed_peak_rss_ceiling_bytes": 1776846438,
+    "warm_run_count": 7,
+    "comparison_gate_percent": 3.0
+  },
+  "rejected_system_allocator": {
+    "profiler_sha256": "b7ad973d183818efba5a9b306c0ab65beb6bd41b2899f47fd2a32bfb8a524c5a",
+    "tracked_diff_sha256": "65de284c684b1469d2f396db3e0a9f44ee62357059639d21a0ecf2f76b301625",
+    "files": [
+      "/tmp/ruby-fast-lsp-type-inference-v28-determinism2-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-v28-determinism3-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-v28-determinism4-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-v28-determinism5-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-v28-determinism6-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-v28-determinism7-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-v28-determinism8-20260811.jsonl"
+    ],
+    "wall_ms": {
+      "samples": [19863.091125, 19803.660583, 20247.049125, 20367.959459, 20365.88625, 19870.538541, 20523.174209],
+      "median": 20247.049125
+    },
+    "user_cpu_ms": {
+      "samples": [39476.178, 39407.312, 39563.485, 39959.578, 39757.087, 39672.347, 39664.36],
+      "median": 39664.36
+    },
+    "system_cpu_ms": {
+      "samples": [7134.309, 7277.988, 7445.52, 7557.353, 7582.299, 7255.606, 7865.939],
+      "median": 7445.52
+    },
+    "total_cpu_ms": {
+      "samples": [46610.487, 46685.3, 47009.005, 47516.931, 47339.386, 46927.953, 47530.299],
+      "median": 47009.005
+    },
+    "peak_rss_bytes": {
+      "samples": [1615478784, 1569095680, 1582153728, 1534033920, 1916141568, 1704673280, 1536409600],
+      "median": 1582153728,
+      "maximum": 1916141568,
+      "ceiling_passes": 6,
+      "ceiling_runs": 7
+    },
+    "estimated_engine_heap_bytes": {
+      "samples": [776715171, 776713547, 776713425, 776713228, 776714504, 776715055, 776714243],
+      "median": 776714243
+    },
+    "decision": "Rejected. Semantic output and retained engine heap were stable, but one of seven peak-RSS samples exceeded the fixed ceiling."
+  },
+  "accepted_jemalloc": {
+    "allocator_policy": "Use tikv-jemallocator 0.6.1 by default on non-MSVC production builds; retain the system allocator on MSVC. The memory-profiling feature is mutually exclusive with jemalloc so DHAT remains authoritative.",
+    "profiler_sha256": "6613379375e51870296f6007c29a4933b84807bebc7a6024471d0e2a549763e9",
+    "tracked_diff_sha256": "c317ceeed835d83fd65cb8814d49fc73234e8ed8f2dc94425e7bfed06be08e04",
+    "files": [
+      "/tmp/ruby-fast-lsp-type-inference-release-final2-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-release-final3-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-release-final4-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-release-final5-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-release-final6-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-release-final7-20260811.jsonl",
+      "/tmp/ruby-fast-lsp-type-inference-release-final8-20260811.jsonl"
+    ],
+    "excluded_cold_population_run": {
+      "file": "/tmp/ruby-fast-lsp-type-inference-release-final1-20260811.jsonl",
+      "wall_ms": 43113.078875,
+      "peak_rss_bytes": 1809858560,
+      "gem_product_producers": 512,
+      "reason": "The allocator change altered the semantic-producer identity and populated 512 persistent gem products. It is recorded but excluded from the fully warm comparison."
+    },
+    "wall_ms": {
+      "samples": [19203.396, 19192.528291, 18973.255833, 20106.2345, 20182.884542, 20282.941375, 19847.778917],
+      "median": 19847.778917,
+      "delta_percent": -1.971992094
+    },
+    "user_cpu_ms": {
+      "samples": [37421.207, 37457.487, 37421.258, 38039.233, 37982.564, 37766.526, 37741.06],
+      "median": 37741.06,
+      "delta_percent": -4.848937434
+    },
+    "system_cpu_ms": {
+      "samples": [7320.123, 7246.283, 6890.719, 7368.546, 8049.866, 8248.358, 7566.074],
+      "median": 7368.546,
+      "delta_percent": -1.033829739
+    },
+    "total_cpu_ms": {
+      "samples": [44741.33, 44703.77, 44311.977, 45407.779, 46032.43, 46014.884, 45307.134],
+      "median": 45307.134,
+      "delta_percent": -3.620308492
+    },
+    "peak_rss_bytes": {
+      "samples": [1607237632, 1519157248, 1615429632, 1495089152, 1545666560, 1644199936, 1611431936],
+      "median": 1607237632,
+      "maximum": 1644199936,
+      "median_delta_percent": 1.585427734,
+      "ceiling_passes": 7,
+      "ceiling_runs": 7,
+      "minimum_headroom_bytes": 132646502
+    },
+    "estimated_engine_heap_bytes": {
+      "samples": [776715838, 776714069, 776714069, 776715055, 776714185, 776713141, 776714504],
+      "median": 776714185
+    },
+    "decision": "Accepted. All seven exact-binary warm runs stay below the hard RSS ceiling. Median wall, user, system, and total CPU improve; median RSS moves +1.59% within the 3% comparison gate with 132,646,502 bytes of worst-sample ceiling headroom. The complete semantic identity remains unchanged."
+  },
+  "determinism": {
+    "all_seven_warm_runs_identical": true,
+    "project_semantic_result_fingerprints": {
+      "server-devops-5441": "13ae4f7b0ce04d4e191905817ed6d6a5",
+      "server": "80e267807718806abe90e0fe47a23aa9"
+    },
+    "diagnostic_manifests": {
+      "server-devops-5441": {
+        "sha256": "c9784ed94cdbe0b08cd5d1f752c229828a85710a86c9ed64c071e347914d09bf",
+        "diagnostic_count": 15470
+      },
+      "server": {
+        "sha256": "5c61dc413b58654bd133a80b127fee7a870dce905077fe4cbf9c00d8d436b25f",
+        "diagnostic_count": 15666
+      }
+    },
+    "proof_counters": {
+      "method_reference_candidates": 590130,
+      "constant_reference_candidates": 847814,
+      "deferred_receiver_candidates": 251036,
+      "deferred_receiver_proven": 146451,
+      "deferred_receiver_unknown": 104585
+    },
+    "persistent_product_reuse_per_run": {
+      "gem_hits": 607,
+      "gem_producers": 0,
+      "java_artifact_hits": 169,
+      "java_artifact_producers": 0
+    }
+  },
+  "correctness": {
+    "release_scorecard": "96/96 reviewed cases passed; 100/100 points; every category 100%; zero recorded gaps; zero unexpected outcomes",
+    "reviewed_real_project_precision": "13/13 pinned reductions across Rails, RSpec Core, Sinatra, Minitest, and Cucumber Ruby passed; 2/2 concrete proofs, 4/4 positive diagnostics, 7/7 diagnostic suppressions, zero known false positives",
+    "workspace_all_targets": "cargo test --offline --locked --workspace --all-targets -- --test-threads=1 passed; rbs-parser 44/44; ruby-analysis 484/484; root 1503 passed, 0 failed, 2 intentional ignored release reporters; every remaining workspace, extension, packaged-guest, integration, black-box, and doc-test target passed",
+    "format": "cargo fmt --all -- --check passed",
+    "check": "cargo check --offline --locked --workspace --all-targets passed",
+    "dhat_configuration": "cargo check --offline --locked --release --bin profiler --no-default-features --features memory-profiling passed",
+    "locked_metadata": "cargo metadata --offline --locked --no-deps --format-version 1 passed"
+  },
+  "distribution": {
+    "npm_pack_install_smoke": "passed; local wrapper and darwin-arm64 packages installed into a clean project, completed a real LSP initialize, and verified packaged JRuby navigation",
+    "vsix_archive_smoke": "passed; rebuilt the current target from this checkout and verified the extracted package, official bundled extensions, ERB behavior, core RBS, CFR, and JRuby navigation",
+    "vsix_path": "target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "5a58389c0203ccf0771d0f3fae88ab21c1025ace77510c67e3b5205ca3e8e4e0",
+    "packaged_macos_arm64_binary_sha256": "e1e1294fb63487a29e97826499c95fb3dc2fbf3b0225340e2bb755e043566ad2",
+    "installed_extension": "naveenraj.ruby-fast-lsp@0.2.6",
+    "installed_macos_arm64_binary_sha256": "e1e1294fb63487a29e97826499c95fb3dc2fbf3b0225340e2bb755e043566ad2",
+    "installed_binary_matches_packaged_archive": true
+  },
+  "limitations": [
+    "Real-project precision uses reviewed, commit-pinned reductions so ground truth is explicit and redistributable; the separate 5,211-file goshposh transition audit remains an unlabeled breadth signal and is not counted as an accuracy score.",
+    "The allocator comparison changes only allocation strategy. Type facts, proof counters, project fingerprints, diagnostic hashes, persistent-product identities, and retained engine ownership remain unchanged."
+  ]
+}

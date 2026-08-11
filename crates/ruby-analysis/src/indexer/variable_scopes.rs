@@ -31,6 +31,15 @@ pub struct VariableScopes {
     root: LVScopeId,
     /// Current active scope during building
     current: Option<LVScopeId>,
+    /// Exact read-site results from the shared forward flow tracker, including
+    /// `Unknown` proof barriers. Keeping one flat range-sorted vector avoids an
+    /// empty allocation field on every lexical scope and keeps document
+    /// replacement/cloning proportional to actual flow evidence.
+    flow_read_types: Vec<FlowReadType>,
+    /// Fast-path discriminator for ordinary straight-line files. It avoids a
+    /// second scope lookup for every local read when no exact flow evidence
+    /// was installed anywhere in the document.
+    has_flow_read_types: bool,
     #[cfg(test)]
     scope_owner_scan_count: Cell<usize>,
 }
@@ -57,6 +66,8 @@ impl VariableScopes {
             scopes,
             root: 0,
             current: Some(0),
+            flow_read_types: Vec::new(),
+            has_flow_read_types: false,
             #[cfg(test)]
             scope_owner_scan_count: Cell::new(0),
         }
@@ -479,10 +490,136 @@ impl VariableScopes {
         false
     }
 
+    /// Install exact read-site results produced by the shared forward flow
+    /// tracker for one lexical scope. `Unknown` is retained here so consumers
+    /// cannot fall back to a syntactically later concrete branch assignment;
+    /// it is not a publishable concrete type fact. The document can contain
+    /// nested or repeated semantic traversals whose method scopes are not
+    /// installed globally in source order, so the compact shared vector is
+    /// normalized after each nonempty method batch.
+    pub fn install_flow_read_types(
+        &mut self,
+        scope_id: LVScopeId,
+        reads: Vec<(String, TextRange, RubyType)>,
+    ) {
+        self.scopes.get(scope_id).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: flow-local read type targets missing scope {scope_id}. This is a bug because TypeTracker results are installed immediately after entering their method scope. Fix: retain the method scope until its flow evidence is attached."
+            )
+        });
+        for pair in reads.windows(2) {
+            assert!(
+                pair[0].1 < pair[1].1,
+                "INVARIANT VIOLATED: one method emitted duplicated or out-of-order flow-local reads ({:?} then {:?}). This is a bug because one AST read has one final flow result and TypeTracker sorts each method batch. Fix: deduplicate repeated solver visits before installing read evidence.",
+                pair[0].1,
+                pair[1].1
+            );
+        }
+        self.flow_read_types
+            .extend(
+                reads
+                    .into_iter()
+                    .map(|(name, range, ruby_type)| FlowReadType {
+                        scope_id,
+                        name: ustr::ustr(&name),
+                        range,
+                        ruby_type,
+                    }),
+            );
+        self.flow_read_types.sort_unstable_by(|left, right| {
+            (left.range, left.scope_id, left.name).cmp(&(right.range, right.scope_id, right.name))
+        });
+        self.flow_read_types.dedup_by(|right, left| {
+            if (left.range, left.scope_id, left.name) != (right.range, right.scope_id, right.name) {
+                return false;
+            }
+            assert_eq!(
+                left.ruby_type,
+                right.ruby_type,
+                "INVARIANT VIOLATED: one lexical read has conflicting exact flow results. This is a bug because repeated semantic traversals must converge to the same proof. Fix: replace the complete document generation before installing changed flow evidence."
+            );
+            true
+        });
+        self.has_flow_read_types = true;
+    }
+
     /// Get the type of a variable at a given position.
     /// Finds the latest type assignment whose range starts before or at the position.
     /// Walks the scope chain respecting hard boundaries.
     pub fn get_type_at_position(
+        &self,
+        name: &str,
+        scope_id: LVScopeId,
+        file_id: crate::core::SourceFileId,
+        byte_offset: u32,
+    ) -> Option<&RubyType> {
+        self.get_flow_read_type_at_position(name, scope_id, file_id, byte_offset)
+            .or_else(|| self.get_assignment_type_at_position(name, scope_id, file_id, byte_offset))
+    }
+
+    pub fn get_flow_read_type_at_position(
+        &self,
+        name: &str,
+        scope_id: LVScopeId,
+        file_id: crate::core::SourceFileId,
+        byte_offset: u32,
+    ) -> Option<&RubyType> {
+        let name_key = ustr::ustr(name);
+        let mut current = Some(scope_id);
+
+        while let Some(sid) = current {
+            if let Some(scope) = self.scopes.get(sid) {
+                let upper = self
+                    .flow_read_types
+                    .partition_point(|read| read.range.start_byte <= byte_offset);
+                if let Some(read) = self.flow_read_types[..upper].iter().rev().find(|read| {
+                    read.scope_id == sid
+                        && read.name == name_key
+                        && read.range.contains_offset(file_id, byte_offset)
+                }) {
+                    return Some(&read.ruby_type);
+                }
+
+                if scope.kind.is_hard_scope_boundary() {
+                    return None;
+                }
+                current = scope.parent;
+            } else {
+                return None;
+            }
+        }
+        None
+    }
+
+    /// Return the exact flow result and latest syntactic assignment for one
+    /// read. The overwhelmingly common straight-line scope has no flow-read
+    /// entries, so it retains the original single assignment lookup.
+    pub fn get_read_types_at_position(
+        &self,
+        name: &str,
+        scope_id: LVScopeId,
+        file_id: crate::core::SourceFileId,
+        byte_offset: u32,
+    ) -> (Option<&RubyType>, Option<&RubyType>) {
+        if !self.has_flow_read_types {
+            return (
+                None,
+                self.get_assignment_type_at_position(name, scope_id, file_id, byte_offset),
+            );
+        }
+
+        self.scopes.get(scope_id).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: local-read type lookup targets missing scope {scope_id}. This is a bug because reference_variable returned this owner immediately before the query. Fix: keep scope ownership stable throughout FactCollector traversal."
+            )
+        });
+        (
+            self.get_flow_read_type_at_position(name, scope_id, file_id, byte_offset),
+            self.get_assignment_type_at_position(name, scope_id, file_id, byte_offset),
+        )
+    }
+
+    pub fn get_assignment_type_at_position(
         &self,
         name: &str,
         scope_id: LVScopeId,
@@ -602,6 +739,14 @@ pub struct ScopeNode {
     pub local_variables: Vec<VariableNode>,
     /// References to variables from outer scopes (captured in blocks)
     pub captured_variables: Vec<CaptureRef>,
+}
+
+#[derive(Clone)]
+struct FlowReadType {
+    scope_id: LVScopeId,
+    name: ustr::Ustr,
+    range: TextRange,
+    ruby_type: RubyType,
 }
 
 /// A single local variable with its full def-use chain

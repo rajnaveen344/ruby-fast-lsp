@@ -11,6 +11,7 @@ use generators::HoverContext;
 pub use generators::HoverInfo;
 
 use crate::query::EngineQuery;
+use crate::utils::position_to_offset;
 use ruby_analysis::indexer::{identifier_to_hover_target, HoverTarget};
 use tower_lsp::lsp_types::{Position, Url};
 
@@ -31,8 +32,11 @@ impl EngineQuery {
     ) -> Option<HoverInfo> {
         // Step 1: Get identifier at position using existing analyzer
         let analyzer = self.analyzer_at_position(uri, content, position);
+        let byte_offset = u32::try_from(position_to_offset(content, position)).expect(
+            "INVARIANT VIOLATED: hover position exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+        );
         let (identifier_opt, identifier_type, namespace, scope_id, namespace_kind) =
-            analyzer.get_identifier(position);
+            analyzer.get_identifier(byte_offset);
 
         let identifier = identifier_opt?;
 
@@ -44,7 +48,7 @@ impl EngineQuery {
             namespace,
             namespace_kind,
             scope_id,
-            position,
+            byte_offset,
         );
 
         // Step 3: Create context for generators
@@ -54,6 +58,7 @@ impl EngineQuery {
             current_namespace: &hover_namespace,
             namespace_kind,
             position,
+            byte_offset,
         };
 
         // Step 4: Generate hover content based on node type

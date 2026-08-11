@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
-    MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, MethodVisibilityOverrideFact,
-    NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact, SymbolKind,
-    TextRange, TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact,
+    GraphNodeKind, MethodAvailability, MethodFact, MethodParamFact, MethodParamKind,
+    MethodVisibilityOverrideFact, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceFileId,
+    SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    UnresolvedGraphEdgeFact,
 };
 use ruby_prism::{
     visit_alias_method_node, visit_call_node, visit_class_node,
@@ -285,22 +286,42 @@ impl AnalysisIndexer {
         kind: GraphEdgeKind,
         range: TextRange,
     ) {
+        self.push_edge_with_provenance(
+            source,
+            parts,
+            absolute,
+            kind,
+            GraphEdgeProvenance::Explicit,
+            range,
+        );
+    }
+
+    fn push_edge_with_provenance(
+        &mut self,
+        source: FullyQualifiedName,
+        parts: &[RubyConstant],
+        absolute: bool,
+        kind: GraphEdgeKind,
+        provenance: GraphEdgeProvenance,
+        range: TextRange,
+    ) {
         let Some(target) = self.resolve_namespace(parts, absolute) else {
-            self.facts
-                .unresolved_graph_edges
-                .push(UnresolvedGraphEdgeFact::new(
+            self.facts.unresolved_graph_edges.push(
+                UnresolvedGraphEdgeFact::new(
                     source,
                     parts.to_vec(),
                     absolute,
                     FullyQualifiedName::namespace(self.namespace_stack.clone()),
                     kind,
                     range,
-                ));
+                )
+                .with_provenance(provenance),
+            );
             return;
         };
         self.facts
             .graph_edges
-            .push(GraphEdgeFact::new(source, target, kind, range));
+            .push(GraphEdgeFact::new(source, target, kind, range).with_provenance(provenance));
     }
 
     fn push_included_hook_mixin_edges(&mut self, node: &CallNode<'_>) {
@@ -337,6 +358,23 @@ impl AnalysisIndexer {
         range: TextRange,
     ) {
         self.push_method_fact_with_params(namespace, owner_kind, method, range, Vec::new());
+    }
+
+    fn push_method_fact_without_parameter_shape(
+        &mut self,
+        namespace: Vec<RubyConstant>,
+        owner_kind: crate::core::NamespaceKind,
+        method: RubyMethod,
+        range: TextRange,
+    ) {
+        let fqn = FullyQualifiedName::method(namespace.clone(), method);
+        let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
+        self.facts
+            .symbols
+            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
+        self.facts
+            .methods
+            .push(MethodFact::new(fqn, owner, range).with_visibility(self.current_visibility()));
     }
 
     fn push_method_fact_with_params(
@@ -554,7 +592,12 @@ impl AnalysisIndexer {
             ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
         };
         let range = self.range(&node.location());
-        self.push_method_fact(self.namespace_stack.clone(), owner_kind, new_method, range);
+        self.push_method_fact_without_parameter_shape(
+            self.namespace_stack.clone(),
+            owner_kind,
+            new_method,
+            range,
+        );
 
         let old_fqn = FullyQualifiedName::method(self.namespace_stack.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
@@ -603,7 +646,12 @@ impl AnalysisIndexer {
         } else {
             crate::core::NamespaceKind::Instance
         };
-        self.push_method_fact(self.namespace_stack.clone(), owner_kind, method, range);
+        self.push_method_fact_without_parameter_shape(
+            self.namespace_stack.clone(),
+            owner_kind,
+            method,
+            range,
+        );
     }
 
     fn push_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
@@ -637,7 +685,7 @@ impl AnalysisIndexer {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        self.push_method_fact(
+        self.push_method_fact_without_parameter_shape(
             namespace,
             crate::core::NamespaceKind::Singleton,
             method,
@@ -681,7 +729,7 @@ impl AnalysisIndexer {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        self.push_method_fact(namespace, owner_kind, method, range);
+        self.push_method_fact_without_parameter_shape(namespace, owner_kind, method, range);
     }
 
     fn resolve_constant_receiver_namespace(
@@ -1183,11 +1231,12 @@ impl Visit<'_> for AnalysisIndexer {
                  This is a bug because Ruby's implicit class superclass must be representable. \
                  Fix: update RubyConstant validation or implicit superclass construction.",
             );
-            self.push_edge(
+            self.push_edge_with_provenance(
                 fqn.clone(),
                 &[object],
                 true,
                 GraphEdgeKind::Superclass,
+                GraphEdgeProvenance::ImplicitObject,
                 range,
             );
         }
@@ -1424,7 +1473,12 @@ impl Visit<'_> for AnalysisIndexer {
             ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
         };
         let range = self.range(&node.location());
-        self.push_method_fact(self.namespace_stack.clone(), owner_kind, new_method, range);
+        self.push_method_fact_without_parameter_shape(
+            self.namespace_stack.clone(),
+            owner_kind,
+            new_method,
+            range,
+        );
 
         let old_fqn = FullyQualifiedName::method(self.namespace_stack.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
@@ -2014,6 +2068,15 @@ fn method_param_facts(node: &DefNode<'_>) -> Vec<MethodParamFact> {
         }
     }
 
+    for post in params_node.posts().iter() {
+        if let Some(param) = post.as_required_parameter_node() {
+            params.push(MethodParamFact::new(
+                String::from_utf8_lossy(param.name().as_slice()).to_string(),
+                MethodParamKind::Required,
+            ));
+        }
+    }
+
     for keyword in params_node.keywords().iter() {
         if let Some(param) = keyword.as_required_keyword_parameter_node() {
             params.push(MethodParamFact::new(
@@ -2239,7 +2302,7 @@ mod tests {
     #[test]
     fn indexes_method_param_names() {
         let index = AnalysisIndexer::new(file()).index_source(
-            "class User\n  def find(id, name = nil, *rest, active:, role: nil, **opts, &block)\n  end\nend\n",
+            "class User\n  def find(id, name = nil, *rest, tail, active:, role: nil, **opts, &block)\n  end\nend\n",
         );
 
         let method = index
@@ -2253,7 +2316,7 @@ mod tests {
             );
         assert_eq!(
             method.params,
-            vec!["id", "name", "rest", "active", "role", "opts", "block"]
+            vec!["id", "name", "rest", "tail", "active", "role", "opts", "block"]
         );
         let kinds = method
             .param_facts
@@ -2266,6 +2329,7 @@ mod tests {
                 MethodParamKind::Required,
                 MethodParamKind::Optional,
                 MethodParamKind::Rest,
+                MethodParamKind::Required,
                 MethodParamKind::RequiredKeyword,
                 MethodParamKind::OptionalKeyword,
                 MethodParamKind::KeywordRest,

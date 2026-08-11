@@ -40,6 +40,9 @@ pub enum RaiseArgCandidate {
         current_namespace: Vec<RubyConstant>,
         method: RubyMethod,
     },
+    /// Exact local-variable read to validate only after the shared flow solver
+    /// has installed a proven read type. Missing evidence remains Unknown.
+    LocalRead(TextRange),
     Unknown,
 }
 
@@ -159,6 +162,7 @@ fn raise_arg_heap_bytes(arg: &RaiseArgCandidate) -> usize {
     match arg {
         RaiseArgCandidate::StringLiteral
         | RaiseArgCandidate::NonExceptionLiteral
+        | RaiseArgCandidate::LocalRead(_)
         | RaiseArgCandidate::Unknown => 0,
         RaiseArgCandidate::Constant(name) => string_heap_bytes(name),
         RaiseArgCandidate::Type(ruby_type) => ruby_type_heap_bytes(ruby_type),

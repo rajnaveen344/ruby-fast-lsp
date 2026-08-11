@@ -17,6 +17,7 @@ use ruby_analysis::core::FullyQualifiedName;
 
 use super::analysis_location::location_for_range;
 use super::EngineQuery;
+use crate::utils::lsp::lsp_position;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum MixinType {
@@ -90,8 +91,8 @@ impl EngineQuery {
             }
 
             // Convert byte offsets to LSP positions.
-            let start_position = document.offset_to_position(module.start_offset);
-            let end_position = document.offset_to_position(module.end_offset);
+            let start_position = lsp_position(document.offset_to_position(module.start_offset));
+            let end_position = lsp_position(document.offset_to_position(module.end_offset));
             let range = Range {
                 start: start_position,
                 end: end_position,

@@ -282,6 +282,12 @@ cannot be detected, use the bundled Ruby 3.0 core stubs as a conservative
 fallback and skip only runtime-dependent stdlib modules. Missing runtimes must
 never turn universal core constants such as `Thread` into false unresolved
 diagnostics.
+Universal runtime value constants are declared in the embedded core
+`constants.rbs` and must enter each isolated engine as ordinary file-owned
+`SourceKind::Signature` facts even when no runtime exists. Keep the packaged
+physical `core-rbs/constants.rbs` source and every VSIX/npm packaging manifest
+aligned so navigation has a real target. Never infer a constant's value type
+from its name or treat every constant receiver as a class object.
 Runtime stdlib discovery must invoke only the owning project's exact selected
 runtime executable, with its exact Java home and without inherited Ruby,
 RubyGems, or Bundler environment overrides. Never fall back to the server's
@@ -1524,3 +1530,10 @@ driven rather than a polished code example:
   its declared value type through `AnalysisQuery::type_to_namespace` and use
   ordinary instance-method lookup. Zero-argument `freeze` preserves the
   receiver's literal type so frozen constant declarations seed that fact.
+- A nested call may become a receiver only from the exact proven inner
+  call-expression outcome after the complete graph is installed. Validate the
+  resulting namespace against its graph node kind; a module must never become
+  a class merely because source calls `new`. Normalize instance `initialize`
+  to constructor `new` only for a proven class and use the language-defined
+  constructed instance return. An explicit `self.new` is an ordinary method
+  and remains Unknown unless its own return is proven.

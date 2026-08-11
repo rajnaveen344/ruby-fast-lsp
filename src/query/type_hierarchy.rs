@@ -30,6 +30,7 @@ use ruby_analysis::indexer::Identifier;
 
 use super::analysis_location::location_for_range;
 use super::EngineQuery;
+use crate::utils::lsp::source_position;
 
 // ============================================================================
 // Data Structures
@@ -66,7 +67,7 @@ impl EngineQuery {
         // Use analyzer to find identifier at position before locking analysis state.
         let analyzer = self.analyzer_at_position(uri, &content, position);
         let (identifier, _, ancestors, _scope_id, _namespace_kind) =
-            analyzer.get_identifier(position);
+            analyzer.get_identifier_at_position(source_position(position));
 
         let identifier = identifier?;
 

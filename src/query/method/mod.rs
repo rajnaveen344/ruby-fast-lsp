@@ -26,6 +26,7 @@ use ruby_analysis::inference::RubyType;
 use tower_lsp::lsp_types::{Location, Position};
 
 use super::EngineQuery;
+use crate::utils::lsp::source_position;
 
 // ============================================================================
 // Public API
@@ -192,7 +193,21 @@ impl EngineQuery {
             match self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)
             {
                 Some(namespace_fqn) => namespace_fqn,
-                None => return Vec::new(),
+                None => {
+                    let receiver_type =
+                        self.resolve_receiver_type(receiver, namespace, namespace_kind, position);
+                    if matches!(receiver_type, RubyType::Union(_)) {
+                        return analysis::resolve_method_callees_for_type(
+                            self,
+                            &receiver_type,
+                            method,
+                            allow_private,
+                            protected_caller,
+                        )
+                        .unwrap_or_default();
+                    }
+                    return Vec::new();
+                }
             };
 
         let callees = if allow_private {
@@ -227,7 +242,7 @@ impl EngineQuery {
         let doc_guard = self.doc.as_ref().map(|doc| doc.read());
         let byte_offset = doc_guard
             .as_ref()
-            .map(|doc| doc.position_to_analysis_offset(position))
+            .map(|doc| doc.position_to_analysis_offset(source_position(position)))
             .unwrap_or(0);
         let engine_guard = self.analysis_engine().map(|engine| engine.read());
         let analysis_query = engine_guard
@@ -255,7 +270,7 @@ impl EngineQuery {
         let doc_guard = self.doc.as_ref().map(|doc| doc.read());
         let byte_offset = doc_guard
             .as_ref()
-            .map(|doc| doc.position_to_analysis_offset(position))
+            .map(|doc| doc.position_to_analysis_offset(source_position(position)))
             .unwrap_or(0);
         let engine_guard = self.analysis_engine().map(|engine| engine.read());
         let analysis_query = engine_guard

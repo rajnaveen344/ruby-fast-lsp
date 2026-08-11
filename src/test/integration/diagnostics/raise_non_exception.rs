@@ -230,3 +230,22 @@ x = some_unknown_method
     )
     .await;
 }
+
+#[tokio::test]
+async fn rescue_assigned_local_uses_flow_proof_instead_of_the_initial_nil() {
+    check(
+        r#"
+def verify(values)
+  latest_error = nil
+  values.each do |value|
+    raise StandardError if value
+  rescue StandardError => error
+    latest_error = error
+  end
+
+  <warn none code="raise-non-exception">raise latest_error if latest_error</warn>
+end
+"#,
+    )
+    .await;
+}

@@ -22,10 +22,10 @@
 //! - `@return [String, nil] The result or nil`
 
 use super::types::{YardMethodDoc, YardOption, YardParam, YardReturn};
+use crate::core::{SourcePosition as Position, SourceRange as Range};
 use log::debug;
 use regex::Regex;
 use std::sync::LazyLock;
-use tower_lsp::lsp_types::{Position, Range};
 
 // =============================================================================
 // Regex Patterns

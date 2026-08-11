@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::mem::size_of;
 
-use super::memory_estimate::{map_table_bytes, vec_payload_bytes};
+use super::memory_estimate::{map_table_bytes, ruby_type_heap_bytes, vec_payload_bytes};
 use crate::{
-    ConstLookupId, FqnId, FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod,
+    ConstLookupId, FqnId, FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType,
     SourceFileId, TextRange,
 };
 use smallvec::SmallVec;
@@ -85,6 +86,16 @@ pub enum ReferenceCandidateKind {
 pub struct MethodCallSignatureCandidate {
     pub positional_count: usize,
     pub has_positional_splat: bool,
+    /// At least one statically present entry exists in the trailing keyword
+    /// hash. For methods without keyword parameters Ruby can pass that syntax
+    /// as one positional options hash. This is deliberately distinct from a
+    /// keyword splat, whose runtime hash may be empty.
+    pub has_nonempty_keyword_hash: bool,
+    /// The final positional argument is either proven to be a Hash literal or
+    /// has a shape whose value type is not statically known. On Ruby versions
+    /// where an options hash can satisfy keyword parameters, required-keyword
+    /// diagnostics are therefore inconclusive.
+    pub trailing_positional_may_be_options_hash: bool,
     pub keyword_args: Vec<KeywordArgCandidate>,
     pub has_keyword_splat: bool,
 }
@@ -93,6 +104,8 @@ impl MethodCallSignatureCandidate {
     pub fn is_empty(&self) -> bool {
         self.positional_count == 0
             && !self.has_positional_splat
+            && !self.has_nonempty_keyword_hash
+            && !self.trailing_positional_may_be_options_hash
             && self.keyword_args.is_empty()
             && !self.has_keyword_splat
     }
@@ -102,9 +115,23 @@ impl MethodCallSignatureCandidate {
 pub struct MethodReferenceDiagnostics {
     pub diagnostic_range: TextRange,
     pub receiver_label: Option<String>,
+    /// The exact nested call whose proven result is the receiver for this
+    /// dispatch. The engine resolves this dependency after all file-owned
+    /// facts are installed; an absent or unproven result keeps the outer call
+    /// Unknown instead of guessing from syntax.
+    pub receiver_expression_range: Option<TextRange>,
+    /// The collector's statically proven receiver type. Engine finalization
+    /// revalidates expression receivers against complete flow evidence before
+    /// using this fallback; unions resolve as one fail-closed dispatch group.
+    /// Kept behind the candidate's existing metadata box so ordinary method
+    /// reference candidates retain their compact stored layout.
+    pub receiver_type: Option<Box<RubyType>>,
     pub diagnose_unresolved: bool,
     pub allow_unindexed_owner: bool,
-    pub signature: MethodCallSignatureCandidate,
+    /// Present only when this reference is an invocation with a statically
+    /// known call shape. Method objects, aliases, and other references are not
+    /// zero-argument calls and therefore retain `None`.
+    pub signature: Option<MethodCallSignatureCandidate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -465,6 +492,16 @@ impl ReferenceCandidateStore {
             .collect()
     }
 
+    pub fn method_candidates_named(
+        &self,
+        method: RubyMethod,
+    ) -> impl Iterator<Item = &StoredMethodReferenceCandidate> {
+        self.methods_by_file
+            .values()
+            .flat_map(|candidates| candidates.iter())
+            .filter(move |candidate| candidate.method == method)
+    }
+
     pub fn candidates_in_file(&self, file_id: SourceFileId) -> Vec<StoredReferenceCandidate> {
         let mut candidates = Vec::new();
         if let Some(constants) = self.constants_by_file.get(&file_id) {
@@ -660,6 +697,28 @@ impl ReferenceStore {
             .collect()
     }
 
+    /// Return every semantic target resolved for one exact source range.
+    ///
+    /// A grouped receiver dispatch can intentionally resolve one call range
+    /// to multiple method identities. Keeping this reverse lookup in the
+    /// resolved store lets navigation consume the same proof as references,
+    /// diagnostics, hover, and the check CLI instead of recomputing a receiver
+    /// from syntax.
+    pub fn targets_for_exact_range(&self, range: TextRange) -> Vec<FqnId> {
+        let Some(targets) = self.targets_by_file.get(&range.file_id) else {
+            return Vec::new();
+        };
+        targets
+            .iter()
+            .copied()
+            .filter(|target| {
+                self.facts
+                    .get(target)
+                    .is_some_and(|facts| facts.iter().any(|fact| fact.range == range))
+            })
+            .collect()
+    }
+
     pub fn facts_for_caller(&self, caller: FqnId) -> Vec<ReferenceFact> {
         self.facts
             .values()
@@ -753,13 +812,23 @@ fn method_reference_diagnostics_heap_bytes(diagnostics: &MethodReferenceDiagnost
         .as_ref()
         .map(String::capacity)
         .unwrap_or(0)
-        + vec_payload_bytes(&diagnostics.signature.keyword_args)
+        + diagnostics
+            .receiver_type
+            .as_deref()
+            .map(|ruby_type| size_of::<RubyType>() + ruby_type_heap_bytes(ruby_type))
+            .unwrap_or(0)
         + diagnostics
             .signature
-            .keyword_args
-            .iter()
-            .map(|arg| arg.name.capacity())
-            .sum::<usize>()
+            .as_ref()
+            .map(|signature| {
+                vec_payload_bytes(&signature.keyword_args)
+                    + signature
+                        .keyword_args
+                        .iter()
+                        .map(|arg| arg.name.capacity())
+                        .sum::<usize>()
+            })
+            .unwrap_or(0)
 }
 
 #[cfg(test)]

@@ -4,9 +4,12 @@ use std::time::Instant;
 use tower_lsp::lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse};
 
 use crate::server::RubyLanguageServer;
+use crate::utils::lsp::lsp_range;
 
 use ruby_analysis::core::NamespaceKind;
-use ruby_analysis::indexer::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
+use ruby_analysis::indexer::{
+    DocumentSymbolKind, DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext,
+};
 
 /// Handle document symbols request for a Ruby file
 pub async fn handle_document_symbols(
@@ -86,12 +89,12 @@ fn convert_to_document_symbol(ruby_symbol: RubySymbolContext) -> DocumentSymbol 
     DocumentSymbol {
         name: ruby_symbol.name,
         detail,
-        kind: ruby_symbol.kind,
+        kind: lsp_symbol_kind(ruby_symbol.kind),
         tags: None,
         #[allow(deprecated)]
         deprecated: None,
-        range: ruby_symbol.range,
-        selection_range: ruby_symbol.selection_range,
+        range: lsp_range(ruby_symbol.range),
+        selection_range: lsp_range(ruby_symbol.selection_range),
         children: if ruby_symbol.children.is_empty() {
             None
         } else {
@@ -103,6 +106,16 @@ fn convert_to_document_symbol(ruby_symbol: RubySymbolContext) -> DocumentSymbol 
                     .collect(),
             )
         },
+    }
+}
+
+fn lsp_symbol_kind(kind: DocumentSymbolKind) -> tower_lsp::lsp_types::SymbolKind {
+    match kind {
+        DocumentSymbolKind::Module => tower_lsp::lsp_types::SymbolKind::MODULE,
+        DocumentSymbolKind::Class => tower_lsp::lsp_types::SymbolKind::CLASS,
+        DocumentSymbolKind::Method => tower_lsp::lsp_types::SymbolKind::METHOD,
+        DocumentSymbolKind::Constant => tower_lsp::lsp_types::SymbolKind::CONSTANT,
+        DocumentSymbolKind::Property => tower_lsp::lsp_types::SymbolKind::PROPERTY,
     }
 }
 
@@ -127,11 +140,7 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
                 MethodVisibility::Protected => detail_parts.push("protected".to_string()),
                 MethodVisibility::Public => {
                     // Only show "public" explicitly for methods to distinguish from default
-                    if matches!(
-                        ruby_symbol.kind,
-                        tower_lsp::lsp_types::SymbolKind::METHOD
-                            | tower_lsp::lsp_types::SymbolKind::FUNCTION
-                    ) {
+                    if matches!(ruby_symbol.kind, DocumentSymbolKind::Method) {
                         detail_parts.push("public".to_string());
                     }
                 }
@@ -157,11 +166,12 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ruby_analysis::core::{SourcePosition as Position, SourceRange as Range};
+    use ruby_analysis::indexer::DocumentSymbolKind as SymbolKind;
     use std::sync::Arc;
     use std::time::Duration;
     use tower_lsp::lsp_types::{
-        DidOpenTextDocumentParams, Position, Range, SymbolKind, TextDocumentIdentifier,
-        TextDocumentItem, Url,
+        DidOpenTextDocumentParams, TextDocumentIdentifier, TextDocumentItem, Url,
     };
 
     fn create_test_range() -> Range {
@@ -182,7 +192,7 @@ mod tests {
         // Test private method
         let private_method = RubySymbolContext {
             name: "private_method".to_string(),
-            kind: SymbolKind::METHOD,
+            kind: SymbolKind::Method,
             detail: None,
             range: create_test_range(),
             selection_range: create_test_range(),
@@ -201,7 +211,7 @@ mod tests {
         // Test class method (should not include visibility)
         let class_method = RubySymbolContext {
             name: "class_method".to_string(),
-            kind: SymbolKind::METHOD,
+            kind: SymbolKind::Method,
             detail: None,
             range: create_test_range(),
             selection_range: create_test_range(),
@@ -217,7 +227,7 @@ mod tests {
         // Test public method
         let public_method = RubySymbolContext {
             name: "public_method".to_string(),
-            kind: SymbolKind::METHOD,
+            kind: SymbolKind::Method,
             detail: None,
             range: create_test_range(),
             selection_range: create_test_range(),
@@ -236,7 +246,7 @@ mod tests {
         // Test protected instance method
         let protected_instance_method = RubySymbolContext {
             name: "protected_instance_method".to_string(),
-            kind: SymbolKind::METHOD,
+            kind: SymbolKind::Method,
             detail: None,
             range: create_test_range(),
             selection_range: create_test_range(),
@@ -257,7 +267,7 @@ mod tests {
     fn test_document_symbol_with_existing_detail() {
         let method_with_detail = RubySymbolContext {
             name: "method_with_signature".to_string(),
-            kind: SymbolKind::METHOD,
+            kind: SymbolKind::Method,
             detail: Some("(param1, param2)".to_string()),
             range: create_test_range(),
             selection_range: create_test_range(),
@@ -278,7 +288,7 @@ mod tests {
     fn test_document_symbol_non_method_no_visibility() {
         let class_symbol = RubySymbolContext {
             name: "MyClass".to_string(),
-            kind: SymbolKind::CLASS,
+            kind: SymbolKind::Class,
             detail: None,
             range: create_test_range(),
             selection_range: create_test_range(),
@@ -296,7 +306,7 @@ mod tests {
     fn test_document_symbol_instance_namespace_kind() {
         let method_instance = RubySymbolContext {
             name: "instance_method".to_string(),
-            kind: SymbolKind::METHOD,
+            kind: SymbolKind::Method,
             detail: None,
             range: create_test_range(),
             selection_range: create_test_range(),

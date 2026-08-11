@@ -1,11 +1,11 @@
 use crate::core::method_store::{MethodVisibility, MethodVisibilityOverrideFact};
 use crate::core::{
     DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ExecutionContextFact,
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
-    InferenceEvidence, InferenceTelemetry, MethodFact, MethodParamFact, MethodReturnEquation,
-    NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, SymbolFact, SymbolKind, TextRange,
-    TypeFact, TypeInferenceOutcome, TypeProvenance, TypeStore, TypeSubject, UnknownReason,
-    UnresolvedGraphEdgeFact,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact,
+    GraphNodeKind, InferenceEvidence, InferenceTelemetry, MethodAvailability, MethodFact,
+    MethodParamFact, MethodReturnEquation, NamespaceKind, ReferenceCandidate, RubyConstant,
+    RubyMethod, SymbolFact, SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance,
+    TypeStore, TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
 };
 use crate::engine::{AnalysisEngine, AnalysisQueryCache, VariableTypeKind};
 use ruby_fast_lsp_extension_api::{IndexPatch, Receiver, ResolvedCall, SourceRange};
@@ -53,6 +53,7 @@ pub struct FactCollector {
     pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
     pub extension_project_context: Option<ruby_fast_lsp_extension_api::ProjectContext>,
     pub extension_call_stack_marks: Vec<bool>,
+    pub extension_handled_call_marks: Vec<bool>,
     pub extension_index_patches: Vec<IndexPatch>,
     pub extension_execution_context_facts: Vec<ExecutionContextFact>,
     pending_block_execution_context: Option<BlockExecutionContext>,
@@ -60,6 +61,7 @@ pub struct FactCollector {
     pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
     analysis_query_cache: Arc<AnalysisQueryCache>,
     pub include_local_vars: bool,
+    record_local_read_unknown_reasons: bool,
     pub reference_candidates: Vec<ReferenceCandidate>,
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
     pub resolve_analysis_method_returns: bool,
@@ -84,8 +86,19 @@ pub struct FactCollector {
     method_return_telemetry_by_namespace: BTreeMap<Vec<RubyConstant>, InferenceTelemetry>,
     method_return_outcomes: BTreeMap<FullyQualifiedName, TypeInferenceOutcome>,
     call_expression_outcomes: Vec<(TextRange, TypeInferenceOutcome)>,
+    /// Call expressions that have a retained method candidate capable of
+    /// producing a concrete outcome after complete engine resolution. This is
+    /// collector-local and prevents terminal Unknown chains from becoming
+    /// retained outer method candidates.
+    deferred_call_outcome_ranges: HashSet<TextRange>,
+    local_read_types: Vec<(TextRange, RubyType)>,
     expression_unknown_reasons: Vec<(TextRange, UnknownReason)>,
     local_method_candidates: Arc<HashSet<FullyQualifiedName>>,
+    /// Same-pass method identities whose complete collected declaration set is
+    /// currently public and available. `Arc::make_mut` keeps updates O(1) in
+    /// the ordinary traversal because each method tracker releases its clone
+    /// before the next declaration is installed.
+    local_public_method_candidates: Arc<HashSet<FullyQualifiedName>>,
     direct_known_namespaces: HashSet<FullyQualifiedName>,
     shared_direct_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
 }
@@ -100,7 +113,9 @@ pub struct BlockExecutionContext {
 }
 
 pub trait FactCollectorExtensionHost: std::fmt::Debug + Send + Sync {
-    fn process_call_node(&self, _visitor: &mut FactCollector, _node: &CallNode) {}
+    fn process_call_node(&self, _visitor: &mut FactCollector, _node: &CallNode) -> bool {
+        false
+    }
 
     fn should_track_enclosing_call(&self, _visitor: &FactCollector, _node: &CallNode) -> bool {
         false
@@ -173,18 +188,6 @@ impl FactCollector {
         TextRange::new(self.document.analysis_file_id(), start_byte, end_byte)
     }
 
-    pub fn body_lsp_location(
-        &self,
-        body_location: Option<ruby_prism::Location>,
-        node_location: &ruby_prism::Location,
-    ) -> tower_lsp::lsp_types::Location {
-        if let Some(body_location) = body_location {
-            self.document.prism_location_to_lsp_location(&body_location)
-        } else {
-            self.document.prism_location_to_lsp_location(node_location)
-        }
-    }
-
     pub fn body_text_range(
         &self,
         body_location: Option<ruby_prism::Location>,
@@ -221,6 +224,7 @@ impl FactCollector {
             extension_call_stack: Vec::new(),
             extension_project_context: None,
             extension_call_stack_marks: Vec::new(),
+            extension_handled_call_marks: Vec::new(),
             extension_index_patches: Vec::new(),
             extension_execution_context_facts: Vec::new(),
             pending_block_execution_context: None,
@@ -228,6 +232,7 @@ impl FactCollector {
             analysis_engine,
             analysis_query_cache: Arc::new(AnalysisQueryCache::default()),
             include_local_vars: true,
+            record_local_read_unknown_reasons: true,
             reference_candidates: Vec::new(),
             diagnostic_candidates: Vec::new(),
             resolve_analysis_method_returns: true,
@@ -245,8 +250,11 @@ impl FactCollector {
             method_return_telemetry_by_namespace: BTreeMap::new(),
             method_return_outcomes: BTreeMap::new(),
             call_expression_outcomes: Vec::new(),
+            deferred_call_outcome_ranges: HashSet::new(),
+            local_read_types: Vec::new(),
             expression_unknown_reasons: Vec::new(),
             local_method_candidates,
+            local_public_method_candidates: Arc::new(HashSet::new()),
             direct_known_namespaces: HashSet::new(),
             shared_direct_known_namespaces: None,
         }
@@ -262,6 +270,15 @@ impl FactCollector {
 
     pub fn without_analysis_method_return_resolution(mut self) -> Self {
         self.resolve_analysis_method_returns = false;
+        self
+    }
+
+    /// Skip local-read proof-failure evidence when the owning source is an
+    /// immutable dependency. Local scopes are still collected for semantic
+    /// traversal, but dependency-local hover evidence is not retained by the
+    /// engine and must not add work to cold indexing.
+    pub fn without_local_read_unknown_reasons(mut self) -> Self {
+        self.record_local_read_unknown_reasons = false;
         self
     }
 
@@ -671,20 +688,40 @@ impl FactCollector {
         kind: GraphEdgeKind,
         range: TextRange,
     ) {
+        self.direct_push_edge_with_provenance(
+            source,
+            parts,
+            absolute,
+            kind,
+            GraphEdgeProvenance::Explicit,
+            range,
+        );
+    }
+
+    pub fn direct_push_edge_with_provenance(
+        &mut self,
+        source: FullyQualifiedName,
+        parts: &[RubyConstant],
+        absolute: bool,
+        kind: GraphEdgeKind,
+        provenance: GraphEdgeProvenance,
+        range: TextRange,
+    ) {
         let Some(target) = self.direct_resolve_namespace(parts, absolute) else {
-            self.direct_facts
-                .unresolved_graph_edges
-                .push(UnresolvedGraphEdgeFact::new(
+            self.direct_facts.unresolved_graph_edges.push(
+                UnresolvedGraphEdgeFact::new(
                     source,
                     parts.to_vec(),
                     absolute,
                     FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack()),
                     kind,
                     range,
-                ));
+                )
+                .with_provenance(provenance),
+            );
             return;
         };
-        self.direct_push_resolved_edge(source, target, kind, range);
+        self.direct_push_resolved_edge_with_provenance(source, target, kind, provenance, range);
     }
 
     pub fn direct_push_resolved_edge(
@@ -692,6 +729,23 @@ impl FactCollector {
         source: FullyQualifiedName,
         target: FullyQualifiedName,
         kind: GraphEdgeKind,
+        range: TextRange,
+    ) -> bool {
+        self.direct_push_resolved_edge_with_provenance(
+            source,
+            target,
+            kind,
+            GraphEdgeProvenance::Explicit,
+            range,
+        )
+    }
+
+    fn direct_push_resolved_edge_with_provenance(
+        &mut self,
+        source: FullyQualifiedName,
+        target: FullyQualifiedName,
+        kind: GraphEdgeKind,
+        provenance: GraphEdgeProvenance,
         range: TextRange,
     ) -> bool {
         if self
@@ -735,7 +789,7 @@ impl FactCollector {
 
         self.direct_facts
             .graph_edges
-            .push(GraphEdgeFact::new(source, target, kind, range));
+            .push(GraphEdgeFact::new(source, target, kind, range).with_provenance(provenance));
         true
     }
 
@@ -840,7 +894,7 @@ impl FactCollector {
         self.direct_facts.symbols.push(
             SymbolFact::new(fqn.clone(), SymbolKind::Method, range).with_name_range(name_range),
         );
-        self.direct_facts.methods.push(
+        self.push_direct_method_fact(
             MethodFact::with_param_facts(fqn, owner, range, params)
                 .with_name_range(name_range)
                 .with_signature_metadata(documentation, return_type_label)
@@ -862,9 +916,9 @@ impl FactCollector {
         self.direct_facts
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
-        self.direct_facts
-            .methods
-            .push(MethodFact::new(fqn, owner, range).with_visibility(visibility));
+        self.push_direct_method_fact(
+            MethodFact::new(fqn, owner, range).with_visibility(visibility),
+        );
     }
 
     pub fn direct_set_visibility(&mut self, visibility: MethodVisibility) {
@@ -889,13 +943,48 @@ impl FactCollector {
                 visibility,
                 range,
             ));
+        let mut changed_direct_fact = false;
         for fact in &mut self.direct_facts.methods {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 continue;
             };
             if *fact_method == method && fact.owner == owner {
                 fact.visibility = visibility;
+                changed_direct_fact = true;
             }
+        }
+        if changed_direct_fact {
+            let fqn = FullyQualifiedName::method(owner.namespace_parts(), method);
+            self.refresh_local_public_method_candidate(&fqn);
+        }
+    }
+
+    pub(super) fn push_direct_method_fact(&mut self, fact: MethodFact) {
+        let fqn = fact.fqn.clone();
+        self.direct_facts.methods.push(fact);
+        self.refresh_local_public_method_candidate(&fqn);
+    }
+
+    fn refresh_local_public_method_candidate(&mut self, fqn: &FullyQualifiedName) {
+        let mut matching = self
+            .direct_facts
+            .methods
+            .iter()
+            .filter(|fact| &fact.fqn == fqn)
+            .peekable();
+        assert!(
+            matching.peek().is_some(),
+            "INVARIANT VIOLATED: public-method candidate refresh has no matching direct method fact. This is a bug because refresh must run only after insertion or visibility mutation. Fix: pass the exact inserted method FQN to refresh_local_public_method_candidate."
+        );
+        let proven_public = matching.all(|fact| {
+            fact.visibility == MethodVisibility::Public
+                && matches!(&fact.availability, MethodAvailability::Available)
+        });
+        let candidates = Arc::make_mut(&mut self.local_public_method_candidates);
+        if proven_public {
+            candidates.insert(fqn.clone());
+        } else {
+            candidates.remove(fqn);
         }
     }
 
@@ -1674,6 +1763,12 @@ impl FactCollector {
             suppressed_candidates <= 1,
             "INVARIANT VIOLATED: one proven special call suppressed multiple deferred outcomes. This is a bug because each CallNode owns at most one method candidate. Fix: emit exactly one candidate for the runtime dispatch."
         );
+        if suppressed_candidates == 1 {
+            assert!(
+                self.deferred_call_outcome_ranges.remove(&range),
+                "INVARIANT VIOLATED: a suppressed deferred call candidate has no collector-local range marker. This is a bug because candidate and marker lifecycles must be identical. Fix: insert and remove deferred ranges with the owning method candidate."
+            );
+        }
         let fact = TypeFact::new(
             TypeSubject::Expression(range),
             return_type,
@@ -1976,7 +2071,7 @@ fn ancestry_edge_kind(kind: GraphEdgeKind) -> bool {
 }
 
 fn source_range(visitor: &FactCollector, location: &ruby_prism::Location) -> SourceRange {
-    let range = visitor.document.prism_location_to_lsp_range(location);
+    let range = visitor.document.prism_location_to_source_range(location);
     SourceRange {
         start: ruby_fast_lsp_extension_api::SourcePosition {
             line: range.start.line,
@@ -2224,6 +2319,27 @@ impl FactCollector {
             expression_unknown_reasons,
             telemetry: self.inference_telemetry(),
         }
+    }
+
+    /// Return sparse concrete local-read flow evidence separately from the
+    /// per-file method inference record. Most files have no flow delta, so the
+    /// engine stores this only for files that prove one.
+    pub fn local_read_type_evidence(&self) -> Box<[(TextRange, RubyType)]> {
+        let mut local_read_types = self.local_read_types.clone();
+        local_read_types.sort_unstable_by_key(|(range, _)| *range);
+        for (range, ruby_type) in &local_read_types {
+            assert!(
+                *ruby_type != RubyType::Unknown,
+                "INVARIANT VIOLATED: compact local-read evidence retained Unknown at {range:?}. This is a bug because Unknown reads belong in expression_unknown_reasons and cannot be published as concrete proof. Fix: filter unresolved TypeTracker reads while installing file evidence."
+            );
+        }
+        for adjacent in local_read_types.windows(2) {
+            assert!(
+                adjacent[0].0 != adjacent[1].0,
+                "INVARIANT VIOLATED: one local-variable read produced multiple flow types. This is a bug because bounded solver revisits must overwrite the same AST read. Fix: retain local reads in TypeTracker's range-keyed map before installing evidence."
+            );
+        }
+        local_read_types.into_boxed_slice()
     }
 
     pub(super) fn begin_nonlocal_write(&mut self, subject: TypeSubject, range: TextRange) {
@@ -2516,7 +2632,7 @@ impl Visit<'_> for FactCollector {
                 self.direct_range(&block.location()),
                 "INVARIANT VIOLATED: extension execution context block range differs from the traversed block. This is a bug because a guest must not redirect execution semantics to unrelated source. Fix: validate the exact call and block ranges at the extension boundary."
             );
-            self.scope_tracker.push_execution_context(
+            self.scope_tracker.push_block_execution_context(
                 context.implicit_receiver,
                 context.implicit_receiver_kind,
                 context.method_definition_owner,
@@ -2544,7 +2660,7 @@ impl Visit<'_> for FactCollector {
             let block = node.block().expect(
                 "INVARIANT VIOLATED: dynamic-definition block context lost its block. This is a bug because static_dynamic_definition_block_context required the same immutable Prism call to have a block. Fix: keep call traversal and context matching atomic.",
             );
-            self.scope_tracker.push_execution_context(
+            self.scope_tracker.push_block_execution_context(
                 implicit_namespace.clone(),
                 implicit_kind,
                 definition_namespace,
@@ -2567,7 +2683,7 @@ impl Visit<'_> for FactCollector {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_execution_context(
+                self.scope_tracker.push_block_execution_context(
                     eval_namespace.clone(),
                     implicit_kind,
                     eval_namespace,
@@ -2627,6 +2743,7 @@ impl Visit<'_> for FactCollector {
                 );
             }
         }
+        self.process_nested_receiver_call_reference_candidate(node);
         self.record_call_expression_type(node);
         self.record_current_method_forwarded_yield_types(node);
         self.process_call_node_exit(node);
@@ -2945,7 +3062,7 @@ mod execution_context_tests {
     use crate::core::{GeneratedOwnerId, GraphNodeKind, SourceKind, TypeProvenance};
     use crate::engine::{FileFacts, ResolveMode, SourceFileInput};
     use std::path::PathBuf;
-    use tower_lsp::lsp_types::Url;
+    use url::Url;
 
     #[derive(Debug)]
     struct SyntheticExecutionContextHost {
@@ -2953,9 +3070,9 @@ mod execution_context_tests {
     }
 
     impl FactCollectorExtensionHost for SyntheticExecutionContextHost {
-        fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) {
+        fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) -> bool {
             if node.name().as_slice() != b"describe" {
-                return;
+                return false;
             }
             let block = node.block().expect("test describe call must have a block");
             visitor.set_pending_block_execution_context(BlockExecutionContext {
@@ -2965,7 +3082,56 @@ mod execution_context_tests {
                 method_definition_owner: vec![self.owner],
                 method_definition_kind: NamespaceKind::Instance,
             });
+            true
         }
+    }
+
+    #[test]
+    fn attr_macros_use_the_method_definition_context_in_direct_facts() {
+        let source = "class User\n  attr_accessor :name\n  class << self\n    attr_reader :count\n  end\nend\n";
+        let uri = Url::parse("file:///workspace/lib/user.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/user.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+        collector.visit(&parse.node());
+
+        let user = vec![RubyConstant::new("User").unwrap()];
+        let owner_for = |name: &str| {
+            collector
+                .direct_facts
+                .methods
+                .iter()
+                .find(|fact| fact.fqn.name() == name)
+                .unwrap_or_else(|| panic!("expected direct attr method `{name}`"))
+                .owner
+                .clone()
+        };
+        assert_eq!(
+            owner_for("name"),
+            FullyQualifiedName::namespace_with_kind(user.clone(), NamespaceKind::Instance),
+            "an ordinary class-body attr reader must be instance-owned"
+        );
+        assert_eq!(
+            owner_for("name="),
+            FullyQualifiedName::namespace_with_kind(user.clone(), NamespaceKind::Instance),
+            "an ordinary class-body attr writer must be instance-owned"
+        );
+        assert_eq!(
+            owner_for("count"),
+            FullyQualifiedName::namespace_with_kind(user, NamespaceKind::Singleton),
+            "an attr reader inside class << self must remain singleton-owned"
+        );
     }
 
     #[test]
@@ -3060,6 +3226,195 @@ mod execution_context_tests {
                 .scope_owner_scan_count_for_test(),
             0,
             "fact collection already owns the active lexical scope and must not scan every scope and variable to rediscover it"
+        );
+    }
+
+    #[test]
+    fn ordinary_block_records_unknown_for_an_implicit_receiver() {
+        let source = "class Processor\n  def label = \"lexical\"\n  def run\n    configure do\n      label\n    end\n  end\nend\n";
+        let uri = Url::parse("file:///workspace/lib/processor.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/processor.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let label_start = u32::try_from(source.rfind("label").unwrap()).unwrap();
+        let label_range = TextRange::new(file_id, label_start, label_start + 5);
+        assert!(
+            collector.reference_candidates.iter().all(|candidate| {
+                !matches!(
+                    &candidate.kind,
+                    crate::core::ReferenceCandidateKind::Method {
+                        method,
+                        call_expression_range,
+                        ..
+                    } if method.as_str() == "label" && *call_expression_range == Some(label_range)
+                )
+            }),
+            "an unproven implicit receiver retained a deferred method candidate: {:?}",
+            collector.reference_candidates
+        );
+        assert_eq!(
+            collector
+                .call_expression_outcomes
+                .iter()
+                .find(|(range, _)| *range == label_range)
+                .map(|(_, outcome)| outcome.unknown_reason()),
+            Some(Some(UnknownReason::UnknownReceiver))
+        );
+    }
+
+    #[test]
+    fn nested_value_constant_receiver_preserves_its_proven_type() {
+        let source = "ARGV.first.upcase\n";
+        let uri = Url::parse("file:///workspace/lib/argv.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let core_file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/embedded/core/constants.rbs"),
+            content: "ARGV: Array[String]\n".to_string(),
+            kind: SourceKind::Signature,
+        });
+        let argv = FullyQualifiedName::constant(vec![RubyConstant::new("ARGV").unwrap()]);
+        engine.replace_facts(
+            core_file_id,
+            FileFacts {
+                symbols: vec![SymbolFact::new(
+                    argv.clone(),
+                    SymbolKind::Constant,
+                    TextRange::new(core_file_id, 0, 4),
+                )],
+                types: vec![TypeFact::new(
+                    TypeSubject::Constant(argv),
+                    RubyType::array_of(RubyType::string()),
+                    TextRange::new(core_file_id, 0, 4),
+                    TypeProvenance::Rbs,
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Deferred,
+        );
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/argv.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let (_, outer_outcome) = collector
+            .call_expression_outcomes
+            .iter()
+            .find(|(range, _)| range.start_byte == 0 && range.end_byte == 17)
+            .expect("outer ARGV.first.upcase call must retain a type outcome");
+        assert_eq!(
+            outer_outcome.clone().into_proven_type(),
+            Some(RubyType::string()),
+            "nested value constants must use their proven value type instead of a guessed class reference"
+        );
+    }
+
+    #[test]
+    fn terminal_unknown_receiver_does_not_retain_the_rest_of_a_call_chain() {
+        let source = "def normalize(value)\n  value.first.upcase\nend\n";
+        let uri = Url::parse("file:///workspace/lib/terminal_unknown.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/terminal_unknown.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let retained = collector
+            .reference_candidates
+            .iter()
+            .filter_map(|candidate| match &candidate.kind {
+                crate::core::ReferenceCandidateKind::Method { method, .. }
+                    if matches!(method.as_str(), "first" | "upcase") =>
+                {
+                    Some(method.as_str())
+                }
+                crate::core::ReferenceCandidateKind::Constant { .. }
+                | crate::core::ReferenceCandidateKind::Method { .. }
+                | crate::core::ReferenceCandidateKind::Resolved { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            retained.is_empty(),
+            "an untyped parameter makes `first` terminal Unknown, so `upcase` cannot become provable after complete graph resolution"
+        );
+    }
+
+    #[test]
+    fn potentially_provable_nested_calls_are_retained_inner_first() {
+        let source = "Factory.build.name\nclass Product\n  def name\n    \"value\"\n  end\nend\nclass Factory\n  def self.build\n    Product.new\n  end\nend\n";
+        let uri = Url::parse("file:///workspace/lib/deferred_chain.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/deferred_chain.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let retained = collector
+            .reference_candidates
+            .iter()
+            .filter_map(|candidate| match &candidate.kind {
+                crate::core::ReferenceCandidateKind::Method {
+                    method,
+                    call_expression_range,
+                    ..
+                } if matches!(method.as_str(), "build" | "name") => {
+                    Some((method.as_str(), call_expression_range.is_some()))
+                }
+                crate::core::ReferenceCandidateKind::Constant { .. }
+                | crate::core::ReferenceCandidateKind::Method { .. }
+                | crate::core::ReferenceCandidateKind::Resolved { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            retained,
+            [("build", true), ("name", true)],
+            "the inner call must resolve before its retained outer consumer"
         );
     }
 

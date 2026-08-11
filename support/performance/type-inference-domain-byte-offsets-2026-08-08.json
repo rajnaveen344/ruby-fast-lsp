@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-08",
+  "slice": "editor-independent inference byte-offset boundary",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "description": "Exact accepted release binaries preserved after grouped union reference work and before the inference coordinate-boundary migration.",
+      "profile_single_file_sha256": "0fec6ceb0ea67f9308b943f39d61c6a785c4ad0f8aae9b8b7dbd8c9b6d6f86a2",
+      "profiler_sha256": "99e268fdbbf3badb37a5403776c82a3918b340ee5af675d57e7cd8aec2ea9482",
+      "ruby_fast_lsp_sha256": "ddb0746c093f20ee0eb8438b707c17f27c5fd17e8cbe64d3694ef55c69447cb0"
+    },
+    "candidate": {
+      "profile_single_file_sha256": "d7fe29e4eff32a8fee12baa4c9aea06b208abe43b8d6e8673befe71aa3808f4a",
+      "profiler_sha256": "7c68b2759debb882968364737a85064760893a7c00c8516036a0cdf2f1299774",
+      "ruby_fast_lsp_sha256": "79dcdab5fdc298a349b558bd030793ced6580723f3f6797f2fabade678a11f4b",
+      "tracked_diff_sha256_at_build": "a15cfecbc7a8d21274ee73bd0ba40ac7c151bd632bbd516f54ab1d7195c0f952"
+    }
+  },
+  "inputs": {
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_pairs_100_iterations": 7,
+    "interactive_pairs_500_iterations": 5,
+    "cli_fixture": "tests/fixtures/type_inference_unknown_reasons",
+    "cli_fresh_processes": 5
+  },
+  "semantic_evidence": {
+    "red_reproduction": "A recursive architecture test failed because inference/completion.rs and inference/type_query.rs imported tower-lsp protocol coordinates directly.",
+    "accepted_boundary": "ruby-analysis inference accepts SourceFileId, TextRange, and UTF-8 byte offsets. The root completion adapter converts the current LSP UTF-16 position through RubyDocument exactly once. A recursive source-boundary test rejects tower-lsp and lsp-types dependencies anywhere under crates/ruby-analysis/src/inference.",
+    "utf16_regression": "Completion after a non-BMP prefix resolves the same source-ordered local receiver and offers String#upcase. The old fallback treated the UTF-16 character count as a UTF-8 slice boundary.",
+    "scope_limit": "This slice removes editor protocol types from the inference subtree only. Legacy ruby-analysis indexer, RubyDocument, document-symbol, and YARD surfaces still use tower-lsp and keep the complete library/CLI boundary open.",
+    "scorecard": "85/85 reviewed cases, 100/100 points, revision m0-seed-22, score_eligible=false, claim_eligible=false",
+    "ruby_analysis_tests": "462/462",
+    "root_tests": "1470/1470 non-ignored, one ignored",
+    "workspace_tests": "cargo fmt --all -- --check, git diff --check, cargo check --workspace, and cargo test --workspace exited 0; every extension, integration, black-box, and doc-test target passed",
+    "workspace_retry_note": "The first maximum-concurrency workspace run hit the existing Standard fixer timeout and runtime-version probe timing flakes. Both passed individually; an immediate full maximum-concurrency repeat passed all targets.",
+    "cli_stdout_sha256": "f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b",
+    "cli_result": "All five fresh final-release processes produced byte-identical valid JSON and the expected diagnostic exit status.",
+    "semantic_result_fingerprint_hex": "26048da84ae3a67f68351552c2829171"
+  },
+  "performance": {
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 119.748084,
+        "candidate": 119.669,
+        "delta_percent": -0.066042
+      },
+      "parse": {
+        "baseline": 4.218042,
+        "candidate": 4.22325,
+        "delta_percent": 0.12347
+      },
+      "direct": {
+        "baseline": 5.598416,
+        "candidate": 5.586625,
+        "delta_percent": -0.210613
+      },
+      "visitor": {
+        "baseline": 95.225,
+        "candidate": 95.453542,
+        "delta_percent": 0.240002
+      },
+      "replace_resolve": {
+        "baseline": 12.09725,
+        "candidate": 11.811709,
+        "delta_percent": -2.360379
+      },
+      "overall": {
+        "baseline": 120.277125,
+        "candidate": 120.213041,
+        "delta_percent": -0.05328
+      }
+    },
+    "interactive_100_iteration_medians": {
+      "baseline": {
+        "cold_indexing_ms": 776.998042,
+        "edit_p95_ms": 1.302291,
+        "completion_p95_ms": 0.026833,
+        "hover_p95_ms": 0.013416,
+        "definition_p95_ms": 0.020875,
+        "references_p95_ms": 5.553458,
+        "diagnostics_p95_ms": 0.002334,
+        "engine_heap_mb": 6.1
+      },
+      "candidate": {
+        "cold_indexing_ms": 748.175459,
+        "edit_p95_ms": 1.314833,
+        "completion_p95_ms": 0.029375,
+        "hover_p95_ms": 0.012875,
+        "definition_p95_ms": 0.02075,
+        "references_p95_ms": 5.633458,
+        "diagnostics_p95_ms": 0.002416,
+        "engine_heap_mb": 6.1
+      },
+      "delta_percent": {
+        "cold_indexing": -3.709479,
+        "edit_p95": 0.963072,
+        "completion_p95": 9.47341,
+        "hover_p95": -4.032499,
+        "definition_p95": -0.598802,
+        "references_p95": 1.440544,
+        "diagnostics_p95": 3.513282,
+        "engine_heap": 0.0
+      }
+    },
+    "interactive_500_iteration_medians": {
+      "baseline": {
+        "cold_indexing_ms": 771.031333,
+        "edit_p95_ms": 1.320708,
+        "completion_p95_ms": 0.027583,
+        "hover_p95_ms": 0.013417,
+        "definition_p95_ms": 0.02075,
+        "references_p95_ms": 5.6495,
+        "diagnostics_p95_ms": 0.002375,
+        "engine_heap_mb": 6.1
+      },
+      "candidate": {
+        "cold_indexing_ms": 756.203792,
+        "edit_p95_ms": 1.28675,
+        "completion_p95_ms": 0.027375,
+        "hover_p95_ms": 0.014708,
+        "definition_p95_ms": 0.020125,
+        "references_p95_ms": 5.534375,
+        "diagnostics_p95_ms": 0.002541,
+        "engine_heap_mb": 6.1
+      },
+      "delta_percent": {
+        "cold_indexing": -1.923079,
+        "edit_p95": -2.571197,
+        "completion_p95": -0.754088,
+        "hover_p95": 9.622121,
+        "definition_p95": -3.012048,
+        "references_p95": -2.037791,
+        "diagnostics_p95": 6.989474,
+        "engine_heap": 0.0
+      }
+    },
+    "engine_estimated_heap_bytes": {
+      "baseline": 6367645,
+      "candidate": 6367645
+    },
+    "measurement_note": "The 100-iteration completion movement was 0.002542 ms and reversed to -0.000208 ms at 500 iterations. The changed completion path is therefore evaluated from the higher-confidence run. Hover and diagnostics are unchanged by this slice; their 500-iteration movements are 0.001291 ms and 0.000166 ms at the timer floor, and every process passed its fixed production budget.",
+    "decision": "Accepted. Large-file end-to-end and visitor medians are flat within 0.25 percent. The higher-confidence completion p95, edit p95, cold indexing, and references measurements improve; retained engine heap is byte-identical and all production budgets pass."
+  },
+  "known_follow_ups": [
+    "The scorecard remains deliberately claim-ineligible despite its seed-corpus score.",
+    "Protocol types still exist outside the inference subtree in ruby-analysis indexer, document, and YARD surfaces.",
+    "The goal-wide real-project diagnostic review and cold/warm/allocation/scheduling/two-project RSS matrix remain open.",
+    "Other unsupported Ruby expression and flow forms must continue to report explained Unknown until a complete static proof is implemented."
+  ]
+}

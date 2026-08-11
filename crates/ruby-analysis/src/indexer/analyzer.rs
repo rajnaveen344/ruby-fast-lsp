@@ -1,10 +1,10 @@
-use crate::core::{ExecutionContextFact, RubyConstant};
+use crate::core::{ExecutionContextFact, RubyConstant, SourceFileId, SourcePosition};
 use crate::{
     analyzer_utils as utils, is_erb_path, mask_erb, Identifier, IdentifierType, IdentifierVisitor,
-    LVScopeId, RubyDocument,
+    LVScopeId,
 };
 use ruby_prism::{visit_call_node, CallNode, Visit};
-use tower_lsp::lsp_types::{Position, Url};
+use url::Url;
 
 /// Main analyzer for Ruby code using Prism
 pub struct RubyPrismAnalyzer {
@@ -19,6 +19,7 @@ pub struct SignatureHelpTarget {
     pub namespace: Vec<RubyConstant>,
     pub namespace_kind: crate::core::NamespaceKind,
     pub receiver: crate::MethodReceiver,
+    pub receiver_range: Option<(u32, u32)>,
     pub method: crate::core::RubyMethod,
     pub active_parameter: u32,
     pub active_keyword: Option<String>,
@@ -47,7 +48,7 @@ impl RubyPrismAnalyzer {
     /// Returns the identifier, identifier type, and the ancestors stack at the time of the lookup.
     pub fn get_identifier(
         &self,
-        position: Position,
+        byte_offset: u32,
     ) -> (
         Option<Identifier>,
         Option<IdentifierType>,
@@ -56,26 +57,38 @@ impl RubyPrismAnalyzer {
         crate::core::NamespaceKind,
     ) {
         let parse_result = ruby_prism::parse(self.analysis_code.as_bytes());
-        // Create a RubyDocument with a dummy URI since we only need it for position handling
-        let document = match &self.execution_context {
-            Some(context) => RubyDocument::with_analysis_file_id(
-                self.uri.clone(),
-                self.code.clone(),
-                0,
-                context.range.file_id,
-            ),
-            None => RubyDocument::new(self.uri.clone(), self.code.clone(), 0),
-        };
         let root_node = parse_result.node();
 
-        let mut iden_visitor = IdentifierVisitor::new_with_execution_context(
-            document.clone(),
-            position,
+        let mut iden_visitor = IdentifierVisitor::new_with_execution_context_at_offset(
+            self.code.clone(),
+            byte_offset,
             self.execution_context.clone(),
         );
         iden_visitor.visit(&root_node);
 
         iden_visitor.get_result()
+    }
+
+    pub fn get_identifier_at_position(
+        &self,
+        position: SourcePosition,
+    ) -> (
+        Option<Identifier>,
+        Option<IdentifierType>,
+        Vec<RubyConstant>,
+        LVScopeId,
+        crate::core::NamespaceKind,
+    ) {
+        let source = crate::SourceDocument::new(&self.code, SourceFileId(0));
+        let byte_offset = u32::try_from(source.line_character_to_offset(
+            &self.code,
+            position.line,
+            position.character,
+        ))
+        .expect(
+            "INVARIANT VIOLATED: analyzer source position exceeded u32 byte offsets. This is a bug because TextRange stores u32 offsets. Fix: widen domain offsets before accepting larger source files.",
+        );
+        self.get_identifier(byte_offset)
     }
 
     pub fn get_signature_help_target(&self, byte_offset: u32) -> Option<SignatureHelpTarget> {
@@ -85,9 +98,10 @@ impl RubyPrismAnalyzer {
         finder.visit(&root_node);
         let call_site = finder.best?;
 
-        let message_offset = call_site.message_start.saturating_add(1);
-        let position = self.offset_to_position(message_offset);
-        let (identifier, _, _, _, namespace_kind) = self.get_identifier(position);
+        let message_offset = u32::try_from(call_site.message_start.saturating_add(1)).expect(
+            "INVARIANT VIOLATED: signature-help message offset exceeded u32. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+        );
+        let (identifier, _, _, _, namespace_kind) = self.get_identifier(message_offset);
         let crate::Identifier::RubyMethod {
             namespace,
             receiver,
@@ -101,33 +115,36 @@ impl RubyPrismAnalyzer {
             namespace,
             namespace_kind,
             receiver,
+            receiver_range: call_site.receiver_range,
             method,
             active_parameter: call_site.active_parameter,
             active_keyword: call_site.active_keyword,
         })
     }
 
-    /// Get the namespace context (enclosing module/class) at a given position.
-    pub fn get_namespace_at_position(&self, position: Position) -> Vec<RubyConstant> {
+    /// Get the namespace context (enclosing module/class) at a byte offset.
+    pub fn get_namespace_at_offset(&self, byte_offset: u32) -> Vec<RubyConstant> {
         let parse_result = ruby_prism::parse(self.analysis_code.as_bytes());
         let root_node = parse_result.node();
 
         let mut namespace_stack = Vec::new();
-        self.collect_namespaces_containing_position(&root_node, position, &mut namespace_stack);
+        self.collect_namespaces_containing_offset(&root_node, byte_offset, &mut namespace_stack);
         namespace_stack
     }
 
     /// Recursively collect namespace (module/class) names that contain the given position.
-    fn collect_namespaces_containing_position(
+    fn collect_namespaces_containing_offset(
         &self,
         node: &ruby_prism::Node,
-        position: Position,
+        byte_offset: u32,
         namespace_stack: &mut Vec<RubyConstant>,
     ) {
+        let target_offset = usize::try_from(byte_offset).expect(
+            "INVARIANT VIOLATED: u32 analysis offset could not fit usize. This is a bug because supported targets must address u32 source offsets. Fix: reject the unsupported target architecture.",
+        );
         let position_in_node = |node_loc: &ruby_prism::Location| -> bool {
             let start_offset = node_loc.start_offset();
             let end_offset = node_loc.end_offset();
-            let target_offset = self.position_to_offset(position);
             target_offset >= start_offset && target_offset < end_offset
         };
 
@@ -137,7 +154,7 @@ impl RubyPrismAnalyzer {
                 push_constant_path_parts(&constant_path, namespace_stack);
 
                 if let Some(body) = class_node.body() {
-                    self.collect_namespaces_containing_position(&body, position, namespace_stack);
+                    self.collect_namespaces_containing_offset(&body, byte_offset, namespace_stack);
                 }
                 return;
             }
@@ -149,7 +166,7 @@ impl RubyPrismAnalyzer {
                 push_constant_path_parts(&constant_path, namespace_stack);
 
                 if let Some(body) = module_node.body() {
-                    self.collect_namespaces_containing_position(&body, position, namespace_stack);
+                    self.collect_namespaces_containing_offset(&body, byte_offset, namespace_stack);
                 }
                 return;
             }
@@ -157,46 +174,26 @@ impl RubyPrismAnalyzer {
 
         if let Some(program) = node.as_program_node() {
             for stmt in program.statements().body().iter() {
-                self.collect_namespaces_containing_position(&stmt, position, namespace_stack);
+                self.collect_namespaces_containing_offset(&stmt, byte_offset, namespace_stack);
             }
         } else if let Some(stmts) = node.as_statements_node() {
             for stmt in stmts.body().iter() {
-                self.collect_namespaces_containing_position(&stmt, position, namespace_stack);
+                self.collect_namespaces_containing_offset(&stmt, byte_offset, namespace_stack);
             }
         } else if let Some(begin_node) = node.as_begin_node() {
             if let Some(stmts) = begin_node.statements() {
                 for stmt in stmts.body().iter() {
-                    self.collect_namespaces_containing_position(&stmt, position, namespace_stack);
+                    self.collect_namespaces_containing_offset(&stmt, byte_offset, namespace_stack);
                 }
             }
         }
-    }
-
-    /// Convert LSP position to byte offset in the source code.
-    fn position_to_offset(&self, position: Position) -> usize {
-        let mut offset = 0;
-        for (line_idx, line) in self.code.lines().enumerate() {
-            if line_idx == position.line as usize {
-                return offset + position.character as usize;
-            }
-            offset += line.len() + 1;
-        }
-        offset
-    }
-
-    fn offset_to_position(&self, offset: usize) -> Position {
-        let clamped = offset.min(self.code.len());
-        let prefix = &self.code[..clamped];
-        let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;
-        let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
-        let character = self.code[line_start..clamped].encode_utf16().count() as u32;
-        Position::new(line, character)
     }
 }
 
 #[derive(Debug, Clone)]
 struct SignatureCallSite {
     message_start: usize,
+    receiver_range: Option<(u32, u32)>,
     active_parameter: u32,
     active_keyword: Option<String>,
     span_len: usize,
@@ -243,6 +240,17 @@ impl<'a> SignatureCallSiteFinder<'a> {
 
         self.best = Some(SignatureCallSite {
             message_start: message.start_offset(),
+            receiver_range: node.receiver().map(|receiver| {
+                let location = receiver.location();
+                (
+                    u32::try_from(location.start_offset()).expect(
+                        "INVARIANT VIOLATED: signature-help receiver start exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+                    ),
+                    u32::try_from(location.end_offset()).expect(
+                        "INVARIANT VIOLATED: signature-help receiver end exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+                    ),
+                )
+            }),
             active_parameter: active_parameter_for_call(node, self.byte_offset, self.source),
             active_keyword: active_keyword_for_call(node, self.byte_offset),
             span_len,

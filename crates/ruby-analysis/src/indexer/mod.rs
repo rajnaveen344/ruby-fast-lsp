@@ -30,7 +30,9 @@ pub mod yard;
 pub use analysis_indexer::{AnalysisIndex, AnalysisIndexer};
 pub use analyzer::{RubyPrismAnalyzer, SignatureHelpTarget};
 pub use code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
-pub use document_symbols::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
+pub use document_symbols::{
+    DocumentSymbolKind, DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext,
+};
 pub use erb::{is_erb_path, mask_erb, EmbeddedRuby};
 pub use hover::{identifier_to_hover_target, HoverTarget};
 pub use identifier::{Identifier, MethodReceiver};
@@ -47,7 +49,10 @@ pub use scope_tracker::{
     ScopeTracker,
 };
 pub use selection_ranges::selection_range_chains;
-pub use semantic_tokens::{TokenVisitor, TOKEN_MODIFIERS, TOKEN_TYPES};
+pub use semantic_tokens::{
+    SemanticTokenData, SemanticTokenKind, SemanticTokenModifierKind, TokenVisitor, TOKEN_MODIFIERS,
+    TOKEN_TYPES,
+};
 pub use source_document::{mask_shebang, SourceDocument};
 pub use variable_scopes::{
     CaptureRef, LVScopeId, LVScopeKind, RenameTarget, RenameTargetKind, ScopeNode, TypeAssignment,

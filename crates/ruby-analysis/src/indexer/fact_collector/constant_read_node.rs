@@ -37,9 +37,9 @@ impl FactCollector {
         )
     }
 
-    pub(super) fn text_range_from_lsp_range(
+    pub(super) fn text_range_from_source_range(
         &self,
-        range: tower_lsp::lsp_types::Range,
+        range: crate::core::SourceRange,
         kind: &str,
     ) -> TextRange {
         TextRange::new(

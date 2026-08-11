@@ -3,6 +3,7 @@
 //! This module contains the logic for generating actual hints from AST nodes.
 //! Generators are pure functions that take nodes and context, returning hints.
 
+use crate::utils::lsp::lsp_position;
 use parking_lot::RwLock;
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
@@ -57,7 +58,7 @@ pub fn generate_structural_hints(nodes: &[InlayNode], context: &HintContext) -> 
                 name,
                 end_offset,
             } => Some(InlayHintData {
-                position: context.document.offset_to_position(*end_offset as usize),
+                position: lsp_position(context.document.offset_to_position(*end_offset as usize)),
                 label: format!("{} {}", kind.keyword(), name),
                 kind: InlayHintKind::EndLabel,
                 tooltip: None,
@@ -65,7 +66,7 @@ pub fn generate_structural_hints(nodes: &[InlayNode], context: &HintContext) -> 
                 padding_right: false,
             }),
             InlayNode::ImplicitReturn { offset } => Some(InlayHintData {
-                position: context.document.offset_to_position(*offset as usize),
+                position: lsp_position(context.document.offset_to_position(*offset as usize)),
                 label: "return".to_string(),
                 kind: InlayHintKind::ImplicitReturn,
                 tooltip: None,
@@ -110,9 +111,11 @@ pub fn generate_variable_type_hints(
             };
 
             hints.push(InlayHintData {
-                position: context
-                    .document
-                    .offset_to_position(*name_end_offset as usize),
+                position: lsp_position(
+                    context
+                        .document
+                        .offset_to_position(*name_end_offset as usize),
+                ),
                 label,
                 kind: InlayHintKind::VariableType,
                 tooltip: None,
@@ -143,9 +146,11 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
                     .unwrap_or_else(|| "?".to_string());
 
             hints.push(InlayHintData {
-                position: context
-                    .document
-                    .offset_to_position(*return_type_offset as usize),
+                position: lsp_position(
+                    context
+                        .document
+                        .offset_to_position(*return_type_offset as usize),
+                ),
                 label: format!(" -> {}", return_type_str),
                 kind: InlayHintKind::MethodReturn,
                 tooltip: None,
@@ -164,9 +169,11 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
                     };
 
                     hints.push(InlayHintData {
-                        position: context
-                            .document
-                            .offset_to_position(param.end_offset as usize),
+                        position: lsp_position(
+                            context
+                                .document
+                                .offset_to_position(param.end_offset as usize),
+                        ),
                         label,
                         kind: InlayHintKind::ParameterType,
                         tooltip: None,
@@ -201,9 +208,11 @@ pub fn generate_chained_call_hints(
                 continue;
             };
             hints.push(InlayHintData {
-                position: context
-                    .document
-                    .offset_to_position(*call_end_offset as usize),
+                position: lsp_position(
+                    context
+                        .document
+                        .offset_to_position(*call_end_offset as usize),
+                ),
                 label: format!(": {ruby_type}"),
                 kind: InlayHintKind::ChainedMethodType,
                 tooltip: Some("Proven intermediate type in method chain".to_string()),

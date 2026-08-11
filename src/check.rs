@@ -474,6 +474,30 @@ fn solved_types_in_file(
             },
         });
     }
+    if let Some(unknown_expressions) = query.expression_unknown_reasons_in_file(file_id) {
+        for (range, reason) in unknown_expressions {
+            inferred.push(CheckInferredType {
+                path: report_path(root, &file.path),
+                range: check_range(file, *range)?,
+                kind: CheckTypeSubjectKind::Expression,
+                subject: "expression".to_string(),
+                outcome: CheckTypeOutcome::Unknown { reason: *reason },
+            });
+        }
+    }
+    if let Some(local_reads) = query.local_read_types_in_file(file_id) {
+        for (range, ruby_type) in local_reads {
+            inferred.push(CheckInferredType {
+                path: report_path(root, &file.path),
+                range: check_range(file, range)?,
+                kind: CheckTypeSubjectKind::Expression,
+                subject: "expression".to_string(),
+                outcome: CheckTypeOutcome::Proven {
+                    type_label: ruby_type.to_string(),
+                },
+            });
+        }
+    }
     if let Some(call_outcomes) = query.call_expression_outcomes_in_file(file_id) {
         for (range, outcome) in call_outcomes {
             let outcome = match outcome.proven_type() {
@@ -488,7 +512,7 @@ fn solved_types_in_file(
             };
             inferred.push(CheckInferredType {
                 path: report_path(root, &file.path),
-                range: check_range(file, *range)?,
+                range: check_range(file, range)?,
                 kind: CheckTypeSubjectKind::Expression,
                 subject: "expression".to_string(),
                 outcome,

@@ -166,8 +166,7 @@ struct DiagnosticPublicationState {
 
 impl DiagnosticPublicationState {
     fn queue(&mut self, uri: Url, diagnostics: Vec<Diagnostic>) -> bool {
-        self.pending
-            .insert(uri.to_string(), (uri, diagnostics));
+        self.pending.insert(uri.to_string(), (uri, diagnostics));
         if self.sender_scheduled {
             return false;
         }
@@ -229,6 +228,20 @@ fn new_core_engine_cache(
             )
         },
     )
+}
+
+fn new_orphan_analysis_engine() -> Arc<RwLock<AnalysisEngine>> {
+    let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+    crate::indexer::indexer_stdlib::IndexerStdlib::new(
+        crate::indexer::file_processor::FileProcessor::new(),
+        None,
+    )
+    .index_core_runtime_constants(None, engine.clone())
+    .expect(
+        "INVARIANT VIOLATED: the orphan engine could not seed embedded Ruby core runtime constants. This is a bug because loose files require the same universal constant facts as project engines. Fix: keep the embedded core RBS overlay parseable and register it before orphan documents.",
+    );
+    engine.write().resolve();
+    engine
 }
 
 fn new_runtime_stdlib_path_cache() -> crate::single_flight::BoundedSingleFlightCache<
@@ -457,7 +470,7 @@ impl RubyLanguageServer {
             workspaces: Arc::new(RwLock::new(Vec::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
             document_semantic_locks: Arc::new(Mutex::new(HashMap::new())),
-            analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
+            analysis_engine: new_orphan_analysis_engine(),
             external_document_projects: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(Mutex::new(config)),
             discovered_runtimes: Arc::new(tokio::sync::OnceCell::new()),
@@ -1624,7 +1637,7 @@ impl Default for RubyLanguageServer {
             workspaces: Arc::new(RwLock::new(Vec::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
             document_semantic_locks: Arc::new(Mutex::new(HashMap::new())),
-            analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
+            analysis_engine: new_orphan_analysis_engine(),
             external_document_projects: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
             discovered_runtimes: Arc::new(tokio::sync::OnceCell::new()),
@@ -2238,10 +2251,18 @@ mod runtime_status_tests {
         assert!(publication.queue(first.clone(), Vec::new()));
         assert!(!publication.queue(first.clone(), vec![Diagnostic::default()]));
         assert!(!publication.queue(second.clone(), Vec::new()));
-        let (uri, diagnostics) = publication.take_next().expect("first URI must stay pending");
+        let (uri, diagnostics) = publication
+            .take_next()
+            .expect("first URI must stay pending");
         assert_eq!(uri, first);
-        assert_eq!(diagnostics.len(), 1, "latest diagnostics for a URI must win");
-        let (uri, diagnostics) = publication.take_next().expect("second URI must stay pending");
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "latest diagnostics for a URI must win"
+        );
+        let (uri, diagnostics) = publication
+            .take_next()
+            .expect("second URI must stay pending");
         assert_eq!(uri, second);
         assert!(diagnostics.is_empty());
         assert!(publication.take_next().is_none());
@@ -2322,9 +2343,8 @@ mod runtime_status_tests {
         for index in 0..8 {
             let project = fixture.path().join(format!("project-{index}"));
             std::fs::create_dir_all(&project).unwrap();
-            workspaces.push(
-                language_server.add_workspace(Url::from_directory_path(&project).unwrap()),
-            );
+            workspaces
+                .push(language_server.add_workspace(Url::from_directory_path(&project).unwrap()));
         }
 
         let publish_started = Instant::now();

@@ -745,6 +745,7 @@ impl FakeEditor {
             );
             visitor.visit(&parse_result.node());
             let file_id = visitor.document.analysis_file_id();
+            let local_read_types = visitor.local_read_type_evidence();
             let inference = visitor.inference_evidence();
             let mut engine = analysis_engine.write();
             let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
@@ -798,6 +799,7 @@ impl FakeEditor {
                 },
                 execution_contexts: visitor.extension_execution_context_facts,
                 inference,
+                local_read_types,
             };
             engine.replace_facts(
                 file_id,

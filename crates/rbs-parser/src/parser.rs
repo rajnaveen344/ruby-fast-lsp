@@ -131,6 +131,26 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_constant_declaration() {
+        let source = "ARGV: Array[String]";
+        let declarations = Parser::new()
+            .parse(source)
+            .expect("constant RBS must parse");
+        assert_eq!(declarations.len(), 1);
+        let Declaration::Constant(constant) = &declarations[0] else {
+            panic!("ARGV RBS must produce a constant declaration");
+        };
+        assert_eq!(constant.name, "ARGV");
+        assert_eq!(
+            constant.r#type,
+            RbsType::ClassInstance {
+                name: "Array".to_string(),
+                args: vec![RbsType::Class("String".to_string())],
+            }
+        );
+    }
+
+    #[test]
     fn test_debug_print() {
         let source = r#"
 class String

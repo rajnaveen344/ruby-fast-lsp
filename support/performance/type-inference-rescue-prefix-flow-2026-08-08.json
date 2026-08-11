@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-08",
+  "slice": "proof-first rescue assignment-prefix flow and complete union consumers",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "description": "Exact release binaries preserved immediately before this rescue-prefix slice.",
+      "profile_single_file_sha256": "91ada7d8fe6a326d40339af27e489f66a976d3de4ceea9f693dfefa721b72d2d",
+      "profiler_sha256": "dce161c6364ac02b10b9966c187eeb90a6d6f7c4859d475c6bae71922bfb1fd6",
+      "ruby_fast_lsp_sha256": "7ef4139efbd20e6a3e99f5377df7233077c12c0c2ed259d8746c8c1d1e71b4c2"
+    },
+    "candidate": {
+      "profile_single_file_sha256": "10e170493a3cdf95fdc8c7fe1e28d78efbb5f5f8797d8dde6a7d1eba1b897ba0",
+      "profiler_sha256": "6076bf9e766a455d16379d44a7e3f49dcedb0024ab6be5afff8811f4ea9705dd",
+      "ruby_fast_lsp_sha256": "0cbbdcb67287e0659502a3cdefcc7a982913285368d25e76e7ace0e5b91ea8ff",
+      "tracked_diff_sha256_at_build": "b306c460a43829a0a1d1b1ada072f70b034980ebe640f849c5e0b58b80598796"
+    }
+  },
+  "inputs": {
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_reversed_order_pairs_per_repeat": 7,
+    "interactive_iterations_per_repeat_process": 100,
+    "interactive_high_confidence_pairs": 5,
+    "interactive_high_confidence_iterations_per_process": 500,
+    "cli_fixture": "tests/fixtures/type_inference_unknown_reasons",
+    "cli_fresh_processes": 5
+  },
+  "semantic_evidence": {
+    "red_reproduction": "With value = Product.new before begin, value = Text.new followed by a raising call inside begin, rescue incorrectly published Product only. An exception can enter rescue before or after the assignment commits, so the exhaustive receiver is Product | Text.",
+    "accepted_rescue_rule": "During the existing recursive protected-body traversal, each active rescue frame observes the prior local value before an assignment RHS and the new value after a successful write. Every rescue clause starts from the canonical union of all observed assignment prefixes overlaid on the pre-begin environment. Nested protected bodies update every active outer frame; rescue, else, and ensure execute only after the matching frame is popped. Unknown absorbs the union.",
+    "accepted_union_rule": "A union call, definition lookup, or signature lookup succeeds only when every receiver member has an exact visibility-admitted method result. Return types and definition/signature results are then combined deterministically; one missing, private, unavailable, or unresolved member fails closed.",
+    "diagnostic_rule": "A concrete union dispatch proven by the shared fail-closed return resolver cannot also emit unresolved-method from the legacy single-owner reference candidate. Incomplete union outcomes are not suppressed.",
+    "architecture": "Rescue flow remains inside ruby-analysis TypeTracker, complete MRO/visibility resolution remains inside AnalysisQuery, and CLI/LSP query modules only project engine results. The implementation adds no second AST walk, semantic store, or retained cache.",
+    "performance_refactor": "The initially correct public-method proof rebuilt a growing HashSet for every method and pushed visitor median over the 3 percent gate. The accepted design maintains one incrementally updated Arc<HashSet>; tracker handoff is O(1), and inherited visibility overrides remain engine-owned.",
+    "scorecard": "85/85 reviewed cases, 100/100 points, revision m0-seed-22, score_eligible=false, claim_eligible=false",
+    "ruby_analysis_tests": "461/461",
+    "root_tests": "1469/1469 non-ignored, one ignored",
+    "workspace_tests": "cargo fmt --all -- --check, git diff --check, and cargo test --workspace -- --test-threads=4 exited 0; all extension, integration, black-box, and doc-test targets passed",
+    "lifecycle": "The same source transitions from Text, to a complete Product | Text rescue receiver, to a private-member incomplete union, to an unresolved protected assignment, and back to Text. Hover, completion, chained-call hover, definition, signature help, diagnostics, and method-return inlays invalidate and recover together. Complete union navigation returns both definitions; the private and unresolved variants return none.",
+    "cli_stdout_sha256": "f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b",
+    "cli_result": "All five fresh final-release processes produced byte-identical normalized JSON. The diagnostic-present fixture intentionally exits nonzero before the hashing pipeline.",
+    "semantic_result_fingerprint_hex": "26048da84ae3a67f68351552c2829171"
+  },
+  "performance": {
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 121.36675,
+        "candidate": 120.98925,
+        "delta_percent": -0.311041
+      },
+      "parse": {
+        "baseline": 4.3205,
+        "candidate": 4.250459,
+        "delta_percent": -1.621132
+      },
+      "direct": {
+        "baseline": 5.695083,
+        "candidate": 5.689792,
+        "delta_percent": -0.092905
+      },
+      "visitor": {
+        "baseline": 96.58975,
+        "candidate": 96.568375,
+        "delta_percent": -0.02213
+      },
+      "replace_resolve": {
+        "baseline": 12.161959,
+        "candidate": 12.077542,
+        "delta_percent": -0.694107
+      },
+      "overall": {
+        "baseline": 121.935625,
+        "candidate": 121.561542,
+        "delta_percent": -0.306787
+      }
+    },
+    "interactive_repeat_1_delta_percent": {
+      "cold_indexing": -0.389976,
+      "edit_p95": -4.797316,
+      "completion_p95": -0.278838,
+      "hover_p95": -15.033895,
+      "definition_p95": 2.982155,
+      "references_p95": 0.642321,
+      "diagnostics_p95": 17.557895,
+      "engine_heap": 0.0
+    },
+    "interactive_repeat_2_delta_percent": {
+      "cold_indexing": 1.10145,
+      "edit_p95": -1.382015,
+      "completion_p95": 3.229177,
+      "hover_p95": 0.006685,
+      "definition_p95": 7.386364,
+      "references_p95": 0.494713,
+      "diagnostics_p95": -10.121739,
+      "engine_heap": 0.0
+    },
+    "interactive_500_iteration_medians": {
+      "baseline": {
+        "cold_indexing_ms": 748.761333,
+        "edit_p95_ms": 1.325459,
+        "completion_p95_ms": 0.030375,
+        "hover_p95_ms": 0.01425,
+        "definition_p95_ms": 0.023,
+        "references_p95_ms": 5.594917,
+        "diagnostics_p95_ms": 0.002792,
+        "engine_heap_mb": 6.1
+      },
+      "candidate": {
+        "cold_indexing_ms": 757.129375,
+        "edit_p95_ms": 1.314333,
+        "completion_p95_ms": 0.03075,
+        "hover_p95_ms": 0.015208,
+        "definition_p95_ms": 0.023084,
+        "references_p95_ms": 5.605667,
+        "diagnostics_p95_ms": 0.002375,
+        "engine_heap_mb": 6.1
+      },
+      "delta_percent": {
+        "cold_indexing": 1.117585,
+        "edit_p95": -0.839407,
+        "completion_p95": 1.234568,
+        "hover_p95": 6.722807,
+        "definition_p95": 0.365217,
+        "references_p95": 0.192139,
+        "diagnostics_p95": -14.93553,
+        "engine_heap": 0.0
+      }
+    },
+    "noise_note": "The 100-iteration definition movement was 0.625 microseconds in one order and 1.625 microseconds in the reverse; at 500 iterations it narrowed to 0.084 microseconds. The 500-iteration hover difference is 0.958 microseconds on an unchanged hover query path. Diagnostic percentages likewise represent fractions of one microsecond. Fixed absolute budgets pass in every measured process.",
+    "decision": "Accepted. The exact final candidate is flat or faster on the 225,569-byte inference path, all material 500-iteration interactive deltas are below 3 percent, retained heap is unchanged, microsecond-floor movements remain thousands of times below fixed budgets, and every correctness and production budget gate passes. This does not replace the goal-wide warm-cache, allocation, worker-schedule, real-project precision, packaging, or two-project RSS acceptance matrix."
+  },
+  "known_follow_ups": [
+    "The scorecard remains deliberately claim-ineligible despite its seed-corpus score.",
+    "The legacy stored method-reference candidate still has one owner. Definition and signature queries now handle complete union receivers, but indexing one union call as references to every proven member requires a grouped receiver-target representation in a later slice.",
+    "A complete method whose return type is itself unresolved still needs a union-aware diagnostic target representation; this slice suppresses the contradictory unresolved-method diagnostic only when the complete union return proof is concrete.",
+    "The goal-wide real-project diagnostic review and cold/warm/allocation/scheduling/two-project RSS matrix remain open."
+  ]
+}

@@ -55,10 +55,17 @@ pub struct ScopeTracker {
 struct ExecutionContextFrame {
     lexical_frame_depth: usize,
     local_scope_depth: usize,
+    origin: ExecutionContextOrigin,
     implicit_receiver: Vec<RubyConstant>,
     implicit_receiver_kind: NamespaceKind,
     method_definition_owner: Vec<RubyConstant>,
     method_definition_kind: NamespaceKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutionContextOrigin {
+    Method,
+    Block,
 }
 
 #[derive(Debug, Clone)]
@@ -88,8 +95,41 @@ impl ScopeTracker {
         }
     }
 
-    pub fn push_execution_context(
+    pub fn push_method_execution_context(
         &mut self,
+        implicit_receiver: Vec<RubyConstant>,
+        implicit_receiver_kind: NamespaceKind,
+        method_definition_owner: Vec<RubyConstant>,
+        method_definition_kind: NamespaceKind,
+    ) {
+        self.push_execution_context(
+            ExecutionContextOrigin::Method,
+            implicit_receiver,
+            implicit_receiver_kind,
+            method_definition_owner,
+            method_definition_kind,
+        );
+    }
+
+    pub fn push_block_execution_context(
+        &mut self,
+        implicit_receiver: Vec<RubyConstant>,
+        implicit_receiver_kind: NamespaceKind,
+        method_definition_owner: Vec<RubyConstant>,
+        method_definition_kind: NamespaceKind,
+    ) {
+        self.push_execution_context(
+            ExecutionContextOrigin::Block,
+            implicit_receiver,
+            implicit_receiver_kind,
+            method_definition_owner,
+            method_definition_kind,
+        );
+    }
+
+    fn push_execution_context(
+        &mut self,
+        origin: ExecutionContextOrigin,
         implicit_receiver: Vec<RubyConstant>,
         implicit_receiver_kind: NamespaceKind,
         method_definition_owner: Vec<RubyConstant>,
@@ -98,6 +138,7 @@ impl ScopeTracker {
         self.execution_context_stack.push(ExecutionContextFrame {
             lexical_frame_depth: self.frames.len(),
             local_scope_depth: self.scope_kind_stack.len(),
+            origin,
             implicit_receiver,
             implicit_receiver_kind,
             method_definition_owner,
@@ -158,6 +199,50 @@ impl ScopeTracker {
                     self.current_method_context_without_execution(),
                 )
             })
+    }
+
+    /// Whether the active implicit `self` is established by Ruby syntax or an
+    /// explicit execution-context contract.
+    ///
+    /// An ordinary block captures lexical `self`, but the receiving method can
+    /// execute that block through `instance_eval`/`instance_exec`. Until the
+    /// callee's block contract is known, resolving bare calls or `self.foo`
+    /// inside the block against the lexical owner would be a guess.
+    pub fn implicit_receiver_context_is_proven(&self) -> bool {
+        if let Some(context) = self.current_execution_context() {
+            let ordinary_block_depth = self.scope_kind_stack[context.local_scope_depth..]
+                .iter()
+                .filter(|kind| matches!(kind, LocalScopeKind::Block))
+                .count();
+            return match context.origin {
+                ExecutionContextOrigin::Method => ordinary_block_depth == 0,
+                ExecutionContextOrigin::Block => ordinary_block_depth <= 1,
+            };
+        }
+
+        let mut kinds = self.scope_kind_stack.iter().rev().filter(|kind| {
+            !matches!(
+                kind,
+                LocalScopeKind::Rescue | LocalScopeKind::ExplicitBlockLocal
+            )
+        });
+        let Some(kind) = kinds.next() else {
+            return true;
+        };
+        match kind {
+            LocalScopeKind::InstanceMethod
+            | LocalScopeKind::ClassMethod
+            | LocalScopeKind::Constant => true,
+            LocalScopeKind::Block => {
+                matches!(kinds.next(), Some(LocalScopeKind::FrameworkInstanceBlock))
+            }
+            LocalScopeKind::FrameworkInstanceBlock => true,
+            LocalScopeKind::Rescue | LocalScopeKind::ExplicitBlockLocal => {
+                panic!(
+                    "INVARIANT VIOLATED: filtered local-scope kind reached implicit receiver proof classification. This is a bug because rescue and explicit-block-local frames were removed immediately above. Fix: keep filtering and exhaustive classification in one function."
+                )
+            }
+        }
     }
 
     pub fn method_definition_context(&self) -> (Vec<RubyConstant>, NamespaceKind) {
@@ -617,7 +702,7 @@ mod tests {
         let target = RubyConstant::new("Target").expect("test constant must be valid");
         tracker.push_ns_scope(lexical.clone());
 
-        tracker.push_execution_context(
+        tracker.push_block_execution_context(
             vec![target.clone()],
             NamespaceKind::Instance,
             vec![target.clone()],
@@ -642,7 +727,7 @@ mod tests {
         let target = RubyConstant::new("Target").expect("test constant must be valid");
         let nested = RubyConstant::new("Nested").expect("test constant must be valid");
         tracker.push_ns_scope(lexical.clone());
-        tracker.push_execution_context(
+        tracker.push_block_execution_context(
             vec![target],
             NamespaceKind::Instance,
             vec![RubyConstant::new("Target").expect("test constant must be valid")],
@@ -669,7 +754,7 @@ mod tests {
         let lexical = RubyConstant::new("Lexical").expect("test constant must be valid");
         let target = RubyConstant::new("Target").expect("test constant must be valid");
         tracker.push_ns_scope(lexical.clone());
-        tracker.push_execution_context(
+        tracker.push_block_execution_context(
             vec![target.clone()],
             NamespaceKind::Singleton,
             vec![target.clone()],

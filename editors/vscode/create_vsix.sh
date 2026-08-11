@@ -263,6 +263,20 @@ else
     echo "Stubs will not be included in the VSIX package"
 fi
 
+# Stage the embedded core-RBS proof source as a real navigation target. The
+# server also embeds these bytes for standalone checking, but packaged LSP
+# definition locations must resolve to an actual immutable file.
+echo "Bundling core runtime RBS..."
+CORE_RBS_SOURCE="$ROOT_DIR/crates/rbs-parser/rbs_types/core/constants.rbs"
+CORE_RBS_TARGET="$EXTENSION_DIR/core-rbs"
+if [ ! -f "$CORE_RBS_SOURCE" ]; then
+    echo "Error: missing core runtime RBS at $CORE_RBS_SOURCE"
+    exit 1
+fi
+rm -rf "$CORE_RBS_TARGET"
+mkdir -p "$CORE_RBS_TARGET"
+cp "$CORE_RBS_SOURCE" "$CORE_RBS_TARGET/constants.rbs"
+
 # Stage the runtime-owned JRuby delta assets. These remain uncompressed because
 # the server indexes only the selected series and needs stable navigation URIs
 # inside the installed extension.

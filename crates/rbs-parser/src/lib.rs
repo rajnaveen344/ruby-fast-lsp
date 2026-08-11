@@ -36,7 +36,7 @@ mod visitor;
 pub use converter::{
     get_base_class_name, is_nilable, rbs_type_to_string, rbs_type_to_yard, unwrap_nilable,
 };
-pub use embedded::{core_file_count, stdlib_file_count};
+pub use embedded::{core_file_count, core_rbs_file, stdlib_file_count};
 pub use loader::{LoadError, Loader};
 pub use parser::Parser;
 pub use types::*;

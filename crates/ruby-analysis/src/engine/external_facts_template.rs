@@ -20,7 +20,10 @@ use std::fmt;
 /// insert template-owned file IDs into an engine. This first cacheable slice
 /// excludes reference, diagnostic, and execution-context facts because those
 /// carry project/query/extension policy rather than project-neutral dependency
-/// declarations.
+/// declarations. File-local symbols, expression/local types, flow evidence,
+/// and local-read evidence are intentionally excluded: they cannot affect a
+/// different file and an interactively opened dependency is reprocessed
+/// through the ordinary file-owned lifecycle.
 #[derive(Debug, Clone)]
 pub struct ProjectNeutralFileFactsTemplate {
     source_file_id: SourceFileId,
@@ -139,6 +142,7 @@ struct SnapshotMethodFact {
     name_range: SnapshotRange,
     params: Vec<String>,
     param_facts: Vec<SnapshotMethodParamFact>,
+    parameter_shape_complete: bool,
     delegate_receiver: Option<String>,
     visibility: SnapshotMethodVisibility,
     availability: SnapshotMethodAvailability,
@@ -245,6 +249,7 @@ struct SnapshotGraphEdgeFact {
     source: SnapshotFqn,
     target: SnapshotFqn,
     kind: SnapshotGraphEdgeKind,
+    provenance: SnapshotGraphEdgeProvenance,
     range: SnapshotRange,
 }
 
@@ -255,7 +260,15 @@ struct SnapshotUnresolvedGraphEdgeFact {
     absolute: bool,
     context: SnapshotFqn,
     kind: SnapshotGraphEdgeKind,
+    provenance: SnapshotGraphEdgeProvenance,
     range: SnapshotRange,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotGraphEdgeProvenance {
+    Explicit,
+    ImplicitObject,
 }
 
 impl fmt::Display for ProjectNeutralTemplateRejection {
@@ -277,8 +290,9 @@ impl std::error::Error for ProjectNeutralTemplateRejection {}
 impl ProjectNeutralFileFactsTemplate {
     pub fn try_new(
         source_file_id: SourceFileId,
-        facts: FileFacts,
+        mut facts: FileFacts,
     ) -> Result<Self, ProjectNeutralTemplateRejection> {
+        retain_project_neutral_declaration_facts(&mut facts);
         if !facts.reference_candidates.is_empty()
             || !facts.diagnostic_candidates.is_empty()
             || !facts.diagnostics.is_empty()
@@ -440,6 +454,20 @@ impl ProjectNeutralFileFactsTemplate {
         let facts = restore_declaration_facts(snapshot, source_file_id)?;
         Self::try_new(source_file_id, facts).map_err(|error| error.to_string())
     }
+}
+
+fn retain_project_neutral_declaration_facts(facts: &mut FileFacts) {
+    facts
+        .symbols
+        .retain(|fact| fact.kind != SymbolKind::LocalVariable);
+    facts.types.retain(|fact| {
+        !matches!(
+            &fact.subject,
+            TypeSubject::Local { .. } | TypeSubject::Expression(_)
+        )
+    });
+    facts.inference = Default::default();
+    facts.local_read_types = Default::default();
 }
 
 fn fqn_has_generated_owner(fqn: &FullyQualifiedName) -> bool {
@@ -842,6 +870,7 @@ fn snapshot_method(fact: &MethodFact) -> Result<SnapshotMethodFact, String> {
                 documentation: parameter.documentation.clone(),
             })
             .collect(),
+        parameter_shape_complete: fact.parameter_shape_complete,
         delegate_receiver: fact
             .delegate_receiver
             .as_ref()
@@ -881,6 +910,7 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
         name_range,
         params: fact.params,
         param_facts,
+        parameter_shape_complete: fact.parameter_shape_complete,
         delegate_receiver,
         visibility: restore_visibility(fact.visibility),
         availability: restore_availability(fact.availability)?,
@@ -1135,6 +1165,28 @@ fn restore_graph_edge_kind(kind: SnapshotGraphEdgeKind) -> GraphEdgeKind {
     }
 }
 
+fn snapshot_graph_edge_provenance(
+    provenance: crate::core::GraphEdgeProvenance,
+) -> SnapshotGraphEdgeProvenance {
+    match provenance {
+        crate::core::GraphEdgeProvenance::Explicit => SnapshotGraphEdgeProvenance::Explicit,
+        crate::core::GraphEdgeProvenance::ImplicitObject => {
+            SnapshotGraphEdgeProvenance::ImplicitObject
+        }
+    }
+}
+
+fn restore_graph_edge_provenance(
+    provenance: SnapshotGraphEdgeProvenance,
+) -> crate::core::GraphEdgeProvenance {
+    match provenance {
+        SnapshotGraphEdgeProvenance::Explicit => crate::core::GraphEdgeProvenance::Explicit,
+        SnapshotGraphEdgeProvenance::ImplicitObject => {
+            crate::core::GraphEdgeProvenance::ImplicitObject
+        }
+    }
+}
+
 fn snapshot_graph_node(fact: &GraphNodeFact) -> Result<SnapshotGraphNodeFact, String> {
     Ok(SnapshotGraphNodeFact {
         fqn: snapshot_fqn(&fact.fqn)?,
@@ -1159,6 +1211,7 @@ fn snapshot_graph_edge(fact: &GraphEdgeFact) -> Result<SnapshotGraphEdgeFact, St
         source: snapshot_fqn(&fact.source)?,
         target: snapshot_fqn(&fact.target)?,
         kind: snapshot_graph_edge_kind(fact.kind),
+        provenance: snapshot_graph_edge_provenance(fact.provenance),
         range: snapshot_range(fact.range),
     })
 }
@@ -1172,7 +1225,8 @@ fn restore_graph_edge(
         restore_fqn(fact.target)?,
         restore_graph_edge_kind(fact.kind),
         restore_range(fact.range, file_id)?,
-    ))
+    )
+    .with_provenance(restore_graph_edge_provenance(fact.provenance)))
 }
 
 fn snapshot_unresolved_graph_edge(
@@ -1184,6 +1238,7 @@ fn snapshot_unresolved_graph_edge(
         absolute: fact.absolute,
         context: snapshot_fqn(&fact.context)?,
         kind: snapshot_graph_edge_kind(fact.kind),
+        provenance: snapshot_graph_edge_provenance(fact.provenance),
         range: snapshot_range(fact.range),
     })
 }
@@ -1199,7 +1254,8 @@ fn restore_unresolved_graph_edge(
         restore_fqn(fact.context)?,
         restore_graph_edge_kind(fact.kind),
         restore_range(fact.range, file_id)?,
-    ))
+    )
+    .with_provenance(restore_graph_edge_provenance(fact.provenance)))
 }
 
 fn validate_contained_range(inner: TextRange, outer: TextRange, label: &str) -> Result<(), String> {
@@ -1276,9 +1332,10 @@ fn rebind_range(range: &mut TextRange, source: SourceFileId, target: SourceFileI
 mod tests {
     use crate::core::{
         DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeFact,
-        GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact, MethodVisibilityOverrideFact,
-        RubyConstant, RubyMethod, RubyType, SourceFileId, SourceKind, SymbolFact, SymbolKind,
-        TextRange, TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
+        GraphEdgeKind, GraphNodeFact, GraphNodeKind, InferenceEvidence, MethodFact,
+        MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType, SourceFileId, SourceKind,
+        SymbolFact, SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance,
+        TypeSubject, UnresolvedGraphEdgeFact,
     };
     use crate::engine::{
         AnalysisEngine, AnalysisQuery, FileFacts, ProjectNeutralFileFactsTemplate,
@@ -1296,7 +1353,7 @@ mod tests {
     }
 
     #[test]
-    fn template_rebinds_every_supported_source_range() {
+    fn template_rebinds_declarations_and_drops_file_local_evidence() {
         let source = SourceFileId(41);
         let target = SourceFileId(7);
         let owner = namespace("Widget");
@@ -1308,9 +1365,12 @@ mod tests {
         let template = ProjectNeutralFileFactsTemplate::try_new(
             source,
             FileFacts {
-                symbols: vec![SymbolFact::new(owner.clone(), SymbolKind::Class, range)
-                    .with_name_range(TextRange::new(source, 1, 7))],
-                methods: vec![MethodFact::new(method_fqn, owner.clone(), range)
+                symbols: vec![
+                    SymbolFact::new(owner.clone(), SymbolKind::Class, range)
+                        .with_name_range(TextRange::new(source, 1, 7)),
+                    SymbolFact::new(owner.clone(), SymbolKind::LocalVariable, expression),
+                ],
+                methods: vec![MethodFact::new(method_fqn.clone(), owner.clone(), range)
                     .with_name_range(TextRange::new(source, 8, 12))],
                 method_visibility_overrides: vec![MethodVisibilityOverrideFact::new(
                     owner.clone(),
@@ -1318,12 +1378,20 @@ mod tests {
                     MethodVisibility::Private,
                     expression,
                 )],
-                types: vec![TypeFact::new(
-                    TypeSubject::Expression(expression),
-                    RubyType::string(),
-                    expression,
-                    TypeProvenance::Inferred,
-                )],
+                types: vec![
+                    TypeFact::new(
+                        TypeSubject::Expression(expression),
+                        RubyType::string(),
+                        expression,
+                        TypeProvenance::Inferred,
+                    ),
+                    TypeFact::new(
+                        TypeSubject::MethodReturn(method_fqn),
+                        RubyType::string(),
+                        range,
+                        TypeProvenance::Inferred,
+                    ),
+                ],
                 graph_nodes: vec![GraphNodeFact::new(
                     owner.clone(),
                     GraphNodeKind::Class,
@@ -1343,6 +1411,14 @@ mod tests {
                     GraphEdgeKind::Include,
                     range,
                 )],
+                inference: InferenceEvidence {
+                    call_expression_outcomes: vec![(
+                        expression,
+                        TypeInferenceOutcome::proven(RubyType::string()),
+                    )],
+                    ..Default::default()
+                },
+                local_read_types: vec![(expression, RubyType::string())].into_boxed_slice(),
                 ..FileFacts::default()
             },
         )
@@ -1352,16 +1428,19 @@ mod tests {
         let restored =
             ProjectNeutralFileFactsTemplate::try_from_persistent_snapshot(snapshot).unwrap();
         let facts = restored.instantiate(target);
+        assert_eq!(facts.symbols.len(), 1);
         assert_range_file(facts.symbols[0].range, target);
         assert_range_file(facts.symbols[0].name_range, target);
         assert_range_file(facts.methods[0].range, target);
         assert_range_file(facts.methods[0].name_range, target);
         assert_range_file(facts.method_visibility_overrides[0].range, target);
+        assert_eq!(facts.types.len(), 1);
         assert_range_file(facts.types[0].range, target);
-        let TypeSubject::Expression(subject_range) = facts.types[0].subject else {
-            panic!("expected expression type subject");
+        let TypeSubject::MethodReturn(_) = facts.types[0].subject else {
+            panic!("expected retained method-return type subject");
         };
-        assert_range_file(subject_range, target);
+        assert_eq!(facts.inference, InferenceEvidence::default());
+        assert!(facts.local_read_types.is_empty());
         assert_range_file(facts.graph_nodes[0].range, target);
         assert_range_file(facts.graph_edges[0].range, target);
         assert_range_file(facts.unresolved_graph_edges[0].range, target);

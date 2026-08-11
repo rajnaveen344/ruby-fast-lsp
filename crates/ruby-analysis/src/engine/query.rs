@@ -3,8 +3,9 @@ use std::path::Path;
 use crate::core::method_store::MethodVisibilityOverrideFact;
 use crate::core::{
     DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
-    MethodFact, MethodReferenceAccess, ReferenceFact, SourceFileId, StoredReferenceCandidateKind,
-    SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject,
+    MethodCalleeResolution, MethodFact, ReferenceFact, RubyType, SourceFileId,
+    StoredMethodReferenceCandidate, StoredReferenceCandidateKind, SymbolFact, TextRange, TypeFact,
+    TypeResolution, TypeSubject, UnknownReason,
 };
 
 use crate::{AnalysisEngine, SourceFile};
@@ -95,201 +96,256 @@ impl<'a> AnalysisQuery<'a> {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> Vec<TextRange> {
-        let mut targets = self
+        let mut candidates = Vec::new();
+        for candidate in self
             .engine
             .reference_candidate_store()
             .candidates_in_file(file_id)
             .into_iter()
-            .filter_map(|candidate| {
-                let contains_offset = candidate.range.file_id == file_id
-                    && candidate.range.start_byte <= byte_offset
-                    && byte_offset < candidate.range.end_byte;
-                if !contains_offset {
-                    return None;
-                }
-                match candidate.kind {
-                    StoredReferenceCandidateKind::Resolved { target, .. } => {
-                        self.engine
-                            .fqn_for_id(target)
-                            .cloned()
-                            .map(|target| (target, None))
+            .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))
+        {
+            // Extension patches enter both direct and merged collection paths.
+            // Identical candidates represent one semantic target, not an
+            // ambiguity. Distinct overlapping candidates remain separate and
+            // continue through the fail-closed target checks below.
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+        if let [candidate] = candidates.as_slice() {
+            if let StoredReferenceCandidateKind::Method {
+                owner,
+                owner_kind,
+                method,
+                is_super,
+                access,
+                caller,
+                call_expression_range,
+                preferred_definition_range,
+                diagnostics,
+            } = &candidate.kind
+            {
+                let candidate = StoredMethodReferenceCandidate {
+                    range: candidate.range,
+                    owner: *owner,
+                    owner_kind: *owner_kind,
+                    method: *method,
+                    is_super: *is_super,
+                    access: *access,
+                    caller: *caller,
+                    call_expression_range: *call_expression_range,
+                    preferred_definition_range: *preferred_definition_range,
+                    diagnostics: diagnostics.clone(),
+                };
+                let mut all_ranges = Vec::new();
+                let candidate_callees = self.method_candidate_callees(&candidate);
+                for callee in candidate_callees.into_iter().filter(|callee| {
+                    callee.resolution == MethodCalleeResolution::Exact
+                        && callee.method == candidate.method
+                }) {
+                    let mut ranges = callee.definition_ranges;
+                    if let Some(preferred) = candidate.preferred_definition_range {
+                        if ranges.contains(&preferred) {
+                            ranges = vec![preferred];
+                        }
                     }
-                    StoredReferenceCandidateKind::Method {
-                        owner,
-                        owner_kind,
-                        method,
-                        is_super,
-                        access,
-                        caller,
-                        call_expression_range: _,
-                        preferred_definition_range,
-                        diagnostics,
-                    } => {
-                        let owner = self.engine.names.const_lookup(owner).expect(
-                            "INVARIANT VIOLATED: exact method reference points to a missing owner lookup. \
-                             This is a bug because candidates contain only interned lookup ids. \
-                             Fix: intern method target owners before storing candidates.",
-                        );
-                        let owner = FullyQualifiedName::namespace_with_kind(
-                            owner.path.to_vec(),
-                            owner_kind,
-                        );
-                        if is_super {
-                            return self
-                                .resolve_super_method_reference(&owner, &method)
-                                .reference_parts()
-                                .filter(|(_resolved_owner, resolved_method, _)| {
-                                    *resolved_method == method
-                                })
-                                .map(|(resolved_owner, resolved_method, _)| {
-                                    (
-                                        FullyQualifiedName::method(
-                                            resolved_owner.namespace_parts(),
-                                            resolved_method,
-                                        ),
-                                        preferred_definition_range,
-                                    )
-                                });
-                        }
-
-                        if diagnostics.is_none() {
-                            return self
-                                .resolve_method_reference(&owner, &method)
-                                .reference_parts()
-                                .filter(|(_resolved_owner, resolved_method, _)| {
-                                    *resolved_method == method
-                                })
-                                .map(|(resolved_owner, resolved_method, _)| {
-                                    (
-                                        FullyQualifiedName::method(
-                                            resolved_owner.namespace_parts(),
-                                            resolved_method,
-                                        ),
-                                        preferred_definition_range,
-                                    )
-                                });
-                        }
-
-                        let callees = match access {
-                            MethodReferenceAccess::Normal
-                            | MethodReferenceAccess::VisibilityBypass => {
-                                self.resolve_method_callees(&owner, &method)
-                            }
-                            MethodReferenceAccess::ExplicitReceiver => caller
-                                .and_then(|caller| self.engine.fqn_for_id(caller))
-                                .and_then(|caller| {
-                                    let mut owners = self
-                                        .engine
-                                        .method_facts_for(caller)
-                                        .into_iter()
-                                        .map(|fact| fact.owner)
-                                        .collect::<Vec<_>>();
-                                    owners.sort_by_key(ToString::to_string);
-                                    owners.dedup();
-                                    let caller = if owners.len() == 1 {
-                                        owners.pop().expect(
-                                            "INVARIANT VIOLATED: one caller owner disappeared after length validation. This is a bug because protected navigation needs a stable caller namespace. Fix: keep caller-owner selection atomic.",
-                                        )
-                                    } else {
-                                        FullyQualifiedName::namespace(caller.namespace_parts())
-                                    };
-                                    self.resolve_protected_method_callees(
-                                        &owner,
-                                        &method,
-                                        &caller,
-                                    )
-                                })
-                                .or_else(|| self.resolve_public_method_callees(&owner, &method)),
-                        };
-                        let mut exact_targets = callees
-                            .unwrap_or_default()
-                            .into_iter()
-                            .filter(|callee| {
-                                callee.method == method && !callee.definition_ranges.is_empty()
-                            })
-                            .map(|callee| {
-                                FullyQualifiedName::method(
-                                    callee.owner.namespace_parts(),
-                                    callee.method,
+                    let winning_precedence = ranges
+                        .iter()
+                        .map(|range| {
+                            self.engine
+                                .file(range.file_id)
+                                .expect(
+                                    "INVARIANT VIOLATED: method-callee definition range references an unregistered source file. This is a bug because navigation resolution must retain file ownership. Fix: register sources before publishing method facts.",
                                 )
-                            })
-                            .collect::<Vec<_>>();
-                        exact_targets.sort_by_key(ToString::to_string);
-                        exact_targets.dedup();
-                        (exact_targets.len() == 1)
-                            .then(|| exact_targets.pop())
-                            .flatten()
-                            .map(|target| (target, preferred_definition_range))
+                                .kind
+                                .definition_precedence()
+                        })
+                        .min();
+                    if let Some(winning_precedence) = winning_precedence {
+                        ranges.retain(|range| {
+                            self.engine
+                                .file(range.file_id)
+                                .expect(
+                                    "INVARIANT VIOLATED: method-callee definition range disappeared during precedence filtering. This is a bug because definition queries hold an immutable engine borrow. Fix: keep file registration stable for the duration of an analysis query.",
+                                )
+                                .kind
+                                .definition_precedence()
+                                == winning_precedence
+                        });
                     }
-                    StoredReferenceCandidateKind::Constant { .. } => None,
+                    all_ranges.extend(ranges);
+                }
+                all_ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+                all_ranges.dedup();
+                return all_ranges;
+            }
+        }
+        let mut targets = candidates
+            .into_iter()
+            .flat_map(|candidate| match candidate.kind {
+                StoredReferenceCandidateKind::Resolved { target, .. } => vec![self
+                    .engine
+                    .fqn_for_id(target)
+                    .expect(
+                        "INVARIANT VIOLATED: exact resolved reference points to a missing target FQN. This is a bug because resolved candidates contain only interned target ids. Fix: intern the target before storing the reference candidate and keep the name arena append-only.",
+                    )
+                    .clone()],
+                StoredReferenceCandidateKind::Method { .. } => Vec::new(),
+                StoredReferenceCandidateKind::Constant { lookup } => {
+                    let lookup = self.engine.names.const_lookup(lookup).expect(
+                        "INVARIANT VIOLATED: exact constant reference points to a missing lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern constant lookups before storing reference candidates.",
+                    );
+                    let context = self.engine.names.fqn(lookup.context).expect(
+                        "INVARIANT VIOLATED: exact constant reference lookup points to a missing context FQN. This is a bug because constant lookups must retain their interned lexical context. Fix: intern the context before storing the lookup.",
+                    );
+                    self.resolve_constant_in_context(
+                        lookup.path.as_slice(),
+                        &if lookup.absolute {
+                            Vec::new()
+                        } else {
+                            context.namespace_parts()
+                        },
+                    )
+                    .map(|target| vec![target])
+                    .unwrap_or_default()
                 }
             })
             .collect::<Vec<_>>();
-        targets.sort_by_key(|(target, preferred)| {
-            (
-                target.to_string(),
-                preferred.map(|range| (range.file_id, range.start_byte, range.end_byte)),
-            )
-        });
+        targets.sort_by_key(ToString::to_string);
         targets.dedup();
-        if targets.len() != 1 {
+        if targets.len() > 1 {
             return Vec::new();
         }
-
-        let (target, preferred_definition_range) = &targets[0];
-        let mut ranges = match target {
-            FullyQualifiedName::Method(_, _) => {
-                let facts = self.engine.method_facts_for(target);
-                if let Some(preferred) = preferred_definition_range {
-                    if facts.iter().any(|fact| fact.range == *preferred) {
-                        return vec![*preferred];
-                    }
+        let mut all_ranges = Vec::new();
+        for target in targets {
+            let mut ranges = match &target {
+                FullyQualifiedName::Method(_, _) => {
+                    let facts = self.engine.method_facts_for(&target);
+                    facts.into_iter().map(|fact| fact.range).collect::<Vec<_>>()
                 }
-                facts.into_iter().map(|fact| fact.range).collect::<Vec<_>>()
+                FullyQualifiedName::Namespace(_, _)
+                | FullyQualifiedName::Constant(_)
+                | FullyQualifiedName::LocalVariable(_)
+                | FullyQualifiedName::InstanceVariable(_)
+                | FullyQualifiedName::ClassVariable(_)
+                | FullyQualifiedName::GlobalVariable(_) => self
+                    .engine
+                    .symbol_facts_for(&target)
+                    .into_iter()
+                    .map(|fact| fact.range)
+                    .collect::<Vec<_>>(),
+            };
+            let winning_precedence = ranges
+                .iter()
+                .map(|range| {
+                    self.engine
+                        .file(range.file_id)
+                        .expect(
+                            "INVARIANT VIOLATED: definition range references an unregistered source file. \
+                             This is a bug because definition precedence requires stable source metadata. \
+                             Fix: register sources before inserting symbol or method facts.",
+                        )
+                        .kind
+                        .definition_precedence()
+                })
+                .min();
+            if let Some(winning_precedence) = winning_precedence {
+                ranges.retain(|range| {
+                    self.engine
+                        .file(range.file_id)
+                        .expect(
+                            "INVARIANT VIOLATED: definition range disappeared during precedence filtering. \
+                             This is a bug because definition queries hold an immutable engine borrow. \
+                             Fix: keep file registration stable for the duration of an analysis query.",
+                        )
+                        .kind
+                        .definition_precedence()
+                        == winning_precedence
+                });
             }
-            FullyQualifiedName::Namespace(_, _)
-            | FullyQualifiedName::Constant(_)
-            | FullyQualifiedName::LocalVariable(_)
-            | FullyQualifiedName::InstanceVariable(_)
-            | FullyQualifiedName::ClassVariable(_)
-            | FullyQualifiedName::GlobalVariable(_) => self
-                .engine
-                .symbol_facts_for(target)
-                .into_iter()
-                .map(|fact| fact.range)
-                .collect::<Vec<_>>(),
-        };
-        let winning_precedence = ranges
-            .iter()
-            .map(|range| {
-                self.engine
-                    .file(range.file_id)
-                    .expect(
-                        "INVARIANT VIOLATED: definition range references an unregistered source file. \
-                         This is a bug because definition precedence requires stable source metadata. \
-                         Fix: register sources before inserting symbol or method facts.",
-                    )
-                    .kind
-                    .definition_precedence()
-            })
-            .min();
-        if let Some(winning_precedence) = winning_precedence {
-            ranges.retain(|range| {
-                self.engine
-                    .file(range.file_id)
-                    .expect(
-                        "INVARIANT VIOLATED: definition range disappeared during precedence filtering. \
-                         This is a bug because definition queries hold an immutable engine borrow. \
-                         Fix: keep file registration stable for the duration of an analysis query.",
-                    )
-                    .kind
-                    .definition_precedence()
-                    == winning_precedence
-            });
+            all_ranges.extend(ranges);
         }
-        ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
-        ranges.dedup();
-        ranges
+        all_ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+        all_ranges.dedup();
+        all_ranges
+    }
+
+    pub fn navigation_must_fail_closed_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+        exact_target_proven: bool,
+    ) -> bool {
+        let candidates = self
+            .engine
+            .reference_candidate_store()
+            .candidates_in_file(file_id);
+        let exact_non_method_reference = exact_target_proven
+            && candidates.iter().any(|candidate| {
+                candidate.range.contains_offset(file_id, byte_offset)
+                    && matches!(
+                        candidate.kind,
+                        StoredReferenceCandidateKind::Resolved { .. }
+                            | StoredReferenceCandidateKind::Constant { .. }
+                    )
+            });
+        if exact_non_method_reference {
+            return false;
+        }
+        let unknown_reason_blocks_dispatch = |reason| {
+            matches!(
+                reason,
+                UnknownReason::NoReachingAssignment
+                    | UnknownReason::UnresolvedAssignmentValue
+                    | UnknownReason::AmbiguousReachingAssignment
+                    | UnknownReason::UnknownReceiver
+                    | UnknownReason::InvalidMethodName
+                    | UnknownReason::IncompleteUnionMember
+            )
+        };
+        let candidate_barrier = self
+            .engine
+            .reference_candidate_store()
+            .candidates_in_file(file_id)
+            .iter()
+            .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))
+            .any(|candidate| {
+                let StoredReferenceCandidateKind::Method {
+                    method,
+                    call_expression_range: _,
+                    diagnostics,
+                    ..
+                } = &candidate.kind
+                else {
+                    return false;
+                };
+                let receiver_unknown = diagnostics.as_deref().is_some_and(|diagnostics| {
+                    diagnostics.receiver_expression_range.is_some_and(|range| {
+                        self.local_read_type_at(range.file_id, range.start_byte)
+                            == Some(RubyType::Unknown)
+                            || self.exact_expression_unknown_reason(range).is_some()
+                    })
+                });
+                let resolved_to_fallback = self
+                    .engine
+                    .reference_store()
+                    .targets_for_exact_range(candidate.range)
+                    .into_iter()
+                    .filter_map(|target| self.engine.fqn_for_id(target))
+                    .any(|target| {
+                        matches!(
+                            target,
+                            FullyQualifiedName::Method(_, resolved_method)
+                                if resolved_method != method
+                        )
+                    });
+                receiver_unknown || resolved_to_fallback
+            });
+        candidate_barrier
+            || (!exact_target_proven
+                && self
+                    .expression_unknown_reason_at(file_id, byte_offset)
+                    .is_some_and(unknown_reason_blocks_dispatch))
     }
 
     pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {

@@ -35,6 +35,7 @@ pub use generators::{
 };
 
 use crate::query::EngineQuery;
+use crate::utils::lsp::text_range;
 use ruby_analysis::indexer::{inlay_hints::InlayNodeCollector, RubyDocument};
 use tower_lsp::lsp_types::Range;
 
@@ -56,7 +57,7 @@ impl EngineQuery {
         let parse_result = ruby_prism::parse(content.as_bytes());
         let root = parse_result.node();
 
-        let range = document.lsp_range_to_text_range(*range);
+        let range = text_range(document, *range);
 
         // Step 3: Collect relevant domain nodes
         let collector =

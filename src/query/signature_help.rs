@@ -6,6 +6,7 @@ use ruby_analysis::inference::rbs::{RbsMethodSignature, RbsSignatureParameter};
 use tower_lsp::lsp_types::{Position, Url};
 
 use super::EngineQuery;
+use crate::utils::lsp::source_position;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignatureHelpData {
@@ -36,21 +37,58 @@ impl EngineQuery {
         content: &str,
     ) -> Option<SignatureHelpData> {
         let document = self.doc.as_ref()?.read();
-        let byte_offset = document.position_to_analysis_offset(position);
+        let byte_offset = document.position_to_analysis_offset(source_position(position));
         let analyzer = self.analyzer_at_position(uri, content, position);
         let target = analyzer.get_signature_help_target(byte_offset)?;
+        let file_id = document.analysis_file_id();
         drop(document);
 
         if matches!(target.receiver, MethodReceiver::Super) {
             return None;
         }
 
-        let namespace_fqn = self.resolve_receiver_to_namespace(
+        let flow_sensitive_receiver = matches!(
+            &target.receiver,
+            MethodReceiver::LocalVariable(_)
+                | MethodReceiver::InstanceVariable(_)
+                | MethodReceiver::ClassVariable(_)
+                | MethodReceiver::GlobalVariable(_)
+                | MethodReceiver::MethodCall { .. }
+                | MethodReceiver::Literal(_)
+                | MethodReceiver::Expression
+        );
+        if flow_sensitive_receiver
+            && target.receiver_range.is_some_and(|(start, _end)| {
+                self.analysis_engine().is_some_and(|engine| {
+                    AnalysisQuery::new(&engine.read())
+                        .expression_unknown_reason_at(file_id, start)
+                        .is_some()
+                })
+            })
+        {
+            return None;
+        }
+
+        let receiver_type = self.resolve_receiver_type(
             &target.receiver,
             &target.namespace,
             target.namespace_kind,
             position,
-        )?;
+        );
+        if flow_sensitive_receiver && receiver_type == ruby_analysis::core::RubyType::Unknown {
+            return None;
+        }
+        let union_receiver = matches!(receiver_type, ruby_analysis::core::RubyType::Union(_));
+        let namespace_fqn = if union_receiver {
+            None
+        } else {
+            Some(self.resolve_receiver_to_namespace(
+                &target.receiver,
+                &target.namespace,
+                target.namespace_kind,
+                position,
+            )?)
+        };
         let caller_namespace = FullyQualifiedName::namespace_with_kind(
             target.namespace.clone(),
             target.namespace_kind,
@@ -58,9 +96,12 @@ impl EngineQuery {
         let engine = self.analysis_engine()?.read();
         let query = AnalysisQuery::new(&engine);
         let facts = match &target.receiver {
-            MethodReceiver::None => {
-                query.resolve_method_signature_facts(&namespace_fqn, &target.method)
-            }
+            MethodReceiver::None => query.resolve_method_signature_facts(
+                namespace_fqn.as_ref().expect(
+                    "INVARIANT VIOLATED: an implicit receiver was classified as a union without a namespace. This is a bug because implicit self has one lexical runtime namespace. Fix: keep union receiver handling restricted to explicit typed expressions.",
+                ),
+                &target.method,
+            ),
             MethodReceiver::SelfReceiver
             | MethodReceiver::Constant(_)
             | MethodReceiver::LocalVariable(_)
@@ -69,11 +110,23 @@ impl EngineQuery {
             | MethodReceiver::GlobalVariable(_)
             | MethodReceiver::MethodCall { .. }
             | MethodReceiver::Literal(_)
-            | MethodReceiver::Expression => query.resolve_protected_method_signature_facts(
-                &namespace_fqn,
-                &target.method,
-                &caller_namespace,
-            ),
+            | MethodReceiver::Expression => {
+                if union_receiver {
+                    query.resolve_protected_method_signature_facts_for_type(
+                        &receiver_type,
+                        &target.method,
+                        &caller_namespace,
+                    )
+                } else {
+                    query.resolve_protected_method_signature_facts(
+                        namespace_fqn.as_ref().expect(
+                            "INVARIANT VIOLATED: a non-union explicit receiver lost its resolved namespace before signature lookup. This is a bug because receiver classification and namespace resolution use the same immutable target. Fix: retain the resolved namespace through signature selection.",
+                        ),
+                        &target.method,
+                        &caller_namespace,
+                    )
+                }
+            }
             MethodReceiver::Super => unreachable!(
                 "INVARIANT VIOLATED: super receiver reached ordinary signature resolution. \
                  This is a bug because super calls are rejected before receiver resolution. \
@@ -92,12 +145,6 @@ impl EngineQuery {
             })
             .collect::<Vec<_>>();
         if signatures.is_empty() {
-            let receiver_type = self.resolve_receiver_type(
-                &target.receiver,
-                &target.namespace,
-                target.namespace_kind,
-                position,
-            );
             signatures = rbs_method_signatures_for_type(&receiver_type, target.method.as_str())
                 .iter()
                 .map(|signature| {

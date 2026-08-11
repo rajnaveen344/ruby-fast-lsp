@@ -1,6 +1,6 @@
-use crate::core::{RubyType, SourceFileId, TextRange};
+use crate::core::{RubyType, SourceFileId, SourcePosition, SourceRange, TextRange};
 use ruby_prism::Location as PrismLocation;
-use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
+use url::Url;
 
 use crate::{is_erb_path, mask_erb, EmbeddedRuby, LVScopeId, SourceDocument, VariableScopes};
 
@@ -14,9 +14,6 @@ pub struct RubyDocument {
     /// The version at which this document was last indexed (None if never indexed)
     pub indexed_version: Option<i32>,
     source: SourceDocument,
-
-    /// Inlay hints in the document for modules, classes, methods, etc.
-    inlay_hints: Vec<InlayHint>,
 
     /// Variable scopes for local variable tracking (definitions, references, types)
     pub variable_scopes: VariableScopes,
@@ -46,7 +43,6 @@ impl RubyDocument {
             embedded,
             version,
             indexed_version: None,
-            inlay_hints: Vec::new(),
             variable_scopes: VariableScopes::new(),
         }
     }
@@ -67,7 +63,7 @@ impl RubyDocument {
         self.embedded.is_some()
     }
 
-    pub fn is_ruby_position(&self, position: Position) -> bool {
+    pub fn is_ruby_position(&self, position: SourcePosition) -> bool {
         self.embedded
             .as_ref()
             .is_none_or(|embedded| embedded.is_ruby_offset(self.position_to_offset(position)))
@@ -89,7 +85,6 @@ impl RubyDocument {
         self.content = content;
         self.version = version;
         self.variable_scopes = VariableScopes::new();
-        self.compute_inlay_hints();
     }
 
     /// Source file id for type facts emitted from this document.
@@ -101,29 +96,29 @@ impl RubyDocument {
         self.source.set_file_id(analysis_file_id);
     }
 
-    /// Converts a byte offset to an LSP Position (line, character)
-    pub fn offset_to_position(&self, offset: usize) -> Position {
+    /// Converts a byte offset to a UTF-16 source position.
+    pub fn offset_to_position(&self, offset: usize) -> SourcePosition {
         let (line, character) = self.source.offset_to_line_character(&self.content, offset);
-        Position::new(line, character)
+        SourcePosition::new(line, character)
     }
 
-    /// Converts an LSP Position to a byte offset
-    pub fn position_to_offset(&self, position: Position) -> usize {
+    /// Converts a UTF-16 source position to a byte offset.
+    pub fn position_to_offset(&self, position: SourcePosition) -> usize {
         self.source
             .line_character_to_offset(&self.content, position.line, position.character)
     }
 
-    pub fn position_to_analysis_offset(&self, position: Position) -> u32 {
+    pub fn position_to_analysis_offset(&self, position: SourcePosition) -> u32 {
         u32::try_from(self.position_to_offset(position)).expect(
-            "INVARIANT VIOLATED: LSP position offset exceeded u32. \
+            "INVARIANT VIOLATED: source position offset exceeded u32. \
              This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
              Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
         )
     }
 
-    /// Converts a ruby_prism Location to an LSP Range
-    pub fn prism_location_to_lsp_range(&self, location: &PrismLocation) -> Range {
-        Range::new(
+    /// Converts a Prism byte location to a UTF-16 source range.
+    pub fn prism_location_to_source_range(&self, location: &PrismLocation) -> SourceRange {
+        SourceRange::new(
             self.offset_to_position(location.start_offset()),
             self.offset_to_position(location.end_offset()),
         )
@@ -133,7 +128,7 @@ impl RubyDocument {
         self.source.prism_location_to_text_range(location)
     }
 
-    pub fn lsp_range_to_text_range(&self, range: Range) -> TextRange {
+    pub fn source_range_to_text_range(&self, range: SourceRange) -> TextRange {
         TextRange::new(
             self.analysis_file_id(),
             self.position_to_analysis_offset(range.start),
@@ -141,7 +136,7 @@ impl RubyDocument {
         )
     }
 
-    pub fn text_range_to_lsp_range(&self, range: TextRange) -> Range {
+    pub fn text_range_to_source_range(&self, range: TextRange) -> SourceRange {
         assert_eq!(
             range.file_id,
             self.analysis_file_id(),
@@ -149,17 +144,17 @@ impl RubyDocument {
              This is a bug because RubyDocument can only convert ranges from its own file. \
              Fix: route cross-file ranges through the owning document."
         );
-        Range::new(
+        SourceRange::new(
             self.offset_to_position(range.start_byte as usize),
             self.offset_to_position(range.end_byte as usize),
         )
     }
 
-    pub fn text_range_to_lsp_location(&self, range: TextRange) -> LspLocation {
-        LspLocation::new(self.uri.clone(), self.text_range_to_lsp_range(range))
-    }
-
-    pub fn find_scope_for_variable_at(&self, name: &str, position: Position) -> Option<LVScopeId> {
+    pub fn find_scope_for_variable_at(
+        &self,
+        name: &str,
+        position: SourcePosition,
+    ) -> Option<LVScopeId> {
         self.variable_scopes.find_scope_for_variable_at(
             name,
             self.analysis_file_id(),
@@ -167,7 +162,7 @@ impl RubyDocument {
         )
     }
 
-    pub fn scope_at_position(&self, position: Position) -> Option<LVScopeId> {
+    pub fn scope_at_position(&self, position: SourcePosition) -> Option<LVScopeId> {
         self.variable_scopes.scope_at_position(
             self.analysis_file_id(),
             self.position_to_analysis_offset(position),
@@ -178,7 +173,7 @@ impl RubyDocument {
         &self,
         name: &str,
         scope_id: LVScopeId,
-        position: Position,
+        position: SourcePosition,
     ) -> Option<&RubyType> {
         self.variable_scopes.get_type_at_position(
             name,
@@ -226,41 +221,6 @@ impl RubyDocument {
             .collect()
     }
 
-    pub fn prism_location_to_lsp_location(&self, location: &PrismLocation) -> LspLocation {
-        LspLocation::new(self.uri.clone(), self.prism_location_to_lsp_range(location))
-    }
-
-    /// Computes inlay hints for the document (now only clears old hints)
-    pub fn compute_inlay_hints(&mut self) {
-        // Clear previous structural hints - type hints are managed separately by FactCollector
-        self.inlay_hints.clear();
-    }
-
-    /// Get inlay hints for the document
-    pub fn get_inlay_hints(&self) -> Vec<InlayHint> {
-        self.inlay_hints.clone()
-    }
-
-    /// Add an inlay hint to the document
-    pub fn add_inlay_hint(&mut self, hint: InlayHint) {
-        self.inlay_hints.push(hint);
-    }
-
-    /// Clear all inlay hints from the document
-    pub fn clear_inlay_hints(&mut self) {
-        self.inlay_hints.clear();
-    }
-
-    /// Set multiple inlay hints for the document
-    pub fn set_inlay_hints(&mut self, hints: Vec<InlayHint>) {
-        self.inlay_hints = hints;
-    }
-
-    /// Get all hints (both inlay and type hints) combined
-    pub fn get_all_hints(&self) -> Vec<InlayHint> {
-        self.inlay_hints.clone()
-    }
-
     /// Returns a mutable reference to variable scopes for building during indexing
     pub fn variable_scopes_mut(&mut self) -> &mut VariableScopes {
         &mut self.variable_scopes
@@ -275,6 +235,7 @@ impl RubyDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{SourcePosition as Position, SourceRange as Range};
 
     /// Helper to create a test document with sample content
     fn create_test_document() -> RubyDocument {
@@ -353,7 +314,7 @@ mod tests {
 
         // Test with the location from a real node
         let def_node_loc = node.location();
-        let actual_range = doc.prism_location_to_lsp_range(&def_node_loc);
+        let actual_range = doc.prism_location_to_source_range(&def_node_loc);
 
         assert_eq!(expected_range, actual_range);
     }

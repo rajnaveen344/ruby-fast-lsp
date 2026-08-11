@@ -54,20 +54,14 @@ impl IdentifierVisitor {
 
     pub fn process_constant_and_write_node_exit(&mut self, _node: &ConstantAndWriteNode) {}
 
-    pub fn process_constant_operator_write_node_entry(
-        &mut self,
-        node: &ConstantOperatorWriteNode,
-    ) {
+    pub fn process_constant_operator_write_node_entry(&mut self, node: &ConstantOperatorWriteNode) {
         if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
         self.set_simple_constant_def_at_name(node.name().as_slice(), &node.name_loc());
     }
 
-    pub fn process_constant_operator_write_node_exit(
-        &mut self,
-        _node: &ConstantOperatorWriteNode,
-    ) {
+    pub fn process_constant_operator_write_node_exit(&mut self, _node: &ConstantOperatorWriteNode) {
     }
 
     pub fn process_constant_target_node_entry(&mut self, node: &ConstantTargetNode) {

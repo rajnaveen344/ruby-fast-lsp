@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::LanguageServer;
 
-use super::ruby_gen::{CallSite, SourcePos};
+use super::ruby_gen::{CallSite, SourcePos, UNPROVEN_BLOCK_RECEIVER_GAP};
 
 fn phase1_project() -> SyntheticProject {
     let mut project = SyntheticProject::new("synthetic_phase1");
@@ -1614,7 +1614,7 @@ fn generated_project_seeded_generation_has_stable_fingerprint() {
 async fn generated_project_tracks_navigation_support_gaps() {
     let runner = SimulationRunner::start(phase1_project()).await;
     let gaps = runner.known_gap_reasons();
-    let expected = [].into_iter().collect();
+    let expected = [UNPROVEN_BLOCK_RECEIVER_GAP].into_iter().collect();
 
     assert_eq!(gaps, expected);
 }

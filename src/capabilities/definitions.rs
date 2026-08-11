@@ -8,9 +8,7 @@
 
 use std::path::PathBuf;
 
-use tower_lsp::lsp_types::{
-    GotoDefinitionResponse, Location, LocationLink, Position, Range, Url,
-};
+use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, LocationLink, Position, Range, Url};
 
 use crate::indexer::require_paths::{
     find_require_string_at_offset, location_for_require_target, resolve_require_path,
@@ -18,6 +16,7 @@ use crate::indexer::require_paths::{
 };
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
+use crate::utils::lsp::{lsp_position, source_position};
 use ruby_analysis::indexer::RubyDocument;
 
 pub(crate) fn navigation_demand_keys_at_position(
@@ -43,7 +42,7 @@ pub async fn find_definition_at_position(
         let doc_guard = server.docs.lock();
         let doc_arc = doc_guard.get(&uri)?.clone();
         let doc = doc_arc.read();
-        let byte_offset = doc.position_to_analysis_offset(position);
+        let byte_offset = doc.position_to_analysis_offset(source_position(position));
         (
             doc.content.clone(),
             doc_arc.clone(),
@@ -70,8 +69,8 @@ pub(crate) fn require_string_lsp_range(
 ) -> Range {
     let (start_byte, end_byte) = target.content_byte_range(&document.content);
     Range::new(
-        document.offset_to_position(start_byte),
-        document.offset_to_position(end_byte),
+        lsp_position(document.offset_to_position(start_byte)),
+        lsp_position(document.offset_to_position(end_byte)),
     )
 }
 
@@ -121,9 +120,10 @@ fn require_path_definitions(
 pub(crate) fn definition_target_uris(response: &GotoDefinitionResponse) -> Vec<Url> {
     match response {
         GotoDefinitionResponse::Scalar(location) => vec![location.uri.clone()],
-        GotoDefinitionResponse::Array(locations) => {
-            locations.iter().map(|location| location.uri.clone()).collect()
-        }
+        GotoDefinitionResponse::Array(locations) => locations
+            .iter()
+            .map(|location| location.uri.clone())
+            .collect(),
         GotoDefinitionResponse::Link(links) => {
             links.iter().map(|link| link.target_uri.clone()).collect()
         }

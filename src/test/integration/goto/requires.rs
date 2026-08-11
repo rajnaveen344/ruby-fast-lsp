@@ -21,9 +21,7 @@ fn assert_hits_file(locs: &[Location], expected_filename: &str) {
 async fn goto_require_relative_sibling() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
-    editor
-        .open("project/app/foo.rb", "# foo target\n")
-        .await;
+    editor.open("project/app/foo.rb", "# foo target\n").await;
     editor
         .open("project/app/main.rb", "require_relative \"./foo\"\n")
         .await;
@@ -56,18 +54,12 @@ async fn goto_require_origin_covers_string_contents_only() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
     editor
-        .open(
-            "project/lib/platform/helpers/json.rb",
-            "# json helpers\n",
-        )
+        .open("project/lib/platform/helpers/json.rb", "# json helpers\n")
         .await;
     // require 'platform/helpers/json'
     // 0123456789012345678901234567890
     editor
-        .open(
-            "project/main.rb",
-            "require 'platform/helpers/json'\n",
-        )
+        .open("project/main.rb", "require 'platform/helpers/json'\n")
         .await;
 
     // Cursor on the final path segment "json"
@@ -85,23 +77,19 @@ async fn hover_require_range_covers_string_contents_only() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
     editor
-        .open(
-            "project/lib/platform/helpers/json.rb",
-            "# json helpers\n",
-        )
+        .open("project/lib/platform/helpers/json.rb", "# json helpers\n")
         .await;
     editor
-        .open(
-            "project/main.rb",
-            "require 'platform/helpers/json'\n",
-        )
+        .open("project/main.rb", "require 'platform/helpers/json'\n")
         .await;
 
     let hover = editor
         .hover_at("project/main.rb", 0, 26)
         .await
         .expect("require hover");
-    let range = hover.range.expect("require hover must set the content range");
+    let range = hover
+        .range
+        .expect("require hover must set the content range");
     assert_eq!(range.start, Position::new(0, 9));
     assert_eq!(range.end, Position::new(0, 30));
 }
@@ -121,22 +109,13 @@ async fn goto_require_uses_workspace_dependency_require_roots() {
         .expect("project workspace")
         .set_dependency_require_paths(vec![gem_lib]);
     editor
-        .open(
-            "project/main.rb",
-            "require 'platform/helpers/json'\n",
-        )
+        .open("project/main.rb", "require 'platform/helpers/json'\n")
         .await;
 
     let locs = editor.goto_def_at("project/main.rb", 0, 26).await;
     assert!(
-        locs.iter().any(|location| {
-            location
-                .uri
-                .to_file_path()
-                .ok()
-                .as_ref()
-                == Some(&target)
-        }),
+        locs.iter()
+            .any(|location| { location.uri.to_file_path().ok().as_ref() == Some(&target) }),
         "require must open the gem feature file under its require_paths, got {locs:?}"
     );
 }
@@ -152,10 +131,7 @@ async fn unresolved_require_clears_after_dependency_roots_without_edit() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
     editor
-        .open(
-            "project/main.rb",
-            "require 'platform/helpers/json'\n",
-        )
+        .open("project/main.rb", "require 'platform/helpers/json'\n")
         .await;
 
     let published_before = editor.published_diagnostics("project/main.rb");
@@ -185,9 +161,8 @@ async fn unresolved_require_clears_after_dependency_roots_without_edit() {
 
     let locs = editor.goto_def_at("project/main.rb", 0, 26).await;
     assert!(
-        locs.iter().any(|location| {
-            location.uri.to_file_path().ok().as_ref() == Some(&target)
-        }),
+        locs.iter()
+            .any(|location| { location.uri.to_file_path().ok().as_ref() == Some(&target) }),
         "require must resolve after dependency roots are published, got {locs:?}"
     );
 }
@@ -215,9 +190,7 @@ async fn goto_require_custom_load_path_wins_before_lib() {
             paths: vec!["custom".to_string()],
         }],
     };
-    editor
-        .open("project/custom/foo.rb", "# custom foo\n")
-        .await;
+    editor.open("project/custom/foo.rb", "# custom foo\n").await;
     editor.open("project/lib/foo.rb", "# lib foo\n").await;
     editor.open("project/main.rb", "require \"foo\"\n").await;
 
@@ -250,9 +223,7 @@ async fn goto_require_load_paths_are_isolated_per_project() {
     editor.open("server/lib/foo.rb", "# server lib\n").await;
     editor.open("server/main.rb", "require \"foo\"\n").await;
 
-    editor
-        .open("admin/other/foo.rb", "# admin other\n")
-        .await;
+    editor.open("admin/other/foo.rb", "# admin other\n").await;
     editor.open("admin/lib/foo.rb", "# admin lib\n").await;
     editor.open("admin/main.rb", "require \"foo\"\n").await;
 
@@ -274,9 +245,7 @@ async fn goto_require_falls_back_to_workspace_default_load_paths() {
         default: vec!["shared".to_string()],
         projects: Vec::new(),
     };
-    editor
-        .open("project/shared/foo.rb", "# shared foo\n")
-        .await;
+    editor.open("project/shared/foo.rb", "# shared foo\n").await;
     editor.open("project/lib/foo.rb", "# lib foo\n").await;
     editor.open("project/main.rb", "require \"foo\"\n").await;
 
@@ -351,9 +320,7 @@ async fn resolved_require_has_no_unresolved_require_diagnostic() {
 async fn interpolated_require_has_no_unresolved_require_diagnostic() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
-    editor
-        .open("project/main.rb", "require \"a#{b}\"\n")
-        .await;
+    editor.open("project/main.rb", "require \"a#{b}\"\n").await;
 
     let diags = editor.diagnostics("project/main.rb").await;
     assert!(
@@ -385,9 +352,7 @@ async fn autoload_is_not_diagnosed_as_unresolved_require() {
 async fn goto_require_interpolated_string_returns_none() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
-    editor
-        .open("project/main.rb", "require \"a#{b}\"\n")
-        .await;
+    editor.open("project/main.rb", "require \"a#{b}\"\n").await;
 
     let locs = editor.goto_def_at("project/main.rb", 0, 10).await;
     assert!(
@@ -401,10 +366,7 @@ async fn goto_class_identifier_still_works() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");
     editor
-        .open(
-            "project/main.rb",
-            "class Foo\nend\n\nFoo.new\n",
-        )
+        .open("project/main.rb", "class Foo\nend\n\nFoo.new\n")
         .await;
 
     // Cursor on Foo in Foo.new (line 3)

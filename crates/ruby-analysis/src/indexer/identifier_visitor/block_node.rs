@@ -18,15 +18,18 @@ impl IdentifierVisitor {
             return;
         }
 
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
+        let (body_start, body_end) = match node.body() {
+            Some(body) => {
+                let location = body.location();
+                (location.start_offset(), location.end_offset())
+            }
+            None => {
+                let location = node.location();
+                (location.start_offset(), location.end_offset())
+            }
         };
 
-        if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
+        if !self.is_position_in_offsets(body_start, body_end) {
             self.scope_tracker.pop_scope_kind();
         }
     }

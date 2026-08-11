@@ -18,6 +18,7 @@
 //! 2. **Collect**: Re-traverse, collecting all nodes with matching name and
 //!    defining scope ID.
 
+use crate::core::{SourceFileId, TextRange};
 use ruby_prism::{
     visit_block_node, visit_block_parameter_node, visit_class_node, visit_def_node,
     visit_lambda_node, visit_local_variable_and_write_node,
@@ -29,9 +30,6 @@ use ruby_prism::{
     LocalVariableTargetNode, LocalVariableWriteNode, ModuleNode, Node, OptionalParameterNode,
     RequiredParameterNode, RestParameterNode, SingletonClassNode, Visit,
 };
-use tower_lsp::lsp_types::Range;
-
-use crate::RubyDocument;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Phase {
@@ -40,7 +38,7 @@ enum Phase {
 }
 
 pub struct RenameVisitor {
-    document: RubyDocument,
+    file_id: SourceFileId,
     cursor_offset: usize,
     // Scope tracking — each scope-creating node gets a unique ID
     scope_stack: Vec<usize>,
@@ -49,7 +47,7 @@ pub struct RenameVisitor {
     target_name: Option<String>,
     target_scope_id: Option<usize>,
     // Phase 2 output: all ranges to rename
-    rename_ranges: Vec<Range>,
+    rename_ranges: Vec<TextRange>,
     phase: Phase,
 }
 
@@ -58,13 +56,13 @@ impl RenameVisitor {
     ///
     /// Returns an empty Vec if the cursor is not on a local variable.
     pub fn find_rename_targets(
-        document: RubyDocument,
+        file_id: SourceFileId,
         cursor_offset: usize,
         root: &Node,
-    ) -> Vec<Range> {
+    ) -> Vec<TextRange> {
         // Phase 1: Find the target variable
         let mut visitor = Self {
-            document,
+            file_id,
             cursor_offset,
             scope_stack: vec![0], // Program-level scope
             next_scope_id: 1,
@@ -134,9 +132,15 @@ impl RenameVisitor {
                 {
                     let name = String::from_utf8_lossy(name_bytes);
                     if name.as_ref() == target_name.as_str() && defining_scope == target_scope {
-                        let range = self
-                            .document
-                            .prism_location_to_lsp_range(name_range_location);
+                        let range = TextRange::new(
+                            self.file_id,
+                            u32::try_from(name_range_location.start_offset()).expect(
+                                "INVARIANT VIOLATED: rename start offset exceeded u32. This is a bug because TextRange stores u32 offsets. Fix: widen TextRange before accepting larger source files.",
+                            ),
+                            u32::try_from(name_range_location.end_offset()).expect(
+                                "INVARIANT VIOLATED: rename end offset exceeded u32. This is a bug because TextRange stores u32 offsets. Fix: widen TextRange before accepting larger source files.",
+                            ),
+                        );
                         self.rename_ranges.push(range);
                     }
                 }

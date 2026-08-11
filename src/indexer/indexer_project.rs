@@ -10,7 +10,7 @@ use log::{info, warn};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use ruby_analysis::core::{FullyQualifiedName, SourceKind};
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::{AnalysisEngine, FileFacts, ResolveMode};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -201,6 +201,7 @@ impl IndexerProject {
         self.jruby_replay_analysis_engine = None;
 
         let mut project_files = self.collect_project_files()?;
+        let all_project_files = project_files.clone();
         let total_files = project_files.len();
         let selection = select_navigation_demand_files(
             &mut project_files,
@@ -222,13 +223,20 @@ impl IndexerProject {
         );
 
         self.collect_signature_facts(&signature_files, server);
+        self.initialize_project_collection_semantic_context(server, &all_project_files)?;
+        let collection_known_namespaces = self.exhaustive_known_namespaces.clone().expect(
+            "INVARIANT VIOLATED: project collection baseline has no namespace set after initialization. This is a bug because every project file must use one generation-owned semantic universe. Fix: initialize the baseline before collecting the first project batch.",
+        );
+        let collection_analysis_engine = self.exhaustive_analysis_engine.clone().expect(
+            "INVARIANT VIOLATED: project collection baseline has no analysis engine after initialization. This is a bug because every project file must use one generation-owned semantic universe. Fix: initialize the baseline before collecting the first project batch.",
+        );
         self.collect_facts_and_track_dependencies(
             &selection.files,
             selection.files.len(),
             server,
             true,
-            None,
-            None,
+            Some(collection_known_namespaces),
+            Some(collection_analysis_engine),
         )?;
         self.record_processed_project_files(&selection.files);
         self.pending_project_navigation_files = Some(ruby_files);
@@ -267,8 +275,12 @@ impl IndexerProject {
             ruby_files.len(),
             server,
             true,
-            None,
-            None,
+            Some(self.exhaustive_known_namespaces.clone().expect(
+                "INVARIANT VIOLATED: active project frontier lost the generation-owned namespace baseline. This is a bug because frontier ordering must not change collected facts. Fix: retain the baseline through project completion.",
+            )),
+            Some(self.exhaustive_analysis_engine.clone().expect(
+                "INVARIANT VIOLATED: active project frontier lost the generation-owned analysis baseline. This is a bug because frontier ordering must not change collected facts. Fix: retain the baseline through project completion.",
+            )),
         )?;
         self.record_processed_project_files(&ruby_files);
         self.refresh_exhaustive_semantic_context(server)?;
@@ -291,8 +303,8 @@ impl IndexerProject {
                 && self.project_navigation_started_at.is_none(),
             "INVARIANT VIOLATED: exhaustive project collection started before the active \
              navigation frontier completed. This is a coordinator bug because exhaustive files \
-             require the immutable post-frontier namespace snapshot. Fix: finish the project \
-             navigation frontier before collecting its retained tail."
+             require the retained immutable pre-collection namespace baseline. Fix: finish the \
+             project navigation frontier before collecting its retained tail."
         );
         let files = self.pending_project_files.take().expect(
             "INVARIANT VIOLATED: exhaustive project fact collection started without a completed \
@@ -302,13 +314,13 @@ impl IndexerProject {
         );
         let started = Instant::now();
         let known_namespaces = self.exhaustive_known_namespaces.clone().expect(
-            "INVARIANT VIOLATED: exhaustive project collection has no post-frontier namespace \
-             snapshot. This is a bug because every tail file must be collected against one \
-             immutable semantic context. Fix: capture the snapshot after the priority frontier \
-             and retain it through completion.",
+            "INVARIANT VIOLATED: exhaustive project collection has no pre-collection namespace \
+             baseline. This is a bug because every project file must be collected against one \
+             immutable semantic context. Fix: initialize the baseline before the first project \
+             file and retain it through completion.",
         );
         let semantic_context_engine = self.exhaustive_analysis_engine.clone().expect(
-            "INVARIANT VIOLATED: exhaustive project collection has no immutable semantic read engine. This is a bug because arbitrary batch writes must never become inputs to later fact construction. Fix: capture the post-frontier semantic context before collecting the project tail.",
+            "INVARIANT VIOLATED: exhaustive project collection has no immutable pre-collection semantic read engine. This is a bug because arbitrary project writes must never become inputs to later fact construction. Fix: initialize one baseline before the first project file and retain it through completion.",
         );
         self.exhaustive_collection_started = true;
         self.collect_facts_and_track_dependencies(
@@ -356,10 +368,10 @@ impl IndexerProject {
             self.pending_project_navigation_files.is_none()
                 && self.project_navigation_started_at.is_none()
                 && self.exhaustive_known_namespaces.is_some(),
-            "INVARIANT VIOLATED: post-frontier navigation demand selection ran before the active \
+            "INVARIANT VIOLATED: post-navigation-frontier demand selection ran before the active \
              project frontier completed. This is a coordinator bug because promoted tail files \
-             require the immutable post-frontier namespace snapshot. Fix: finish the active \
-             frontier before draining newly queued project demands."
+             require the immutable pre-collection namespace baseline. Fix: finish the active \
+             frontier and retain that baseline before draining newly queued project demands."
         );
         let pending_files = self.pending_project_files.as_mut().expect(
             "INVARIANT VIOLATED: project navigation demand selection started without an \
@@ -410,12 +422,12 @@ impl IndexerProject {
             return Ok(());
         }
         let known_namespaces = self.exhaustive_known_namespaces.clone().expect(
-            "INVARIANT VIOLATED: bounded project batch has no post-frontier namespace snapshot. \
+            "INVARIANT VIOLATED: bounded project batch has no pre-collection namespace baseline. \
              This is a coordinator bug because every demanded and exhaustive batch belongs to \
-             one retained frontier. Fix: keep the snapshot until finish_remaining_project_facts.",
+             one project generation. Fix: keep the baseline until finish_remaining_project_facts.",
         );
         let semantic_context_engine = self.exhaustive_analysis_engine.clone().expect(
-            "INVARIANT VIOLATED: bounded project batch has no immutable semantic read engine. This is a coordinator bug because batch boundaries must not affect fact construction. Fix: capture and retain one post-frontier engine through finish_remaining_project_facts.",
+            "INVARIANT VIOLATED: bounded project batch has no immutable pre-collection semantic read engine. This is a coordinator bug because navigation demand and batch boundaries must not affect fact construction. Fix: initialize the baseline before the first project file and retain it through finish_remaining_project_facts.",
         );
         self.exhaustive_collection_started = true;
         self.collect_facts_and_track_dependencies(
@@ -471,8 +483,8 @@ impl IndexerProject {
              last bounded batch as a navigation-resolution boundary."
         );
         let known_namespaces = self.exhaustive_known_namespaces.take().expect(
-            "INVARIANT VIOLATED: exhaustive project completion has no post-frontier namespace \
-             snapshot. This is a coordinator bug because the snapshot and pending tail have one \
+            "INVARIANT VIOLATED: exhaustive project completion has no pre-collection namespace \
+             baseline. This is a coordinator bug because the baseline and pending tail have one \
              lifecycle. Fix: retain both until the deterministic batch loop finishes.",
         );
         let semantic_context_engine = self.exhaustive_analysis_engine.take().expect(
@@ -552,13 +564,46 @@ impl IndexerProject {
 
     pub(crate) fn refresh_exhaustive_semantic_context(
         &mut self,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<()> {
         assert!(
             self.pending_project_navigation_files.is_none()
                 && self.pending_project_files.is_some()
                 && !self.exhaustive_collection_started,
-            "INVARIANT VIOLATED: the exhaustive semantic context was captured outside the idle post-frontier state. This is a bug because every background source file must read one immutable generation-owned engine before any exhaustive facts become visible. Fix: finish the active project frontier, then capture or refresh the context before taking the first tail batch."
+            "INVARIANT VIOLATED: the project collection baseline was validated outside the idle post-navigation-frontier state. This is a bug because every project source file must read one immutable generation-owned engine. Fix: initialize the baseline before collecting any project file, finish the active frontier, then validate the retained baseline before taking the first tail batch."
+        );
+        let snapshot = self.exhaustive_analysis_engine.as_ref().expect(
+            "INVARIANT VIOLATED: project completion lost the pre-collection semantic baseline. This is a bug because rebuilding the context after the active frontier would make results depend on navigation demand. Fix: initialize and retain one baseline before collecting any Ruby project file.",
+        );
+        let known_namespaces = self.exhaustive_known_namespaces.as_ref().expect(
+            "INVARIANT VIOLATED: project completion lost the pre-collection namespace baseline. This is a bug because rebuilding namespaces after the active frontier would make results depend on navigation demand. Fix: initialize and retain one baseline before collecting any Ruby project file.",
+        );
+        let estimated_bytes = snapshot.read().estimated_memory_stats().total();
+        assert!(
+            estimated_bytes <= MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
+            "INVARIANT VIOLATED: project collection baseline for {} requires an estimated {} bytes, exceeding the bounded {}-byte clone budget. This is a bug because deterministic parallel collection must not create an unbounded engine snapshot. Fix: reduce the dependency/signature seed or replace the clone with a compact immutable query projection.",
+            self.workspace_root.display(),
+            estimated_bytes,
+            MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES
+        );
+        info!(
+            "Retained immutable project collection baseline for {}: estimated_bytes={}, namespaces={}",
+            self.workspace_root.display(),
+            estimated_bytes,
+            known_namespaces.len()
+        );
+        Ok(())
+    }
+
+    fn initialize_project_collection_semantic_context(
+        &mut self,
+        server: &RubyLanguageServer,
+        project_files: &[PathBuf],
+    ) -> Result<()> {
+        assert!(
+            self.exhaustive_known_namespaces.is_none()
+                && self.exhaustive_analysis_engine.is_none(),
+            "INVARIANT VIOLATED: one project generation initialized its semantic collection baseline twice. This is a bug because every Ruby file must read exactly one immutable pre-collection universe. Fix: clear the prior generation before starting project collection."
         );
         let project_uri = Url::from_directory_path(&self.workspace_root).map_err(|_| {
             anyhow::anyhow!(
@@ -567,10 +612,7 @@ impl IndexerProject {
             )
         })?;
         let analysis_engine = server.analysis_engine_for_uri(&project_uri);
-        let pending_files = self.pending_project_files.as_ref().expect(
-            "INVARIANT VIOLATED: exhaustive context capture lost the retained project tail after validating it. This is a bug because one mutable IndexerProject owns both values. Fix: keep context capture inside the same exclusive IndexerProject borrow.",
-        );
-        if let Some(path) = pending_files.first() {
+        if let Some(path) = project_files.first() {
             let uri = Url::from_file_path(path).map_err(|_| {
                 anyhow!(
                     "project source path is not a valid file URI: {}",
@@ -581,29 +623,40 @@ impl IndexerProject {
                 .ensure_project_semantic_seed(&uri, &analysis_engine);
         }
 
-        let snapshot = {
+        let mut snapshot = {
             let mut engine = analysis_engine.write();
-            for path in pending_files {
+            for path in project_files {
                 if engine.file_id(path).is_none() {
                     engine.register_file_borrowed(path.clone(), "", SourceKind::Project);
                 }
             }
-            let estimated_bytes = engine.estimated_memory_stats().total();
-            assert!(
-                estimated_bytes <= MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
-                "INVARIANT VIOLATED: post-frontier semantic context for {} requires an estimated {} bytes, exceeding the bounded {}-byte clone budget. This is a bug because exhaustive parallel collection must not create an unbounded engine snapshot. Fix: reduce the active frontier/dependency seed or replace the clone with a compact immutable query projection before admitting this project.",
-                self.workspace_root.display(),
-                estimated_bytes,
-                MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES
-            );
             engine.clone()
         };
+        let stale_project_file_ids = snapshot
+            .files()
+            .filter(|file| {
+                matches!(file.kind, SourceKind::Project | SourceKind::Excluded)
+                    && snapshot.semantic_export_fingerprint(file.id).is_some()
+            })
+            .map(|file| file.id)
+            .collect::<Vec<_>>();
+        for file_id in stale_project_file_ids {
+            snapshot.replace_facts(file_id, FileFacts::default(), ResolveMode::Deferred);
+        }
+        let estimated_bytes = snapshot.estimated_memory_stats().total();
+        assert!(
+            estimated_bytes <= MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
+            "INVARIANT VIOLATED: pre-collection semantic baseline for {} requires an estimated {} bytes, exceeding the bounded {}-byte clone budget. This is a bug because deterministic project collection must not retain an unbounded snapshot. Fix: reduce the dependency/signature seed or replace the clone with a compact immutable query projection.",
+            self.workspace_root.display(),
+            estimated_bytes,
+            MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES
+        );
         let known_namespaces =
             Arc::new(ruby_analysis::engine::AnalysisQuery::new(&snapshot).known_namespace_fqns());
         info!(
-            "Captured immutable exhaustive semantic context for {}: estimated_bytes={}, namespaces={}",
+            "Captured immutable pre-collection semantic baseline for {}: estimated_bytes={}, namespaces={}",
             self.workspace_root.display(),
-            snapshot.estimated_memory_stats().total(),
+            estimated_bytes,
             known_namespaces.len()
         );
         self.exhaustive_known_namespaces = Some(known_namespaces);
@@ -639,14 +692,8 @@ impl IndexerProject {
         })?;
         let analysis_engine = server.analysis_engine_for_uri(&project_uri);
         let uses_immutable_semantic_context = semantic_context_engine.is_some();
-        let semantic_read_engine =
+        let base_semantic_read_engine =
             semantic_context_engine.unwrap_or_else(|| analysis_engine.clone());
-        let known_namespaces = known_namespaces.unwrap_or_else(|| {
-            Arc::new({
-                let engine = semantic_read_engine.read();
-                ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
-            })
-        });
 
         let collect_start = Instant::now();
         let read_file = |file_path: &PathBuf| -> Result<(
@@ -696,7 +743,7 @@ impl IndexerProject {
         let batch_registration_started = Instant::now();
         if uses_immutable_semantic_context {
             let mut engine = analysis_engine.write();
-            let mut semantic_engine = semantic_read_engine.write();
+            let mut semantic_engine = base_semantic_read_engine.write();
             for (path, content, _, _) in &inputs {
                 let live_id =
                     engine.register_file_borrowed(path.clone(), content, SourceKind::Project);
@@ -719,6 +766,48 @@ impl IndexerProject {
             }
         }
         let batch_registration_elapsed = batch_registration_started.elapsed();
+
+        // Project collection must be independent of whether an identical
+        // document was indexed interactively before the cold pass. The live
+        // engine may already contain facts for one or more input files; using
+        // those facts while rebuilding the same files creates a second-pass
+        // fixed point that a clean cold index cannot observe. Sanitize the
+        // whole batch in one bounded snapshot so parallel workers share the
+        // same file-order-independent semantic universe.
+        let semantic_read_engine = {
+            let engine = base_semantic_read_engine.read();
+            let stale_file_ids = inputs
+                .iter()
+                .filter_map(|(path, _, _, _)| {
+                    let file_id = engine.file_id(path)?;
+                    engine.semantic_export_fingerprint(file_id).map(|_| file_id)
+                })
+                .collect::<Vec<_>>();
+            if stale_file_ids.is_empty() {
+                drop(engine);
+                base_semantic_read_engine.clone()
+            } else {
+                let mut snapshot = engine.clone();
+                drop(engine);
+                for file_id in stale_file_ids {
+                    snapshot.replace_facts(file_id, FileFacts::default(), ResolveMode::Deferred);
+                }
+                Arc::new(parking_lot::RwLock::new(snapshot))
+            }
+        };
+        let known_namespaces = if Arc::ptr_eq(&semantic_read_engine, &base_semantic_read_engine) {
+            known_namespaces.unwrap_or_else(|| {
+                Arc::new({
+                    let engine = semantic_read_engine.read();
+                    ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+                })
+            })
+        } else {
+            Arc::new({
+                let engine = semantic_read_engine.read();
+                ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+            })
+        };
 
         let collect_file = |input: (PathBuf, String, std::time::Duration, std::time::Duration)| -> Result<(
             PathBuf,
@@ -896,14 +985,14 @@ impl IndexerProject {
         })?;
         let analysis_engine = server.analysis_engine_for_uri(&project_uri);
         let known_namespaces = self.jruby_replay_known_namespaces.take().expect(
-            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no immutable post-frontier \
-             namespace snapshot. This is a bug because replayed files must use the same semantic \
+            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no immutable pre-collection \
+             namespace baseline. This is a bug because replayed files must use the same semantic \
              context as provider-aware project batches regardless of concurrent dependency \
-             binding. Fix: retain the generation-owned snapshot through exhaustive project \
+             binding. Fix: retain the generation-owned baseline through exhaustive project \
              completion and consume it exactly once during replay.",
         );
         let semantic_read_engine = self.jruby_replay_analysis_engine.take().expect(
-            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no immutable post-frontier semantic engine. This is a bug because providerless and provider-aware collection must observe the same generation-owned facts. Fix: retain the exhaustive read engine through replay and consume it exactly once."
+            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no immutable pre-collection semantic engine. This is a bug because providerless and provider-aware collection must observe the same generation-owned facts. Fix: retain the project collection baseline through replay and consume it exactly once."
         );
         let replay_started = Instant::now();
         let outcomes = files
@@ -1606,6 +1695,47 @@ mod tests {
     }
 
     #[test]
+    fn cold_project_result_is_independent_of_a_prior_identical_file_pass() {
+        let workspace = TempDir::new().unwrap();
+        let root = workspace.path();
+        let path = root.join("user.rb");
+        let source = "class User\n  def normalized_name\n    name.upcase\n  end\n\n  def name\n    \"Ada\"\n  end\nend\n\nUser.new.normalized_name\n";
+        std::fs::write(&path, source).unwrap();
+
+        let collect = |preindex: bool| {
+            let server = RubyLanguageServer::default();
+            let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
+            if preindex {
+                FileProcessor::new()
+                    .process_file_current_file_resolution_forced(
+                        &Url::from_file_path(&path).unwrap(),
+                        source,
+                        &server,
+                    )
+                    .unwrap();
+            }
+            let mut indexer = IndexerProject::new(
+                root.to_path_buf(),
+                FileProcessor::new(),
+                IndexingConfig::default(),
+            );
+            indexer.collect_project_facts(&server).unwrap();
+            workspace_state.analysis_engine.write().resolve();
+            let fingerprint = workspace_state
+                .analysis_engine
+                .read()
+                .semantic_result_fingerprint();
+            fingerprint
+        };
+
+        assert_eq!(
+            collect(false),
+            collect(true),
+            "byte-identical project collection must not consume stale facts from an earlier pass of the same file"
+        );
+    }
+
+    #[test]
     fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
         let workspace = TempDir::new().unwrap();
         let root = workspace.path();
@@ -1738,7 +1868,7 @@ mod tests {
     }
 
     #[test]
-    fn exhaustive_batches_share_one_immutable_post_frontier_namespace_context() {
+    fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
         let workspace = TempDir::new().unwrap();
         let root = workspace.path();
         std::fs::write(root.join("seed.rb"), "class Seed\nend\n").unwrap();

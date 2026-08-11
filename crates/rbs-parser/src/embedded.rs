@@ -16,6 +16,11 @@ pub fn core_rbs_files() -> impl Iterator<Item = (&'static str, &'static str)> {
     })
 }
 
+/// Get one embedded core RBS file by its path relative to `rbs_types/core`.
+pub fn core_rbs_file(name: &str) -> Option<&'static str> {
+    core_rbs_files().find_map(|(candidate, content)| (candidate == name).then_some(content))
+}
+
 /// Get all embedded stdlib RBS files as (name, content) pairs
 pub fn stdlib_rbs_files() -> impl Iterator<Item = (&'static str, &'static str)> {
     STDLIB_RBS_FILES.iter().filter_map(|(name, bytes)| {
@@ -58,6 +63,20 @@ mod tests {
         assert!(
             file_names.iter().any(|n| n.contains("array")),
             "array.rbs should be embedded"
+        );
+    }
+
+    #[test]
+    fn test_core_file_lookup_is_exact() {
+        let constants =
+            core_rbs_file("constants.rbs").expect("embedded core RBS must contain constants.rbs");
+        assert!(
+            constants.contains("ARGV: Array[String]"),
+            "constants.rbs must retain the authoritative ARGV type"
+        );
+        assert!(
+            core_rbs_file("core/constants.rbs").is_none(),
+            "core RBS lookup must use exact paths relative to the embedded root"
         );
     }
 

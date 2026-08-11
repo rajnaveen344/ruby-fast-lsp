@@ -5,11 +5,10 @@ use super::{
 };
 use parking_lot::RwLock;
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, MethodCallSignatureCandidate,
-    MethodParamFact, MethodParamKind, MethodReferenceAccess, MethodReferenceCandidate,
-    MethodReferenceDiagnostics, NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod,
-    RubyType, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance,
-    TypeSubject,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, MethodParamFact, MethodParamKind,
+    MethodReferenceAccess, MethodReferenceCandidate, MethodReferenceDiagnostics, NamespaceKind,
+    ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact, SymbolKind,
+    TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_fast_lsp_jruby_support::JavaClassName;
@@ -1160,9 +1159,11 @@ impl JrubyImportProvider {
                     diagnostics: MethodReferenceDiagnostics {
                         diagnostic_range: method_range,
                         receiver_label: Some(proxy.to_string()),
+                        receiver_expression_range: None,
+                        receiver_type: None,
                         diagnose_unresolved: false,
                         allow_unindexed_owner: false,
-                        signature: MethodCallSignatureCandidate::default(),
+                        signature: None,
                     },
                 },
             ));
@@ -1485,9 +1486,11 @@ impl JrubyImportProvider {
                     diagnostics: MethodReferenceDiagnostics {
                         diagnostic_range: old_name_range,
                         receiver_label: None,
+                        receiver_expression_range: None,
+                        receiver_type: None,
                         diagnose_unresolved: false,
                         allow_unindexed_owner: false,
-                        signature: MethodCallSignatureCandidate::default(),
+                        signature: None,
                     },
                 },
             ));
@@ -1680,7 +1683,7 @@ fn supplemental_implementation_location(
 }
 
 impl FactCollectorExtensionHost for JrubyImportProvider {
-    fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode<'_>) {
+    fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode<'_>) -> bool {
         CALL_HOST_ENTRIES.fetch_add(1, Ordering::Relaxed);
 
         let started = Instant::now();
@@ -1722,6 +1725,8 @@ impl FactCollectorExtensionHost for JrubyImportProvider {
         let started = Instant::now();
         self.process_java_constructor_call(visitor, node);
         record_call_host_ns(&CALL_HOST_JAVA_CTOR_NS, started);
+
+        false
     }
 }
 

@@ -55,15 +55,11 @@ impl FactCollector {
         full_location: &Location<'_>,
     ) {
         self.direct_facts.symbols.push(
-            SymbolFact::new(
-                fqn,
-                SymbolKind::Constant,
-                self.direct_range(full_location),
-            )
-            .with_name_range(self.direct_terminal_name_range(
-                &constant_path.location(),
-                constant_name.as_bytes(),
-            )),
+            SymbolFact::new(fqn, SymbolKind::Constant, self.direct_range(full_location))
+                .with_name_range(self.direct_terminal_name_range(
+                    &constant_path.location(),
+                    constant_name.as_bytes(),
+                )),
         );
     }
 
@@ -105,10 +101,7 @@ impl FactCollector {
         self.record_constant_path_value_type(fqn, &node.value(), &constant_path, &node.location());
     }
 
-    pub fn process_constant_path_or_write_node_entry(
-        &mut self,
-        node: &ConstantPathOrWriteNode,
-    ) {
+    pub fn process_constant_path_or_write_node_entry(&mut self, node: &ConstantPathOrWriteNode) {
         let constant_path = node.target();
         let Some((constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -116,10 +109,7 @@ impl FactCollector {
         self.record_constant_path_symbol(fqn, &constant_path, &constant_name, &node.location());
     }
 
-    pub fn process_constant_path_or_write_node_exit(
-        &mut self,
-        node: &ConstantPathOrWriteNode,
-    ) {
+    pub fn process_constant_path_or_write_node_exit(&mut self, node: &ConstantPathOrWriteNode) {
         let constant_path = node.target();
         let Some((_constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -127,10 +117,7 @@ impl FactCollector {
         self.record_constant_path_value_type(fqn, &node.value(), &constant_path, &node.location());
     }
 
-    pub fn process_constant_path_and_write_node_entry(
-        &mut self,
-        node: &ConstantPathAndWriteNode,
-    ) {
+    pub fn process_constant_path_and_write_node_entry(&mut self, node: &ConstantPathAndWriteNode) {
         let constant_path = node.target();
         let Some((constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -138,10 +125,7 @@ impl FactCollector {
         self.record_constant_path_symbol(fqn, &constant_path, &constant_name, &node.location());
     }
 
-    pub fn process_constant_path_and_write_node_exit(
-        &mut self,
-        node: &ConstantPathAndWriteNode,
-    ) {
+    pub fn process_constant_path_and_write_node_exit(&mut self, node: &ConstantPathAndWriteNode) {
         let constant_path = node.target();
         let Some((_constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;

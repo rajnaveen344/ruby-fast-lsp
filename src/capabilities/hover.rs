@@ -21,6 +21,7 @@ use crate::indexer::require_paths::{
 };
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
+use crate::utils::lsp::source_position;
 
 /// Return the hover capability.
 pub fn get_hover_capability() -> HoverProviderCapability {
@@ -36,7 +37,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
         let docs = server.docs.lock();
         let doc_arc = docs.get(&uri)?.clone();
         let doc = doc_arc.read();
-        let byte_offset = doc.position_to_analysis_offset(position);
+        let byte_offset = doc.position_to_analysis_offset(source_position(position));
         (
             doc.content.clone(),
             doc_arc.clone(),
@@ -45,8 +46,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
         )
     };
 
-    if let Some(hover) =
-        require_path_hover(server, &uri, &content, &document, byte_offset as usize)
+    if let Some(hover) = require_path_hover(server, &uri, &content, &document, byte_offset as usize)
     {
         return Some(hover);
     }

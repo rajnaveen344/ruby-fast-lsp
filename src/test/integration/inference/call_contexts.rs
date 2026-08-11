@@ -7,16 +7,35 @@
 //! through nested scopes (blocks, lambdas) so that bare method calls resolve to
 //! the correct namespace.
 
-use crate::test::harness::check;
+use crate::test::harness::{check, FakeEditor};
+
+async fn check_unproven_block_receiver(fixture: &str) {
+    let untagged = fixture.replace("<def>", "").replace("</def>", "");
+    let marker = untagged
+        .find("$0")
+        .expect("unproven block receiver fixture must contain one cursor");
+    let before = &untagged[..marker];
+    let line = before.matches('\n').count() as u32;
+    let character = (marker - before.rfind('\n').map(|index| index + 1).unwrap_or(0)) as u32;
+    let source = untagged.replace("$0", "");
+    let mut editor = FakeEditor::new().await;
+    editor.open("inline_test.rb", &source).await;
+    let definitions = editor.goto_def_at("inline_test.rb", line, character).await;
+    assert!(
+        definitions.is_empty(),
+        "an ordinary block without an execution-context contract must not guess lexical self, got {definitions:?}"
+    );
+}
 
 // ============================================================================
 // Block Contexts
 // ============================================================================
 
-/// Method call inside a block should resolve to the enclosing class's method.
+/// An ordinary block can be executed with a rebound `self`; without a callee
+/// contract, navigation must not guess the lexical class's method.
 #[tokio::test]
 async fn goto_method_inside_block() {
-    check(
+    check_unproven_block_receiver(
         r#"
 class Processor
   <def>def helper
@@ -34,10 +53,10 @@ end
     .await;
 }
 
-/// Method call inside a brace block should resolve correctly.
+/// Brace blocks obey the same proof barrier as do/end blocks.
 #[tokio::test]
 async fn goto_method_inside_brace_block() {
-    check(
+    check_unproven_block_receiver(
         r#"
 class Mapper
   <def>def transform(x)
@@ -53,10 +72,10 @@ end
     .await;
 }
 
-/// Method call inside nested blocks should resolve to enclosing class.
+/// Nested ordinary blocks remain unknown without an execution contract.
 #[tokio::test]
 async fn goto_method_inside_nested_blocks() {
-    check(
+    check_unproven_block_receiver(
         r#"
 class DataProcessor
   <def>def validate(item)
@@ -118,10 +137,11 @@ end
     .await;
 }
 
-/// Method call inside Proc.new should resolve correctly.
+/// A Proc can be supplied to an API that rebinds `self`, so its bare receiver
+/// remains unknown until the invocation contract is proven.
 #[tokio::test]
 async fn goto_method_inside_proc_new() {
-    check(
+    check_unproven_block_receiver(
         r#"
 class Worker
   <def>def perform_task
@@ -464,10 +484,11 @@ end
     .await;
 }
 
-/// Method call with block inside class method.
+/// A block created in a class method still needs an execution-context contract
+/// before its implicit receiver can be published.
 #[tokio::test]
 async fn goto_method_inside_class_method_with_block() {
-    check(
+    check_unproven_block_receiver(
         r#"
 class BatchService
   <def>def self.process_item(item)

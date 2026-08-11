@@ -175,9 +175,8 @@ pub async fn handle_goto_definition(
             if definition.is_none() {
                 let phase = project.indexing_status.snapshot().phase;
                 if phase.project_navigation_pending() || phase.dependency_navigation_pending() {
-                    let reason = deferred_reason.unwrap_or(
-                        "the requested definition still depends on broader indexing",
-                    );
+                    let reason = deferred_reason
+                        .unwrap_or("the requested definition still depends on broader indexing");
                     info!(
                         "Goto definition deferred while indexing ({reason}) at {:?}",
                         position

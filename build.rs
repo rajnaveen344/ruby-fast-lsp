@@ -3,7 +3,11 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const GEM_FACT_PRODUCER_TREES: &[&str] = &["crates/ruby-analysis/src"];
+const GEM_FACT_PRODUCER_TREES: &[&str] = &[
+    "crates/ruby-analysis/src",
+    "crates/rbs-parser/src",
+    "crates/rbs-parser/rbs_types",
+];
 const GEM_FACT_PRODUCER_FILES: &[&str] = &[
     "src/indexer/file_processor.rs",
     "src/runtime/jruby/imports.rs",

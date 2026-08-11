@@ -3,6 +3,7 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, Position,
 };
 
+use crate::utils::lsp::source_position;
 use ruby_analysis::indexer::RubyDocument;
 
 pub fn find_variable_completions(
@@ -12,7 +13,7 @@ pub fn find_variable_completions(
     let mut completions = vec![];
     let mut seen_variables = HashSet::new();
 
-    let scope_id = match document.scope_at_position(position) {
+    let scope_id = match document.scope_at_position(source_position(position)) {
         Some(id) => id,
         None => return completions,
     };

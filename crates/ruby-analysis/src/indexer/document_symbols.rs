@@ -1,14 +1,31 @@
 use std::collections::HashMap;
 
+use crate::core::{NamespaceKind, RubyConstant, SourceRange};
+use crate::{LVScopeKind, RubyDocument, ScopeTracker};
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_write_node, visit_def_node,
     visit_module_node, visit_singleton_class_node, CallNode, ClassNode, ConstantWriteNode, DefNode,
     ModuleNode, SingletonClassNode, Visit,
 };
-use tower_lsp::lsp_types::{Range, SymbolKind};
 
-use crate::core::{NamespaceKind, RubyConstant};
-use crate::{LVScopeKind, RubyDocument, ScopeTracker};
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentSymbolKind {
+    Module,
+    Class,
+    Method,
+    Constant,
+    Property,
+}
+
+impl DocumentSymbolKind {
+    const MODULE: Self = Self::Module;
+    const CLASS: Self = Self::Class;
+    const METHOD: Self = Self::Method;
+    const CONSTANT: Self = Self::Constant;
+    const PROPERTY: Self = Self::Property;
+}
+
+use DocumentSymbolKind as SymbolKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodVisibility {
@@ -23,8 +40,8 @@ pub struct RubySymbolContext {
     pub name: String,
     pub kind: SymbolKind,
     pub detail: Option<String>,
-    pub range: Range,
-    pub selection_range: Range,
+    pub range: SourceRange,
+    pub selection_range: SourceRange,
     pub children: Vec<RubySymbolContext>,
     pub visibility: Option<MethodVisibility>,
     pub namespace_kind: Option<NamespaceKind>,
@@ -149,7 +166,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         location: &ruby_prism::Location,
         namespace_kind: Option<NamespaceKind>,
     ) -> RubySymbolContext {
-        let range = self.document.prism_location_to_lsp_range(location);
+        let range = self.document.prism_location_to_source_range(location);
 
         RubySymbolContext {
             name,
@@ -186,14 +203,6 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         let symbol_index = self.add_symbol_to_flat_list(symbol);
 
         // Handle scope tracking similar to FactCollector
-        let _body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
-
         // Push namespace scope
         if let Ok(namespace) = RubyConstant::new(&name) {
             self.scope_tracker.push_ns_scope(namespace);
@@ -227,14 +236,6 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         let symbol_index = self.add_symbol_to_flat_list(symbol);
 
         // Handle scope tracking
-        let _body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
-
         // Push namespace scope
         if let Ok(namespace) = RubyConstant::new(&name) {
             self.scope_tracker.push_ns_scope(namespace);
@@ -363,7 +364,7 @@ impl<'a> Visit<'a> for DocumentSymbolsVisitor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::lsp_types::Url;
+    use url::Url;
 
     fn create_test_document(content: &str) -> RubyDocument {
         let uri = Url::parse("file:///test.rb").unwrap();

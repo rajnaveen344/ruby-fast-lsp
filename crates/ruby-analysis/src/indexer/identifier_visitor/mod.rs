@@ -3,7 +3,6 @@ use crate::core::{ExecutionContextFact, ExecutionScopeMode, NamespaceKind, RubyC
 use crate::{Identifier, LVScopeId, RubyDocument, ScopeTracker};
 
 use ruby_prism::*;
-use tower_lsp::lsp_types::Position;
 
 mod alias_method_node;
 mod back_reference_read_node;
@@ -26,6 +25,7 @@ pub enum IdentifierType {
     ConstantDef,
     MethodDef,
     MethodCall,
+    MethodReference,
     LVarDef,
     LVarRead,
     CVarDef,
@@ -38,8 +38,8 @@ pub enum IdentifierType {
 
 /// Visitor for finding identifiers at a specific position
 pub struct IdentifierVisitor {
-    document: RubyDocument,
-    position: Position,
+    content: String,
+    byte_offset: u32,
     scope_tracker: ScopeTracker,
     execution_context: Option<ExecutionContextFact>,
 
@@ -52,20 +52,25 @@ pub struct IdentifierVisitor {
 }
 
 impl IdentifierVisitor {
-    pub fn new(document: RubyDocument, position: Position) -> Self {
-        Self::new_with_execution_context(document, position, None)
+    pub fn new(document: RubyDocument, position: crate::core::SourcePosition) -> Self {
+        let byte_offset = document.position_to_analysis_offset(position);
+        Self::new_at_offset(document.content, byte_offset)
     }
 
-    pub fn new_with_execution_context(
-        document: RubyDocument,
-        position: Position,
+    pub fn new_at_offset(content: String, byte_offset: u32) -> Self {
+        Self::new_with_execution_context_at_offset(content, byte_offset, None)
+    }
+
+    pub fn new_with_execution_context_at_offset(
+        content: String,
+        byte_offset: u32,
         execution_context: Option<ExecutionContextFact>,
     ) -> Self {
         let scope_tracker = ScopeTracker::new();
 
         Self {
-            document,
-            position,
+            content,
+            byte_offset,
             scope_tracker,
             execution_context,
             ns_stack_at_pos: Vec::new(),
@@ -89,13 +94,23 @@ impl IdentifierVisitor {
     }
 
     pub fn is_position_in_location(&self, location: &Location) -> bool {
-        let position_offset = self.document.position_to_offset(self.position);
+        self.is_position_in_offsets(location.start_offset(), location.end_offset())
+    }
 
-        let start_offset = location.start_offset();
-        let end_offset = location.end_offset();
-
+    pub fn is_position_in_offsets(&self, start_offset: usize, end_offset: usize) -> bool {
+        let position_offset = usize::try_from(self.byte_offset).expect(
+            "INVARIANT VIOLATED: u32 identifier offset could not fit usize. This is a bug because supported targets must address u32 source offsets. Fix: reject the unsupported target architecture.",
+        );
         // Include the end position for completion support (when cursor is right after an identifier)
         position_offset >= start_offset && position_offset <= end_offset
+    }
+
+    pub fn cursor_offset(&self) -> u32 {
+        self.byte_offset
+    }
+
+    pub fn content(&self) -> &str {
+        &self.content
     }
 
     pub fn set_result(
@@ -438,7 +453,7 @@ impl Visit<'_> for IdentifierVisitor {
             let definition_kind = context.method_definition_owner.namespace_kind().expect(
                 "INVARIANT VIOLATED: execution method owner is not a namespace. This is a bug because engine ingestion validates execution targets. Fix: keep ExecutionContextFact namespace validation in replace_facts.",
             );
-            self.scope_tracker.push_execution_context(
+            self.scope_tracker.push_block_execution_context(
                 context.implicit_receiver.namespace_parts(),
                 implicit_kind,
                 context.method_definition_owner.namespace_parts(),
@@ -464,7 +479,7 @@ impl Visit<'_> for IdentifierVisitor {
             let block = node.block().expect(
                 "INVARIANT VIOLATED: dynamic-definition identifier context lost its block. This is a bug because static_dynamic_definition_block_context required the same immutable Prism call to have a block. Fix: keep identifier traversal and context matching atomic.",
             );
-            self.scope_tracker.push_execution_context(
+            self.scope_tracker.push_block_execution_context(
                 implicit_namespace,
                 implicit_kind,
                 definition_namespace,
@@ -482,7 +497,7 @@ impl Visit<'_> for IdentifierVisitor {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.scope_tracker.push_execution_context(
+                self.scope_tracker.push_block_execution_context(
                     eval_namespace.clone(),
                     implicit_kind,
                     eval_namespace,
@@ -604,10 +619,11 @@ impl Visit<'_> for IdentifierVisitor {
 
 #[cfg(test)]
 mod tests {
+    use crate::core::SourcePosition as Position;
     use crate::MethodReceiver;
 
     use super::*;
-    use tower_lsp::lsp_types::{Position, Url};
+    use url::Url;
 
     // Helper function to test the full visitor behavior
     fn test_visitor(code: &str, position: Position, expected_parts: Vec<&str>) {

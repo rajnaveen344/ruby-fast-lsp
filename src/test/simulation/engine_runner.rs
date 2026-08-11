@@ -289,6 +289,7 @@ impl EngineSimulationRunner {
                     diagnostics: Vec::new(),
                     execution_contexts: Vec::new(),
                     inference: Default::default(),
+                    local_read_types: Default::default(),
                 },
                 ResolveMode::Deferred,
             );
@@ -311,6 +312,7 @@ impl EngineSimulationRunner {
                 self.engine.clone(),
             );
             visitor.visit(&parse.node());
+            let local_read_types = visitor.local_read_type_evidence();
             let inference = visitor.inference_evidence();
             let mut types = direct_facts.types;
             types.extend(visitor.direct_facts.types);
@@ -329,6 +331,7 @@ impl EngineSimulationRunner {
                 diagnostics: visitor.analysis_diagnostics,
                 execution_contexts: visitor.extension_execution_context_facts,
                 inference,
+                local_read_types,
             };
             self.engine
                 .write()

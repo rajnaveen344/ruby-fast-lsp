@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-08",
+  "slice": "proof-first reaching-path types after case/in without else",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "profile_single_file_sha256": "5bc5b483d141d3e640ec11fbbeaaefde674b0e6c89a97bea65ea6654df46e363",
+      "profiler_sha256": "309fef1f435e1cf9036eb5504503f2c1d98f03a27e49b27c6301f7e21fff304d"
+    },
+    "candidate": {
+      "profile_single_file_sha256": "4eb75ab8d1ae2bad38276b9a37e2e8d54b4d3b2772d7f77090b0285fc50a55ab",
+      "profiler_sha256": "20a77b40870209a57f373e293e3c9d8ced6fa6cc5ead62cf0651e9598bdfd866",
+      "tracked_diff_sha256_at_measurement": "a39f4a6695cffaca4fc6cee97c58be7c74be340f710b8301193a3236fc6e8b25"
+    }
+  },
+  "inputs": {
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_pairs": 15,
+    "interactive_iterations_per_process": 500
+  },
+  "semantic_evidence": {
+    "baseline_fingerprint": "26048da84ae3a67f68351552c2829171",
+    "candidate_fingerprint": "26048da84ae3a67f68351552c2829171",
+    "scorecard": "81/81 cases, 100/100 points, score_eligible=false",
+    "ruby_analysis_tests": "454/454",
+    "root_tests": "1466/1466 non-ignored, one ignored",
+    "rule": "An unmatched case/in without else raises NoMatchingPatternError and cannot reach the post-case environment. Explicit else branches and other reachable in-branches still contribute NilClass when they do not bind a capture."
+  },
+  "invalid_measurement": {
+    "shape": "baseline profiler copied outside target/release",
+    "observed_mismatch": "The relocated binary found a different bundled-resource universe: 13,311-byte engine heap and fingerprint dd6d777ea92f6e8da72d1b810db984da instead of 6,367,645 bytes and 26048da84ae3a67f68351552c2829171.",
+    "decision": "discarded immediately; no sample from that run is used below",
+    "fix": "Run both hashed binaries from target/release and require identical dataset, semantic fingerprint, file count, and engine heap before comparison."
+  },
+  "accepted_design": {
+    "shape": "remove the synthetic NilClass augmentation after a case/in without else; retain the existing reachable-branch merge and shared flow evidence path",
+    "new_production_storage_bytes": 0,
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 119.976834,
+        "candidate": 119.712833,
+        "delta_percent": -0.220043
+      },
+      "parse": {
+        "baseline": 4.332042,
+        "candidate": 4.283084,
+        "delta_percent": -1.130137
+      },
+      "direct": {
+        "baseline": 5.623083,
+        "candidate": 5.618292,
+        "delta_percent": -0.085202
+      },
+      "visitor": {
+        "baseline": 95.212625,
+        "candidate": 95.443334,
+        "delta_percent": 0.242309
+      },
+      "replace_resolve": {
+        "baseline": 12.146125,
+        "candidate": 12.084917,
+        "delta_percent": -0.50393
+      },
+      "overall": {
+        "baseline": 120.469209,
+        "candidate": 120.264916,
+        "delta_percent": -0.169581
+      }
+    },
+    "interactive_medians": {
+      "indexing_wall_ms": {
+        "baseline": 558.830917,
+        "candidate": 552.131166,
+        "delta_percent": -1.198887
+      },
+      "user_cpu_ms": {
+        "baseline": 238.984,
+        "candidate": 240.432,
+        "delta_percent": 0.605898
+      },
+      "peak_rss_bytes": {
+        "baseline": 89735168,
+        "candidate": 89653248,
+        "delta_percent": -0.091291
+      },
+      "engine_heap_bytes": {
+        "baseline": 6367645,
+        "candidate": 6367645,
+        "delta_percent": 0.0
+      },
+      "cold_ms": {
+        "baseline": 758.658792,
+        "candidate": 751.56225,
+        "delta_percent": -0.935406
+      },
+      "edit_p50_us": {
+        "baseline": 1237.708,
+        "candidate": 1240.542,
+        "delta_percent": 0.228972
+      },
+      "edit_p95_us": {
+        "baseline": 1344.541,
+        "candidate": 1320.917,
+        "delta_percent": -1.757031
+      },
+      "completion_p50_us": {
+        "baseline": 24.083,
+        "candidate": 24.0,
+        "delta_percent": -0.344641
+      },
+      "completion_p95_us": {
+        "baseline": 28.083,
+        "candidate": 27.792,
+        "delta_percent": -1.036214
+      },
+      "hover_p50_us": {
+        "baseline": 11.75,
+        "candidate": 11.75,
+        "delta_percent": 0.0
+      },
+      "hover_p95_us": {
+        "baseline": 13.208,
+        "candidate": 13.25,
+        "delta_percent": 0.317989
+      },
+      "definition_p50_us": {
+        "baseline": 17.667,
+        "candidate": 17.666,
+        "delta_percent": -0.00566
+      },
+      "definition_p95_us": {
+        "baseline": 20.709,
+        "candidate": 20.667,
+        "delta_percent": -0.20281
+      },
+      "references_p50_us": {
+        "baseline": 5349.541,
+        "candidate": 5374.208,
+        "delta_percent": 0.461105
+      },
+      "references_p95_us": {
+        "baseline": 5613.833,
+        "candidate": 5640.625,
+        "delta_percent": 0.47725
+      },
+      "diagnostics_p50_us": {
+        "baseline": 2.25,
+        "candidate": 2.291,
+        "delta_percent": 1.822222
+      },
+      "diagnostics_p95_us": {
+        "baseline": 2.417,
+        "candidate": 2.417,
+        "delta_percent": 0.0
+      }
+    },
+    "all_fixed_budgets": "pass",
+    "decision": "accepted; all compared medians are within the three-percent non-regression gate, semantic fingerprints match, and retained engine heap is byte-identical"
+  }
+}

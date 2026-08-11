@@ -106,6 +106,9 @@ zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6.1", optional = true }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
@@ -126,8 +129,9 @@ cc = "1.0.83"
 sha2 = "0.10.9"
 
 [features]
-default = []
+default = ["jemalloc"]
 memory-profiling = []
+jemalloc = ["dep:tikv-jemallocator"]
 
 [profile.release]
 opt-level = "z"

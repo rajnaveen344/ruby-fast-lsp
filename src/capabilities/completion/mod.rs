@@ -17,7 +17,7 @@ use ruby_analysis::inference::{
 use crate::{
     query::{analyzer_for_document, EngineQuery},
     server::RubyLanguageServer,
-    utils::{ast::is_in_statement_position, position_to_offset},
+    utils::{ast::is_in_statement_position, lsp::source_position, position_to_offset},
 };
 
 pub use snippets::RubySnippets;
@@ -36,7 +36,7 @@ pub async fn find_completion_at_position(
             return CompletionResponse::Array(vec![]);
         }
     };
-    if !document.is_ruby_position(position) {
+    if !document.is_ruby_position(source_position(position)) {
         return CompletionResponse::Array(Vec::new());
     }
     let analyzer = analyzer_for_document(
@@ -63,7 +63,8 @@ pub async fn find_completion_at_position(
         .nth(position.line as usize)
         .unwrap_or("");
 
-    let (partial_name, _, _, _lv_scope_id, namespace_kind) = analyzer.get_identifier(position);
+    let byte_offset = document.position_to_analysis_offset(source_position(position));
+    let (partial_name, _, _, _lv_scope_id, namespace_kind) = analyzer.get_identifier(byte_offset);
 
     // Check if we're in a :: (scope resolution) context
     let is_scope_resolution_context = if is_trigger_character && trigger_character == Some(":") {
@@ -247,7 +248,7 @@ pub async fn find_completion_at_position(
             &semantic_query,
             &document,
             &document.content,
-            position,
+            byte_offset,
             namespace_kind,
             &partial_name,
         );

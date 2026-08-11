@@ -1,14 +1,14 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, MethodAvailability, MethodParamFact, MethodParamKind,
-    MethodReturnEquation, NamespaceKind, RubyMethod, TextRange, TypeFact, TypeProvenance,
-    TypeSubject, UnknownReason,
+    FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodAvailability, MethodParamFact,
+    MethodParamKind, MethodReturnEquation, NamespaceKind, RubyMethod, TextRange, TypeFact,
+    TypeProvenance, TypeSubject, UnknownReason,
 };
 use crate::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use log::warn;
 use ruby_prism::*;
 
 use crate::inference::r#type::literal::LiteralAnalyzer;
-use crate::inference::type_tracker::TypeTracker;
+use crate::inference::type_tracker::{LocalReadType, TypeTracker};
 use crate::inference::RubyType;
 
 use crate::yard::{YardMethodDoc, YardParser, YardTypeConverter};
@@ -75,8 +75,29 @@ impl FactCollector {
 
         let mut method = RubyMethod::new(method_name_str.as_ref()).unwrap();
         let mut actual_namespace_kind = namespace_kind;
+        let definition_fqn = FullyQualifiedName::namespace(definition_namespace.clone());
+        let direct_definition_kinds = self
+            .direct_facts
+            .graph_nodes
+            .iter()
+            .filter(|fact| fact.fqn == definition_fqn)
+            .map(|fact| fact.kind)
+            .collect::<Vec<_>>();
+        let definition_is_proven_class = if direct_definition_kinds.is_empty() {
+            crate::engine::AnalysisQuery::new(&self.analysis_engine.read())
+                .namespace_node_kind(&definition_fqn)
+                == Some(GraphNodeKind::Class)
+        } else {
+            direct_definition_kinds
+                .iter()
+                .all(|kind| *kind == GraphNodeKind::Class)
+        };
+        let is_constructor = method.as_str() == "initialize"
+            && node.receiver().is_none()
+            && namespace_kind == NamespaceKind::Instance
+            && definition_is_proven_class;
 
-        if method.as_str() == "initialize" {
+        if is_constructor {
             method = RubyMethod::new("new").unwrap();
             actual_namespace_kind = NamespaceKind::Singleton;
         }
@@ -200,7 +221,7 @@ impl FactCollector {
             NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
         self.scope_tracker.push_scope_kind(scope_kind);
-        self.scope_tracker.push_execution_context(
+        self.scope_tracker.push_method_execution_context(
             namespace_parts.clone(),
             namespace_kind,
             namespace_parts.clone(),
@@ -262,6 +283,10 @@ impl FactCollector {
                 is_singleton,
             )
         };
+        let declared_return_type = rbs_return_type
+            .as_ref()
+            .or(yard_return_type.as_ref())
+            .cloned();
 
         if let Some(ref doc) = yard_doc {
             self.emit_yard_diagnostics(
@@ -276,9 +301,19 @@ impl FactCollector {
         // Always store the inferred type - Unknown displays as "?" in hints
         // For owner_fqn in inference, use instance namespace for proper class resolution
         let instance_owner_fqn = FullyQualifiedName::namespace(namespace_parts.clone());
-        let (return_type, return_type_provenance, return_equation) = if let Some(return_type) =
-            rbs_return_type
-        {
+        let (return_type, return_type_provenance, return_equation) = if is_constructor {
+            let return_type =
+                RubyType::Class(FullyQualifiedName::constant(namespace_parts.clone()));
+            (
+                Some(return_type.clone()),
+                TypeProvenance::Inferred,
+                Some(MethodReturnEquation::from_ruby_type(
+                    fqn.clone(),
+                    return_type,
+                    UnknownReason::UnresolvedMethodReturn,
+                )),
+            )
+        } else if let Some(return_type) = rbs_return_type {
             (
                 Some(return_type.clone()),
                 TypeProvenance::Rbs,
@@ -308,8 +343,20 @@ impl FactCollector {
             tracker = tracker.with_analysis_engine(self.analysis_engine.clone());
             tracker = tracker.with_analysis_query_cache(self.analysis_query_cache.clone());
             tracker = tracker.with_local_method_returns(self.local_method_returns_for_tracker());
+            tracker = tracker.with_local_public_method_candidates(
+                self.local_public_method_candidates_for_tracker(),
+            );
             tracker = tracker.with_local_superclasses(self.local_superclasses_for_tracker());
             tracker = tracker.with_yield_param_types(self.yield_param_types_by_method.clone());
+            tracker = tracker.with_parameter_types(
+                param_types
+                    .iter()
+                    .map(|(name, ruby_type, _range)| (name.clone(), ruby_type.clone()))
+                    .collect(),
+            );
+            if self.record_local_read_unknown_reasons {
+                tracker = tracker.with_local_read_types();
+            }
             // Set the current class context for self resolution
             if !namespace_parts.is_empty() {
                 tracker.set_current_class(Some(instance_owner_fqn.clone()));
@@ -319,6 +366,9 @@ impl FactCollector {
                 fqn.clone(),
                 self.local_method_candidates_for_tracker(),
             );
+            if self.record_local_read_unknown_reasons {
+                self.install_local_read_types(tracker.take_local_read_types());
+            }
             let immediate = equation.immediate_outcome();
             (
                 Some(immediate.into_ruby_type()),
@@ -357,14 +407,42 @@ impl FactCollector {
             ));
         }
 
-        self.validate_declared_return_type(node, &return_type, &instance_owner_fqn);
+        if !is_constructor {
+            self.validate_declared_return_type(
+                node,
+                declared_return_type.as_ref(),
+                &instance_owner_fqn,
+            );
+        }
         true
+    }
+
+    fn install_local_read_types(&mut self, reads: Vec<LocalReadType>) {
+        if reads.is_empty() {
+            return;
+        }
+        let scope_id = self.document.variable_scopes().current_scope().expect(
+            "INVARIANT VIOLATED: TypeTracker local-read results have no active method scope. This is a bug because process_def_node_entry enters the scope before collecting its return equation. Fix: install flow evidence before exiting the definition.",
+        );
+        let reads = reads
+            .into_iter()
+            .map(|read| {
+                (
+                    read.name,
+                    self.text_range_from_offsets(read.start_offset, read.end_offset),
+                    read.ruby_type,
+                )
+            })
+            .collect();
+        self.document
+            .variable_scopes_mut()
+            .install_flow_read_types(scope_id, reads);
     }
 
     fn validate_declared_return_type(
         &mut self,
         node: &DefNode,
-        return_type: &Option<RubyType>,
+        return_type: Option<&RubyType>,
         _instance_owner_fqn: &FullyQualifiedName,
     ) {
         let Some(expected_type) = return_type else {
@@ -373,7 +451,8 @@ impl FactCollector {
         let return_values = infer_return_values_for_declared_type_check(node);
 
         for (inferred_ty, start, end) in return_values {
-            if inferred_ty == RubyType::Unknown {
+            if RubyType::contains_unknown(expected_type) || RubyType::contains_unknown(&inferred_ty)
+            {
                 continue;
             }
 
@@ -457,6 +536,21 @@ impl FactCollector {
             }
         }
 
+        // Ruby post parameters are required positional parameters declared
+        // after optional/rest parameters (`def render(prefix = nil, body)`).
+        // Omitting them makes the stored signature accept too few arguments
+        // and reject valid calls, so retain them in their actual call order.
+        for post in params_node.posts().iter() {
+            if let Some(param) = post.as_required_parameter_node() {
+                let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                params.push(MethodParamInfo::new(
+                    param_name,
+                    MethodParamKind::Required,
+                    self.direct_range(&param.location()),
+                ));
+            }
+        }
+
         // Process keyword parameters (name: or name: default)
         // These already have a colon in the syntax, so we don't add another
         for keyword in params_node.keywords().iter() {
@@ -533,7 +627,7 @@ impl FactCollector {
 
         for (yard_param, range) in yard_doc.find_unmatched_params(&actual_param_names) {
             self.push_warning_diagnostic(
-                self.text_range_from_lsp_range(range, "YARD unknown param"),
+                self.text_range_from_source_range(range, "YARD unknown param"),
                 "yard-unknown-param",
                 format!(
                     "YARD @param '{}' does not match any method parameter",
@@ -560,7 +654,7 @@ impl FactCollector {
         };
 
         self.push_warning_diagnostic(
-            self.text_range_from_lsp_range(range, "YARD RBS mismatch"),
+            self.text_range_from_source_range(range, "YARD RBS mismatch"),
             "yard-rbs-mismatch",
             format!(
                 "YARD return type '{}' conflicts with RBS type '{}'",
@@ -582,6 +676,12 @@ impl FactCollector {
         &self,
     ) -> std::sync::Arc<std::collections::HashSet<FullyQualifiedName>> {
         std::sync::Arc::clone(&self.local_method_candidates)
+    }
+
+    fn local_public_method_candidates_for_tracker(
+        &self,
+    ) -> std::sync::Arc<std::collections::HashSet<FullyQualifiedName>> {
+        std::sync::Arc::clone(&self.local_public_method_candidates)
     }
 
     fn local_superclasses_for_tracker(

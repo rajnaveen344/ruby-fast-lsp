@@ -1,17 +1,39 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
-    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
-    MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod,
-    SourceFileId, StoredMethodReferenceCandidate, StoredReferenceCandidateRef, SymbolKind,
-    TextRange, TypeSubject,
+    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind,
+    MethodCalleeResolution, MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant,
+    RubyMethod, RubyType, SourceFileId, SourceKind, StoredMethodReferenceCandidate,
+    StoredReferenceCandidateRef, SymbolKind, TextRange, TypeSubject,
 };
 use crate::engine::query::AnalysisQuery;
 use crate::engine::state::EffectiveMethodFactMatch;
 use crate::engine::types::{AnalysisQueryCache, MethodReturnQueryAccess};
 
-pub(crate) type MethodLookupChainCache = HashMap<FullyQualifiedName, Vec<FqnId>>;
+#[derive(Default)]
+pub(crate) struct MethodLookupChainCache {
+    chains: HashMap<FullyQualifiedName, Vec<FqnId>>,
+    metaclass_methods: HashMap<(FqnId, RubyMethod), MethodLookupResult>,
+    unresolved_edge_sources: Option<HashSet<FqnId>>,
+    unresolved_dependencies: HashMap<FullyQualifiedName, bool>,
+    unproven_universal_methods: HashMap<FqnId, HashSet<RubyMethod>>,
+}
+
+impl MethodLookupChainCache {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.chains.len()
+    }
+
+    pub(crate) fn get(&self, owner: &FullyQualifiedName) -> Option<&Vec<FqnId>> {
+        self.chains.get(owner)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstantRenameTarget {
@@ -35,7 +57,7 @@ pub struct MethodRenameTarget {
 
 #[derive(Clone)]
 pub enum MethodLookupResult {
-    Unique(MethodFact),
+    Unique(Arc<MethodFact>),
     Ambiguous {
         owner: FullyQualifiedName,
         method: RubyMethod,
@@ -58,6 +80,25 @@ impl MethodLookupResult {
 
     pub fn is_missing(&self) -> bool {
         matches!(self, MethodLookupResult::Missing)
+    }
+}
+
+fn receiver_type_members(receiver_type: &RubyType) -> &[RubyType] {
+    match receiver_type {
+        RubyType::Union(members) => {
+            assert!(
+                members.len() >= 2,
+                "INVARIANT VIOLATED: method resolution received a RubyType::Union with fewer than two members. This is a bug because canonical union construction must collapse empty and singleton inputs. Fix: construct receiver unions only through RubyType::union helpers."
+            );
+            members
+        }
+        RubyType::Class(_)
+        | RubyType::Module(_)
+        | RubyType::ClassReference(_)
+        | RubyType::ModuleReference(_)
+        | RubyType::Array(_)
+        | RubyType::Hash(_, _)
+        | RubyType::Unknown => std::slice::from_ref(receiver_type),
     }
 }
 
@@ -348,10 +389,10 @@ impl<'a> AnalysisQuery<'a> {
         })
     }
 
-    fn method_candidate_rename_identities(
+    pub(super) fn method_candidate_callees(
         &self,
         candidate: &StoredMethodReferenceCandidate,
-    ) -> Vec<MethodRenameIdentity> {
+    ) -> Vec<ResolvedMethodCallee> {
         let owner_lookup = self.engine.names.const_lookup(candidate.owner).expect(
             "INVARIANT VIOLATED: method rename candidate points to a missing owner lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern method owners before storing candidates.",
         );
@@ -359,7 +400,57 @@ impl<'a> AnalysisQuery<'a> {
             owner_lookup.path.to_vec(),
             candidate.owner_kind,
         );
-        let callees = if candidate.is_super {
+        let grouped_receiver_type = candidate
+            .diagnostics
+            .as_deref()
+            .and_then(|diagnostics| diagnostics.receiver_type.as_deref())
+            .filter(|receiver_type| matches!(receiver_type, RubyType::Union(_)));
+        assert!(
+            grouped_receiver_type.is_none() || !candidate.is_super,
+            "INVARIANT VIOLATED: a super reference carries grouped receiver metadata. This is a bug because super has one lexical owner chain rather than a value receiver union. Fix: attach receiver_type only to explicit call-node receiver inference."
+        );
+        let callees = if let Some(receiver_type) = grouped_receiver_type {
+            match candidate.access {
+                MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
+                    .resolve_method_callees_for_type(receiver_type, &candidate.method)
+                    .unwrap_or_default(),
+                MethodReferenceAccess::ExplicitReceiver => {
+                    let protected = candidate
+                        .caller
+                        .and_then(|caller| self.engine.fqn_for_id(caller))
+                        .and_then(|caller| {
+                            let mut owners = self
+                                .engine
+                                .method_facts_for(caller)
+                                .into_iter()
+                                .map(|fact| fact.owner)
+                                .collect::<Vec<_>>();
+                            owners.sort_by_key(ToString::to_string);
+                            owners.dedup();
+                            let caller = if owners.len() == 1 {
+                                owners.pop().expect(
+                                    "INVARIANT VIOLATED: one grouped rename caller owner disappeared after length validation. This is a bug because caller selection must be atomic. Fix: keep the local owner vector unchanged before pop.",
+                                )
+                            } else {
+                                FullyQualifiedName::namespace(caller.namespace_parts())
+                            };
+                            self.resolve_protected_method_callees_for_type(
+                                receiver_type,
+                                &candidate.method,
+                                &caller,
+                            )
+                        });
+                    protected
+                        .or_else(|| {
+                            self.resolve_public_method_callees_for_type(
+                                receiver_type,
+                                &candidate.method,
+                            )
+                        })
+                        .unwrap_or_default()
+                }
+            }
+        } else if candidate.is_super {
             self.resolve_super_method_callee(&owner, &candidate.method)
                 .into_iter()
                 .collect::<Vec<_>>()
@@ -400,7 +491,33 @@ impl<'a> AnalysisQuery<'a> {
                 }
             }
         };
+        if candidate.access == MethodReferenceAccess::Normal
+            && !callees.iter().any(|callee| {
+                callee.resolution == MethodCalleeResolution::Exact
+                    && !callee.definition_ranges.is_empty()
+            })
+        {
+            if let Some(fact) = self.source_ordered_top_level_method_reference(
+                &owner,
+                &candidate.method,
+                candidate.range,
+            ) {
+                return vec![ResolvedMethodCallee {
+                    owner: fact.owner.clone(),
+                    method: candidate.method,
+                    resolution: MethodCalleeResolution::Exact,
+                    definition_ranges: vec![fact.range],
+                }];
+            }
+        }
+        callees
+    }
 
+    fn method_candidate_rename_identities(
+        &self,
+        candidate: &StoredMethodReferenceCandidate,
+    ) -> Vec<MethodRenameIdentity> {
+        let callees = self.method_candidate_callees(candidate);
         let mut identities = callees
             .into_iter()
             .filter(|callee| {
@@ -446,6 +563,9 @@ impl<'a> AnalysisQuery<'a> {
         while let Some(current) = pending.pop() {
             if !visited.insert(current.clone()) {
                 continue;
+            }
+            if self.engine.superclass_is_ambiguous(&current) {
+                return true;
             }
             if unresolved_sources.contains(&current.namespace_parts()) {
                 return true;
@@ -497,6 +617,62 @@ impl<'a> AnalysisQuery<'a> {
             false,
             Some(caller_namespace_fqn),
         )
+    }
+
+    pub fn resolve_protected_method_signature_facts_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+        caller_namespace_fqn: &FullyQualifiedName,
+    ) -> Vec<MethodFact> {
+        self.resolve_method_signature_facts_for_type_inner(
+            receiver_type,
+            method,
+            false,
+            Some(caller_namespace_fqn),
+        )
+    }
+
+    fn resolve_method_signature_facts_for_type_inner(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+    ) -> Vec<MethodFact> {
+        let members = receiver_type_members(receiver_type);
+        let mut all_facts = Vec::new();
+        for member in members {
+            let namespaces = Self::receiver_type_to_method_namespaces(member);
+            if namespaces.is_empty() {
+                return Vec::new();
+            }
+
+            let mut member_facts = Vec::new();
+            for namespace in namespaces {
+                member_facts.extend(self.resolve_method_signature_facts_inner(
+                    &namespace,
+                    method,
+                    allow_private,
+                    protected_caller,
+                ));
+            }
+            if member_facts.is_empty() {
+                return Vec::new();
+            }
+            all_facts.extend(member_facts);
+        }
+
+        all_facts.sort_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+                fact.fqn.to_string(),
+            )
+        });
+        all_facts.dedup();
+        all_facts
     }
 
     fn resolve_method_signature_facts_inner(
@@ -614,6 +790,82 @@ impl<'a> AnalysisQuery<'a> {
         caller_namespace_fqn: &FullyQualifiedName,
     ) -> Option<Vec<ResolvedMethodCallee>> {
         self.resolve_method_callees_inner(namespace_fqn, method, false, Some(caller_namespace_fqn))
+    }
+
+    pub fn resolve_method_callees_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        self.resolve_method_callees_for_type_inner(receiver_type, method, true, None)
+    }
+
+    pub fn resolve_public_method_callees_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        self.resolve_method_callees_for_type_inner(receiver_type, method, false, None)
+    }
+
+    pub fn resolve_protected_method_callees_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+        caller_namespace_fqn: &FullyQualifiedName,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        self.resolve_method_callees_for_type_inner(
+            receiver_type,
+            method,
+            false,
+            Some(caller_namespace_fqn),
+        )
+    }
+
+    fn resolve_method_callees_for_type_inner(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        let members = receiver_type_members(receiver_type);
+        let mut all_callees = Vec::new();
+        for member in members {
+            let namespaces = Self::receiver_type_to_method_namespaces(member);
+            if namespaces.is_empty() {
+                return None;
+            }
+
+            let mut member_callees = Vec::new();
+            for namespace in namespaces {
+                let callees = self.resolve_method_callees_inner(
+                    &namespace,
+                    method,
+                    allow_private,
+                    protected_caller,
+                )?;
+                member_callees.extend(
+                    callees
+                        .into_iter()
+                        .filter(|callee| callee.resolution == MethodCalleeResolution::Exact),
+                );
+            }
+            if member_callees.is_empty() {
+                return None;
+            }
+            all_callees.extend(member_callees);
+        }
+
+        all_callees.sort_by_key(|callee| {
+            (
+                callee.owner.to_string(),
+                callee.method.to_string(),
+                callee.definition_ranges.clone(),
+            )
+        });
+        all_callees.dedup();
+        Some(all_callees)
     }
 
     pub fn resolve_protected_method_callees_cached(
@@ -764,6 +1016,58 @@ impl<'a> AnalysisQuery<'a> {
         self.resolve_method_reference_with_chain_cache(namespace_fqn, method, &mut cache)
     }
 
+    /// Resolve a top-level method only when this exact source location proves
+    /// it has already executed in the same file and no receiver-specific,
+    /// metaclass, execution-context, or unresolved-ancestry candidate can
+    /// precede it. This is the narrow proof needed for Ruby class-body forms
+    /// such as `attr_accessor helper_call`; arbitrary workspace indexing is
+    /// never treated as runtime load evidence.
+    pub(crate) fn source_ordered_top_level_method_reference(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        call_range: TextRange,
+    ) -> Option<Arc<MethodFact>> {
+        if namespace_fqn.namespace_parts().is_empty()
+            || method_lookup_chain_has_unresolved_dependency(self.engine, namespace_fqn)
+        {
+            return None;
+        }
+
+        let receiver_chain = method_lookup_chain_without_metaclass(self.engine, namespace_fqn);
+        if method_facts_in_chain(self.engine, &receiver_chain, method, true, None).is_some() {
+            return None;
+        }
+        if let Some(metaclass) = metaclass_namespace_for_object(self.engine, namespace_fqn) {
+            let metaclass_chain = method_lookup_chain_without_metaclass(self.engine, &metaclass);
+            if method_facts_in_chain(self.engine, &metaclass_chain, method, true, None).is_some() {
+                return None;
+            }
+        }
+        if execution_context_application_targets(self.engine, namespace_fqn)
+            .into_iter()
+            .any(|application| {
+                let chain = method_lookup_chain_without_metaclass(self.engine, &application);
+                method_facts_in_chain(self.engine, &chain, method, true, None).is_some()
+            })
+        {
+            return None;
+        }
+
+        let root = FullyQualifiedName::namespace_with_kind(
+            Vec::new(),
+            crate::core::NamespaceKind::Instance,
+        );
+        let EffectiveMethodFactMatch::Unique(fact) = self
+            .engine
+            .effective_method_fact_matching_owner_name(&root, method)
+        else {
+            return None;
+        };
+        (fact.range.file_id == call_range.file_id && fact.range.end_byte <= call_range.start_byte)
+            .then(|| Arc::new(fact))
+    }
+
     pub(crate) fn resolve_method_reference_with_chain_cache(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -776,15 +1080,41 @@ impl<'a> AnalysisQuery<'a> {
 
         let ancestor_chain =
             method_lookup_chain_for_reference_cached(self.engine, namespace_fqn, chain_cache);
+        let universal_roots = ancestor_chain
+            .iter()
+            .copied()
+            .filter(|owner| {
+                self.engine
+                    .names
+                    .fqn(*owner)
+                    .is_some_and(is_universal_open_root)
+            })
+            .collect::<Vec<_>>();
+        let mut crossed_universal_root = false;
 
         for owner_id in ancestor_chain.iter().copied() {
+            let owner = self.engine.names.fqn(owner_id).expect(
+                "INVARIANT VIOLATED: cached method-chain owner ID is absent from the name registry. This is a bug because resolution-local chain IDs originate from that same immutable registry. Fix: invalidate all resolution-local chain caches whenever names can change.",
+            );
+            crossed_universal_root |= is_universal_open_root(owner);
             match self
                 .engine
                 .effective_method_fact_matching_owner_id(owner_id, method)
             {
                 EffectiveMethodFactMatch::Missing => continue,
                 EffectiveMethodFactMatch::Unique(fact) => {
-                    return MethodLookupResult::Unique(fact);
+                    if non_core_fact_requires_ancestry_proof(
+                        self.engine,
+                        namespace_fqn,
+                        &fact,
+                        crossed_universal_root,
+                    ) {
+                        return MethodLookupResult::Ambiguous {
+                            owner: namespace_fqn.clone(),
+                            method: *method,
+                        };
+                    }
+                    return MethodLookupResult::Unique(Arc::new(fact));
                 }
                 EffectiveMethodFactMatch::Ambiguous => {
                     return MethodLookupResult::Ambiguous {
@@ -798,6 +1128,143 @@ impl<'a> AnalysisQuery<'a> {
                             .clone(),
                         method: *method,
                     };
+                }
+            }
+        }
+
+        if is_module_instance_namespace(self.engine, namespace_fqn) {
+            let mut includer_callees = self
+                .resolve_method_callees_inner(namespace_fqn, method, true, None)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|callee| {
+                    callee.resolution == MethodCalleeResolution::Exact
+                        && !callee.definition_ranges.is_empty()
+                })
+                .collect::<Vec<_>>();
+            includer_callees
+                .sort_by_key(|callee| (callee.owner.to_string(), callee.definition_ranges.clone()));
+            includer_callees.dedup();
+            let mut includer_owners = includer_callees
+                .iter()
+                .map(|callee| callee.owner.clone())
+                .collect::<Vec<_>>();
+            includer_owners.sort_by_key(ToString::to_string);
+            includer_owners.dedup();
+            if includer_owners.len() > 1 {
+                return MethodLookupResult::Ambiguous {
+                    owner: namespace_fqn.clone(),
+                    method: *method,
+                };
+            }
+            if let Some(owner) = includer_owners.pop() {
+                let definition_ranges = includer_callees
+                    .into_iter()
+                    .flat_map(|callee| callee.definition_ranges)
+                    .collect::<HashSet<_>>();
+                let target = FullyQualifiedName::method(owner.namespace_parts(), *method);
+                let mut facts = self
+                    .engine
+                    .method_facts_for(&target)
+                    .into_iter()
+                    .filter(|fact| fact.owner == owner && definition_ranges.contains(&fact.range))
+                    .collect::<Vec<_>>();
+                facts.sort_by_key(|fact| {
+                    (
+                        fact.range.file_id,
+                        fact.range.start_byte,
+                        fact.range.end_byte,
+                    )
+                });
+                if let Some(fact) = facts.into_iter().next() {
+                    return MethodLookupResult::Unique(Arc::new(fact));
+                }
+                panic!(
+                    "INVARIANT VIOLATED: exact module-includer method resolution has no matching method fact. This is a bug because callee definition ranges originate from method facts in the same immutable engine. Fix: keep includer callee construction and reference materialization on the same fact snapshot."
+                );
+            }
+        }
+
+        // An unresolved ancestry edge is a proof barrier. A method found on
+        // the receiver or on a fully traversed known prepend/include remains
+        // usable because it returned above, but lookup must not continue into
+        // Class/Module or top-level fallbacks: the missing ancestor can define
+        // the same method earlier in Ruby's lookup order.
+        if method_lookup_chain_has_unresolved_dependency_cached(
+            self.engine,
+            namespace_fqn,
+            chain_cache,
+        ) {
+            return MethodLookupResult::Missing;
+        }
+
+        // Class and module objects share one language-defined fallback through
+        // Class/Module. Keep that continuation lazy for reference resolution:
+        // most singleton calls resolve in their own ancestry, and appending the
+        // same metaclass chain to every cached owner multiplied transient work
+        // on large projects without adding proof.
+        if let Some(metaclass) = metaclass_namespace_for_object(self.engine, namespace_fqn) {
+            let metaclass_id = self.engine.names.fqn_id(&metaclass).expect(
+                "INVARIANT VIOLATED: proven metaclass namespace is absent from the name registry. This is a bug because metaclass fallback requires an indexed graph node. Fix: intern graph node FQNs before method resolution.",
+            );
+            let cache_key = (metaclass_id, *method);
+            let fallback = if let Some(cached) = chain_cache.metaclass_methods.get(&cache_key) {
+                cached.clone()
+            } else {
+                let metaclass_chain =
+                    method_lookup_chain_for_reference_cached(self.engine, &metaclass, chain_cache);
+                let mut result = MethodLookupResult::Missing;
+                for owner_id in metaclass_chain.iter().copied() {
+                    match self
+                        .engine
+                        .effective_method_fact_matching_owner_id(owner_id, method)
+                    {
+                        EffectiveMethodFactMatch::Missing => continue,
+                        EffectiveMethodFactMatch::Unique(fact) => {
+                            if non_core_fact_requires_ancestry_proof(
+                                self.engine,
+                                namespace_fqn,
+                                &fact,
+                                true,
+                            ) {
+                                result = MethodLookupResult::Ambiguous {
+                                    owner: metaclass.clone(),
+                                    method: *method,
+                                };
+                                break;
+                            }
+                            result = MethodLookupResult::Unique(Arc::new(fact));
+                            break;
+                        }
+                        EffectiveMethodFactMatch::Ambiguous => {
+                            result = MethodLookupResult::Ambiguous {
+                                owner: self
+                                    .engine
+                                    .names
+                                    .fqn(owner_id)
+                                    .expect(
+                                        "INVARIANT VIOLATED: cached metaclass-chain owner ID is absent from the name registry. This is a bug because resolution-local chain IDs originate from that same immutable registry. Fix: invalidate all resolution-local chain caches whenever names can change.",
+                                    )
+                                    .clone(),
+                                method: *method,
+                            };
+                            break;
+                        }
+                    }
+                }
+                assert!(
+                    chain_cache
+                        .metaclass_methods
+                        .insert(cache_key, result.clone())
+                        .is_none(),
+                    "INVARIANT VIOLATED: metaclass fallback cache replaced an entry after a confirmed miss. This is a bug because metaclass identity and method names are immutable during one resolve pass. Fix: keep fallback lookup and insertion in one resolution step."
+                );
+                result
+            };
+            match fallback {
+                MethodLookupResult::Missing => {}
+                MethodLookupResult::Unique(_) | MethodLookupResult::Ambiguous { .. } => {
+                    return fallback;
                 }
             }
         }
@@ -829,6 +1296,13 @@ impl<'a> AnalysisQuery<'a> {
         }
         if let Some(fact) = application_facts.pop() {
             return MethodLookupResult::Unique(fact);
+        }
+
+        if unproven_universal_method_exists(self.engine, &universal_roots, method, chain_cache) {
+            return MethodLookupResult::Ambiguous {
+                owner: namespace_fqn.clone(),
+                method: *method,
+            };
         }
 
         if *method != method_missing_method() {
@@ -863,7 +1337,7 @@ impl<'a> AnalysisQuery<'a> {
             .effective_method_fact_matching_owner_name(&callee.owner, method)
         {
             EffectiveMethodFactMatch::Missing => MethodLookupResult::Missing,
-            EffectiveMethodFactMatch::Unique(fact) => MethodLookupResult::Unique(fact),
+            EffectiveMethodFactMatch::Unique(fact) => MethodLookupResult::Unique(Arc::new(fact)),
             EffectiveMethodFactMatch::Ambiguous => MethodLookupResult::Ambiguous {
                 owner: callee.owner,
                 method: *method,
@@ -1293,7 +1767,9 @@ impl<'a> AnalysisQuery<'a> {
         let same_name_non_public = self
             .method_name_has_visibility(method, MethodVisibility::Private)
             || self.method_name_has_visibility(method, MethodVisibility::Protected);
-        for target in self.method_reference_targets(namespace_fqn, method) {
+        let targets = self.method_reference_targets(namespace_fqn, method);
+        let target_set = targets.iter().cloned().collect::<HashSet<_>>();
+        for target in targets {
             let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
             let target_visibility_owner =
                 self.method_target_visibility_owner(&target, &ancestor_chain);
@@ -1339,6 +1815,29 @@ impl<'a> AnalysisQuery<'a> {
                     }),
             );
         }
+        for candidate in self
+            .engine
+            .reference_candidate_store()
+            .method_candidates_named(*method)
+        {
+            let resolves_to_target = self
+                .method_candidate_callees(candidate)
+                .into_iter()
+                .filter(|callee| {
+                    callee.resolution == MethodCalleeResolution::Exact
+                        && callee.method == *method
+                        && !callee.definition_ranges.is_empty()
+                })
+                .map(|callee| {
+                    FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method)
+                })
+                .any(|target| target_set.contains(&target));
+            if resolves_to_target {
+                ranges.push(candidate.range);
+            }
+        }
+        ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+        ranges.dedup();
         ranges
     }
 
@@ -1558,6 +2057,47 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
+fn non_core_fact_requires_ancestry_proof(
+    engine: &crate::AnalysisEngine,
+    requested_owner: &FullyQualifiedName,
+    fact: &MethodFact,
+    crossed_universal_root: bool,
+) -> bool {
+    if requested_owner == &fact.owner {
+        return false;
+    }
+
+    let source_kind = engine
+        .file(fact.range.file_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: method fact `{}` references missing source file {}. This is a bug because every fact must remain owned by a registered file. Fix: remove facts before unregistering their source.",
+                fact.fqn,
+                fact.range.file_id.0,
+            )
+        })
+        .kind;
+    if matches!(source_kind, SourceKind::Stub | SourceKind::Signature) {
+        return false;
+    }
+
+    crossed_universal_root
+}
+
+fn is_universal_open_root(owner: &FullyQualifiedName) -> bool {
+    if owner.namespace_parts().is_empty() {
+        return true;
+    }
+    matches!(
+        owner.namespace_parts().as_slice(),
+        [name]
+            if matches!(
+                name.as_str(),
+                "BasicObject" | "Object" | "Kernel" | "Module" | "Class"
+            )
+    )
+}
+
 fn method_name_is_refactorable(method: RubyMethod) -> bool {
     !matches!(
         method.as_str(),
@@ -1728,6 +2268,31 @@ pub(super) fn method_lookup_chain(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
+    let mut chain = method_lookup_chain_without_metaclass(engine, fqn);
+    let Some(metaclass) = metaclass_namespace_for_object(engine, fqn) else {
+        return chain;
+    };
+    let mut visited = chain
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    build_mro(engine, &metaclass, &mut chain, &mut visited, false);
+    chain
+}
+
+fn method_lookup_chain_without_metaclass(
+    engine: &crate::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+) -> Vec<FullyQualifiedName> {
+    let allow_top_level_fallback = !method_lookup_chain_has_unresolved_dependency(engine, fqn);
+    method_lookup_chain_without_metaclass_with_fallback(engine, fqn, allow_top_level_fallback)
+}
+
+fn method_lookup_chain_without_metaclass_with_fallback(
+    engine: &crate::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    allow_top_level_fallback: bool,
+) -> Vec<FullyQualifiedName> {
     assert!(
         matches!(fqn, FullyQualifiedName::Namespace(_, _)),
         "INVARIANT VIOLATED: analysis method lookup requested for non-namespace FQN: {fqn}. \
@@ -1745,18 +2310,22 @@ pub(super) fn method_lookup_chain(
             }
             chain
         } else {
-            vec![
-                fqn.clone(),
-                FullyQualifiedName::namespace_with_kind(
-                    Vec::new(),
-                    crate::core::NamespaceKind::Instance,
-                ),
-            ]
+            // A constant or inferred receiver without an indexed namespace
+            // has no proven ancestry. Retain its exact receiver identity for
+            // reference candidates, but never guess that it falls through to
+            // top-level Object/Kernel methods.
+            vec![fqn.clone()]
         }
     } else {
         let mut chain = Vec::new();
         let mut visited = std::collections::HashSet::new();
-        build_mro(engine, fqn, &mut chain, &mut visited);
+        build_mro(
+            engine,
+            fqn,
+            &mut chain,
+            &mut visited,
+            is_universal_open_root(fqn),
+        );
 
         let root = FullyQualifiedName::namespace_with_kind(
             Vec::new(),
@@ -1766,12 +2335,139 @@ pub(super) fn method_lookup_chain(
             && !fqn.namespace_parts().is_empty()
             && (is_module_instance_namespace(engine, fqn)
                 || fqn.namespace_kind() == Some(crate::core::NamespaceKind::Singleton))
+            && allow_top_level_fallback
         {
-            append_top_level_instance_fallback(engine, &mut chain, &mut visited);
+            append_universal_object_fallback(engine, &mut chain, &mut visited);
         }
 
         chain
     }
+}
+
+fn method_lookup_chain_has_unresolved_dependency(
+    engine: &crate::AnalysisEngine,
+    owner: &FullyQualifiedName,
+) -> bool {
+    let unresolved_sources = engine
+        .graph
+        .unresolved_edges()
+        .into_iter()
+        .filter(|edge| edge.provenance == GraphEdgeProvenance::Explicit)
+        .map(|edge| edge.source)
+        .collect::<HashSet<_>>();
+    method_lookup_chain_has_unresolved_dependency_from_sources(engine, owner, &unresolved_sources)
+}
+
+fn method_lookup_chain_has_unresolved_dependency_cached(
+    engine: &crate::AnalysisEngine,
+    owner: &FullyQualifiedName,
+    cache: &mut MethodLookupChainCache,
+) -> bool {
+    if let Some(incomplete) = cache.unresolved_dependencies.get(owner) {
+        return *incomplete;
+    }
+    if cache.unresolved_edge_sources.is_none() {
+        cache.unresolved_edge_sources = Some(
+            engine
+                .graph
+                .unresolved_edges()
+                .into_iter()
+                .filter(|edge| edge.provenance == GraphEdgeProvenance::Explicit)
+                .map(|edge| edge.source)
+                .collect(),
+        );
+    }
+    let incomplete = method_lookup_chain_has_unresolved_dependency_from_sources(
+        engine,
+        owner,
+        cache.unresolved_edge_sources.as_ref().expect(
+            "INVARIANT VIOLATED: unresolved method-edge sources disappeared after initialization. This is a bug because a resolution-local cache is immutable between candidate lookups. Fix: initialize the source set once and retain it for the resolve pass.",
+        ),
+    );
+    assert!(
+        cache
+            .unresolved_dependencies
+            .insert(owner.clone(), incomplete)
+            .is_none(),
+        "INVARIANT VIOLATED: unresolved method-dependency cache replaced an entry after a confirmed miss. This is a bug because the engine graph is immutable during one resolve pass. Fix: keep lookup and insertion in one candidate step."
+    );
+    incomplete
+}
+
+fn method_lookup_chain_has_unresolved_dependency_from_sources(
+    engine: &crate::AnalysisEngine,
+    owner: &FullyQualifiedName,
+    unresolved_sources: &HashSet<FqnId>,
+) -> bool {
+    let mut pending = vec![owner.clone()];
+    let mut visited = HashSet::new();
+
+    while let Some(current) = pending.pop() {
+        if !visited.insert(current.clone()) {
+            continue;
+        }
+        if engine.superclass_is_ambiguous(&current) {
+            return true;
+        }
+
+        let unresolved_source = match current.namespace_kind() {
+            Some(crate::core::NamespaceKind::Singleton) => current
+                .to_instance_namespace()
+                .expect(
+                    "INVARIANT VIOLATED: singleton lookup owner cannot produce an instance namespace. This is a bug because unresolved superclass facts are keyed by class/module instance identity. Fix: preserve Namespace identity while checking method proof barriers.",
+                ),
+            Some(crate::core::NamespaceKind::Instance) => current.clone(),
+            None => panic!(
+                "INVARIANT VIOLATED: method lookup proof barrier received non-namespace FQN `{current}`. This is a bug because only namespace receivers have ancestry. Fix: convert receiver types before method resolution."
+            ),
+        };
+        if let Some(source_id) = engine.names.fqn_id(&unresolved_source) {
+            if unresolved_sources.contains(&source_id) {
+                return true;
+            }
+        }
+
+        pending.extend(
+            engine
+                .graph_edges_from(&current)
+                .into_iter()
+                .filter(|edge| {
+                    matches!(
+                        edge.kind,
+                        GraphEdgeKind::Superclass
+                            | GraphEdgeKind::Include
+                            | GraphEdgeKind::Prepend
+                            | GraphEdgeKind::Extend
+                    )
+                })
+                .map(|edge| edge.target),
+        );
+    }
+
+    false
+}
+
+fn metaclass_namespace_for_object(
+    engine: &crate::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+) -> Option<FullyQualifiedName> {
+    if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Singleton) {
+        return None;
+    }
+    let metaclass_name = match node_kind(engine, fqn) {
+        Some(GraphNodeKind::Class) => "Class",
+        Some(GraphNodeKind::Module) => "Module",
+        None => return None,
+    };
+    let metaclass = FullyQualifiedName::namespace_with_kind(
+        vec![RubyConstant::new(metaclass_name).unwrap_or_else(|error| {
+            panic!(
+                "INVARIANT VIOLATED: Ruby metaclass name `{metaclass_name}` is invalid: {error}. This is a bug because Class and Module are universal Ruby constants. Fix: preserve RubyConstant support for language-defined class names."
+            )
+        })],
+        crate::core::NamespaceKind::Instance,
+    );
+    (!engine.graph_nodes_for(&metaclass).is_empty()).then_some(metaclass)
 }
 
 pub(super) fn method_lookup_chain_for_reference_cached<'cache>(
@@ -1779,18 +2475,32 @@ pub(super) fn method_lookup_chain_for_reference_cached<'cache>(
     fqn: &FullyQualifiedName,
     chain_cache: &'cache mut MethodLookupChainCache,
 ) -> &'cache [FqnId] {
+    if !chain_cache.chains.contains_key(fqn) {
+        let allow_top_level_fallback =
+            !method_lookup_chain_has_unresolved_dependency_cached(engine, fqn, chain_cache);
+        let chain = method_lookup_chain_without_metaclass_with_fallback(
+            engine,
+            fqn,
+            allow_top_level_fallback,
+        )
+        .into_iter()
+        // An uninterned fallback namespace cannot own graph or method
+        // facts because both stores are keyed exclusively by FqnId.
+        // Omitting it is therefore the exact ID-domain equivalent of
+        // the previous owner lookup returning Missing.
+        .filter_map(|fqn| engine.names.fqn_id(&fqn))
+        .collect();
+        assert!(
+            chain_cache.chains.insert(fqn.clone(), chain).is_none(),
+            "INVARIANT VIOLATED: method lookup-chain cache replaced an entry after a confirmed miss. This is a bug because the engine graph is immutable during one resolve pass. Fix: keep chain construction and insertion in one candidate step."
+        );
+    }
     chain_cache
-        .entry(fqn.clone())
-        .or_insert_with(|| {
-            method_lookup_chain(engine, fqn)
-                .into_iter()
-                // An uninterned fallback namespace cannot own graph or method
-                // facts because both stores are keyed exclusively by FqnId.
-                // Omitting it is therefore the exact ID-domain equivalent of
-                // the previous owner lookup returning Missing.
-                .filter_map(|fqn| engine.names.fqn_id(&fqn))
-                .collect()
-        })
+        .chains
+        .get(fqn)
+        .expect(
+            "INVARIANT VIOLATED: method lookup-chain cache lost an entry immediately after insertion. This is a bug because the cache is not mutated between insertion and lookup. Fix: keep cached chain access in one resolution step.",
+        )
         .as_slice()
 }
 
@@ -1815,6 +2525,79 @@ fn append_top_level_instance_fallback(
     }
 }
 
+fn append_universal_object_fallback(
+    engine: &crate::AnalysisEngine,
+    chain: &mut Vec<FullyQualifiedName>,
+    visited: &mut std::collections::HashSet<FullyQualifiedName>,
+) {
+    for fqn in compute_universal_object_fallback(engine) {
+        if visited.insert(fqn.clone()) {
+            chain.push(fqn);
+        }
+    }
+}
+
+fn compute_universal_object_fallback(engine: &crate::AnalysisEngine) -> Vec<FullyQualifiedName> {
+    if let Some(cached) = engine.cached_universal_object_method_lookup_chain() {
+        return cached;
+    }
+    let mut fallback = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let object = top_level_object_instance_fqn();
+    if !engine.graph_nodes_for(&object).is_empty() {
+        build_mro(engine, &object, &mut fallback, &mut visited, false);
+    }
+    engine.cache_universal_object_method_lookup_chain(fallback.clone());
+    fallback
+}
+
+fn unproven_universal_method_exists(
+    engine: &crate::AnalysisEngine,
+    universal_roots: &[FqnId],
+    method: &RubyMethod,
+    cache: &mut MethodLookupChainCache,
+) -> bool {
+    for root_id in universal_roots {
+        if !cache.unproven_universal_methods.contains_key(root_id) {
+            let root = engine.names.fqn(*root_id).expect(
+                "INVARIANT VIOLATED: universal lookup root ID is absent from the name registry. This is a bug because roots are selected from a cached chain owned by the same immutable registry. Fix: invalidate resolution-local caches whenever names change.",
+            );
+            let mut broad = Vec::new();
+            let mut broad_visited = HashSet::new();
+            build_mro(engine, root, &mut broad, &mut broad_visited, true);
+            let mut proven = Vec::new();
+            let mut proven_visited = HashSet::new();
+            build_mro(engine, root, &mut proven, &mut proven_visited, false);
+            let proven = proven.into_iter().collect::<HashSet<_>>();
+            let mut methods = HashSet::new();
+            for owner in broad.into_iter().filter(|owner| !proven.contains(owner)) {
+                let Some(owner_id) = engine.names.fqn_id(&owner) else {
+                    continue;
+                };
+                methods.extend(engine.ruby_method_names_for_owner_id(owner_id));
+            }
+            assert!(
+                cache
+                    .unproven_universal_methods
+                    .insert(*root_id, methods)
+                    .is_none(),
+                "INVARIANT VIOLATED: unproven universal-method cache replaced one root after a confirmed miss. This is a bug because the engine graph is immutable during one resolve pass. Fix: keep root lookup and insertion atomic."
+            );
+        }
+        if cache
+            .unproven_universal_methods
+            .get(root_id)
+            .expect(
+                "INVARIANT VIOLATED: unproven universal-method cache lost one root immediately after insertion. This is a bug because the resolution-local cache is not cleared during one pass. Fix: retain root entries for the cache lifetime.",
+            )
+            .contains(method)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn compute_top_level_instance_fallback(
     engine: &crate::AnalysisEngine,
     chain: &mut Vec<FullyQualifiedName>,
@@ -1822,11 +2605,11 @@ fn compute_top_level_instance_fallback(
 ) {
     let root =
         FullyQualifiedName::namespace_with_kind(Vec::new(), crate::core::NamespaceKind::Instance);
-    build_mro(engine, &root, chain, visited);
+    build_mro(engine, &root, chain, visited, true);
 
     let object_fqn = top_level_object_instance_fqn();
     if !engine.graph_nodes_for(&object_fqn).is_empty() {
-        build_mro(engine, &object_fqn, chain, visited);
+        build_mro(engine, &object_fqn, chain, visited, true);
     }
 }
 
@@ -1846,36 +2629,94 @@ fn build_mro(
     fqn: &FullyQualifiedName,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
+    allow_non_language_universal_edges: bool,
 ) {
     if !visited.insert(fqn.clone()) {
         return;
     }
 
-    let mut prepends = edges_from(engine, fqn, GraphEdgeKind::Prepend);
+    let language_owned_only = is_universal_open_root(fqn) && !allow_non_language_universal_edges;
+    let edge_is_allowed = |edge: &GraphEdgeFact| {
+        !language_owned_only || method_lookup_edge_is_language_owned(engine, edge)
+    };
+
+    let mut prepends = edges_from(engine, fqn, GraphEdgeKind::Prepend)
+        .into_iter()
+        .filter(&edge_is_allowed)
+        .collect::<Vec<_>>();
     for edge in prepends.iter_mut().rev() {
-        build_mro(engine, &edge.target, chain, visited);
+        build_mro(
+            engine,
+            &edge.target,
+            chain,
+            visited,
+            allow_non_language_universal_edges,
+        );
     }
 
     chain.push(fqn.clone());
 
-    let mut includes = edges_from(engine, fqn, GraphEdgeKind::Include);
+    let mut includes = edges_from(engine, fqn, GraphEdgeKind::Include)
+        .into_iter()
+        .filter(&edge_is_allowed)
+        .collect::<Vec<_>>();
     for edge in includes.iter_mut().rev() {
-        build_mro(engine, &edge.target, chain, visited);
+        build_mro(
+            engine,
+            &edge.target,
+            chain,
+            visited,
+            allow_non_language_universal_edges,
+        );
     }
 
-    let mut included_hook_extends = included_hook_extend_edges(engine, fqn);
+    let mut included_hook_extends = included_hook_extend_edges(engine, fqn, language_owned_only)
+        .into_iter()
+        .filter(&edge_is_allowed)
+        .collect::<Vec<_>>();
     for edge in included_hook_extends.iter_mut().rev() {
-        build_mro(engine, &edge.target, chain, visited);
+        build_mro(
+            engine,
+            &edge.target,
+            chain,
+            visited,
+            allow_non_language_universal_edges,
+        );
     }
 
-    if let Some(superclass) = edges_from(engine, fqn, GraphEdgeKind::Superclass).first() {
-        build_mro(engine, &superclass.target, chain, visited);
+    if let Some(superclass) = engine.proven_superclass_edge(fqn).filter(&edge_is_allowed) {
+        build_mro(
+            engine,
+            &superclass.target,
+            chain,
+            visited,
+            allow_non_language_universal_edges,
+        );
     }
+}
+
+fn method_lookup_edge_is_language_owned(
+    engine: &crate::AnalysisEngine,
+    edge: &GraphEdgeFact,
+) -> bool {
+    matches!(
+        engine
+            .file(edge.range.file_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: method lookup graph edge references missing source file {}. This is a bug because every graph edge must remain owned by a registered source. Fix: remove graph edges before unregistering their file.",
+                    edge.range.file_id.0,
+                )
+            })
+            .kind,
+        SourceKind::Stub | SourceKind::Signature
+    )
 }
 
 fn included_hook_extend_edges(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
+    language_owned_only: bool,
 ) -> Vec<GraphEdgeFact> {
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Singleton) {
         return Vec::new();
@@ -1888,8 +2729,15 @@ fn included_hook_extend_edges(
     for edge in edges_from(engine, &instance_fqn, GraphEdgeKind::Include)
         .into_iter()
         .chain(edges_from(engine, &instance_fqn, GraphEdgeKind::Prepend))
+        .filter(|edge| !language_owned_only || method_lookup_edge_is_language_owned(engine, edge))
     {
-        hook_edges.extend(edges_from(engine, &edge.target, GraphEdgeKind::Extend));
+        hook_edges.extend(
+            edges_from(engine, &edge.target, GraphEdgeKind::Extend)
+                .into_iter()
+                .filter(|hook| {
+                    !language_owned_only || method_lookup_edge_is_language_owned(engine, hook)
+                }),
+        );
     }
     hook_edges
 }
@@ -2209,9 +3057,12 @@ fn default_basic_object_method_missing_fact(
 ) -> bool {
     fact.owner == basic_object_instance_fqn()
         && method_name_from_fact(fact) == method_missing_method()
-        && engine
-            .file(fact.range.file_id)
-            .is_some_and(|file| file.kind == crate::core::SourceKind::Stub)
+        && engine.file(fact.range.file_id).is_some_and(|file| {
+            matches!(
+                file.kind,
+                crate::core::SourceKind::Stub | crate::core::SourceKind::Signature
+            )
+        })
 }
 
 fn default_basic_object_method_missing_callee(
@@ -2221,9 +3072,12 @@ fn default_basic_object_method_missing_callee(
     callee.owner == basic_object_instance_fqn()
         && !callee.definition_ranges.is_empty()
         && callee.definition_ranges.iter().all(|range| {
-            engine
-                .file(range.file_id)
-                .is_some_and(|file| file.kind == crate::core::SourceKind::Stub)
+            engine.file(range.file_id).is_some_and(|file| {
+                matches!(
+                    file.kind,
+                    crate::core::SourceKind::Stub | crate::core::SourceKind::Signature
+                )
+            })
         })
 }
 

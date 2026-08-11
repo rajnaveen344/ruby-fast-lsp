@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-07",
+  "slice": "compact proof-failure evidence for unresolved local-variable reads",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "profile_single_file_sha256": "800f1dacbd3cd5f7d7501309972e71efea68fb2eccacf4ca1c8d021247013197",
+      "profiler_sha256": "f625192897ff0f17f6b9fc5b1ff6a43ae5bebc4a491716400a2d64969e734403",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "accepted_candidate": {
+      "profile_single_file_sha256": "41156b8d90838c7871495174d0b0cec029e12578be51296d1bd67a273dbc5250",
+      "profiler_sha256": "1b5a5fbcf69ce42fa06fdcfa493cdb746f4b2767692efd799d5cc06de682e482",
+      "tracked_diff_sha256_at_measurement": "413e4664c55f6441c3bf2f5fcf7f7b51c24289b39678d40ed6fe41c1259f2808"
+    },
+    "rejected_type_store_candidate": {
+      "profile_single_file_sha256": "10c91a33740bb368a34b44764d4c14b871b5fc6a357e07b19ff3da07878e3491",
+      "profiler_sha256": "950b63d544a01ab231f8ccd77fbcbedc88634cc358effaa8487f15819247fe1f"
+    }
+  },
+  "inputs": {
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_pairs_per_run": 15,
+    "interactive_iterations_per_process": 500,
+    "interactive_resource_budget": {
+      "cpu_lanes": 6,
+      "top_level_tasks": 2,
+      "transient_memory_bytes": 536870912,
+      "io_slots": 2
+    }
+  },
+  "rejected_design": {
+    "shape": "insert one RubyType::Unknown TypeSubject::Expression fact into the general TypeStore for every unresolved local read",
+    "reason": "The facts made general replacement and resolution scale with unresolved local reads even though the result is observational proof-failure evidence.",
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 122.276959,
+        "candidate": 142.584917,
+        "delta_percent": 16.608164094103767
+      },
+      "visitor": {
+        "baseline": 97.26275,
+        "candidate": 98.088875,
+        "delta_percent": 0.8493745035997899
+      },
+      "replace_resolve": {
+        "baseline": 12.3405,
+        "candidate": 14.591666,
+        "delta_percent": 18.242097159758515
+      },
+      "overall": {
+        "baseline": 122.856666,
+        "candidate": 143.358,
+        "delta_percent": 16.687197095190584
+      }
+    },
+    "decision": "rejected and removed"
+  },
+  "accepted_design": {
+    "shape": "retain only range-sorted UnknownReason entries in InferenceEvidence; project and open excluded files collect them, immutable dependency sources skip the local-read lookup, and CLI/hover project the domain query without a TypeStore fact",
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 120.663958,
+        "candidate": 119.852583,
+        "delta_percent": -0.6724253152710259
+      },
+      "visitor": {
+        "baseline": 95.849708,
+        "candidate": 95.151042,
+        "delta_percent": -0.7289182352021384
+      },
+      "replace_resolve": {
+        "baseline": 12.057209,
+        "candidate": 11.977541,
+        "delta_percent": -0.6607499297723034
+      },
+      "overall": {
+        "baseline": 121.214875,
+        "candidate": 120.43975,
+        "delta_percent": -0.6394635971864037
+      }
+    },
+    "interactive_repeat_1": {
+      "indexing_wall_delta_percent": -2.232450357996562,
+      "project_phase_delta_percent": 0.980590545720541,
+      "cold_delta_percent": -0.18876207519166172,
+      "edit_p95_delta_percent": 1.990650540612886,
+      "completion_p95_delta_percent": 4.036074982297924,
+      "hover_p95_delta_percent": -1.577358490566035,
+      "definition_p95_delta_percent": -2.8371550719005034,
+      "references_p95_delta_percent": -0.11861596544348543,
+      "diagnostics_p95_delta_percent": -14.935530085959881,
+      "engine_heap_bytes_baseline": 6367645,
+      "engine_heap_bytes_candidate": 6367645,
+      "fixed_budgets": "pass"
+    },
+    "interactive_repeat_2": {
+      "indexing_wall_delta_percent": -0.7654645931325331,
+      "project_phase_delta_percent": -3.131115459882594,
+      "cold_delta_percent": 1.3737542263270976,
+      "edit_p95_delta_percent": 0.201800826275946,
+      "completion_p95_delta_percent": -0.7644810349897031,
+      "hover_p95_delta_percent": -4.888073394495415,
+      "definition_p95_delta_percent": -1.2345679012345678,
+      "references_p95_delta_percent": -0.594552448772714,
+      "diagnostics_p95_delta_percent": 0.0,
+      "engine_heap_bytes_baseline": 6367645,
+      "engine_heap_bytes_candidate": 6367645,
+      "fixed_budgets": "pass"
+    },
+    "noise_note": "The first 15-pair repeat put completion at +4.04% (1.083 microseconds) while the second put it at -0.76%; this slice is not on the completion query path. Both repeats passed all fixed production budgets, every affected path stayed within 3%, and heap was byte-identical. The full goal-wide performance matrix remains open.",
+    "decision": "accepted as a bounded local-read explanation slice"
+  }
+}

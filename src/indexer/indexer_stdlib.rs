@@ -20,6 +20,8 @@ use std::time::Instant;
 use std::time::SystemTime;
 use tower_lsp::lsp_types::Url;
 
+const CORE_RUNTIME_CONSTANTS_RBS: &str = "constants.rbs";
+
 // ============================================================================
 // IndexerStdlib
 // ============================================================================
@@ -355,6 +357,8 @@ impl IndexerStdlib {
                 stub_files.sort();
                 if stub_files.is_empty() {
                     warn!("No stub files found in: {:?}", stubs_dir);
+                    self.index_core_runtime_constants(Some(&stubs_dir), analysis_engine.clone())?;
+                    analysis_engine.write().resolve();
                     return Ok(());
                 }
 
@@ -364,6 +368,7 @@ impl IndexerStdlib {
                     stubs_dir
                 );
 
+                self.index_core_runtime_constants(Some(&stubs_dir), analysis_engine.clone())?;
                 self.index_stub_files_deterministically(&stub_files, analysis_engine.clone())?;
                 self.index_jruby_overlay_stubs(analysis_engine.clone())?;
 
@@ -374,6 +379,8 @@ impl IndexerStdlib {
 
         // Fall back to finding stubs relative to executable (development path)
         let Some(stubs_path) = self.find_core_stubs_path(version) else {
+            self.index_core_runtime_constants(None, analysis_engine.clone())?;
+            analysis_engine.write().resolve();
             return Ok(());
         };
 
@@ -386,11 +393,95 @@ impl IndexerStdlib {
             return Ok(());
         }
 
+        self.index_core_runtime_constants(Some(&stubs_path), analysis_engine.clone())?;
         self.index_stub_files_deterministically(&stub_files, analysis_engine.clone())?;
         self.index_jruby_overlay_stubs(analysis_engine.clone())?;
         info!("Indexed {} core stub files", stub_files.len());
 
         Ok(())
+    }
+
+    pub(crate) fn index_core_runtime_constants(
+        &self,
+        stubs_path: Option<&Path>,
+        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    ) -> Result<()> {
+        let content = rbs_parser::core_rbs_file(CORE_RUNTIME_CONSTANTS_RBS).ok_or_else(|| {
+            anyhow!(
+                "INVARIANT VIOLATED: embedded Ruby core RBS is missing {CORE_RUNTIME_CONSTANTS_RBS}. This is a bug because universal runtime constants require a version-independent proof source. Fix: keep crates/rbs-parser/rbs_types/core/{CORE_RUNTIME_CONSTANTS_RBS} embedded and exported."
+            )
+        })?;
+        let path = self.core_runtime_constants_path(stubs_path);
+        let mut engine = analysis_engine.write();
+        let file_id = engine.register_file_borrowed(
+            path,
+            content,
+            ruby_analysis::core::SourceKind::Signature,
+        );
+        let facts = ruby_analysis::indexer::index_rbs(file_id, content).map_err(|error| {
+            anyhow!(
+                "INVARIANT VIOLATED: embedded Ruby core RBS {CORE_RUNTIME_CONSTANTS_RBS} failed to parse: {error}. This is a bug because build-time bundled language semantics must always produce valid facts. Fix: validate the vendored RBS update before embedding it."
+            )
+        })?;
+        engine.replace_facts(
+            file_id,
+            ruby_analysis::engine::FileFacts {
+                symbols: facts.symbols,
+                methods: facts.methods,
+                method_visibility_overrides: facts.method_visibility_overrides,
+                types: facts.types,
+                graph_nodes: facts.graph_nodes,
+                graph_edges: facts.graph_edges,
+                unresolved_graph_edges: facts.unresolved_graph_edges,
+                ..Default::default()
+            },
+            ruby_analysis::engine::ResolveMode::Deferred,
+        );
+        Ok(())
+    }
+
+    fn core_runtime_constants_path(&self, stubs_path: Option<&Path>) -> PathBuf {
+        if let Some(path) = stubs_path
+            .map(|path| path.join(CORE_RUNTIME_CONSTANTS_RBS))
+            .filter(|path| path.is_file())
+        {
+            return path;
+        }
+
+        if let Some(path) = self
+            .extension_path
+            .as_ref()
+            .map(|path| path.join("core-rbs").join(CORE_RUNTIME_CONSTANTS_RBS))
+            .filter(|path| path.is_file())
+        {
+            return path;
+        }
+
+        let development_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("crates")
+            .join("rbs-parser")
+            .join("rbs_types")
+            .join("core")
+            .join(CORE_RUNTIME_CONSTANTS_RBS);
+        if development_path.is_file() {
+            return development_path;
+        }
+
+        let executable_dir = std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| PathBuf::from("."));
+        let adjacent = executable_dir
+            .join("core-rbs")
+            .join(CORE_RUNTIME_CONSTANTS_RBS);
+        if adjacent.is_file() {
+            return adjacent;
+        }
+        executable_dir
+            .parent()
+            .map(|parent| parent.join("core-rbs").join(CORE_RUNTIME_CONSTANTS_RBS))
+            .filter(|path| path.is_file())
+            .unwrap_or(adjacent)
     }
 
     fn index_stub_files_deterministically(
@@ -721,6 +812,12 @@ impl IndexerStdlib {
 
         // Try various relative paths
         let candidates = [
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("editors")
+                .join("vscode")
+                .join("vsix")
+                .join("stubs")
+                .join(&stub_dir),
             exe_dir.join("stubs").join(&stub_dir),
             exe_dir.parent()?.join("stubs").join(&stub_dir),
             exe_dir.parent()?.parent()?.join("stubs").join(&stub_dir),
@@ -810,7 +907,9 @@ fn jruby_series_for_compatibility(version: (u8, u8)) -> Option<&'static str> {
 mod tests {
     use super::*;
     use parking_lot::RwLock;
-    use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyMethod};
+    use ruby_analysis::core::{
+        FullyQualifiedName, MethodParamKind, NamespaceKind, RubyConstant, RubyMethod, RubyType,
+    };
     use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
     use ruby_analysis::method_store::MethodVisibility;
     use std::fs;
@@ -877,6 +976,55 @@ mod tests {
             .unwrap()
             .to_string();
         assert_eq!(child, expected);
+    }
+
+    #[tokio::test]
+    async fn bundled_ruby_25_signatures_match_observed_runtime_arities() {
+        let extension_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("editors/vscode/vsix");
+        let mut indexer = IndexerStdlib::new(FileProcessor::new(), Some(RubyVersion::new(2, 5)));
+        indexer.set_extension_path(extension_root);
+        let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+        indexer
+            .index_core_stubs(engine.clone())
+            .await
+            .expect("bundled Ruby 2.5 core stubs must index");
+
+        let query_guard = engine.read();
+        let query = AnalysisQuery::new(&query_guard);
+        let string = RubyConstant::new("String").expect("String must be a valid constant");
+        let concat = FullyQualifiedName::method(
+            vec![string],
+            RubyMethod::new("concat").expect("concat must be a valid method"),
+        );
+        assert!(
+            query.methods_for_fqn(&concat).iter().any(|fact| {
+                fact.owner.namespace_kind() == Some(NamespaceKind::Instance)
+                    && fact
+                        .param_facts
+                        .iter()
+                        .map(|param| param.kind)
+                        .eq([MethodParamKind::Rest])
+            }),
+            "Ruby 2.5 String#concat must accept the runtime's zero-or-more positional shape"
+        );
+
+        let big_decimal =
+            RubyConstant::new("BigDecimal").expect("BigDecimal must be a valid constant");
+        let constructor = FullyQualifiedName::method(
+            vec![big_decimal],
+            RubyMethod::new("new").expect("new must be a valid method"),
+        );
+        assert!(
+            query.methods_for_fqn(&constructor).iter().any(|fact| {
+                fact.owner.namespace_kind() == Some(NamespaceKind::Singleton)
+                    && fact
+                        .param_facts
+                        .iter()
+                        .map(|param| param.kind)
+                        .eq([MethodParamKind::Required, MethodParamKind::Optional])
+            }),
+            "Ruby 2.5 BigDecimal.new must accept the runtime's one-or-two positional shape"
+        );
     }
 
     #[test]
@@ -1031,6 +1179,55 @@ mod tests {
                 .symbols_for_fqn(&thread)
                 .is_empty(),
             "Thread must resolve from default bundled core stubs when runtime detection fails"
+        );
+
+        let argv = FullyQualifiedName::constant(vec![
+            RubyConstant::new("ARGV").expect("ARGV must be a valid Ruby constant")
+        ]);
+        {
+            let engine = engine.read();
+            let query = AnalysisQuery::new(&engine);
+            assert!(
+                !query.symbols_for_fqn(&argv).is_empty(),
+                "ARGV must resolve from embedded core RBS when runtime detection fails"
+            );
+            assert_eq!(
+                query.constant_value_type(&argv),
+                Some(RubyType::array_of(RubyType::string())),
+                "ARGV must retain its proven Array[String] type from embedded core RBS"
+            );
+        }
+
+        let project = extension.path().join("project.rb");
+        let project_uri = Url::from_file_path(&project)
+            .expect("temporary project path must convert to a file URI");
+        let source = "ARGV.first.upcase\n";
+        indexer
+            .file_processor()
+            .collect_file_facts_as_deferred_resolution_in_engine(
+                &project_uri,
+                source,
+                engine.clone(),
+                ruby_analysis::core::SourceKind::Project,
+            )
+            .expect("project source using ARGV must index");
+        engine.write().resolve();
+
+        let engine = engine.read();
+        let file_id = engine
+            .file_id(&project)
+            .expect("project source must remain registered");
+        let query = AnalysisQuery::new(&engine);
+        assert_eq!(
+            query.expression_type_at(file_id, 14),
+            Some(RubyType::string()),
+            "ARGV.first.upcase must preserve the proven generic String type through the chain; reason={:?}",
+            query.expression_unknown_reason_at(file_id, 14)
+        );
+        assert!(
+            query.diagnostic_facts_in_file(file_id).is_empty(),
+            "a fully proven ARGV method chain must not emit semantic diagnostics: {:?}",
+            query.diagnostic_facts_in_file(file_id)
         );
     }
 

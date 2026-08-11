@@ -8,14 +8,31 @@ use super::FactCollector;
 
 impl FactCollector {
     pub fn process_forwarding_super_node_entry(&mut self, node: &ForwardingSuperNode) {
-        self.push_super_reference_candidate(&node.location());
+        self.push_super_reference_candidate(
+            &node.location(),
+            MethodCallSignatureCandidate {
+                has_positional_splat: true,
+                has_keyword_splat: true,
+                ..MethodCallSignatureCandidate::default()
+            },
+        );
     }
 
     pub fn process_super_node_entry(&mut self, node: &SuperNode) {
-        self.push_super_reference_candidate(&node.keyword_loc());
+        let signature = node
+            .arguments()
+            .map(|arguments| {
+                self.method_signature_candidate_from_arguments(arguments.arguments().iter(), 0)
+            })
+            .unwrap_or_default();
+        self.push_super_reference_candidate(&node.keyword_loc(), signature);
     }
 
-    fn push_super_reference_candidate(&mut self, location: &ruby_prism::Location) {
+    fn push_super_reference_candidate(
+        &mut self,
+        location: &ruby_prism::Location,
+        signature: MethodCallSignatureCandidate,
+    ) {
         let Some(FullyQualifiedName::Method(_, method)) = self.scope_tracker.current_method_fqn()
         else {
             return;
@@ -40,9 +57,11 @@ impl FactCollector {
                 diagnostics: MethodReferenceDiagnostics {
                     diagnostic_range: range,
                     receiver_label: Some("super".to_string()),
+                    receiver_expression_range: None,
+                    receiver_type: None,
                     diagnose_unresolved: self.diagnostics_enabled,
                     allow_unindexed_owner: false,
-                    signature: MethodCallSignatureCandidate::default(),
+                    signature: Some(signature),
                 },
             },
         ));

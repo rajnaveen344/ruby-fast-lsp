@@ -1290,6 +1290,12 @@ impl IndexingCoordinator {
             IndexingWorkClass::HeavyCpu,
             "final semantic resolution",
             move || {
+                // Project, dependency, and JRuby collection leave large freed
+                // buffers in the process allocator. Return those pages before
+                // the final resolve pass materializes reference and diagnostic
+                // indexes, otherwise the retired collection pages and the live
+                // resolved stores overlap in peak RSS.
+                release_allocator_free_pages();
                 analysis_engine.write().resolve();
             },
         )
@@ -2414,14 +2420,12 @@ impl IndexingCoordinator {
                 .map(|provider| provider.classpath_fingerprint().to_string()),
         );
         let mut inferred_required = self.get_required_gems();
-        inferred_required.extend(
-            gem_indexer.gemfile_required_roots_blocking().expect(
-                "INVARIANT VIOLATED: owning-project Gemfile could not be read while configuring \
+        inferred_required.extend(gem_indexer.gemfile_required_roots_blocking().expect(
+            "INVARIANT VIOLATED: owning-project Gemfile could not be read while configuring \
                  discovered gems. This is a bug because Bundler projects keep Gemfile next to the \
                  lockfile already used for discovery. Fix: keep Gemfile readable for the same \
                  project root that produced Gemfile.lock.",
-            ),
-        );
+        ));
         let (required_gems, excluded_gems) =
             configured_gem_selection(inferred_required, &self.config.indexing);
 
@@ -4061,6 +4065,36 @@ mod coordinator_integration_tests {
         let source_file = AnalysisQuery::new(&engine)
             .file_id(&source_path)
             .expect("project source must be registered");
+        let import_target_offset = u32::try_from(
+            source
+                .find("fixtures.RichFixture")
+                .expect("fixture Java import target must exist")
+                + "fixtures.".len(),
+        )
+        .unwrap();
+        let import_targets = AnalysisQuery::new(&engine)
+            .resolved_reference_definition_ranges_at(source_file, import_target_offset);
+        assert!(
+            import_targets.iter().any(|target| {
+                AnalysisQuery::new(&engine)
+                    .file(target.file_id)
+                    .is_some_and(|file| {
+                        file.kind == ruby_analysis::core::SourceKind::External
+                            && file.path.ends_with("fixtures/RichFixture.java")
+                    })
+            }),
+            "a catalog-proven java_import target must resolve to its exact Java source; \
+             targets: {import_targets:?}"
+        );
+        assert!(
+            !AnalysisQuery::new(&engine).navigation_must_fail_closed_at(
+                source_file,
+                import_target_offset,
+                !import_targets.is_empty(),
+            ),
+            "an exact runtime-owned java_import reference must outrank an overlapping generic \
+             dotted-call candidate; targets: {import_targets:?}"
+        );
         let new_offset = u32::try_from(
             source
                 .find("new")

@@ -173,11 +173,16 @@ The current implementation also exposes the next structural limits:
   graph with joins and dependency-aware solving.
 - Type inference is duplicated across TypeTracker, FactCollector helpers,
   completion helpers, and query fallbacks.
-- ruby-analysis inference still contains tower-lsp Position, Range, and Url
-  types in type_query.rs, violating the intended reusable boundary.
+- The full `ruby-analysis` crate now uses domain source positions/ranges and
+  generic source identities rather than `tower-lsp`; protocol projection is
+  owned by the root adapter. The remaining modularity work is consolidating
+  duplicated inference rules and completing the shared session API, not
+  removing an editor-protocol dependency from reusable analysis.
 - The headless checker now shares the LSP cold-index lifecycle and domain
-  diagnostics, but normalized inferred-type output and differential CLI/LSP
-  type-parity coverage are not complete.
+  diagnostics, publishes normalized proof outcomes, and has differential
+  CLI/LSP parity for the supported type/diagnostic surfaces. Coverage remains
+  incomplete for unsupported Ruby forms and future inference rules; those
+  sites must stay explained Unknown until the shared engine proves them.
 
 M0 must turn this checkpoint into measured evidence before large changes:
 current score by category, Unknown frequency/reasons, wrong-type frequency,
@@ -331,7 +336,9 @@ and peak RSS.
   non-converging equation remains `unproven_recursive_cycle`. Explicit
   `return` paths participate in a method's inferred return union, fixing two
   old guard cases that had omitted the reachable bare-return `NilClass` result.
-  Cross-file recursive SCC solving remains future work.
+  The subsequent project-level equation solve extends this same proof policy
+  across files and reuses the prior solution when file-owned equations are
+  byte-for-byte unchanged.
 - `RubyType` union normalization now uses structural ordering instead of
   allocating and sorting debug strings. Canonical Boolean and inferred union
   ordering therefore follow one deterministic path.
@@ -569,6 +576,492 @@ and peak RSS.
   with 6,910 proven method returns, 17,116 explained Unknowns, and zero
   suppressed dependency diagnostics; the alternating base-vs-candidate matrix
   and goshposh RSS ceiling measurement remain open.
+
+### Implementation checkpoint — 2026-08-07
+
+- Work resumed from clean commit `00c1028` after auditing the M0 checkpoint and
+  its three follow-ups. The cross-file recursive return regression passes its
+  full lifecycle contract: unchanged equations run zero project solves, a
+  changed base runs one, and removing the base invalidates the component to an
+  explained Unknown.
+- Unresolved local-variable reads now retain the exact
+  `unresolved_assignment_value` reason in compact, range-sorted,
+  file-owned `InferenceEvidence`. `AnalysisQuery` exposes that domain result;
+  the check CLI and local-variable hover project it without their own inference
+  rule. A replacement regression proves Unknown -> `String` -> Unknown without
+  stale evidence, and a proven local receiver remains concrete even when its
+  enclosing call is unresolved. Immutable dependency sources skip this
+  project/excluded-file observability work.
+- The scorecard is now **78/78 cases (`m0-seed-16`)** and still **100/100**
+  with `score_eligible = false`; the new explanation case is deliberately
+  worth zero points. The bounded root suite passes **1,463/1,463 non-ignored
+  tests** (one ignored), and ruby-analysis passes **448/448**.
+- The first storage design was rejected: inserting one general TypeStore fact
+  per unresolved local read regressed the 225,569-byte large-file pass by
+  **16.61%** and replacement/resolution by **18.24%**. The retained compact
+  design measures **-0.67% file processing**, **-0.73% visitor**, **-0.66%
+  replacement/resolution**, and **-0.64% end-to-end** over 15 alternating
+  pairs. Two independent 15-pair, 500-iteration interactive comparisons pass
+  every fixed production budget; cold/edit/hover/definition/references and
+  exact engine heap show no consistent regression. One completion median moved
+  +4.04% (1.083 microseconds) in the first repeat and -0.76% in the second even
+  though this slice is not on that query path, so the variance is retained
+  explicitly rather than hidden. Exact hashes, measurements, the rejected
+  design, and the acceptance decision are recorded in
+  `support/performance/type-inference-local-read-unknown-reasons-2026-08-07.json`.
+- Remaining M0 work is unchanged in substance: explain the other unsupported
+  local/flow expression forms, broaden reviewed real-project diagnostic
+  precision, and complete the goal-wide alternating CPU/allocation/warm-cache/
+  worker-schedule/two-project-goshposh RSS matrix. This checkpoint does not
+  make the 9/10 claim eligible.
+
+### Implementation checkpoint — 2026-08-08
+
+- Work continued from `00c1028` after auditing the four M0 commits from
+  `327dfc0` through `00c1028` and preserving the in-progress compact Unknown
+  evidence slice. Ordinary `case ... when` expressions without an `else` now
+  model the unmatched path explicitly: the expression contributes `NilClass`
+  and the post-case flow join retains the bindings that entered the case.
+  `case ... in` remains separate: without an `else`, its unmatched path raises
+  `NoMatchingPatternError` and cannot reach the post-case join. Pattern
+  captures therefore stay concrete after the match when every reaching
+  `in` branch proves them; an explicit `else` or another reaching branch that
+  omits the capture still contributes `NilClass`.
+- The existing inference traversal now records exact read-site outcomes for
+  flow-sensitive locals after control flow begins. Concrete results and
+  internal Unknown proof barriers share one document-local range-sorted
+  vector; loop revisits and repeated method batches are normalized
+  deterministically. Only concrete reads enter the sparse engine-owned type
+  map, while Unknown remains machine-readable reason evidence. An unresolved
+  reaching branch therefore blocks older syntactic assignments and source-text
+  fallbacks across hover, completion, chained dispatch, navigation, signature
+  help, and method-return inlays. Explicit YARD parameter contracts seed both
+  lexical scopes and the same forward tracker; later unresolved assignments
+  still invalidate them. A partially proven union remains Unknown with
+  `incomplete_union_member`.
+- The scorecard is now **83/83 cases (`m0-seed-20`)** and reports **100/100**
+  with `score_eligible = false`. Five new zero-point cases prove ordinary-case
+  expression/post-join behavior, the distinct raising pattern-case path, an
+  unresolved join as a receiver proof barrier, and explicit parameter
+  contracts through flow; they deliberately do not inflate the score. The
+  pattern case has direct
+  CLI/LSP parity plus a no-else -> explicit-else -> no-else edit lifecycle that
+  proves hover, completion, chained-call resolution, and method-return inlays
+  invalidate and recover together. The unresolved-join lifecycle additionally
+  proves concrete -> Unknown -> concrete invalidation and recovery for hover,
+  completion, navigation, signature help, and inlays. The full workspace suite
+  passes: **1,467/1,467** non-ignored root tests (one ignored), **454/454**
+  ruby-analysis tests, all other workspace/integration/doc tests, and the
+  explicit ignored scorecard reporter.
+- A dense design that enlarged every file's `InferenceEvidence` was rejected
+  after repeat body-edit measurements regressed by roughly 4–5% and retained
+  heap grew. The accepted sparse design is byte-identical in measured engine
+  heap. Across two independent 15-pair release comparisons, indexing wall is
+  **+0.28% / -0.00%**, user CPU **+0.06% / +0.27%**, edit p95
+  **+1.71% / +2.29%**, and peak RSS **-1.32% / +0.02%**. The 225,569-byte
+  large-file comparison is **+0.93% end-to-end** and **+1.02%** for
+  replacement/resolution. All fixed production budgets pass; exact hashes,
+  medians, the rejected design, and the sub-microsecond unaffected diagnostic
+  noise are recorded in
+  `support/performance/type-inference-ordinary-case-flow-2026-08-08.json`.
+  The follow-up pattern-case correction adds no storage and removes one
+  synthetic post-join loop. Its separate 15-pair comparison measures **-0.17%
+  large-file end-to-end**, **-1.20% indexing wall**, **+0.61% user CPU**,
+  **-1.76% edit p95**, **+0.32% hover p95**, **-1.04% completion p95**, and
+  byte-identical engine heap. Every fixed budget passes with identical dataset
+  and semantic fingerprints; the rejected invalid-resource-universe run and
+  accepted evidence are recorded in
+  `support/performance/type-inference-pattern-case-flow-2026-08-08.json`.
+  The final Unknown-barrier increment was rebuilt and measured separately over
+  15 alternating release pairs. The exact final binary measures **-0.88%
+  end-to-end** and **-0.34% visitor** on the 225,569-byte file. Two independent
+  interactive repeats put indexing wall at **-0.33% / -1.53%**, peak RSS at
+  **+1.71% / +1.38%**, references p95 at **-0.89% / -0.67%**, and edit p95 at
+  **-5.11% / -2.81%**, with byte-identical engine heap and every fixed budget
+  passing. Completion and definition p95 moved by only 1–2 microseconds in one
+  direction in repeat one and reversed in repeat two; the variance is retained
+  explicitly. Five fresh CLI processes produced byte-identical JSON, while the
+  repeated scorecard and lifecycle test pin `unresolved_assignment_value` and
+  `unknown_receiver`. Exact hashes, medians, and sub-microsecond unaffected
+  diagnostic noise are recorded in
+  `support/performance/type-inference-flow-unknown-proof-barrier-2026-08-08.json`.
+- The goal remains open. A score of 100 on the seed corpus is not a 9/10
+  completion claim while `score_eligible` is false. Remaining M0 work includes
+  explained Unknowns for the other unsupported local/flow forms, reviewed
+  real-project diagnostic precision, broader consumer and inlay-hint coverage,
+  and the goal-wide cold/warm/allocation/worker-schedule/two-project-goshposh
+  RSS and determinism matrix.
+
+#### Short-circuit flow follow-up — 2026-08-08
+
+- `&&` and `||` now participate in the same forward proof environment as
+  conditionals instead of allowing an assignment in the right operand to look
+  unconditional. The left operand always executes; proven Ruby truthiness
+  determines whether the right operand runs always, never, or conditionally.
+  Conditional execution joins the skipped and executed environments. The
+  expression result includes only left-side union members that really
+  short-circuit plus the right result, and unproven evidence stays Unknown.
+- A red reviewed case first reproduced the unsoundness: after
+  `value = Product.new; flag && (value = "fallback")`, the later read was
+  incorrectly reported as `String` and could resolve `String#upcase` even
+  though `Product` reaches the call. The accepted result is
+  `(Product | String)` for the read and
+  `Unknown[incomplete_union_member]` for the partial call. The equivalent
+  `||` path is covered as well.
+- User-defined union completion now follows the same complete-proof policy as
+  call inference: names are intersected across every receiver member,
+  parameter contracts must agree, and only then are proven returns unioned.
+  This prevents completion from advertising a method that chained resolution,
+  navigation, or signature help must reject.
+- The edit lifecycle proves all consumers move together. A concrete `Text`
+  receiver exposes hover, completion, definition, signature help, and an
+  inferred return inlay; changing the assignment to a conditional short-circuit
+  produces the receiver union, removes the partial method from completion and
+  navigation/signature help, suppresses the inlay, and exposes the exact
+  Unknown reason; restoring the source restores every projection.
+- The scorecard is now **84/84 reviewed cases (`m0-seed-21`)** and remains
+  **100/100 with `score_eligible = false`**. The zero-point breadth case does
+  not inflate the original score. The full workspace test command exits zero;
+  the focused final counts are **458/458 ruby-analysis tests** and
+  **1,468/1,468 non-ignored root tests** (one ignored). Five fresh release CLI
+  processes produced byte-identical 9,210-byte JSON with SHA-256
+  `f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b`.
+- Fifteen alternating large-file pairs compare the final candidate to the
+  preserved pre-flow-barrier binary: file processing is **+0.73%**, visitor
+  time **+0.92%**, replacement/resolution **-0.33%**, and end-to-end
+  **+0.65%**. The intervening barrier increment is independently measured in
+  its preceding artifact. Two reversed-order interactive repeats show no
+  consistent affected-path regression, exact retained engine heap remains
+  **6,367,645 bytes**, and a final 500-iteration candidate run passes every
+  production budget at **1.31 ms edit p95**, **25.96 us completion p95**,
+  **13.71 us hover p95**, **19.04 us definition p95**, **5.65 ms references
+  p95**, and **2.38 us diagnostics p95**. Exact hashes, measurements, noise,
+  and limitations are recorded in
+  `support/performance/type-inference-short-circuit-flow-2026-08-08.json`.
+- This closes one more unsupported flow form, not the goal. Remaining gates
+  are still explained Unknowns for other unsupported expressions, reviewed
+  real-project precision, broader consumer/inlay coverage, and the goal-wide
+  cold/warm/allocation/worker-schedule/two-project-goshposh RSS and determinism
+  matrix.
+
+#### Rescue assignment-prefix follow-up — 2026-08-08
+
+- Rescue entry now uses every assignment prefix that can reach an exception,
+  rather than only the environment before `begin`. For each active protected
+  body, the existing recursive traversal observes a local's prior value before
+  evaluating an assignment RHS and its new value after the write commits. A
+  rescue therefore sees the canonical union of the pre-write and post-write
+  states; a nested protected body updates all active outer frames, and Unknown
+  remains absorbing. The matching frame is popped before rescue, `else`, or
+  `ensure`, so those regions cannot become their own rescue-entry evidence.
+- The red case used `Product` before `begin` and assigned `Text` before a
+  raising call. The old result incorrectly published `Product` in rescue; the
+  exhaustive receiver is `(Product | Text)`. An unresolved protected
+  assignment instead yields `Unknown[unresolved_assignment_value]`, and the
+  dependent call yields `Unknown[unknown_receiver]`. The rescue-modifier form
+  and nested-frame stack discipline have focused unit coverage.
+- Complete user-defined union dispatch now reaches the same consumers. Both
+  CLI and LSP prove `(Integer | String)` when every receiver member implements
+  `normalize`; completion retains only the common method, definition returns
+  both exact declarations, signature help returns the complete visible fact
+  set, hover and method-return inlays publish the union, and the proven call no
+  longer receives a contradictory `unresolved-method` diagnostic. A private
+  member or unresolved assignment fails every consumer closed. Same-pass
+  public-method evidence is maintained incrementally and handed to each
+  tracker through an `Arc`, avoiding the rejected quadratic rebuild.
+- The scorecard is now **85/85 reviewed cases (`m0-seed-22`)** and remains
+  **100/100 with `score_eligible = false` and `claim_eligible = false`**. The
+  new rescue safety case is worth zero points and does not inflate the original
+  score. Final correctness is green: **461/461 ruby-analysis tests** and
+  **1,469/1,469 non-ignored root tests** (one ignored), plus every other
+  workspace, extension, integration, black-box, and doc-test target. Five
+  fresh release CLI processes produced byte-identical JSON with SHA-256
+  `f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b`.
+- The first correct implementation exceeded the visitor gate because it
+  rebuilt a growing public-method set for every definition. The accepted O(1)
+  handoff restores the exact final 15-pair large-file result to **-0.31%
+  end-to-end** and **-0.02% visitor**. Five alternating 500-iteration
+  interactive pairs measure **+1.12% cold indexing**, **-0.84% edit p95**,
+  **+1.23% completion p95**, **+0.37% definition p95**, **+0.19% references
+  p95**, and byte-identical retained heap. Hover's +0.96 microsecond movement
+  is on an unchanged query path and remains far below its fixed budget; every
+  measured production budget passes. Exact hashes, rejected measurements,
+  final medians, and noise bounds are recorded in
+  `support/performance/type-inference-rescue-prefix-flow-2026-08-08.json`.
+- This does not complete the goal. Stored method-reference candidates still
+  need a grouped union-target representation before references can link one
+  call to every proven receiver member, and complete methods with unresolved
+  returns need the same representation for union-aware diagnostics. The
+  claim-wide real-project precision, packaging, warm-cache, allocation,
+  scheduling, and two-project RSS gates also remain open.
+
+#### Grouped union references and diagnostics follow-up — 2026-08-08
+
+- Proven union receiver calls now retain the canonical receiver set behind the
+  reference candidate's existing boxed per-call metadata. Ordinary stored
+  method candidates do not grow. The engine resolves the set through one
+  fail-closed MRO and visibility policy: only if every member has an exact
+  admitted target is the call materialized as a reference to every target.
+  One missing or inaccessible member produces no partial references, and the
+  ordinary per-file replacement lifecycle removes previously resolved grouped
+  references after an edit.
+- Method existence is now independent from method-return proof. When both
+  `Product#normalize` and `Text#normalize` exist but their returns are
+  unresolved, navigation and references still resolve both exact methods,
+  while hover remains `Unknown[incomplete_union_member]` and no false
+  `unresolved-method` is published. Missing-method diagnostics require complete
+  receiver lookup chains and no known `method_missing` fallback. Signature and
+  runtime-availability diagnostics use only unambiguous exact grouped facts and
+  deduplicate identical results. Rename reads the same grouped identities and
+  rejects a call spanning independent methods.
+- Lifecycle coverage now transitions one open file from a scalar receiver, to
+  a complete concrete-return union, to a complete unknown-return union, to a
+  private-member incomplete union, to an unresolved rescue assignment, and
+  back. Find-references from both definitions contains the shared call only in
+  the exact-dispatch states; hover, completion, definition, signature help,
+  rename, diagnostics, and inlays invalidate and recover with it. Both CLI and
+  LSP remain projections of the same engine facts.
+- The reviewed scorecard remains **85/85 cases (`m0-seed-22`)** and
+  **100/100 with `score_eligible = false` and `claim_eligible = false`**; this
+  reference-consumer safety slice does not inflate the scored seed. Final
+  correctness is green: **461/461 ruby-analysis tests** and **1,469/1,469
+  non-ignored root tests** (one ignored), plus every workspace, extension,
+  integration, black-box, and doc-test target. Five fresh release CLI processes
+  remain byte-identical at SHA-256
+  `f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b`.
+- Fifteen alternating final-binary large-file pairs measure **+0.86%
+  end-to-end**, **+0.78% visitor**, and **+0.77% replace/resolve**. Five
+  alternating 500-iteration interactive pairs measure **+1.93% cold
+  indexing**, **-0.12% edit p95**, **-0.55% completion p95**, **+1.39% hover
+  p95**, **-6.82% definition p95**, **-2.64% references p95**, and
+  byte-identical retained heap. Every fixed production budget passes. Exact
+  hashes, medians, the discarded pre-link batch, and noise interpretation are
+  recorded in
+  `support/performance/type-inference-grouped-union-references-2026-08-08.json`.
+- This closes the stored grouped-reference and unknown-return diagnostic gaps,
+  not the overall goal. Claim eligibility still requires representative
+  real-project precision review and the goal-wide packaging, warm-cache,
+  allocation, worker-scheduling, and two-project RSS matrix; unsupported Ruby
+  forms must continue to remain explained Unknown until proven.
+
+#### Analysis crate protocol-boundary follow-up — 2026-08-08
+
+- The complete `ruby-analysis` crate no longer imports or depends on editor
+  protocol types. Reusable APIs expose `SourcePosition`, `SourceRange`,
+  `SourceFileId`, `TextRange`, byte offsets, and domain document-symbol and
+  semantic-token records. The root `src/` adapter alone converts those values
+  to and from LSP positions, ranges, locations, symbol kinds, and token kinds.
+  A crate-wide recursive architecture test scans every Rust source file and
+  the manifest, while `cargo tree -p ruby-analysis` contains neither
+  `tower-lsp` nor `lsp-types`.
+- Protocol positions are converted once through the shared UTF-16-aware source
+  document before analyzer, hover, completion, navigation, rename, selection,
+  inlay, diagnostic, extension, or hierarchy queries consume byte offsets.
+  This retains the earlier non-BMP completion regression and adds a direct
+  analyzer regression for an identifier after an emoji on the same line.
+- The scorecard remains **85/85 reviewed cases (`m0-seed-22`)**, **100/100**,
+  `score_eligible = false`, and `claim_eligible = false`. Correctness is green:
+  **464/464 ruby-analysis tests** and **1,470/1,470 non-ignored root tests**
+  (one ignored), plus `cargo fmt --all -- --check`, `git diff --check`,
+  `cargo check --workspace`, and every workspace, extension, black-box,
+  integration, and doc-test target at four test threads. Five fresh release
+  CLI processes produced byte-identical valid JSON
+  with SHA-256
+  `f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b`.
+- Against the exact preserved inference-boundary release binaries, fifteen
+  alternating large-file pairs measure **-0.02% end-to-end**, **+0.04%
+  visitor**, and **+0.06% replace/resolve**. Seven alternating 500-iteration
+  interactive pairs measure **+2.99% cold indexing**, **-7.48% edit p95**,
+  **-7.40% completion p95**, **-10.18% hover p95**, **-3.58% definition p95**,
+  **-1.55% references p95**, **+0.30% CPU**, **-0.38% peak RSS**, and
+  byte-identical retained engine heap. Every fixed production budget passes.
+  Exact hashes, medians, and the process-wall noise interpretation are recorded
+  in `support/performance/type-inference-analysis-crate-protocol-boundary-2026-08-08.json`.
+- This closes hard modularity criterion 8: `ruby-analysis` has no `tower-lsp`
+  dependency and the existing check command runs without an LSP service. It
+  does not complete the overall goal. Representative real-project precision
+  review and the goal-wide packaging, warm-cache, allocation, worker-
+  scheduling, and two-project RSS matrix remain open; the scorecard therefore
+  remains deliberately claim-ineligible.
+
+#### Proof-checked core constants and chained constructors — 2026-08-08
+
+- Universal runtime value constants now enter each isolated engine from the
+  embedded core `constants.rbs` as ordinary file-owned `Signature` facts. This
+  works when no Ruby runtime is available and retains the packaged physical
+  source for navigation. The RBS visitor now preserves a typed constant's
+  declared name, so `ARGV.first.upcase` proves `String` through the same engine
+  outcome in CLI and LSP instead of producing false unresolved-constant
+  diagnostics or treating `ARGV` as a class object.
+- Nested call receivers are finalized after the complete engine graph is
+  installed. A stored candidate identifies the exact inner expression range;
+  the outer call consumes only that expression's proven outcome, validates the
+  resulting namespace against its graph declaration kind, and otherwise stays
+  explained Unknown. This restores cross-file recursive call chains without
+  restoring the rejected rule that every constant receiver is a class. A
+  module receiving `new` therefore remains Unknown.
+- Ruby constructor origin is proof-checked. An instance `initialize` is
+  normalized to `new` only inside a namespace proven to be a class, and its
+  return is the language-defined class instance rather than the return of the
+  initializer body. An explicit `self.new` keeps its own inferred return and
+  remains Unknown when that body is unproven. Focused CLI/LSP regressions cover
+  the proven initializer chain, explicit dynamic `self.new`, module rejection,
+  and cross-file recursive chaining.
+- The scorecard is now **88/88 reviewed cases (`m0-seed-25`)**, **100/100**,
+  with `score_eligible = false` and `claim_eligible = false`. The added
+  constructor-origin case is a zero-point safety case and does not inflate the
+  original score. Correctness is green: **44/44 rbs-parser tests**, **465/465
+  ruby-analysis tests**, and **1,473/1,474 root tests** with one intentional
+  ignore, plus every workspace, extension, integration, black-box, and
+  doc-test target. Five fresh release checker processes remain byte-identical
+  at SHA-256
+  `f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b`.
+- The complete 2,619-file goshposh audit remains dependency-complete with zero
+  suppressed diagnostics. Errors fall from **26,706 to 26,559**, warnings from
+  **15,166 to 15,152**, unresolved constants from **24,930 to 24,783**, and
+  unresolved methods from **3,930 to 3,916**. Proven method returns rise from
+  **7,002 to 8,121** while explained Unknown method returns fall by the same
+  1,119. Total concrete inferred-expression/fact count is lower because 3,154
+  old constructor expressions are now withheld when class identity or its
+  dependency is unresolved; representative `BSON::ObjectId.new` sites were
+  previously labeled even while both `BSON` and `BSON::ObjectId` were reported
+  unresolved. That is a deliberate removal of guesses, not an accuracy loss,
+  but the unlabelled corpus remains ineligible as a precision score.
+- Against the preserved pre-slice release, fifteen alternating large-file
+  pairs measure **+0.30% file processing** and **+0.27% end-to-end**. Fourteen
+  alternating 500-iteration interactive pairs across two reversed-order
+  repeats measure **-0.49% cold indexing**, **+1.99% edit p95**, **-1.99%
+  completion p95**, **-0.75% definition p95**, **-0.93% CPU**, **+1.62% peak
+  RSS**, and **+0.10% retained engine heap**. Hover moves by 0.479 microseconds
+  and references by 0.178 milliseconds; all 28 production-budget runs pass.
+  Exact binaries, audit transitions, medians, and noise bounds are recorded in
+  `support/performance/type-inference-core-runtime-constants-2026-08-08.json`.
+- Distribution packaging is green. The npm smoke rebuilt and packed the
+  current darwin-arm64 binary and both npm packages, installed them in a clean
+  project, completed a real LSP initialize, verified JRuby implementation
+  navigation, and confirmed `core-rbs/constants.rbs` is in the platform
+  tarball. The current-platform VSIX was also rebuilt and tested from the
+  produced archive with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber,
+  packaged ERB HTML behavior, JRuby navigation, and the core RBS source.
+- The overall goal remains open. The scorecard is deliberately not claim
+  eligible, the real-project transition review lacks representative ground-
+  truth labels, and the goal-wide warm-cache, allocation, worker-scheduling,
+  and two-project RSS matrix still have to pass before a 9/10 completion claim.
+
+#### Compact proof storage and schedule-independent collection — 2026-08-08
+
+- The engine now interns structurally equal `RubyType` values once and stores
+  deterministic compact IDs in type facts, resolved-call outcomes, and proven
+  local-read evidence. IDs expand only at public domain boundaries, so CLI,
+  hover, inlay hints, chained-call resolution, and diagnostics still consume
+  the same proof outcome without treating an allocation identity as type
+  identity. Resolution drops pass-local caches before moving its owned compact
+  outcome map into engine state.
+- Expression facts use a four-byte tagged subject ID and reuse their existing
+  `TextRange`. They no longer duplicate the range in the arena or enter the
+  general subject interner and per-subject hash buckets. A test pins
+  `StoredTypeFact` to 24 bytes on 64-bit targets. Aggregate estimated engine
+  heap fell from **959,589,689** to a seven-run median of **775,775,424 bytes**,
+  a reduction of **183,814,265 bytes (19.16%)**. Per-outcome `Arc<RubyType>` and
+  an enum that duplicated expression ranges were measured, regressed memory,
+  and were reverted.
+- The first final warm two-project goshposh series was **7/7 under the
+  1,776,846,438-byte RSS ceiling**. Its median peak RSS was **1,675,689,984
+  bytes**, median retained engine heap was **775,775,424 bytes**, and tightest
+  passing headroom was **16,352,870 bytes**. Every run reused 607 persistent gem
+  products and 169 Java artifact products with zero producers.
+- A final-source symbolized DHAT run preserves the same semantic fingerprints,
+  proof counters, and fully warm product reuse. Against the pre-storage profile,
+  cumulative allocation falls by **1,059,024,365 bytes (1.54%)**, maximum live
+  allocation falls by **171,494,953 bytes (9.62%)**, and externally observed
+  peak RSS falls by **566,362,112 bytes (25.13%)**. This closes the final-source
+  allocation gate for the compact storage pass.
+- That workload exposed a correctness bug rather than merely a scheduling
+  variance: an already opened probe file and earlier frontier files could enter
+  the read engine used to collect later project facts. Cold results therefore
+  changed with navigation demand. Project collection now captures one
+  generation-owned baseline after signatures and extension seed facts but
+  before any Ruby project file. It pre-registers all project paths, removes
+  stale project/excluded exports, and supplies the same immutable namespace and
+  query universe to demanded, active, exhaustive, and JRuby replay batches.
+- Active versus no-active probes and concurrent versus single-worker schedules
+  now produce identical per-project semantic fingerprints, diagnostic hashes
+  and counts, the same `batch_worker.rb` export, and the same proof counters.
+  The regression `cold_project_result_is_independent_of_a_prior_identical_file_pass`
+  protects the underlying stale-fact failure.
+- Seven exact-binary alternating pairs against the immediate pre-fix collection
+  behavior measure **+0.18% wall**, **-1.40% user CPU**, **+1.78% system CPU**,
+  **-6.04% median peak RSS**, and **-0.06% retained engine heap**. This closes
+  the slice's relative performance question. It also reopened the absolute RSS
+  gate: two candidate samples reached 2,013,118,464 and 2,024,423,424 bytes, so
+  only **5/7** were below the fixed ceiling. A 384 MiB admission experiment was
+  rejected because it regressed median wall by about 59.5% and still failed one
+  of three RSS samples.
+- Correctness is green after the cumulative changes: **44/44 rbs-parser
+  tests**, **472/472 ruby-analysis tests**, and **1,474/1,474 non-ignored root
+  tests** with one intentional ignore, plus `cargo fmt --all -- --check`,
+  `git diff --check`, `cargo check --workspace`, and all remaining workspace,
+  integration, and doc-test targets. The explicit release scorecard remains
+  **88/88 reviewed cases (`m0-seed-25`)**, **100/100**, with
+  `score_eligible = false` and `claim_eligible = false`.
+- Final distribution smoke is green. The npm workflow rebuilt and packed the
+  darwin-arm64 native and wrapper packages, installed them in a clean project,
+  initialized the packaged server, and verified JRuby implementation
+  navigation. The current-platform VSIX rebuilt and passed its packaged RSpec,
+  Rails, Minitest, Sinatra, Cucumber, ERB HTML, core RBS, CFR, and JRuby checks.
+  The npm and VSIX native binaries are byte-identical at SHA-256
+  `f98ec5af9aeb6c163d2f534cfb433b25767846593acad69d332d0f119c27d05d`.
+- Exact workload, hashes, run samples, accepted/rejected designs, and the
+  pre-fix/post-fix semantic evidence are recorded in
+  `support/performance/type-inference-warm-rss-storage-determinism-2026-08-08.json`.
+  The overall goal remains open: representative ground-truth precision, a
+  repeatable pass under the fixed RSS ceiling, and explicit eligibility review
+  are still required before a 9/10 claim.
+
+### Final acceptance checkpoint — 2026-08-11
+
+- The checked-in release scorecard is claim eligible at **96/96 reviewed cases,
+  100/100 points, every category at 100%, zero recorded supported gaps, and zero
+  unexpected outcomes**. Its schema-2 Unknown reasons remain machine-readable;
+  all supported scorecard sites pass, while unsupported dynamic Ruby boundaries
+  remain explicit Unknown rather than guessed concrete types.
+- The separate commit-pinned real-project corpus passes **13/13** reductions
+  from Rails, RSpec Core, Sinatra, Minitest, and Cucumber Ruby: **2/2 concrete
+  proofs, 4/4 positive diagnostics, and 7/7 conservative suppressions**, with
+  zero known false-positive diagnostics. Deterministic generated simulations
+  also retain a zero false-positive budget.
+- CLI and LSP acceptance fixtures consume the same engine-owned normalized
+  types, Unknown reasons, and diagnostics. Hover, inlay hints, completion,
+  chained-call resolution, navigation, references, signature help, diagnostics,
+  and the standalone `ruby-fast-lsp check` path are covered by shared-result
+  parity and edit-lifecycle tests. `ruby-analysis` remains editor independent
+  and contains no `tower-lsp` or `lsp-types` dependency.
+- Seven exact-binary, fully warm two-project goshposh runs produced identical
+  project fingerprints, diagnostic hashes/counts, proof counters, and persistent
+  product reuse. The accepted production allocator series measures **19,847.78
+  ms median wall (-1.97%)**, **37,741.06 ms user CPU (-4.85%)**, **45,307.13 ms
+  total CPU (-3.62%)**, and **1,607,237,632-byte median peak RSS (+1.59%)**.
+  All **7/7** samples are below the fixed **1,776,846,438-byte** ceiling; the
+  worst sample retains **132,646,502 bytes** of headroom. The system-allocator
+  series that exceeded the ceiling once was rejected. Exact evidence is in
+  `support/performance/type-inference-final-proof-rss-determinism-2026-08-11.json`.
+- The final correctness gate passes `cargo test --offline --locked --workspace
+  --all-targets -- --test-threads=1`: **44/44 rbs-parser**, **484/484
+  ruby-analysis**, **1,503 root tests with zero failures and two intentional
+  ignored release reporters**, plus all extension, packaged-guest, integration,
+  black-box, and doc-test targets. Both ignored reporters pass explicitly in
+  release mode. Repository-wide rustfmt, locked all-target checking, the
+  DHAT-compatible profiler build, locked metadata, evidence JSON validation,
+  and `git diff --check` all pass.
+- npm clean pack/install/initialize smoke and the rebuilt current-platform VSIX
+  archive smoke pass. VS Code now reports `naveenraj.ruby-fast-lsp@0.2.6`.
+  The VSIX archive SHA-256 is
+  `5a58389c0203ccf0771d0f3fae88ab21c1025ace77510c67e3b5205ca3e8e4e0`;
+  the binary inside the archive, the staged VSIX binary, and the installed
+  macOS-arm64 binary are byte-identical at
+  `e1e1294fb63487a29e97826499c95fb3dc2fbf3b0225340e2bb755e043566ad2`.
+- Every item in Definition of 9/10 and the Local Completion Gate is therefore
+  satisfied by current source, current artifacts, and recorded measurements.
 
 ## Correct Architecture
 

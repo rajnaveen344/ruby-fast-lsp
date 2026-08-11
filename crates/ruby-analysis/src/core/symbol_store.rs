@@ -91,7 +91,21 @@ pub struct SymbolStore {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct SymbolFactId(usize);
+struct SymbolFactId(u32);
+
+impl SymbolFactId {
+    fn from_index(index: usize) -> Self {
+        Self(u32::try_from(index).expect(
+            "INVARIANT VIOLATED: symbol fact arena exceeded u32 ids. This is a bug because \
+             retained symbol indexes use bounded compact ids. Fix: widen SymbolFactId and \
+             every stored symbol index together before retaining more than u32::MAX facts.",
+        ))
+    }
+
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
 
 impl SymbolStore {
     pub fn new() -> Self {
@@ -190,7 +204,7 @@ impl SymbolStore {
                     appended_count,
                     file_id,
                     |id| {
-                        self.facts[id.0]
+                        self.facts[id.index()]
                             .as_ref()
                             .expect(
                                 "INVARIANT VIOLATED: symbol index points to missing fact. \
@@ -243,7 +257,7 @@ impl SymbolStore {
 
     fn insert_fact(&mut self, fact: StoredSymbolFact) -> SymbolFactId {
         if let Some(id) = self.free_facts.pop() {
-            let slot = self.facts.get_mut(id.0).expect(
+            let slot = self.facts.get_mut(id.index()).expect(
                 "INVARIANT VIOLATED: symbol free list points outside fact arena. \
                  This is a bug because free ids must come from previous arena slots. \
                  Fix: only push ids returned by SymbolStore::take_fact.",
@@ -257,17 +271,17 @@ impl SymbolStore {
             *slot = Some(fact);
             return id;
         }
-        let id = SymbolFactId(self.facts.len());
+        let id = SymbolFactId::from_index(self.facts.len());
         self.facts.push(Some(fact));
         id
     }
 
     fn fact(&self, id: SymbolFactId) -> Option<StoredSymbolFact> {
-        self.facts.get(id.0).and_then(|fact| *fact)
+        self.facts.get(id.index()).and_then(|fact| *fact)
     }
 
     fn take_fact(&mut self, id: SymbolFactId) -> Option<StoredSymbolFact> {
-        self.facts.get_mut(id.0).and_then(Option::take)
+        self.facts.get_mut(id.index()).and_then(Option::take)
     }
 
     fn clone_facts(&self, ids: &[SymbolFactId]) -> Vec<StoredSymbolFact> {
@@ -277,7 +291,7 @@ impl SymbolStore {
 
 fn sort_symbol_ids(facts: &[Option<StoredSymbolFact>], ids: &mut [SymbolFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.0].as_ref().expect(
+        let fact = facts[id.index()].as_ref().expect(
             "INVARIANT VIOLATED: symbol index points to missing fact. \
              This is a bug because indexes must be removed before arena facts. \
              Fix: remove stale ids from every SymbolStore index.",
@@ -293,7 +307,7 @@ fn sort_symbol_ids(facts: &[Option<StoredSymbolFact>], ids: &mut [SymbolFactId])
 
 fn sort_symbol_ids_by_file(facts: &[Option<StoredSymbolFact>], ids: &mut [SymbolFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.0].as_ref().expect(
+        let fact = facts[id.index()].as_ref().expect(
             "INVARIANT VIOLATED: symbol file index points to missing fact. \
              This is a bug because indexes must be removed before arena facts. \
              Fix: remove stale ids from every SymbolStore index.",

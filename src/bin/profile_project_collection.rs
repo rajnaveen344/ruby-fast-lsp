@@ -36,7 +36,9 @@ fn main() -> Result<()> {
     if args.len() < 2 {
         eprintln!(
             "Usage: {} <project_root> [--limit N]",
-            args.first().map(String::as_str).unwrap_or("profile_project_collection")
+            args.first()
+                .map(String::as_str)
+                .unwrap_or("profile_project_collection")
         );
         std::process::exit(1);
     }
@@ -47,10 +49,14 @@ fn main() -> Result<()> {
     while i < args.len() {
         match args[i].as_str() {
             "--limit" => {
-                let value = args.get(i + 1).ok_or_else(|| anyhow!("--limit requires N"))?;
-                limit = Some(value.parse().map_err(|error| {
-                    anyhow!("invalid --limit {value}: {error}")
-                })?);
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| anyhow!("--limit requires N"))?;
+                limit = Some(
+                    value
+                        .parse()
+                        .map_err(|error| anyhow!("invalid --limit {value}: {error}"))?,
+                );
                 i += 2;
             }
             other => {
@@ -186,8 +192,7 @@ fn print_summary(
     ];
     let mut ranked = ranked.to_vec();
     ranked.sort_by(|left, right| right.1.cmp(&left.1));
-    let denom = timing
-        .parse
+    let denom = timing.parse
         + timing.visitor
         + timing.replacement
         + timing.semantic_seed

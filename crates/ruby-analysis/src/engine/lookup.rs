@@ -77,6 +77,47 @@ impl<'a> AnalysisQuery<'a> {
         partial_method: &str,
         kind: NamespaceKind,
     ) -> Vec<MethodMatch> {
+        if let RubyType::Union(members) = receiver_type {
+            let Some((first, rest)) = members.split_first() else {
+                panic!(
+                    "INVARIANT VIOLATED: completion received an empty RubyType::Union. This is a bug because RubyType::union collapses empty inputs to Unknown. Fix: construct receiver unions only through the canonical RubyType helpers."
+                );
+            };
+            let mut common = self
+                .method_matches_for_type(first, partial_method, kind)
+                .into_iter()
+                .map(|candidate| (candidate.name.clone(), candidate))
+                .collect::<std::collections::BTreeMap<_, _>>();
+
+            for member in rest {
+                let member_matches = self
+                    .method_matches_for_type(member, partial_method, kind)
+                    .into_iter()
+                    .map(|candidate| (candidate.name.clone(), candidate))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                common.retain(|name, candidate| {
+                    let Some(member_candidate) = member_matches.get(name) else {
+                        return false;
+                    };
+                    if candidate.params != member_candidate.params {
+                        return false;
+                    }
+                    candidate.return_type = match (
+                        candidate.return_type.take(),
+                        member_candidate.return_type.clone(),
+                    ) {
+                        (Some(left), Some(right)) => {
+                            RubyType::union_from_proven([left, right], Some)
+                        }
+                        (Some(_), None) | (None, Some(_)) | (None, None) => None,
+                    };
+                    true
+                });
+            }
+
+            return common.into_values().collect();
+        }
+
         let mut candidates = Vec::new();
         for namespace_fqn in Self::receiver_type_to_namespaces(receiver_type, kind) {
             for fact in self.method_facts_matching(&namespace_fqn, partial_method) {

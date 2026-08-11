@@ -186,6 +186,16 @@ impl<'a> InlayNodeCollector<'a> {
             }
         }
 
+        for param in params.posts().iter() {
+            if let Some(post) = param.as_required_parameter_node() {
+                result.push(ParamNode {
+                    name: String::from_utf8_lossy(post.name().as_slice()).to_string(),
+                    end_offset: Self::to_u32_offset(post.location().end_offset()),
+                    has_colon: false,
+                });
+            }
+        }
+
         for param in params.keywords().iter() {
             if let Some(kw_opt) = param.as_optional_keyword_parameter_node() {
                 result.push(ParamNode {
@@ -574,6 +584,29 @@ mod tests {
             .iter()
             .any(|n| matches!(n, InlayNode::MethodDef { name, .. } if name == "foo"));
         assert!(has_method_def);
+    }
+
+    #[test]
+    fn collects_post_required_method_parameter_in_call_order() {
+        let nodes = collect("def render(prefix = nil, *extras, body)\nend");
+        let params = nodes.iter().find_map(|node| match node {
+            InlayNode::MethodDef { name, params, .. } if name == "render" => Some(params),
+            InlayNode::BlockEnd { .. }
+            | InlayNode::MethodDef { .. }
+            | InlayNode::VariableWrite { .. }
+            | InlayNode::ChainedCall { .. }
+            | InlayNode::ImplicitReturn { .. } => None,
+        });
+        let params = params.expect(
+            "INVARIANT VIOLATED: inlay collection omitted the render method definition. This is a bug because every DefNode in range must produce a MethodDef node. Fix: preserve DefNode collection before extracting parameter hints.",
+        );
+        assert_eq!(
+            params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["prefix", "extras", "body"]
+        );
     }
 
     #[test]

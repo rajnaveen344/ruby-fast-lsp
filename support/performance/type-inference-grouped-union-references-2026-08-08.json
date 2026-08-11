@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-08",
+  "slice": "proof-first grouped union references and diagnostics",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "description": "Exact accepted release binaries preserved after the rescue assignment-prefix slice and before grouped union reference work.",
+      "profile_single_file_sha256": "10e170493a3cdf95fdc8c7fe1e28d78efbb5f5f8797d8dde6a7d1eba1b897ba0",
+      "profiler_sha256": "6076bf9e766a455d16379d44a7e3f49dcedb0024ab6be5afff8811f4ea9705dd",
+      "ruby_fast_lsp_sha256": "0cbbdcb67287e0659502a3cdefcc7a982913285368d25e76e7ace0e5b91ea8ff"
+    },
+    "candidate": {
+      "profile_single_file_sha256": "0fec6ceb0ea67f9308b943f39d61c6a785c4ad0f8aae9b8b7dbd8c9b6d6f86a2",
+      "profiler_sha256": "99e268fdbbf3badb37a5403776c82a3918b340ee5af675d57e7cd8aec2ea9482",
+      "ruby_fast_lsp_sha256": "ddb0746c093f20ee0eb8438b707c17f27c5fd17e8cbe64d3694ef55c69447cb0",
+      "tracked_diff_sha256_at_build": "d92d5259d91a7ad5d983158a3202444c3e0173eed3324da1c8f0c95a2041a04e"
+    }
+  },
+  "inputs": {
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_pairs_100_iterations": 7,
+    "interactive_pairs_500_iterations": 5,
+    "cli_fixture": "tests/fixtures/type_inference_unknown_reasons",
+    "cli_fresh_processes": 5
+  },
+  "semantic_evidence": {
+    "red_reproduction": "A Product | Text rescue receiver navigated to both normalize declarations, but find-references from either declaration returned no union call because the stored reference candidate retained only one legacy owner.",
+    "accepted_reference_rule": "A method call with a canonical proven union receiver is one fail-closed dispatch group. Only when every member resolves through the shared MRO and visibility policy is the call indexed under every exact method target. One missing or inaccessible member publishes no partial references, and replacement removes previously materialized grouped references.",
+    "accepted_diagnostic_rule": "Method existence and method return proof are independent. If every union member resolves the method but one or more returns remain unproven, the call stays Unknown[incomplete_union_member], remains an exact reference to every target, and cannot emit unresolved-method. A missing-method diagnostic requires complete owner chains and no known method_missing fallback.",
+    "architecture": "The indexer attaches a canonical union receiver only to calls that proved one. The metadata is stored behind the candidate's existing box, leaving the ordinary StoredMethodReferenceCandidate layout unchanged. ruby-analysis engine resolution owns grouped MRO, visibility, method_missing, diagnostics, reference materialization, lifecycle replacement, and fail-closed rename identity; LSP and CLI remain projections.",
+    "lifecycle": "The same open file transitions from a scalar Text receiver, to an exact Product | Text union, to exact dispatch with both return types unknown, to a union with one private member, to an unresolved protected assignment, and back. Both definitions receive the union call as a reference only in the two exact-dispatch states; navigation, rename, signature help, hover, completion, diagnostics, and inlays invalidate consistently.",
+    "scorecard": "85/85 reviewed cases, 100/100 points, revision m0-seed-22, score_eligible=false, claim_eligible=false",
+    "ruby_analysis_tests": "461/461",
+    "root_tests": "1469/1469 non-ignored, one ignored",
+    "workspace_tests": "cargo fmt --all -- --check, git diff --check, and cargo test --workspace -- --test-threads=4 exited 0; all extension, integration, black-box, and doc-test targets passed",
+    "cli_stdout_sha256": "f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b",
+    "cli_result": "All five fresh final-release processes produced byte-identical JSON.",
+    "semantic_result_fingerprint_hex": "26048da84ae3a67f68351552c2829171"
+  },
+  "performance": {
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 119.717917,
+        "candidate": 120.748042,
+        "delta_percent": 0.86046
+      },
+      "parse": {
+        "baseline": 4.298209,
+        "candidate": 4.317292,
+        "delta_percent": 0.443976
+      },
+      "direct": {
+        "baseline": 5.556208,
+        "candidate": 5.590959,
+        "delta_percent": 0.625445
+      },
+      "visitor": {
+        "baseline": 95.248208,
+        "candidate": 95.995791,
+        "delta_percent": 0.784879
+      },
+      "replace_resolve": {
+        "baseline": 11.948542,
+        "candidate": 12.041083,
+        "delta_percent": 0.774496
+      },
+      "overall": {
+        "baseline": 120.299541,
+        "candidate": 121.335917,
+        "delta_percent": 0.861496
+      }
+    },
+    "interactive_100_iteration_medians": {
+      "baseline": {
+        "cold_indexing_ms": 761.024042,
+        "edit_p95_ms": 1.286125,
+        "completion_p95_ms": 0.03,
+        "hover_p95_ms": 0.015417,
+        "definition_p95_ms": 0.022083,
+        "references_p95_ms": 5.454584,
+        "diagnostics_p95_ms": 0.002833,
+        "engine_heap_mb": 6.1
+      },
+      "candidate": {
+        "cold_indexing_ms": 761.970666,
+        "edit_p95_ms": 1.32475,
+        "completion_p95_ms": 0.028959,
+        "hover_p95_ms": 0.014583,
+        "definition_p95_ms": 0.021417,
+        "references_p95_ms": 5.594625,
+        "diagnostics_p95_ms": 0.002875,
+        "engine_heap_mb": 6.1
+      },
+      "delta_percent": {
+        "cold_indexing": 0.124388,
+        "edit_p95": 3.003207,
+        "completion_p95": -3.47,
+        "hover_p95": -5.409613,
+        "definition_p95": -3.015895,
+        "references_p95": 2.5674,
+        "diagnostics_p95": 1.482527,
+        "engine_heap": 0.0
+      }
+    },
+    "interactive_500_iteration_medians": {
+      "baseline": {
+        "cold_indexing_ms": 743.194625,
+        "edit_p95_ms": 1.287084,
+        "completion_p95_ms": 0.030167,
+        "hover_p95_ms": 0.014917,
+        "definition_p95_ms": 0.023208,
+        "references_p95_ms": 5.619625,
+        "diagnostics_p95_ms": 0.002916,
+        "engine_heap_mb": 6.1
+      },
+      "candidate": {
+        "cold_indexing_ms": 757.508583,
+        "edit_p95_ms": 1.285542,
+        "completion_p95_ms": 0.03,
+        "hover_p95_ms": 0.015125,
+        "definition_p95_ms": 0.021625,
+        "references_p95_ms": 5.471458,
+        "diagnostics_p95_ms": 0.0025,
+        "engine_heap_mb": 6.1
+      },
+      "delta_percent": {
+        "cold_indexing": 1.926004,
+        "edit_p95": -0.119806,
+        "completion_p95": -0.553585,
+        "hover_p95": 1.394382,
+        "definition_p95": -6.820924,
+        "references_p95": -2.636599,
+        "diagnostics_p95": -14.266118,
+        "engine_heap": 0.0
+      }
+    },
+    "engine_estimated_heap_bytes": {
+      "baseline": 6367645,
+      "candidate": 6367645
+    },
+    "measurement_note": "One preliminary large-file batch was discarded because release linking had not finished and the candidate binary hashes changed during the batch. Every recorded measurement uses the stable final hashes above. The 100-iteration edit movement was 0.038625 ms and narrowed to -0.001542 ms at 500 iterations. Query movements at the microsecond floor are interpreted with the higher-confidence run and fixed budgets; every measured process passed production budgets.",
+    "decision": "Accepted. Final large-file end-to-end, visitor, and replace/resolve medians are all below a one percent increase. The 500-iteration cold-indexing median is +1.93 percent, all material query paths are below the three percent regression gate or faster, and retained engine heap is byte-identical."
+  },
+  "known_follow_ups": [
+    "The scorecard remains deliberately claim-ineligible despite its seed-corpus score.",
+    "The goal-wide real-project diagnostic review and cold/warm/allocation/scheduling/two-project RSS matrix remain open.",
+    "Other unsupported Ruby expression and flow forms must continue to report explained Unknown until a complete static proof is implemented."
+  ]
+}

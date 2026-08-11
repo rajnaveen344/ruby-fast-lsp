@@ -27,6 +27,9 @@ u.<warn code="unresolved-method" message="Did you mean `name`?">naem</warn>
 async fn typo_in_constant_receiver_method_suggests() {
     check(
         r#"
+class Class
+end
+
 class Foo
   def self.bar(x)
     x

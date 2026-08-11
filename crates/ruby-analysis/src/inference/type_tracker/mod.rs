@@ -40,6 +40,66 @@ enum RecursiveReturnApproximation {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Truthiness {
+    AlwaysTruthy,
+    AlwaysFalsy,
+    Conditional,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShortCircuitOperator {
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RightExecution {
+    Always,
+    Never,
+    Conditional,
+}
+
+#[derive(Debug, Default)]
+struct RescueEntryTypes {
+    locals: HashMap<String, RubyType>,
+}
+
+impl RescueEntryTypes {
+    fn observe(&mut self, name: &str, ruby_type: &RubyType) {
+        self.locals
+            .entry(name.to_string())
+            .and_modify(|observed| {
+                *observed = RubyType::union([observed.clone(), ruby_type.clone()]);
+            })
+            .or_insert_with(|| ruby_type.clone());
+    }
+
+    fn environment_from(
+        &self,
+        environment_before: &HashMap<String, RubyType>,
+    ) -> HashMap<String, RubyType> {
+        let mut environment = environment_before.clone();
+        for (name, ruby_type) in &self.locals {
+            environment.insert(name.clone(), ruby_type.clone());
+        }
+        environment
+    }
+}
+
+/// One exact local-variable read solved by the forward flow tracker.
+///
+/// Offsets remain parser-native until FactCollector attaches the owning
+/// `SourceFileId`. This keeps the reusable inference layer independent of LSP
+/// positions and of workspace file registration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocalReadType {
+    pub start_offset: usize,
+    pub end_offset: usize,
+    pub name: String,
+    pub ruby_type: RubyType,
+}
+
 impl RecursiveReturnApproximation {
     fn from_ruby_type(ruby_type: RubyType) -> Self {
         if ruby_type == RubyType::Unknown {
@@ -81,9 +141,24 @@ pub struct TypeTracker<'a> {
     /// Current type environment (variable name → type)
     vars: HashMap<String, RubyType>,
 
+    /// Explicit parameter contracts for the method being tracked. They seed
+    /// the flow environment before the body is visited; a later assignment can
+    /// still replace or invalidate that proof normally.
+    parameter_types: HashMap<String, RubyType>,
+
     /// Variable types at each offset (for queries)
     /// Key = offset where state was recorded, Value = all variables and their types
     var_types: BTreeMap<usize, HashMap<String, RubyType>>,
+
+    /// Exact local-read results requested by FactCollector. Appending during
+    /// traversal keeps the interactive path allocation-light; extraction
+    /// sorts and collapses repeated bounded-loop visits to their final result.
+    local_read_types: Vec<LocalReadType>,
+    record_local_read_types: bool,
+    /// Set on the first branch, rescue, or loop in the current method. Exact
+    /// read evidence is only useful inside or after control flow; straight-line
+    /// reads are already represented by the scope's assignment facts.
+    has_seen_control_flow: bool,
 
     /// Source code (for offset calculations)
     #[allow(dead_code)]
@@ -114,6 +189,12 @@ pub struct TypeTracker<'a> {
 
     /// Same-file method return facts already collected before this method.
     local_method_returns: HashMap<FullyQualifiedName, RubyType>,
+
+    /// Same-file methods whose complete current-pass declaration set proves
+    /// public explicit-receiver access. This lets return inference use local
+    /// method results without guessing through visibility before engine facts
+    /// are installed.
+    local_public_method_candidates: Arc<HashSet<FullyQualifiedName>>,
 
     /// Same-file superclass edges already collected before this method.
     local_superclasses: HashMap<FullyQualifiedName, FullyQualifiedName>,
@@ -159,6 +240,15 @@ pub struct TypeTracker<'a> {
     /// Set while the ordinary method traversal observes a direct recursive
     /// call. This avoids a separate pre-scan of every method body.
     saw_direct_recursive_call: bool,
+
+    /// Possible local values at every active protected body's rescue entry.
+    ///
+    /// Each ordinary local assignment records its value both before evaluating
+    /// the RHS and after a successful write. An exception can therefore enter
+    /// rescue on either side of that write. Nested protected bodies retain one
+    /// accumulator each; a write is visible to every enclosing rescue frame
+    /// because an inner exception may propagate outward.
+    rescue_entry_types: Vec<RescueEntryTypes>,
 }
 
 impl<'a> TypeTracker<'a> {
@@ -166,7 +256,11 @@ impl<'a> TypeTracker<'a> {
     pub fn new(source: &'a [u8]) -> Self {
         Self {
             vars: HashMap::new(),
+            parameter_types: HashMap::new(),
             var_types: BTreeMap::new(),
+            local_read_types: Vec::new(),
+            record_local_read_types: false,
+            has_seen_control_flow: false,
             source,
             literal_analyzer: LiteralAnalyzer::new(),
             analysis_engine: None,
@@ -178,6 +272,7 @@ impl<'a> TypeTracker<'a> {
             current_class: None,
             current_method: None,
             local_method_returns: HashMap::new(),
+            local_public_method_candidates: Arc::new(HashSet::new()),
             local_superclasses: HashMap::new(),
             yield_param_types_by_method: HashMap::new(),
             proc_return_types_by_local: HashMap::new(),
@@ -189,6 +284,7 @@ impl<'a> TypeTracker<'a> {
             direct_call_return_proofs: HashSet::new(),
             explicit_return_types: Vec::new(),
             saw_direct_recursive_call: false,
+            rescue_entry_types: Vec::new(),
         }
     }
 
@@ -210,11 +306,27 @@ impl<'a> TypeTracker<'a> {
         self
     }
 
+    pub(crate) fn with_local_public_method_candidates(
+        mut self,
+        local_public_method_candidates: Arc<HashSet<FullyQualifiedName>>,
+    ) -> Self {
+        self.local_public_method_candidates = local_public_method_candidates;
+        self
+    }
+
     pub fn with_local_superclasses(
         mut self,
         local_superclasses: HashMap<FullyQualifiedName, FullyQualifiedName>,
     ) -> Self {
         self.local_superclasses = local_superclasses;
+        self
+    }
+
+    pub(crate) fn with_parameter_types(
+        mut self,
+        parameter_types: HashMap<String, RubyType>,
+    ) -> Self {
+        self.parameter_types = parameter_types;
         self
     }
 
@@ -234,6 +346,30 @@ impl<'a> TypeTracker<'a> {
     /// Get variable types map (for storing in RubyDocument)
     pub fn into_var_types(self) -> BTreeMap<usize, HashMap<String, RubyType>> {
         self.var_types
+    }
+
+    pub(crate) fn with_local_read_types(mut self) -> Self {
+        self.record_local_read_types = true;
+        self
+    }
+
+    pub(crate) fn take_local_read_types(&mut self) -> Vec<LocalReadType> {
+        let mut reads = std::mem::take(&mut self.local_read_types);
+        reads.sort_by_key(|read| (read.start_offset, read.end_offset));
+
+        let mut deduplicated: Vec<LocalReadType> = Vec::with_capacity(reads.len());
+        for read in reads {
+            if deduplicated.last().is_some_and(|previous| {
+                previous.start_offset == read.start_offset && previous.end_offset == read.end_offset
+            }) {
+                *deduplicated.last_mut().expect(
+                    "INVARIANT VIOLATED: the final local-read entry disappeared after it was checked. This is a bug because no mutation occurs between the check and replacement. Fix: keep repeated-read collapse atomic.",
+                ) = read;
+            } else {
+                deduplicated.push(read);
+            }
+        }
+        deduplicated
     }
 
     /// Record current variable state at an offset
@@ -311,8 +447,14 @@ impl<'a> TypeTracker<'a> {
         method: &DefNode,
         recursive_return_approximation: Option<RecursiveReturnApproximation>,
     ) -> RecursiveReturnApproximation {
+        assert!(
+            self.rescue_entry_types.is_empty(),
+            "INVARIANT VIOLATED: a rescue-entry accumulator escaped a previous method traversal. This is a bug because protected-body state is lexical and cannot cross method boundaries. Fix: pop every accumulator immediately after tracking its protected expression."
+        );
         self.vars.clear();
         self.var_types.clear();
+        self.local_read_types.clear();
+        self.has_seen_control_flow = false;
         self.proc_return_types_by_local.clear();
         self.local_return_terms.clear();
         self.explicit_return_types.clear();
@@ -372,6 +514,11 @@ impl<'a> TypeTracker<'a> {
         alternatives.push(fallthrough);
         let return_type = join_recursive_return_approximations(alternatives);
 
+        assert!(
+            self.rescue_entry_types.is_empty(),
+            "INVARIANT VIOLATED: method traversal finished with an active rescue-entry accumulator. This is a bug because every protected body must restore the accumulator stack before publishing inferred types. Fix: balance the push/pop in begin and rescue-modifier tracking."
+        );
+
         self.current_method = previous_method;
         self.recursive_return_approximation = None;
         return_type
@@ -379,8 +526,9 @@ impl<'a> TypeTracker<'a> {
 
     /// Add method parameters to the type environment
     fn add_parameters(&mut self, _params: &ParametersNode) {
-        // TODO: Extract parameter types from YARD/RBS or infer from usage
-        // For now, parameters default to Unknown
+        for (name, ruby_type) in &self.parameter_types {
+            self.vars.insert(name.clone(), ruby_type.clone());
+        }
     }
 
     /// Track a node and return its type
@@ -423,6 +571,31 @@ impl<'a> TypeTracker<'a> {
                 self.track_control_flow(|tracker| tracker.track_case_match(&case_match_node))
             }
 
+            // Short-circuit boolean expressions are control flow: the right
+            // operand may mutate locals, but only one of the skipped/executed
+            // environments reaches the following expression.
+            _ if node.as_and_node().is_some() => {
+                let and_node = node.as_and_node().unwrap();
+                self.track_control_flow(|tracker| {
+                    tracker.track_short_circuit(
+                        &and_node.left(),
+                        &and_node.right(),
+                        ShortCircuitOperator::And,
+                    )
+                })
+            }
+
+            _ if node.as_or_node().is_some() => {
+                let or_node = node.as_or_node().unwrap();
+                self.track_control_flow(|tracker| {
+                    tracker.track_short_circuit(
+                        &or_node.left(),
+                        &or_node.right(),
+                        ShortCircuitOperator::Or,
+                    )
+                })
+            }
+
             _ if node.as_super_node().is_some() || node.as_forwarding_super_node().is_some() => {
                 self.infer_super_return_type()
             }
@@ -458,6 +631,7 @@ impl<'a> TypeTracker<'a> {
         self.local_return_terms.clear();
         let was_inside_control_flow = self.inside_control_flow;
         self.inside_control_flow = true;
+        self.has_seen_control_flow = true;
         let ruby_type = track(self);
         self.inside_control_flow = was_inside_control_flow;
         self.local_return_terms.clear();
@@ -486,6 +660,18 @@ impl<'a> TypeTracker<'a> {
     fn track_assignment(&mut self, write: &LocalVariableWriteNode) -> RubyType {
         // Get variable name
         let var_name = String::from_utf8_lossy(write.name().as_slice()).to_string();
+
+        // The RHS may raise before the local write commits. Every enclosing
+        // rescue can therefore observe the prior value (or Ruby's implicit nil
+        // for a syntactically declared local that has not yet been assigned).
+        if !self.rescue_entry_types.is_empty() {
+            let prior_type = self
+                .vars
+                .get(&var_name)
+                .cloned()
+                .unwrap_or_else(RubyType::nil_class);
+            self.observe_rescue_entry_type(&var_name, &prior_type);
+        }
 
         // Infer type from value
         let value = write.value();
@@ -518,10 +704,19 @@ impl<'a> TypeTracker<'a> {
         }
 
         // Update environment
-        self.vars.insert(var_name, var_type.clone());
+        self.vars.insert(var_name.clone(), var_type.clone());
+        if !self.rescue_entry_types.is_empty() {
+            self.observe_rescue_entry_type(&var_name, &var_type);
+        }
 
         // Return the assigned type (assignments return their value in Ruby)
         var_type
+    }
+
+    fn observe_rescue_entry_type(&mut self, name: &str, ruby_type: &RubyType) {
+        for entry_types in &mut self.rescue_entry_types {
+            entry_types.observe(name, ruby_type);
+        }
     }
 
     /// Track an if statement with branch merging
@@ -629,10 +824,8 @@ impl<'a> TypeTracker<'a> {
             }
         }
 
-        let has_else = case_node.else_clause().is_some();
-        if has_else {
+        if let Some(else_clause) = case_node.else_clause() {
             self.vars = env_before.clone();
-            let else_clause = case_node.else_clause().unwrap();
             let diverges = else_clause
                 .statements()
                 .map(|s| control_flow::diverges(&s.as_node()))
@@ -643,6 +836,8 @@ impl<'a> TypeTracker<'a> {
                 RubyType::nil_class()
             };
             branches.push((self.vars.clone(), else_type, diverges));
+        } else {
+            push_unmatched_ordinary_case_path(&mut branches, &env_before);
         }
 
         if branches.is_empty() {
@@ -663,12 +858,6 @@ impl<'a> TypeTracker<'a> {
             self.vars = surviving_envs[0].clone();
             for env in &surviving_envs[1..] {
                 self.merge_env(env, false);
-            }
-            if !has_else {
-                for (var, ty) in self.vars.clone() {
-                    let union = RubyType::union(vec![ty, RubyType::nil_class()]);
-                    self.vars.insert(var, union);
-                }
             }
         }
 
@@ -747,13 +936,14 @@ impl<'a> TypeTracker<'a> {
             for env in &surviving_envs[1..] {
                 self.merge_env(env, false);
             }
-            if !has_else {
-                for (var, ty) in self.vars.clone() {
-                    let union = RubyType::union(vec![ty, RubyType::nil_class()]);
-                    self.vars.insert(var, union);
-                }
-            }
         }
+
+        // Unlike an ordinary `case ... when`, a `case ... in` expression with
+        // no matching pattern and no `else` raises NoMatchingPatternError.
+        // That path cannot reach the environment after the case and therefore
+        // must not add NilClass to bindings from the surviving `in` branches.
+        // `merge_env` above still adds NilClass when a binding is absent from a
+        // different reachable branch or from an explicit `else`.
 
         let typed_branches: Vec<(RubyType, bool)> =
             branches.into_iter().map(|(_, ty, d)| (ty, d)).collect();
@@ -830,6 +1020,11 @@ impl<'a> TypeTracker<'a> {
     fn track_begin(&mut self, begin_node: &BeginNode) -> RubyType {
         let env_before = self.vars.clone();
 
+        let has_rescue = begin_node.rescue_clause().is_some();
+        if has_rescue {
+            self.rescue_entry_types.push(RescueEntryTypes::default());
+        }
+
         self.vars = env_before.clone();
         let body_diverges = begin_node
             .statements()
@@ -840,6 +1035,11 @@ impl<'a> TypeTracker<'a> {
             .map(|statements| self.track_node(&statements.as_node()))
             .unwrap_or_else(RubyType::nil_class);
         let body_env = self.vars.clone();
+        let rescue_entry_types = has_rescue.then(|| {
+            self.rescue_entry_types.pop().expect(
+                "INVARIANT VIOLATED: a begin/rescue protected-body accumulator disappeared before rescue analysis. This is a bug because only the matching begin frame may pop it. Fix: keep rescue accumulator ownership stack-disciplined.",
+            )
+        });
 
         self.vars = body_env;
         let else_diverges = begin_node
@@ -858,7 +1058,12 @@ impl<'a> TypeTracker<'a> {
         let mut branches = vec![(normal_env, normal_type, normal_diverges)];
         let mut rescue_clause = begin_node.rescue_clause();
         while let Some(rescue_node) = rescue_clause {
-            self.vars = env_before.clone();
+            self.vars = rescue_entry_types
+                .as_ref()
+                .expect(
+                    "INVARIANT VIOLATED: a rescue clause has no protected-body entry evidence. This is a bug because has_rescue and the immutable rescue chain came from the same Prism begin node. Fix: create one accumulator whenever a rescue clause exists.",
+                )
+                .environment_from(&env_before);
             let diverges = rescue_node
                 .statements()
                 .map(|statements| control_flow::diverges(&statements.as_node()))
@@ -903,11 +1108,15 @@ impl<'a> TypeTracker<'a> {
 
         let expression = rescue_modifier.expression();
         self.vars = env_before.clone();
+        self.rescue_entry_types.push(RescueEntryTypes::default());
         let expression_type = self.track_node(&expression);
         let expression_env = self.vars.clone();
+        let rescue_entry_types = self.rescue_entry_types.pop().expect(
+            "INVARIANT VIOLATED: a rescue-modifier protected-expression accumulator disappeared before rescue analysis. This is a bug because only the matching rescue modifier may pop it. Fix: keep rescue accumulator ownership stack-disciplined.",
+        );
 
         let rescue_expression = rescue_modifier.rescue_expression();
-        self.vars = env_before;
+        self.vars = rescue_entry_types.environment_from(&env_before);
         let rescue_type = self.track_node(&rescue_expression);
         let rescue_env = self.vars.clone();
 
@@ -1059,6 +1268,49 @@ impl<'a> TypeTracker<'a> {
         join_branch_types(&[(then_type, then_diverges), (else_type, else_diverges)])
     }
 
+    /// Track Ruby's value-returning short-circuit operators.
+    ///
+    /// The left operand always executes. Depending on its proven truthiness,
+    /// the right operand executes always, never, or along one reachable path.
+    /// Conditional execution joins the environment immediately after the left
+    /// operand with the environment after the right operand. This prevents a
+    /// syntactically later assignment in the right operand from being treated
+    /// as unconditional by downstream receiver queries.
+    fn track_short_circuit(
+        &mut self,
+        left: &Node<'_>,
+        right: &Node<'_>,
+        operator: ShortCircuitOperator,
+    ) -> RubyType {
+        let left_type = self.track_node(left);
+        let left_env = self.vars.clone();
+        let truthiness = ruby_truthiness(&left_type);
+        let right_execution = match (operator, truthiness) {
+            (ShortCircuitOperator::And, Truthiness::AlwaysTruthy)
+            | (ShortCircuitOperator::Or, Truthiness::AlwaysFalsy) => RightExecution::Always,
+            (ShortCircuitOperator::And, Truthiness::AlwaysFalsy)
+            | (ShortCircuitOperator::Or, Truthiness::AlwaysTruthy) => RightExecution::Never,
+            (ShortCircuitOperator::And | ShortCircuitOperator::Or, Truthiness::Conditional) => {
+                RightExecution::Conditional
+            }
+        };
+
+        match right_execution {
+            RightExecution::Never => left_type,
+            RightExecution::Always => self.track_node(right),
+            RightExecution::Conditional => {
+                self.vars = left_env.clone();
+                let right_type = self.track_node(right);
+                let right_env = self.vars.clone();
+
+                self.vars = left_env;
+                self.merge_env(&right_env, false);
+
+                short_circuit_result_type(left_type, right_type, operator)
+            }
+        }
+    }
+
     /// Infer the type of an expression
     ///
     /// Uses literal analyzer for static types, and handles variable reads
@@ -1072,10 +1324,21 @@ impl<'a> TypeTracker<'a> {
         // Handle local variable reads
         if let Some(read) = node.as_local_variable_read_node() {
             let var_name = String::from_utf8_lossy(read.name().as_slice()).to_string();
-            if let Some(ty) = self.vars.get(&var_name) {
-                return ty.clone();
+            let ruby_type = self
+                .vars
+                .get(&var_name)
+                .cloned()
+                .unwrap_or(RubyType::Unknown);
+            if self.record_local_read_types && self.has_seen_control_flow {
+                let location = read.location();
+                self.local_read_types.push(LocalReadType {
+                    start_offset: location.start_offset(),
+                    end_offset: location.end_offset(),
+                    name: var_name,
+                    ruby_type: ruby_type.clone(),
+                });
             }
-            return RubyType::Unknown;
+            return ruby_type;
         }
 
         // Handle method calls
@@ -1106,7 +1369,7 @@ impl<'a> TypeTracker<'a> {
         // Handle parenthesized expressions
         if let Some(parens) = node.as_parentheses_node() {
             if let Some(body) = parens.body() {
-                return self.infer_expression(&body);
+                return self.track_node(&body);
             }
             return RubyType::nil_class();
         }
@@ -1184,6 +1447,20 @@ impl<'a> TypeTracker<'a> {
         }
 
         let allow_private = call.receiver().is_none();
+        if let RubyType::Union(members) = &receiver_type {
+            return crate::inference::method::return_type::resolve_proven_union(
+                members,
+                |member| {
+                    self.resolve_method_return_type_from_analysis(
+                        member,
+                        &method_name,
+                        allow_private,
+                    )
+                    .or_else(|| self.resolve_rbs_method_return_type(member, &method_name))
+                },
+            )
+            .unwrap_or(RubyType::Unknown);
+        }
         if let Some(return_type) = self.resolve_method_return_type_from_analysis(
             &receiver_type,
             &method_name,
@@ -1267,12 +1544,10 @@ impl<'a> TypeTracker<'a> {
     ) -> Option<RubyType> {
         let analysis_engine = self.analysis_engine.as_ref()?;
         let method = crate::core::RubyMethod::new(method_name).ok()?;
-        if allow_private {
-            if let Some(return_type) =
-                self.local_method_return_type_for_receiver(receiver_type, &method)
-            {
-                return Some(return_type);
-            }
+        if let Some(return_type) =
+            self.local_method_return_type_for_receiver(receiver_type, &method, !allow_private)
+        {
+            return Some(return_type);
         }
         let (receiver_fqn, namespace_kind) = match receiver_type {
             RubyType::Class(fqn) | RubyType::Module(fqn) => {
@@ -1392,6 +1667,7 @@ impl<'a> TypeTracker<'a> {
         &self,
         receiver_type: &RubyType,
         method: &RubyMethod,
+        require_public: bool,
     ) -> Option<RubyType> {
         let parts = match receiver_type {
             RubyType::Class(fqn)
@@ -1402,8 +1678,12 @@ impl<'a> TypeTracker<'a> {
                 return None;
             }
         };
+        let method_fqn = FullyQualifiedName::method(parts, method.clone());
+        if require_public && !self.local_public_method_candidates.contains(&method_fqn) {
+            return None;
+        }
         self.local_method_returns
-            .get(&FullyQualifiedName::method(parts, method.clone()))
+            .get(&method_fqn)
             .filter(|ty| **ty != RubyType::Unknown)
             .cloned()
     }
@@ -1690,6 +1970,79 @@ fn normalized_method_name(method: &DefNode<'_>) -> RubyMethod {
     })
 }
 
+fn ruby_truthiness(ruby_type: &RubyType) -> Truthiness {
+    match ruby_type {
+        RubyType::Unknown => Truthiness::Conditional,
+        RubyType::Union(members) => {
+            assert!(
+                members.len() >= 2,
+                "INVARIANT VIOLATED: RubyType::Union contains fewer than two members. This is a bug because RubyType::union must collapse empty and singleton inputs. Fix: construct unions only through the canonical RubyType helpers."
+            );
+            let has_falsy = members.iter().any(is_falsy_type);
+            let has_truthy = members.iter().any(|member| !is_falsy_type(member));
+            match (has_truthy, has_falsy) {
+                (true, false) => Truthiness::AlwaysTruthy,
+                (false, true) => Truthiness::AlwaysFalsy,
+                (true, true) => Truthiness::Conditional,
+                (false, false) => panic!(
+                    "INVARIANT VIOLATED: a nonempty RubyType::Union has no truthy or falsy members. This is a bug because every concrete Ruby value has one truthiness class. Fix: update truthiness classification when adding a RubyType variant."
+                ),
+            }
+        }
+        ruby_type if is_falsy_type(ruby_type) => Truthiness::AlwaysFalsy,
+        RubyType::Class(_)
+        | RubyType::Module(_)
+        | RubyType::ClassReference(_)
+        | RubyType::ModuleReference(_)
+        | RubyType::Array(_)
+        | RubyType::Hash(_, _) => Truthiness::AlwaysTruthy,
+    }
+}
+
+fn is_falsy_type(ruby_type: &RubyType) -> bool {
+    let RubyType::Class(fqn) = ruby_type else {
+        return false;
+    };
+    let parts = fqn.namespace_parts_slice();
+    parts.len() == 1
+        && matches!(
+            parts
+                .first()
+                .expect("INVARIANT VIOLATED: a one-part FQN lost its first part while classifying Ruby truthiness. This is a bug because the immutable slice was checked immediately before access. Fix: keep the length check and access in one expression.")
+                .as_str(),
+            "FalseClass" | "NilClass"
+        )
+}
+
+fn short_circuit_result_type(
+    left_type: RubyType,
+    right_type: RubyType,
+    operator: ShortCircuitOperator,
+) -> RubyType {
+    if left_type == RubyType::Unknown {
+        return RubyType::Unknown;
+    }
+
+    let RubyType::Union(left_members) = left_type else {
+        panic!(
+            "INVARIANT VIOLATED: conditional short-circuit evaluation received a non-union concrete left type. This is a bug because one concrete Ruby class is always truthy or always falsy. Fix: keep ruby_truthiness and short-circuit projection exhaustive over the same RubyType variants."
+        );
+    };
+    let mut result_members = left_members
+        .into_iter()
+        .filter(|member| match operator {
+            ShortCircuitOperator::And => is_falsy_type(member),
+            ShortCircuitOperator::Or => !is_falsy_type(member),
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !result_members.is_empty(),
+        "INVARIANT VIOLATED: conditional short-circuit evaluation has no left-side result member. This is a bug because Conditional requires both an executing and a short-circuiting path. Fix: keep truthiness classification and member projection symmetric."
+    );
+    result_members.push(right_type);
+    RubyType::union(result_members)
+}
+
 fn call_is_direct_recursive(call: &CallNode<'_>, method: Option<&RubyMethod>) -> bool {
     let Some(method) = method else {
         return false;
@@ -1737,6 +2090,19 @@ fn join_branch_types(branches: &[(RubyType, bool)]) -> RubyType {
     } else {
         RubyType::union(surviving)
     }
+}
+
+/// Add the path taken when no `when` clause in an ordinary Ruby `case`
+/// matches and no `else` is present. That path preserves the incoming local
+/// environment and the expression evaluates to `nil`.
+///
+/// Do not use this for `case ... in`: an unmatched pattern case without an
+/// `else` raises `NoMatchingPatternError`, so its unmatched path diverges.
+fn push_unmatched_ordinary_case_path(
+    branches: &mut Vec<(HashMap<String, RubyType>, RubyType, bool)>,
+    env_before: &HashMap<String, RubyType>,
+) {
+    branches.push((env_before.clone(), RubyType::nil_class(), false));
 }
 
 fn block_parameter_names(block: &BlockNode<'_>) -> Vec<String> {
@@ -1808,6 +2174,30 @@ mod tests {
 
     fn create_test_tracker<'a>(source: &'a str) -> TypeTracker<'a> {
         TypeTracker::new(source.as_bytes())
+    }
+
+    fn instance_type(name: &str) -> RubyType {
+        RubyType::Class(FullyQualifiedName::constant(vec![
+            RubyConstant::new(name).expect("test class name must be a valid Ruby constant")
+        ]))
+    }
+
+    fn exact_local_read_type(
+        tracker: &mut TypeTracker<'_>,
+        source: &str,
+        needle: &str,
+    ) -> RubyType {
+        let start_offset = source.rfind(needle).expect(
+            "INVARIANT VIOLATED: the test local-read needle is absent. This is a bug because the fixture and assertion must identify the same source token. Fix: keep the needle synchronized with the fixture.",
+        );
+        tracker
+            .take_local_read_types()
+            .into_iter()
+            .find(|read| read.start_offset == start_offset)
+            .map(|read| read.ruby_type)
+            .expect(
+                "INVARIANT VIOLATED: TypeTracker did not retain the expected exact local read. This is a bug because the fixture places it inside rescue control flow. Fix: keep local-read evidence enabled and traverse the rescue expression through track_node.",
+            )
     }
 
     #[test]
@@ -2093,6 +2483,200 @@ end"#;
     }
 
     #[test]
+    fn short_circuit_and_joins_executed_and_skipped_assignment_paths() {
+        let source = r#"def foo(flag)
+  value = 1
+  flag && (value = "fallback")
+  value
+end"#;
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let mut tracker = create_test_tracker(source);
+
+        assert_eq!(
+            tracker.track_method(&def_node),
+            RubyType::union([RubyType::integer(), RubyType::string()]),
+            "an unknown left operand makes both the skipped and executed right-operand states reachable"
+        );
+    }
+
+    #[test]
+    fn short_circuit_or_joins_executed_and_skipped_assignment_paths() {
+        let source = r#"def foo(flag)
+  value = 1
+  flag or (value = "fallback")
+  value
+end"#;
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let mut tracker = create_test_tracker(source);
+
+        assert_eq!(
+            tracker.track_method(&def_node),
+            RubyType::union([RubyType::integer(), RubyType::string()]),
+            "an unknown left operand makes both the skipped and executed right-operand states reachable"
+        );
+    }
+
+    #[test]
+    fn short_circuit_result_keeps_only_the_left_members_that_return() {
+        let and_source = "def foo(flag)\n  flag && \"fallback\"\nend";
+        let and_parse = ruby_prism::parse(and_source.as_bytes());
+        let and_method = and_parse
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let mut and_tracker = create_test_tracker(and_source)
+            .with_parameter_types(HashMap::from([("flag".to_string(), RubyType::boolean())]));
+        assert_eq!(
+            and_tracker.track_method(&and_method),
+            RubyType::union([RubyType::false_class(), RubyType::string()])
+        );
+
+        let or_source = "def foo(flag)\n  flag || \"fallback\"\nend";
+        let or_parse = ruby_prism::parse(or_source.as_bytes());
+        let or_method = or_parse
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let mut or_tracker = create_test_tracker(or_source)
+            .with_parameter_types(HashMap::from([("flag".to_string(), RubyType::boolean())]));
+        assert_eq!(
+            or_tracker.track_method(&or_method),
+            RubyType::union([RubyType::string(), RubyType::true_class()])
+        );
+    }
+
+    #[test]
+    fn rescue_entry_joins_values_before_and_after_each_protected_assignment() {
+        let source = r#"def foo
+  value = Product.new
+  begin
+    value = Text.new
+    dangerous
+  rescue
+    value
+  end
+end"#;
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let mut tracker = create_test_tracker(source).with_local_read_types();
+
+        tracker.track_method(&def_node);
+
+        assert_eq!(
+            exact_local_read_type(&mut tracker, source, "value\n  end"),
+            RubyType::union([instance_type("Product"), instance_type("Text")])
+        );
+    }
+
+    #[test]
+    fn rescue_modifier_uses_the_same_assignment_prefix_join() {
+        let source = r#"def foo
+  value = Product.new
+  ((value = Text.new; dangerous) rescue value)
+end"#;
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let mut tracker = create_test_tracker(source).with_local_read_types();
+
+        tracker.track_method(&def_node);
+
+        assert_eq!(
+            exact_local_read_type(&mut tracker, source, "value)"),
+            RubyType::union([instance_type("Product"), instance_type("Text")])
+        );
+    }
+
+    #[test]
+    fn unresolved_protected_assignment_absorbs_the_rescue_receiver_proof() {
+        let source = r#"def foo
+  value = Product.new
+  begin
+    value = dynamic_value
+    dangerous
+  rescue
+    value
+  end
+end"#;
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let def_node = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let mut tracker = create_test_tracker(source).with_local_read_types();
+
+        tracker.track_method(&def_node);
+
+        assert_eq!(
+            exact_local_read_type(&mut tracker, source, "value\n  end"),
+            RubyType::Unknown,
+            "one unproven assignment value must absorb every concrete rescue-entry alternative"
+        );
+    }
+
+    #[test]
     fn test_if_with_else() {
         let source = r#"def foo
   if true
@@ -2276,6 +2860,182 @@ end"#;
         assert!(x_type.is_some());
         let x_type = x_type.unwrap();
         assert!(matches!(x_type, RubyType::Union(_)));
+    }
+
+    #[test]
+    fn case_without_else_preserves_the_pre_case_binding_on_the_unmatched_path() {
+        let source = r#"def choose(value)
+  result = 1
+  case value
+  when :ready
+    result = "ready"
+  end
+  result
+end"#;
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let definition = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+
+        let return_type = tracker.track_method(&definition);
+        let var_types = tracker.into_var_types();
+        let after_case = source.find("end\n  result").unwrap() + "end".len();
+        let expected = RubyType::union([RubyType::integer(), RubyType::string()]);
+
+        assert_eq!(return_type, expected);
+        assert_eq!(
+            get_var_type_at(&var_types, after_case, "result"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn case_without_else_includes_the_unmatched_nil_result() {
+        let source = r#"def choose(value)
+  case value
+  when :ready
+    "ready"
+  end
+end"#;
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let definition = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+
+        assert_eq!(
+            tracker.track_method(&definition),
+            RubyType::union([RubyType::nil_class(), RubyType::string()]),
+            "an unmatched ordinary case path must contribute Ruby's nil result"
+        );
+    }
+
+    #[test]
+    fn pattern_case_without_else_keeps_only_reaching_branch_types() {
+        let source = r#"def choose
+  case { name: "Ada" }
+  in { name: value }
+    value
+  end
+  value
+end"#;
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let definition = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+
+        let return_type = tracker.track_method(&definition);
+        let var_types = tracker.into_var_types();
+        let after_case = source.find("end\n  value").unwrap() + "end".len();
+
+        assert_eq!(return_type, RubyType::string());
+        assert_eq!(
+            get_var_type_at(&var_types, after_case, "value"),
+            Some(RubyType::string()),
+            "the unmatched pattern path raises, so it cannot contribute NilClass at the join"
+        );
+    }
+
+    #[test]
+    fn pattern_case_explicit_else_keeps_nil_for_an_unbound_capture() {
+        let source = r#"def choose
+  case { name: "Ada" }
+  in { name: value }
+    value
+  else
+    nil
+  end
+  value
+end"#;
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let definition = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let expected = RubyType::union([RubyType::nil_class(), RubyType::string()]);
+
+        let return_type = tracker.track_method(&definition);
+        let var_types = tracker.into_var_types();
+        let after_case = source.find("end\n  value").unwrap() + "end".len();
+
+        assert_eq!(return_type, expected);
+        assert_eq!(
+            get_var_type_at(&var_types, after_case, "value"),
+            Some(expected),
+            "an explicit else reaches the join without binding the pattern capture"
+        );
+    }
+
+    #[test]
+    fn pattern_case_branch_specific_capture_remains_nilable() {
+        let source = r#"def choose
+  case { name: "Ada" }
+  in { name: value }
+    value
+  in { age: age }
+    age
+  end
+  value
+end"#;
+        let mut tracker = create_test_tracker(source);
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let definition = parse_result
+            .node()
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let expected = RubyType::union([RubyType::nil_class(), RubyType::string()]);
+
+        let return_type = tracker.track_method(&definition);
+        let var_types = tracker.into_var_types();
+        let after_case = source.find("end\n  value").unwrap() + "end".len();
+
+        assert_eq!(return_type, expected);
+        assert_eq!(
+            get_var_type_at(&var_types, after_case, "value"),
+            Some(expected),
+            "a different reachable in-branch may leave this capture unbound"
+        );
     }
 
     #[test]

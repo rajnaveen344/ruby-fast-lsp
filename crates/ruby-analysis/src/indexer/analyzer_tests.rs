@@ -2,12 +2,24 @@
 mod tests {
     use super::super::LVScopeId;
     use super::super::*;
-    use crate::core::RubyConstant;
-    use tower_lsp::lsp_types::{Position, Url};
+    use crate::core::{RubyConstant, SourcePosition as Position};
+    use url::Url;
 
     // Helper function to parse content and create an analyzer
     fn create_analyzer(content: &str) -> RubyPrismAnalyzer {
         RubyPrismAnalyzer::new(Url::parse("file:///dummy.rb").unwrap(), content.to_string())
+    }
+
+    #[test]
+    fn analyzer_position_adapter_uses_utf16_before_same_line_identifier() {
+        let analyzer = create_analyzer("\"😀\"; value = 1; value\n");
+
+        let (identifier, _, _, _, _) = analyzer.get_identifier_at_position(Position::new(0, 21));
+
+        assert!(matches!(
+            identifier,
+            Some(Identifier::RubyLocalVariable { ref name, .. }) if name == "value"
+        ));
     }
 
     #[test]
@@ -36,14 +48,14 @@ mod tests {
             extension_id: "rspec-ruby".to_string(),
         });
 
-        let (method, _, _, _, _) = analyzer.get_identifier(Position::new(2, 5));
+        let (method, _, _, _, _) = analyzer.get_identifier_at_position(Position::new(2, 5));
         let Identifier::RubyMethod { namespace, .. } = method.expect("helper must be identified")
         else {
             panic!("helper must be a method identifier")
         };
         assert_eq!(namespace, owner.namespace_parts());
 
-        let (constant, _, lexical, _, _) = analyzer.get_identifier(Position::new(3, 6));
+        let (constant, _, lexical, _, _) = analyzer.get_identifier_at_position(Position::new(3, 6));
         assert!(matches!(constant, Some(Identifier::RubyConstant { .. })));
         assert_eq!(lexical, vec![RubyConstant::new("Lexical").unwrap()]);
     }
@@ -54,7 +66,7 @@ mod tests {
         position: Position,
     ) -> (Option<Identifier>, Vec<RubyConstant>, LVScopeId) {
         let (identifier, _identifier_type, ns_stack, lv_scope_id, _namespace_kind) =
-            analyzer.get_identifier(position);
+            analyzer.get_identifier_at_position(position);
         (identifier, ns_stack, lv_scope_id)
     }
 

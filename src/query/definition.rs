@@ -13,6 +13,8 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::{locations_for_ranges, non_empty_locations};
 use super::EngineQuery;
+use crate::utils::lsp::{lsp_text_location, source_position};
+use crate::utils::position_to_offset;
 
 impl EngineQuery {
     /// Find definitions for an identifier at the given position.
@@ -29,11 +31,16 @@ impl EngineQuery {
         content: &str,
     ) -> Option<Vec<Location>> {
         // First check if we're in a YARD comment type reference
-        if let Some(yard_type) = YardParser::find_type_at_position(content, position) {
+        if let Some(yard_type) =
+            YardParser::find_type_at_position(content, source_position(position))
+        {
             info!("Found YARD type at position: {}", yard_type.type_name);
             // Get the enclosing namespace context for proper resolution
             let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-            let ancestors = analyzer.get_namespace_at_position(position);
+            let byte_offset = u32::try_from(position_to_offset(content, position)).expect(
+                "INVARIANT VIOLATED: definition position exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+            );
+            let ancestors = analyzer.get_namespace_at_offset(byte_offset);
             info!("YARD type namespace context: {:?}", ancestors);
             return self.find_yard_type_definitions(&yard_type.type_name, &ancestors);
         }
@@ -43,8 +50,11 @@ impl EngineQuery {
         }
 
         let analyzer = self.analyzer_at_position(uri, content, position);
+        let byte_offset = u32::try_from(position_to_offset(content, position)).expect(
+            "INVARIANT VIOLATED: definition position exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+        );
         let (identifier, _, ancestors, _scope_stack, namespace_kind) =
-            analyzer.get_identifier(position);
+            analyzer.get_identifier(byte_offset);
 
         let identifier = match identifier {
             Some(id) => id,
@@ -72,11 +82,18 @@ impl EngineQuery {
     fn resolved_reference_definition_locations(&self, position: Position) -> Option<Vec<Location>> {
         let document = self.doc.as_ref()?.read();
         let file_id = document.analysis_file_id();
-        let byte_offset = document.position_to_analysis_offset(position);
+        let byte_offset = document.position_to_analysis_offset(source_position(position));
         let engine = self.analysis_engine()?.read();
-        let ranges = AnalysisQuery::new(&engine)
-            .resolved_reference_definition_ranges_at(file_id, byte_offset);
-        non_empty_locations(locations_for_ranges(&engine, ranges))
+        let query = AnalysisQuery::new(&engine);
+        let resolved = query.resolved_reference_definition_ranges_at(file_id, byte_offset);
+        if query.navigation_must_fail_closed_at(file_id, byte_offset, !resolved.is_empty()) {
+            return Some(Vec::new());
+        }
+        let locations = locations_for_ranges(&engine, resolved);
+        if !locations.is_empty() {
+            return Some(locations);
+        }
+        None
     }
 
     /// Find definitions for a local variable using VariableScopes (position-based lookup)
@@ -88,10 +105,10 @@ impl EngineQuery {
         let doc_arc = self.doc.as_ref()?;
         let document = doc_arc.read();
 
-        let byte_offset = document.position_to_analysis_offset(position);
+        let byte_offset = document.position_to_analysis_offset(source_position(position));
         document
             .local_variable_definition_range_before(name, byte_offset)
-            .map(|range| vec![document.text_range_to_lsp_location(range)])
+            .map(|range| vec![lsp_text_location(&document, range)])
             .or_else(|| {
                 self.local_variable_definition_locations_from_analysis(
                     name,
@@ -152,7 +169,8 @@ pub(crate) fn definition_navigation_demand_keys(
     content: &str,
 ) -> Option<DefinitionNavigationDemandKeys> {
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-    let (identifier, _, ancestors, _, _) = analyzer.get_identifier(position);
+    let (identifier, _, ancestors, _, _) =
+        analyzer.get_identifier_at_position(source_position(position));
     let (project_constant, dependency_constant) = match identifier? {
         Identifier::RubyConstant { iden, .. } => (iden.last().cloned(), iden.first().cloned()),
         Identifier::RubyMethod {

@@ -87,6 +87,9 @@ pub enum OracleSupport {
     KnownGap(&'static str),
 }
 
+pub(super) const UNPROVEN_BLOCK_RECEIVER_GAP: &str =
+    "implicit receiver calls inside blocks require a proven execution contract";
+
 impl OracleSupport {
     pub fn is_supported(self) -> bool {
         matches!(self, OracleSupport::Supported)
@@ -1641,11 +1644,11 @@ fn const_get_receiver(fqn: &str) -> (String, String) {
 
 fn method_definition_support(shape: &CallShape) -> OracleSupport {
     match shape {
-        CallShape::Bare
-        | CallShape::BareInDoBlock
+        CallShape::BareInDoBlock
         | CallShape::BareInBraceBlock
         | CallShape::BareInLambda
-        | CallShape::BareInProc
+        | CallShape::BareInProc => OracleSupport::KnownGap(UNPROVEN_BLOCK_RECEIVER_GAP),
+        CallShape::Bare
         | CallShape::FrameworkRouteBlock
         | CallShape::Super
         | CallShape::LocalVar { .. }
@@ -1665,11 +1668,11 @@ fn method_definition_support(shape: &CallShape) -> OracleSupport {
 
 fn method_reference_support(shape: &CallShape) -> OracleSupport {
     match shape {
-        CallShape::Bare
-        | CallShape::BareInDoBlock
+        CallShape::BareInDoBlock
         | CallShape::BareInBraceBlock
         | CallShape::BareInLambda
-        | CallShape::BareInProc
+        | CallShape::BareInProc => OracleSupport::KnownGap(UNPROVEN_BLOCK_RECEIVER_GAP),
+        CallShape::Bare
         | CallShape::FrameworkRouteBlock
         | CallShape::Super
         | CallShape::LocalVar { .. }
@@ -1689,11 +1692,11 @@ fn method_reference_support(shape: &CallShape) -> OracleSupport {
 
 fn method_hover_support(shape: &CallShape) -> OracleSupport {
     match shape {
-        CallShape::Bare
-        | CallShape::BareInDoBlock
+        CallShape::BareInDoBlock
         | CallShape::BareInBraceBlock
         | CallShape::BareInLambda
-        | CallShape::BareInProc
+        | CallShape::BareInProc => OracleSupport::KnownGap(UNPROVEN_BLOCK_RECEIVER_GAP),
+        CallShape::Bare
         | CallShape::FrameworkRouteBlock
         | CallShape::Super
         | CallShape::LocalVar { .. }

@@ -8,9 +8,9 @@
 //! stay silent — once the first link is flagged, further "unknown receiver" warnings
 //! would be redundant noise.
 //!
-//! Note: `User.new` itself currently warns ("Unresolved method `new` on `User`")
-//! because `Class#new` isn't in the user index. Tests scope assertions tightly
-//! around the calls under test to avoid colliding with that pre-existing noise.
+//! Class and module objects use their language-defined Class/Module fallback
+//! chains, so universal methods such as `User.new` are resolved consistently
+//! with constructor inference.
 
 use crate::indexer::file_processor::FileProcessor;
 use crate::test::harness::{check, check_multi_file, FakeEditor};
@@ -55,6 +55,65 @@ u = User.new
 }
 
 #[tokio::test]
+async fn class_object_uses_class_instance_method_chain() {
+    check(
+        r#"
+class Widget
+end
+
+<warn none code="unresolved-method">Widget.new</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn delayed_superclass_resolution_preserves_class_method_inheritance() {
+    check_multi_file(&[
+        (
+            "child.rb",
+            r#"
+class Child < Parent
+end
+
+<warn none code="unresolved-method">Child.build</warn>
+"#,
+        ),
+        (
+            "parent.rb",
+            r#"
+class Parent
+  def self.build
+    new
+  end
+end
+"#,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn custom_included_hook_keeps_absence_diagnostic_unknown() {
+    check(
+        r#"
+module RuntimeMethods
+  def self.included(base)
+    base.define_singleton_method(:generated) { true }
+  end
+end
+
+class Host
+  include RuntimeMethods
+end
+
+<warn none code="unresolved-method">Host.generated</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn typed_value_constants_use_instance_method_resolution() {
     check(
         r#"
@@ -90,7 +149,7 @@ record = DynamicRecord.new
 }
 
 #[tokio::test]
-async fn default_basic_object_stub_method_missing_does_not_hide_missing_calls() {
+async fn top_level_open_method_surface_suppresses_absence_claims() {
     let mut editor = FakeEditor::new().await;
     let stub_uri =
         Url::parse("file:///ruby-fast-lsp-stubs/basic_object.rb").expect("stub URI must be valid");
@@ -120,12 +179,12 @@ end
 
     let diagnostics = editor.diagnostics("jruby_import.rb").await;
     assert!(
-        diagnostics.iter().any(|diagnostic| {
+        diagnostics.iter().all(|diagnostic| {
             diagnostic.code
-                == Some(NumberOrString::String("unresolved-method".to_string()))
-                && diagnostic.message.contains("java_import")
+                != Some(NumberOrString::String("unresolved-method".to_string()))
+                || !diagnostic.message.contains("java_import")
         }),
-        "the default raising BasicObject#method_missing stub must not prove that `java_import` exists: {diagnostics:?}"
+        "top-level Ruby has no closed method surface, so `java_import` absence cannot be proven: {diagnostics:?}"
     );
 }
 

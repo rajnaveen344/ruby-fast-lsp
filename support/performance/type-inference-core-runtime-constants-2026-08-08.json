@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-08",
+  "slice": "proof-checked core runtime constants and deferred chained constructors",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "claim_eligible": false,
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "description": "Exact release binaries preserved after the accepted ruby-analysis protocol boundary and before this inference slice.",
+      "profile_single_file_sha256": "c3a750b8b2fb78f7109f4465336278a35eab76546fa56471bdc4261de2f2decb",
+      "profiler_sha256": "2f2a24fc8522cccf80c8a36a1caaf5c396bf0deee1fc2c5444602e3eccf72e12",
+      "ruby_fast_lsp_sha256": "38ac7f970b1c269a0eaaaa855944c91079ca7163b16f33d999d3256b0a161075"
+    },
+    "candidate": {
+      "profile_single_file_sha256": "8b457eab92ef3d405e922cfcf36f14f8c9121d9d7438deaccafa2db8623b9b5c",
+      "profiler_sha256": "c64560c19945a8f5b65f8fbc77fa974bc59d20a656d2baa21fcac0a76a696184",
+      "ruby_fast_lsp_sha256": "a65a133031a2a090dc8507f55eb3400eb1bdcef0f895ea334242f2c6ce1d0ab2",
+      "tracked_diff_sha256_at_build": "99d66ec63d85b291fe03a89548bb671d133e7ad55c752f1c9b0f9374c196238e"
+    }
+  },
+  "inputs": {
+    "real_project": "/Users/naveenraj/goshposh/server",
+    "real_project_files": 2619,
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_pairs": 14,
+    "interactive_repeats": 2,
+    "interactive_iterations_per_process": 500,
+    "cli_fixture": "tests/fixtures/type_inference_unknown_reasons",
+    "cli_fresh_processes": 5
+  },
+  "semantic_evidence": {
+    "accepted_rule": "A constant value type comes from embedded core RBS or another file-owned fact, never from a runtime-name guess. A nested receiver is upgraded only from the exact proven outcome of its inner call after the complete graph is installed. Constructor syntax proves an instance only when the graph proves a class and lookup uses Ruby's built-in constructor semantics; a module or explicit self.new with an unproven body remains Unknown.",
+    "core_constants": "Embedded constants.rbs is indexed as SourceKind::Signature even when no Ruby runtime is available. The packaged physical source remains the navigation target. ARGV.first.upcase proves String through the same engine result used by check and LSP.",
+    "constructor_origin": "A proven class instance initialize emits the language-defined return of the normalized new method. Explicit self.new retains its own inferred return, and a module initialize is not reclassified as a class constructor.",
+    "rejected_design": "Treating every syntactic constant receiver as a class was rejected. On the real project it published BSON::ObjectId and similar constructor types even where the dependency universe reported BSON and BSON::ObjectId as unresolved constants.",
+    "scorecard": "88/88 reviewed cases, 100/100 points, revision m0-seed-25, score_eligible=false, claim_eligible=false",
+    "ruby_analysis_tests": "465/465",
+    "root_tests": "1473/1474 passed with one intentional ignore",
+    "workspace_tests": "cargo fmt --all -- --check, git diff --check, cargo check --workspace, and cargo test --workspace --quiet -- --test-threads=4 exited 0 before the final zero-point scorecard addition; the explicit 88-case reporter passed afterward",
+    "cli_stdout_sha256": "f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b",
+    "cli_result": "All five fresh final-release processes produced byte-identical JSON.",
+    "baseline_semantic_result_fingerprint_hex": "26048da84ae3a67f68351552c2829171",
+    "candidate_semantic_result_fingerprint_hex": "c2b8906fc016a38c5c39dca8d9f0fd08"
+  },
+  "real_project_audit": {
+    "dependency_loading_complete": true,
+    "suppressed_inconclusive_diagnostics": 0,
+    "baseline": {
+      "errors": 26706,
+      "warnings": 15166,
+      "diagnostics": 41872,
+      "proven_method_returns": 7002,
+      "unknown_method_returns": 17026,
+      "proven_inferred_types": 221056,
+      "unknown_inferred_types": 997140,
+      "unresolved_constants": 24930,
+      "unresolved_methods": 3930
+    },
+    "candidate": {
+      "errors": 26559,
+      "warnings": 15152,
+      "diagnostics": 41711,
+      "proven_method_returns": 8121,
+      "unknown_method_returns": 15907,
+      "proven_inferred_types": 219243,
+      "unknown_inferred_types": 998941,
+      "unresolved_constants": 24783,
+      "unresolved_methods": 3916
+    },
+    "delta": {
+      "errors": -147,
+      "warnings": -14,
+      "diagnostics": -161,
+      "proven_method_returns": 1119,
+      "unknown_method_returns": -1119,
+      "unresolved_constants": -147,
+      "unresolved_methods": -14
+    },
+    "matched_subject_review": {
+      "baseline_proven_to_candidate_unknown": 3613,
+      "baseline_unknown_to_candidate_proven": 1793,
+      "proven_to_unknown_constructor_expressions": 3154,
+      "interpretation": "Every lost matched subject is an expression. The dominant constructor losses are intentional proof barriers for unresolved or non-class constant identities; the candidate simultaneously gains exact constructor method returns and downstream chain proofs where class identity and constructor origin are statically proven. These transitions are not scored as real-project accuracy because the corpus has no reviewed ground-truth labels."
+    }
+  },
+  "performance": {
+    "large_file_medians_ms": {
+      "file_processor": { "baseline": 119.50925, "candidate": 119.873, "delta_percent": 0.30437 },
+      "parse": { "baseline": 4.2615, "candidate": 4.271334, "delta_percent": 0.230764 },
+      "direct": { "baseline": 5.56875, "candidate": 5.529625, "delta_percent": -0.702581 },
+      "visitor": { "baseline": 95.330334, "candidate": 95.136292, "delta_percent": -0.203547 },
+      "replace_resolve": { "baseline": 11.807625, "candidate": 12.30525, "delta_percent": 4.214438 },
+      "overall": { "baseline": 120.111667, "candidate": 120.432167, "delta_percent": 0.266835 }
+    },
+    "interactive_500_iteration_combined_medians": {
+      "indexing_process_wall_ms": { "baseline": 538.077375, "candidate": 538.994667, "delta_percent": 0.170476 },
+      "user_cpu_ms": { "baseline": 239.806, "candidate": 237.5835, "delta_percent": -0.926791 },
+      "peak_rss_bytes": { "baseline": 88416256, "candidate": 89849856, "delta_percent": 1.621421 },
+      "cold_indexing_ms": { "baseline": 756.514876, "candidate": 752.778084, "delta_percent": -0.493948 },
+      "edit_p95_ms": { "baseline": 1.276583, "candidate": 1.3019795, "delta_percent": 1.989412 },
+      "completion_p95_us": { "baseline": 25.167, "candidate": 24.667, "delta_percent": -1.986729 },
+      "hover_p95_us": { "baseline": 12.729, "candidate": 13.208, "delta_percent": 3.763061, "absolute_delta_us": 0.479 },
+      "definition_p95_us": { "baseline": 19.3545, "candidate": 19.2085, "delta_percent": -0.754347 },
+      "references_p95_ms": { "baseline": 5.533292, "candidate": 5.711667, "delta_percent": 3.223678, "absolute_delta_ms": 0.178376 },
+      "diagnostics_p95_us": { "baseline": 2.4585, "candidate": 2.396, "delta_percent": -2.542201 },
+      "engine_heap_bytes": { "baseline": 6367645, "candidate": 6373832, "delta_percent": 0.097163 }
+    },
+    "production_budget_runs": "28/28 passed",
+    "measurement_note": "The semantic pass, process wall, CPU, cold indexing, edit p95, peak RSS, and retained heap stay inside the focused gates. Hover moves by 0.479 microseconds and references by 0.178 milliseconds across the combined two-repeat sample; both remain timer/noise-scale relative to fixed 25 ms and 50 ms budgets. The replace/resolve subphase moves by 0.498 ms while complete file processing is +0.30%.",
+    "decision": "Accepted for this inference slice. There is no material cold, edit, semantic-pass, CPU, RSS, heap, or query-budget regression."
+  },
+  "distribution_checks": {
+    "shell_and_javascript_syntax": "passed",
+    "manifest_version_consistency": "all distribution manifests match 0.2.6",
+    "npm_audit_notice": "The VSIX dependency install reported two high-severity npm audit findings; packaging and the archive smoke still completed successfully. This slice did not change dependency versions.",
+    "npm_install_smoke": "The current darwin-arm64 binary and both npm packages were rebuilt, packed, installed in a clean project, and completed a real LSP initialize plus JRuby implementation-navigation check. The platform tarball contained core-rbs/constants.rbs.",
+    "current_platform_vsix_smoke": "The macos-arm64 VSIX was rebuilt and tested from the produced archive. It initialized the packaged binary with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber extensions, verified packaged ERB HTML behavior and JRuby implementation navigation, and contained core-rbs/constants.rbs."
+  },
+  "known_follow_ups": [
+    "The scorecard remains deliberately claim-ineligible despite the seed-corpus score.",
+    "Real-project transition counts are not a precision score until representative sites have reviewed ground-truth labels.",
+    "The goal-wide warm-cache, allocation, worker-scheduling, and two-project RSS matrix remain open.",
+    "Unsupported Ruby and unresolved dependency forms must remain explained Unknown until a complete shared proof rule is implemented."
+  ]
+}

@@ -231,3 +231,59 @@ end
     )
     .await;
 }
+
+#[tokio::test]
+async fn unresolved_superclass_blocks_unrelated_top_level_return_type() {
+    check(
+        r#"
+def validate(filename)
+  "top-level"
+end
+
+class SupplierForm < ExternalFormModel
+  validate<hover label="?"> :supplier, :provider
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn nested_class_does_not_publish_an_unproven_top_level_return_type() {
+    check(
+        r#"
+def validate(filename)
+  "top-level"
+end
+
+class SupplierForm
+  validate<hover label="?"> :supplier, :provider
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn implicit_receiver_in_unproven_block_is_unknown() {
+    check(
+        r#"
+class Processor
+  def label
+    "lexical"
+  end
+
+  def configure(&block)
+    Object.new.instance_exec(&block)
+  end
+
+  def run
+    configure do
+      label<hover label="Unknown[unknown_receiver]">
+    end
+  end
+end
+"#,
+    )
+    .await;
+}

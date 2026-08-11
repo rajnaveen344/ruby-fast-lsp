@@ -1,11 +1,11 @@
 schema_version = 1
 name = "Ruby Fast LSP type inference conformance"
-corpus_revision = "m0-seed-15"
-score_eligible = false
+corpus_revision = "m0-seed-27"
+score_eligible = true
 target_score = 90
 critical_category_minimum = 85
 minimum_cases_for_claim = 50
-notes = "M0 seed corpus with 77 reviewed cases. Proven multiline chained-call inlays, source-ordered owner isolation, exact nonlocal-read and call-expression proof outcomes, deferred complete-graph finalization, exhaustive reopened-call unions, visibility-complete explicit dispatch, cross-file recursive return components, Unknown reassignment invalidation, and fail-closed unresolved or inaccessible chains are covered. Differential CLI/LSP parity covers method returns, parameters, constants, local and nonlocal variable assignments, concrete and explained-Unknown variable reads and calls, proven chain expressions, deferred mixin dispatch, reopened implicit/explicit dispatch, and cross-file recursive calls. Differential CLI/LSP diagnostic parity now covers unresolved-method with suggestions, unresolved-constant, missing-kwarg, unmatched YARD parameters, YARD/RBS return conflicts, unresolved require, parser syntax errors, and deterministic multi-diagnostic order; the measured score is diagnostic only until real-project reductions, representative diagnostic precision, and full performance baselines are complete."
+notes = "M0 corpus with 96 reviewed cases. Proven multiline chained-call inlays, embedded core runtime value constants, proof-checked deferred chained receivers and constructor origins, source-ordered owner isolation, exact local/nonlocal-read and call-expression proof outcomes, explicit parameter contracts through flow, explicit unmatched ordinary-case joins, raising unmatched pattern-case flow, unresolved flow joins as receiver proof barriers, short-circuit assignment joins, exception-prefix rescue joins, deferred complete-graph finalization, exhaustive reopened-call unions, visibility-complete explicit dispatch, cross-file recursive return components, namespaced value-constant dispatch, complete positional parameter shapes, attribute-macro ownership, Unknown reassignment invalidation, and fail-closed unresolved or inaccessible ancestry and top-level chains are covered. Differential CLI/LSP parity covers method returns, parameters, constants, local and nonlocal variable assignments, concrete and explained-Unknown variable reads and calls, proven chain expressions, deferred mixin dispatch, reopened implicit/explicit dispatch, and cross-file recursive calls. Differential CLI/LSP diagnostic parity covers unresolved-method with suggestions, unresolved-constant, missing-kwarg, unmatched YARD parameters, YARD/RBS return conflicts, unresolved require, parser syntax errors, and deterministic multi-diagnostic order. Eligibility is enabled after the separate 13-case, five-project reviewed precision corpus passed with zero false positives and the recorded seven-run deterministic performance/RSS matrix passed."
 
 [[categories]]
 id = "literals_collections"
@@ -173,6 +173,82 @@ class Builder
 end
 
 Builder.new.build.name<hover label="String">
+'''
+
+[[cases]]
+id = "embedded_core_value_constant_chain"
+category = "calls_dispatch"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Universal runtime value constants use embedded core RBS as proof, and nested call analysis preserves the value type instead of treating the constant as a class object."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+ARGV.first.upcase<hover label="String">
+'''
+
+[[cases]]
+id = "cross_file_module_constructor_chain_fails_closed"
+category = "calls_dispatch"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "Deferred chained-receiver resolution validates the complete graph declaration kind; a module is never guessed to be a class merely because source calls `new`."
+
+[[cases.files]]
+path = "factory_like.rb"
+fixture = '''
+module FactoryLike
+end
+'''
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+FactoryLike.new.to_s<hover label="Unknown[unknown_receiver]">
+'''
+
+[[cases]]
+id = "constructor_origin_is_proof_checked"
+category = "calls_dispatch"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "An instance initialize in a proven class supplies Ruby's constructor result, while an explicit self.new with an unproven body remains Unknown instead of inheriting built-in constructor semantics."
+
+[[cases.files]]
+path = "widget.rb"
+fixture = '''
+class Widget
+  def initialize(value = nil)
+  end
+
+  def label
+    "widget"
+  end
+end
+'''
+
+[[cases.files]]
+path = "factory.rb"
+fixture = '''
+class Factory
+  def self.new
+    dynamic_factory
+  end
+end
+'''
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+Widget.new.label<hover label="String">
+Factory.new.to_s<hover label="Unknown[unresolved_method_return]">
 '''
 
 [[cases]]
@@ -909,6 +985,192 @@ end
 '''
 
 [[cases]]
+id = "ordinary_case_without_else_retains_unmatched_path"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An ordinary case without else has an explicit unmatched path: its expression result is nil and its post-state preserves bindings that entered the case."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def choose(flag)<hint label=" -> (Integer | String)">
+  value = 1
+  case flag
+  when true
+    value = "ready"
+  end
+  value<hover label="(Integer | String)">
+end
+
+def maybe(flag)<hint label=" -> (NilClass | String)">
+  case flag
+  when true then "ready"
+  end
+end
+'''
+
+[[cases]]
+id = "ordinary_case_join_blocks_partial_local_dispatch"
+category = "flow"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A method available on only one member of the exhaustive local join cannot become a concrete chained-call result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def normalize(flag)
+  value = 1
+  case flag
+  when true
+    value = "ready"
+  end
+  value.upcase<hover label="Unknown[incomplete_union_member]">
+end
+'''
+
+[[cases]]
+id = "pattern_case_without_else_uses_only_reaching_paths"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An unmatched case/in without else raises NoMatchingPatternError, so only matched branches can reach the following local read and chained call. Supplemental breadth is intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def normalize<hint label=" -> String">
+  case { name: "Ada" }
+  in { name: value }
+    value
+  end
+  value<hover label="String">.upcase
+end
+'''
+
+[[cases]]
+id = "unresolved_flow_join_is_a_receiver_proof_barrier"
+category = "flow"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+repeat = 2
+rationale = "One unresolved reaching branch absorbs a later concrete syntactic assignment. Hover and completion must consume the exact flow Unknown instead of recovering Product from source text. Supplemental safety coverage is intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Product
+  def label(prefix)
+    "label"
+  end
+end
+
+def normalize(flag)
+  if flag
+    value = dynamic_value
+  else
+    value = Product.new
+  end
+  value<hover label="Unknown[unresolved_assignment_value]">.label<hover label="Unknown[unknown_receiver]">("x")
+  value.$0
+  <complete excludes="label">
+end
+'''
+
+[[cases]]
+id = "explicit_parameter_contract_seeds_flow"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A proven YARD parameter contract seeds the shared flow environment. A same-type branch assignment preserves that proof for hover, completion, and chained dispatch. Supplemental coverage is intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+# @param value [String]
+def normalize(value)
+  if value.empty?
+    value = "fallback"
+  end
+  value<hover label="String">.upcase
+  value.$0
+  <complete items="upcase">
+end
+'''
+
+[[cases]]
+id = "short_circuit_assignment_joins_both_reaching_receivers"
+category = "flow"
+points = 0
+expectation = "proof_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "The right operand of &&/|| executes conditionally. Each post-expression local therefore retains the exhaustive pre-write and right-write union, and chained dispatch stays Unknown when one receiver member does not implement the method. Supplemental safety coverage is intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Product
+end
+
+def normalize(flag)
+  value = Product.new
+  flag && (value = "fallback")
+  value<hover label="(Product | String)">.upcase<hover label="Unknown[incomplete_union_member]">
+
+  alternate = Product.new
+  flag || (alternate = "fallback")
+  alternate<hover label="(Product | String)">.upcase<hover label="Unknown[incomplete_union_member]">
+end
+'''
+
+[[cases]]
+id = "rescue_entry_joins_every_assignment_prefix"
+category = "flow"
+points = 0
+expectation = "proof_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "An exception may transfer control before or after each protected-body assignment. Rescue receiver and call types must include every reachable local value instead of borrowing only the pre-body environment. Supplemental safety coverage is intentionally unscored."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Product
+  def normalize
+    1
+  end
+end
+
+class Text
+  def normalize
+    "text"
+  end
+end
+
+def normalize
+  value = Product.new
+  begin
+    value = Text.new
+    dangerous
+  rescue
+    value<hover label="(Product | Text)">.normalize<hover label="(Integer | String)">
+  end
+end
+'''
+
+[[cases]]
 id = "nonbreaking_loop_prunes_branch"
 category = "flow"
 points = 0
@@ -1504,6 +1766,22 @@ end
 '''
 
 [[cases]]
+id = "local_read_with_unresolved_binding_is_explained"
+category = "lifecycle_parity"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A local read whose reaching binding value is unproven remains Unknown with the same stable assignment-proof reason used by the shared engine and CLI."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+value = dynamic_value
+value<hover label="Unknown[unresolved_assignment_value]">
+'''
+
+[[cases]]
 id = "call_with_unknown_receiver_is_explained"
 category = "lifecycle_parity"
 points = 0
@@ -1767,6 +2045,195 @@ class String
   # @return <warn code="yard-rbs-mismatch">[String]</warn>
   def length
     1
+  end
+end
+'''
+
+[[cases]]
+id = "namespaced_value_constant_uses_value_receiver_shape"
+category = "calls_dispatch"
+points = 0
+expectation = "proof_safety"
+allow_unknown = false
+baseline = "pass"
+rationale = "A namespaced value constant dispatches on its proven Array or Hash value type instead of being guessed to be a class object or falling through to an unrelated top-level method."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def find(transaction_id)
+  transaction_id
+end
+
+module Catalog
+  VALUES = [1, 2]
+  LABELS = { "one" => 1 }
+end
+
+<warn none code="wrong-arity">Catalog::VALUES.find { |value| value == 2 }</warn>
+<warn none code="wrong-arity">Catalog::LABELS.find { |name, _value| name == "one" }</warn>
+'''
+
+[[cases]]
+id = "captured_local_unknown_reassignment_blocks_stale_dispatch"
+category = "flow"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A captured local invalidates its earlier concrete receiver proof after an unresolved reassignment, suppressing diagnostics that would rely on the stale type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class Formatter
+  def render(value)
+    value
+  end
+end
+
+def process(enabled, items)
+  formatter = Formatter.new
+  formatter.render("known") if enabled
+  formatter = dynamic_formatter
+  items.each do
+    <warn none code="wrong-arity">formatter.render</warn>
+  end
+end
+'''
+
+[[cases]]
+id = "unresolved_superclass_blocks_unrelated_top_level_fallback"
+category = "calls_dispatch"
+points = 0
+expectation = "proof_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "An unresolved superclass makes the inherited lookup chain incomplete, so a same-named top-level method cannot be used as proof for nested dispatch."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def validate(filename)
+  filename
+end
+
+class SupplierForm < ExternalFormModel
+  <warn none code="wrong-arity">validate :supplier, :provider</warn>
+end
+'''
+
+[[cases]]
+id = "nested_class_does_not_inherit_open_top_level_methods"
+category = "calls_dispatch"
+points = 0
+expectation = "proof_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A nested class body cannot prove that an unrelated open top-level method participates in its runtime lookup chain."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def validate(filename)
+  filename
+end
+
+class SupplierForm
+  <warn none code="wrong-arity">validate :supplier, :provider</warn>
+end
+'''
+
+[[cases]]
+id = "trailing_options_hash_keeps_keyword_arity_inconclusive"
+category = "methods_blocks"
+points = 0
+expectation = "proof_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "Ruby's trailing options-hash conversion prevents a definitive positional-arity claim when the declaration accepts keyword rest arguments."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def configure(path, **options)
+  [path, options]
+end
+
+options = {}
+<warn none code="wrong-arity">configure("config.yml", options)</warn>
+<warn code="wrong-arity">configure</warn>("config.yml", "extra", options)
+'''
+
+[[cases]]
+id = "post_required_parameter_has_exact_positional_shape"
+category = "methods_blocks"
+points = 0
+expectation = "diagnostic"
+allow_unknown = false
+baseline = "pass"
+rationale = "A required parameter after an optional parameter contributes to the exact accepted positional range; diagnostics use the complete declared shape."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def render(prefix = "value", body)
+  [prefix, body]
+end
+
+<warn code="wrong-arity">render</warn>
+<warn none code="wrong-arity">render("body")</warn>
+<warn none code="wrong-arity">render("prefix", "body")</warn>
+<warn code="wrong-arity">render</warn>("prefix", "body", "extra")
+'''
+
+[[cases]]
+id = "generated_attribute_writer_owns_value_parameter"
+category = "locals_scopes_attributes"
+points = 0
+expectation = "proof_safety"
+allow_unknown = false
+baseline = "pass"
+rationale = "An attr_accessor writer is represented with its required value parameter and does not inherit a conflicting zero-arity shape from another owner."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+class User
+  attr_accessor :name
+
+  def rename
+    <warn none code="wrong-arity">self.name = "Ada"</warn>
+  end
+end
+'''
+
+[[cases]]
+id = "inherited_attribute_reader_precedes_mixin_homonym"
+category = "calls_dispatch"
+points = 0
+expectation = "proof_safety"
+allow_unknown = false
+baseline = "pass"
+rationale = "MRO and declaration ownership select the inherited attribute reader before a same-named, argument-taking mixin method."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+module ApiHelpers
+  def user(id)
+    id
+  end
+end
+
+class BaseFeed
+  include ApiHelpers
+  attr_accessor :user
+end
+
+class PersonalizedFeed < BaseFeed
+  def payload
+    <warn none code="wrong-arity">user</warn>
   end
 end
 '''

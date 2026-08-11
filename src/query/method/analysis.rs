@@ -2,6 +2,7 @@ use crate::query::analysis_location::locations_for_ranges;
 use crate::query::EngineQuery;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::RubyMethod;
+use ruby_analysis::core::RubyType;
 
 use super::ResolvedMethodCallee;
 
@@ -52,6 +53,37 @@ fn resolve_method_callees_with_private(
         analysis_query.resolve_protected_method_callees(namespace_fqn, method, caller)?
     } else {
         analysis_query.resolve_public_method_callees(namespace_fqn, method)?
+    };
+
+    Some(
+        callees
+            .into_iter()
+            .map(|callee| ResolvedMethodCallee {
+                owner: callee.owner,
+                method: callee.method,
+                resolution: callee.resolution,
+                definition_locations: locations_for_ranges(&engine, callee.definition_ranges),
+            })
+            .collect(),
+    )
+}
+
+pub(super) fn resolve_method_callees_for_type(
+    query: &EngineQuery,
+    receiver_type: &RubyType,
+    method: &RubyMethod,
+    allow_private: bool,
+    protected_caller: Option<&FullyQualifiedName>,
+) -> Option<Vec<ResolvedMethodCallee>> {
+    let engine = query.analysis_engine()?;
+    let engine = engine.read();
+    let analysis_query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+    let callees = if allow_private {
+        analysis_query.resolve_method_callees_for_type(receiver_type, method)?
+    } else if let Some(caller) = protected_caller {
+        analysis_query.resolve_protected_method_callees_for_type(receiver_type, method, caller)?
+    } else {
+        analysis_query.resolve_public_method_callees_for_type(receiver_type, method)?
     };
 
     Some(

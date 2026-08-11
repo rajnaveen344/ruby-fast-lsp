@@ -1,0 +1,307 @@
+{
+  "schema_version": 1,
+  "measurement": "type-inference-warm-rss-storage-and-project-schedule-determinism",
+  "date": "2026-08-08",
+  "claim_eligible": false,
+  "source": {
+    "revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+    "worktree": "dirty cumulative type-inference goal worktree",
+    "measured_tracked_diff_sha256": "36c5f414837303fa37651a3d37a937415edcae97528665e1c3ce5f7c468bb452",
+    "profiler_sha256": "f3dc4fbc71b9961549be955087b276068328a965ab686f7a29e14c5c9b88e351",
+    "machine": "Apple M4 Pro, 24 GiB, macOS Darwin 25.2.0, aarch64"
+  },
+  "workload": {
+    "workspace": "/Users/naveenraj/goshposh",
+    "projects": [
+      "/Users/naveenraj/goshposh/server",
+      "/Users/naveenraj/goshposh/server-devops-5441"
+    ],
+    "config": "/tmp/ruby-fast-lsp-type-inference-two-project-20260808.json",
+    "cache": "/tmp/ruby-fast-lsp-type-inference-candidate-cache-20260808",
+    "extension_path": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/editors/vscode/vsix",
+    "live_definition_probes": [
+      "server/lib/workers/batch_worker.rb:1173:55",
+      "server/lib/workers/batch_worker.rb:2798:37"
+    ],
+    "command": "RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-type-inference-candidate-cache-20260808 target/release/profiler --memory --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-type-inference-two-project-20260808.json --extension-path /Users/naveenraj/sources/devtools/ruby-fast-lsp/editors/vscode/vsix --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37"
+  },
+  "accepted_storage_changes": {
+    "ruby_type_interner": "TypeStore retains one deterministic RubyType value and compact u32 ids in facts.",
+    "compact_call_outcomes": "Engine-owned call-expression outcomes retain RubyTypeId or UnknownReason and expand only at public CLI/domain boundaries.",
+    "compact_local_reads": "Concrete local-read evidence retains RubyTypeId and uses a no-allocation exact internal query.",
+    "compact_expression_subject": "Expression facts use a four-byte tagged subject id and reuse the fact's existing TextRange; expression subjects do not enter the general subject interner or per-subject hash buckets.",
+    "resolve_lifetime": "Pass-local resolution caches are dropped before resolved call outcomes are installed, and outcome installation moves the owned map instead of overlapping a full map and vector.",
+    "arena_layout_invariant": "StoredTypeFact remains exactly 24 bytes on supported 64-bit targets."
+  },
+  "rejected_storage_changes": [
+    {
+      "design": "Arc<RubyType> in every public TypeInferenceOutcome",
+      "reason": "Many small allocations increased all three warm peak-RSS samples to approximately 1.875-1.943 GB; the change was reverted."
+    },
+    {
+      "design": "StoredTypeSubject enum carrying a duplicate TextRange",
+      "reason": "It enlarged every type-fact arena entry and raised aggregate estimated engine heap to 788033822 bytes; it was replaced by the four-byte tagged id."
+    }
+  ],
+  "estimated_engine_heap_progression_bytes": {
+    "pre_storage_pass": 959589689,
+    "after_compact_call_outcomes_and_local_reads": 782208315,
+    "after_tagged_expression_subject_before_determinism_fix": 776268943,
+    "final_seven_run_median": 775775424,
+    "pre_storage_to_final_reduction": 183814265,
+    "pre_storage_to_final_reduction_percent": 19.16
+  },
+  "warm_rss_gate": {
+    "ceiling_bytes": 1776846438,
+    "persistent_gem_hits_per_run": 607,
+    "persistent_gem_producers_per_run": 0,
+    "persistent_java_hits_per_run": 169,
+    "persistent_java_producers_per_run": 0,
+    "runs": [
+      {
+        "wall_ms": 21478.504375,
+        "peak_rss_bytes": 1705885696,
+        "estimated_engine_heap_bytes": 775775163
+      },
+      {
+        "wall_ms": 20174.533,
+        "peak_rss_bytes": 1611792384,
+        "estimated_engine_heap_bytes": 775774586
+      },
+      {
+        "wall_ms": 20423.718084,
+        "peak_rss_bytes": 1675689984,
+        "estimated_engine_heap_bytes": 775775424
+      },
+      {
+        "wall_ms": 19189.666916,
+        "peak_rss_bytes": 1760493568,
+        "user_cpu_ms": 36508.794,
+        "system_cpu_ms": 6570.152,
+        "estimated_engine_heap_bytes": 775775221
+      },
+      {
+        "wall_ms": 19659.646041,
+        "peak_rss_bytes": 1544175616,
+        "user_cpu_ms": 37316.576,
+        "system_cpu_ms": 7033.37,
+        "estimated_engine_heap_bytes": 775776938
+      },
+      {
+        "wall_ms": 21140.064459,
+        "peak_rss_bytes": 1708212224,
+        "user_cpu_ms": 38622.117,
+        "system_cpu_ms": 8662.112,
+        "estimated_engine_heap_bytes": 775775917
+      },
+      {
+        "wall_ms": 19816.310416,
+        "peak_rss_bytes": 1577844736,
+        "user_cpu_ms": 37567.882,
+        "system_cpu_ms": 7190.485,
+        "estimated_engine_heap_bytes": 775775714
+      }
+    ],
+    "median_wall_ms": 20174.533,
+    "median_peak_rss_bytes": 1675689984,
+    "tightest_headroom_bytes": 16352870,
+    "passing_runs": 7,
+    "total_runs": 7,
+    "decision": "This original fixed series passed 7/7. A subsequent alternating exact-binary series recorded below passed only 5/7 candidate runs, so the absolute RSS gate is reopened even though the candidate improved relative to its paired legacy baseline. Relative to the approximately 30.3 s M0 warm checkpoint, the cumulative candidate remains materially faster."
+  },
+  "alternating_exact_binary": {
+    "directory": "/tmp/ruby-fast-lsp-type-inference-determinism-alternating-20260808.P6toZb",
+    "pairs": 7,
+    "order": "Baseline/candidate order reverses on every pair.",
+    "baseline_profiler_sha256": "b60116e3d023b2453fb3d79b9dafc35b930ae19fcd9c4688f0518cab01a6a36a",
+    "candidate_profiler_sha256": "e3108dfafcafd8b2bc85c1a81b9c0fb018c2014b3fb2f7abf684b9a29de1f202",
+    "baseline_medians": {
+      "wall_ms": 20518.599417,
+      "user_cpu_ms": 39286.435,
+      "system_cpu_ms": 7901.463,
+      "peak_rss_bytes": 1833418752,
+      "estimated_engine_heap_bytes": 776269761
+    },
+    "candidate_medians": {
+      "wall_ms": 20554.53175,
+      "user_cpu_ms": 38737.772,
+      "system_cpu_ms": 8042.059,
+      "peak_rss_bytes": 1722761216,
+      "estimated_engine_heap_bytes": 775775772
+    },
+    "candidate_delta_percent": {
+      "wall": 0.1751,
+      "user_cpu": -1.3966,
+      "system_cpu": 1.7794,
+      "peak_rss": -6.0356,
+      "estimated_engine_heap": -0.0636
+    },
+    "candidate_peak_rss_samples_bytes": [
+      1652457472,
+      2013118464,
+      2024423424,
+      1740619776,
+      1722761216,
+      1575550976,
+      1558953984
+    ],
+    "candidate_rss_ceiling_passes": 5,
+    "candidate_rss_ceiling_runs": 7,
+    "persistent_products_per_run": {
+      "gem_hits": 607,
+      "gem_producers": 0,
+      "java_hits": 169,
+      "java_producers": 0
+    },
+    "baseline_semantic_fingerprints": {
+      "server": "36afcf8680cb9ea21061e3e1c958774b",
+      "server-devops-5441": "635276506b882a127169fb186649e0f5"
+    },
+    "candidate_semantic_fingerprints": {
+      "server": "c2bc224c396cef0dfc1c57bb61eb7325",
+      "server-devops-5441": "635276506b882a127169fb186649e0f5"
+    },
+    "decision": "CPU/wall/relative-memory PASS: every median delta is within the three-percent CPU/wall tolerance or improves, and the candidate removes the schedule-dependent semantic result. Absolute RSS remains OPEN because two candidate samples exceed the fixed ceiling."
+  },
+  "rejected_resource_admission_experiment": {
+    "transient_memory_mib": 384,
+    "runs": 3,
+    "median_wall_ms": 32778.725667,
+    "median_peak_rss_bytes": 1714585600,
+    "maximum_peak_rss_bytes": 1936588800,
+    "decision": "REJECT. Lowering admission from 512 to 384 MiB increased median wall time by about 59.5% versus the alternating candidate and still exceeded the RSS ceiling in one of three runs."
+  },
+  "rejected_exclusive_resolve_experiment": {
+    "profiler_sha256": "ba270db1ae86f03da305c682527169fcbc44773b9b1881fbd1af758646f6b7d0",
+    "runs": 3,
+    "median_wall_ms": 20727.38275,
+    "median_user_cpu_ms": 37490.982,
+    "median_system_cpu_ms": 6929.407,
+    "peak_rss_samples_bytes": [1705836544, 1952661504, 1967570944],
+    "decision": "REJECT AND REVERT. Giving final semantic resolution the full transient-memory claim serialized the two project resolves but two of three samples still exceeded the RSS ceiling. Concurrent final resolution was not the causal peak, so the exclusive scheduling change was removed."
+  },
+  "determinism_bug_and_fix": {
+    "bug": "Before the fix, opening batch_worker.rb for a live navigation probe before cold indexing let later project batches consume facts from earlier project files and from the target file's previous pass. Identical source/config/cache therefore produced different final semantics depending on navigation demand.",
+    "pre_fix_active_project": {
+      "semantic_fingerprint_hex": "36afcf8680cb9ea21061e3e1c958774b",
+      "diagnostic_fingerprint_sha256": "586d49d1084b5be5a6e4ecb5af3ececf19b843b25d05a5046a2321ea55b56a9b",
+      "diagnostic_count": 28460,
+      "method_reference_candidates": 865575,
+      "deferred_receiver_candidates": 230801,
+      "deferred_receiver_proven": 37597,
+      "deferred_receiver_unknown": 193204,
+      "batch_worker_export_fingerprint_hex": "15ccbaa1e981753d24b659a4ac07bc6b"
+    },
+    "pre_fix_no_probe_project": {
+      "semantic_fingerprint_hex": "c2bc224c396cef0dfc1c57bb61eb7325",
+      "diagnostic_fingerprint_sha256": "50fa7c34a47dd3c7a9c455632e69e76733a55c9c08ff4b830036ac84629ef0e2",
+      "diagnostic_count": 28103,
+      "method_reference_candidates": 865091,
+      "deferred_receiver_candidates": 230734,
+      "deferred_receiver_proven": 36782,
+      "deferred_receiver_unknown": 193952,
+      "batch_worker_export_fingerprint_hex": "c59b7ef62112b749fcc9cbadb12bef78"
+    },
+    "fix": "One generation-owned pre-Ruby semantic baseline is captured after signatures and extension seed facts but before any Ruby project facts. All project paths receive stable file ids up front; stale Project/Excluded facts are removed from the baseline. Demanded, active, exhaustive, and JRuby replay batches read that same immutable universe while inserting results only into the live isolated engine.",
+    "post_fix_runs": [
+      {
+        "schedule": "two workers with active live probes",
+        "wall_ms": 21478.504375
+      },
+      {
+        "schedule": "two workers without navigation demand",
+        "wall_ms": 20234.128917
+      },
+      {
+        "schedule": "one project worker and one top-level task with active live probes",
+        "wall_ms": 33071.813209
+      }
+    ],
+    "final_project_semantic_fingerprints": {
+      "server": "c2bc224c396cef0dfc1c57bb61eb7325",
+      "server-devops-5441": "635276506b882a127169fb186649e0f5"
+    },
+    "final_diagnostic_manifests": {
+      "server": {
+        "fingerprint_sha256": "50fa7c34a47dd3c7a9c455632e69e76733a55c9c08ff4b830036ac84629ef0e2",
+        "count": 28103
+      },
+      "server-devops-5441": {
+        "fingerprint_sha256": "4c239e105f3df71fb707c6e188e6f2450a0a0a96c9a5b702d641a9a664753880",
+        "count": 27844
+      }
+    },
+    "final_proof_counters": {
+      "ambiguous_method_return_cache_hits": 46096,
+      "ambiguous_method_return_cache_misses": 2745,
+      "method_reference_candidates": 865091,
+      "deferred_receiver_candidates": 230734,
+      "deferred_receiver_proven": 36782,
+      "deferred_receiver_unknown": 193952
+    },
+    "decision": "PASS. Active/no-active and concurrent/sequential schedules produce identical semantic fingerprints, diagnostic hashes/counts, batch_worker export identity, and proof counters."
+  },
+  "allocation_profile": {
+    "pre_storage_profile": {
+      "directory": "/tmp/ruby-fast-lsp-type-inference-dhat-symbolized-20260808.U3tao3",
+      "total_allocated_bytes": 68915632045,
+      "total_allocated_blocks": 203827446,
+      "global_max_live_bytes": 1782202721,
+      "global_max_live_blocks": 11444331,
+      "rusage_peak_rss_bytes": 2253701120,
+      "limitation": "This symbolized DHAT run predates the final compact outcome/expression storage and project-baseline fix."
+    },
+    "final_source_profile": {
+      "directory": "/tmp/ruby-fast-lsp-type-inference-final-dhat-20260808.lvZNSy",
+      "profiler_sha256": "945485d118d9595fdc5405a786ff4f5d5f268acc9719808bd9d3ae0417bbede5",
+      "tracked_diff_sha256": "a3d250d625b5dde254e47285786e9571adecc87ecb2650e2c1ac1624f58ac578",
+      "total_allocated_bytes": 67856607680,
+      "total_allocated_blocks": 203385529,
+      "global_max_live_bytes": 1610707768,
+      "global_max_live_blocks": 11000307,
+      "rusage_peak_rss_bytes": 1687339008,
+      "estimated_engine_heap_bytes": 775777518,
+      "semantic_fingerprints": {
+        "server": "c2bc224c396cef0dfc1c57bb61eb7325",
+        "server-devops-5441": "635276506b882a127169fb186649e0f5"
+      },
+      "persistent_gem_hits": 607,
+      "persistent_gem_producers": 0,
+      "persistent_java_hits": 169,
+      "persistent_java_producers": 0
+    },
+    "comparison": {
+      "total_allocated_reduction_bytes": 1059024365,
+      "total_allocated_reduction_percent": 1.5367,
+      "total_block_reduction": 441917,
+      "total_block_reduction_percent": 0.2168,
+      "global_max_live_reduction_bytes": 171494953,
+      "global_max_live_reduction_percent": 9.6226,
+      "global_max_live_block_reduction": 444024,
+      "global_max_live_block_reduction_percent": 3.8799,
+      "rusage_peak_rss_reduction_bytes": 566362112,
+      "rusage_peak_rss_reduction_percent": 25.1303
+    },
+    "decision": "PASS. The final-source symbolized workload preserves the accepted semantic identities and fully warm product reuse while reducing both cumulative allocation and maximum live allocation relative to the pre-storage profile."
+  },
+  "correctness": {
+    "format_check": "cargo fmt --all -- --check: PASS",
+    "diff_check": "git diff --check: PASS",
+    "workspace_check": "cargo check --workspace: PASS",
+    "workspace_tests": "cargo test --workspace --quiet -- --test-threads=4: PASS; rbs-parser 44/44, ruby-analysis 472/472, root 1474 passed with one intentional ignore, and every other workspace/integration/doc target passed",
+    "scorecard": "88/88 reviewed cases, 100/100 points, revision m0-seed-25, baseline_matches=true, score_eligible=false, claim_eligible=false"
+  },
+  "distribution": {
+    "npm_smoke": "PASS. Rebuilt darwin-arm64 native and wrapper packages, installed both tarballs in a clean project, completed a real LSP initialize, and verified JRuby implementation navigation.",
+    "vsix_smoke": "PASS. Rebuilt the current-platform archive and initialized its packaged server with bundled RSpec, Rails, Minitest, Sinatra, and Cucumber extensions, ERB HTML behavior, core runtime RBS, CFR asset, and JRuby implementation navigation.",
+    "vsix_path": "/Users/naveenraj/sources/devtools/ruby-fast-lsp/target/ruby-fast-lsp-0.2.6.vsix",
+    "vsix_sha256": "02c037691da8ec620b2d45368d1519974d35aa42410bb632d5d80bc58b466e42",
+    "npm_native_sha256": "f98ec5af9aeb6c163d2f534cfb433b25767846593acad69d332d0f119c27d05d",
+    "vsix_native_sha256": "f98ec5af9aeb6c163d2f534cfb433b25767846593acad69d332d0f119c27d05d"
+  },
+  "remaining_gates": [
+    "Representative reviewed real-project type and diagnostic ground-truth precision.",
+    "Restore repeatable compliance with the fixed two-project RSS ceiling; the later alternating candidate passed only five of seven runs.",
+    "The scorecard must remain claim-ineligible until every goal-wide acceptance item is evidenced."
+  ]
+}

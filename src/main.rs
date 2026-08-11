@@ -7,6 +7,10 @@ use anyhow::{anyhow, Result};
 use log::{error, info};
 use tower_lsp::{LspService, Server};
 
+#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     if let Some(exit_code) = run_cli_command_if_requested().await? {

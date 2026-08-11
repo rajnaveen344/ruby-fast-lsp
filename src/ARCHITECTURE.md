@@ -308,6 +308,17 @@ replacement. Never overwrite an engine merely because startup has not reached
 project collection; that would erase document-ready navigation and potentially
 unsaved content.
 
+Cold Ruby project collection reads one immutable, generation-owned semantic
+baseline captured after signatures and extension semantic seed facts are
+installed but before any Ruby project file is collected. The coordinator
+pre-registers every project path in deterministic order and removes stale
+`Project` and `Excluded` exports from the snapshot. Demanded files, the active
+navigation frontier, exhaustive batches, and JRuby catalog-sensitive replay all
+read this same baseline while publishing their results only to the live
+isolated engine. Navigation demand may change when a file becomes queryable; it
+must never change the facts ultimately collected from identical source,
+configuration, dependency products, and extension inputs.
+
 Shared work must not imply shared semantic ownership. A reusable dependency
 product has three distinct layers:
 
@@ -417,7 +428,10 @@ The Server coordinates between LSP clients and the internal components.
 
 #### Design Decisions:
 
-- The server is the only component aware of the LSP protocol details
+- The server and root adapters own request-time LSP protocol conversion. The
+  complete `ruby-analysis` crate is editor-independent and exposes domain
+  positions, ranges, symbols, tokens, and source identities; no reusable
+  analysis module imports or depends on `tower-lsp`.
 - The server delegates actual implementation to capability modules
 - The server maintains minimal state (mostly for coordination)
 
@@ -427,6 +441,31 @@ Inference handles type analysis and integration with RBS type signatures.
 
 - **Primary Responsibility**: Infer types for Ruby expressions
 - **Secondary Responsibility**: Load and query RBS type information
+- **Coordinate Boundary**: Inference queries accept `SourceFileId`, domain
+  ranges, and UTF-8 byte offsets. Root LSP adapters convert UTF-16 positions
+  through the current `RubyDocument` generation exactly once before calling
+  inference. A crate-wide recursive architecture test rejects direct editor-
+  protocol imports and manifest dependencies anywhere in `ruby-analysis`.
+- **Core value constants**: Universal runtime values such as `ARGV` are parsed
+  from the embedded core `constants.rbs` and installed through the ordinary
+  file-owned `SourceKind::Signature` lifecycle. This proof source is available
+  without runtime stdlib discovery; the packaged physical RBS file remains the
+  navigation target. Neither the collector nor an LSP adapter synthesizes a
+  type from the constant's name.
+- **Deferred chained receivers**: A method candidate may retain the exact
+  nested call-expression range that supplies its receiver. Engine resolution
+  first finalizes the inner call against the complete graph, then admits the
+  outer dispatch only when that exact outcome is proven and its type agrees
+  with the graph node's class/module kind. Reopened methods and union returns
+  use the same fail-closed method-resolution path. A missing or ambiguous
+  outcome remains explained Unknown and cannot be replaced by constant syntax.
+- **Constructor proof**: Ruby source `initialize` becomes the callable
+  singleton `new` fact only when its instance owner is proven to be a class.
+  Its semantic return is the constructed class instance; the initializer
+  body's Ruby return is irrelevant. An explicit `self.new` remains an ordinary
+  user method whose own return must be proven, and a module declaration never
+  acquires class-constructor semantics. RBS constructors enter through the same
+  normalized method/type facts.
 
 ### 7. Handlers (`src/handlers/`)
 
@@ -488,6 +527,12 @@ Ruby version detection and version-manager integration.
    incomplete: an unresolved superclass/mixin edge makes absence inconclusive.
    The reference candidate remains available, while diagnostic and signature
    policy stay single-sourced in the engine.
+7. A call with a proven union receiver stores that canonical receiver behind
+   its existing per-call candidate metadata. The engine resolves the receiver
+   members as one fail-closed MRO/visibility group and materializes the call as
+   a reference to every exact target only when all members resolve. Method
+   existence is independent from return-type proof: an exact grouped call may
+   retain an explained Unknown return without becoming an unresolved method.
 
 ## Component Interactions
 
@@ -547,12 +592,30 @@ The modular architecture facilitates extending the server with new capabilities:
   `TypeStore::known_method_return_types` domain view. The view preserves arena
   order and filters unrelated/unknown type facts before cloning, without
   exposing store IDs or moving lookup policy out of the engine.
+- `TypeStore` interns each structurally equal `RubyType` once and retains
+  compact deterministic IDs in stored facts, resolved-call outcomes, and
+  concrete local-read evidence. Public engine and CLI/LSP domain boundaries
+  expand those IDs back to values; interned IDs never escape as semantic
+  identity.
+- A stored expression subject is one four-byte tagged ID. Its high bit marks an
+  expression and its payload reuses the fact's existing `TextRange`; expression
+  facts therefore do not duplicate a range, enter the global subject interner,
+  or allocate per-subject hash buckets. A 64-bit layout test pins
+  `StoredTypeFact` at 24 bytes.
+- Resolution drops pass-local caches before installing the owned compact
+  resolved-call map. This avoids simultaneously retaining duplicate expanded
+  outcome collections during the project-wide resolution peak.
 - AST-time local receiver inference starts from the `VariableScopes` lexical
   cursor already synchronized by `FactCollector` traversal. The existing type
   lookup walks capturable block parents, respects hard method/class boundaries,
   and applies source-order assignments without an all-scope ownership scan.
-  Editor-position queries remain location based because they do not own the
-  traversal cursor.
+  Request-time analysis queries receive the document's domain byte offset from
+  the root adapter because reusable analysis does not own protocol-coordinate
+  conversion. `ruby-analysis` has no `tower-lsp` dependency: its document,
+  analyzer, indexer, rename, hover, symbol, token, YARD, engine, and inference
+  surfaces use `SourcePosition`, `SourceRange`, `TextRange`, and domain enums.
+  Root `src/` modules alone project those records into LSP positions, ranges,
+  locations, symbol kinds, and semantic tokens.
 - A failed lexical lookup remains unknown. Fact collection does not fall back
   to scanning source lines or reparsing assignment fragments: such a fallback
   cannot preserve Ruby lexical ownership or source order and can attribute a

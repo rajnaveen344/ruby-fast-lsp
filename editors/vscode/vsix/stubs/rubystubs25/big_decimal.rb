@@ -313,7 +313,7 @@ class BigDecimal < Numeric
   #
   # ArgumentError:: If the +initial+ is a Float or Rational, and the +digits+
   #                 value is omitted, this exception is raised.
-  def initialize(initial, digits) end
+  def initialize(initial, digits = 0) end
 
   # Returns the modulus from dividing by b.
   #

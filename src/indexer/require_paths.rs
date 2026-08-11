@@ -218,10 +218,7 @@ pub fn resolve_require_path(
                 }
                 roots.push(dependency_root.clone());
             }
-            roots
-                .into_iter()
-                .map(|root| root.join(argument))
-                .collect()
+            roots.into_iter().map(|root| root.join(argument)).collect()
         }
     };
 
@@ -420,7 +417,10 @@ mod tests {
         let target = find_require_string_at_offset(source, source.find("json").unwrap()).unwrap();
         let (start, end) = target.content_byte_range(source);
         assert_eq!(&source[start..end], "platform/helpers/json");
-        assert_eq!(&source[target.start_byte..target.end_byte], "'platform/helpers/json'");
+        assert_eq!(
+            &source[target.start_byte..target.end_byte],
+            "'platform/helpers/json'"
+        );
     }
 
     #[test]

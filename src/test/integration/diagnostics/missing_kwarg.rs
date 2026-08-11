@@ -80,6 +80,21 @@ end
 }
 
 #[tokio::test]
+async fn possible_ruby_two_options_hash_keeps_required_keywords_inconclusive() {
+    check(
+        r#"
+def configure(name:)
+  name
+end
+
+options = { name: "strict" }
+<warn none code="missing-kwarg">configure(options)</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn multiple_missing_grouped() {
     // All missing required kwargs reported in one warning.
     check(

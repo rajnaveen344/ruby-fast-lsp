@@ -376,7 +376,7 @@ class String
   #    b.concat("_", b, "_", b)   #=> "sn_sn_sn"
   #
   # See also String#<<, which takes a single argument.
-  def concat(obj1, obj2, *args) end
+  def concat(*objects) end
 
   # Each +other_str+ parameter defines a set of characters to count.  The
   # intersection of these sets defines the characters to count in +str+.  Any

@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-08",
+  "slice": "proof-first Unknown barriers for unresolved local-flow joins",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "profile_single_file_sha256": "4eb75ab8d1ae2bad38276b9a37e2e8d54b4d3b2772d7f77090b0285fc50a55ab",
+      "profiler_sha256": "20a77b40870209a57f373e293e3c9d8ced6fa6cc5ead62cf0651e9598bdfd866",
+      "ruby_fast_lsp_sha256": "7bed0ccdf34b33841cc224d7202b5636d48219e9591f4421f87021daf37f4326"
+    },
+    "candidate": {
+      "profile_single_file_sha256": "7e490e28c708b63729b10b41207ab1ee5a5d877f7db0600e10772c66b6ff2aa2",
+      "profiler_sha256": "3e82eef330fa298ec0e364250b4bd8fb9e6800b3ba5e3b5b8c6602fc28ba9d19",
+      "ruby_fast_lsp_sha256": "d6c8aaa0338460399ca638006a1c264a87609b518aec04b99060f54b0beac695",
+      "tracked_diff_sha256_at_measurement": "db40fc3f7ba0ed646c8b9cbff9a3309d36ad40ccd04b4602c5e0af15f920ba28"
+    }
+  },
+  "inputs": {
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_pairs_per_repeat": 15,
+    "interactive_repeats": 2,
+    "interactive_iterations_per_process": 500,
+    "cli_fresh_processes": 5
+  },
+  "semantic_evidence": {
+    "red_reproduction": "A post-if local read with one unresolved branch and one Product.new branch was incorrectly recovered as Product from the later syntactic assignment, making Product#label appear resolved.",
+    "accepted_rule": "The exact forward-flow Unknown is an internal proof barrier. It blocks older assignment and source-text fallbacks for hover, completion, navigation, signature help, chained-call resolution, and method-return inlays while the compact engine store retains only concrete local-read types plus the machine-readable Unknown reason.",
+    "parameter_contract_rule": "A proven YARD parameter contract seeds both lexical scope assignments and the forward tracker. A later unresolved assignment still replaces that proof with Unknown.",
+    "baseline_fingerprint": "26048da84ae3a67f68351552c2829171",
+    "candidate_fingerprint": "26048da84ae3a67f68351552c2829171",
+    "scorecard": "83/83 cases, 100/100 points, score_eligible=false, claim_eligible=false",
+    "ruby_analysis_tests": "454/454",
+    "root_tests": "1467/1467 non-ignored, one ignored",
+    "workspace_tests": "cargo test --workspace -- --test-threads=4 exited 0",
+    "cli_fixture": "tests/fixtures/type_inference_unknown_reasons",
+    "cli_stdout_sha256": "f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b",
+    "cli_result": "All five fresh final-release processes were byte-identical. The repeated scorecard and lifecycle test separately pin unresolved_assignment_value for the post-join read and unknown_receiver for its call."
+  },
+  "accepted_design": {
+    "shape": "Retain concrete and Unknown exact read-site outcomes in one document-local range-sorted vector, normalize each method batch deterministically, publish only concrete entries to the sparse engine local-read map, and retain Unknown as reason evidence.",
+    "storage": "No new retained engine entries for Unknown; document-local storage is proportional only to exact reads after control flow. The measured retained engine heap is byte-identical.",
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 124.01725,
+        "candidate": 122.968666,
+        "delta_percent": -0.845515
+      },
+      "parse": {
+        "baseline": 4.560792,
+        "candidate": 4.428334,
+        "delta_percent": -2.904276
+      },
+      "direct": {
+        "baseline": 5.775875,
+        "candidate": 5.769,
+        "delta_percent": -0.11903
+      },
+      "visitor": {
+        "baseline": 98.364541,
+        "candidate": 98.030959,
+        "delta_percent": -0.339128
+      },
+      "replace_resolve": {
+        "baseline": 12.434042,
+        "candidate": 11.779916,
+        "delta_percent": -5.260767
+      },
+      "overall": {
+        "baseline": 124.654833,
+        "candidate": 123.553667,
+        "delta_percent": -0.883372
+      }
+    },
+    "interactive_repeat_1": {
+      "indexing_wall_ms": {
+        "baseline": 502.509583,
+        "candidate": 500.831,
+        "delta_percent": -0.33404
+      },
+      "user_cpu_ms": {
+        "baseline": 241.379,
+        "candidate": 234.403,
+        "delta_percent": -2.890061
+      },
+      "peak_rss_bytes": {
+        "baseline": 88997888,
+        "candidate": 90521600,
+        "delta_percent": 1.712077
+      },
+      "engine_heap_bytes": {
+        "baseline": 6367645,
+        "candidate": 6367645,
+        "delta_percent": 0.0
+      },
+      "cold_ms": {
+        "baseline": 700.400583,
+        "candidate": 691.27525,
+        "delta_percent": -1.302873
+      },
+      "edit_p50_us": {
+        "baseline": 1263.208,
+        "candidate": 1201.833,
+        "delta_percent": -4.858661
+      },
+      "edit_p95_us": {
+        "baseline": 1376.917,
+        "candidate": 1306.5,
+        "delta_percent": -5.114106
+      },
+      "completion_p50_us": {
+        "baseline": 23.708,
+        "candidate": 23.791,
+        "delta_percent": 0.350093
+      },
+      "completion_p95_us": {
+        "baseline": 27.917,
+        "candidate": 29.209,
+        "delta_percent": 4.628004
+      },
+      "hover_p50_us": {
+        "baseline": 11.75,
+        "candidate": 11.708,
+        "delta_percent": -0.357447
+      },
+      "hover_p95_us": {
+        "baseline": 13.542,
+        "candidate": 13.834,
+        "delta_percent": 2.156255
+      },
+      "definition_p50_us": {
+        "baseline": 17.584,
+        "candidate": 17.375,
+        "delta_percent": -1.188581
+      },
+      "definition_p95_us": {
+        "baseline": 22.209,
+        "candidate": 24.125,
+        "delta_percent": 8.627133
+      },
+      "references_p50_us": {
+        "baseline": 5483.375,
+        "candidate": 5475.666,
+        "delta_percent": -0.140589
+      },
+      "references_p95_us": {
+        "baseline": 5794.0,
+        "candidate": 5742.292,
+        "delta_percent": -0.89244
+      },
+      "diagnostics_p50_us": {
+        "baseline": 2.25,
+        "candidate": 2.25,
+        "delta_percent": 0.0
+      },
+      "diagnostics_p95_us": {
+        "baseline": 2.417,
+        "candidate": 2.375,
+        "delta_percent": -1.737691
+      }
+    },
+    "interactive_repeat_2": {
+      "indexing_wall_ms": {
+        "baseline": 507.981916,
+        "candidate": 500.233917,
+        "delta_percent": -1.525251
+      },
+      "user_cpu_ms": {
+        "baseline": 241.51,
+        "candidate": 234.991,
+        "delta_percent": -2.699267
+      },
+      "peak_rss_bytes": {
+        "baseline": 89063424,
+        "candidate": 90292224,
+        "delta_percent": 1.379691
+      },
+      "engine_heap_bytes": {
+        "baseline": 6367645,
+        "candidate": 6367645,
+        "delta_percent": 0.0
+      },
+      "cold_ms": {
+        "baseline": 698.372792,
+        "candidate": 699.403375,
+        "delta_percent": 0.147569
+      },
+      "edit_p50_us": {
+        "baseline": 1255.041,
+        "candidate": 1199.458,
+        "delta_percent": -4.42878
+      },
+      "edit_p95_us": {
+        "baseline": 1349.917,
+        "candidate": 1312.041,
+        "delta_percent": -2.805802
+      },
+      "completion_p50_us": {
+        "baseline": 24.083,
+        "candidate": 23.625,
+        "delta_percent": -1.901756
+      },
+      "completion_p95_us": {
+        "baseline": 29.958,
+        "candidate": 29.625,
+        "delta_percent": -1.111556
+      },
+      "hover_p50_us": {
+        "baseline": 11.75,
+        "candidate": 11.791,
+        "delta_percent": 0.348936
+      },
+      "hover_p95_us": {
+        "baseline": 14.916,
+        "candidate": 14.416,
+        "delta_percent": -3.352105
+      },
+      "definition_p50_us": {
+        "baseline": 17.584,
+        "candidate": 17.458,
+        "delta_percent": -0.716561
+      },
+      "definition_p95_us": {
+        "baseline": 23.875,
+        "candidate": 23.25,
+        "delta_percent": -2.617801
+      },
+      "references_p50_us": {
+        "baseline": 5474.416,
+        "candidate": 5463.625,
+        "delta_percent": -0.197117
+      },
+      "references_p95_us": {
+        "baseline": 5748.042,
+        "candidate": 5709.333,
+        "delta_percent": -0.673429
+      },
+      "diagnostics_p50_us": {
+        "baseline": 2.25,
+        "candidate": 2.25,
+        "delta_percent": 0.0
+      },
+      "diagnostics_p95_us": {
+        "baseline": 2.375,
+        "candidate": 2.667,
+        "delta_percent": 12.294737
+      }
+    },
+    "noise_note": "Completion p95 was +1.292 microseconds in the first repeat and -0.333 microseconds in the confirmation repeat; definition p95 was +1.916 then -0.625 microseconds. The only above-threshold increase in repeat two was +0.292 microseconds on unaffected diagnostics. These paths show no consistent regression, every affected or millisecond-scale metric stays within the gate, exact engine heap is unchanged, and every fixed budget passes.",
+    "all_fixed_budgets": "pass",
+    "decision": "accepted; the proof barrier is deterministic, every concrete consumer fails closed and recovers after edit, the semantic universe is identical, retained engine heap is byte-identical, and two independent interactive repeats show no consistent material regression"
+  }
+}

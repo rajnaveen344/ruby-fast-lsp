@@ -829,8 +829,8 @@ impl ExtensionRegistryHandle {
         );
     }
 
-    pub fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) {
-        process_call_node_with_registry(self, visitor, node, None, false);
+    pub fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) -> bool {
+        process_call_node_with_registry(self, visitor, node, None, false)
     }
 
     pub(crate) fn applicability_snapshot(
@@ -852,8 +852,8 @@ impl ExtensionRegistryHandle {
         visitor: &mut FactCollector,
         node: &CallNode,
         applicability: &ExtensionApplicabilitySnapshot,
-    ) {
-        process_call_node_with_registry(self, visitor, node, Some(applicability), true);
+    ) -> bool {
+        process_call_node_with_registry(self, visitor, node, Some(applicability), true)
     }
 
     pub(crate) fn should_track_enclosing_call_with_applicability(
@@ -1070,8 +1070,8 @@ impl ExtensionRegistryHandle {
 }
 
 impl FactCollectorExtensionHost for ExtensionRegistryHandle {
-    fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) {
-        ExtensionRegistryHandle::process_call_node(self, visitor, node);
+    fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) -> bool {
+        ExtensionRegistryHandle::process_call_node(self, visitor, node)
     }
 
     fn should_track_enclosing_call(&self, visitor: &FactCollector, node: &CallNode) -> bool {
@@ -1925,7 +1925,7 @@ pub fn validate_extension_package(path: &Path) -> Result<ExtensionStatusReport, 
 }
 
 pub fn process_call_node(visitor: &mut FactCollector, node: &CallNode) {
-    process_call_node_with_registry(&EXTENSION_REGISTRY, visitor, node, None, false);
+    let _ = process_call_node_with_registry(&EXTENSION_REGISTRY, visitor, node, None, false);
 }
 
 fn process_call_node_with_registry(
@@ -1934,7 +1934,7 @@ fn process_call_node_with_registry(
     node: &CallNode,
     applicability: Option<&ExtensionApplicabilitySnapshot>,
     tracked_call_prechecked: bool,
-) {
+) -> bool {
     let method_name = utils::utf8_str(node.name().as_slice());
     if !tracked_call_prechecked
         && !registry
@@ -1943,13 +1943,13 @@ fn process_call_node_with_registry(
             .tracked_call_names
             .contains(method_name)
     {
-        return;
+        return false;
     }
     if process_wasm_call_node(registry, visitor, node, applicability) {
-        return;
+        return true;
     }
     if registry.inner.read().has_loaded_wasm_for_call(method_name) {
-        return;
+        return false;
     }
 
     let rspec = ruby_fast_lsp_extension_rspec::extension();
@@ -1963,7 +1963,7 @@ fn process_call_node_with_registry(
     );
 
     if !rspec.indexed_call_names().contains(&method_name) {
-        return;
+        return false;
     }
 
     let ctx = call_context(visitor, node, true);
@@ -1985,12 +1985,14 @@ fn process_call_node_with_registry(
     validate_execution_contexts(rspec.id(), &ctx, &output.execution_contexts).expect(
         "INVARIANT VIOLATED: bundled native extension emitted an invalid execution context. This is a bug because native adapters must use the same validated ABI as Wasm guests. Fix: correct the context ranges, owners, targets, or provenance.",
     );
+    let handled = !output.index_patches.is_empty() || !output.execution_contexts.is_empty();
     for patch in output.index_patches {
         apply_patch(visitor, node, patch);
     }
     for context in output.execution_contexts {
         apply_execution_context(visitor, context);
     }
+    handled
 }
 
 pub fn document_symbols(uri: &str, text: &str) -> Vec<DocumentSymbol> {
@@ -2801,9 +2803,8 @@ fn apply_execution_context(visitor: &mut FactCollector, context: BlockExecutionC
         .extension_project_context
         .as_ref()
         .map(|project| project.project_uri.as_str());
-    let range = visitor
-        .document
-        .lsp_range_to_text_range(range_from_abi(context.block_range));
+    let range =
+        crate::utils::lsp::text_range(&visitor.document, range_from_abi(context.block_range));
     let mut owners = BTreeMap::new();
 
     for owner in &context.generated_owners {
@@ -5111,9 +5112,10 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                     "INVARIANT VIOLATED: extension namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
                 ))
                 .collect::<Vec<_>>();
-            let range = visitor
-                .document
-                .lsp_range_to_text_range(range_from_abi(namespace.location));
+            let range = crate::utils::lsp::text_range(
+                &visitor.document,
+                range_from_abi(namespace.location),
+            );
             visitor.direct_push_namespace_facts(
                 FullyQualifiedName::namespace(parts),
                 match namespace.kind {
@@ -5140,9 +5142,8 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                 "INVARIANT VIOLATED: extension constant name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
             ));
             let fqn = FullyQualifiedName::constant(parts);
-            let range = visitor
-                .document
-                .lsp_range_to_text_range(range_from_abi(constant.location));
+            let range =
+                crate::utils::lsp::text_range(&visitor.document, range_from_abi(constant.location));
             visitor.direct_facts.symbols.push(SymbolFact::new(
                 fqn.clone(),
                 AnalysisSymbolKind::Constant,
@@ -5164,9 +5165,10 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
             }
         }
         IndexPatch::AddReference(reference) => {
-            let range = visitor
-                .document
-                .lsp_range_to_text_range(range_from_abi(reference.location));
+            let range = crate::utils::lsp::text_range(
+                &visitor.document,
+                range_from_abi(reference.location),
+            );
             let target = match &reference.target {
                 ruby_fast_lsp_extension_api::ReferenceTarget::Namespace(namespace) => {
                     FullyQualifiedName::namespace(
@@ -5248,9 +5250,8 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                 "INVARIANT VIOLATED: extension method name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
             );
             let fqn = FullyQualifiedName::method(namespace, ruby_method);
-            let range = visitor
-                .document
-                .lsp_range_to_text_range(range_from_abi(method.location));
+            let range =
+                crate::utils::lsp::text_range(&visitor.document, range_from_abi(method.location));
             visitor.direct_push_method_fact_with_visibility(
                 fqn.namespace_parts(),
                 owner_kind,
@@ -5430,17 +5431,16 @@ fn symbol_kind_from_extension(kind: &str) -> Result<SymbolKind, String> {
 }
 
 fn source_range(visitor: &FactCollector, location: &ruby_prism::Location) -> SourceRange {
-    let range = visitor.document.prism_location_to_lsp_range(location);
+    let range = visitor.document.prism_location_to_source_range(location);
     SourceRange {
-        start: source_position(range.start),
-        end: source_position(range.end),
-    }
-}
-
-fn source_position(position: Position) -> SourcePosition {
-    SourcePosition {
-        line: position.line,
-        character: position.character,
+        start: SourcePosition {
+            line: range.start.line,
+            character: range.start.character,
+        },
+        end: SourcePosition {
+            line: range.end.line,
+            character: range.end.character,
+        },
     }
 }
 

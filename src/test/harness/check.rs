@@ -665,9 +665,7 @@ async fn run_type_check(
 
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
         let (identifier_opt, _, _ancestors, _scope_stack, _namespace_kind) =
-            analyzer.get_identifier(position);
-
-        let type_query = TypeQuery::new(uri, content.as_bytes());
+            analyzer.get_identifier_at_position(crate::utils::lsp::source_position(position));
 
         // Determine actual kind based on identifier type
         let (inferred_type, actual_kind): (Option<RubyType>, &str) = if let Some(identifier) =
@@ -678,8 +676,13 @@ async fn run_type_check(
                     let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
                     let variable_type = if let Some(doc) = doc_snapshot {
                         let scope_id = doc
-                            .find_scope_for_variable_at(name, position)
-                            .or_else(|| doc.scope_at_position(position));
+                            .find_scope_for_variable_at(
+                                name,
+                                crate::utils::lsp::source_position(position),
+                            )
+                            .or_else(|| {
+                                doc.scope_at_position(crate::utils::lsp::source_position(position))
+                            });
                         if let Some(scope_id) = scope_id {
                             let scope_id = u32::try_from(scope_id).expect(
                                 "INVARIANT VIOLATED: local variable scope id exceeded u32. \
@@ -687,18 +690,16 @@ async fn run_type_check(
                                  Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
                             );
                             let type_store = server.analysis_engine.read().type_store().clone();
-                            TypeQuery::with_type_store_for_file(
-                                uri,
-                                content.as_bytes(),
-                                &type_store,
-                                doc.analysis_file_id(),
-                            )
-                            .get_local_variable_type_at(name, scope_id, position)
+                            let byte_offset = doc.position_to_analysis_offset(
+                                crate::utils::lsp::source_position(position),
+                            );
+                            TypeQuery::with_type_store_for_file(&type_store, doc.analysis_file_id())
+                                .get_local_variable_type_at(name, scope_id, byte_offset)
                         } else {
-                            type_query.get_local_variable_type(name, position)
+                            None
                         }
                     } else {
-                        type_query.get_local_variable_type(name, position)
+                        None
                     };
                     (variable_type, "var")
                 }
@@ -710,15 +711,13 @@ async fn run_type_check(
                     let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
                     let constant_type = if let Some(doc) = doc_snapshot {
                         let type_store = server.analysis_engine.read().type_store().clone();
-                        TypeQuery::with_type_store_for_file(
-                            uri,
-                            content.as_bytes(),
-                            &type_store,
-                            doc.analysis_file_id(),
-                        )
-                        .get_constant_type_at(&constant_fqn, position)
+                        let byte_offset = doc.position_to_analysis_offset(
+                            crate::utils::lsp::source_position(position),
+                        );
+                        TypeQuery::with_type_store_for_file(&type_store, doc.analysis_file_id())
+                            .get_constant_type_at(&constant_fqn, byte_offset)
                     } else {
-                        type_query.get_constant_type_at(&constant_fqn, position)
+                        None
                     };
                     (
                         constant_type.or_else(|| Some(RubyType::Class(namespace_fqn))),
@@ -781,10 +780,8 @@ async fn run_type_check(
                                     ruby_analysis::core::FullyQualifiedName::constant(path.clone());
                                 RubyType::ClassReference(fqn)
                             }
-                            ruby_analysis::indexer::MethodReceiver::LocalVariable(name) => {
-                                type_query
-                                    .get_local_variable_type(name, position)
-                                    .unwrap_or(RubyType::Unknown)
+                            ruby_analysis::indexer::MethodReceiver::LocalVariable(_) => {
+                                RubyType::Unknown
                             }
                             _ => RubyType::Unknown,
                         };
@@ -1028,6 +1025,7 @@ async fn run_diagnostics_check(
         );
         visitor.visit(&parse_result.node());
         let file_id = visitor.document.analysis_file_id();
+        let local_read_types = visitor.local_read_type_evidence();
         let inference = visitor.inference_evidence();
         let mut engine = analysis_engine.write();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
@@ -1079,6 +1077,7 @@ async fn run_diagnostics_check(
             },
             execution_contexts: visitor.extension_execution_context_facts,
             inference,
+            local_read_types,
         };
         engine.replace_facts(
             file_id,

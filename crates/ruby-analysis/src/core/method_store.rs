@@ -91,6 +91,7 @@ pub struct MethodFact {
     pub name_range: TextRange,
     pub params: Vec<String>,
     pub param_facts: Vec<MethodParamFact>,
+    pub(crate) parameter_shape_complete: bool,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
     pub availability: MethodAvailability,
@@ -99,6 +100,10 @@ pub struct MethodFact {
 }
 
 impl MethodFact {
+    /// Construct a method declaration whose parameter shape is unavailable.
+    ///
+    /// Use `with_params` or `with_param_facts`, including with an empty
+    /// vector, when the source proves the complete parameter shape.
     pub fn new(fqn: FullyQualifiedName, owner: FullyQualifiedName, range: TextRange) -> Self {
         Self {
             fqn,
@@ -107,6 +112,7 @@ impl MethodFact {
             name_range: range,
             params: Vec::new(),
             param_facts: Vec::new(),
+            parameter_shape_complete: false,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -142,6 +148,7 @@ impl MethodFact {
             name_range: range,
             params,
             param_facts,
+            parameter_shape_complete: true,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -163,6 +170,7 @@ impl MethodFact {
             name_range: range,
             params: Vec::new(),
             param_facts: Vec::new(),
+            parameter_shape_complete: false,
             delegate_receiver: Some(delegate_receiver),
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -174,6 +182,10 @@ impl MethodFact {
     pub fn with_visibility(mut self, visibility: MethodVisibility) -> Self {
         self.visibility = visibility;
         self
+    }
+
+    pub fn has_complete_parameter_shape(&self) -> bool {
+        self.parameter_shape_complete
     }
 
     pub fn with_availability(mut self, availability: MethodAvailability) -> Self {
@@ -249,6 +261,7 @@ pub struct StoredMethodFact {
     pub name_range: TextRange,
     pub params: Vec<String>,
     pub param_facts: Vec<MethodParamFact>,
+    pub(crate) parameter_shape_complete: bool,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
     pub availability: MethodAvailability,
@@ -273,6 +286,7 @@ impl StoredMethodFact {
             name_range: range,
             params: Vec::new(),
             param_facts: Vec::new(),
+            parameter_shape_complete: false,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -297,6 +311,7 @@ impl StoredMethodFact {
             name_range: range,
             params,
             param_facts,
+            parameter_shape_complete: true,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
             availability: MethodAvailability::Available,
@@ -317,7 +332,21 @@ pub struct MethodStore {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct MethodFactId(usize);
+struct MethodFactId(u32);
+
+impl MethodFactId {
+    fn from_index(index: usize) -> Self {
+        Self(u32::try_from(index).expect(
+            "INVARIANT VIOLATED: method fact arena exceeded u32 ids. This is a bug because \
+             retained method indexes use bounded compact ids. Fix: widen MethodFactId and \
+             every stored method index together before retaining more than u32::MAX facts.",
+        ))
+    }
+
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
 
 impl MethodStore {
     pub fn new() -> Self {
@@ -444,6 +473,23 @@ impl MethodStore {
             let name = method.as_str();
             if seen.insert(name) {
                 names.push(name);
+            }
+        }
+        names
+    }
+
+    pub(crate) fn ruby_method_names_for_owner(&self, owner: FqnId) -> Vec<RubyMethod> {
+        let mut names = Vec::new();
+        let mut seen = HashSet::new();
+        let Some(facts) = self.facts_by_owner.get(&owner) else {
+            return names;
+        };
+        for fact in facts.iter().filter_map(|id| self.fact(*id)) {
+            let Some(method) = fact.method else {
+                continue;
+            };
+            if seen.insert(method) {
+                names.push(method);
             }
         }
         names
@@ -602,7 +648,7 @@ impl MethodStore {
 
     fn insert_fact(&mut self, fact: StoredMethodFact) -> MethodFactId {
         if let Some(id) = self.free_facts.pop() {
-            let slot = self.facts.get_mut(id.0).expect(
+            let slot = self.facts.get_mut(id.index()).expect(
                 "INVARIANT VIOLATED: method free list points outside fact arena. \
                  This is a bug because free ids must come from previous arena slots. \
                  Fix: only push ids returned by MethodStore::take_fact.",
@@ -616,17 +662,17 @@ impl MethodStore {
             *slot = Some(fact);
             return id;
         }
-        let id = MethodFactId(self.facts.len());
+        let id = MethodFactId::from_index(self.facts.len());
         self.facts.push(Some(fact));
         id
     }
 
     fn fact(&self, id: MethodFactId) -> Option<&StoredMethodFact> {
-        self.facts.get(id.0).and_then(Option::as_ref)
+        self.facts.get(id.index()).and_then(Option::as_ref)
     }
 
     fn take_fact(&mut self, id: MethodFactId) -> Option<StoredMethodFact> {
-        self.facts.get_mut(id.0).and_then(Option::take)
+        self.facts.get_mut(id.index()).and_then(Option::take)
     }
 
     fn clone_facts(&self, ids: &[MethodFactId]) -> Vec<StoredMethodFact> {
@@ -676,7 +722,7 @@ fn method_fact_heap_bytes(fact: &StoredMethodFact) -> usize {
 
 fn sort_method_ids_by_fqn(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.0].as_ref().expect(
+        let fact = facts[id.index()].as_ref().expect(
             "INVARIANT VIOLATED: method index points to missing fact. \
              This is a bug because indexes must be removed before arena facts. \
              Fix: remove stale ids from every MethodStore index.",
@@ -692,7 +738,7 @@ fn sort_method_ids_by_fqn(facts: &[Option<StoredMethodFact>], ids: &mut [MethodF
 
 fn sort_method_ids_by_owner(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.0].as_ref().expect(
+        let fact = facts[id.index()].as_ref().expect(
             "INVARIANT VIOLATED: method owner index points to missing fact. \
              This is a bug because indexes must be removed before arena facts. \
              Fix: remove stale ids from every MethodStore index.",
@@ -708,7 +754,7 @@ fn sort_method_ids_by_owner(facts: &[Option<StoredMethodFact>], ids: &mut [Metho
 
 fn sort_method_ids_by_file(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.0].as_ref().expect(
+        let fact = facts[id.index()].as_ref().expect(
             "INVARIANT VIOLATED: method file index points to missing fact. \
              This is a bug because indexes must be removed before arena facts. \
              Fix: remove stale ids from every MethodStore index.",

@@ -1,6 +1,5 @@
 use crate::core::{
-    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeProvenance,
-    TypeSubject,
+    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
 };
 use log::{error, trace};
 use ruby_prism::{
@@ -32,12 +31,8 @@ impl FactCollector {
         name_location: &Location<'_>,
     ) {
         self.direct_facts.symbols.push(
-            SymbolFact::new(
-                fqn,
-                SymbolKind::Constant,
-                self.direct_range(full_location),
-            )
-            .with_name_range(self.direct_range(name_location)),
+            SymbolFact::new(fqn, SymbolKind::Constant, self.direct_range(full_location))
+                .with_name_range(self.direct_range(name_location)),
         );
     }
 
@@ -134,10 +129,7 @@ impl FactCollector {
         self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
     }
 
-    pub fn process_constant_operator_write_node_entry(
-        &mut self,
-        node: &ConstantOperatorWriteNode,
-    ) {
+    pub fn process_constant_operator_write_node_entry(&mut self, node: &ConstantOperatorWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -145,10 +137,7 @@ impl FactCollector {
         self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
     }
 
-    pub fn process_constant_operator_write_node_exit(
-        &mut self,
-        node: &ConstantOperatorWriteNode,
-    ) {
+    pub fn process_constant_operator_write_node_exit(&mut self, node: &ConstantOperatorWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;

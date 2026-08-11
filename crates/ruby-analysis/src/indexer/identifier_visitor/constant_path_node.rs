@@ -31,7 +31,7 @@ impl IdentifierVisitor {
         utils::collect_namespaces(node, &mut namespaces);
 
         // Check if first two char are ::
-        let code = self.document.content.as_bytes();
+        let code = self.content().as_bytes();
         let start = node.location().start_offset();
         let end = start + 2;
         let target_str = String::from_utf8_lossy(&code[start..end]).to_string();

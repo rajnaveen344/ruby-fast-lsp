@@ -2,8 +2,8 @@
 //!
 //! Contains the data structures for representing parsed YARD documentation.
 
+use crate::core::SourceRange as Range;
 use std::fmt::{self, Display, Formatter};
-use tower_lsp::lsp_types::Range;
 
 /// Represents a YARD parameter documentation
 #[derive(Debug, Clone, PartialEq)]

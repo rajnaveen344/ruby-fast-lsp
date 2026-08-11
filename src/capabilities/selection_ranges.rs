@@ -2,6 +2,7 @@ use ruby_analysis::indexer::selection_range_chains;
 use tower_lsp::lsp_types::{SelectionRange, SelectionRangeParams};
 
 use crate::server::RubyLanguageServer;
+use crate::utils::lsp::{lsp_text_range, source_position};
 
 pub async fn handle_selection_ranges(
     server: &RubyLanguageServer,
@@ -15,7 +16,7 @@ pub async fn handle_selection_ranges(
     let offsets = params
         .positions
         .iter()
-        .map(|position| document.position_to_analysis_offset(*position))
+        .map(|position| document.position_to_analysis_offset(source_position(*position)))
         .collect::<Vec<_>>();
     let chains = selection_range_chains(
         document.analysis_file_id(),
@@ -38,7 +39,7 @@ fn selection_range_from_chain(
     let mut nested = None;
     for range in chain.into_iter().rev() {
         nested = Some(SelectionRange {
-            range: document.text_range_to_lsp_range(range),
+            range: lsp_text_range(document, range),
             parent: nested.map(Box::new),
         });
     }

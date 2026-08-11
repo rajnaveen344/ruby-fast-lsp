@@ -11,6 +11,7 @@
   "cpu": ["x64"],
   "files": [
     "bin/ruby-fast-lsp.exe",
+    "core-rbs/**",
     "jruby-decompiler/**"
   ]
 }

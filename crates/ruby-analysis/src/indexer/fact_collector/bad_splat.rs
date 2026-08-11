@@ -1,6 +1,6 @@
 use ruby_prism::{CallNode, Node};
-use tower_lsp::lsp_types::Location;
 
+use crate::core::TextRange;
 use crate::inference::RubyType;
 use crate::{utf8_str, RubyDocument};
 
@@ -9,7 +9,7 @@ pub struct BadSplatCandidate {
     pub operator: String,
     pub arg_repr: String,
     pub expected: String,
-    pub location: Location,
+    pub location: TextRange,
 }
 
 /// Check *splat and **splat arguments at a callsite for type mismatches.
@@ -28,7 +28,7 @@ pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<BadSplatCandidate>
             if let Some(expr) = splat.expression() {
                 if is_definitely_non_array(&expr, document) {
                     let arg_repr = String::from_utf8_lossy(expr.location().as_slice()).to_string();
-                    let loc = document.prism_location_to_lsp_location(&splat.location());
+                    let loc = document.prism_location_to_text_range(&splat.location());
                     entries.push(BadSplatCandidate {
                         operator: "*".to_string(),
                         arg_repr,
@@ -47,7 +47,7 @@ pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<BadSplatCandidate>
                             let arg_repr =
                                 String::from_utf8_lossy(expr.location().as_slice()).to_string();
                             let loc =
-                                document.prism_location_to_lsp_location(&assoc_splat.location());
+                                document.prism_location_to_text_range(&assoc_splat.location());
                             entries.push(BadSplatCandidate {
                                 operator: "**".to_string(),
                                 arg_repr,

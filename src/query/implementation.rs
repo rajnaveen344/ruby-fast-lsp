@@ -13,6 +13,7 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::{locations_for_ranges, non_empty_locations};
 use super::EngineQuery;
+use crate::utils::lsp::source_position;
 
 impl EngineQuery {
     /// Find implementations for the identifier at the given position.
@@ -28,7 +29,7 @@ impl EngineQuery {
     ) -> Option<Vec<Location>> {
         let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier, _, ancestors, _scope_stack, namespace_kind) =
-            analyzer.get_identifier(position);
+            analyzer.get_identifier_at_position(source_position(position));
 
         let identifier = match identifier {
             Some(id) => id,

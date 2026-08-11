@@ -20,6 +20,7 @@ pub mod ruby_method;
 pub mod ruby_namespace;
 pub mod ruby_type;
 pub mod source_file;
+pub mod source_position;
 pub mod symbol_store;
 pub mod type_inference_outcome;
 pub mod type_store;
@@ -32,8 +33,9 @@ pub use execution_context::{ExecutionContextFact, ExecutionScopeMode};
 pub use fqn_id::{ConstLookupId, FqnId};
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 pub use graph_store::{
-    GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, SemanticGraph, StoredGraphEdgeFact,
-    StoredGraphNodeFact, StoredUnresolvedGraphEdgeFact, UnresolvedGraphEdgeFact,
+    GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind, SemanticGraph,
+    StoredGraphEdgeFact, StoredGraphNodeFact, StoredSuperclassResolution,
+    StoredUnresolvedGraphEdgeFact, UnresolvedGraphEdgeFact,
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use method_return_equation::MethodReturnEquation;
@@ -53,6 +55,7 @@ pub use ruby_method::RubyMethod;
 pub use ruby_namespace::{GeneratedOwnerId, RubyConstant};
 pub use ruby_type::RubyType;
 pub use source_file::{LibraryPackageId, SourceKind};
+pub use source_position::{SourcePosition, SourceRange};
 pub use symbol_store::{StoredSymbolFact, SymbolFact, SymbolKind, SymbolStore};
 pub use type_inference_outcome::{
     InferenceEvidence, InferenceTelemetry, TypeInferenceOutcome, UnknownReason,

@@ -1,0 +1,345 @@
+schema_version = 1
+name = "Ruby Fast LSP reviewed real-project type precision"
+corpus_revision = "real-project-1"
+review_date = "2026-08-11"
+minimum_projects = 5
+minimum_cases = 12
+notes = "Pinned reductions from Rails, RSpec Core, Sinatra, Minitest, and Cucumber Ruby. Exact-type cases verify concrete proofs; diagnostic cases are reviewed single-error mutations of an upstream call shape; suppression cases verify that incomplete dynamic evidence never becomes a false-positive type diagnostic. Cases are unweighted and do not increase the 100-point inference score."
+
+[[projects]]
+id = "rails"
+repository = "https://github.com/rails/rails"
+revision = "f78cc5d12551e21262c96be59211ec16550c0e28"
+
+[[projects]]
+id = "rspec-core"
+repository = "https://github.com/rspec/rspec-core"
+revision = "aec5f49485d97908183dbe790a7fefb8baaa8091"
+
+[[projects]]
+id = "sinatra"
+repository = "https://github.com/sinatra/sinatra"
+revision = "cb22afd7902b566b6eaba6c4ea89739494a65d12"
+
+[[projects]]
+id = "minitest"
+repository = "https://github.com/minitest/minitest"
+revision = "581e7d5386def72040e49b036ba49e36e9cb14df"
+
+[[projects]]
+id = "cucumber-ruby"
+repository = "https://github.com/cucumber/cucumber-ruby"
+revision = "e12701f5607207478c32eecb97cc1f6fc4ad55b8"
+
+[[cases]]
+id = "rails_numeric_boolean_returns"
+project = "rails"
+expectation = "concrete_type"
+source_path = "activesupport/lib/active_support/core_ext/object/blank.rb"
+source_lines = "197-212"
+source_url = "https://github.com/rails/rails/blob/f78cc5d12551e21262c96be59211ec16550c0e28/activesupport/lib/active_support/core_ext/object/blank.rb#L197-L212"
+reduction = "Retain the Numeric blank?/present? literal method bodies and remove documentation only."
+rationale = "Literal boolean bodies prove exact method returns without relying on Rails runtime behavior."
+
+[[cases.files]]
+path = "rails_numeric.rb"
+fixture = '''
+class Numeric
+  def blank?<hint label=" -> FalseClass">
+    false
+  end
+
+  def present?<hint label=" -> TrueClass">
+    true
+  end
+end
+'''
+
+[[cases]]
+id = "rails_concern_dynamic_constant_result_is_not_diagnosed"
+project = "rails"
+expectation = "diagnostic_suppression"
+source_path = "activesupport/lib/active_support/concern.rb"
+source_lines = "223-229"
+source_url = "https://github.com/rails/rails/blob/f78cc5d12551e21262c96be59211ec16550c0e28/activesupport/lib/active_support/concern.rb#L223-L229"
+reduction = "Retain class_methods and its const_defined?/const_get/const_set conditional; define the surrounding module locally."
+rationale = "The dynamically selected constant value is incomplete static evidence, so module_eval must remain diagnostic-free rather than borrowing a guessed receiver type."
+
+[[cases.files]]
+path = "rails_concern.rb"
+fixture = '''
+module ConcernReduction
+  def class_methods(&class_methods_module_definition)
+    mod = const_defined?(:ClassMethods, false) ?
+      const_get(:ClassMethods) :
+      const_set(:ClassMethods, Module.new)
+
+    <warn none code="unresolved-method">mod.module_eval(&class_methods_module_definition)</warn>
+  end
+end
+'''
+
+[[cases]]
+id = "rails_concern_extra_argument_is_proven"
+project = "rails"
+expectation = "diagnostic"
+source_path = "activesupport/lib/active_support/concern.rb"
+source_lines = "223-229"
+source_url = "https://github.com/rails/rails/blob/f78cc5d12551e21262c96be59211ec16550c0e28/activesupport/lib/active_support/concern.rb#L223-L229"
+reduction = "Retain the upstream zero-positional-parameter signature and mutate one call by adding a positional argument."
+rationale = "The declaration and call shape are complete, so the single extra positional argument proves wrong-arity."
+
+[[cases.files]]
+path = "rails_concern_arity.rb"
+fixture = '''
+class ConcernReduction
+  def self.class_methods(&block)
+    block
+  end
+end
+
+ConcernReduction.<warn code="wrong-arity">class_methods</warn>(:unexpected)
+'''
+
+[[cases]]
+id = "rspec_memoized_branch_is_exhaustive_union"
+project = "rspec-core"
+expectation = "concrete_type"
+source_path = "lib/rspec/core/memoized_helpers.rb"
+source_lines = "141-147"
+source_url = "https://github.com/rspec/rspec-core/blob/aec5f49485d97908183dbe790a7fefb8baaa8091/lib/rspec/core/memoized_helpers.rb#L141-L147"
+reduction = "Flatten namespaces and replace RSpec.configuration.threadsafe? with an unknown boolean parameter while preserving both constructor branches and the instance-variable write."
+rationale = "Both reachable branches construct known classes, so the result is their exhaustive normalized union."
+
+[[cases.files]]
+path = "rspec_memoized.rb"
+fixture = '''
+class ThreadsafeMemoized
+end
+
+class NonThreadSafeMemoized
+end
+
+class MemoizedHelpers
+  def initialize_memoized(threadsafe)
+    @memoized = if threadsafe
+                  ThreadsafeMemoized.new
+                else
+                  NonThreadSafeMemoized.new
+                end
+    @memoized<hover label="(NonThreadSafeMemoized | ThreadsafeMemoized)">
+  end
+end
+'''
+
+[[cases]]
+id = "rspec_dynamic_constant_receiver_is_not_diagnosed"
+project = "rspec-core"
+expectation = "diagnostic_suppression"
+source_path = "lib/rspec/core/memoized_helpers.rb"
+source_lines = "570-576"
+source_url = "https://github.com/rspec/rspec-core/blob/aec5f49485d97908183dbe790a7fefb8baaa8091/lib/rspec/core/memoized_helpers.rb#L570-L576"
+reduction = "Retain get_constant_or_yield and its dynamic example_group receiver; omit compatibility comments."
+rationale = "An unannotated parameter does not prove a receiver lookup chain, so its reflection calls cannot produce unresolved-method diagnostics."
+
+[[cases.files]]
+path = "rspec_constant.rb"
+fixture = '''
+module MemoizedHelpers
+  def self.get_constant_or_yield(example_group, name)
+    if <warn none code="unresolved-method">example_group.const_defined?(name, false)</warn>
+      <warn none code="unresolved-method">example_group.const_get(name, false)</warn>
+    else
+      yield
+    end
+  end
+end
+'''
+
+[[cases]]
+id = "rspec_get_constant_missing_name_is_proven"
+project = "rspec-core"
+expectation = "diagnostic"
+source_path = "lib/rspec/core/memoized_helpers.rb"
+source_lines = "570-576"
+source_url = "https://github.com/rspec/rspec-core/blob/aec5f49485d97908183dbe790a7fefb8baaa8091/lib/rspec/core/memoized_helpers.rb#L570-L576"
+reduction = "Retain the two-required-parameter signature and mutate one call by omitting name."
+rationale = "The static module method identity and positional signature prove the missing argument."
+
+[[cases.files]]
+path = "rspec_constant_arity.rb"
+fixture = '''
+module MemoizedHelpers
+  def self.get_constant_or_yield(example_group, name)
+    [example_group, name]
+  end
+end
+
+MemoizedHelpers.<warn code="wrong-arity">get_constant_or_yield</warn>(Object.new)
+'''
+
+[[cases]]
+id = "sinatra_settings_chain_is_not_diagnosed"
+project = "sinatra"
+expectation = "diagnostic_suppression"
+source_path = "lib/sinatra/base.rb"
+source_lines = "1016-1024"
+source_url = "https://github.com/sinatra/sinatra/blob/cb22afd7902b566b6eaba6c4ea89739494a65d12/lib/sinatra/base.rb#L1016-L1024"
+reduction = "Retain the class and instance settings methods in a standalone Base reduction."
+rationale = "The class-object call chain is resolved from actual declarations and must not create an unresolved-method diagnostic."
+
+[[cases.files]]
+path = "sinatra_settings.rb"
+fixture = '''
+class SinatraBase
+  def self.settings
+    self
+  end
+
+  def settings
+    <warn none code="unresolved-method">self.class.settings</warn>
+  end
+end
+'''
+
+[[cases]]
+id = "sinatra_get_options_hash_shape_is_valid"
+project = "sinatra"
+expectation = "diagnostic_suppression"
+source_path = "lib/sinatra/base.rb"
+source_lines = "1529-1537"
+source_url = "https://github.com/sinatra/sinatra/blob/cb22afd7902b566b6eaba6c4ea89739494a65d12/lib/sinatra/base.rb#L1529-L1537"
+reduction = "Retain get(path, opts = {}, &block), its route calls, and a minimal route declaration."
+rationale = "The optional positional options hash and forwarded block are a complete valid call shape."
+
+[[cases.files]]
+path = "sinatra_get.rb"
+fixture = '''
+class SinatraBase
+  def self.route(verb, path, options = {}, &block)
+    [verb, path, options, block]
+  end
+
+  def self.get(path, opts = {}, &block)
+    <warn none code="wrong-arity">route("GET", path, opts, &block)</warn>
+    <warn none code="wrong-arity">route("HEAD", path, opts, &block)</warn>
+  end
+end
+
+<warn none code="wrong-arity">SinatraBase.get("/", { auth: true }) { "ok" }</warn>
+'''
+
+[[cases]]
+id = "sinatra_get_missing_path_is_proven"
+project = "sinatra"
+expectation = "diagnostic"
+source_path = "lib/sinatra/base.rb"
+source_lines = "1529-1537"
+source_url = "https://github.com/sinatra/sinatra/blob/cb22afd7902b566b6eaba6c4ea89739494a65d12/lib/sinatra/base.rb#L1529-L1537"
+reduction = "Retain the one-required-path signature and mutate one call by omitting path."
+rationale = "The class method and its required positional parameter are complete proof of wrong-arity."
+
+[[cases.files]]
+path = "sinatra_get_arity.rb"
+fixture = '''
+class SinatraBase
+  def self.get(path, opts = {}, &block)
+    [path, opts, block]
+  end
+end
+
+SinatraBase.<warn code="wrong-arity">get</warn>
+'''
+
+[[cases]]
+id = "minitest_dynamic_memo_store_is_not_diagnosed"
+project = "minitest"
+expectation = "diagnostic_suppression"
+source_path = "lib/minitest/spec.rb"
+source_lines = "224-236"
+source_url = "https://github.com/minitest/minitest/blob/581e7d5386def72040e49b036ba49e36e9cb14df/lib/minitest/spec.rb#L224-L236"
+reduction = "Retain let's generated method and dynamic @_memoized fetch/write body; omit name validation."
+rationale = "The memo store is runtime-initialized and unproven in this slice, so calls on it must remain Unknown without unresolved-method diagnostics."
+
+[[cases.files]]
+path = "minitest_let.rb"
+fixture = '''
+class MinitestSpec
+  def self.let(name, &block)
+    define_method(name) do
+      <warn none code="unresolved-method">@_memoized.fetch(name) { |key| @_memoized[key] = instance_eval(&block) }</warn>
+    end
+  end
+end
+'''
+
+[[cases]]
+id = "minitest_subject_forwards_block_shape"
+project = "minitest"
+expectation = "diagnostic_suppression"
+source_path = "lib/minitest/spec.rb"
+source_lines = "239-245"
+source_url = "https://github.com/minitest/minitest/blob/581e7d5386def72040e49b036ba49e36e9cb14df/lib/minitest/spec.rb#L239-L245"
+reduction = "Retain subject's block forwarding to let and provide the matching let signature."
+rationale = "The forwarded block and symbol argument satisfy the exact declared call shape."
+
+[[cases.files]]
+path = "minitest_subject.rb"
+fixture = '''
+class MinitestSpec
+  def self.let(name, &block)
+    [name, block]
+  end
+
+  def self.subject(&block)
+    <warn none code="wrong-arity">let(:subject, &block)</warn>
+  end
+end
+'''
+
+[[cases]]
+id = "cucumber_step_registration_shape_is_valid"
+project = "cucumber-ruby"
+expectation = "diagnostic_suppression"
+source_path = "lib/cucumber/glue/dsl.rb"
+source_lines = "141-144"
+source_url = "https://github.com/cucumber/cucumber-ruby/blob/e12701f5607207478c32eecb97cc1f6fc4ad55b8/lib/cucumber/glue/dsl.rb#L141-L144"
+reduction = "Retain the step-registration defaults and proc-or-symbol forwarding; provide the matching Dsl singleton declaration."
+rationale = "One required and two optional positional parameters form a complete valid call shape."
+
+[[cases.files]]
+path = "cucumber_step.rb"
+fixture = '''
+module CucumberDsl
+  def self.register(regexp, proc_or_sym, options = {})
+    [regexp, proc_or_sym, options]
+  end
+
+  def register_rb_step_definition(regexp, symbol = nil, options = {}, &proc)
+    proc_or_sym = symbol || proc
+    <warn none code="wrong-arity">CucumberDsl.register(regexp, proc_or_sym, options)</warn>
+  end
+end
+'''
+
+[[cases]]
+id = "cucumber_registration_missing_proc_is_proven"
+project = "cucumber-ruby"
+expectation = "diagnostic"
+source_path = "lib/cucumber/glue/dsl.rb"
+source_lines = "29-31"
+source_url = "https://github.com/cucumber/cucumber-ruby/blob/e12701f5607207478c32eecb97cc1f6fc4ad55b8/lib/cucumber/glue/dsl.rb#L29-L31"
+reduction = "Retain the two-required-parameter Dsl registration signature and mutate one call by omitting proc_or_sym."
+rationale = "The singleton method identity and required positional shape prove wrong-arity."
+
+[[cases.files]]
+path = "cucumber_step_arity.rb"
+fixture = '''
+module CucumberDsl
+  def self.register(regexp, proc_or_sym, options = {})
+    [regexp, proc_or_sym, options]
+  end
+end
+
+CucumberDsl.<warn code="wrong-arity">register</warn>(/step/)
+'''

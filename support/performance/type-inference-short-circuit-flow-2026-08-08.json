@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-08",
+  "slice": "proof-first short-circuit flow joins and union completion",
+  "base_revision": "00c1028d647f9b68f643f371dbad9024bdefbb02",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "physical_memory_bytes": 25769803776,
+    "os_release": "Darwin 25.2.0"
+  },
+  "builds": {
+    "baseline": {
+      "description": "Preserved release binary from immediately before the flow-Unknown-barrier increment. The intervening increment is independently accepted in type-inference-flow-unknown-proof-barrier-2026-08-08.json.",
+      "profile_single_file_sha256": "4eb75ab8d1ae2bad38276b9a37e2e8d54b4d3b2772d7f77090b0285fc50a55ab",
+      "profiler_sha256": "20a77b40870209a57f373e293e3c9d8ced6fa6cc5ead62cf0651e9598bdfd866",
+      "ruby_fast_lsp_sha256": "7bed0ccdf34b33841cc224d7202b5636d48219e9591f4421f87021daf37f4326"
+    },
+    "candidate": {
+      "profile_single_file_sha256": "91ada7d8fe6a326d40339af27e489f66a976d3de4ceea9f693dfefa721b72d2d",
+      "profiler_sha256": "dce161c6364ac02b10b9966c187eeb90a6d6f7c4859d475c6bae71922bfb1fd6",
+      "ruby_fast_lsp_sha256": "7ef4139efbd20e6a3e99f5377df7233077c12c0c2ed259d8746c8c1d1e71b4c2",
+      "tracked_diff_sha256_at_measurement": "84800f41b2b2f0199231fe8283bf7db90527b94ae7180328638dbd7faca393f9"
+    }
+  },
+  "inputs": {
+    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_bytes": 225569,
+    "large_file_pairs": 15,
+    "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
+    "interactive_dataset_fingerprint_sha256": "4d4b95d1275c2f2366809715f980f66e9f20c05a6f38876de4d5c20c9c3d7e58",
+    "interactive_pairs_per_repeat": 7,
+    "interactive_iterations_per_pair": 100,
+    "interactive_repeats": 2,
+    "final_budget_iterations": 500,
+    "cli_fixture": "tests/fixtures/type_inference_unknown_reasons",
+    "cli_fresh_processes": 5
+  },
+  "semantic_evidence": {
+    "red_reproduction": "value = Product.new; flag && (value = \"fallback\"); value.upcase incorrectly treated the conditional assignment as unconditional, reported String for value, and could resolve String#upcase even though Product reaches the call.",
+    "accepted_short_circuit_rule": "The left operand always executes. Proven Ruby truthiness determines whether the right operand executes always, never, or conditionally. A conditional right operand joins the skipped and executed environments, and the expression result retains only left-side members that actually short-circuit plus the right result. Unproven evidence remains explained Unknown.",
+    "accepted_completion_rule": "Completion for a user-defined union receiver intersects method names across every member, requires identical parameter contracts, and unions only proven return types. A method missing from any reachable member is not offered.",
+    "architecture": "Both rules live in ruby-analysis inference/engine code. The CLI and LSP adapters consume the same engine-owned outcomes and add no type rule.",
+    "scorecard": "84/84 reviewed cases, 100/100 points, revision m0-seed-21, score_eligible=false, claim_eligible=false",
+    "ruby_analysis_tests": "458/458",
+    "root_tests": "1468/1468 non-ignored, one ignored",
+    "workspace_tests": "cargo fmt --all -- --check and cargo test --workspace -- --test-threads=4 exited 0",
+    "lifecycle": "A Text receiver transitions from concrete to (Product | Text) after a short-circuit edit and back to concrete. Hover, completion, navigation, signature help, chained-call resolution, and method-return inlays invalidate and recover together; the incomplete union call reports Unknown[incomplete_union_member].",
+    "cli_stdout_bytes": 9210,
+    "cli_stdout_sha256": "f91b37a4e42b4af43f5cf0633b1060777897b609a33633284f65d24d0427462b",
+    "cli_exit_code": 1,
+    "cli_result": "All five fresh final-release processes were byte-identical. Exit 1 is the expected diagnostic-present result for the fixture."
+  },
+  "performance": {
+    "semantic_fingerprint": "26048da84ae3a67f68351552c2829171",
+    "large_file_medians_ms": {
+      "file_processor": {
+        "baseline": 118.541583,
+        "candidate": 119.406875,
+        "delta_percent": 0.72995
+      },
+      "parse_delta_percent": 0.68881,
+      "direct_delta_percent": 0.9161,
+      "visitor": {
+        "baseline": 94.211042,
+        "candidate": 95.074667,
+        "delta_percent": 0.91669
+      },
+      "replace_resolve": {
+        "baseline": 11.979916,
+        "candidate": 11.940041,
+        "delta_percent": -0.33285
+      },
+      "overall": {
+        "baseline": 119.1335,
+        "candidate": 119.912209,
+        "delta_percent": 0.65364
+      }
+    },
+    "interactive_repeat_1_delta_percent": {
+      "indexing_wall": 2.585,
+      "indexing_user_cpu": 0.269,
+      "peak_rss": 0.293,
+      "engine_heap": 0.0,
+      "cold_wall": 3.921,
+      "edit_p95": -1.845,
+      "completion_p95": -9.897,
+      "hover_p95": -1.595,
+      "definition_p95": 5.903,
+      "references_p95": -1.419,
+      "diagnostics_p95": -1.708
+    },
+    "interactive_repeat_2_delta_percent": {
+      "indexing_wall": -0.575,
+      "indexing_user_cpu": -0.335,
+      "peak_rss": 1.216,
+      "engine_heap": 0.0,
+      "cold_wall": 0.16,
+      "edit_p95": -0.989,
+      "completion_p95": -3.376,
+      "hover_p95": -5.722,
+      "definition_p95": -14.841,
+      "references_p95": -1.129,
+      "diagnostics_p95": 6.264
+    },
+    "noise_note": "The first repeat's cold and definition movements reversed in the second repeat. The second repeat's diagnostics movement is 0.167 microseconds on an unaffected path. Exact engine heap stayed 6,367,645 bytes. No material regression reproduced, and the final fixed production budgets all passed.",
+    "final_candidate_500_iteration_budget": {
+      "indexing_total_ms": 527.425334,
+      "indexing_user_cpu_ms": 235.6,
+      "peak_rss_bytes": 90685440,
+      "engine_heap_bytes": 6367645,
+      "cold_ms": 733.386,
+      "edit_p95_ms": 1.310583,
+      "completion_p95_us": 25.958,
+      "hover_p95_us": 13.708,
+      "definition_p95_us": 19.041,
+      "references_p95_ms": 5.653708,
+      "diagnostics_p95_us": 2.375,
+      "production_budgets": "pass"
+    },
+    "decision": "Accepted as a bounded short-circuit and union-completion increment. The cumulative large-file comparison remains below one percent, repeated affected query paths show no consistent regression, and fixed production budgets pass. This does not replace the goal-wide cold/warm/allocation/schedule/two-project RSS matrix."
+  }
+}

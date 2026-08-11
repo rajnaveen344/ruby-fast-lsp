@@ -108,6 +108,18 @@ name.u$0
 }
 
 #[tokio::test]
+async fn utf16_prefix_preserves_variable_receiver_completion() {
+    check(
+        r#"
+name = "hello"
+"😀"; name.u$0
+<complete items="upcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn variable_from_array_literal() {
     check(
         r#"

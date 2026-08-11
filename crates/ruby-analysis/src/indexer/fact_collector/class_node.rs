@@ -1,4 +1,6 @@
-use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind, RubyConstant, RubyType};
+use crate::core::{
+    FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, RubyConstant, RubyType,
+};
 use crate::mixin_ref_from_node;
 use crate::LocalScopeKind as LVScopeKind;
 use log::error;
@@ -129,11 +131,12 @@ impl FactCollector {
                  This is a bug because Ruby's implicit class superclass must be representable. \
                  Fix: update RubyConstant validation or implicit superclass construction.",
             );
-            self.direct_push_edge(
+            self.direct_push_edge_with_provenance(
                 fqn.clone(),
                 &[object],
                 true,
                 GraphEdgeKind::Superclass,
+                GraphEdgeProvenance::ImplicitObject,
                 range,
             );
         }

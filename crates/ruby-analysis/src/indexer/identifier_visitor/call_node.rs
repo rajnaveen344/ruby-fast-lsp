@@ -587,7 +587,7 @@ impl IdentifierVisitor {
                         receiver,
                         iden: method,
                     }),
-                    Some(IdentifierType::MethodCall),
+                    Some(IdentifierType::MethodReference),
                     self.scope_tracker.get_ns_stack(),
                     Some(0),
                 );
@@ -618,7 +618,7 @@ impl IdentifierVisitor {
                         receiver: MethodReceiver::None,
                         iden: method,
                     }),
-                    Some(IdentifierType::MethodCall),
+                    Some(IdentifierType::MethodReference),
                     namespace,
                     Some(0),
                 );

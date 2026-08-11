@@ -20,3 +20,6 @@ editors/npm/darwin-arm64/bin/
 editors/npm/darwin-x64/bin/
 editors/npm/linux-x64/bin/
 editors/npm/win32-x64/bin/
+# Packaged core RBS copies (generated from crates/rbs-parser/rbs_types/core)
+editors/npm/*/core-rbs/
+editors/vscode/vsix/core-rbs/

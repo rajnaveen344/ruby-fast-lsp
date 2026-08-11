@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::mem::size_of;
+
+use indexmap::IndexSet;
 
 use super::file_owned_index::place_appended_file_facts;
 use super::memory_estimate::{
@@ -109,10 +112,45 @@ impl TypeFact {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StoredTypeFact {
-    subject: TypeSubjectId,
-    ruby_type: RubyType,
+    subject: StoredTypeSubject,
+    ruby_type: RubyTypeId,
     range: TextRange,
     provenance: TypeProvenance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct StoredTypeSubject(u32);
+
+impl StoredTypeSubject {
+    const EXPRESSION_TAG: u32 = 1 << 31;
+
+    fn interned(id: TypeSubjectId) -> Self {
+        assert!(
+            id.0 < Self::EXPRESSION_TAG,
+            "INVARIANT VIOLATED: the non-expression type subject interner exceeded the compact 31-bit id space. This is a bug because the high bit distinguishes range-owned expression facts. Fix: widen StoredTypeSubject and every stored subject reference together before interning 2^31 subjects."
+        );
+        Self(id.0)
+    }
+
+    fn expression() -> Self {
+        Self(Self::EXPRESSION_TAG)
+    }
+
+    fn interned_id(self) -> Option<TypeSubjectId> {
+        if self.0 == Self::EXPRESSION_TAG {
+            None
+        } else {
+            assert!(
+                self.0 < Self::EXPRESSION_TAG,
+                "INVARIANT VIOLATED: stored type subject has an unknown compact tag. This is a bug because only interned ids and the expression tag are valid. Fix: construct stored subjects through StoredTypeSubject::interned or StoredTypeSubject::expression."
+            );
+            Some(TypeSubjectId(self.0))
+        }
+    }
+
+    fn is_expression(self) -> bool {
+        self.interned_id().is_none()
+    }
 }
 
 /// Deterministic type query result.
@@ -128,8 +166,8 @@ pub enum TypeResolution {
 pub struct TypeStore {
     facts: Vec<Option<StoredTypeFact>>,
     free_facts: Vec<TypeFactId>,
-    subjects: Vec<TypeSubject>,
-    subject_ids: HashMap<TypeSubject, TypeSubjectId>,
+    subjects: IndexSet<TypeSubject>,
+    ruby_types: IndexSet<RubyType>,
     facts_by_subject: HashMap<TypeSubjectId, Vec<TypeFactId>>,
     facts_by_file: HashMap<SourceFileId, Vec<TypeFactId>>,
     file_owned_indexes_ordered: bool,
@@ -140,8 +178,8 @@ impl Default for TypeStore {
         Self {
             facts: Vec::new(),
             free_facts: Vec::new(),
-            subjects: Vec::new(),
-            subject_ids: HashMap::new(),
+            subjects: IndexSet::new(),
+            ruby_types: IndexSet::new(),
             facts_by_subject: HashMap::new(),
             facts_by_file: HashMap::new(),
             file_owned_indexes_ordered: true,
@@ -150,10 +188,57 @@ impl Default for TypeStore {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct TypeFactId(usize);
+struct TypeFactId(u32);
+
+impl TypeFactId {
+    fn from_index(index: usize) -> Self {
+        Self(u32::try_from(index).expect(
+            "INVARIANT VIOLATED: type fact arena exceeded u32 ids. This is a bug because the \
+             retained type indexes use bounded compact ids. Fix: widen TypeFactId and every \
+             stored type-fact index together before retaining more than u32::MAX facts.",
+        ))
+    }
+
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct TypeSubjectId(usize);
+struct TypeSubjectId(u32);
+
+impl TypeSubjectId {
+    fn from_index(index: usize) -> Self {
+        Self(u32::try_from(index).expect(
+            "INVARIANT VIOLATED: type subject interner exceeded u32 ids. This is a bug because \
+             every stored type fact refers to a compact subject id. Fix: widen TypeSubjectId \
+             and every stored subject reference together before interning more than u32::MAX \
+             subjects.",
+        ))
+    }
+
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct RubyTypeId(u32);
+
+impl RubyTypeId {
+    fn from_index(index: usize) -> Self {
+        Self(u32::try_from(index).expect(
+            "INVARIANT VIOLATED: Ruby type interner exceeded u32 ids. This is a bug because \
+             every stored type fact refers to a compact Ruby type id. Fix: widen RubyTypeId \
+             and every stored Ruby type reference together before interning more than \
+             u32::MAX distinct types.",
+        ))
+    }
+
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
 
 impl TypeStore {
     pub fn new() -> Self {
@@ -167,25 +252,46 @@ impl TypeStore {
         // stable sort instead of assuming the existing prefix is ordered.
         self.file_owned_indexes_ordered = false;
         let file_id = fact.range.file_id;
-        let subject = self.intern_subject(fact.subject);
+        let subject = self.store_subject(fact.subject, fact.range);
+        let ruby_type = self.intern_ruby_type(fact.ruby_type);
         let id = self.insert_fact(StoredTypeFact {
             subject,
-            ruby_type: fact.ruby_type,
+            ruby_type,
             range: fact.range,
             provenance: fact.provenance,
         });
-        self.facts_by_subject.entry(subject).or_default().push(id);
+        if let Some(subject_id) = subject.interned_id() {
+            self.facts_by_subject
+                .entry(subject_id)
+                .or_default()
+                .push(id);
+        }
         self.facts_by_file.entry(file_id).or_default().push(id);
     }
 
     pub fn facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
-        let Some(subject_id) = self.subject_ids.get(subject).copied() else {
-            return Vec::new();
-        };
-        self.facts_by_subject
-            .get(&subject_id)
-            .map(|ids| self.clone_facts(ids))
-            .unwrap_or_default()
+        match subject {
+            TypeSubject::Expression(range) => self
+                .facts_by_file
+                .get(&range.file_id)
+                .map(|ids| self.clone_expression_facts(ids, *range))
+                .unwrap_or_default(),
+            TypeSubject::Constant(_)
+            | TypeSubject::Local { .. }
+            | TypeSubject::InstanceVariable { .. }
+            | TypeSubject::ClassVariable { .. }
+            | TypeSubject::GlobalVariable(_)
+            | TypeSubject::MethodReturn(_)
+            | TypeSubject::Parameter { .. } => {
+                let Some(subject_id) = self.subject_id(subject) else {
+                    return Vec::new();
+                };
+                self.facts_by_subject
+                    .get(&subject_id)
+                    .map(|ids| self.clone_facts(ids))
+                    .unwrap_or_default()
+            }
+        }
     }
 
     /// Return the latest non-unknown type and its source range without
@@ -196,12 +302,11 @@ impl TypeStore {
         &self,
         subject: &TypeSubject,
     ) -> Option<(&RubyType, TextRange)> {
-        let subject_id = self.subject_ids.get(subject).copied()?;
-        self.facts_by_subject
-            .get(&subject_id)?
+        self.fact_ids_for_subject(subject)?
             .iter()
             .filter_map(|id| self.fact(*id))
-            .filter(|fact| fact.ruby_type != RubyType::Unknown)
+            .filter(|fact| self.stored_subject_matches(fact, subject))
+            .filter(|fact| self.ruby_type(fact.ruby_type) != &RubyType::Unknown)
             .max_by_key(|fact| {
                 (
                     fact.range.file_id,
@@ -209,7 +314,7 @@ impl TypeStore {
                     fact.range.end_byte,
                 )
             })
-            .map(|fact| (&fact.ruby_type, fact.range))
+            .map(|fact| (self.ruby_type(fact.ruby_type), fact.range))
     }
 
     pub fn all_facts(&self) -> Vec<TypeFact> {
@@ -231,18 +336,24 @@ impl TypeStore {
     ) -> impl Iterator<Item = (&FullyQualifiedName, &RubyType)> {
         self.facts.iter().filter_map(|stored| {
             let fact = stored.as_ref()?;
-            if fact.ruby_type == RubyType::Unknown {
+            let ruby_type = self.ruby_type(fact.ruby_type);
+            if ruby_type == &RubyType::Unknown {
                 return None;
             }
-            match self.subject(fact.subject) {
-                TypeSubject::MethodReturn(fqn) => Some((fqn, &fact.ruby_type)),
-                TypeSubject::Constant(_)
-                | TypeSubject::Local { .. }
-                | TypeSubject::InstanceVariable { .. }
-                | TypeSubject::ClassVariable { .. }
-                | TypeSubject::GlobalVariable(_)
-                | TypeSubject::Parameter { .. }
-                | TypeSubject::Expression(_) => None,
+            match fact.subject.interned_id() {
+                Some(subject_id) => match self.subject(subject_id) {
+                    TypeSubject::MethodReturn(fqn) => Some((fqn, ruby_type)),
+                    TypeSubject::Constant(_)
+                    | TypeSubject::Local { .. }
+                    | TypeSubject::InstanceVariable { .. }
+                    | TypeSubject::ClassVariable { .. }
+                    | TypeSubject::GlobalVariable(_)
+                    | TypeSubject::Parameter { .. } => None,
+                    TypeSubject::Expression(_) => panic!(
+                        "INVARIANT VIOLATED: an expression subject was inserted into the general type-subject interner. This is a bug because expressions must use their compact file-local range identity. Fix: route every inserted TypeSubject through TypeStore::store_subject."
+                    ),
+                },
+                None => None,
             }
         })
     }
@@ -261,14 +372,15 @@ impl TypeStore {
         let mut updated = 0usize;
         for (method, ruby_type) in updates {
             let subject = TypeSubject::MethodReturn(method.clone());
-            let Some(subject_id) = self.subject_ids.get(&subject).copied() else {
+            let Some(subject_id) = self.subject_id(&subject) else {
                 continue;
             };
+            let ruby_type = self.intern_ruby_type(ruby_type);
             let Some(fact_ids) = self.facts_by_subject.get(&subject_id).cloned() else {
                 continue;
             };
             for fact_id in fact_ids {
-                let fact = self.facts.get_mut(fact_id.0).unwrap_or_else(|| {
+                let fact = self.facts.get_mut(fact_id.index()).unwrap_or_else(|| {
                     panic!(
                         "INVARIANT VIOLATED: method-return type index points outside the fact arena. \
                          This is a bug because indexed type ids must reference allocated slots. \
@@ -285,7 +397,7 @@ impl TypeStore {
                 if fact.range.file_id != file_id || fact.provenance != TypeProvenance::Inferred {
                     continue;
                 }
-                fact.ruby_type = ruby_type.clone();
+                fact.ruby_type = ruby_type;
                 updated = updated.checked_add(1).expect(
                     "INVARIANT VIOLATED: inferred method-return update count overflowed usize. \
                      This is a bug because the count cannot exceed the bounded fact arena. \
@@ -316,10 +428,12 @@ impl TypeStore {
                 continue;
             };
             self.free_facts.push(stale_id);
-            if let Some(ids) = self.facts_by_subject.get_mut(&stale.subject) {
-                ids.retain(|id| *id != stale_id);
-                if ids.is_empty() {
-                    self.facts_by_subject.remove(&stale.subject);
+            if let Some(subject_id) = stale.subject.interned_id() {
+                if let Some(ids) = self.facts_by_subject.get_mut(&subject_id) {
+                    ids.retain(|id| *id != stale_id);
+                    if ids.is_empty() {
+                        self.facts_by_subject.remove(&subject_id);
+                    }
                 }
             }
         }
@@ -339,22 +453,30 @@ impl TypeStore {
                  This is a bug because TypeStore::replace_file must only receive facts for the target file. \
                  Fix: partition facts by SourceFileId before replacing."
             );
-            let key = self.intern_subject(fact.subject);
-            if let Some((_, appended_count)) = touched_subjects
-                .iter_mut()
-                .find(|(touched, _)| *touched == key)
-            {
-                *appended_count += 1;
-            } else {
-                touched_subjects.push((key, 1));
+            let subject = self.store_subject(fact.subject, fact.range);
+            if let Some(subject_id) = subject.interned_id() {
+                if let Some((_, appended_count)) = touched_subjects
+                    .iter_mut()
+                    .find(|(touched, _)| *touched == subject_id)
+                {
+                    *appended_count += 1;
+                } else {
+                    touched_subjects.push((subject_id, 1));
+                }
             }
+            let ruby_type = self.intern_ruby_type(fact.ruby_type);
             let id = self.insert_fact(StoredTypeFact {
-                subject: key,
-                ruby_type: fact.ruby_type,
+                subject,
+                ruby_type,
                 range: fact.range,
                 provenance: fact.provenance,
             });
-            self.facts_by_subject.entry(key).or_default().push(id);
+            if let Some(subject_id) = subject.interned_id() {
+                self.facts_by_subject
+                    .entry(subject_id)
+                    .or_default()
+                    .push(id);
+            }
             self.facts_by_file.entry(file_id).or_default().push(id);
         }
         for (subject, appended_count) in touched_subjects {
@@ -365,7 +487,7 @@ impl TypeStore {
                         appended_count,
                         file_id,
                         |id| {
-                            self.facts[id.0]
+                            self.facts[id.index()]
                                 .as_ref()
                                 .expect(
                                     "INVARIANT VIOLATED: type index points to missing fact. \
@@ -392,23 +514,17 @@ impl TypeStore {
     pub fn estimated_heap_bytes(&self) -> usize {
         vec_payload_bytes(&self.facts)
             + vec_payload_bytes(&self.free_facts)
-            + vec_payload_bytes(&self.subjects)
+            + self.subjects.capacity() * (size_of::<TypeSubject>() + size_of::<usize>() + 1)
             + self
                 .subjects
                 .iter()
                 .map(type_subject_heap_bytes)
                 .sum::<usize>()
-            + map_table_bytes(&self.subject_ids)
+            + self.ruby_types.capacity() * (size_of::<RubyType>() + size_of::<usize>() + 1)
             + self
-                .subject_ids
-                .keys()
-                .map(type_subject_heap_bytes)
-                .sum::<usize>()
-            + self
-                .facts
+                .ruby_types
                 .iter()
-                .filter_map(|fact| fact.as_ref())
-                .map(type_fact_heap_bytes)
+                .map(ruby_type_heap_bytes)
                 .sum::<usize>()
             + map_table_bytes(&self.facts_by_subject)
             + map_table_bytes(&self.facts_by_file)
@@ -428,7 +544,7 @@ impl TypeStore {
         self.facts.shrink_to_fit();
         self.free_facts.shrink_to_fit();
         self.subjects.shrink_to_fit();
-        self.subject_ids.shrink_to_fit();
+        self.ruby_types.shrink_to_fit();
         self.facts_by_subject.shrink_to_fit();
         self.facts_by_file.shrink_to_fit();
         for ids in self.facts_by_subject.values_mut() {
@@ -445,16 +561,14 @@ impl TypeStore {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> TypeResolution {
-        let Some(subject_id) = self.subject_ids.get(subject).copied() else {
-            return TypeResolution::Unresolved;
-        };
-        let Some(ids) = self.facts_by_subject.get(&subject_id) else {
+        let Some(ids) = self.fact_ids_for_subject(subject) else {
             return TypeResolution::Unresolved;
         };
 
         let Some(latest_start) = ids
             .iter()
             .filter_map(|id| self.fact(*id))
+            .filter(|fact| self.stored_subject_matches(fact, subject))
             .filter(|fact| fact.range.starts_before_or_at(file_id, byte_offset))
             .map(|fact| fact.range.start_byte)
             .max()
@@ -465,6 +579,7 @@ impl TypeStore {
         let mut candidates: Vec<TypeFact> = ids
             .iter()
             .filter_map(|id| self.fact(*id))
+            .filter(|fact| self.stored_subject_matches(fact, subject))
             .filter(|fact| fact.range.file_id == file_id && fact.range.start_byte == latest_start)
             .map(|fact| self.expand_fact(fact))
             .collect();
@@ -482,7 +597,7 @@ impl TypeStore {
 
     fn insert_fact(&mut self, fact: StoredTypeFact) -> TypeFactId {
         if let Some(id) = self.free_facts.pop() {
-            let slot = self.facts.get_mut(id.0).expect(
+            let slot = self.facts.get_mut(id.index()).expect(
                 "INVARIANT VIOLATED: type free list points outside fact arena. \
                  This is a bug because free ids must come from previous arena slots. \
                  Fix: only push ids returned by TypeStore::take_fact.",
@@ -496,17 +611,17 @@ impl TypeStore {
             *slot = Some(fact);
             return id;
         }
-        let id = TypeFactId(self.facts.len());
+        let id = TypeFactId::from_index(self.facts.len());
         self.facts.push(Some(fact));
         id
     }
 
     fn fact(&self, id: TypeFactId) -> Option<&StoredTypeFact> {
-        self.facts.get(id.0).and_then(Option::as_ref)
+        self.facts.get(id.index()).and_then(Option::as_ref)
     }
 
     fn take_fact(&mut self, id: TypeFactId) -> Option<StoredTypeFact> {
-        self.facts.get_mut(id.0).and_then(Option::take)
+        self.facts.get_mut(id.index()).and_then(Option::take)
     }
 
     fn clone_facts(&self, ids: &[TypeFactId]) -> Vec<TypeFact> {
@@ -516,41 +631,112 @@ impl TypeStore {
             .collect()
     }
 
-    fn intern_subject(&mut self, subject: TypeSubject) -> TypeSubjectId {
-        if let Some(id) = self.subject_ids.get(&subject) {
-            return *id;
+    fn clone_expression_facts(&self, ids: &[TypeFactId], range: TextRange) -> Vec<TypeFact> {
+        ids.iter()
+            .filter_map(|id| self.fact(*id))
+            .filter(|fact| fact.subject.is_expression() && fact.range == range)
+            .map(|fact| self.expand_fact(fact))
+            .collect()
+    }
+
+    fn store_subject(&mut self, subject: TypeSubject, fact_range: TextRange) -> StoredTypeSubject {
+        match subject {
+            TypeSubject::Expression(range) => {
+                assert!(
+                    range == fact_range,
+                    "INVARIANT VIOLATED: expression subject range differs from its type fact range. This is a bug because compact expression identity reuses the fact's existing range. Fix: construct the expression subject and fact from the same AST location."
+                );
+                StoredTypeSubject::expression()
+            }
+            TypeSubject::Constant(_)
+            | TypeSubject::Local { .. }
+            | TypeSubject::InstanceVariable { .. }
+            | TypeSubject::ClassVariable { .. }
+            | TypeSubject::GlobalVariable(_)
+            | TypeSubject::MethodReturn(_)
+            | TypeSubject::Parameter { .. } => {
+                let (index, _) = self.subjects.insert_full(subject);
+                StoredTypeSubject::interned(TypeSubjectId::from_index(index))
+            }
         }
-        let id = TypeSubjectId(self.subjects.len());
-        self.subjects.push(subject.clone());
-        self.subject_ids.insert(subject, id);
-        id
+    }
+
+    fn fact_ids_for_subject(&self, subject: &TypeSubject) -> Option<&[TypeFactId]> {
+        match subject {
+            TypeSubject::Expression(range) => {
+                self.facts_by_file.get(&range.file_id).map(Vec::as_slice)
+            }
+            TypeSubject::Constant(_)
+            | TypeSubject::Local { .. }
+            | TypeSubject::InstanceVariable { .. }
+            | TypeSubject::ClassVariable { .. }
+            | TypeSubject::GlobalVariable(_)
+            | TypeSubject::MethodReturn(_)
+            | TypeSubject::Parameter { .. } => self
+                .subject_id(subject)
+                .and_then(|subject_id| self.facts_by_subject.get(&subject_id))
+                .map(Vec::as_slice),
+        }
+    }
+
+    fn stored_subject_matches(&self, fact: &StoredTypeFact, subject: &TypeSubject) -> bool {
+        match (fact.subject.interned_id(), subject) {
+            (None, TypeSubject::Expression(expected)) => fact.range == *expected,
+            (Some(_), TypeSubject::Expression(_))
+            | (None, TypeSubject::Constant(_))
+            | (None, TypeSubject::Local { .. })
+            | (None, TypeSubject::InstanceVariable { .. })
+            | (None, TypeSubject::ClassVariable { .. })
+            | (None, TypeSubject::GlobalVariable(_))
+            | (None, TypeSubject::MethodReturn(_))
+            | (None, TypeSubject::Parameter { .. }) => false,
+            (Some(stored), expected) => self.subject(stored) == expected,
+        }
+    }
+
+    fn subject_id(&self, subject: &TypeSubject) -> Option<TypeSubjectId> {
+        self.subjects
+            .get_index_of(subject)
+            .map(TypeSubjectId::from_index)
     }
 
     fn subject(&self, id: TypeSubjectId) -> &TypeSubject {
-        self.subjects.get(id.0).expect(
+        self.subjects.get_index(id.index()).expect(
             "INVARIANT VIOLATED: type fact points to missing subject id. \
              This is a bug because type facts must only store interned subject ids. \
              Fix: intern type subjects before inserting facts.",
         )
     }
 
+    pub(crate) fn intern_ruby_type(&mut self, ruby_type: RubyType) -> RubyTypeId {
+        let (index, _) = self.ruby_types.insert_full(ruby_type);
+        RubyTypeId::from_index(index)
+    }
+
+    pub(crate) fn ruby_type(&self, id: RubyTypeId) -> &RubyType {
+        self.ruby_types.get_index(id.index()).expect(
+            "INVARIANT VIOLATED: type fact points to missing Ruby type id. This is a bug because \
+             stored facts must only reference interned Ruby types. Fix: intern Ruby types before \
+             inserting facts and keep the interner append-only while facts exist.",
+        )
+    }
+
     fn expand_fact(&self, fact: &StoredTypeFact) -> TypeFact {
         TypeFact {
-            subject: self.subject(fact.subject).clone(),
-            ruby_type: fact.ruby_type.clone(),
+            subject: match fact.subject.interned_id() {
+                Some(subject_id) => self.subject(subject_id).clone(),
+                None => TypeSubject::Expression(fact.range),
+            },
+            ruby_type: self.ruby_type(fact.ruby_type).clone(),
             range: fact.range,
             provenance: fact.provenance,
         }
     }
 }
 
-fn type_fact_heap_bytes(fact: &StoredTypeFact) -> usize {
-    ruby_type_heap_bytes(&fact.ruby_type)
-}
-
 fn sort_type_ids(facts: &[Option<StoredTypeFact>], ids: &mut [TypeFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.0].as_ref().expect(
+        let fact = facts[id.index()].as_ref().expect(
             "INVARIANT VIOLATED: type index points to missing fact. \
              This is a bug because indexes must be removed before arena facts. \
              Fix: remove stale ids from every TypeStore index.",
@@ -566,7 +752,7 @@ fn sort_type_ids(facts: &[Option<StoredTypeFact>], ids: &mut [TypeFactId]) {
 
 fn sort_type_ids_by_file(facts: &[Option<StoredTypeFact>], ids: &mut [TypeFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.0].as_ref().expect(
+        let fact = facts[id.index()].as_ref().expect(
             "INVARIANT VIOLATED: type file index points to missing fact. \
              This is a bug because indexes must be removed before arena facts. \
              Fix: remove stale ids from every TypeStore index.",
@@ -732,6 +918,82 @@ mod tests {
                 (&first_fqn, &RubyType::string()),
                 (&second_fqn, &RubyType::integer()),
             ]
+        );
+    }
+
+    #[test]
+    fn identical_ruby_types_share_one_internal_value() {
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            constant_subject("FIRST"),
+            RubyType::string(),
+            TextRange::new(file(), 0, 5),
+            TypeProvenance::Assignment,
+        ));
+        store.add(TypeFact::new(
+            constant_subject("SECOND"),
+            RubyType::string(),
+            TextRange::new(file(), 10, 16),
+            TypeProvenance::Assignment,
+        ));
+
+        assert_eq!(store.fact_count(), 2);
+        assert_eq!(store.ruby_types.len(), 1);
+    }
+
+    #[test]
+    fn stored_type_fact_retains_the_compact_arena_layout() {
+        assert_eq!(
+            size_of::<StoredTypeFact>(),
+            24,
+            "adding retained fields to every type fact requires real-project memory evidence"
+        );
+    }
+
+    #[test]
+    fn expression_facts_use_file_local_range_identity_without_subject_buckets() {
+        let old_range = TextRange::new(file(), 0, 5);
+        let new_range = TextRange::new(file(), 10, 15);
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            TypeSubject::Expression(old_range),
+            RubyType::string(),
+            old_range,
+            TypeProvenance::Literal,
+        ));
+
+        assert_eq!(store.subjects.len(), 0);
+        assert_eq!(store.facts_by_subject.len(), 0);
+        assert_eq!(
+            store.facts_for(&TypeSubject::Expression(old_range))[0].ruby_type,
+            RubyType::string()
+        );
+        assert!(matches!(
+            store.type_at(&TypeSubject::Expression(old_range), file(), 4),
+            TypeResolution::Resolved(TypeFact {
+                ruby_type: RubyType::Class(_),
+                ..
+            })
+        ));
+
+        store.replace_file(
+            file(),
+            [TypeFact::new(
+                TypeSubject::Expression(new_range),
+                RubyType::integer(),
+                new_range,
+                TypeProvenance::Literal,
+            )],
+        );
+
+        assert_eq!(store.subjects.len(), 0);
+        assert_eq!(store.facts_by_subject.len(), 0);
+        assert!(store
+            .facts_for(&TypeSubject::Expression(old_range))
+            .is_empty());
+        assert_eq!(
+            store.facts_for(&TypeSubject::Expression(new_range))[0].ruby_type,
+            RubyType::integer()
         );
     }
 

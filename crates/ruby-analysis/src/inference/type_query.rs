@@ -9,48 +9,34 @@
 use crate::core::FullyQualifiedName;
 use crate::core::{SourceFileId, TypeResolution, TypeStore, TypeSubject};
 use crate::inference::RubyType;
-use tower_lsp::lsp_types::{Position, Range, Url};
 
 /// Unified type query interface.
 ///
 /// Provides methods to query types for various constructs, automatically
 /// handling inference and caching.
 pub struct TypeQuery<'a> {
-    content: &'a [u8],
     type_store: Option<&'a TypeStore>,
     source_file_id: SourceFileId,
 }
 
 impl<'a> TypeQuery<'a> {
-    /// Create a new TypeQuery for a specific file.
-    pub fn new(_uri: &'a Url, content: &'a [u8]) -> Self {
+    /// Create a query without a semantic snapshot.
+    pub fn new() -> Self {
         Self {
-            content,
             type_store: None,
             source_file_id: SourceFileId(0),
         }
     }
 
-    pub fn with_type_store(uri: &'a Url, content: &'a [u8], type_store: &'a TypeStore) -> Self {
-        Self::with_type_store_for_file(uri, content, type_store, SourceFileId(0))
+    pub fn with_type_store(type_store: &'a TypeStore) -> Self {
+        Self::with_type_store_for_file(type_store, SourceFileId(0))
     }
 
     pub fn with_type_store_for_file(
-        _uri: &'a Url,
-        content: &'a [u8],
-        type_store: &'a TypeStore,
-        source_file_id: SourceFileId,
-    ) -> Self {
-        Self::with_type_store_snapshot(content, type_store, source_file_id)
-    }
-
-    pub fn with_type_store_snapshot(
-        content: &'a [u8],
         type_store: &'a TypeStore,
         source_file_id: SourceFileId,
     ) -> Self {
         Self {
-            content,
             type_store: Some(type_store),
             source_file_id,
         }
@@ -76,10 +62,9 @@ impl<'a> TypeQuery<'a> {
     pub fn get_constant_type_at(
         &self,
         fqn: &FullyQualifiedName,
-        position: Position,
+        byte_offset: u32,
     ) -> Option<RubyType> {
         if let Some(type_store) = self.type_store {
-            let byte_offset = position_to_byte_offset(self.content, position)?;
             match type_store.type_at(
                 &TypeSubject::Constant(fqn.clone()),
                 self.source_file_id,
@@ -96,7 +81,7 @@ impl<'a> TypeQuery<'a> {
 
     /// Get type for a local variable by name at a position.
     /// Checks method parameters first, then falls back to assignment inference.
-    pub fn get_local_variable_type(&self, _name: &str, _position: Position) -> Option<RubyType> {
+    pub fn get_local_variable_type(&self, _name: &str, _byte_offset: u32) -> Option<RubyType> {
         None
     }
 
@@ -104,10 +89,9 @@ impl<'a> TypeQuery<'a> {
         &self,
         name: &str,
         scope_id: u32,
-        position: Position,
+        byte_offset: u32,
     ) -> Option<RubyType> {
         if let Some(type_store) = self.type_store {
-            let byte_offset = position_to_byte_offset(self.content, position)?;
             match type_store.type_at(
                 &TypeSubject::Local {
                     scope_id,
@@ -141,16 +125,15 @@ impl<'a> TypeQuery<'a> {
                 .map(|fact| fact.ruby_type);
         }
 
-        self.get_local_variable_type(name, position)
+        self.get_local_variable_type(name, byte_offset)
     }
 
     pub fn get_method_return_type_at(
         &self,
         fqn: &FullyQualifiedName,
-        position: Position,
+        byte_offset: u32,
     ) -> Option<RubyType> {
         if let Some(type_store) = self.type_store {
-            let byte_offset = position_to_byte_offset(self.content, position)?;
             match type_store.type_at(
                 &TypeSubject::MethodReturn(fqn.clone()),
                 self.source_file_id,
@@ -164,102 +147,37 @@ impl<'a> TypeQuery<'a> {
 
         None
     }
-
-    /// Check if a position is within a range.
-    #[inline]
-    pub fn is_in_range(pos: &Position, range: &Range) -> bool {
-        (pos.line > range.start.line
-            || (pos.line == range.start.line && pos.character >= range.start.character))
-            && (pos.line < range.end.line
-                || (pos.line == range.end.line && pos.character <= range.end.character))
-    }
 }
 
-fn position_to_byte_offset(content: &[u8], position: Position) -> Option<u32> {
-    let content = std::str::from_utf8(content).ok()?;
-    let mut line = 0u32;
-    let mut character = 0u32;
-
-    for (byte_offset, ch) in content.char_indices() {
-        if line == position.line && character == position.character {
-            return u32::try_from(byte_offset).ok();
-        }
-
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
+impl Default for TypeQuery<'_> {
+    fn default() -> Self {
+        Self::new()
     }
-
-    if line == position.line && character == position.character {
-        return u32::try_from(content.len()).ok();
-    }
-
-    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{TextRange, TypeFact, TypeProvenance};
 
     #[test]
-    fn test_is_in_range() {
-        let range = Range {
-            start: Position {
-                line: 5,
-                character: 0,
-            },
-            end: Position {
-                line: 10,
-                character: 0,
-            },
-        };
-
-        // Inside range
-        assert!(TypeQuery::is_in_range(
-            &Position {
-                line: 7,
-                character: 5
-            },
-            &range
+    fn query_uses_domain_byte_offsets_without_source_or_protocol_coordinates() {
+        let file_id = SourceFileId(7);
+        let range = TextRange::new(file_id, 4, 9);
+        let fqn = FullyQualifiedName::constant(vec![crate::RubyConstant::new("VALUE").unwrap()]);
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            TypeSubject::Constant(fqn.clone()),
+            RubyType::string(),
+            range,
+            TypeProvenance::Inferred,
         ));
 
-        // At start
-        assert!(TypeQuery::is_in_range(
-            &Position {
-                line: 5,
-                character: 0
-            },
-            &range
-        ));
-
-        // At end
-        assert!(TypeQuery::is_in_range(
-            &Position {
-                line: 10,
-                character: 0
-            },
-            &range
-        ));
-
-        // Before range
-        assert!(!TypeQuery::is_in_range(
-            &Position {
-                line: 4,
-                character: 0
-            },
-            &range
-        ));
-
-        // After range
-        assert!(!TypeQuery::is_in_range(
-            &Position {
-                line: 11,
-                character: 0
-            },
-            &range
-        ));
+        let query = TypeQuery::with_type_store_for_file(&store, file_id);
+        assert_eq!(
+            query.get_constant_type_at(&fqn, 6),
+            Some(RubyType::string())
+        );
+        assert_eq!(query.get_constant_type_at(&fqn, 2), None);
     }
 }

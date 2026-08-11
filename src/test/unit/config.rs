@@ -47,11 +47,17 @@ mod tests {
 
         let config: RubyFastLspConfig = serde_json::from_value(input.clone()).unwrap();
         assert_eq!(
-            config.indexing.load_paths.paths_for_project(std::path::Path::new("/repo/server")),
+            config
+                .indexing
+                .load_paths
+                .paths_for_project(std::path::Path::new("/repo/server")),
             &["custom_lib".to_string()]
         );
         assert_eq!(
-            config.indexing.load_paths.paths_for_project(std::path::Path::new("/repo/admin")),
+            config
+                .indexing
+                .load_paths
+                .paths_for_project(std::path::Path::new("/repo/admin")),
             &["shared/lib".to_string()]
         );
         let output = serde_json::to_value(config).unwrap();

@@ -13,6 +13,7 @@ use tower_lsp::lsp_types::{
 
 use crate::query::analysis_location::locations_for_ranges;
 use crate::server::RubyLanguageServer;
+use crate::utils::lsp::{lsp_text_range, source_position};
 use ruby_analysis::core::{RubyConstant, RubyMethod};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::{Identifier, RenameVisitor, RubyDocument, RubyPrismAnalyzer};
@@ -30,17 +31,19 @@ pub async fn handle_prepare_rename(
             document.content.clone(),
             document.version,
             document.analysis_file_id(),
-            document.position_to_analysis_offset(position),
+            document.position_to_analysis_offset(source_position(position)),
         )
     };
 
     let doc = RubyDocument::new(uri.clone(), content.clone(), version);
-    let cursor_offset = doc.position_to_offset(position);
+    let cursor_offset = doc.position_to_offset(source_position(position));
     let parse_result = doc.parse();
     let root = parse_result.node();
-    let local_ranges = RenameVisitor::find_rename_targets(doc.clone(), cursor_offset, &root);
+    let local_ranges =
+        RenameVisitor::find_rename_targets(doc.analysis_file_id(), cursor_offset, &root);
     if let Some(range) = local_ranges
         .into_iter()
+        .map(|range| lsp_text_range(&doc, range))
         .find(|range| range_contains(*range, position))
     {
         return Some(PrepareRenameResponse::Range(range));
@@ -62,7 +65,7 @@ pub async fn handle_prepare_rename(
     drop(engine);
 
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
-    let (identifier, _, ancestors, _, _) = analyzer.get_identifier(position);
+    let (identifier, _, ancestors, _, _) = analyzer.get_identifier(analysis_offset);
     let Identifier::RubyConstant { iden, .. } = identifier? else {
         return None;
     };
@@ -97,17 +100,17 @@ pub async fn handle_rename(
         (
             document.content.clone(),
             document.analysis_file_id(),
-            document.position_to_analysis_offset(position),
+            document.position_to_analysis_offset(source_position(position)),
         )
     };
 
     // Parse and traverse the AST to find all rename targets
     let doc = RubyDocument::new(uri.clone(), content.clone(), 0);
-    let cursor_offset = doc.position_to_offset(position);
+    let cursor_offset = doc.position_to_offset(source_position(position));
     let parse_result = doc.parse();
     let root = parse_result.node();
 
-    let ranges = RenameVisitor::find_rename_targets(doc.clone(), cursor_offset, &root);
+    let ranges = RenameVisitor::find_rename_targets(doc.analysis_file_id(), cursor_offset, &root);
 
     let mut changes = HashMap::new();
     if !ranges.is_empty() {
@@ -115,7 +118,7 @@ pub async fn handle_rename(
             .into_iter()
             .map(|range| TextEdit {
                 new_text: new_name.clone(),
-                range,
+                range: lsp_text_range(&doc, range),
             })
             .collect();
         changes.insert(uri, edits);
@@ -150,7 +153,7 @@ pub async fn handle_rename(
 
         let new_constant = RubyConstant::new(&new_name).ok()?;
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
-        let (identifier, _, ancestors, _, _) = analyzer.get_identifier(position);
+        let (identifier, _, ancestors, _, _) = analyzer.get_identifier(analysis_offset);
         let Identifier::RubyConstant { iden, .. } = identifier? else {
             return None;
         };

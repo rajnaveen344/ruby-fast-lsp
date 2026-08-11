@@ -1,11 +1,8 @@
 use crate::core::NamespaceKind;
 use ruby_prism::{ConstantPathNode, Location as PrismLocation, Node};
-use tower_lsp::lsp_types::Location as LspLocation;
 
 use crate::constant_path_is_absolute;
 use crate::core::{FullyQualifiedName, RubyConstant};
-
-use crate::RubyDocument;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MixinRef {
@@ -104,16 +101,13 @@ pub fn fqn_from_node(
 /// # Arguments
 /// * `body_location` - Optional location from node.body().map(|b| b.location())
 /// * `node_location` - The fallback location from node.location()
-/// * `document` - The RubyDocument for converting prism locations to LSP locations
-pub fn get_body_location(
-    body_location: Option<PrismLocation>,
-    node_location: &PrismLocation,
-    document: &RubyDocument,
-) -> LspLocation {
-    if let Some(body_loc) = body_location {
-        document.prism_location_to_lsp_location(&body_loc)
-    } else {
-        document.prism_location_to_lsp_location(node_location)
+pub fn get_body_offsets(
+    body_location: Option<PrismLocation<'_>>,
+    node_location: &PrismLocation<'_>,
+) -> (usize, usize) {
+    match body_location {
+        Some(body) => (body.start_offset(), body.end_offset()),
+        None => (node_location.start_offset(), node_location.end_offset()),
     }
 }
 

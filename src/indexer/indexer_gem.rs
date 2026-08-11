@@ -3787,11 +3787,7 @@ end
         let indexer = IndexerGem::new(Some(workspace.path().to_path_buf()));
         assert_eq!(
             indexer.gemfile_required_roots_blocking().unwrap(),
-            vec![
-                "rack".to_string(),
-                "rails".to_string(),
-                "rspec".to_string()
-            ]
+            vec!["rack".to_string(), "rails".to_string(), "rspec".to_string()]
         );
         assert_eq!(
             super::parse_gemfile_gem_statement("  gem 'sinatra', require: false"),

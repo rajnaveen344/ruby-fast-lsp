@@ -3,6 +3,7 @@
 //! AST-only diagnostics (syntax errors/warnings) live here.
 //! Index-dependent diagnostics (unresolved entries, YARD issues) are in the query layer.
 
+use crate::utils::lsp::lsp_position;
 use log::debug;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::inference::control_flow;
@@ -83,7 +84,7 @@ impl<'a, 'pr> Visit<'pr> for NilCallVisitor<'a> {
                             let start = self.document.offset_to_position(msg_loc.start_offset());
                             let end = self.document.offset_to_position(msg_loc.end_offset());
                             self.diagnostics.push(Diagnostic {
-                                range: Range::new(start, end),
+                                range: Range::new(lsp_position(start), lsp_position(end)),
                                 severity: Some(DiagnosticSeverity::WARNING),
                                 code: Some(NumberOrString::String("nil-call".to_string())),
                                 code_description: None,
@@ -167,7 +168,7 @@ impl<'a> InconsistentReturnVisitor<'a> {
         let start = self.document.offset_to_position(loc.start_offset());
         let end = self.document.offset_to_position(loc.end_offset());
         self.diagnostics.push(Diagnostic {
-            range: Range::new(start, end),
+            range: Range::new(lsp_position(start), lsp_position(end)),
             severity: Some(DiagnosticSeverity::WARNING),
             code: Some(NumberOrString::String("inconsistent-return".to_string())),
             code_description: None,
@@ -263,7 +264,7 @@ impl<'a, 'pr> Visit<'pr> for UnreachableVisitor<'a> {
                 let start = self.document.offset_to_position(loc.start_offset());
                 let end = self.document.offset_to_position(loc.end_offset());
                 self.diagnostics.push(Diagnostic {
-                    range: Range::new(start, end),
+                    range: Range::new(lsp_position(start), lsp_position(end)),
                     severity: Some(DiagnosticSeverity::WARNING),
                     code: Some(NumberOrString::String("unreachable-code".to_string())),
                     code_description: None,
@@ -300,7 +301,7 @@ fn extract_syntax_diagnostics(
             let end_pos = document.offset_to_position(location.end_offset());
 
             diagnostics.push(Diagnostic {
-                range: Range::new(start_pos, end_pos),
+                range: Range::new(lsp_position(start_pos), lsp_position(end_pos)),
                 severity: Some(DiagnosticSeverity::ERROR),
                 code: None,
                 code_description: None,
@@ -334,7 +335,7 @@ fn extract_syntax_diagnostics(
             let end_pos = document.offset_to_position(location.end_offset());
 
             diagnostics.push(Diagnostic {
-                range: Range::new(start_pos, end_pos),
+                range: Range::new(lsp_position(start_pos), lsp_position(end_pos)),
                 severity: Some(DiagnosticSeverity::WARNING),
                 code: None,
                 code_description: None,

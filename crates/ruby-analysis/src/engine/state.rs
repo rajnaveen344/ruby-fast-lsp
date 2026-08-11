@@ -13,15 +13,16 @@ use crate::core::method_store::StoredMethodFactMatch;
 use crate::core::{
     ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateStore,
     DiagnosticFact, DiagnosticSeverity, DiagnosticStore, ExecutionContextFact, ExecutionScopeMode,
-    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
-    InferenceEvidence, InferenceTelemetry, MethodAvailability, MethodFact, MethodParamKind,
-    MethodReferenceAccess, MethodStore, MethodVisibilityOverrideFact, NamespaceKind,
-    ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact,
-    ReferenceStore, RubyConstant, RubyMethod, RubyType, SemanticGraph, SourceFileId, SourceKind,
-    StoredGraphEdgeFact, StoredGraphNodeFact, StoredMethodFact, StoredReferenceCandidate,
-    StoredSymbolFact, StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolKind, SymbolStore,
-    TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeResolution, TypeStore,
-    TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
+    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact,
+    GraphNodeKind, InferenceEvidence, InferenceTelemetry, MethodAvailability, MethodFact,
+    MethodParamKind, MethodReferenceAccess, MethodStore, MethodVisibilityOverrideFact,
+    NamespaceKind, ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore,
+    ReferenceFact, ReferenceStore, RubyConstant, RubyMethod, RubyType, SemanticGraph, SourceFileId,
+    SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact, StoredMethodFact,
+    StoredReferenceCandidate, StoredSuperclassResolution, StoredSymbolFact,
+    StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolKind, SymbolStore, TextRange, TypeFact,
+    TypeInferenceOutcome, TypeProvenance, TypeResolution, TypeStore, TypeSubject, UnknownReason,
+    UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
@@ -49,37 +50,79 @@ pub struct SourceFile {
     pub library_package: Option<crate::core::LibraryPackageId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StoredTypeInferenceOutcome {
+    Proven(crate::core::type_store::RubyTypeId),
+    Unknown(UnknownReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TypeInferenceOutcomeRef<'a> {
+    Proven(&'a RubyType),
+    Unknown(UnknownReason),
+}
+
+impl StoredTypeInferenceOutcome {
+    fn from_domain(types: &mut TypeStore, outcome: TypeInferenceOutcome) -> Self {
+        match outcome.unknown_reason() {
+            Some(reason) => Self::Unknown(reason),
+            None => Self::Proven(types.intern_ruby_type(
+                outcome.into_proven_type().expect(
+                    "INVARIANT VIOLATED: call-expression outcome is neither proven nor Unknown. This is a bug because TypeInferenceOutcome has exactly those two states. Fix: construct outcomes only through TypeInferenceOutcome::proven or TypeInferenceOutcome::unknown.",
+                ),
+            )),
+        }
+    }
+
+    fn as_ref<'a>(self, types: &'a TypeStore) -> TypeInferenceOutcomeRef<'a> {
+        match self {
+            Self::Proven(ruby_type) => TypeInferenceOutcomeRef::Proven(types.ruby_type(ruby_type)),
+            Self::Unknown(reason) => TypeInferenceOutcomeRef::Unknown(reason),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SourceLineIndex {
-    line_offsets: Vec<usize>,
-    len: usize,
+    line_offsets: Vec<u32>,
+    len: u32,
     ascii: bool,
 }
 
 impl SourceLineIndex {
     fn new(source: &str) -> Self {
+        let len = u32::try_from(source.len()).expect(
+            "INVARIANT VIOLATED: source file byte length exceeded u32. This is a bug because \
+             every analysis TextRange and SourceFileId-relative byte offset is represented as \
+             u32. Fix: reject or segment files larger than u32::MAX before registration.",
+        );
         let mut line_offsets = vec![0];
         for (idx, byte) in source.bytes().enumerate() {
             if byte == b'\n' {
-                line_offsets.push(idx + 1);
+                line_offsets.push(u32::try_from(idx + 1).expect(
+                    "INVARIANT VIOLATED: source line offset exceeded u32 after the complete \
+                     source length fit u32. This is a bug because a position within a bounded \
+                     source cannot exceed its length. Fix: keep source length validation before \
+                     line-index construction.",
+                ));
             }
         }
-        if line_offsets.last() != Some(&source.len()) {
-            line_offsets.push(source.len());
+        if line_offsets.last() != Some(&len) {
+            line_offsets.push(len);
         }
         Self {
             line_offsets,
-            len: source.len(),
+            len,
             ascii: source.is_ascii(),
         }
     }
 
-    pub fn line_offsets(&self) -> &[usize] {
+    pub fn line_offsets(&self) -> &[u32] {
         &self.line_offsets
     }
 
     pub fn len(&self) -> usize {
-        self.len
+        self.len as usize
     }
 
     pub fn is_ascii(&self) -> bool {
@@ -97,7 +140,7 @@ impl SourceFile {
     }
 
     pub fn byte_offset_to_line_character(&self, byte_offset: u32) -> Option<(u32, u32)> {
-        let target = usize::try_from(byte_offset).ok()?;
+        let target = byte_offset;
         if target > self.line_index.len {
             return None;
         }
@@ -110,13 +153,17 @@ impl SourceFile {
             target.checked_sub(line_start)?
         } else {
             let source = self.source.as_deref()?;
+            let target = target as usize;
+            let line_start = line_start as usize;
             if !source.is_char_boundary(target) {
                 return None;
             }
             source[line_start..target]
                 .chars()
                 .map(char::len_utf16)
-                .sum()
+                .sum::<usize>()
+                .try_into()
+                .ok()?
         };
         Some((
             u32::try_from(line_index).expect(
@@ -124,11 +171,7 @@ impl SourceFile {
                  This is a bug because LSP positions require u32 lines. \
                  Fix: reject or segment files with more than u32::MAX lines.",
             ),
-            u32::try_from(character).expect(
-                "INVARIANT VIOLATED: source character offset exceeded u32. \
-                 This is a bug because LSP positions require u32 columns. \
-                 Fix: reject or segment lines longer than u32::MAX characters.",
-            ),
+            character,
         ))
     }
 }
@@ -147,6 +190,7 @@ pub struct FileFacts {
     pub diagnostics: Vec<DiagnosticFact>,
     pub execution_contexts: Vec<ExecutionContextFact>,
     pub inference: InferenceEvidence,
+    pub local_read_types: Box<[(TextRange, RubyType)]>,
 }
 
 impl SemanticExportFingerprint {
@@ -242,6 +286,7 @@ impl SemanticExportFingerprint {
                 stable_fqn(hasher, &fact.source);
                 stable_fqn(hasher, &fact.target);
                 stable_graph_edge_kind(hasher, fact.kind);
+                stable_graph_edge_provenance(hasher, fact.provenance);
             }));
         }
         for fact in &facts.unresolved_graph_edges {
@@ -255,6 +300,7 @@ impl SemanticExportFingerprint {
                 stable_bool(hasher, fact.absolute);
                 stable_fqn(hasher, &fact.context);
                 stable_graph_edge_kind(hasher, fact.kind);
+                stable_graph_edge_provenance(hasher, fact.provenance);
             }));
         }
 
@@ -604,6 +650,13 @@ fn stable_graph_edge_kind(hasher: &mut StableExportHasher, kind: GraphEdgeKind) 
     }
 }
 
+fn stable_graph_edge_provenance(hasher: &mut StableExportHasher, provenance: GraphEdgeProvenance) {
+    match provenance {
+        GraphEdgeProvenance::Explicit => stable_u8(hasher, 1),
+        GraphEdgeProvenance::ImplicitObject => stable_u8(hasher, 2),
+    }
+}
+
 fn stable_source_kind(hasher: &mut StableExportHasher, kind: SourceKind) {
     match kind {
         SourceKind::Project => stable_u8(hasher, 1),
@@ -791,6 +844,22 @@ pub struct ResolvePassStats {
     pub method_namespace_exists_cache_entries: usize,
     pub method_suggestion_cache_entries: usize,
     pub incomplete_method_chain_cache_entries: usize,
+    /// Method candidates whose explicit receiver is another call expression
+    /// and therefore must wait for an earlier call outcome in source order.
+    pub deferred_receiver_candidates: usize,
+    /// Deferred receiver candidates whose inner call produced a concrete type.
+    pub deferred_receiver_proven: usize,
+    /// Deferred receiver candidates whose inner call remained Unknown.
+    pub deferred_receiver_unknown: usize,
+    pub method_return_cache_hits: usize,
+    pub method_return_cache_misses: usize,
+    pub method_return_cache_entries: usize,
+    pub method_visibility_cache_hits: usize,
+    pub method_visibility_cache_misses: usize,
+    pub method_visibility_cache_entries: usize,
+    pub ambiguous_method_return_cache_hits: usize,
+    pub ambiguous_method_return_cache_misses: usize,
+    pub ambiguous_method_return_cache_entries: usize,
 }
 
 pub(super) fn elapsed_ns(started: Instant) -> u64 {
@@ -978,10 +1047,15 @@ pub struct AnalysisEngine {
     pub(super) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
     execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
     inference_by_file: HashMap<SourceFileId, InferenceEvidence>,
+    call_expression_outcomes_by_file:
+        HashMap<SourceFileId, Box<[(TextRange, StoredTypeInferenceOutcome)]>>,
+    local_read_types_by_file:
+        HashMap<SourceFileId, Box<[(TextRange, crate::core::type_store::RubyTypeId)]>>,
     method_return_equations_dirty: bool,
     method_return_solution_spans_files: bool,
     semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
     top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
+    universal_object_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
     last_resolve_pass: ResolvePassStats,
 }
 
@@ -1013,10 +1087,13 @@ impl Default for AnalysisEngine {
             method_visibility_overrides: Vec::new(),
             execution_contexts: HashMap::new(),
             inference_by_file: HashMap::new(),
+            call_expression_outcomes_by_file: HashMap::new(),
+            local_read_types_by_file: HashMap::new(),
             method_return_equations_dirty: false,
             method_return_solution_spans_files: false,
             semantic_export_fingerprints: HashMap::new(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
+            universal_object_method_lookup_chain_cache: Mutex::new(None),
             last_resolve_pass: ResolvePassStats::default(),
         }
     }
@@ -1034,10 +1111,13 @@ impl Clone for AnalysisEngine {
             method_visibility_overrides: self.method_visibility_overrides.clone(),
             execution_contexts: self.execution_contexts.clone(),
             inference_by_file: self.inference_by_file.clone(),
+            call_expression_outcomes_by_file: self.call_expression_outcomes_by_file.clone(),
+            local_read_types_by_file: self.local_read_types_by_file.clone(),
             method_return_equations_dirty: self.method_return_equations_dirty,
             method_return_solution_spans_files: self.method_return_solution_spans_files,
             semantic_export_fingerprints: self.semantic_export_fingerprints.clone(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
+            universal_object_method_lookup_chain_cache: Mutex::new(None),
             last_resolve_pass: ResolvePassStats::default(),
         }
     }
@@ -1221,6 +1301,8 @@ impl AnalysisEngine {
         self.facts.diagnostics.candidates.shrink_to_fit();
         self.facts.diagnostics.resolved.shrink_to_fit();
         self.inference_by_file.shrink_to_fit();
+        self.call_expression_outcomes_by_file.shrink_to_fit();
+        self.local_read_types_by_file.shrink_to_fit();
     }
 
     pub fn query(&self) -> AnalysisQuery<'_> {
@@ -1266,16 +1348,25 @@ impl AnalysisEngine {
             diagnostic_candidates: self.facts.diagnostics.candidates.estimated_heap_bytes(),
             graph: self.graph.estimated_heap_bytes(),
             unresolved_graph_edges: self.graph.estimated_unresolved_heap_bytes(),
-            query_caches: self.estimated_top_level_method_lookup_chain_cache_heap_bytes(),
+            query_caches: self.estimated_method_lookup_chain_cache_heap_bytes(),
         }
     }
 
-    fn estimated_top_level_method_lookup_chain_cache_heap_bytes(&self) -> usize {
+    fn estimated_method_lookup_chain_cache_heap_bytes(&self) -> usize {
+        let chain_bytes = |chain: &Vec<FullyQualifiedName>| {
+            vec_payload_bytes(chain) + chain.iter().map(fqn_heap_bytes).sum::<usize>()
+        };
         self.top_level_method_lookup_chain_cache
             .lock()
             .as_ref()
-            .map(|chain| vec_payload_bytes(chain) + chain.iter().map(fqn_heap_bytes).sum::<usize>())
+            .map(chain_bytes)
             .unwrap_or(0)
+            + self
+                .universal_object_method_lookup_chain_cache
+                .lock()
+                .as_ref()
+                .map(chain_bytes)
+                .unwrap_or(0)
     }
 
     fn estimated_file_store_heap_bytes(&self) -> usize {
@@ -1300,6 +1391,28 @@ impl AnalysisEngine {
                 .inference_by_file
                 .values()
                 .map(InferenceEvidence::estimated_heap_bytes)
+                .sum::<usize>()
+            + self.call_expression_outcomes_by_file.capacity()
+                * (size_of::<SourceFileId>()
+                    + size_of::<Box<[(TextRange, StoredTypeInferenceOutcome)]>>()
+                    + 1)
+            + self
+                .call_expression_outcomes_by_file
+                .values()
+                .map(|outcomes| {
+                    outcomes.len() * size_of::<(TextRange, StoredTypeInferenceOutcome)>()
+                })
+                .sum::<usize>()
+            + self.local_read_types_by_file.capacity()
+                * (size_of::<SourceFileId>()
+                    + size_of::<Box<[(TextRange, crate::core::type_store::RubyTypeId)]>>()
+                    + 1)
+            + self
+                .local_read_types_by_file
+                .values()
+                .map(|reads| {
+                    reads.len() * size_of::<(TextRange, crate::core::type_store::RubyTypeId)>()
+                })
                 .sum::<usize>()
     }
 
@@ -1355,13 +1468,11 @@ impl AnalysisEngine {
         })
     }
 
-    /// Stable, path-independent identity of every user-visible semantic fact.
-    ///
-    /// This is intended for cross-process correctness evidence, not query
-    /// lookup. Each fact is reduced to an order-independent stable component;
-    /// the final multiset preserves file ownership and source-kind precedence
-    /// without retaining engine-local IDs or physical paths.
-    pub fn semantic_result_fingerprint(&self) -> SemanticResultFingerprint {
+    /// Stable, path-independent identity of every user-visible semantic fact,
+    /// partitioned by its owning source file.
+    pub fn semantic_result_file_fingerprints(
+        &self,
+    ) -> Vec<(SourceFileId, SemanticResultFingerprint)> {
         fn push_component(
             components: &mut HashMap<SourceFileId, Vec<SemanticExportFingerprint>>,
             file_id: SourceFileId,
@@ -1469,6 +1580,7 @@ impl AnalysisEngine {
                     stable_fqn(hasher, &fact.source);
                     stable_fqn(hasher, &fact.target);
                     stable_graph_edge_kind(hasher, fact.kind);
+                    stable_graph_edge_provenance(hasher, fact.provenance);
                     stable_range_offsets(hasher, fact.range);
                 }),
             );
@@ -1487,6 +1599,7 @@ impl AnalysisEngine {
                     stable_bool(hasher, fact.absolute);
                     stable_fqn(hasher, &fact.context);
                     stable_graph_edge_kind(hasher, fact.kind);
+                    stable_graph_edge_provenance(hasher, fact.provenance);
                     stable_range_offsets(hasher, fact.range);
                 }),
             );
@@ -1549,23 +1662,164 @@ impl AnalysisEngine {
                 );
             }
         }
+        for (file_id, reads) in &self.local_read_types_by_file {
+            for (range, ruby_type) in reads.as_ref() {
+                let ruby_type = self.facts.types.ruby_type(*ruby_type);
+                push_component(
+                    &mut components,
+                    *file_id,
+                    export_hash(|hasher| {
+                        stable_u8(hasher, 11);
+                        stable_range_offsets(hasher, *range);
+                        stable_ruby_type(hasher, ruby_type);
+                    }),
+                );
+            }
+        }
 
-        let mut file_fingerprints = components
+        components
             .into_iter()
             .map(|(file_id, mut facts)| {
                 let source = self.sources.files.get(&file_id).expect(
                     "INVARIANT VIOLATED: semantic result component owner has no registered source file. This is a bug because the component map is seeded exclusively from registered sources. Fix: keep source removal and semantic fact removal atomic.",
                 );
                 facts.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
-                result_hash(|hasher| {
-                    stable_source_kind(hasher, source.kind);
-                    stable_len(hasher, facts.len());
-                    for fact in &facts {
-                        stable_u64(hasher, fact.high);
-                        stable_u64(hasher, fact.low);
-                    }
-                })
+                (
+                    file_id,
+                    result_hash(|hasher| {
+                        stable_source_kind(hasher, source.kind);
+                        stable_len(hasher, facts.len());
+                        for fact in &facts {
+                            stable_u64(hasher, fact.high);
+                            stable_u64(hasher, fact.low);
+                        }
+                    }),
+                )
             })
+            .collect()
+    }
+
+    /// Stable per-file fingerprints for the three resolution-owned result
+    /// categories that are not already isolated by semantic export and
+    /// diagnostic manifests: resolved references, framework execution
+    /// contexts, and proven local-read types.
+    pub fn semantic_resolution_file_fingerprints(
+        &self,
+    ) -> HashMap<SourceFileId, [SemanticResultFingerprint; 3]> {
+        let category_hash = |tag: u8, mut components: Vec<SemanticExportFingerprint>| {
+            components.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
+            result_hash(|hasher| {
+                stable_u8(hasher, tag);
+                stable_len(hasher, components.len());
+                for component in &components {
+                    stable_u64(hasher, component.high);
+                    stable_u64(hasher, component.low);
+                }
+            })
+        };
+        let mut components = self
+            .sources
+            .files
+            .keys()
+            .copied()
+            .map(|file_id| (file_id, [Vec::new(), Vec::new(), Vec::new()]))
+            .collect::<HashMap<_, _>>();
+
+        for (target, fact) in self.facts.references.resolved.iter_facts_with_targets() {
+            let target = self.names.fqn(target).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: per-file reference fingerprint target {:?} has no interned FQN. This is a bug because resolved references retain their target identity. Fix: remove references before removing interned names.",
+                    target,
+                )
+            });
+            let caller = fact.caller.map(|caller| {
+                self.names.fqn(caller).unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: per-file reference fingerprint caller {:?} has no interned FQN. This is a bug because resolved references retain caller provenance. Fix: remove references before removing interned names.",
+                        caller,
+                    )
+                })
+            });
+            let component = export_hash(|hasher| {
+                stable_fqn(hasher, target);
+                stable_optional_fqn(hasher, caller);
+                stable_method_reference_access(hasher, fact.access);
+                stable_range_offsets(hasher, fact.range);
+            });
+            components
+                .get_mut(&fact.range.file_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: per-file reference fingerprint belongs to unknown file {:?}. This is a bug because resolved references cannot outlive their registered source. Fix: remove references before unregistering files.",
+                        fact.range.file_id,
+                    )
+                })[0]
+                .push(component);
+        }
+        for (file_id, contexts) in &self.execution_contexts {
+            let output = &mut components
+                .get_mut(file_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: execution-context fingerprint belongs to unknown file {:?}. This is a bug because execution contexts cannot outlive their registered source. Fix: remove contexts before unregistering files.",
+                        file_id,
+                    )
+                })[1];
+            output.extend(contexts.iter().map(|context| {
+                export_hash(|hasher| {
+                    stable_fqn(hasher, &context.lexical_namespace);
+                    stable_fqn(hasher, &context.implicit_receiver);
+                    stable_fqn(hasher, &context.method_definition_owner);
+                    stable_execution_scope_mode(hasher, context.lexical_scope);
+                    stable_execution_scope_mode(hasher, context.local_scope);
+                    stable_string(hasher, &context.extension_id);
+                    stable_range_offsets(hasher, context.range);
+                })
+            }));
+        }
+        for (file_id, reads) in &self.local_read_types_by_file {
+            let output = &mut components
+                .get_mut(file_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: local-read fingerprint belongs to unknown file {:?}. This is a bug because flow evidence cannot outlive its registered source. Fix: remove inference evidence before unregistering files.",
+                        file_id,
+                    )
+                })[2];
+            output.extend(reads.iter().map(|(range, ruby_type)| {
+                export_hash(|hasher| {
+                    stable_range_offsets(hasher, *range);
+                    stable_ruby_type(hasher, self.facts.types.ruby_type(*ruby_type));
+                })
+            }));
+        }
+
+        components
+            .into_iter()
+            .map(|(file_id, [references, contexts, local_reads])| {
+                (
+                    file_id,
+                    [
+                        category_hash(1, references),
+                        category_hash(2, contexts),
+                        category_hash(3, local_reads),
+                    ],
+                )
+            })
+            .collect()
+    }
+
+    /// Stable, path-independent identity of every user-visible semantic fact.
+    ///
+    /// This is intended for cross-process correctness evidence, not query
+    /// lookup. Each fact is reduced to an order-independent stable component;
+    /// the final multiset preserves file ownership and source-kind precedence
+    /// without retaining engine-local IDs or physical paths.
+    pub fn semantic_result_fingerprint(&self) -> SemanticResultFingerprint {
+        let mut file_fingerprints = self
+            .semantic_result_file_fingerprints()
+            .into_iter()
+            .map(|(_, fingerprint)| fingerprint)
             .collect::<Vec<_>>();
         file_fingerprints.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
         result_hash(|hasher| {
@@ -1588,7 +1842,24 @@ impl AnalysisEngine {
              Fix: widen the semantic revision before performing u64::MAX replacements.",
         );
         *self.top_level_method_lookup_chain_cache.get_mut() = None;
+        *self.universal_object_method_lookup_chain_cache.get_mut() = None;
         self.assert_known_file_id(file_id, "file analysis references unknown source file id");
+        for (range, ruby_type) in facts.local_read_types.as_ref() {
+            assert_eq!(
+                range.file_id, file_id,
+                "INVARIANT VIOLATED: compact local-read type belongs to a different file. This is a bug because inference evidence must be replaced atomically with its source. Fix: attach the registered SourceFileId while converting TypeTracker offsets."
+            );
+            assert!(
+                *ruby_type != RubyType::Unknown,
+                "INVARIANT VIOLATED: compact local-read evidence contains Unknown at {range:?}. This is a bug because only proven flow types may enter local_read_types. Fix: retain the failure in expression_unknown_reasons instead."
+            );
+        }
+        for adjacent in facts.local_read_types.windows(2) {
+            assert!(
+                adjacent[0].0 < adjacent[1].0,
+                "INVARIANT VIOLATED: compact local-read evidence is duplicated or unsorted. This is a bug because deterministic range queries require one result per AST read. Fix: sort and deduplicate TypeTracker results before engine replacement."
+            );
+        }
         let equations_changed = match self.inference_by_file.get(&file_id) {
             Some(previous) => {
                 previous.method_return_equations != facts.inference.method_return_equations
@@ -1648,7 +1919,38 @@ impl AnalysisEngine {
             .diagnostics
             .resolved
             .replace_file(file_id, facts.diagnostics);
+        let call_expression_outcomes =
+            std::mem::take(&mut facts.inference.call_expression_outcomes);
         self.inference_by_file.insert(file_id, facts.inference);
+        if call_expression_outcomes.is_empty() {
+            self.call_expression_outcomes_by_file.remove(&file_id);
+        } else {
+            let outcomes = call_expression_outcomes
+                .into_iter()
+                .map(|(range, outcome)| {
+                    (
+                        range,
+                        StoredTypeInferenceOutcome::from_domain(&mut self.facts.types, outcome),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            self.call_expression_outcomes_by_file
+                .insert(file_id, outcomes);
+        }
+        if facts.local_read_types.is_empty() {
+            self.local_read_types_by_file.remove(&file_id);
+        } else {
+            let local_read_types = facts
+                .local_read_types
+                .into_vec()
+                .into_iter()
+                .map(|(range, ruby_type)| (range, self.facts.types.intern_ruby_type(ruby_type)))
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            self.local_read_types_by_file
+                .insert(file_id, local_read_types);
+        }
         self.method_return_equations_dirty |= equations_changed;
     }
 
@@ -1788,11 +2090,12 @@ impl AnalysisEngine {
             .map(|evidence| evidence.method_return_equations.as_slice())
     }
 
-    pub fn inference_evidence_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Option<&InferenceEvidence> {
-        self.inference_by_file.get(&file_id)
+    pub fn inference_evidence_in_file(&self, file_id: SourceFileId) -> Option<InferenceEvidence> {
+        let mut evidence = self.inference_by_file.get(&file_id)?.clone();
+        evidence.call_expression_outcomes = self
+            .call_expression_outcomes_in_file(file_id)
+            .unwrap_or_default();
+        Some(evidence)
     }
 
     pub(crate) fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool {
@@ -1805,62 +2108,155 @@ impl AnalysisEngine {
     }
 
     pub(super) fn expression_unknown_reason(&self, range: TextRange) -> Option<UnknownReason> {
-        self.inference_by_file
-            .get(&range.file_id)
-            .and_then(|evidence| {
+        self.call_expression_outcome_at(range)
+            .and_then(|outcome| match outcome {
+                TypeInferenceOutcomeRef::Proven(_) => None,
+                TypeInferenceOutcomeRef::Unknown(reason) => Some(reason),
+            })
+            .or_else(|| {
+                let evidence = self.inference_by_file.get(&range.file_id)?;
                 evidence
-                    .call_expression_outcomes
+                    .expression_unknown_reasons
                     .binary_search_by_key(&range, |(evidence_range, _)| *evidence_range)
                     .ok()
-                    .and_then(|index| evidence.call_expression_outcomes[index].1.unknown_reason())
-                    .or_else(|| {
-                        evidence
-                            .expression_unknown_reasons
-                            .binary_search_by_key(&range, |(evidence_range, _)| *evidence_range)
-                            .ok()
-                            .map(|index| evidence.expression_unknown_reasons[index].1)
-                    })
+                    .map(|index| evidence.expression_unknown_reasons[index].1)
             })
     }
 
     pub(super) fn call_expression_outcomes_in_file(
         &self,
         file_id: SourceFileId,
-    ) -> Option<&[(TextRange, TypeInferenceOutcome)]> {
-        self.inference_by_file
+    ) -> Option<Vec<(TextRange, TypeInferenceOutcome)>> {
+        self.call_expression_outcome_views_in_file(file_id)
+            .map(|outcomes| {
+                outcomes
+                    .map(|(range, outcome)| {
+                        let outcome = match outcome {
+                            TypeInferenceOutcomeRef::Proven(ruby_type) => {
+                                TypeInferenceOutcome::proven(ruby_type.clone())
+                            }
+                            TypeInferenceOutcomeRef::Unknown(reason) => {
+                                TypeInferenceOutcome::unknown(reason)
+                            }
+                        };
+                        (range, outcome)
+                    })
+                    .collect()
+            })
+    }
+
+    pub(super) fn call_expression_outcome_views_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<impl Iterator<Item = (TextRange, TypeInferenceOutcomeRef<'_>)>> {
+        self.call_expression_outcomes_by_file
             .get(&file_id)
-            .map(|evidence| evidence.call_expression_outcomes.as_slice())
+            .map(|outcomes| {
+                outcomes
+                    .iter()
+                    .map(|(range, outcome)| (*range, outcome.as_ref(&self.facts.types)))
+            })
+    }
+
+    pub(super) fn call_expression_outcome_at(
+        &self,
+        range: TextRange,
+    ) -> Option<TypeInferenceOutcomeRef<'_>> {
+        let outcomes = self.call_expression_outcomes_by_file.get(&range.file_id)?;
+        let index = outcomes
+            .binary_search_by_key(&range, |(outcome_range, _)| *outcome_range)
+            .ok()?;
+        Some(outcomes[index].1.as_ref(&self.facts.types))
+    }
+
+    pub(super) fn local_read_types_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<Vec<(TextRange, RubyType)>> {
+        self.local_read_type_views_in_file(file_id).map(|reads| {
+            reads
+                .map(|(range, ruby_type)| (range, ruby_type.clone()))
+                .collect()
+        })
+    }
+
+    pub(super) fn local_read_type_views_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<impl Iterator<Item = (TextRange, &RubyType)>> {
+        self.inference_by_file.get(&file_id)?;
+        let reads = self
+            .local_read_types_by_file
+            .get(&file_id)
+            .map_or(&[][..], Box::as_ref);
+        Some(
+            reads
+                .iter()
+                .map(|(range, ruby_type)| (*range, self.facts.types.ruby_type(*ruby_type))),
+        )
+    }
+
+    pub(super) fn local_read_type_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<&RubyType> {
+        self.inference_by_file.get(&file_id)?;
+        let reads = self.local_read_types_by_file.get(&file_id)?;
+        let upper = reads.partition_point(|(range, _)| range.start_byte <= byte_offset);
+        reads[..upper]
+            .iter()
+            .rev()
+            .find(|(range, _)| range.contains_offset(file_id, byte_offset))
+            .map(|(_, ruby_type)| self.facts.types.ruby_type(*ruby_type))
     }
 
     pub(super) fn replace_resolved_call_expression_outcomes(
         &mut self,
-        mut outcomes: Vec<(TextRange, TypeInferenceOutcome)>,
+        mut outcomes: HashMap<TextRange, TypeInferenceOutcome>,
     ) {
-        outcomes.sort_unstable_by_key(|(range, _)| *range);
-        for adjacent in outcomes.windows(2) {
-            assert!(
-                adjacent[0].0 != adjacent[1].0,
-                "INVARIANT VIOLATED: one call expression resolved through multiple method candidates. This is a bug because one runtime dispatch must have one proof outcome. Fix: attach the call range only to the candidate representing the invoked method."
-            );
-        }
-        let mut outcomes = outcomes.into_iter().peekable();
-        while let Some((first_range, first_outcome)) = outcomes.next() {
+        // Sorting only the compact ranges avoids materializing a second
+        // Vec<(TextRange, TypeInferenceOutcome)> while the resolve map and the
+        // previous file-owned outcomes are both still live. Move each outcome
+        // out of the map only when its file is merged.
+        let mut ordered_ranges = outcomes.keys().copied().collect::<Vec<_>>();
+        ordered_ranges.sort_unstable();
+        let mut ordered_ranges = ordered_ranges.into_iter().peekable();
+        while let Some(first_range) = ordered_ranges.next() {
             let file_id = first_range.file_id;
+            let first_outcome = StoredTypeInferenceOutcome::from_domain(
+                &mut self.facts.types,
+                outcomes.remove(&first_range).expect(
+                    "INVARIANT VIOLATED: sorted call-expression range has no resolved outcome. This is a bug because the range list is built directly from the owned outcome map. Fix: remove each map entry exactly once while grouping by file.",
+                ),
+            );
             let mut incoming = vec![(first_range, first_outcome)];
-            while outcomes
+            while ordered_ranges
                 .peek()
-                .is_some_and(|(range, _)| range.file_id == file_id)
+                .is_some_and(|range| range.file_id == file_id)
             {
-                incoming.push(outcomes.next().expect(
-                    "INVARIANT VIOLATED: a peeked call-expression outcome disappeared before consumption. This is a bug because the local iterator is not shared. Fix: keep grouping and consumption in one loop.",
-                ));
+                let range = ordered_ranges.next().expect(
+                    "INVARIANT VIOLATED: a peeked call-expression range disappeared before consumption. This is a bug because the local iterator is not shared. Fix: keep grouping and consumption in one loop.",
+                );
+                let outcome = StoredTypeInferenceOutcome::from_domain(
+                    &mut self.facts.types,
+                    outcomes.remove(&range).expect(
+                        "INVARIANT VIOLATED: grouped call-expression range has no resolved outcome. This is a bug because each sorted range must still own one map entry. Fix: remove each map entry exactly once while grouping by file.",
+                    ),
+                );
+                incoming.push((range, outcome));
             }
 
-            let evidence = self.inference_by_file.get_mut(&file_id).expect(
+            self.inference_by_file.get(&file_id).expect(
                 "INVARIANT VIOLATED: resolved call outcome belongs to a file without inference evidence. This is a bug because file facts are installed before their method candidates resolve. Fix: replace inference evidence atomically with reference candidates.",
             );
-            let existing = std::mem::take(&mut evidence.call_expression_outcomes);
-            let mut existing = existing.into_iter().peekable();
+            let mut existing = self
+                .call_expression_outcomes_by_file
+                .remove(&file_id)
+                .unwrap_or_default()
+                .into_vec()
+                .into_iter()
+                .peekable();
             let mut incoming = incoming.into_iter().peekable();
             let mut merged = Vec::with_capacity(existing.len() + incoming.len());
             loop {
@@ -1894,8 +2290,13 @@ impl AnalysisEngine {
                     (None, None) => break,
                 }
             }
-            evidence.call_expression_outcomes = merged;
+            self.call_expression_outcomes_by_file
+                .insert(file_id, merged.into_boxed_slice());
         }
+        assert!(
+            outcomes.is_empty(),
+            "INVARIANT VIOLATED: resolved call-expression outcomes remained after the complete sorted merge. This is a bug because every map key was copied into the ordered range list. Fix: keep range collection and map ownership in the same merge operation."
+        );
     }
 
     pub(super) fn expression_unknown_reasons_in_file(
@@ -1919,9 +2320,29 @@ impl AnalysisEngine {
         *self.top_level_method_lookup_chain_cache.lock() = Some(chain);
     }
 
+    pub(super) fn cached_universal_object_method_lookup_chain(
+        &self,
+    ) -> Option<Vec<FullyQualifiedName>> {
+        self.universal_object_method_lookup_chain_cache
+            .lock()
+            .clone()
+    }
+
+    pub(super) fn cache_universal_object_method_lookup_chain(
+        &self,
+        chain: Vec<FullyQualifiedName>,
+    ) {
+        *self.universal_object_method_lookup_chain_cache.lock() = Some(chain);
+    }
+
     #[cfg(test)]
     fn valid_method_lookup_chain_cache_len_for_test(&self) -> usize {
         usize::from(self.top_level_method_lookup_chain_cache.lock().is_some())
+            + usize::from(
+                self.universal_object_method_lookup_chain_cache
+                    .lock()
+                    .is_some(),
+            )
     }
 
     fn replace_execution_contexts(
@@ -2097,6 +2518,22 @@ impl AnalysisEngine {
         facts
     }
 
+    pub(super) fn method_absence_contract_matches_owner_name(
+        &self,
+        owner: &FullyQualifiedName,
+        method: &crate::core::RubyMethod,
+    ) -> bool {
+        let Some(owner_id) = self.names.fqn_id(owner) else {
+            return false;
+        };
+        self.facts
+            .definitions
+            .methods
+            .facts_matching_owner_name(owner_id, method)
+            .iter()
+            .any(|fact| matches!(fact.availability, MethodAvailability::Absent { .. }))
+    }
+
     pub(super) fn effective_method_fact_matching_owner_name(
         &self,
         owner: &FullyQualifiedName,
@@ -2169,6 +2606,13 @@ impl AnalysisEngine {
         names
     }
 
+    pub(super) fn ruby_method_names_for_owner_id(&self, owner: FqnId) -> Vec<RubyMethod> {
+        self.facts
+            .definitions
+            .methods
+            .ruby_method_names_for_owner(owner)
+    }
+
     pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
         self.facts
             .definitions
@@ -2199,6 +2643,42 @@ impl AnalysisEngine {
             .into_iter()
             .map(|fact| self.expand_graph_edge_fact(fact))
             .collect()
+    }
+
+    /// Returns the one superclass that is statically proven for `source`.
+    /// Explicit declarations outrank per-declaration implicit `Object` facts,
+    /// but two distinct explicit targets or any unresolved explicit target
+    /// make the superclass unknown. Duplicate declarations of the same target
+    /// remain one semantic proof while retaining every file-owned fact.
+    pub fn proven_superclass_edge(&self, source: &FullyQualifiedName) -> Option<GraphEdgeFact> {
+        if self.superclass_source_has_unresolved_explicit_edge(source) {
+            return None;
+        }
+        let source_id = self.names.fqn_id(source)?;
+        match self.graph.superclass_resolution(source_id) {
+            StoredSuperclassResolution::Unique(edge) => Some(self.expand_graph_edge_fact(edge)),
+            StoredSuperclassResolution::Missing | StoredSuperclassResolution::Ambiguous => None,
+        }
+    }
+
+    pub fn superclass_is_ambiguous(&self, source: &FullyQualifiedName) -> bool {
+        self.names.fqn_id(source).is_some_and(|source_id| {
+            self.graph.superclass_resolution(source_id) == StoredSuperclassResolution::Ambiguous
+        })
+    }
+
+    fn superclass_source_has_unresolved_explicit_edge(&self, source: &FullyQualifiedName) -> bool {
+        let instance_source = match source.namespace_kind() {
+            Some(NamespaceKind::Singleton) => source.to_instance_namespace().expect(
+                "INVARIANT VIOLATED: singleton superclass source cannot produce an instance namespace. This is a bug because graph superclass sources are Namespace FQNs. Fix: preserve Namespace identity for class graph nodes.",
+            ),
+            Some(NamespaceKind::Instance) => source.clone(),
+            None => return false,
+        };
+        let Some(source_id) = self.names.fqn_id(&instance_source) else {
+            return false;
+        };
+        self.graph.has_unresolved_explicit_superclass(source_id)
     }
 
     pub fn graph_edges_to(&self, target: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
@@ -2443,6 +2923,7 @@ impl AnalysisEngine {
                     name_range: fact.name_range,
                     params: fact.params,
                     param_facts: fact.param_facts,
+                    parameter_shape_complete: fact.parameter_shape_complete,
                     delegate_receiver: fact.delegate_receiver,
                     visibility: fact.visibility,
                     availability: fact.availability,
@@ -2470,6 +2951,7 @@ impl AnalysisEngine {
                 let source = self.names.intern_fqn(fact.source);
                 let target = self.names.intern_fqn(fact.target);
                 StoredGraphEdgeFact::new(source, target, fact.kind, fact.range)
+                    .with_provenance(fact.provenance)
             })
             .collect()
     }
@@ -2489,6 +2971,7 @@ impl AnalysisEngine {
                     context,
                 ));
                 StoredUnresolvedGraphEdgeFact::new(source, target, fact.kind, fact.range)
+                    .with_provenance(fact.provenance)
             })
             .collect()
     }
@@ -2532,6 +3015,7 @@ impl AnalysisEngine {
             name_range: fact.name_range,
             params: fact.params,
             param_facts: fact.param_facts,
+            parameter_shape_complete: fact.parameter_shape_complete,
             delegate_receiver: fact.delegate_receiver,
             visibility: fact.visibility,
             availability: fact.availability,
@@ -2572,7 +3056,7 @@ impl AnalysisEngine {
                  Fix: intern graph edge target FQNs before inserting facts.",
             )
             .clone();
-        GraphEdgeFact::new(source, target, fact.kind, fact.range)
+        GraphEdgeFact::new(source, target, fact.kind, fact.range).with_provenance(fact.provenance)
     }
 
     fn expand_unresolved_graph_edge_fact(
@@ -2610,6 +3094,7 @@ impl AnalysisEngine {
             fact.kind,
             fact.range,
         )
+        .with_provenance(fact.provenance)
     }
 
     fn retry_unresolved_graph_edges(&mut self) {
@@ -2620,17 +3105,76 @@ impl AnalysisEngine {
         let pending = self.graph.take_unresolved_edges();
         for unresolved in pending {
             if let Some(target) = self.resolve_unresolved_graph_target(&unresolved) {
+                let singleton_superclass =
+                    self.resolved_singleton_superclass_companion(&unresolved, &target);
                 let target = self.names.intern_fqn(target);
-                self.graph.add_edge(StoredGraphEdgeFact::new(
-                    unresolved.source,
-                    target,
-                    unresolved.kind,
-                    unresolved.range,
-                ));
+                self.graph.add_edge(
+                    StoredGraphEdgeFact::new(
+                        unresolved.source,
+                        target,
+                        unresolved.kind,
+                        unresolved.range,
+                    )
+                    .with_provenance(unresolved.provenance),
+                );
+                if let Some((source, target)) = singleton_superclass {
+                    let source = self.names.intern_fqn(source);
+                    let target = self.names.intern_fqn(target);
+                    self.graph.add_edge(
+                        StoredGraphEdgeFact::new(
+                            source,
+                            target,
+                            GraphEdgeKind::Superclass,
+                            unresolved.range,
+                        )
+                        .with_provenance(unresolved.provenance),
+                    );
+                }
             } else {
                 self.graph.add_unresolved_edge(unresolved);
             }
         }
+    }
+
+    /// Ruby class-method inheritance follows the singleton classes of the
+    /// ordinary superclass chain. The collector can emit both edges when the
+    /// target is already known, but a cross-file superclass starts as one
+    /// unresolved instance edge. Materialize its exact singleton companion at
+    /// the same resolution boundary so indexing order cannot change class
+    /// method lookup.
+    fn resolved_singleton_superclass_companion(
+        &self,
+        unresolved: &StoredUnresolvedGraphEdgeFact,
+        target: &FullyQualifiedName,
+    ) -> Option<(FullyQualifiedName, FullyQualifiedName)> {
+        if unresolved.kind != GraphEdgeKind::Superclass
+            || target.namespace_kind() != Some(NamespaceKind::Instance)
+        {
+            return None;
+        }
+        let source = self.names.fqn(unresolved.source).expect(
+            "INVARIANT VIOLATED: unresolved superclass edge points to a missing source FQN. This is a bug because graph edges retain interned sources for their full lifetime. Fix: retain source FQNs until unresolved edges are removed.",
+        );
+        if source.namespace_kind() != Some(NamespaceKind::Instance)
+            || !self
+                .graph_nodes_for(source)
+                .iter()
+                .any(|fact| fact.kind == GraphNodeKind::Class)
+            || !self
+                .graph_nodes_for(target)
+                .iter()
+                .any(|fact| fact.kind == GraphNodeKind::Class)
+        {
+            return None;
+        }
+        Some((
+            source.to_singleton_namespace().expect(
+                "INVARIANT VIOLATED: a class instance namespace cannot produce its singleton namespace. This is a bug because class declarations always use Namespace FQNs. Fix: keep class graph nodes namespace-owned.",
+            ),
+            target.to_singleton_namespace().expect(
+                "INVARIANT VIOLATED: a class superclass cannot produce its singleton namespace. This is a bug because resolved superclass targets are class Namespace FQNs. Fix: validate graph node kinds before materializing class inheritance.",
+            ),
+        ))
     }
 
     fn resolve_unresolved_graph_target(
