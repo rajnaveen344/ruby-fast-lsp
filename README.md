@@ -40,6 +40,8 @@ This is enough for the LSP to resolve return types, validate callers, and propag
 
 This is what makes the difference between a language server that can grep and one that can reason about Ruby code.
 
+See [Next Engineering Goals](NEXT.md) for the forward-looking inference and analysis roadmap.
+
 ## Installation
 
 ### npm (recommended)

@@ -160,9 +160,9 @@ fn validate_scorecard(scorecard: &Scorecard) {
     );
     assert_eq!(
         scorecard.target_score, 90,
-        "INVARIANT VIOLATED: the 9/10 score target changed. This is a bug because goal.md fixes \
-         acceptance at 90/100. Fix: retain target_score = 90 or revise the reviewed goal and \
-         reporter together."
+        "INVARIANT VIOLATED: the 9/10 score target changed. This is a bug because the checked-in \
+         scorecard contract fixes acceptance at 90/100. Fix: retain target_score = 90 or revise \
+         the reviewed scorecard and reporter together."
     );
     assert_eq!(
         scorecard.critical_category_minimum, 85,
@@ -186,8 +186,8 @@ fn validate_scorecard(scorecard: &Scorecard) {
             assert!(
                 category.critical,
                 "INVARIANT VIOLATED: scorecard category `{}` is not critical. This is a bug \
-                 because goal.md requires every category to meet the floor. Fix: mark every \
-                 current category critical or revise the reviewed scoring contract.",
+                 because the reviewed scorecard requires every category to meet the floor. Fix: \
+                 mark every current category critical or revise the scoring contract.",
                 category.id
             );
             category_points.insert(category.id.as_str(), category.points);

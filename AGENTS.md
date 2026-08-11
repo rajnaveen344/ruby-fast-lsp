@@ -16,11 +16,16 @@ testing, or agent workflow changes.
 
 Supporting docs:
 
-| File                                      | Purpose                                      |
-| ----------------------------------------- | -------------------------------------------- |
-| [src/ARCHITECTURE.md](src/ARCHITECTURE.md) | Current implementation architecture          |
-| [src/query/README.md](src/query/README.md) | LSP query adapter boundaries                 |
-| [src/test/README.md](src/test/README.md)  | Test harness and integration test structure  |
+| File                                                                                   | Purpose                                         |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| [README.md](README.md)                                                                 | Product overview and usage                      |
+| [NEXT.md](NEXT.md)                                                                     | Forward-looking engineering roadmap             |
+| [src/ARCHITECTURE.md](src/ARCHITECTURE.md)                                             | Current implementation architecture             |
+| [crates/ruby-analysis/src/inference/mod.rs](crates/ruby-analysis/src/inference/mod.rs) | Type-inference proof model and design rationale |
+| [src/query/README.md](src/query/README.md)                                             | LSP query adapter boundaries                    |
+| [src/test/README.md](src/test/README.md)                                               | Test harness and integration test structure     |
+| [support/type_inference/scorecard.toml](support/type_inference/scorecard.toml)         | Reviewed type-inference acceptance contract     |
+| [support/performance/](support/performance/)                                           | Machine-readable accepted/rejected measurements |
 
 For Prism AST node names and byte offsets, prefer:
 
@@ -1171,7 +1176,39 @@ Moved non-LSP logic out of `src/`:
     imported from `ruby_analysis::core` / `ruby_analysis::indexer`; Ruby version
     detection owns `RubyVersion` under `src/indexer/version`.
 
-### Performance Backlog
+### Production Performance Contract
+
+Run the deterministic release profiler with:
+
+```bash
+cargo run --release --bin profiler -- \
+  --benchmark-iterations 100 \
+  --check-budgets
+```
+
+The generated medium-project corpus enforces these absolute regression budgets:
+
+| Measurement              | Budget |
+| ------------------------ | -----: |
+| Cold indexing            |    2 s |
+| Body-only edit p95       | 100 ms |
+| Completion p95           |  50 ms |
+| Hover p95                |  25 ms |
+| Definition p95           |  25 ms |
+| References p95           |  50 ms |
+| Semantic diagnostics p95 |  25 ms |
+| Estimated engine heap    | 32 MiB |
+
+These are safety ceilings, not claims that every project or machine has the
+same latency. A material inference expansion additionally requires like-for-
+like alternating release measurements: median wall/CPU and affected edit/query
+p95 must remain within 3% outside measured noise, and the fully warm two-project
+goshposh workload must remain at or below 1,776,846,438 bytes peak RSS. Preserve
+the exact inputs, binaries, cache state, semantic fingerprints, raw samples,
+and accepted/rejected decision under `support/performance/`. Never weaken a
+budget to accept a candidate or trade semantic correctness for timing.
+
+### Performance Backlog and Recorded Decisions
 
 - Indexing feels slow in real VS Code usage after extension packaging. Do not
   optimize mid-refactor; profile after architecture cleanup. Likely targets:
@@ -1432,20 +1469,27 @@ command. Add reduced regression seeds to `regression_seeds.txt`.
 
 ### Type Inference Architecture
 
-**Two code paths for method return types:**
+The authoritative proof model, ownership rationale, current higher-order call
+boundary, and change protocol live in the module-level Rustdoc at
+`crates/ruby-analysis/src/inference/mod.rs`. Keep that documentation beside the
+rules it constrains and update it whenever the inference architecture changes.
 
-1. **Analysis engine** (`MethodResolver` path 1) — searches user-defined methods in ancestor chain
-2. **RBS fallback** (`MethodResolver` path 2) — built-in Ruby types from RBS definitions
+Mandatory repository-wide consequences:
 
-For generic types (`Array`, `Hash`), user-defined method lookup is **skipped** and RBS is used directly.
-RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` becomes `Integer`).
-
-**Key files:**
-
-- `crates/ruby-analysis/src/inference/type_tracker/mod.rs` — local flow/type tracking
-- `crates/ruby-analysis/src/inference/rbs.rs` — RBS type lookup with generic substitution
-- `crates/ruby-analysis/src/inference/completion.rs` — receiver type probing and RBS completion matches
-- `src/query/completion.rs` — LSP completion item mapping for analysis matches
+- `TypeInferenceOutcome` is the proof boundary; never publish
+  `Proven(Unknown)` or filter an unresolved member out of a concrete union.
+- Method/MRO/visibility/ambiguity resolution remains single-sourced in
+  `AnalysisQuery`; inference consumes it and adapters do not reproduce it.
+- Type evidence is file-owned and uses the ordinary engine replacement
+  lifecycle, so edits remove stale outcomes without a parallel type store.
+- CLI and LSP features project the same engine-owned outcomes and Unknown
+  reasons. A consumer-specific second inference path is forbidden.
+- Extend blocks, procs, symbol-to-proc, and generic collection transforms
+  through one reusable higher-order call model in `ruby-analysis::inference`,
+  not method-name cases in hover, inlay hints, completion, or the checker.
+- New concrete results require a failing positive test, a partial-evidence
+  Unknown counterexample, affected-consumer and edit-lifecycle coverage, and
+  proportionate release-profile evidence.
 
 ## Subagent Delegation
 

@@ -49,12 +49,12 @@ impl YardTypeConverter {
     /// Convert a single YARD type string to RubyType (without index validation)
     ///
     /// Examples:
-    /// - "String" -> RubyType::Class(String)
-    /// - "Integer" -> RubyType::Class(Integer)
-    /// - "nil" -> RubyType::Class(NilClass)
-    /// - "Array<String>" -> RubyType::Array([String])
-    /// - "Hash<Symbol, String>" -> RubyType::Hash([Symbol], [String])
-    /// - "Hash{Symbol => String}" -> RubyType::Hash([Symbol], [String])
+    /// - `String` -> `RubyType::Class(String)`
+    /// - `Integer` -> `RubyType::Class(Integer)`
+    /// - `nil` -> `RubyType::Class(NilClass)`
+    /// - `Array<String>` -> `RubyType::Array([String])`
+    /// - `Hash<Symbol, String>` -> `RubyType::Hash([Symbol], [String])`
+    /// - `Hash{Symbol => String}` -> `RubyType::Hash([Symbol], [String])`
     pub fn convert(type_str: &str) -> RubyType {
         Self::convert_with_validation(type_str).ruby_type
     }

@@ -437,35 +437,74 @@ The Server coordinates between LSP clients and the internal components.
 
 ### 6. Inference (`crates/ruby-analysis/src/inference/`)
 
-Inference handles type analysis and integration with RBS type signatures.
+Inference derives types from local flow, method bodies, semantic lookup, and
+RBS contracts. Its authoritative proof model and change protocol live beside
+the implementation in the module-level Rustdoc at
+`crates/ruby-analysis/src/inference/mod.rs`; this section describes how that
+module participates in the complete system.
 
-- **Primary Responsibility**: Infer types for Ruby expressions
-- **Secondary Responsibility**: Load and query RBS type information
-- **Coordinate Boundary**: Inference queries accept `SourceFileId`, domain
-  ranges, and UTF-8 byte offsets. Root LSP adapters convert UTF-16 positions
-  through the current `RubyDocument` generation exactly once before calling
-  inference. A crate-wide recursive architecture test rejects direct editor-
-  protocol imports and manifest dependencies anywhere in `ruby-analysis`.
-- **Core value constants**: Universal runtime values such as `ARGV` are parsed
-  from the embedded core `constants.rbs` and installed through the ordinary
-  file-owned `SourceKind::Signature` lifecycle. This proof source is available
-  without runtime stdlib discovery; the packaged physical RBS file remains the
-  navigation target. Neither the collector nor an LSP adapter synthesizes a
-  type from the constant's name.
-- **Deferred chained receivers**: A method candidate may retain the exact
-  nested call-expression range that supplies its receiver. Engine resolution
-  first finalizes the inner call against the complete graph, then admits the
-  outer dispatch only when that exact outcome is proven and its type agrees
-  with the graph node's class/module kind. Reopened methods and union returns
-  use the same fail-closed method-resolution path. A missing or ambiguous
-  outcome remains explained Unknown and cannot be replaced by constant syntax.
-- **Constructor proof**: Ruby source `initialize` becomes the callable
-  singleton `new` fact only when its instance owner is proven to be a class.
-  Its semantic return is the constructed class instance; the initializer
-  body's Ruby return is irrelevant. An explicit `self.new` remains an ordinary
-  user method whose own return must be proven, and a module declaration never
-  acquires class-constructor semantics. RBS constructors enter through the same
-  normalized method/type facts.
+The semantic path is intentionally one-way:
+
+```text
+Prism traversal in ruby-analysis::indexer
+        -> file-owned facts, candidates, flow evidence, return equations
+        -> engine graph and immutable query context
+        -> bounded inference/recursive solve
+        -> engine-owned solved outcomes and diagnostics
+        -> thin LSP and check-CLI projections
+```
+
+This shape preserves three independent concerns. The indexer owns Ruby syntax
+and lexical traversal. Inference owns derivation, joins, narrowing, RBS
+substitution, and bounded solving. The engine owns persistent project truth and
+the only method/MRO/visibility/ambiguity policy. A new feature must not bypass
+those boundaries by reparsing for one request, looking up methods locally, or
+storing a second result for one consumer.
+
+Inference queries accept `SourceFileId`, domain ranges, and UTF-8 byte offsets.
+Root LSP adapters convert UTF-16 positions through the current `RubyDocument`
+generation exactly once before calling reusable analysis. A recursive
+architecture test rejects direct editor-protocol imports and manifest
+dependencies anywhere in `ruby-analysis`.
+
+Concrete results are proof-carrying. An incomplete union, receiver, lookup
+chain, overload, recursive component, or type substitution remains an
+explained Unknown. A proven outer collection may retain an unknown argument,
+but that partial shape cannot prove a diagnostic requiring a concrete element.
+Method existence is independent from return proof: exact navigation and
+references may survive while hover and chained inference remain Unknown.
+
+Universal runtime values such as `ARGV` are parsed from the embedded core
+`constants.rbs` and installed through the ordinary file-owned
+`SourceKind::Signature` lifecycle. The physical RBS file remains the navigation
+target. Neither the collector nor an adapter synthesizes a type from a constant
+name. RBS, YARD, runtime, and validated extension types all enter this same fact
+and provenance lifecycle.
+
+A nested call candidate retains the exact inner expression range that supplies
+its receiver. Engine resolution first finalizes the inner call against the
+complete graph, then admits the outer dispatch only when that outcome is proven
+and its type agrees with the graph node's class/module kind. Reopened methods
+and union returns use the same fail-closed path. Ruby source `initialize`
+becomes callable singleton `new` only when its owner is proven to be a class;
+its semantic return is the constructed instance. Explicit `self.new` remains
+an ordinary method, and modules never acquire constructor semantics from
+syntax alone.
+
+The remaining reusable infrastructure seam is higher-order call solving. The
+current analysis handles selected yields, block bodies, proc/lambda calls, and
+receiver-generic RBS returns, but there is not yet one callable constraint model
+that solves generic results from block input/output. Static symbol-to-proc forms
+such as `items.map(&:to_s)` therefore remain a known false Unknown. That gap
+belongs in `ruby-analysis::inference` as a general block/proc/generic
+substitution rule, not as collection-method cases in LSP features or the
+checker.
+
+The reviewed acceptance contract is
+`support/type_inference/scorecard.toml`. Historical accepted and rejected
+measurements live under `support/performance/`; they are evidence, not a second
+architecture document. Mandatory release and memory gates are summarized in
+`AGENTS.md`.
 
 ### 7. Handlers (`src/handlers/`)
 
@@ -640,8 +679,9 @@ The modular architecture facilitates extending the server with new capabilities:
 - `didChange` never performs project-wide affected-file propagation. Export
   changes refresh at most eight open project documents; body-only changes
   refresh only the edited document.
-- Repeatable cold, edit, query-p95, and estimated-engine-memory budgets live in
-  `PERFORMANCE.md` and are checked by the release profiler.
+- Repeatable cold, edit, query-p95, and estimated-engine-memory budgets are
+  defined in `AGENTS.md`, checked by the release profiler, and backed by exact
+  machine-readable evidence under `support/performance/`.
 - Loop flow stabilization is bounded in `ruby-analysis::inference`: only the
   outermost lexical loop repeats to the configured fixed-point limit, while
   nested loops receive one pass per outer iteration. This prevents exponential

@@ -1,7 +1,156 @@
-//! Editor-agnostic Ruby type inference.
+//! Editor-agnostic, proof-first Ruby type inference.
 //!
-//! This crate owns type inference helpers, RBS lookup, literal/collection
-//! analysis, and forward local type tracking.
+//! # Purpose
+//!
+//! This module owns reusable rules for deriving Ruby types. It is shared by
+//! workspace indexing, semantic queries, the language server, and the
+//! standalone checker. An editor feature may format or filter an inference
+//! result, but it must not implement a competing type rule.
+//!
+//! The design optimizes for trustworthy answers rather than maximum hint
+//! volume: publish a concrete type only when the available static evidence is
+//! complete. Otherwise retain [`crate::core::RubyType::Unknown`] together with
+//! a stable [`crate::core::UnknownReason`] where the evidence surface supports
+//! one. A false Unknown is a coverage gap that can be improved later; a false
+//! concrete type is a correctness defect.
+//!
+//! # Ownership boundaries
+//!
+//! The inference pipeline crosses four deliberately separate layers:
+//!
+//! 1. [`crate::indexer`] performs the offset-preserving Prism traversal,
+//!    maintains lexical/execution scopes, and emits file-owned facts, call
+//!    candidates, local-flow evidence, and compact method-return equations.
+//! 2. This module derives expression, flow, method-return, block/proc, and RBS
+//!    types. It may ask semantic questions through domain query APIs, but it
+//!    does not own a workspace, parse files, or use editor protocol types.
+//! 3. [`crate::engine`] owns the complete project graph, the sole Ruby
+//!    method/MRO/visibility/ambiguity policy, file replacement, cross-file
+//!    resolution, and stored solved outcomes.
+//! 4. Root LSP and CLI adapters project those same engine-owned domain results
+//!    into hover, inlay, completion, navigation, diagnostics, or terminal/JSON
+//!    output.
+//!
+//! This direction is intentional. Moving AST traversal into the engine would
+//! couple persistent semantic state to Prism. Moving lookup into inference or
+//! an adapter would allow hover, navigation, diagnostics, and checking to
+//! disagree about the callable method. Moving type rules into an editor would
+//! make headless checking a second implementation.
+//!
+//! # Proof model
+//!
+//! [`crate::core::TypeInferenceOutcome`] is the proof-carrying boundary. Its
+//! private representation prevents `Proven(Unknown)`. The following rules are
+//! invariants rather than presentation preferences:
+//!
+//! - A union is concrete only when every reachable member is proven. Unknown
+//!   absorbs an incomplete union; known members must not be published as a
+//!   plausible partial answer.
+//! - A proven outer collection may retain an explicit unknown argument, such
+//!   as `Array[Unknown]`. That proves the container shape, not its contents,
+//!   and cannot prove an argument or assignment mismatch requiring a concrete
+//!   element type.
+//! - Method existence and method return proof are separate. A call may resolve
+//!   to exact navigation/reference targets while its return remains Unknown.
+//! - Missing-method and type diagnostics require the complete relevant lookup
+//!   chain. Missing ancestors, mixins, signatures, dependencies, visibility
+//!   information, or overload evidence suppress claims that depend on them.
+//! - Explicit RBS, YARD, runtime, and validated extension types enter as
+//!   provenance-bearing facts. They use the ordinary engine lifecycle and do
+//!   not create a second signature precedence or semantic store here.
+//! - Dynamic Ruby boundaries such as arbitrary string evaluation, reflective
+//!   dispatch, data-dependent `method_missing`, and unsupported
+//!   metaprogramming remain Unknown. Naming conventions, `Object`, observed
+//!   call sites, confidence scores, and arbitrary overload selection are not
+//!   substitutes for proof.
+//!
+//! # Flow, calls, and recursion
+//!
+//! [`type_tracker`] owns forward lexical flow, joins, narrowing, block-local
+//! state, and method-body return equations. Source order and hard lexical
+//! boundaries are semantic inputs: inference must not scan source text or
+//! borrow a later same-named assignment when scope evidence is absent.
+//!
+//! [`method`] composes receiver types with engine-owned dispatch and RBS
+//! signatures. Reopened definitions and union receivers are exhaustive: all
+//! selected definitions or receiver members must participate. Recursive and
+//! mutually recursive returns use compact equations and a bounded,
+//! deterministic SCC fixed-point solve. Bottom is private solver state; a
+//! base-free, incomplete, or non-converging component publishes an explained
+//! Unknown rather than widening a result.
+//!
+//! [`rbs`] performs supported RBS conversion and generic substitution.
+//! [`completion`] exposes reusable receiver/type probing; editor trigger
+//! routing and snippet construction remain outside this crate.
+//!
+//! # Determinism and lifecycle
+//!
+//! Identical source, signatures, configuration, and dependency inputs must
+//! produce identical canonical types, diagnostics, and semantic fingerprints
+//! regardless of file discovery order, hash iteration, worker scheduling,
+//! cache state, or LSP versus CLI execution. Preserve this by:
+//!
+//! - canonicalizing composite types structurally;
+//! - sorting or using ordered collections at persisted/query boundaries;
+//! - bounding loop and recursive solving rather than depending on traversal
+//!   luck;
+//! - storing evidence with its owning file and removing it through the same
+//!   `register_file -> replace_facts -> resolve` lifecycle as other facts; and
+//! - reusing compact bindings/equations instead of reparsing or walking Prism
+//!   once per consumer.
+//!
+//! A body-only edit must not synchronously trigger a closed-workspace check.
+//! New retained state, constraint work, union growth, or explanation graphs
+//! require explicit bounds and release-profile evidence. Accuracy work may
+//! reduce false Unknowns, but it does not get to regress the established
+//! latency, CPU, or RSS gates.
+//!
+//! # Higher-order call boundary
+//!
+//! The current implementation proves selected yielding methods, block bodies,
+//! proc/lambda calls, and receiver-generic RBS returns. It does **not** yet
+//! provide one general callable-constraint model that solves type variables
+//! from block parameters and block results. Static symbol-to-proc syntax such
+//! as `items.map(&:to_s)` is therefore a known false-Unknown boundary today.
+//!
+//! Extend this as a reusable higher-order call rule, not as a list of editor
+//! or method-name special cases. A static `&:method` can be treated like an
+//! equivalent block only after the block input type is proven, the method
+//! resolves for every reachable union member, and generic substitution proves
+//! the container result. If any member or substitution is incomplete, retain
+//! Unknown. This same abstraction should serve `map`, `collect`,
+//! `filter_map`, `each_with_object`, and user/RBS-declared yielding methods.
+//!
+//! # Acceptance contract
+//!
+//! `support/type_inference/scorecard.toml` is the machine-readable conformance
+//! contract. The 9/10 threshold is at least 90/100 overall and at least 85%
+//! in every critical category, with no known wrong concrete type in supported
+//! cases. Conservative safety cases and the separately reviewed real-project
+//! precision corpus protect the no-false-positive rule without inflating the
+//! accuracy score. CLI/LSP parity, deterministic lifecycle behavior, package
+//! smoke tests, and the performance/RSS contract in `AGENTS.md` are independent
+//! completion gates; a high score alone is not sufficient.
+//!
+//! Keep measured results in the scorecard and `support/performance/` artifacts,
+//! not in this Rustdoc. This document records why the system is shaped this
+//! way; machine-readable evidence records whether the current implementation
+//! satisfies it.
+//!
+//! # Change protocol
+//!
+//! For a new inference rule:
+//!
+//! 1. Add the smallest failing domain or integration test first and confirm
+//!    the intended failure.
+//! 2. Add a counterexample showing partial or ambiguous evidence remains
+//!    Unknown.
+//! 3. Implement the rule in this module or emit the necessary binding/fact in
+//!    the indexer; keep lookup and persistence in the engine.
+//! 4. Verify every affected consumer reads the shared outcome and that edit
+//!    replacement removes stale evidence.
+//! 5. Add or update the reviewed scorecard case and measure any material hot-
+//!    path or retained-memory change with the release profiler.
 
 pub mod completion;
 pub mod control_flow;

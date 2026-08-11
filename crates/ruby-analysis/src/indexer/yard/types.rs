@@ -17,7 +17,7 @@ pub struct YardParam {
     /// The range of the @param tag in the source (for diagnostics)
     /// This covers the entire @param line
     pub range: Option<Range>,
-    /// The range of just the [Type] portion (for type-specific diagnostics)
+    /// The range of just the `[Type]` portion (for type-specific diagnostics)
     /// Used to highlight only the type when it's unknown
     pub types_range: Option<Range>,
 }
@@ -100,7 +100,7 @@ pub struct YardReturn {
     pub description: Option<String>,
     /// The range of the @return tag in the source (for diagnostics)
     pub range: Option<Range>,
-    /// The range of just the [Type] portion (for type-specific diagnostics)
+    /// The range of just the `[Type]` portion (for type-specific diagnostics)
     pub types_range: Option<Range>,
 }
 
@@ -144,7 +144,7 @@ impl Display for YardReturn {
 }
 
 /// Represents a YARD @option tag for hash options
-/// Format: @option hash_name [Type] :key_name (default) description
+/// Format: `@option hash_name [Type] :key_name (default) description`
 #[derive(Debug, Clone, PartialEq)]
 pub struct YardOption {
     /// The parameter name this option belongs to (e.g., "opts" in @option opts)
