@@ -958,7 +958,9 @@ impl AnalysisEngine {
             RubyType::Class(_)
             | RubyType::ClassReference(_)
             | RubyType::Array(_)
-            | RubyType::Hash(_, _) => GraphNodeKind::Class,
+            | RubyType::Hash(_, _)
+            | RubyType::Literal(_)
+            | RubyType::Shape(_) => GraphNodeKind::Class,
             RubyType::Module(_) | RubyType::ModuleReference(_) => GraphNodeKind::Module,
             RubyType::Union(_) | RubyType::Unknown => return None,
         };
@@ -1939,9 +1941,10 @@ impl AnalysisEngine {
                 }
                 self.is_exception_class_name(&name)
             }
+            RubyType::Literal(value) => self.ruby_type_is_exception(value.widened_type()),
             RubyType::Module(_) | RubyType::ModuleReference(_) => false,
             RubyType::Union(_) | RubyType::Unknown => true,
-            RubyType::Array(_) | RubyType::Hash(_, _) => false,
+            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_) => false,
         }
     }
 

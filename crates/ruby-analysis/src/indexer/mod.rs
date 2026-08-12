@@ -28,7 +28,10 @@ mod variable_scopes;
 pub mod yard;
 
 pub use analysis_indexer::{AnalysisIndex, AnalysisIndexer};
-pub use analyzer::{RubyPrismAnalyzer, SignatureHelpTarget};
+pub use analyzer::{
+    CompletionReceiverTarget, RubyPrismAnalyzer, ShapeKeyCompletionTarget, ShapeKeySyntax,
+    SignatureHelpTarget,
+};
 pub use code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
 pub use document_symbols::{
     DocumentSymbolKind, DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext,

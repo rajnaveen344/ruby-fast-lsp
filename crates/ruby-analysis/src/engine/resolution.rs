@@ -96,8 +96,10 @@ fn receiver_type_members(receiver_type: &RubyType) -> &[RubyType] {
         | RubyType::Module(_)
         | RubyType::ClassReference(_)
         | RubyType::ModuleReference(_)
+        | RubyType::Literal(_)
         | RubyType::Array(_)
         | RubyType::Hash(_, _)
+        | RubyType::Shape(_)
         | RubyType::Unknown => std::slice::from_ref(receiver_type),
     }
 }
@@ -1589,6 +1591,8 @@ impl<'a> AnalysisQuery<'a> {
                 | crate::core::RubyType::Module(_)
                 | crate::core::RubyType::Array(_)
                 | crate::core::RubyType::Hash(_, _)
+                | crate::core::RubyType::Literal(_)
+                | crate::core::RubyType::Shape(_)
                 | crate::core::RubyType::Union(_)
                 | crate::core::RubyType::Unknown => None,
             })

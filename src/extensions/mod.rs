@@ -171,6 +171,7 @@ struct LoadedWasmExtension {
     indexed_call_names: BTreeSet<String>,
     frame_call_names: BTreeSet<String>,
     semantic_targets: Vec<ExtensionMethodTarget>,
+    semantic_namespaces: Vec<ExtensionNamespaceTarget>,
     watched_file_matcher: GlobSet,
     applicability: Vec<ExtensionGemRequirement>,
     project_context_delivery: ExtensionProjectContextDelivery,
@@ -218,6 +219,12 @@ struct ExtensionMethodTarget {
     owner_kind: NamespaceKind,
     method: RubyMethod,
     frame: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ExtensionNamespaceTarget {
+    owner: Vec<RubyConstant>,
+    declaration_kind: GraphNodeKind,
 }
 
 #[derive(Clone, Debug)]
@@ -485,6 +492,8 @@ struct ExtensionIndexingManifest {
     frame_call_names: Vec<String>,
     #[serde(default)]
     targets: Vec<ExtensionMethodTargetManifest>,
+    #[serde(default)]
+    namespaces: Vec<ExtensionNamespaceTargetManifest>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -527,6 +536,12 @@ struct ExtensionMethodTargetManifest {
     method: String,
     #[serde(default)]
     frame: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ExtensionNamespaceTargetManifest {
+    owner: Vec<String>,
+    declaration_kind: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -827,6 +842,17 @@ impl ExtensionRegistryHandle {
             Some(&snapshot.context),
             snapshot.applicability_fingerprint,
         );
+    }
+
+    pub(crate) fn has_applicable_semantic_targets(
+        &self,
+        project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
+    ) -> bool {
+        self.inner.read().extensions.iter().any(|extension| {
+            extension.is_loaded()
+                && extension.has_semantic_targets()
+                && extension.applies_to_source(project)
+        })
     }
 
     pub fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) -> bool {
@@ -1405,6 +1431,22 @@ impl ExtensionRegistry {
             if !extension.is_loaded() || !extension.applies_to(project) {
                 continue;
             }
+            for namespace in &extension.semantic_namespaces {
+                let instance = FullyQualifiedName::namespace_with_kind(
+                    namespace.owner.clone(),
+                    NamespaceKind::Instance,
+                );
+                let singleton = FullyQualifiedName::namespace_with_kind(
+                    namespace.owner.clone(),
+                    NamespaceKind::Singleton,
+                );
+                for owner in [instance, singleton] {
+                    let fact = GraphNodeFact::new(owner, namespace.declaration_kind, range);
+                    if !facts.graph_nodes.contains(&fact) {
+                        facts.graph_nodes.push(fact);
+                    }
+                }
+            }
             for target in &extension.semantic_targets {
                 let owner = FullyQualifiedName::namespace_with_kind(
                     target.owner.clone(),
@@ -1468,6 +1510,7 @@ impl LoadedWasmExtension {
         extension: ruby_fast_lsp_extension_wasm_host::WasmExtension,
         compiled_extension: ruby_fast_lsp_extension_wasm_host::CompiledWasmExtension,
         semantic_targets: Vec<ExtensionMethodTarget>,
+        semantic_namespaces: Vec<ExtensionNamespaceTarget>,
         frame_call_names: BTreeSet<String>,
         applicability: Vec<ExtensionGemRequirement>,
         project_context_delivery: ExtensionProjectContextDelivery,
@@ -1492,6 +1535,7 @@ impl LoadedWasmExtension {
             indexed_call_names,
             frame_call_names,
             semantic_targets,
+            semantic_namespaces,
             watched_file_matcher,
             applicability,
             project_context_delivery,
@@ -4240,6 +4284,12 @@ fn load_wasm_extension_with_cache(
         .map(parse_manifest_method_targets)
         .transpose()?
         .unwrap_or_default();
+    let semantic_namespaces = package
+        .manifest
+        .as_ref()
+        .map(parse_manifest_namespace_targets)
+        .transpose()?
+        .unwrap_or_default();
     let frame_call_names = package
         .manifest
         .as_ref()
@@ -4264,6 +4314,7 @@ fn load_wasm_extension_with_cache(
         extension,
         compiled_extension,
         semantic_targets,
+        semantic_namespaces,
         frame_call_names,
         applicability,
         project_context_delivery,
@@ -4745,6 +4796,52 @@ fn parse_manifest_method_targets(
         .targets
         .iter()
         .map(|target| parse_manifest_method_target(&manifest.id, target))
+        .collect()
+}
+
+fn parse_manifest_namespace_targets(
+    manifest: &ExtensionManifest,
+) -> Result<Vec<ExtensionNamespaceTarget>, ExtensionLoadError> {
+    let Some(indexing) = &manifest.indexing else {
+        return Ok(Vec::new());
+    };
+    indexing
+        .namespaces
+        .iter()
+        .map(|target| {
+            let owner = target
+                .owner
+                .iter()
+                .map(|part| {
+                    RubyConstant::new(part).map_err(|err| {
+                        ExtensionLoadError::new(format!(
+                            "extension `{}` indexing namespace owner part `{}` is invalid: {}",
+                            manifest.id, part, err
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if owner.is_empty() {
+                return Err(ExtensionLoadError::new(format!(
+                    "extension `{}` indexing namespace owner must not be empty",
+                    manifest.id
+                )));
+            }
+            let declaration_kind = match target.declaration_kind.as_str() {
+                "class" => GraphNodeKind::Class,
+                "module" => GraphNodeKind::Module,
+                other => {
+                    return Err(ExtensionLoadError::new(format!(
+                        "extension `{}` indexing namespace declaration_kind `{}` is invalid; expected `class` or `module`",
+                        manifest.id, other
+                    )))
+                }
+            };
+            Ok(ExtensionNamespaceTarget {
+                owner,
+                declaration_kind,
+            })
+        })
         .collect()
 }
 
@@ -6626,7 +6723,7 @@ globs = ["config/routes.rb"]
     }
 
     #[test]
-    fn manifest_method_targets_parse_semantic_owner_kind_and_method() {
+    fn manifest_targets_parse_semantic_namespaces_and_methods() {
         let manifest: ExtensionManifest = toml::from_str(
             r#"
 id = "semantic"
@@ -6637,6 +6734,10 @@ wasm = "extension.wasm"
 [indexing]
 call_names = ["describe"]
 
+[[indexing.namespaces]]
+owner = ["RSpec"]
+declaration_kind = "module"
+
 [[indexing.targets]]
 owner = ["RSpec"]
 owner_kind = "singleton"
@@ -6646,6 +6747,16 @@ frame = true
         )
         .expect("test manifest must parse");
 
+        let namespaces = parse_manifest_namespace_targets(&manifest)
+            .expect("test semantic namespaces must parse");
+        assert_eq!(
+            namespaces,
+            vec![ExtensionNamespaceTarget {
+                owner: vec![RubyConstant::new("RSpec").expect("test constant is valid")],
+                declaration_kind: GraphNodeKind::Module,
+            }],
+            "semantic namespace parsing must retain the explicit declaration kind"
+        );
         let targets =
             parse_manifest_method_targets(&manifest).expect("test semantic targets must parse");
         assert_eq!(targets.len(), 1);

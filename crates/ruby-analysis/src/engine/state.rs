@@ -58,8 +58,10 @@ fn resolve_constant_dependency(
                     RubyType::Class(_)
                     | RubyType::Module(_)
                     | RubyType::ModuleReference(_)
+                    | RubyType::Literal(_)
                     | RubyType::Array(_)
                     | RubyType::Hash(_, _)
+                    | RubyType::Shape(_)
                     | RubyType::Union(_)
                     | RubyType::Unknown => None,
                 };
@@ -99,8 +101,20 @@ pub struct SourceFile {
     pub line_index: SourceLineIndex,
     pub content_hash: u64,
     pub kind: SourceKind,
+    revision: u64,
     /// Present for `SourceKind::Gem` files bound from a locked package.
     pub library_package: Option<crate::core::LibraryPackageId>,
+}
+
+/// Opaque identity of one registered file snapshot in one engine.
+///
+/// Keeping the engine, file, and revision identities together prevents a fact
+/// batch from accidentally validating against another file or cloned engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceFileSnapshot {
+    engine_instance_id: u64,
+    file_id: SourceFileId,
+    revision: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -644,6 +658,10 @@ fn stable_ruby_type(hasher: &mut StableExportHasher, ruby_type: &RubyType) {
             stable_u8(hasher, 4);
             stable_fqn(hasher, fqn);
         }
+        RubyType::Literal(value) => {
+            stable_u8(hasher, 9);
+            stable_literal_value(hasher, value);
+        }
         RubyType::Array(elements) => {
             stable_u8(hasher, 5);
             stable_len(hasher, elements.len());
@@ -662,6 +680,52 @@ fn stable_ruby_type(hasher: &mut StableExportHasher, ruby_type: &RubyType) {
                 stable_ruby_type(hasher, value);
             }
         }
+        RubyType::Shape(shape) => {
+            stable_u8(hasher, 10);
+            stable_len(hasher, shape.fields().len());
+            for field in shape.fields() {
+                match field.key() {
+                    crate::core::LiteralKey::Symbol(value) => {
+                        stable_u8(hasher, 1);
+                        stable_string(hasher, value);
+                    }
+                    crate::core::LiteralKey::String(value) => {
+                        stable_u8(hasher, 2);
+                        stable_string(hasher, value);
+                    }
+                }
+                stable_u8(
+                    hasher,
+                    match field.presence() {
+                        crate::core::ShapeFieldPresence::Required => 1,
+                        crate::core::ShapeFieldPresence::Optional => 2,
+                    },
+                );
+                stable_ruby_type(hasher, field.value());
+            }
+            match shape.rest() {
+                Some(rest) => {
+                    stable_u8(hasher, 1);
+                    stable_ruby_type(hasher, rest.key());
+                    stable_ruby_type(hasher, rest.value());
+                }
+                None => stable_u8(hasher, 0),
+            }
+            stable_u8(
+                hasher,
+                match shape.exactness() {
+                    crate::core::ShapeExactness::Exact => 1,
+                    crate::core::ShapeExactness::Open => 2,
+                },
+            );
+            stable_u8(
+                hasher,
+                match shape.stability() {
+                    crate::core::ShapeStability::TrackedMutable => 1,
+                    crate::core::ShapeStability::Frozen => 2,
+                },
+            );
+        }
         RubyType::Union(types) => {
             stable_u8(hasher, 7);
             stable_len(hasher, types.len());
@@ -670,6 +734,19 @@ fn stable_ruby_type(hasher: &mut StableExportHasher, ruby_type: &RubyType) {
             }
         }
         RubyType::Unknown => stable_u8(hasher, 8),
+    }
+}
+
+fn stable_literal_value(hasher: &mut StableExportHasher, value: &crate::core::LiteralValue) {
+    match value {
+        crate::core::LiteralValue::Symbol(value) => {
+            stable_u8(hasher, 1);
+            stable_string(hasher, value);
+        }
+        crate::core::LiteralValue::String(value) => {
+            stable_u8(hasher, 2);
+            stable_string(hasher, value);
+        }
     }
 }
 
@@ -1093,6 +1170,7 @@ pub(super) struct DiagnosticFacts {
 pub struct AnalysisEngine {
     instance_id: u64,
     semantic_revision: u64,
+    next_source_revision: u64,
     pub(super) sources: SourceRegistry,
     pub(super) names: NameRegistry,
     pub(super) facts: FactArena,
@@ -1134,6 +1212,7 @@ impl Default for AnalysisEngine {
         Self {
             instance_id: next_analysis_engine_instance_id(),
             semantic_revision: 0,
+            next_source_revision: 0,
             sources: SourceRegistry::default(),
             names: NameRegistry::default(),
             facts: FactArena::default(),
@@ -1159,6 +1238,7 @@ impl Clone for AnalysisEngine {
         Self {
             instance_id: next_analysis_engine_instance_id(),
             semantic_revision: self.semantic_revision,
+            next_source_revision: self.next_source_revision,
             sources: self.sources.clone(),
             names: self.names.clone(),
             facts: self.facts.clone(),
@@ -1254,6 +1334,19 @@ impl AnalysisEngine {
         library_package: Option<crate::core::LibraryPackageId>,
     ) -> SourceFileId {
         let id = self.sources.ids.get_or_insert(&path);
+        if self.sources.files.get(&id).is_some_and(|existing| {
+            existing.path == path
+                && existing.kind == kind
+                && existing.line_index == line_index
+                && existing.content_hash == content_hash
+                && existing.source == source
+                && existing.library_package == library_package
+        }) {
+            return id;
+        }
+        self.next_source_revision = self.next_source_revision.checked_add(1).expect(
+            "INVARIANT VIOLATED: analysis engine source revision exhausted u64. This is a bug because stale background fact commits require monotonic source identity. Fix: widen the source snapshot revision before registering u64::MAX distinct source snapshots.",
+        );
         self.sources.files.insert(
             id,
             SourceFile {
@@ -1263,10 +1356,54 @@ impl AnalysisEngine {
                 line_index,
                 content_hash,
                 kind,
+                revision: self.next_source_revision,
                 library_package,
             },
         );
         id
+    }
+
+    pub fn source_snapshot_for_path(&self, path: impl AsRef<Path>) -> Option<SourceFileSnapshot> {
+        let file_id = self.file_id(path)?;
+        let file = self.file(file_id)?;
+        Some(SourceFileSnapshot {
+            engine_instance_id: self.instance_id,
+            file_id,
+            revision: file.revision,
+        })
+    }
+
+    /// Register a source only if no newer registration occurred after the
+    /// caller captured `expected_snapshot`.
+    pub fn register_file_borrowed_if_snapshot(
+        &mut self,
+        path: PathBuf,
+        content: &str,
+        kind: SourceKind,
+        expected_snapshot: Option<SourceFileSnapshot>,
+    ) -> Option<SourceFileSnapshot> {
+        if let Some(expected) = expected_snapshot {
+            assert_eq!(
+                expected.engine_instance_id,
+                self.instance_id,
+                "INVARIANT VIOLATED: conditional source registration received a snapshot from another analysis engine. This is a bug because source revisions are engine-local lifecycle identities. Fix: capture and commit the snapshot through the same isolated project engine."
+            );
+        }
+        if self.source_snapshot_for_path(&path) != expected_snapshot {
+            return None;
+        }
+        let file_id = self.register_file_borrowed(path, content, kind);
+        let file = self.file(file_id).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: conditional source registration lost file id {:?}. This is a bug because registration and revision capture occur under one engine write borrow. Fix: keep SourceRegistry insertion atomic.",
+                file_id
+            )
+        });
+        Some(SourceFileSnapshot {
+            engine_instance_id: self.instance_id,
+            file_id,
+            revision: file.revision,
+        })
     }
 
     pub fn replace_facts(
@@ -1286,6 +1423,29 @@ impl AnalysisEngine {
             ResolveMode::Deferred => {}
         }
         change
+    }
+
+    /// Commit facts only while the source snapshot used to collect them is
+    /// still current. A mismatch is an expected concurrent-edit outcome.
+    pub fn replace_facts_if_source_snapshot(
+        &mut self,
+        expected_snapshot: SourceFileSnapshot,
+        facts: FileFacts,
+        mode: ResolveMode,
+    ) -> Option<SemanticChange> {
+        assert_eq!(
+            expected_snapshot.engine_instance_id,
+            self.instance_id,
+            "INVARIANT VIOLATED: fact replacement received a source snapshot from another analysis engine. This is a bug because isolated projects cannot share mutable source lifecycle identity. Fix: commit collected facts through the same engine that issued the snapshot."
+        );
+        if self
+            .file(expected_snapshot.file_id)
+            .map(|file| file.revision)
+            != Some(expected_snapshot.revision)
+        {
+            return None;
+        }
+        Some(self.replace_facts(expected_snapshot.file_id, facts, mode))
     }
 
     pub fn resolve(&mut self) {
@@ -2017,6 +2177,51 @@ impl AnalysisEngine {
                     .iter()
                     .any(|equation| !equation.constant_dependencies().is_empty())
         });
+        self.refresh_retained_shape_telemetry(file_id);
+    }
+
+    fn refresh_retained_shape_telemetry(&mut self, file_id: SourceFileId) {
+        let mut observed = InferenceTelemetry::default();
+        for ruby_type in self.facts.types.ruby_types_in_file(file_id) {
+            observed.observe_retained_type(ruby_type);
+        }
+        if let Some(reads) = self.local_read_type_views_in_file(file_id) {
+            for (_, ruby_type) in reads {
+                observed.observe_retained_type(ruby_type);
+            }
+        }
+        if let Some(evidence) = self.inference_by_file.get(&file_id) {
+            for outcome in evidence.method_return_outcomes.values() {
+                if let Some(ruby_type) = outcome.proven_type() {
+                    observed.observe_retained_type(ruby_type);
+                }
+                if let Some(reason) = outcome.unknown_reason() {
+                    observed.observe_shape_unknown(reason);
+                }
+            }
+            for (_, reason) in &evidence.expression_unknown_reasons {
+                observed.observe_shape_unknown(*reason);
+            }
+        }
+        if let Some(outcomes) = self.call_expression_outcome_views_in_file(file_id) {
+            for (_, outcome) in outcomes {
+                match outcome {
+                    TypeInferenceOutcomeRef::Proven(ruby_type) => {
+                        observed.observe_retained_type(ruby_type);
+                    }
+                    TypeInferenceOutcomeRef::Unknown(reason) => {
+                        observed.observe_shape_unknown(reason);
+                    }
+                }
+            }
+        }
+        self.inference_by_file
+            .get_mut(&file_id)
+            .expect(
+                "INVARIANT VIOLATED: retained shape telemetry lost its file-owned inference evidence. This is a bug because the refresh runs only after atomic evidence insertion. Fix: keep telemetry refresh inside the file replacement lifecycle.",
+            )
+            .telemetry
+            .replace_retained_shape_observations(&observed);
     }
 
     fn resolve_constant_type_equations(&mut self) -> bool {
@@ -2246,18 +2451,34 @@ impl AnalysisEngine {
                 "INVARIANT VIOLATED: a method-equation owner disappeared before evidence replacement. This is a bug because resolution owns the engine write lock. Fix: keep equation solving and evidence projection atomic.",
             );
             evidence.method_return_outcomes = outcomes;
+            let max_live_shape_aliases = evidence.telemetry.max_live_shape_aliases;
             evidence.telemetry = InferenceTelemetry::default();
+            evidence
+                .telemetry
+                .observe_max_live_shape_aliases(usize::try_from(max_live_shape_aliases).expect(
+                    "INVARIANT VIOLATED: retained shape alias telemetry did not fit usize. This is a bug because the configured alias bound is representable on every supported target. Fix: keep the telemetry representation aligned with MAX_SHAPE_ALIASES.",
+                ));
         }
 
         let telemetry_owner = *file_ids.first().expect(
             "INVARIANT VIOLATED: a non-empty method-equation solve has no file owner. This is a bug because equations are collected exclusively from sorted file evidence. Fix: preserve the owner while flattening equations.",
         );
-        self.inference_by_file
+        let telemetry_evidence = self
+            .inference_by_file
             .get_mut(&telemetry_owner)
             .expect(
                 "INVARIANT VIOLATED: the deterministic method-solver telemetry owner disappeared. This is a bug because resolution owns the engine write lock. Fix: assign telemetry before leaving the atomic solve pass.",
-            )
-            .telemetry = solve_result.telemetry;
+            );
+        let max_live_shape_aliases = telemetry_evidence.telemetry.max_live_shape_aliases;
+        telemetry_evidence.telemetry = solve_result.telemetry;
+        telemetry_evidence
+            .telemetry
+            .observe_max_live_shape_aliases(usize::try_from(max_live_shape_aliases).expect(
+                "INVARIANT VIOLATED: retained shape alias telemetry did not fit usize. This is a bug because the configured alias bound is representable on every supported target. Fix: keep the telemetry representation aligned with MAX_SHAPE_ALIASES.",
+            ));
+        for file_id in &file_ids {
+            self.refresh_retained_shape_telemetry(*file_id);
+        }
         self.method_return_equations_dirty = false;
         self.method_return_solution_spans_files = file_ids.len() > 1;
         true

@@ -19,6 +19,7 @@ Supporting docs:
 | File                                                                                   | Purpose                                         |
 | -------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | [README.md](README.md)                                                                 | Product overview and usage                      |
+| [docs/structural-hash-shapes.md](docs/structural-hash-shapes.md)                       | Structural Hash behavior and limits             |
 | [NEXT.md](NEXT.md)                                                                     | Forward-looking engineering roadmap             |
 | [src/ARCHITECTURE.md](src/ARCHITECTURE.md)                                             | Current implementation architecture             |
 | [crates/ruby-analysis/src/inference/mod.rs](crates/ruby-analysis/src/inference/mod.rs) | Type-inference proof model and design rationale |
@@ -129,6 +130,12 @@ but publishes only documents currently open in the client. Opening/changing a
 file publishes its syntax and semantic diagnostics normally. Do not flood the
 LSP client with closed-file diagnostics or weaken the engine's reusable
 diagnostic store to implement this projection policy.
+Open editor buffers are authoritative over disk during cold project collection
+and JRuby replay. Delayed file-fact producers must capture the engine's opaque
+source snapshot and commit only while that exact engine/file/revision identity
+is current; a concurrent edit invalidates the old result. Never restore an
+unconditional background replacement path that can erase newer interactive
+facts merely because it finishes later.
 
 Missing-method diagnostics require a complete engine-owned lookup chain. If a
 superclass, include, prepend, or extend edge is unresolved anywhere in the
@@ -293,6 +300,22 @@ Universal runtime value constants are declared in the embedded core
 physical `core-rbs/constants.rbs` source and every VSIX/npm packaging manifest
 aligned so navigation has a real target. Never infer a constant's value type
 from its name or treat every constant receiver as a class object.
+
+Hash-backed structural inference is represented only by canonical
+`RubyType::Literal` and `RubyType::Shape` values. `TypeTracker` may use bounded
+flow-local Hash identities for known mutation, aliases, containment, and escape
+invalidation, but those identities must never become a parallel engine store
+or survive file replacement. Preserve complete correlated union variants and
+fail closed across Unknown, unsupported mutation, or escape; never retain a
+known field prefix after the proof boundary.
+The fixed accepted bounds are 32 fields, eight nested shape levels, eight
+shape variants, eight live aliases, and 16 solve iterations. Bound excess must
+publish the explicit shape-bound Unknown reason rather than truncating,
+widening to `Object`, or flattening correlations. Supported RBS records convert
+to this same shape model, and hover, inlay hints, completion, diagnostics,
+chained dispatch, and `ruby-fast-lsp check` must consume the same engine-owned
+outcome. Release evidence lives in
+`support/performance/type-inference-shapes-final-2026-08-12.json`.
 Runtime stdlib discovery must invoke only the owning project's exact selected
 runtime executable, with its exact Java home and without inherited Ruby,
 RubyGems, or Bundler environment overrides. Never fall back to the server's
@@ -1532,6 +1555,12 @@ Mandatory repository-wide consequences:
 When the user reports that behavior is broken or "not working", follow this
 strict TDD process. This applies even if the report is informal or diagnostic
 driven rather than a polished code example:
+
+Real user workspaces may be inspected read-only to reproduce a report and to
+verify the final behavior, but they are never test fixtures. Do not copy their
+paths, names, namespaces, business terminology, or source into committed test
+cases. Reduce every regression to a neutral synthetic fixture that preserves
+only the semantic shape needed to exercise the same LSP/indexer/engine path.
 
 1. **Red**: Create an integration test that captures the expected behavior
    - Write the test first based on the reported behavior

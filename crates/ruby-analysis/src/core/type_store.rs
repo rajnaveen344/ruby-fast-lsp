@@ -161,6 +161,17 @@ pub enum TypeResolution {
     Unresolved,
 }
 
+/// Borrowed result for one internal named-fact selection.
+///
+/// This keeps hot indexing queries allocation-free without exposing compact
+/// store ids or indexes as semantic API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NamedTypeResolution<'a> {
+    Resolved(&'a RubyType),
+    Ambiguous,
+    Unresolved,
+}
+
 /// Append-only type fact store.
 #[derive(Debug, Clone)]
 pub struct TypeStore {
@@ -325,21 +336,21 @@ impl TypeStore {
             .collect()
     }
 
-    /// Borrow each known method-return type in fact-arena order.
+    /// Borrow each method-return type in fact-arena order, including Unknown.
     ///
     /// This is a domain view rather than a store exposure: callers that only
     /// need method returns must not materialize and clone unrelated type facts.
     /// Arena order matches `all_facts`, preserving deterministic duplicate-key
     /// overwrite behavior when a caller collects the iterator into a map.
-    pub fn known_method_return_types(
-        &self,
-    ) -> impl Iterator<Item = (&FullyQualifiedName, &RubyType)> {
+    ///
+    /// Unknown is retained because an in-progress file replacement must treat
+    /// a newly invalidated local method as authoritative. Dropping it would let
+    /// the collector fall back to the previous engine snapshot and resurrect a
+    /// stale return type while deriving callers later in the same file.
+    pub fn method_return_types(&self) -> impl Iterator<Item = (&FullyQualifiedName, &RubyType)> {
         self.facts.iter().filter_map(|stored| {
             let fact = stored.as_ref()?;
             let ruby_type = self.ruby_type(fact.ruby_type);
-            if ruby_type == &RubyType::Unknown {
-                return None;
-            }
             match fact.subject.interned_id() {
                 Some(subject_id) => match self.subject(subject_id) {
                     TypeSubject::MethodReturn(fqn) => Some((fqn, ruby_type)),
@@ -356,6 +367,13 @@ impl TypeStore {
                 None => None,
             }
         })
+    }
+
+    pub fn known_method_return_types(
+        &self,
+    ) -> impl Iterator<Item = (&FullyQualifiedName, &RubyType)> {
+        self.method_return_types()
+            .filter(|(_, ruby_type)| **ruby_type != RubyType::Unknown)
     }
 
     /// Update inferred method-return facts without rebuilding the file-owned
@@ -493,6 +511,86 @@ impl TypeStore {
             .get(&file_id)
             .map(|ids| self.clone_facts(ids))
             .unwrap_or_default()
+    }
+
+    /// Resolve the latest named type fact selected by one file-local domain
+    /// predicate without materializing unrelated facts.
+    ///
+    /// The predicate receives only interned, non-expression subjects together
+    /// with their exact source range. Callers may therefore exclude a write
+    /// whose right-hand side is still being evaluated without exposing the
+    /// store's compact ids or indexes. Facts at the same latest start offset
+    /// resolve when their Ruby types agree and remain ambiguous when they do
+    /// not, matching the reaching-assignment proof rule.
+    pub(crate) fn named_type_in_file_before_matching(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+        mut matches: impl FnMut(&TypeSubject, TextRange) -> bool,
+    ) -> NamedTypeResolution<'_> {
+        let Some(ids) = self.facts_by_file.get(&file_id) else {
+            return NamedTypeResolution::Unresolved;
+        };
+
+        let mut latest_start = None;
+        let mut latest_type = None;
+        let mut ambiguous = false;
+        for id in ids {
+            let Some(fact) = self.fact(*id) else {
+                continue;
+            };
+            if fact.range.start_byte > byte_offset {
+                continue;
+            }
+            let Some(subject_id) = fact.subject.interned_id() else {
+                continue;
+            };
+            if !matches(self.subject(subject_id), fact.range) {
+                continue;
+            }
+
+            match latest_start {
+                None => {
+                    latest_start = Some(fact.range.start_byte);
+                    latest_type = Some(fact.ruby_type);
+                }
+                Some(start) if fact.range.start_byte > start => {
+                    latest_start = Some(fact.range.start_byte);
+                    latest_type = Some(fact.ruby_type);
+                    ambiguous = false;
+                }
+                Some(start) if fact.range.start_byte == start => {
+                    if latest_type != Some(fact.ruby_type) {
+                        ambiguous = true;
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+
+        let Some(latest_type) = latest_type else {
+            return NamedTypeResolution::Unresolved;
+        };
+        if ambiguous {
+            return NamedTypeResolution::Ambiguous;
+        }
+
+        NamedTypeResolution::Resolved(self.ruby_type(latest_type))
+    }
+
+    /// Borrow only type payloads retained by one file. Engine telemetry uses
+    /// this domain view so an observational refresh does not clone every fact
+    /// on the indexing or typing path.
+    pub(crate) fn ruby_types_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> impl Iterator<Item = &RubyType> {
+        self.facts_by_file
+            .get(&file_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| self.fact(*id))
+            .map(|fact| self.ruby_type(fact.ruby_type))
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {
@@ -951,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn known_method_return_types_borrows_only_known_returns_in_arena_order() {
+    fn method_return_type_views_retain_unknown_locally_and_filter_known_returns() {
         let first = method_return_subject("First", "call");
         let unknown = method_return_subject("Unknown", "call");
         let second = method_return_subject("Second", "call");
@@ -969,7 +1067,7 @@ mod tests {
             TypeProvenance::Assignment,
         ));
         store.add(TypeFact::new(
-            unknown,
+            unknown.clone(),
             RubyType::Unknown,
             TextRange::new(SourceFileId(1), 20, 28),
             TypeProvenance::Inferred,
@@ -981,6 +1079,7 @@ mod tests {
             TypeProvenance::Inferred,
         ));
 
+        let all_returns = store.method_return_types().collect::<Vec<_>>();
         let returns = store.known_method_return_types().collect::<Vec<_>>();
         let TypeSubject::MethodReturn(first_fqn) = first else {
             panic!("test method subject must be a method return")
@@ -988,6 +1087,18 @@ mod tests {
         let TypeSubject::MethodReturn(second_fqn) = second else {
             panic!("test method subject must be a method return")
         };
+        let TypeSubject::MethodReturn(unknown_fqn) = unknown else {
+            panic!("test unknown method subject must be a method return")
+        };
+        assert_eq!(
+            all_returns,
+            vec![
+                (&first_fqn, &RubyType::string()),
+                (&unknown_fqn, &RubyType::Unknown),
+                (&second_fqn, &RubyType::integer()),
+            ],
+            "the local collector view must retain an Unknown proof kill in arena order"
+        );
         assert_eq!(
             returns,
             vec![
@@ -1224,6 +1335,69 @@ mod tests {
         match store.type_at(&subject, file(), 4) {
             TypeResolution::Ambiguous(facts) => assert_eq!(facts.len(), 2),
             other => panic!("expected ambiguous facts, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn named_file_query_selects_without_materializing_unrelated_expression_facts() {
+        let wanted = constant_subject("WANTED");
+        let excluded = TextRange::new(file(), 20, 26);
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            wanted.clone(),
+            RubyType::integer(),
+            TextRange::new(file(), 0, 6),
+            TypeProvenance::Assignment,
+        ));
+        for offset in 1..20 {
+            let range = TextRange::new(file(), offset, offset + 1);
+            store.add(TypeFact::new(
+                TypeSubject::Expression(range),
+                RubyType::string(),
+                range,
+                TypeProvenance::Literal,
+            ));
+        }
+        store.add(TypeFact::new(
+            wanted.clone(),
+            RubyType::string(),
+            excluded,
+            TypeProvenance::Assignment,
+        ));
+
+        let resolution = store.named_type_in_file_before_matching(file(), 30, |subject, range| {
+            subject == &wanted && range != excluded
+        });
+        match resolution {
+            NamedTypeResolution::Resolved(ruby_type) => {
+                assert_eq!(*ruby_type, RubyType::integer())
+            }
+            other => panic!("expected the latest non-excluded named fact, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn named_file_query_preserves_same_position_type_ambiguity() {
+        let wanted = constant_subject("WANTED");
+        let range = TextRange::new(file(), 10, 16);
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            wanted.clone(),
+            RubyType::integer(),
+            range,
+            TypeProvenance::Assignment,
+        ));
+        store.add(TypeFact::new(
+            wanted.clone(),
+            RubyType::string(),
+            range,
+            TypeProvenance::Flow,
+        ));
+
+        match store.named_type_in_file_before_matching(file(), 20, |subject, _| subject == &wanted)
+        {
+            NamedTypeResolution::Ambiguous => {}
+            other => panic!("expected conflicting latest named facts, got {other:?}"),
         }
     }
 

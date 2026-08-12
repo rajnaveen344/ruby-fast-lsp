@@ -62,6 +62,71 @@ fn file_ids_are_stable_across_updates() {
 }
 
 #[test]
+fn source_revisions_change_only_for_distinct_registered_snapshots() {
+    let mut engine = AnalysisEngine::new();
+    let path = std::path::PathBuf::from("app/utility.rb");
+    let first = register_project_file(&mut engine, path.clone(), "module Utility; end");
+    let first_snapshot = engine.source_snapshot_for_path(&path).unwrap();
+
+    let identical = register_project_file(&mut engine, path.clone(), "module Utility; end");
+    assert_eq!(identical, first);
+    assert_eq!(
+        engine.source_snapshot_for_path(&path),
+        Some(first_snapshot),
+        "byte-identical registration must retain the source snapshot identity"
+    );
+
+    register_project_file(
+        &mut engine,
+        path.clone(),
+        "module Utility; def self.lookup; end; end",
+    );
+    assert_ne!(
+        engine.source_snapshot_for_path(&path),
+        Some(first_snapshot),
+        "a content change must create a new source snapshot identity"
+    );
+}
+
+#[test]
+fn stale_source_revision_cannot_replace_newer_file_facts() {
+    let mut engine = AnalysisEngine::new();
+    let path = std::path::PathBuf::from("app/utility.rb");
+    let file_id = register_project_file(&mut engine, path.clone(), "module Utility; end");
+    let stale_snapshot = engine.source_snapshot_for_path(&path).unwrap();
+    register_project_file(
+        &mut engine,
+        path,
+        "module Utility; def self.lookup; end; end",
+    );
+
+    let utility = FullyQualifiedName::namespace(vec![RubyConstant::new("Utility").unwrap()]);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                utility.clone(),
+                GraphNodeKind::Module,
+                crate::core::TextRange::new(file_id, 0, 14),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(
+        engine.replace_facts_if_source_snapshot(
+            stale_snapshot,
+            FileFacts::default(),
+            ResolveMode::Immediate,
+        ),
+        None,
+        "facts collected from a superseded source snapshot must be discarded"
+    );
+    assert!(engine.query().namespace_exists(&utility));
+}
+
+#[test]
 fn source_kind_updates_with_file() {
     let mut engine = AnalysisEngine::new();
 
@@ -2987,5 +3052,43 @@ fn inference_telemetry_replaces_with_its_owning_file() {
             .and_then(|outcomes| outcomes.get(&method))
             .and_then(TypeInferenceOutcome::proven_type),
         Some(&RubyType::string())
+    );
+}
+
+#[test]
+fn expression_end_query_treats_exact_unknown_call_outcome_as_authoritative() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "consumer.rb", "payload[:name]\n");
+    let range = TextRange::new(file_id, 0, 14);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            types: vec![TypeFact::new(
+                TypeSubject::Expression(range),
+                RubyType::string(),
+                range,
+                TypeProvenance::Inferred,
+            )],
+            inference: InferenceEvidence {
+                call_expression_outcomes: vec![(
+                    range,
+                    TypeInferenceOutcome::unknown(UnknownReason::MutableShapeInvalidated),
+                )],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(
+        engine.query().expression_type_ending_at(file_id, 14),
+        Some(RubyType::Unknown),
+        "a call-level Unknown must prevent completion from using a stale expression fact"
+    );
+    assert_eq!(
+        engine.query().proven_expression_type_ending_at(file_id, 14),
+        None,
+        "proven-only consumers must omit the same exact Unknown"
     );
 }

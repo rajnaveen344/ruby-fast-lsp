@@ -319,6 +319,15 @@ isolated engine. Navigation demand may change when a file becomes queryable; it
 must never change the facts ultimately collected from identical source,
 configuration, dependency products, and extension inputs.
 
+Open editor buffers are the authoritative project source while they exist;
+cold batches and JRuby replay must not reread an older disk copy for those
+files. Every live-engine registration issues an opaque per-file source snapshot
+identity. Delayed project facts commit only if that exact engine/file/revision
+snapshot is still current; a concurrent edit makes the old result stale and it
+is discarded. Byte-identical registration preserves the identity. This
+compare-and-commit boundary belongs in `ruby-analysis::engine`, so no
+background producer can erase newer interactive facts by finishing later.
+
 Shared work must not imply shared semantic ownership. A reusable dependency
 product has three distinct layers:
 
@@ -494,6 +503,34 @@ explained Unknown. A proven outer collection may retain an unknown argument,
 but that partial shape cannot prove a diagnostic requiring a concrete element.
 Method existence is independent from return proof: exact navigation and
 references may survive while hover and chained inference remain Unknown.
+
+Hash-backed structural values use the ordinary `RubyType` algebra:
+`RubyType::Literal` retains bounded Symbol/String discriminants and
+`RubyType::Shape` stores canonical fields, optional generic rest evidence,
+exact/open state, and shallow frozen/tracked-mutable state. Shape construction
+sorts and deduplicates fields, rejects embedded Unknown evidence, and enforces
+the fixed limits of 32 fields, eight nested shape levels, eight correlated
+shape variants, eight live aliases, and 16 solve iterations. A limit breach is
+the explicit `shape_bound_exceeded` Unknown reason; fields or variants are
+never truncated.
+
+`TypeTracker` owns mutable Hash identity only for one flow pass. Known writes,
+delete, clear, merge, containment, and aliases update that bounded identity;
+unsupported mutation or escape changes every affected alias to explained
+Unknown. Those private identities never enter file facts. Persisted outcomes
+contain only canonical `RubyType` values and Unknown reasons, so file
+replacement, cross-file return/constant equations, and stale-fact removal use
+the existing engine lifecycle. Frozen means the outer Hash key set is stable,
+not that nested values are deeply immutable.
+
+Literal `[]`, `fetch`, `dig`, presence predicates, iteration, key/value
+projection, Hash patterns, and discriminated equality narrowing are reusable
+inference operations. Ordinary Hash methods use the shape's canonical generic
+`Hash[K, V]` view and engine-owned RBS lookup. Supported RBS records convert to
+the same open structural model. Shape unions remain unions of complete
+variants; presentation may format them but must not flatten field correlation.
+Hover, inlay hints, completion, chained dispatch, diagnostics, and
+`ruby-fast-lsp check` all consume the same solved outcome.
 
 Universal runtime values such as `ARGV` are parsed from the embedded core
 `constants.rbs` and installed through the ordinary file-owned
@@ -676,6 +713,14 @@ The modular architecture facilitates extending the server with new capabilities:
   surfaces use `SourcePosition`, `SourceRange`, `TextRange`, and domain enums.
   Root `src/` modules alone project those records into LSP positions, ranges,
   locations, symbol kinds, and semantic tokens.
+- Structural Hash collection uses a collector-local range-to-fact-index map
+  over the append-only direct fact vector, while named flow reads use the
+  borrowed file-local `TypeStore` selector. These are lookup accelerators only:
+  they store no duplicate types or independent semantic truth. Exact range,
+  provenance, source order, same-position ambiguity, and active-write
+  exclusions are asserted at the boundary. The accepted release evidence is
+  recorded in
+  `support/performance/type-inference-shapes-final-2026-08-12.json`.
 - A failed lexical lookup remains unknown. Fact collection does not fall back
   to scanning source lines or reparsing assignment fragments: such a fallback
   cannot preserve Ruby lexical ownership or source order and can attribute a

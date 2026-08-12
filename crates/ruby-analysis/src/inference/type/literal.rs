@@ -1,6 +1,10 @@
-use crate::core::FullyQualifiedName;
+use crate::core::{
+    FullyQualifiedName, LiteralKey, LiteralValue, ShapeConstructionError, ShapeExactness,
+    ShapeField, ShapeStability, ShapeType, UnknownReason,
+};
 use crate::r#type::ruby::RubyType;
 use ruby_prism::*;
+use std::collections::BTreeMap;
 
 /// Analyzes Ruby literals and determines their types
 pub struct LiteralAnalyzer;
@@ -177,84 +181,17 @@ impl LiteralAnalyzer {
 
     /// Analyze an array literal and infer element types
     fn analyze_array_literal(&self, array_node: &ArrayNode) -> RubyType {
-        let mut element_types = Vec::new();
-
-        for element in array_node.elements().iter() {
-            if let Some(element_type) = self.analyze_literal(&element) {
-                element_types.push(element_type);
-            } else {
-                // If we can't infer the type, use Unknown
-                element_types.push(RubyType::Unknown);
-            }
-        }
-
-        // If array is empty, return Array with Unknown element type
-        if element_types.is_empty() {
-            return RubyType::Array(vec![RubyType::Unknown]);
-        }
-
-        RubyType::Array(RubyType::canonical_union_members(element_types))
+        infer_array_literal_type(array_node, |node| {
+            self.analyze_literal(node).unwrap_or(RubyType::Unknown)
+        })
     }
 
     /// Analyze a hash literal and infer key and value types
     fn analyze_hash_literal(&self, hash_node: &HashNode) -> RubyType {
-        let mut key_types = Vec::new();
-        let mut value_types = Vec::new();
-
-        for element in hash_node.elements().iter() {
-            if let Some(assoc_node) = element.as_assoc_node() {
-                // Analyze key
-                if let Some(key_type) = self.analyze_literal(&assoc_node.key()) {
-                    key_types.push(key_type);
-                } else {
-                    key_types.push(RubyType::Unknown);
-                }
-
-                // Analyze value
-                if let Some(value_type) = self.analyze_literal(&assoc_node.value()) {
-                    value_types.push(value_type);
-                } else {
-                    value_types.push(RubyType::Unknown);
-                }
-            } else if let Some(assoc_splat_node) = element.as_assoc_splat_node() {
-                // Handle splat operator (**hash)
-                match assoc_splat_node
-                    .value()
-                    .and_then(|value| self.analyze_literal(&value))
-                {
-                    Some(RubyType::Hash(keys, values)) => {
-                        key_types.extend(keys);
-                        value_types.extend(values);
-                    }
-                    Some(
-                        RubyType::Class(_)
-                        | RubyType::Module(_)
-                        | RubyType::ClassReference(_)
-                        | RubyType::ModuleReference(_)
-                        | RubyType::Array(_)
-                        | RubyType::Union(_)
-                        | RubyType::Unknown,
-                    )
-                    | None => {
-                        key_types.push(RubyType::Unknown);
-                        value_types.push(RubyType::Unknown);
-                    }
-                }
-            } else {
-                key_types.push(RubyType::Unknown);
-                value_types.push(RubyType::Unknown);
-            }
-        }
-
-        // If hash is empty, return Hash with Unknown key/value types
-        if key_types.is_empty() && value_types.is_empty() {
-            return RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]);
-        }
-
-        RubyType::Hash(
-            RubyType::canonical_union_members(key_types),
-            RubyType::canonical_union_members(value_types),
-        )
+        infer_hash_literal_type(hash_node, |node| {
+            self.analyze_literal(node).unwrap_or(RubyType::Unknown)
+        })
+        .unwrap_or(RubyType::Unknown)
     }
 
     /// Check if a node represents a literal value
@@ -322,6 +259,223 @@ impl LiteralAnalyzer {
 
         None
     }
+}
+
+/// Infer one Array literal through a caller-owned element resolver.
+///
+/// Keeping this traversal shared lets local-flow inference recursively retain
+/// Hash shapes nested in arrays without introducing a second literal policy.
+pub(crate) fn infer_array_literal_type(
+    array_node: &ArrayNode<'_>,
+    mut infer_value: impl FnMut(&Node<'_>) -> RubyType,
+) -> RubyType {
+    infer_array_literal_type_fallible(array_node, |element| {
+        Ok::<RubyType, ShapeConstructionError>(infer_value(element))
+    })
+    .expect(
+        "INVARIANT VIOLATED: infallible Array literal inference returned a shape construction error. This is a bug because the wrapper converts every element to Ok. Fix: keep error creation inside the caller-provided fallible resolver.",
+    )
+}
+
+/// Fallible Array literal inference used when nested shape-bound failures must
+/// remain proof-carrying instead of being flattened into an Unknown element.
+pub(crate) fn infer_array_literal_type_fallible(
+    array_node: &ArrayNode<'_>,
+    mut infer_value: impl FnMut(&Node<'_>) -> Result<RubyType, ShapeConstructionError>,
+) -> Result<RubyType, ShapeConstructionError> {
+    let element_types = array_node
+        .elements()
+        .iter()
+        .map(|element| infer_value(&element))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if element_types.is_empty() {
+        Ok(RubyType::Array(vec![RubyType::Unknown]))
+    } else {
+        Ok(RubyType::Array(RubyType::canonical_union_members(
+            element_types,
+        )))
+    }
+}
+
+/// Project a Shape to its generic Hash view only when this exact call
+/// expression constructs the receiver.
+///
+/// An immediate literal has no pre-existing alias or escape. Shapes reached
+/// through locals or other expressions stay precise and fail closed at method
+/// boundaries until mutable identity tracking is available.
+pub(crate) fn project_immediate_hash_receiver_type(
+    receiver: &Node<'_>,
+    inferred: RubyType,
+) -> RubyType {
+    match inferred {
+        RubyType::Shape(shape) if receiver.as_hash_node().is_some() => shape.generic_hash_type(),
+        inferred => inferred,
+    }
+}
+
+/// Infer one Hash literal through a caller-owned value resolver.
+///
+/// Fully proven Symbol/String-keyed literals become exact canonical shapes.
+/// Unsupported keys, incomplete values, and unknown splats retain only the
+/// exhaustive generic Hash projection. Fixed shape bounds are returned as an
+/// error so proof-carrying callers can attach `shape_bound_exceeded` rather
+/// than publishing a partial prefix.
+pub(crate) fn infer_hash_literal_type(
+    hash_node: &HashNode<'_>,
+    mut infer_value: impl FnMut(&Node<'_>) -> RubyType,
+) -> Result<RubyType, ShapeConstructionError> {
+    infer_hash_literal_type_fallible(hash_node, |value| {
+        Ok::<RubyType, ShapeConstructionError>(infer_value(value))
+    })
+}
+
+/// Fallible Hash literal inference used by proof-carrying callers. A nested
+/// field/depth failure aborts the whole enclosing collection, so no partial
+/// outer shape or generic Hash can conceal the exceeded bound.
+pub(crate) fn infer_hash_literal_type_fallible(
+    hash_node: &HashNode<'_>,
+    mut infer_value: impl FnMut(&Node<'_>) -> Result<RubyType, ShapeConstructionError>,
+) -> Result<RubyType, ShapeConstructionError> {
+    let mut fields = BTreeMap::<LiteralKey, ShapeField>::new();
+    let mut key_types = Vec::new();
+    let mut value_types = Vec::new();
+    let mut shape_complete = true;
+
+    for element in hash_node.elements().iter() {
+        if let Some(assoc) = element.as_assoc_node() {
+            let key_node = assoc.key();
+            let generic_key_type = infer_value(&key_node)?.widen_literals();
+            key_types.push(generic_key_type);
+
+            let value_node = assoc.value();
+            let value_type = match literal_shape_value(&value_node) {
+                Some(literal) => literal,
+                None => infer_value(&value_node)?,
+            };
+            value_types.push(value_type.widen_literals());
+
+            match literal_key(&key_node) {
+                Some(key) if !RubyType::contains_unknown(&value_type) => {
+                    fields.insert(key.clone(), ShapeField::required(key, value_type));
+                }
+                Some(_) | None => shape_complete = false,
+            }
+            continue;
+        }
+
+        if let Some(splat) = element.as_assoc_splat_node() {
+            let splat_type = splat
+                .value()
+                .map(|value| infer_value(&value))
+                .transpose()?
+                .unwrap_or(RubyType::Unknown);
+            match splat_type {
+                RubyType::Shape(shape) if shape.is_exact() && shape.rest().is_none() => {
+                    for field in shape.fields() {
+                        fields.insert(field.key().clone(), field.clone());
+                    }
+                    let RubyType::Hash(keys, values) = shape.generic_hash_type() else {
+                        panic!(
+                            "INVARIANT VIOLATED: ShapeType::generic_hash_type did not return RubyType::Hash. This is a bug because literal splat inference relies on the canonical Hash projection. Fix: keep ShapeType projection exhaustive."
+                        );
+                    };
+                    key_types.extend(keys);
+                    value_types.extend(values);
+                }
+                RubyType::Hash(keys, values) => {
+                    key_types.extend(keys);
+                    value_types.extend(values);
+                    shape_complete = false;
+                }
+                RubyType::Shape(shape) => {
+                    let RubyType::Hash(keys, values) = shape.generic_hash_type() else {
+                        panic!(
+                            "INVARIANT VIOLATED: ShapeType::generic_hash_type did not return RubyType::Hash. This is a bug because literal splat inference relies on the canonical Hash projection. Fix: keep ShapeType projection exhaustive."
+                        );
+                    };
+                    key_types.extend(keys);
+                    value_types.extend(values);
+                    shape_complete = false;
+                }
+                RubyType::Class(_)
+                | RubyType::Module(_)
+                | RubyType::ClassReference(_)
+                | RubyType::ModuleReference(_)
+                | RubyType::Literal(_)
+                | RubyType::Array(_)
+                | RubyType::Union(_)
+                | RubyType::Unknown => {
+                    key_types.push(RubyType::Unknown);
+                    value_types.push(RubyType::Unknown);
+                    shape_complete = false;
+                }
+            }
+            continue;
+        }
+
+        key_types.push(RubyType::Unknown);
+        value_types.push(RubyType::Unknown);
+        shape_complete = false;
+    }
+
+    if shape_complete {
+        return ShapeType::try_new(
+            fields.into_values(),
+            None,
+            ShapeExactness::Exact,
+            ShapeStability::TrackedMutable,
+        )
+        .map(|shape| RubyType::Shape(Box::new(shape)));
+    }
+
+    Ok(RubyType::Hash(
+        RubyType::canonical_union_members(key_types),
+        RubyType::canonical_union_members(value_types),
+    ))
+}
+
+pub(crate) fn literal_key(node: &Node<'_>) -> Option<LiteralKey> {
+    if let Some(symbol) = node.as_symbol_node() {
+        return Some(LiteralKey::symbol(
+            String::from_utf8_lossy(symbol.unescaped()).to_string(),
+        ));
+    }
+    node.as_string_node()
+        .map(|string| LiteralKey::string(String::from_utf8_lossy(string.unescaped()).to_string()))
+}
+
+/// Convert the only construction failures reachable from canonical literal
+/// inference into the stable proof-failure reason exposed by the engine.
+pub(crate) fn literal_shape_construction_unknown_reason(
+    error: ShapeConstructionError,
+) -> UnknownReason {
+    match error {
+        ShapeConstructionError::FieldBoundExceeded { .. }
+        | ShapeConstructionError::DepthBoundExceeded { .. } => {
+            UnknownReason::ShapeBoundExceeded
+        }
+        ShapeConstructionError::DuplicateField(key) => panic!(
+            "INVARIANT VIOLATED: canonical Hash literal inference produced duplicate field `{key}`. This is a bug because Ruby overwrite order is resolved in a BTreeMap before ShapeType construction. Fix: canonicalize every literal field before constructing the shape."
+        ),
+        ShapeConstructionError::ExactShapeHasRest => panic!(
+            "INVARIANT VIOLATED: exact Hash literal inference produced a rest contract. This is a bug because a complete literal has no unlisted key contract. Fix: pass no rest type when constructing exact literal shapes."
+        ),
+        ShapeConstructionError::UnprovenField(key) => panic!(
+            "INVARIANT VIOLATED: complete Hash literal inference retained unproven field `{key}`. This is a bug because any Unknown value must select the generic incomplete-Hash path before ShapeType construction. Fix: reject incomplete field evidence before constructing the shape."
+        ),
+        ShapeConstructionError::UnprovenRest => panic!(
+            "INVARIANT VIOLATED: exact Hash literal inference retained an unproven rest contract. This is a bug because literal shapes are constructed without a rest contract. Fix: keep generic splat evidence out of exact ShapeType construction."
+        ),
+    }
+}
+
+fn literal_shape_value(node: &Node<'_>) -> Option<RubyType> {
+    node.as_symbol_node().map(|symbol| {
+        RubyType::Literal(Box::new(LiteralValue::symbol(
+            String::from_utf8_lossy(symbol.unescaped()).to_string(),
+        )))
+    })
 }
 
 fn get_literal_value(node: Node<'_>) -> Option<String> {
@@ -435,18 +589,37 @@ mod tests {
         test_with_code("{a: 1, b: 2}", |analyzer, node| {
             assert!(analyzer.is_literal(node));
             let ruby_type = analyzer.analyze_literal(node).unwrap();
+            let RubyType::Shape(shape) = ruby_type else {
+                panic!(
+                    "INVARIANT VIOLATED: a complete Symbol-keyed Hash literal did not infer an exact shape. This is a bug because Phase 2 requires local literal construction to preserve fields. Fix: keep infer_hash_literal_type on the complete path."
+                );
+            };
+            assert_eq!(shape.to_string(), "{ a: Integer, b: Integer }");
+            assert_eq!(shape.stability(), ShapeStability::TrackedMutable);
+        });
+    }
+
+    #[test]
+    fn nested_hash_literal_retains_exact_shapes() {
+        test_with_code("{user: {name: \"Ada\", age: 42}}", |analyzer, node| {
             assert_eq!(
-                ruby_type,
-                RubyType::Hash(
-                    vec![RubyType::Class(
-                        FullyQualifiedName::try_from("Symbol").unwrap()
-                    )],
-                    vec![RubyType::Class(
-                        FullyQualifiedName::try_from("Integer").unwrap()
-                    )]
-                )
+                analyzer.analyze_literal(node).unwrap().to_string(),
+                "{ user: { age: Integer, name: String } }"
             );
         });
+    }
+
+    #[test]
+    fn exact_hash_splat_uses_ruby_overwrite_order() {
+        test_with_code(
+            "{before: 1, **{after: 2, before: \"ready\"}}",
+            |analyzer, node| {
+                assert_eq!(
+                    analyzer.analyze_literal(node).unwrap().to_string(),
+                    "{ after: Integer, before: String }"
+                );
+            },
+        );
     }
 
     #[test]

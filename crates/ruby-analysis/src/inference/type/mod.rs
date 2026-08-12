@@ -6,6 +6,7 @@
 pub mod collection;
 pub mod literal;
 pub mod ruby;
+pub(crate) mod shape;
 
 pub use collection::{ArrayTypeInfo, CollectionAnalyzer, HashTypeInfo};
 pub use literal::LiteralAnalyzer;

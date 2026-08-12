@@ -65,6 +65,38 @@
 //!   call sites, confidence scores, and arbitrary overload selection are not
 //!   substitutes for proof.
 //!
+//! # Hash-backed structural shapes
+//!
+//! [`crate::core::RubyType::Shape`] is the canonical structural representation
+//! for a proven Ruby Hash value. Its fields retain Symbol/String literal keys,
+//! required or optional presence, exact/open state, an optional generic rest
+//! contract, and shallow frozen/tracked-mutable state. Literal discriminants
+//! use [`crate::core::RubyType::Literal`]. Shape unions retain complete
+//! variants so a `kind` field remains correlated with the other fields on the
+//! same control-flow path; field-wise flattening is not a semantic operation.
+//!
+//! Shape construction rejects partial Unknown evidence and enforces fixed
+//! bounds: 32 fields, eight nested shape levels, eight shape variants per
+//! union, eight live aliases for one mutable identity, and 16 solver
+//! iterations. Exceeding one of those limits produces
+//! [`crate::core::UnknownReason::ShapeBoundExceeded`]. It never drops fields,
+//! widens to `Object`, or retains a convenient known prefix.
+//!
+//! [`type_tracker`] owns mutable Hash identities only inside one bounded flow
+//! pass. Known mutation updates every tracked alias and unsupported mutation,
+//! escape, or ambiguous containment invalidates every affected alias. Frozen
+//! proves only the outer Hash key set; nested mutable values keep independent
+//! identities. No identity enters engine storage: file facts contain only
+//! canonical `RubyType` outcomes and stable Unknown reasons.
+//!
+//! Literal keyed reads, `fetch`, `dig`, presence predicates, Hash patterns,
+//! discriminated narrowing, key/value iteration, generic Hash projection, and
+//! supported RBS record conversion all use this shared algebra. Cross-file
+//! method returns and value constants propagate it through the ordinary
+//! equation and file-replacement lifecycle. Hover, inlay hints, completion,
+//! chained dispatch, diagnostics, and the standalone checker format or filter
+//! the same engine-owned result; none may reconstruct a shape independently.
+//!
 //! # Flow, calls, and recursion
 //!
 //! [`type_tracker`] owns forward lexical flow, joins, narrowing, block-local

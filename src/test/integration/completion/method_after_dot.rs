@@ -3,7 +3,7 @@
 //! Covers all receiver types: constants, variables, literals, instance variables,
 //! self, inherited, mixins, chaining, YARD annotations, and edge cases.
 
-use crate::test::harness::{check, check_multi_file};
+use crate::test::harness::{check, check_multi_file, FakeEditor};
 
 // ─── 1. Constant Receivers (Singleton/Class Methods) ───
 
@@ -209,6 +209,23 @@ class Types
     @value = "early"
     @value = dynamic_value
     @value.u$0
+  end
+end
+<complete excludes="upcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn unknown_instance_variable_reassignment_invalidates_trailing_dot_completion_receiver() {
+    check(
+        r#"
+class Types
+  def convert
+    @value = "early"
+    @value = dynamic_value
+    @value.$0
   end
 end
 <complete excludes="upcase">
@@ -661,6 +678,137 @@ end
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn cross_file_instance_variable_constructor_receiver() {
+    check_multi_file(&[
+        (
+            "client.rb",
+            r#"
+class Client
+  def initialize
+    @service = DirectoryService.new
+  end
+
+  def run
+    @service.$0
+  end
+end
+<complete items="list_entries">
+"#,
+        ),
+        (
+            "directory_service.rb",
+            r#"
+class DirectoryService
+  def list_entries
+    []
+  end
+end
+"#,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn cross_file_instance_variable_constructor_receiver_is_order_independent() {
+    check_multi_file(&[
+        (
+            "directory_service.rb",
+            r#"
+class DirectoryService
+  def list_entries
+    []
+  end
+end
+"#,
+        ),
+        (
+            "client.rb",
+            r#"
+class Client
+  def initialize
+    @service = DirectoryService.new
+  end
+
+  def run
+    @service.$0
+  end
+end
+<complete items="list_entries">
+"#,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn cross_file_instance_variable_constructor_receiver_has_engine_proof() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "directory_service.rb",
+            "class DirectoryService\n  def list_entries\n    []\n  end\nend\n",
+        )
+        .await;
+    editor
+        .open(
+            "client.rb",
+            "class Client\n  def initialize\n    @service = DirectoryService.new\n  end\n\n  def run\n    @service.\n  end\nend\n",
+        )
+        .await;
+
+    let uri = tower_lsp::lsp_types::Url::parse("file:///client.rb").unwrap();
+    let document = editor.server().get_doc(&uri).unwrap();
+    let engine = editor.server().analysis_engine_for_uri(&uri);
+    let engine = engine.read();
+    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+    let owner = ruby_analysis::core::FullyQualifiedName::namespace_with_kind(
+        vec![ruby_analysis::core::RubyConstant::new("Client").unwrap()],
+        ruby_analysis::core::NamespaceKind::Instance,
+    );
+    let receiver_type = query.variable_type_before_in_owner(
+        ruby_analysis::engine::VariableTypeKind::Instance,
+        "@service",
+        &owner,
+        document.analysis_file_id(),
+        u32::MAX,
+    );
+    assert_eq!(
+        receiver_type,
+        Some(ruby_analysis::core::RubyType::Class(
+            ruby_analysis::core::FullyQualifiedName::constant(vec![
+                ruby_analysis::core::RubyConstant::new("DirectoryService").unwrap(),
+            ]),
+        )),
+        "the file-owned instance-variable write must retain the resolved cross-file constructor type; facts: {:#?}",
+        query.type_facts_in_file(document.analysis_file_id()),
+    );
+    let receiver_start = u32::try_from(document.content.rfind("@service").unwrap()).unwrap();
+    let receiver_range = ruby_analysis::core::TextRange::new(
+        document.analysis_file_id(),
+        receiver_start,
+        receiver_start + u32::try_from("@service".len()).unwrap(),
+    );
+    assert_eq!(
+        query.exact_expression_type(receiver_range),
+        receiver_type,
+        "the exact receiver expression must project the same proof as its reaching instance-variable assignment; facts: {:#?}",
+        query.type_facts_in_file(document.analysis_file_id()),
+    );
+    let method_matches = query.method_matches_for_type(
+        receiver_type.as_ref().unwrap(),
+        "",
+        ruby_analysis::core::NamespaceKind::Instance,
+    );
+    assert!(
+        method_matches
+            .iter()
+            .any(|candidate| candidate.name == "list_entries"),
+        "the engine method query must expose the cross-file receiver method; matches: {method_matches:#?}"
+    );
 }
 
 // ─── 13. Regression: exact screenshot scenario ───

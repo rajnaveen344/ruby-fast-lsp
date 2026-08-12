@@ -51,6 +51,7 @@ pub use resolution::{ConstantRenameTarget, MethodLookupResult};
 pub use state::{
     AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, ResolvePassStats, SemanticChange,
     SemanticExportFingerprint, SemanticResultFingerprint, SourceFile, SourceFileInput,
+    SourceFileSnapshot,
 };
 pub use types::AnalysisQueryCache;
 pub use workspace_symbol_types::WorkspaceSymbolMatch;

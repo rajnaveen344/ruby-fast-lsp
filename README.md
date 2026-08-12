@@ -40,6 +40,10 @@ This is enough for the LSP to resolve return types, validate callers, and propag
 
 This is what makes the difference between a language server that can grep and one that can reason about Ruby code.
 
+See [Structural Hash Shapes](docs/structural-hash-shapes.md) for the supported
+TypeScript-like Hash behavior, examples, conservative boundaries, and fixed
+inference limits.
+
 See [Next Engineering Goals](NEXT.md) for the forward-looking inference and analysis roadmap.
 
 ## Installation

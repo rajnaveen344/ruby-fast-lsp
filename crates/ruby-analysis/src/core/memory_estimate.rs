@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use std::mem::size_of;
 
-use crate::{FullyQualifiedName, RubyType, TypeSubject};
+use crate::{FullyQualifiedName, LiteralValue, RubyType, ShapeRest, ShapeType, TypeSubject};
 
 pub fn map_table_bytes<K, V, S>(map: &HashMap<K, V, S>) -> usize
 where
@@ -53,6 +53,7 @@ pub fn ruby_type_heap_bytes(ruby_type: &RubyType) -> usize {
         | RubyType::Module(fqn)
         | RubyType::ClassReference(fqn)
         | RubyType::ModuleReference(fqn) => fqn_heap_bytes(fqn),
+        RubyType::Literal(value) => size_of::<LiteralValue>() + literal_value_heap_bytes(value),
         RubyType::Array(types) | RubyType::Union(types) => {
             vec_payload_bytes(types) + types.iter().map(ruby_type_heap_bytes).sum::<usize>()
         }
@@ -62,8 +63,29 @@ pub fn ruby_type_heap_bytes(ruby_type: &RubyType) -> usize {
                 + keys.iter().map(ruby_type_heap_bytes).sum::<usize>()
                 + values.iter().map(ruby_type_heap_bytes).sum::<usize>()
         }
+        RubyType::Shape(shape) => size_of::<ShapeType>() + shape_type_heap_bytes(shape),
         RubyType::Unknown => 0,
     }
+}
+
+fn literal_value_heap_bytes(value: &LiteralValue) -> usize {
+    match value {
+        LiteralValue::Symbol(value) | LiteralValue::String(value) => value.capacity(),
+    }
+}
+
+fn shape_type_heap_bytes(shape: &ShapeType) -> usize {
+    shape.fields_allocation_bytes()
+        + shape
+            .fields()
+            .iter()
+            .map(|field| field.key().heap_bytes() + ruby_type_heap_bytes(field.value()))
+            .sum::<usize>()
+        + shape.rest().map_or(0, |rest| {
+            size_of::<ShapeRest>()
+                + ruby_type_heap_bytes(rest.key())
+                + ruby_type_heap_bytes(rest.value())
+        })
 }
 
 pub fn type_subject_heap_bytes(subject: &TypeSubject) -> usize {
@@ -79,5 +101,34 @@ pub fn type_subject_heap_bytes(subject: &TypeSubject) -> usize {
             name,
         } => fqn_heap_bytes(owner) + string_heap_bytes(name),
         TypeSubject::Expression(_) => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LiteralKey, ShapeExactness, ShapeField, ShapeStability};
+
+    #[test]
+    fn shape_deep_weight_counts_box_fields_keys_and_nested_literal_payloads() {
+        let mut key = String::with_capacity(11);
+        key.push_str("label");
+        let mut value = String::with_capacity(17);
+        value.push_str("ready");
+        let shape = ShapeType::try_new(
+            [ShapeField::required(
+                LiteralKey::String(key),
+                RubyType::Literal(Box::new(LiteralValue::String(value))),
+            )],
+            None,
+            ShapeExactness::Exact,
+            ShapeStability::TrackedMutable,
+        )
+        .unwrap();
+        let ruby_type = RubyType::Shape(Box::new(shape));
+        assert_eq!(
+            ruby_type_heap_bytes(&ruby_type),
+            size_of::<ShapeType>() + size_of::<ShapeField>() + 11 + size_of::<LiteralValue>() + 17
+        );
     }
 }

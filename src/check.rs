@@ -22,6 +22,8 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::{Diagnostic as LspDiagnostic, DiagnosticSeverity as LspSeverity, Url};
 
+pub const CHECK_SCHEMA_VERSION: u32 = 5;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckSeverity {
@@ -373,7 +375,7 @@ impl CheckSession {
 
         let summary = summarize(&diagnostics);
         Ok(CheckReport {
-            schema_version: 4,
+            schema_version: CHECK_SCHEMA_VERSION,
             root,
             files_checked,
             dependency_loading_complete: true,

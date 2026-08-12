@@ -5,6 +5,15 @@ language server and `ruby-fast-lsp check`. The next phase should improve the
 number of statically provable Ruby programs without weakening determinism,
 diagnostic precision, edit latency, or memory bounds.
 
+Hash-backed structural shapes are current functionality, not roadmap work.
+They preserve correlated union variants, track bounded mutable aliases,
+invalidate on unsupported mutation or escape, interoperate with supported RBS
+records, and project one engine-owned result to editor and CLI consumers. New
+roadmap slices may build on that algebra but must not introduce a parallel
+object-shape store or treat `Unknown` as a structural wildcard.
+The concise behavior contract and examples live in
+[`docs/structural-hash-shapes.md`](docs/structural-hash-shapes.md).
+
 This is a forward-looking roadmap, not an implementation log or release
 checklist. Current architecture belongs in `src/ARCHITECTURE.md` and the
 inference module Rustdoc. Current acceptance results belong in
@@ -62,7 +71,8 @@ next forms are:
 - `Never`/bottom for non-returning expressions and reachable joins;
 - `Untyped` as an explicit gradual escape hatch distinct from missing proof;
   and
-- supported RBS tuples, records, intersections, self types, and aliases.
+- supported RBS tuples, intersections, self types, and aliases beyond the
+  current record conversion.
 
 `Unknown`, `Untyped`, and `Never` must remain semantically distinct. Unknown
 withholds a claim because evidence is insufficient. Untyped permits an explicit

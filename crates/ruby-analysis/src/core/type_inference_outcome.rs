@@ -38,10 +38,14 @@ pub enum UnknownReason {
     /// A recursive return equation had no concrete least fixed point within
     /// the bounded solver.
     UnprovenRecursiveCycle,
+    /// A shape exceeded a fixed field, depth, variant, alias, or solve bound.
+    ShapeBoundExceeded,
+    /// A mutable shape escaped or crossed an unsupported mutation boundary.
+    MutableShapeInvalidated,
 }
 
 impl UnknownReason {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 10] = [
         Self::NoReachingAssignment,
         Self::UnresolvedAssignmentValue,
         Self::AmbiguousReachingAssignment,
@@ -50,6 +54,8 @@ impl UnknownReason {
         Self::UnresolvedMethodReturn,
         Self::IncompleteUnionMember,
         Self::UnprovenRecursiveCycle,
+        Self::ShapeBoundExceeded,
+        Self::MutableShapeInvalidated,
     ];
 
     /// Stable identifier for CLI/JSON output and scorecard expectations.
@@ -63,6 +69,8 @@ impl UnknownReason {
             Self::UnresolvedMethodReturn => "unresolved_method_return",
             Self::IncompleteUnionMember => "incomplete_union_member",
             Self::UnprovenRecursiveCycle => "unproven_recursive_cycle",
+            Self::ShapeBoundExceeded => "shape_bound_exceeded",
+            Self::MutableShapeInvalidated => "mutable_shape_invalidated",
         }
     }
 
@@ -86,6 +94,12 @@ impl UnknownReason {
             }
             Self::UnprovenRecursiveCycle => {
                 "the recursive return equation did not converge to a concrete proof"
+            }
+            Self::ShapeBoundExceeded => {
+                "shape inference exceeded a fixed field, depth, variant, alias, or solve bound"
+            }
+            Self::MutableShapeInvalidated => {
+                "the mutable shape crossed an unresolved mutation or escape boundary"
             }
         }
     }
@@ -123,6 +137,22 @@ pub struct InferenceTelemetry {
     pub recursive_methods: u64,
     pub solver_iterations: u64,
     pub solver_bound_hits: u64,
+    /// Shape occurrences retained by file-owned proof values. This is an
+    /// occurrence count across facts/outcomes, not a claim about runtime Hash
+    /// instances or allocator-unique objects.
+    pub retained_shape_occurrences: u64,
+    pub retained_shape_fields: u64,
+    pub max_retained_shape_fields: u64,
+    pub max_retained_shape_depth: u64,
+    pub retained_shape_unions: u64,
+    pub retained_shape_union_variants: u64,
+    pub max_retained_shape_union_variants: u64,
+    /// Largest number of simultaneously visible local aliases/containments
+    /// observed for one mutable abstract Hash identity in a file.
+    pub max_live_shape_aliases: u64,
+    /// Exact retained proof outcomes withheld for shape-specific reasons.
+    pub shape_invalidated_outcomes: u64,
+    pub shape_bound_exceeded_outcomes: u64,
 }
 
 /// File-owned proof results and their observational solver telemetry.
@@ -241,10 +271,177 @@ impl InferenceTelemetry {
             other.solver_bound_hits,
             "aggregated solver bound-hit count",
         );
+        self.retained_shape_occurrences = checked_add(
+            self.retained_shape_occurrences,
+            other.retained_shape_occurrences,
+            "aggregated retained shape occurrence count",
+        );
+        self.retained_shape_fields = checked_add(
+            self.retained_shape_fields,
+            other.retained_shape_fields,
+            "aggregated retained shape field count",
+        );
+        self.max_retained_shape_fields = self
+            .max_retained_shape_fields
+            .max(other.max_retained_shape_fields);
+        self.max_retained_shape_depth = self
+            .max_retained_shape_depth
+            .max(other.max_retained_shape_depth);
+        self.retained_shape_unions = checked_add(
+            self.retained_shape_unions,
+            other.retained_shape_unions,
+            "aggregated retained shape union count",
+        );
+        self.retained_shape_union_variants = checked_add(
+            self.retained_shape_union_variants,
+            other.retained_shape_union_variants,
+            "aggregated retained shape union variant count",
+        );
+        self.max_retained_shape_union_variants = self
+            .max_retained_shape_union_variants
+            .max(other.max_retained_shape_union_variants);
+        self.max_live_shape_aliases = self
+            .max_live_shape_aliases
+            .max(other.max_live_shape_aliases);
+        self.shape_invalidated_outcomes = checked_add(
+            self.shape_invalidated_outcomes,
+            other.shape_invalidated_outcomes,
+            "aggregated shape-invalidated outcome count",
+        );
+        self.shape_bound_exceeded_outcomes = checked_add(
+            self.shape_bound_exceeded_outcomes,
+            other.shape_bound_exceeded_outcomes,
+            "aggregated shape-bound outcome count",
+        );
         for (reason, incoming) in &other.unknown_reasons {
             let count = self.unknown_reasons.entry(*reason).or_default();
             *count = checked_add(*count, *incoming, "aggregated Unknown reason count");
         }
+    }
+
+    /// Observe one retained proof value recursively. Shape unions count only
+    /// their direct Shape members so unrelated nominal union alternatives do
+    /// not inflate structural variant width.
+    pub fn observe_retained_type(&mut self, ruby_type: &RubyType) {
+        match ruby_type {
+            RubyType::Shape(shape) => {
+                self.retained_shape_occurrences = checked_add(
+                    self.retained_shape_occurrences,
+                    1,
+                    "retained shape occurrence count",
+                );
+                let fields = u64::try_from(shape.fields().len()).expect(
+                    "INVARIANT VIOLATED: retained shape field count did not fit u64. This is a bug because shape width is bounded far below u64. Fix: keep MAX_SHAPE_FIELDS representable by telemetry.",
+                );
+                self.retained_shape_fields = checked_add(
+                    self.retained_shape_fields,
+                    fields,
+                    "retained shape field count",
+                );
+                self.max_retained_shape_fields = self.max_retained_shape_fields.max(fields);
+                let depth = u64::try_from(shape.depth()).expect(
+                    "INVARIANT VIOLATED: retained shape depth did not fit u64. This is a bug because shape depth is bounded far below u64. Fix: keep MAX_SHAPE_DEPTH representable by telemetry.",
+                );
+                self.max_retained_shape_depth = self.max_retained_shape_depth.max(depth);
+                for field in shape.fields() {
+                    self.observe_retained_type(field.value());
+                }
+                if let Some(rest) = shape.rest() {
+                    self.observe_retained_type(rest.key());
+                    self.observe_retained_type(rest.value());
+                }
+            }
+            RubyType::Union(members) => {
+                let shape_variants = members
+                    .iter()
+                    .filter(|member| matches!(member, RubyType::Shape(_)))
+                    .count();
+                if shape_variants > 1 {
+                    self.retained_shape_unions =
+                        checked_add(self.retained_shape_unions, 1, "retained shape union count");
+                    let variants = u64::try_from(shape_variants).expect(
+                        "INVARIANT VIOLATED: retained shape-union width did not fit u64. This is a bug because union width is bounded far below u64. Fix: keep MAX_SHAPE_UNION_VARIANTS representable by telemetry.",
+                    );
+                    self.retained_shape_union_variants = checked_add(
+                        self.retained_shape_union_variants,
+                        variants,
+                        "retained shape union variant count",
+                    );
+                    self.max_retained_shape_union_variants =
+                        self.max_retained_shape_union_variants.max(variants);
+                }
+                for member in members {
+                    self.observe_retained_type(member);
+                }
+            }
+            RubyType::Array(elements) => {
+                for element in elements {
+                    self.observe_retained_type(element);
+                }
+            }
+            RubyType::Hash(keys, values) => {
+                for key in keys {
+                    self.observe_retained_type(key);
+                }
+                for value in values {
+                    self.observe_retained_type(value);
+                }
+            }
+            RubyType::Class(_)
+            | RubyType::Module(_)
+            | RubyType::ClassReference(_)
+            | RubyType::ModuleReference(_)
+            | RubyType::Literal(_)
+            | RubyType::Unknown => {}
+        }
+    }
+
+    pub fn observe_shape_unknown(&mut self, reason: UnknownReason) {
+        match reason {
+            UnknownReason::MutableShapeInvalidated => {
+                self.shape_invalidated_outcomes = checked_add(
+                    self.shape_invalidated_outcomes,
+                    1,
+                    "shape-invalidated outcome count",
+                );
+            }
+            UnknownReason::ShapeBoundExceeded => {
+                self.shape_bound_exceeded_outcomes = checked_add(
+                    self.shape_bound_exceeded_outcomes,
+                    1,
+                    "shape-bound outcome count",
+                );
+            }
+            UnknownReason::NoReachingAssignment
+            | UnknownReason::UnresolvedAssignmentValue
+            | UnknownReason::AmbiguousReachingAssignment
+            | UnknownReason::UnknownReceiver
+            | UnknownReason::InvalidMethodName
+            | UnknownReason::UnresolvedMethodReturn
+            | UnknownReason::IncompleteUnionMember
+            | UnknownReason::UnprovenRecursiveCycle => {}
+        }
+    }
+
+    pub fn observe_max_live_shape_aliases(&mut self, aliases: usize) {
+        let aliases = u64::try_from(aliases).expect(
+            "INVARIANT VIOLATED: live shape alias count did not fit u64. This is a bug because aliases are bounded far below u64. Fix: keep MAX_SHAPE_ALIASES representable by telemetry.",
+        );
+        self.max_live_shape_aliases = self.max_live_shape_aliases.max(aliases);
+    }
+
+    /// Replace metrics derived from final file-owned proof storage while
+    /// retaining traversal/solver observations from the same file.
+    pub(crate) fn replace_retained_shape_observations(&mut self, observed: &Self) {
+        self.retained_shape_occurrences = observed.retained_shape_occurrences;
+        self.retained_shape_fields = observed.retained_shape_fields;
+        self.max_retained_shape_fields = observed.max_retained_shape_fields;
+        self.max_retained_shape_depth = observed.max_retained_shape_depth;
+        self.retained_shape_unions = observed.retained_shape_unions;
+        self.retained_shape_union_variants = observed.retained_shape_union_variants;
+        self.max_retained_shape_union_variants = observed.max_retained_shape_union_variants;
+        self.shape_invalidated_outcomes = observed.shape_invalidated_outcomes;
+        self.shape_bound_exceeded_outcomes = observed.shape_bound_exceeded_outcomes;
     }
 }
 
@@ -335,6 +532,7 @@ impl TypeInferenceOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{LiteralKey, ShapeExactness, ShapeField, ShapeStability, ShapeType};
 
     #[test]
     fn optional_unknown_retains_the_supplied_reason() {
@@ -367,5 +565,103 @@ mod tests {
             RubyType::Unknown,
             RubyType::string(),
         ]));
+    }
+
+    #[test]
+    fn retained_shape_telemetry_counts_nested_occurrences_and_correlated_unions() {
+        let nested = RubyType::Shape(Box::new(
+            ShapeType::try_new(
+                [ShapeField::required(
+                    LiteralKey::symbol("name"),
+                    RubyType::string(),
+                )],
+                None,
+                ShapeExactness::Exact,
+                ShapeStability::TrackedMutable,
+            )
+            .unwrap(),
+        ));
+        let first = RubyType::Shape(Box::new(
+            ShapeType::try_new(
+                [
+                    ShapeField::required(LiteralKey::symbol("id"), RubyType::integer()),
+                    ShapeField::required(LiteralKey::symbol("profile"), nested),
+                ],
+                None,
+                ShapeExactness::Exact,
+                ShapeStability::TrackedMutable,
+            )
+            .unwrap(),
+        ));
+        let second = RubyType::Shape(Box::new(
+            ShapeType::try_new(
+                [ShapeField::required(
+                    LiteralKey::symbol("error"),
+                    RubyType::string(),
+                )],
+                None,
+                ShapeExactness::Exact,
+                ShapeStability::TrackedMutable,
+            )
+            .unwrap(),
+        ));
+
+        let mut telemetry = InferenceTelemetry::default();
+        telemetry.observe_retained_type(&RubyType::union([first, second]));
+        telemetry.observe_max_live_shape_aliases(3);
+        telemetry.observe_shape_unknown(UnknownReason::MutableShapeInvalidated);
+        telemetry.observe_shape_unknown(UnknownReason::ShapeBoundExceeded);
+
+        assert_eq!(telemetry.retained_shape_occurrences, 3);
+        assert_eq!(telemetry.retained_shape_fields, 4);
+        assert_eq!(telemetry.max_retained_shape_fields, 2);
+        assert_eq!(telemetry.max_retained_shape_depth, 2);
+        assert_eq!(telemetry.retained_shape_unions, 1);
+        assert_eq!(telemetry.retained_shape_union_variants, 2);
+        assert_eq!(telemetry.max_retained_shape_union_variants, 2);
+        assert_eq!(telemetry.max_live_shape_aliases, 3);
+        assert_eq!(telemetry.shape_invalidated_outcomes, 1);
+        assert_eq!(telemetry.shape_bound_exceeded_outcomes, 1);
+    }
+
+    #[test]
+    fn shape_telemetry_merge_adds_occurrences_and_preserves_maxima() {
+        let mut left = InferenceTelemetry {
+            retained_shape_occurrences: 2,
+            retained_shape_fields: 3,
+            max_retained_shape_fields: 2,
+            max_retained_shape_depth: 2,
+            retained_shape_unions: 1,
+            retained_shape_union_variants: 2,
+            max_retained_shape_union_variants: 2,
+            max_live_shape_aliases: 2,
+            shape_invalidated_outcomes: 1,
+            ..Default::default()
+        };
+        let right = InferenceTelemetry {
+            retained_shape_occurrences: 4,
+            retained_shape_fields: 12,
+            max_retained_shape_fields: 5,
+            max_retained_shape_depth: 3,
+            retained_shape_unions: 2,
+            retained_shape_union_variants: 6,
+            max_retained_shape_union_variants: 4,
+            max_live_shape_aliases: 4,
+            shape_bound_exceeded_outcomes: 2,
+            ..Default::default()
+        };
+
+        left.merge(&right);
+
+        assert_eq!(left.retained_shape_occurrences, 6);
+        assert_eq!(left.retained_shape_fields, 15);
+        assert_eq!(left.max_retained_shape_fields, 5);
+        assert_eq!(left.max_retained_shape_depth, 3);
+        assert_eq!(left.retained_shape_unions, 3);
+        assert_eq!(left.retained_shape_union_variants, 8);
+        assert_eq!(left.max_retained_shape_union_variants, 4);
+        assert_eq!(left.max_live_shape_aliases, 4);
+        assert_eq!(left.shape_invalidated_outcomes, 1);
+        assert_eq!(left.shape_bound_exceeded_outcomes, 2);
     }
 }

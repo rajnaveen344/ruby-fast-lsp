@@ -15,6 +15,8 @@ use super::bad_splat::BadSplatCandidate;
 use crate::inference::method::{
     method_call_return_type, rbs_class_exists_for_type, rbs_method_exists_for_type,
 };
+use crate::inference::r#type::literal::literal_key;
+use crate::inference::r#type::shape as shape_reads;
 use crate::inference::RubyType;
 use crate::yard::YardTypeConverter;
 
@@ -902,6 +904,13 @@ impl FactCollector {
                 | ReceiverInfo::ConstantReceiver(_)
                 | ReceiverInfo::ExpressionReceiver
                 | ReceiverInfo::InvalidConstantPath => None,
+            })
+            .map(|ruby_type| {
+                node.receiver().map_or(ruby_type.clone(), |receiver| {
+                    crate::inference::r#type::literal::project_immediate_hash_receiver_type(
+                        &receiver, ruby_type,
+                    )
+                })
             });
         let receiver_expression_range = matches!(
             receiver_info,
@@ -926,12 +935,44 @@ impl FactCollector {
         let immediate_outcome = if inference_failed && deferred_receiver_may_resolve {
             None
         } else if inference_failed {
-            Some(TypeInferenceOutcome::unknown(
-                UnknownReason::UnknownReceiver,
-            ))
+            let receiver_reason = receiver_expression_range.and_then(|range| {
+                self.expression_unknown_reasons
+                    .iter()
+                    .rev()
+                    .find_map(|(candidate, reason)| (*candidate == range).then_some(*reason))
+            });
+            let reason = match receiver_reason {
+                // These reasons describe why a previously complete shape is
+                // no longer available. Preserve that boundary at the keyed
+                // operation itself so consumers do not see an unhelpful
+                // generic receiver failure.
+                Some(
+                    UnknownReason::ShapeBoundExceeded
+                    | UnknownReason::MutableShapeInvalidated,
+                ) => receiver_reason.expect(
+                    "INVARIANT VIOLATED: checked shape receiver reason disappeared. This is a bug because receiver_reason is immutable. Fix: bind the matched reason directly.",
+                ),
+                // Ordinary assignment/scope failures prove only that this
+                // call has no receiver. The receiver expression retains its
+                // own more specific reason at its exact range.
+                Some(
+                    UnknownReason::NoReachingAssignment
+                    | UnknownReason::UnresolvedAssignmentValue
+                    | UnknownReason::AmbiguousReachingAssignment
+                    | UnknownReason::UnknownReceiver
+                    | UnknownReason::InvalidMethodName
+                    | UnknownReason::UnresolvedMethodReturn
+                    | UnknownReason::IncompleteUnionMember
+                    | UnknownReason::UnprovenRecursiveCycle,
+                )
+                | None => UnknownReason::UnknownReceiver,
+            };
+            Some(TypeInferenceOutcome::unknown(reason))
         } else if let Some(receiver_type) = receiver_type.as_ref() {
             if method_name == "freeze" {
                 Some(TypeInferenceOutcome::proven(receiver_type.clone()))
+            } else if let Some(outcome) = self.shape_call_outcome(node, receiver_type) {
+                Some(outcome)
             } else {
                 let syntax_outcome = crate::inference::method::method_call_type_outcome(
                     None,
@@ -950,7 +991,12 @@ impl FactCollector {
                     syntax_outcome
                 };
                 match outcome.unknown_reason() {
-                    None | Some(UnknownReason::IncompleteUnionMember) => Some(outcome),
+                    None
+                    | Some(
+                        UnknownReason::IncompleteUnionMember
+                        | UnknownReason::ShapeBoundExceeded
+                        | UnknownReason::MutableShapeInvalidated,
+                    ) => Some(outcome),
                     Some(
                         UnknownReason::NoReachingAssignment
                         | UnknownReason::UnresolvedAssignmentValue
@@ -1049,6 +1095,53 @@ impl FactCollector {
                 self.diagnostic_candidates.push(candidate);
             }
         }
+    }
+
+    fn shape_call_outcome(
+        &self,
+        node: &CallNode<'_>,
+        receiver_type: &RubyType,
+    ) -> Option<TypeInferenceOutcome> {
+        if !shape_reads::is_shape_only(receiver_type) {
+            return None;
+        }
+        let method_name = String::from_utf8_lossy(node.name().as_slice());
+        let arguments = node
+            .arguments()
+            .map(|arguments| arguments.arguments().iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let argument_types = arguments
+            .iter()
+            .map(|argument| self.infer_assignment_type_from_value(argument))
+            .collect::<Vec<_>>();
+        let result = match method_name.as_ref() {
+            "[]" if arguments.len() == 1 => Some(shape_reads::indexed_read(
+                receiver_type,
+                literal_key(&arguments[0]).as_ref(),
+            )),
+            "fetch" if matches!(arguments.len(), 1 | 2) => Some(shape_reads::fetch(
+                receiver_type,
+                literal_key(&arguments[0]).as_ref(),
+                argument_types.get(1),
+            )),
+            "dig" if !arguments.is_empty() => {
+                let keys = arguments.iter().map(literal_key).collect::<Vec<_>>();
+                Some(shape_reads::dig(receiver_type, &keys))
+            }
+            "key?" | "has_key?" | "include?" | "member?" if arguments.len() == 1 => Some(
+                shape_reads::key_presence(receiver_type, literal_key(&arguments[0]).as_ref()),
+            ),
+            "keys" if arguments.is_empty() => Some(shape_reads::keys(receiver_type)),
+            "values" if arguments.is_empty() => Some(shape_reads::values(receiver_type)),
+            "each" | "each_pair" | "each_key" | "each_value" if arguments.is_empty() => Some(
+                shape_reads::each_return(receiver_type, node.block().is_some()),
+            ),
+            _ => None,
+        }?;
+        Some(match result {
+            Ok(ruby_type) => TypeInferenceOutcome::proven(ruby_type),
+            Err(reason) => TypeInferenceOutcome::unknown(reason),
+        })
     }
 
     fn push_const_lookup_reference_candidate(&mut self, node: &CallNode) {
@@ -1273,6 +1366,8 @@ impl FactCollector {
                         RubyType::Class(_) | RubyType::Module(_) => NamespaceKind::Instance,
                         RubyType::Array(_)
                         | RubyType::Hash(_, _)
+                        | RubyType::Literal(_)
+                        | RubyType::Shape(_)
                         | RubyType::Union(_)
                         | RubyType::Unknown => {
                             let engine = self.analysis_engine.read();
@@ -1313,8 +1408,10 @@ impl FactCollector {
                         }
                         RubyType::Class(_)
                         | RubyType::Module(_)
+                        | RubyType::Literal(_)
                         | RubyType::Array(_)
                         | RubyType::Hash(_, _)
+                        | RubyType::Shape(_)
                         | RubyType::Union(_)
                         | RubyType::Unknown => NamespaceKind::Instance,
                     };
@@ -1370,8 +1467,10 @@ impl FactCollector {
                     }
                     RubyType::Class(_)
                     | RubyType::Module(_)
+                    | RubyType::Literal(_)
                     | RubyType::Array(_)
                     | RubyType::Hash(_, _)
+                    | RubyType::Shape(_)
                     | RubyType::Union(_)
                     | RubyType::Unknown => NamespaceKind::Instance,
                 };
@@ -1392,8 +1491,8 @@ impl FactCollector {
         }
 
         // Local/ivar receivers never receive `TypeSubject::Expression` facts (those are
-        // recorded for call/expression ranges). Resolve them before the O(n) expression
-        // scan so every `user.save`-style receiver does not rescan file type facts.
+        // recorded for call/expression ranges). Resolve them before consulting the
+        // exact expression range index.
         if let Some(local_var) = receiver_node.as_local_variable_read_node() {
             let var_name = utf8_str(local_var.name().as_slice());
             return self.get_local_var_type(var_name, &local_var.location());
@@ -1452,99 +1551,17 @@ impl FactCollector {
             );
         }
 
-        let expression_subject =
-            TypeSubject::Expression(self.direct_range(&receiver_node.location()));
-        if let Some(fact) = self
-            .direct_facts
-            .types
-            .iter()
-            .rev()
-            .find(|fact| fact.subject == expression_subject)
-        {
+        let expression_range = self.direct_range(&receiver_node.location());
+        if let Some(fact) = self.direct_expression_fact(expression_range, None) {
             return Some(fact.ruby_type.clone());
         }
 
-        if let Some(call) = receiver_node.as_call_node() {
-            let inner_method = utf8_str(call.name().as_slice());
-            let inner_type = if let Some(inner_receiver) = call.receiver() {
-                if mixin_ref_from_node(&inner_receiver).is_some() {
-                    self.infer_constant_receiver_type(&inner_receiver)
-                } else {
-                    self.infer_expression_receiver_type(&inner_receiver)
-                }
-            } else {
-                let (ns, kind) = self.scope_tracker.implicit_receiver_context();
-                if ns.is_empty() {
-                    None
-                } else {
-                    let fqn = FullyQualifiedName::constant(ns);
-                    Some(match kind {
-                        NamespaceKind::Instance => RubyType::Class(fqn),
-                        NamespaceKind::Singleton => RubyType::ClassReference(fqn),
-                    })
-                }
-            }?;
-
-            return self.resolve_method_return_type(&inner_type, inner_method);
-        }
-
+        // Reuse the ordinary expression inference below for a call receiver.
+        // That path understands structural Hash reads and retains their exact
+        // proof outcome. Reconstructing the nested call from only its method
+        // name and receiver type would route `payload[:profile][:name]`
+        // through generic method lookup and erase the inner keyed-read proof.
         Some(self.infer_type_from_value(receiver_node)).filter(|ty| *ty != RubyType::Unknown)
-    }
-
-    fn infer_constant_receiver_type(&self, receiver_node: &Node) -> Option<RubyType> {
-        let reference = mixin_ref_from_node(receiver_node)?;
-        let lexical_context = self.scope_tracker.get_ns_stack();
-        if let Some((_constant, ruby_type)) = self.resolve_constant_value_type_from(
-            &reference.parts,
-            reference.absolute,
-            &lexical_context,
-        ) {
-            return Some(ruby_type);
-        }
-
-        let namespace = self
-            .direct_resolve_namespace_from(&reference.parts, reference.absolute, &lexical_context)
-            .or_else(|| {
-                let context = if reference.absolute {
-                    Vec::new()
-                } else {
-                    lexical_context
-                };
-                self.resolve_constant_from_analysis(&reference.parts, &context)
-            })?;
-        let namespace = FullyQualifiedName::namespace(namespace.namespace_parts());
-        let kind = self
-            .direct_facts
-            .graph_nodes
-            .iter()
-            .filter(|fact| fact.fqn == namespace)
-            .max_by_key(|fact| {
-                (
-                    fact.range.file_id,
-                    fact.range.start_byte,
-                    fact.range.end_byte,
-                )
-            })
-            .map(|fact| fact.kind)
-            .or_else(|| {
-                let engine = self.analysis_engine.read();
-                AnalysisQuery::new(&engine)
-                    .graph_nodes_for(&namespace)
-                    .into_iter()
-                    .max_by_key(|fact| {
-                        (
-                            fact.range.file_id,
-                            fact.range.start_byte,
-                            fact.range.end_byte,
-                        )
-                    })
-                    .map(|fact| fact.kind)
-            })?;
-        let constant = FullyQualifiedName::constant(namespace.namespace_parts());
-        Some(match kind {
-            GraphNodeKind::Class => RubyType::ClassReference(constant),
-            GraphNodeKind::Module => RubyType::ModuleReference(constant),
-        })
     }
 
     fn proven_namespace_receiver_type(&self, namespace_parts: &[RubyConstant]) -> Option<RubyType> {
@@ -1579,7 +1596,12 @@ impl FactCollector {
             | RubyType::ClassReference(fqn)
             | RubyType::Module(fqn)
             | RubyType::ModuleReference(fqn) => return Some(fqn.namespace_parts()),
-            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Union(_) | RubyType::Unknown => {}
+            RubyType::Array(_)
+            | RubyType::Hash(_, _)
+            | RubyType::Literal(_)
+            | RubyType::Shape(_)
+            | RubyType::Union(_)
+            | RubyType::Unknown => {}
         }
         let engine = self.analysis_engine.read();
         AnalysisQuery::new(&engine)

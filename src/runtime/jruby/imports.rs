@@ -1263,9 +1263,12 @@ impl JrubyImportProvider {
             RubyType::ClassReference(proxy) | RubyType::ModuleReference(proxy) => {
                 (proxy, NamespaceKind::Singleton)
             }
-            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Union(_) | RubyType::Unknown => {
-                return None
-            }
+            RubyType::Literal(_)
+            | RubyType::Array(_)
+            | RubyType::Hash(_, _)
+            | RubyType::Shape(_)
+            | RubyType::Union(_)
+            | RubyType::Unknown => return None,
         };
         self.proxy_to_internal
             .contains_key(&proxy.to_string())
@@ -1323,8 +1326,10 @@ impl JrubyImportProvider {
                 .map(JvmType::Object),
             RubyType::Class(_)
             | RubyType::Module(_)
+            | RubyType::Literal(_)
             | RubyType::Array(_)
             | RubyType::Hash(_, _)
+            | RubyType::Shape(_)
             | RubyType::Union(_)
             | RubyType::Unknown => None,
         }
@@ -1983,8 +1988,10 @@ fn current_runtime_proxy(visitor: &FactCollector) -> Option<FullyQualifiedName> 
         RubyType::ClassReference(proxy) | RubyType::ModuleReference(proxy) => Some(proxy),
         RubyType::Class(_)
         | RubyType::Module(_)
+        | RubyType::Literal(_)
         | RubyType::Array(_)
         | RubyType::Hash(_, _)
+        | RubyType::Shape(_)
         | RubyType::Union(_)
         | RubyType::Unknown => None,
     }

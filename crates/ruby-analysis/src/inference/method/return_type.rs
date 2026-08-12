@@ -4,6 +4,7 @@ use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::AnalysisQuery;
+use crate::inference::r#type::shape as shape_reads;
 
 /// Resolve every reachable member of a union before publishing a call result.
 ///
@@ -103,6 +104,19 @@ pub fn method_call_type_outcome_with_visibility(
         return TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver);
     }
 
+    if shape_reads::is_shape_only(receiver_type) {
+        if let Some(outcome) = shape_reads::argument_free_method_return(receiver_type, method_name)
+        {
+            return match outcome {
+                Ok(ruby_type) => TypeInferenceOutcome::proven(ruby_type),
+                Err(reason) => TypeInferenceOutcome::unknown(reason),
+            };
+        }
+        if shape_reads::operation_requires_call_arguments(method_name) {
+            return TypeInferenceOutcome::unknown(UnknownReason::UnresolvedMethodReturn);
+        }
+    }
+
     if method_name == "new" {
         if let RubyType::ClassReference(fqn) = receiver_type {
             return TypeInferenceOutcome::proven(RubyType::Class(fqn.clone()));
@@ -196,6 +210,10 @@ fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -
                 &type_args,
             )
         }
+        RubyType::Shape(shape) => {
+            generic_rbs_method_return_type(&shape.generic_hash_type(), method_name)
+        }
+        RubyType::Literal(_) => None,
         RubyType::Class(_)
         | RubyType::Module(_)
         | RubyType::ClassReference(_)
@@ -233,7 +251,8 @@ fn rbs_class_names_for_type(ruby_type: &RubyType) -> Vec<String> {
             .map(|constant| vec![constant.to_string()])
             .unwrap_or_default(),
         RubyType::Array(_) => vec!["Array".to_string()],
-        RubyType::Hash(_, _) => vec!["Hash".to_string()],
+        RubyType::Hash(_, _) | RubyType::Shape(_) => vec!["Hash".to_string()],
+        RubyType::Literal(value) => rbs_class_names_for_type(&value.widened_type()),
         RubyType::Union(types) => {
             let mut all_names = Vec::new();
             for ty in types {
@@ -279,9 +298,10 @@ fn rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option
         RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
             rbs_method_return_for_fqn(fqn, method_name, true)
         }
-        RubyType::Array(_) | RubyType::Hash(_, _) => {
+        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_) => {
             generic_rbs_method_return_type(receiver_type, method_name)
         }
+        RubyType::Literal(value) => rbs_method_return_type(&value.widened_type(), method_name),
         RubyType::Union(types) => resolve_proven_union(types, |ty| {
             generic_rbs_method_return_type(ty, method_name)
                 .or_else(|| rbs_method_return_type(ty, method_name))

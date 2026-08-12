@@ -5,7 +5,8 @@ use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, SourceFileId,
 };
 use tower_lsp::lsp_types::{
-    CompletionContext, CompletionResponse, CompletionTriggerKind, Position, Url,
+    CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
+    CompletionTriggerKind, Position, Range, TextEdit, Url,
 };
 
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
@@ -17,7 +18,11 @@ use ruby_analysis::inference::{
 use crate::{
     query::{analyzer_for_document, EngineQuery},
     server::RubyLanguageServer,
-    utils::{ast::is_in_statement_position, lsp::source_position, position_to_offset},
+    utils::{
+        ast::is_in_statement_position,
+        lsp::{lsp_position, source_position},
+        position_to_offset,
+    },
 };
 
 pub use snippets::RubySnippets;
@@ -45,6 +50,48 @@ pub async fn find_completion_at_position(
         &server.analysis_engine_for_uri(&uri),
         position,
     );
+    let byte_offset = document.position_to_analysis_offset(source_position(position));
+    let (
+        (partial_name, _, _, _lv_scope_id, namespace_kind),
+        shape_key_completion_target,
+        completion_receiver_target,
+    ) = analyzer.get_completion_context(byte_offset);
+    let semantic_query = ServerCompletionSemanticQuery {
+        analysis_engine: server.analysis_engine_for_uri(&uri),
+    };
+    if let Some(target) = shape_key_completion_target {
+        let shape_keys = ruby_analysis::inference::completion::shape_key_completions_for_target(
+            &semantic_query,
+            &document,
+            &target,
+        );
+        let replacement_range = Range::new(
+            lsp_position(document.offset_to_position(shape_keys.replacement_start as usize)),
+            lsp_position(document.offset_to_position(shape_keys.replacement_end as usize)),
+        );
+        let items = shape_keys
+            .keys
+            .into_iter()
+            .map(|key| {
+                let label = match key {
+                    ruby_analysis::core::LiteralKey::Symbol(value)
+                    | ruby_analysis::core::LiteralKey::String(value) => value,
+                };
+                CompletionItem {
+                    label: label.clone(),
+                    kind: Some(CompletionItemKind::FIELD),
+                    detail: Some("Structural Hash key".to_string()),
+                    filter_text: Some(label.clone()),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range: replacement_range,
+                        new_text: label,
+                    })),
+                    ..Default::default()
+                }
+            })
+            .collect::<Vec<_>>();
+        return CompletionResponse::Array(items);
+    }
 
     // Check if completion was triggered by a trigger character
     let is_trigger_character = context
@@ -62,9 +109,6 @@ pub async fn find_completion_at_position(
         .lines()
         .nth(position.line as usize)
         .unwrap_or("");
-
-    let byte_offset = document.position_to_analysis_offset(source_position(position));
-    let (partial_name, _, _, _lv_scope_id, namespace_kind) = analyzer.get_identifier(byte_offset);
 
     // Check if we're in a :: (scope resolution) context
     let is_scope_resolution_context = if is_trigger_character && trigger_character == Some(":") {
@@ -241,9 +285,6 @@ pub async fn find_completion_at_position(
         // Method call context: provide type-aware method completions
 
         // Get receiver type using type snapshots
-        let semantic_query = ServerCompletionSemanticQuery {
-            analysis_engine: server.analysis_engine_for_uri(&uri),
-        };
         let receiver_type = ruby_analysis::inference::completion::receiver_type_from_context(
             &semantic_query,
             &document,
@@ -251,6 +292,7 @@ pub async fn find_completion_at_position(
             byte_offset,
             namespace_kind,
             &partial_name,
+            completion_receiver_target.as_ref(),
         );
 
         if let Some(receiver_type) = receiver_type {
@@ -377,5 +419,17 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
         ruby_analysis::engine::AnalysisQuery::new(&engine)
             .execution_context_at(file_id, byte_offset)
             .map(|context| context.implicit_receiver.clone())
+    }
+
+    fn exact_expression_type(
+        &self,
+        file_id: SourceFileId,
+        start_byte: u32,
+        end_byte: u32,
+    ) -> Option<RubyType> {
+        let engine = self.analysis_engine.read();
+        ruby_analysis::engine::AnalysisQuery::new(&engine).exact_expression_type(
+            ruby_analysis::core::TextRange::new(file_id, start_byte, end_byte),
+        )
     }
 }

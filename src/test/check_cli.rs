@@ -1,6 +1,7 @@
 use crate::check::{
     CheckDiagnostic, CheckReport, CheckSession, CheckTypeOutcome, CheckTypeSubjectKind,
 };
+use crate::indexer::file_processor::FileProcessor;
 use crate::test::harness::FakeEditor;
 use ruby_analysis::{RubyType, UnknownReason};
 use tower_lsp::lsp_types::{InlayHintLabel, NumberOrString, Url};
@@ -413,6 +414,222 @@ async fn normalized_variable_and_expression_types_match_lsp_inlay_projection() {
     assert_eq!(
         lsp_types,
         vec![(3, 5, ": User".to_string()), (4, 9, ": User".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn structural_shape_types_match_cli_hover_and_inlay_projection() {
+    let source =
+        "payload = { id: 1, profile: { name: \"Ada\", active: true } }\npayload[:profile][:name]\n";
+    let expected_shape = "{ id: Integer, profile: { active: TrueClass, name: String } }";
+    let project = tempfile::tempdir().expect("temporary shape-parity project must be created");
+    std::fs::write(project.path().join("main.rb"), source)
+        .expect("shape-parity fixture must be written");
+
+    let check_report = CheckSession::default()
+        .check_path(project.path())
+        .await
+        .expect("headless check must analyze structural shapes");
+    let payload = check_report
+        .inferred_types
+        .iter()
+        .find(|inferred| {
+            inferred.kind == CheckTypeSubjectKind::Local && inferred.subject == "payload"
+        })
+        .expect("the CLI must publish the shape-valued local assignment");
+    assert_eq!(
+        payload.outcome,
+        CheckTypeOutcome::Proven {
+            type_label: expected_shape.to_string(),
+        }
+    );
+    assert!(
+        check_report.inferred_types.iter().any(|inferred| {
+            inferred.kind == CheckTypeSubjectKind::Expression
+                && inferred.range.start.line == 2
+                && inferred.outcome
+                    == CheckTypeOutcome::Proven {
+                        type_label: "String".to_string(),
+                    }
+        }),
+        "the CLI must publish the final keyed-read String proof: {:?}",
+        check_report.inferred_types
+    );
+    assert!(check_report.inference.retained_shape_occurrences > 0);
+    assert!(check_report.inference.retained_shape_fields > 0);
+    assert_eq!(check_report.inference.max_retained_shape_fields, 2);
+    assert_eq!(check_report.inference.max_retained_shape_depth, 2);
+
+    let mut editor = FakeEditor::new().await;
+    editor.open("main.rb", source).await;
+    assert!(
+        editor.inlay_hints("main.rb").await.into_iter().any(|hint| {
+            matches!(
+                hint.label,
+                InlayHintLabel::String(ref label) if label == &format!(": {expected_shape}")
+            )
+        }),
+        "LSP inlay hints must render the same canonical shape as the CLI"
+    );
+    let payload_hover = hover_text(
+        editor
+            .hover_at("main.rb", 0, 2)
+            .await
+            .expect("the shape local must have hover output"),
+    );
+    assert!(
+        payload_hover.contains(expected_shape),
+        "LSP hover must render the same canonical shape as the CLI, got `{payload_hover}`"
+    );
+    let read_hover = hover_text(
+        editor
+            .hover_at("main.rb", 1, 24)
+            .await
+            .expect("the nested keyed read must have hover output"),
+    );
+    assert!(
+        read_hover.contains("String"),
+        "LSP hover must consume the same keyed-read proof as CLI, got `{read_hover}`"
+    );
+}
+
+#[tokio::test]
+async fn invalidated_shape_reason_matches_cli_and_lsp() {
+    let source = "payload = { count: 1 }\ndynamic_sink(payload)\npayload[:count]\n";
+    let project = tempfile::tempdir().expect("temporary shape-parity project must be created");
+    std::fs::write(project.path().join("main.rb"), source)
+        .expect("shape-parity fixture must be written");
+
+    let check_report = CheckSession::default()
+        .check_path(project.path())
+        .await
+        .expect("headless check must retain invalidated shape evidence");
+    let read = check_report
+        .inferred_types
+        .iter()
+        .find(|inferred| {
+            inferred.kind == CheckTypeSubjectKind::Expression && inferred.range.start.line == 3
+        })
+        .expect("the CLI must retain the invalidated keyed-read outcome");
+    assert_eq!(
+        read.outcome,
+        CheckTypeOutcome::Unknown {
+            reason: UnknownReason::MutableShapeInvalidated,
+        }
+    );
+    assert!(
+        check_report.inference.shape_invalidated_outcomes > 0,
+        "the headless report must count retained mutable-shape invalidations"
+    );
+
+    let mut editor = FakeEditor::new().await;
+    editor.open("main.rb", source).await;
+    let hover = hover_text(
+        editor
+            .hover_at("main.rb", 2, 15)
+            .await
+            .expect("the invalidated keyed read must retain hover context"),
+    );
+    assert!(
+        hover.contains("Unknown[mutable_shape_invalidated]"),
+        "LSP hover must project the same invalidation reason as CLI, got `{hover}`"
+    );
+}
+
+#[tokio::test]
+async fn shape_telemetry_reports_alias_and_bound_observations() {
+    let fields = (0..33)
+        .map(|index| format!("field_{index}: {index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!(
+        r#"class PayloadFactory
+  def build
+    payload = {{ count: 1 }}
+    copy = payload
+    copy[:count] = "many"
+    payload
+  end
+
+  def too_wide
+    payload = {{ {fields} }}
+    payload
+  end
+end
+"#
+    );
+    let project = tempfile::tempdir().expect("temporary shape-telemetry project must be created");
+    std::fs::write(project.path().join("payload_factory.rb"), source)
+        .expect("shape-telemetry fixture must be written");
+
+    let report = CheckSession::default()
+        .check_path(project.path())
+        .await
+        .expect("headless check must aggregate file-owned shape telemetry");
+
+    assert_eq!(report.inference.max_live_shape_aliases, 2);
+    assert!(
+        report.inference.shape_bound_exceeded_outcomes > 0,
+        "the rejected 33-field shape must remain measurable as a bound-triggered Unknown; telemetry={:#?}, types={:#?}",
+        report.inference,
+        report.inferred_types
+    );
+}
+
+#[tokio::test]
+async fn structural_return_diagnostics_match_cli_and_lsp_and_fail_closed() {
+    let signature = "class PayloadFactory\n  def build: () -> { id: Integer }\nend\n";
+    let mismatched = "class PayloadFactory\n  def build\n    { id: \"wrong\" }\n  end\nend\n";
+    let incomplete = "class PayloadFactory\n  def build\n    { id: dynamic_value }\n  end\nend\n";
+    let project = tempfile::tempdir().expect("temporary structural-parity project must be created");
+    let sig_dir = project.path().join("sig");
+    std::fs::create_dir(&sig_dir).expect("the synthetic sig directory must be created");
+    std::fs::write(sig_dir.join("payload_factory.rbs"), signature)
+        .expect("the synthetic RBS contract must be written");
+    let implementation = project.path().join("payload_factory.rb");
+    std::fs::write(&implementation, mismatched)
+        .expect("the mismatched Ruby implementation must be written");
+
+    let check_report = CheckSession::default()
+        .check_path(project.path())
+        .await
+        .expect("headless check must evaluate the structural return contract");
+    let mut editor = FakeEditor::new().await;
+    let signature_uri = Url::parse("file:///sig/payload_factory.rbs")
+        .expect("the synthetic signature URI must be valid");
+    FileProcessor::default()
+        .collect_rbs_facts(&signature_uri, signature, editor.server())
+        .expect("the RBS contract must enter the LSP engine");
+    editor.open("payload_factory.rb", mismatched).await;
+    let lsp_diagnostics = editor.diagnostics("payload_factory.rb").await;
+    assert_diagnostic_parity(
+        find_cli_diagnostic(&check_report, "declared-return-type-mismatch"),
+        find_lsp_diagnostic(&lsp_diagnostics, "declared-return-type-mismatch"),
+    );
+
+    std::fs::write(&implementation, incomplete)
+        .expect("the incomplete Ruby implementation must replace the mismatch");
+    let incomplete_check = CheckSession::default()
+        .check_path(project.path())
+        .await
+        .expect("headless check must evaluate incomplete structural evidence");
+    editor.set("payload_factory.rb", incomplete).await;
+    let incomplete_lsp = editor.diagnostics("payload_factory.rb").await;
+    assert!(
+        incomplete_check.diagnostics.iter().all(|diagnostic| {
+            diagnostic.code.as_deref() != Some("declared-return-type-mismatch")
+        }),
+        "CLI must not diagnose structural incompatibility from incomplete evidence: {:?}",
+        incomplete_check.diagnostics
+    );
+    assert!(
+        incomplete_lsp.iter().all(|diagnostic| {
+            !matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code == "declared-return-type-mismatch"
+            )
+        }),
+        "LSP must not diagnose structural incompatibility from incomplete evidence: {incomplete_lsp:?}"
     );
 }
 
@@ -1576,13 +1793,31 @@ end
     );
 
     editor.set("main.rb", unknown_return_union_source).await;
+    let main_uri = Url::parse("file:///main.rb").expect("rescue fixture URI must be valid");
+    let analysis_engine = editor.server().analysis_engine_for_uri(&main_uri);
+    let main_file_id = analysis_engine
+        .read()
+        .file_id(std::path::Path::new("/main.rb"))
+        .expect("rescue fixture must be registered in the analysis engine");
+    let method_return_outcomes = analysis_engine
+        .read()
+        .method_return_outcomes_in_file(main_file_id)
+        .expect("rescue fixture must retain method-return outcomes")
+        .clone();
+    assert!(
+        method_return_outcomes
+            .values()
+            .all(|outcome| outcome.proven_type().is_none()),
+        "the edited file must atomically invalidate every caller derived from the two unknown returns: {method_return_outcomes:#?}"
+    );
     let unknown_return_hover = editor
         .hover_at("main.rb", 19, 14)
         .await
         .expect("the exact union dispatch with unknown returns must retain hover context");
+    let unknown_return_hover = hover_text(unknown_return_hover);
     assert!(
-        hover_text(unknown_return_hover).contains("Unknown[incomplete_union_member]"),
-        "a union call must remain unknown until every member return type is proven"
+        unknown_return_hover.contains("Unknown[incomplete_union_member]"),
+        "a union call must remain unknown until every member return type is proven, got `{unknown_return_hover}` with method outcomes {method_return_outcomes:#?}"
     );
     assert_eq!(
         editor.goto_def_at("main.rb", 19, 14).await.len(),

@@ -249,7 +249,7 @@ fn fallback_type_to_namespace(ruby_type: &RubyType) -> Option<FullyQualifiedName
             )],
             NamespaceKind::Instance,
         )),
-        RubyType::Hash(_, _) => Some(FullyQualifiedName::namespace_with_kind(
+        RubyType::Hash(_, _) | RubyType::Shape(_) => Some(FullyQualifiedName::namespace_with_kind(
             vec![RubyConstant::new("Hash").expect(
                 "INVARIANT VIOLATED: built-in constant `Hash` is invalid. \
                  This is a bug because Ruby built-in constants must be valid Ruby constants. \
@@ -257,6 +257,7 @@ fn fallback_type_to_namespace(ruby_type: &RubyType) -> Option<FullyQualifiedName
             )],
             NamespaceKind::Instance,
         )),
+        RubyType::Literal(value) => fallback_type_to_namespace(&value.widened_type()),
         RubyType::Union(_) | RubyType::Unknown => None,
     }
 }

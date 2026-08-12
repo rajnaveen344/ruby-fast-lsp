@@ -1,6 +1,11 @@
-use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
-use crate::indexer::{Identifier, MethodReceiver, RubyDocument};
+use crate::core::{FullyQualifiedName, LiteralKey, NamespaceKind, RubyConstant, RubyMethod};
+use crate::indexer::{
+    CompletionReceiverTarget, Identifier, MethodReceiver, RubyDocument, ShapeKeyCompletionTarget,
+    ShapeKeySyntax,
+};
+use crate::inference::r#type::shape as shape_reads;
 use crate::inference::RubyType;
+use std::collections::BTreeSet;
 
 pub trait CompletionSemanticQuery {
     fn constant_type_in_context(
@@ -29,6 +34,107 @@ pub trait CompletionSemanticQuery {
         file_id: crate::core::SourceFileId,
         byte_offset: u32,
     ) -> Option<FullyQualifiedName>;
+
+    fn exact_expression_type(
+        &self,
+        file_id: crate::core::SourceFileId,
+        start_byte: u32,
+        end_byte: u32,
+    ) -> Option<RubyType>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShapeKeyCompletionResult {
+    pub keys: Vec<LiteralKey>,
+    pub replacement_start: u32,
+    pub replacement_end: u32,
+}
+
+pub fn shape_key_completions_for_target(
+    query: &impl CompletionSemanticQuery,
+    document: &RubyDocument,
+    target: &ShapeKeyCompletionTarget,
+) -> ShapeKeyCompletionResult {
+    let file_id = document.analysis_file_id();
+    let receiver_type =
+        match query.exact_expression_type(file_id, target.receiver_start, target.receiver_end) {
+            Some(RubyType::Unknown) => None,
+            Some(ruby_type) => Some(ruby_type),
+            None => (|| {
+                let name = target.receiver_local_name.as_ref()?;
+                let scope_id = document
+                    .variable_scopes
+                    .find_scope_for_variable_at(name, file_id, target.receiver_start)
+                    .or_else(|| {
+                        document
+                            .variable_scopes
+                            .scope_at_position(file_id, target.receiver_start)
+                    })?;
+                document
+                    .variable_scopes
+                    .get_type_at_position(name, scope_id, file_id, target.receiver_start)
+                    .cloned()
+            })(),
+        };
+    let keys = receiver_type
+        .map(|receiver_type| common_shape_keys(&receiver_type))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|key| match (target.syntax, key) {
+            (ShapeKeySyntax::Symbol, LiteralKey::Symbol(value))
+            | (ShapeKeySyntax::String, LiteralKey::String(value)) => {
+                value.starts_with(&target.partial)
+            }
+            (ShapeKeySyntax::Symbol, LiteralKey::String(_))
+            | (ShapeKeySyntax::String, LiteralKey::Symbol(_)) => false,
+        })
+        .collect::<Vec<_>>();
+    ShapeKeyCompletionResult {
+        keys,
+        replacement_start: target.replacement_start,
+        replacement_end: target.replacement_end,
+    }
+}
+
+fn common_shape_keys(receiver_type: &RubyType) -> Vec<LiteralKey> {
+    let shapes = match receiver_type {
+        RubyType::Shape(shape) => vec![shape.as_ref()],
+        RubyType::Union(members) => {
+            let mut shapes = Vec::with_capacity(members.len());
+            for member in members {
+                let RubyType::Shape(shape) = member else {
+                    return Vec::new();
+                };
+                shapes.push(shape.as_ref());
+            }
+            shapes
+        }
+        RubyType::Class(_)
+        | RubyType::Module(_)
+        | RubyType::ClassReference(_)
+        | RubyType::ModuleReference(_)
+        | RubyType::Literal(_)
+        | RubyType::Array(_)
+        | RubyType::Hash(_, _)
+        | RubyType::Unknown => return Vec::new(),
+    };
+    let Some((first, rest)) = shapes.split_first() else {
+        return Vec::new();
+    };
+    let mut common = first
+        .fields()
+        .iter()
+        .map(|field| field.key().clone())
+        .collect::<BTreeSet<_>>();
+    for shape in rest {
+        let keys = shape
+            .fields()
+            .iter()
+            .map(|field| field.key().clone())
+            .collect::<BTreeSet<_>>();
+        common = common.intersection(&keys).cloned().collect();
+    }
+    common.into_iter().collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +158,18 @@ pub fn receiver_type_from_context(
     byte_offset: u32,
     namespace_kind: NamespaceKind,
     identifier: &Option<Identifier>,
+    receiver_target: Option<&CompletionReceiverTarget>,
 ) -> Option<RubyType> {
+    if let Some(target) = receiver_target {
+        if let Some(ruby_type) = query.exact_expression_type(
+            document.analysis_file_id(),
+            target.receiver_start,
+            target.receiver_end,
+        ) {
+            return (ruby_type != RubyType::Unknown).then_some(ruby_type);
+        }
+    }
+
     if let Some(Identifier::RubyMethod {
         receiver: MethodReceiver::Constant(recv_parts),
         namespace,
@@ -200,18 +317,35 @@ pub fn receiver_type_from_context(
         }
     }
 
-    if is_variable_name(receiver_text) {
-        let receiver_start_in_line = before_dot.len().checked_sub(receiver_text.len()).expect(
-            "INVARIANT VIOLATED: completion receiver text is longer than the line prefix it was extracted from. This is a bug because receiver extraction must return a suffix of that prefix. Fix: keep receiver parsing and source-offset calculation coupled.",
+    // Prism recovers `receiver.` without a message location, so the AST-based
+    // completion target above can be absent at the exact moment completion is
+    // triggered. Recover only the receiver's source range, then ask the same
+    // engine-owned expression query. An explicit Unknown remains
+    // authoritative and must not fall through to textual constructor guesses.
+    let receiver_start_in_line = before_dot.len().checked_sub(receiver_text.len()).expect(
+        "INVARIANT VIOLATED: completion receiver text is longer than the line prefix it was extracted from. This is a bug because receiver extraction must return a suffix of that prefix. Fix: keep receiver parsing and source-offset calculation coupled.",
+    );
+    let receiver_offset = line_start
+        .checked_add(receiver_start_in_line)
+        .and_then(|offset| u32::try_from(offset).ok())
+        .expect(
+            "INVARIANT VIOLATED: completion receiver offset overflowed its source coordinates. This is a bug because receiver text was sliced from the same bounded line prefix. Fix: keep receiver extraction and byte-offset calculation coupled.",
         );
-        let receiver_offset = line_start
-            .checked_add(receiver_start_in_line)
-            .and_then(|offset| u32::try_from(offset).ok())
-            .expect(
-                "INVARIANT VIOLATED: completion receiver offset overflowed its source coordinates. This is a bug because receiver text was sliced from the same bounded line prefix. Fix: keep receiver extraction and byte-offset calculation coupled.",
-            );
-        let file_id = document.analysis_file_id();
+    let receiver_end = receiver_offset
+        .checked_add(u32::try_from(receiver_text.len()).expect(
+            "INVARIANT VIOLATED: completion receiver length exceeded u32. This is a bug because the receiver was sliced from a u32-addressed source document. Fix: reject oversized documents before completion.",
+        ))
+        .expect(
+            "INVARIANT VIOLATED: completion receiver end overflowed u32 source coordinates. This is a bug because the receiver range came from one bounded document. Fix: reject oversized documents before completion.",
+        );
+    let file_id = document.analysis_file_id();
+    match query.exact_expression_type(file_id, receiver_offset, receiver_end) {
+        Some(RubyType::Unknown) => return None,
+        Some(ruby_type) => return Some(ruby_type),
+        None => {}
+    }
 
+    if is_variable_name(receiver_text) {
         if let Some(scope_id) = document
             .variable_scopes
             .find_scope_for_variable_at(receiver_text, file_id, receiver_offset)
@@ -425,6 +559,16 @@ fn infer_method_call_return_type(
         }
     }
 
+    if shape_reads::is_shape_only(receiver_type) {
+        if let Some(outcome) = shape_reads::argument_free_method_return(receiver_type, method_name)
+        {
+            return outcome.ok();
+        }
+        if shape_reads::operation_requires_call_arguments(method_name) {
+            return None;
+        }
+    }
+
     if let Some(return_type) = infer_generic_rbs_method_return_type(receiver_type, method_name) {
         return Some(return_type);
     }
@@ -464,6 +608,10 @@ fn infer_generic_rbs_method_return_type(
                 &type_args,
             )
         }
+        RubyType::Shape(shape) => {
+            infer_generic_rbs_method_return_type(&shape.generic_hash_type(), method_name)
+        }
+        RubyType::Literal(_) => None,
         RubyType::Class(_)
         | RubyType::Module(_)
         | RubyType::ClassReference(_)
@@ -483,6 +631,12 @@ fn infer_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> 
         }
         RubyType::Array(_) | RubyType::Hash(_, _) => {
             infer_generic_rbs_method_return_type(receiver_type, method_name)
+        }
+        RubyType::Shape(shape) => {
+            infer_rbs_method_return_type(&shape.generic_hash_type(), method_name)
+        }
+        RubyType::Literal(value) => {
+            infer_rbs_method_return_type(&value.widened_type(), method_name)
         }
         RubyType::Union(types) => {
             crate::inference::method::return_type::resolve_proven_union(types, |ty| {
@@ -548,7 +702,8 @@ fn class_names_for_type(ruby_type: &RubyType) -> Vec<String> {
             .map(|constant| vec![constant.to_string()])
             .unwrap_or_default(),
         RubyType::Array(_) => vec!["Array".to_string()],
-        RubyType::Hash(_, _) => vec!["Hash".to_string()],
+        RubyType::Hash(_, _) | RubyType::Shape(_) => vec!["Hash".to_string()],
+        RubyType::Literal(value) => class_names_for_type(&value.widened_type()),
         RubyType::Union(types) => {
             let mut all_names = Vec::new();
             for ty in types {
@@ -582,7 +737,10 @@ fn receiver_type_to_analysis_namespaces(receiver_type: &RubyType) -> Vec<FullyQu
             .iter()
             .flat_map(receiver_type_to_analysis_namespaces)
             .collect(),
-        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
+        RubyType::Literal(value) => receiver_type_to_analysis_namespaces(&value.widened_type()),
+        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_) | RubyType::Unknown => {
+            Vec::new()
+        }
     }
 }
 

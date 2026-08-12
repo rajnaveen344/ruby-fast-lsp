@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "measurement": "type-inference-shapes-final",
+  "date": "2026-08-12",
+  "status": "accepted",
+  "claim": "Proof-first structural Hash shape inference preserves deterministic semantic output, passes the fixed production latency and memory budgets, and stays within the existing 3% representative-workspace comparison gate after indexing hot-path optimization.",
+  "machine": {
+    "target_os": "macos",
+    "target_arch": "aarch64",
+    "os_release": "Darwin 25.2.0",
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820 2025-10-10)"
+  },
+  "build": {
+    "source_revision": "fecfc68fa9dcb557b292795c4c788c438cf73f7c",
+    "production_profiler_sha256": "8b10d93ce429349f29f5e2ae612df0ac30380a84ebdbfc54683b9833375fc9e0",
+    "tracked_diff_sha256": "35a663aa24668ca597474bfb04b39f6fd6a9fc582f2b53b543df7e5a94639545",
+    "memory_profiler_sha256": "3fe71ad3759fb87c7d467856283f822d924f465cdaaf5d061a064c88f4622f0d"
+  },
+  "neutral_production_gate": {
+    "command": "RUST_LOG=error target/release/profiler --benchmark-iterations 100 --check-budgets",
+    "dataset_fingerprint_sha256": "e83a623dd71e9f04daf3e36a8092c04458573e0f1450f58e61e9c38457a763ba",
+    "semantic_result_fingerprint": "35258ab50733c4a39743718b039b60db",
+    "cold_indexing_ms": 791.735,
+    "cold_indexing_budget_ms": 2000,
+    "edit_p95_ms": 3.958708,
+    "edit_budget_ms": 100,
+    "completion_p95_ms": 0.650875,
+    "completion_budget_ms": 50,
+    "hover_p95_ms": 0.053416,
+    "hover_budget_ms": 25,
+    "definition_p95_ms": 0.046958,
+    "definition_budget_ms": 25,
+    "references_p95_ms": 5.939875,
+    "references_budget_ms": 50,
+    "diagnostics_p95_ms": 0.000833,
+    "diagnostics_budget_ms": 25,
+    "estimated_engine_heap_bytes": 5933568,
+    "engine_heap_budget_bytes": 33554432,
+    "peak_rss_bytes": 110313472,
+    "user_cpu_ms": 250.675,
+    "system_cpu_ms": 26.816,
+    "decision": "Passed every fixed production budget with deterministic semantic output."
+  },
+  "representative_read_only_corpus": {
+    "description": "An anonymized two-project, read-only verification corpus. No corpus source was modified and no corpus-specific regression fixture was added.",
+    "dataset_fingerprint_sha256": "1b7ca0d060f642753ca5f7a485c9503e32e0c7fdad5c58fd831bf9063af316dd",
+    "project_file_counts": [2592, 2619],
+    "engine_file_count": 35580,
+    "source_bytes": 219963677,
+    "source_fingerprints": {
+      "project_a": "d9ea83809922a05b1b12d1dc435efbb55036abbdcee9c375d6ba082c58d7b64f",
+      "project_b": "e40d3f2cc2538f8f93e0b6c605b5790584705245732f596982e1d243f07f7760"
+    },
+    "semantic_result_fingerprints": {
+      "project_a": "ed466579f0026cbfc381cb3864d98dc9",
+      "project_b": "b0c8b1e32b5d6a8df60070a19384843f"
+    },
+    "candidate_warm_runs": [
+      {
+        "wall_ms": 19317.36475,
+        "user_cpu_ms": 39112.694,
+        "system_cpu_ms": 6511.518,
+        "total_cpu_ms": 45624.212,
+        "peak_rss_bytes": 1392443392,
+        "estimated_engine_heap_bytes": 786546656
+      },
+      {
+        "wall_ms": 19967.821125,
+        "user_cpu_ms": 39646.791,
+        "system_cpu_ms": 7385.622,
+        "total_cpu_ms": 47032.413,
+        "peak_rss_bytes": 1345159168,
+        "estimated_engine_heap_bytes": 786544676
+      }
+    ],
+    "candidate_average": {
+      "wall_ms": 19642.5929375,
+      "total_cpu_ms": 46328.3125,
+      "peak_rss_bytes": 1368801280,
+      "estimated_engine_heap_bytes": 786545666
+    },
+    "comparison_average": {
+      "wall_ms": 20490.3561455,
+      "total_cpu_ms": 45585.703,
+      "peak_rss_bytes": 1512988672,
+      "estimated_engine_heap_bytes": 779329999
+    },
+    "candidate_delta_percent": {
+      "wall": -4.1374,
+      "total_cpu": 1.6290,
+      "peak_rss": -9.5300,
+      "estimated_engine_heap": 0.9259
+    },
+    "comparison_gate_percent": 3.0,
+    "fixed_peak_rss_ceiling_bytes": 1776846438,
+    "ceiling_passes": 2,
+    "ceiling_runs": 2,
+    "excluded_cold_population_run": {
+      "wall_ms": 42215.544583,
+      "persistent_product_producers": 509,
+      "reason": "This run populated the persistent cache and is not comparable to fully warm runs."
+    },
+    "comparison_limitation": "The clean source revision predates other uncommitted inference work, so this is a whole-working-tree comparison rather than an isolated shape-only benchmark. The fixed production budgets are the authoritative release gate; this representative comparison is supporting evidence.",
+    "decision": "Accepted. Wall improves, CPU grows by 1.63%, RSS improves, retained engine heap grows by 0.93%, and every candidate growth measurement remains inside the 3% gate and fixed RSS ceiling."
+  },
+  "shape_telemetry": {
+    "identical_across_candidate_runs": true,
+    "max_aliases": 2,
+    "max_depth": 7,
+    "max_fields": 32,
+    "max_shape_union_variants": 8,
+    "method_outcomes": 63976,
+    "proven": 30923,
+    "unknown": 33053,
+    "retained_shape_fields": 80712,
+    "retained_shape_occurrences": 62347,
+    "average_fields_per_shape": 1.2946,
+    "retained_union_variants": 2149,
+    "retained_unions": 865,
+    "average_variants_per_union": 2.4844,
+    "bound_exceeded": 2023,
+    "invalidated": 22310,
+    "solver_bound_hits": 0,
+    "maximum_solver_iterations": 16,
+    "unknown_reasons": {
+      "recursive": 8,
+      "assignment": 46,
+      "method_return": 32999
+    }
+  },
+  "allocation_evidence": {
+    "description": "DHAT run over a neutral structural-shape fixture using the exact final source and the mutually exclusive memory-profiling allocator.",
+    "command": "profiler --memory --workspace <neutral-shape-allocation-fixture>",
+    "dataset_fingerprint_sha256": "62bd4e2d7b4eb52b6e2df52cc29e1f9618f641210b0fc4db8bd3e9b8543665ac",
+    "source_fingerprint_sha256": "fdc067c532a97c3996fc46d8df6f6072dd650817ef944927aa247d665e6f7e8b",
+    "semantic_result_fingerprint": "f47ec05daa06f4d17a8c53ce559008eb",
+    "dhat_heap_sha256": "eb40e8e789aad2b6b8edf2edaef3e3f65a19d0f187a83bb7d63b58acfe24bf34",
+    "total_allocated_bytes": 263844823,
+    "total_allocated_blocks": 719499,
+    "peak_live_bytes": 49677032,
+    "peak_live_blocks": 244692,
+    "end_live_bytes": 13267572,
+    "end_live_blocks": 30898,
+    "estimated_engine_heap_bytes": 5210651,
+    "peak_rss_bytes": 121356288,
+    "shape_telemetry": {
+      "occurrences": 54,
+      "fields": 101,
+      "max_depth": 5,
+      "max_fields": 4,
+      "max_union_variants": 2,
+      "max_aliases": 2,
+      "invalidations": 1,
+      "bound_exceeded": 0,
+      "unions": 4,
+      "union_variants": 8
+    }
+  },
+  "optimization": {
+    "root_causes": [
+      "Nonlocal reads cloned every type fact in the file before selecting the latest matching fact.",
+      "Recursive expression inference repeatedly scanned all direct type facts by expression range."
+    ],
+    "changes": [
+      "Use a borrowed file-local named-fact selector that preserves latest-position and ambiguity semantics without materializing unrelated facts.",
+      "Maintain a collector-local compact range-to-index map over the append-only direct fact vector; semantic ownership remains in the ordinary file facts."
+    ],
+    "invariants": [
+      "The range index stores only indexes, never duplicate RubyType values or independent semantic truth.",
+      "Every indexed fact is validated as an expression subject at the exact indexed range.",
+      "Same-position ambiguity and active-right-hand-side exclusion remain fail-closed."
+    ]
+  },
+  "correctness_evidence": {
+    "focused_ruby_analysis": "cargo test -p ruby-analysis passed: 577 passed, 0 failed",
+    "full_release_audit": "cargo test --workspace -- --test-threads=1 passed; the complete scorecard passed 111/111 cases with a 100/100 score, zero recorded gaps, and zero unexpected outcomes; the reviewed precision corpus passed 13/13 cases across five public projects with zero known false positives"
+  }
+}

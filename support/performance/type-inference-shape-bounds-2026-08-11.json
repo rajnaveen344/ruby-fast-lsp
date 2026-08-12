@@ -1,0 +1,108 @@
+{
+  "measurement": "type-inference-shape-bound-selection",
+  "date": "2026-08-11",
+  "status": "accepted-for-phase-0",
+  "purpose": "Choose fixed initial bounds for proof-first Hash-backed structural shape inference before adding the production type representation.",
+  "safety_policy": {
+    "source_execution": false,
+    "real_workspace_policy": "read-only aggregate syntax measurement only",
+    "retained_source_content": false,
+    "retained_source_names": false,
+    "bound_failure": "return an explained Unknown; never truncate fields, variants, aliases, or iterations"
+  },
+  "method": {
+    "parser": "Prism 1.9.0",
+    "shape_candidate": "Hash literal containing only Symbol or String literal keys and no splat",
+    "field_width": "number of entries in one shape candidate",
+    "shape_depth": "root shape counts as one; recursively nested shape values add one; arrays are traversed without adding a shape level",
+    "union_width": "number of direct exact-shape terminal variants in an if expression",
+    "alias_width": "number of simultaneously visible local names statically copied from one exact Hash literal identity within one lexical method scope",
+    "solver_measurement": "headless check aggregate over the neutral repository corpus"
+  },
+  "samples": [
+    {
+      "id": "neutral_repository",
+      "ruby_files": 2205,
+      "parse_errors": 15,
+      "exact_hash_literals": 634,
+      "field_width": {
+        "p50": 1,
+        "p95": 5,
+        "p99": 8,
+        "max": 11
+      },
+      "shape_depth": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 3,
+        "max": 3
+      },
+      "direct_if_shape_variants": {
+        "observations": 1,
+        "p95": 2,
+        "max": 2
+      },
+      "direct_alias_width": {
+        "observations": 58,
+        "p95": 1,
+        "max": 1
+      },
+      "recursive_solver": {
+        "components": 64,
+        "methods": 128,
+        "aggregate_iterations": 192,
+        "average_iterations_per_component": 3.0,
+        "bound_hits": 0
+      }
+    },
+    {
+      "id": "read_only_monorepo",
+      "ruby_files": 5842,
+      "parse_errors": 0,
+      "exact_hash_literals": 111000,
+      "field_width": {
+        "p50": 1,
+        "p95": 6,
+        "p99": 10,
+        "max": 232
+      },
+      "shape_depth": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 3,
+        "max": 8
+      },
+      "direct_if_shape_variants": {
+        "observations": 372,
+        "p95": 3,
+        "max": 4
+      },
+      "direct_alias_width": {
+        "observations": 32534,
+        "p95": 1,
+        "max": 3
+      }
+    }
+  ],
+  "accepted_initial_bounds": {
+    "fields_per_shape": 32,
+    "nested_shape_depth": 8,
+    "shape_variants_per_union": 8,
+    "live_aliases_per_mutable_identity": 8,
+    "shape_solve_iterations": 16
+  },
+  "selection_rationale": {
+    "fields_per_shape": "32 covers more than three times the measured monorepo p99 while bounding the observed 232-field outlier.",
+    "nested_shape_depth": "8 covers the maximum observed nested shape depth and rejects deeper unreviewed structures.",
+    "shape_variants_per_union": "8 is twice the maximum observed direct conditional variant count.",
+    "live_aliases_per_mutable_identity": "8 is more than twice the maximum observed local alias set.",
+    "shape_solve_iterations": "16 is more than five times the measured average recursive component iterations and twice the maximum observed shape depth. A hit remains a proof failure, not permission to publish the current approximation."
+  },
+  "limitations": [
+    "The syntax scan measures literal candidates and direct conditionals; it does not claim complete runtime Hash usage coverage.",
+    "The alias scan intentionally excludes globals, instance variables, containers, reflective aliases, and interprocedural escape because those are invalidation boundaries, not evidence for increasing the precise alias limit.",
+    "The 15 neutral-repository parse errors are malformed-code fixtures; they contribute no shape observation.",
+    "Phase 8 must measure retained shape counts, bound hits, latency, allocation, and RSS before release acceptance."
+  ],
+  "decision": "Accept these bounds for the initial representation and RED contract. Any future increase requires new aggregate evidence and release-profile memory and latency measurements."
+}

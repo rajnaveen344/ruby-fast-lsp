@@ -47,13 +47,26 @@ impl FactCollector {
                 | RubyType::Module(_)
                 | RubyType::ClassReference(_)
                 | RubyType::ModuleReference(_)
+                | RubyType::Literal(_)
                 | RubyType::Array(_)
                 | RubyType::Hash(_, _)
+                | RubyType::Shape(_)
                 | RubyType::Union(_),
             ) => None,
         };
         if let Some(reason) = unknown_reason {
-            self.expression_unknown_reasons.push((range, reason));
+            // TypeTracker may already have installed a more precise flow
+            // reason (for example mutable_shape_invalidated) before the
+            // ordinary visitor reaches this exact read. Keep that proof
+            // barrier instead of adding the generic Unknown projection as a
+            // conflicting second result.
+            if !self
+                .expression_unknown_reasons
+                .iter()
+                .any(|(candidate, _)| *candidate == range)
+            {
+                self.expression_unknown_reasons.push((range, reason));
+            }
         }
     }
 

@@ -290,7 +290,10 @@ impl<'a> AnalysisQuery<'a> {
                 )]
             }
             RubyType::Array(_) => Self::namespace_for_builtin("Array", kind),
-            RubyType::Hash(_, _) => Self::namespace_for_builtin("Hash", kind),
+            RubyType::Hash(_, _) | RubyType::Shape(_) => Self::namespace_for_builtin("Hash", kind),
+            RubyType::Literal(value) => {
+                Self::receiver_type_to_namespaces(&value.widened_type(), kind)
+            }
             RubyType::Union(types) => types
                 .iter()
                 .flat_map(|ty| Self::receiver_type_to_namespaces(ty, kind))
@@ -324,7 +327,12 @@ impl<'a> AnalysisQuery<'a> {
                 .iter()
                 .flat_map(Self::receiver_type_to_method_namespaces)
                 .collect(),
-            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
+            RubyType::Literal(value) => {
+                Self::receiver_type_to_method_namespaces(&value.widened_type())
+            }
+            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_) | RubyType::Unknown => {
+                Vec::new()
+            }
         }
     }
 

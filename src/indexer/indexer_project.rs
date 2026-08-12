@@ -10,7 +10,7 @@ use log::{info, warn};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use ruby_analysis::core::{FullyQualifiedName, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, FileFacts, ResolveMode};
+use ruby_analysis::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileSnapshot};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,6 +21,20 @@ pub(crate) const MAX_PROJECT_NAVIGATION_DEMAND_KEYS: usize = 16;
 const MAX_PROJECT_NAVIGATION_CANDIDATES_PER_KEY: usize = 8;
 const MAX_PROJECT_NAVIGATION_DEMAND_FILES: usize = 64;
 const MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES: usize = 128 * 1024 * 1024;
+
+struct ProjectFileInput {
+    path: PathBuf,
+    content: String,
+    read_elapsed: std::time::Duration,
+    dependency_elapsed: std::time::Duration,
+    expected_snapshot: Option<SourceFileSnapshot>,
+    open_document: bool,
+}
+
+struct RegisteredProjectFileInput {
+    input: ProjectFileInput,
+    source_snapshot: SourceFileSnapshot,
+}
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ProjectNavigationDemandSelection {
@@ -79,6 +93,24 @@ pub struct IndexerProject {
 }
 
 impl IndexerProject {
+    fn read_authoritative_project_source(
+        server: &RubyLanguageServer,
+        path: &Path,
+    ) -> Result<(String, bool)> {
+        let uri = Url::from_file_path(path).map_err(|_| {
+            anyhow!(
+                "project source path is not a valid file URI: {}",
+                path.display()
+            )
+        })?;
+        if let Some(document) = server.get_doc(&uri) {
+            return Ok((document.content, true));
+        }
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read project source {}", path.display()))?;
+        Ok((content, false))
+    }
+
     pub fn new(
         workspace_root: PathBuf,
         file_processor: FileProcessor,
@@ -643,7 +675,72 @@ impl IndexerProject {
         for file_id in stale_project_file_ids {
             snapshot.replace_facts(file_id, FileFacts::default(), ResolveMode::Deferred);
         }
-        let estimated_bytes = snapshot.estimated_memory_stats().total();
+        let semantic_context = Arc::new(parking_lot::RwLock::new(snapshot));
+        let baseline_known_namespaces = Arc::new({
+            let engine = semantic_context.read();
+            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+        });
+        let requires_direct_semantic_seed = project_files.first().is_some_and(|path| {
+            Url::from_file_path(path).is_ok_and(|uri| {
+                self.file_processor
+                    .requires_project_direct_semantic_seed(&uri)
+            })
+        });
+        if requires_direct_semantic_seed {
+            let semantic_seed_started = Instant::now();
+            let outcomes = project_files
+                .par_iter()
+                .map(|path| -> Result<(PathBuf, FileFacts)> {
+                    let (content, _) = Self::read_authoritative_project_source(server, path)
+                        .with_context(|| {
+                            format!(
+                                "failed to read project semantic seed source {}",
+                                path.display()
+                            )
+                        })?;
+                    let uri = Url::from_file_path(path).map_err(|_| {
+                        anyhow!(
+                            "project semantic seed path is not a valid file URI: {}",
+                            path.display()
+                        )
+                    })?;
+                    Ok((
+                        path.clone(),
+                        self.file_processor.collect_project_direct_semantic_seed(
+                            &uri,
+                            &content,
+                            &semantic_context,
+                            baseline_known_namespaces.as_ref(),
+                        ),
+                    ))
+                })
+                .collect::<Vec<_>>();
+            let mut engine = semantic_context.write();
+            for outcome in outcomes {
+                let (path, facts) = outcome?;
+                let file_id = engine.file_id(&path).unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: project-wide semantic seed lost the registered identity for {}. \
+                         This is a bug because the immutable project skeleton must address the same \
+                         pre-registered file as full collection. Fix: preserve registration while \
+                         installing the whole-project declaration barrier.",
+                        path.display()
+                    )
+                });
+                engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+            }
+            engine.resolve();
+            info!(
+                "Project-wide extension semantic skeleton completed for {} files in {:?}",
+                project_files.len(),
+                semantic_seed_started.elapsed()
+            );
+        }
+        let known_namespaces = Arc::new({
+            let engine = semantic_context.read();
+            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+        });
+        let estimated_bytes = semantic_context.read().estimated_memory_stats().total();
         assert!(
             estimated_bytes <= MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
             "INVARIANT VIOLATED: pre-collection semantic baseline for {} requires an estimated {} bytes, exceeding the bounded {}-byte clone budget. This is a bug because deterministic project collection must not retain an unbounded snapshot. Fix: reduce the dependency/signature seed or replace the clone with a compact immutable query projection.",
@@ -651,8 +748,6 @@ impl IndexerProject {
             estimated_bytes,
             MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES
         );
-        let known_namespaces =
-            Arc::new(ruby_analysis::engine::AnalysisQuery::new(&snapshot).known_namespace_fqns());
         info!(
             "Captured immutable pre-collection semantic baseline for {}: estimated_bytes={}, namespaces={}",
             self.workspace_root.display(),
@@ -660,7 +755,7 @@ impl IndexerProject {
             known_namespaces.len()
         );
         self.exhaustive_known_namespaces = Some(known_namespaces);
-        self.exhaustive_analysis_engine = Some(Arc::new(parking_lot::RwLock::new(snapshot)));
+        self.exhaustive_analysis_engine = Some(semantic_context);
         Ok(())
     }
 
@@ -696,26 +791,23 @@ impl IndexerProject {
             semantic_context_engine.unwrap_or_else(|| analysis_engine.clone());
 
         let collect_start = Instant::now();
-        let read_file = |file_path: &PathBuf| -> Result<(
-            PathBuf,
-            String,
-            std::time::Duration,
-            std::time::Duration,
-        )> {
+        let read_file = |file_path: &PathBuf| -> Result<ProjectFileInput> {
+            let expected_snapshot = analysis_engine.read().source_snapshot_for_path(file_path);
             let read_started = Instant::now();
-            let content = std::fs::read_to_string(file_path).with_context(|| {
-                format!("failed to read project source {}", file_path.display())
-            })?;
+            let (content, open_document) =
+                Self::read_authoritative_project_source(server, file_path)?;
             let read_elapsed = read_started.elapsed();
             let dependency_started = Instant::now();
             Self::extract_and_track_dependencies(&content, required_stdlib_ref, required_gems_ref);
             let dependency_elapsed = dependency_started.elapsed();
-            Ok((
-                file_path.clone(),
+            Ok(ProjectFileInput {
+                path: file_path.clone(),
                 content,
                 read_elapsed,
                 dependency_elapsed,
-            ))
+                expected_snapshot,
+                open_document,
+            })
         };
         let mut input_results = files[..priority_file_count]
             .par_iter()
@@ -730,7 +822,8 @@ impl IndexerProject {
         let inputs = input_results.into_iter().collect::<Result<Vec<_>>>()?;
 
         if !uses_immutable_semantic_context {
-            if let Some((path, _, _, _)) = inputs.first() {
+            if let Some(input) = inputs.first() {
+                let path = &input.path;
                 let uri = Url::from_file_path(path).map_err(|_| {
                     anyhow!(
                         "project source path is not a valid file URI: {}",
@@ -741,28 +834,83 @@ impl IndexerProject {
             }
         }
         let batch_registration_started = Instant::now();
+        let mut registered_inputs = Vec::with_capacity(inputs.len());
+        let mut registered_priority_file_count = 0usize;
         if uses_immutable_semantic_context {
             let mut engine = analysis_engine.write();
             let mut semantic_engine = base_semantic_read_engine.write();
-            for (path, content, _, _) in &inputs {
-                let live_id =
-                    engine.register_file_borrowed(path.clone(), content, SourceKind::Project);
+            for (index, input) in inputs.into_iter().enumerate() {
+                if input.open_document {
+                    if let Some(file_id) = engine.file_id(&input.path) {
+                        if !engine.file_content_matches(file_id, &input.content) {
+                            info!(
+                                "Skipping stale project snapshot for open document {}",
+                                input.path.display()
+                            );
+                            continue;
+                        }
+                    }
+                }
+                let Some(source_snapshot) = engine.register_file_borrowed_if_snapshot(
+                    input.path.clone(),
+                    &input.content,
+                    SourceKind::Project,
+                    input.expected_snapshot,
+                ) else {
+                    info!(
+                        "Skipping project snapshot superseded before registration: {}",
+                        input.path.display()
+                    );
+                    continue;
+                };
                 let semantic_id = semantic_engine.register_file_borrowed(
-                    path.clone(),
-                    content,
+                    input.path.clone(),
+                    &input.content,
                     SourceKind::Project,
                 );
                 assert_eq!(
-                    live_id,
+                    engine.file_id(&input.path).unwrap(),
                     semantic_id,
                     "INVARIANT VIOLATED: immutable semantic context assigned a different file id for {}. This is a bug because retained FileFacts ranges must be valid in the owning live engine. Fix: pre-register the complete tail in identical path order before either engine admits generated sources.",
-                    path.display()
+                    input.path.display()
                 );
+                registered_priority_file_count += usize::from(index < priority_file_count);
+                registered_inputs.push(RegisteredProjectFileInput {
+                    input,
+                    source_snapshot,
+                });
             }
         } else {
             let mut engine = analysis_engine.write();
-            for (path, content, _, _) in &inputs {
-                engine.register_file_borrowed(path.clone(), content, SourceKind::Project);
+            for (index, input) in inputs.into_iter().enumerate() {
+                if input.open_document {
+                    if let Some(file_id) = engine.file_id(&input.path) {
+                        if !engine.file_content_matches(file_id, &input.content) {
+                            info!(
+                                "Skipping stale project snapshot for open document {}",
+                                input.path.display()
+                            );
+                            continue;
+                        }
+                    }
+                }
+                let Some(source_snapshot) = engine.register_file_borrowed_if_snapshot(
+                    input.path.clone(),
+                    &input.content,
+                    SourceKind::Project,
+                    input.expected_snapshot,
+                ) else {
+                    info!(
+                        "Skipping project snapshot superseded before registration: {}",
+                        input.path.display()
+                    );
+                    continue;
+                };
+                registered_priority_file_count += usize::from(index < priority_file_count);
+                registered_inputs.push(RegisteredProjectFileInput {
+                    input,
+                    source_snapshot,
+                });
             }
         }
         let batch_registration_elapsed = batch_registration_started.elapsed();
@@ -774,12 +922,18 @@ impl IndexerProject {
         // fixed point that a clean cold index cannot observe. Sanitize the
         // whole batch in one bounded snapshot so parallel workers share the
         // same file-order-independent semantic universe.
-        let semantic_read_engine = {
+        let semantic_read_engine = if uses_immutable_semantic_context {
+            // This generation-owned context was sanitized before the project
+            // skeleton was installed. Clearing one batch here would remove
+            // exact cross-batch inheritance and mixin edges and restore
+            // traversal-order-dependent extension dispatch.
+            base_semantic_read_engine.clone()
+        } else {
             let engine = base_semantic_read_engine.read();
-            let stale_file_ids = inputs
+            let stale_file_ids = registered_inputs
                 .iter()
-                .filter_map(|(path, _, _, _)| {
-                    let file_id = engine.file_id(path)?;
+                .filter_map(|registered| {
+                    let file_id = engine.file_id(&registered.input.path)?;
                     engine.semantic_export_fingerprint(file_id).map(|_| file_id)
                 })
                 .collect::<Vec<_>>();
@@ -795,22 +949,86 @@ impl IndexerProject {
                 Arc::new(parking_lot::RwLock::new(snapshot))
             }
         };
-        let known_namespaces = if Arc::ptr_eq(&semantic_read_engine, &base_semantic_read_engine) {
-            known_namespaces.unwrap_or_else(|| {
+        let baseline_known_namespaces =
+            if Arc::ptr_eq(&semantic_read_engine, &base_semantic_read_engine) {
+                known_namespaces.unwrap_or_else(|| {
+                    Arc::new({
+                        let engine = semantic_read_engine.read();
+                        ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+                    })
+                })
+            } else {
                 Arc::new({
                     let engine = semantic_read_engine.read();
                     ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
                 })
-            })
-        } else {
+            };
+
+        // Extension semantic targets are resolved through the same engine-owned
+        // method lookup as ordinary Ruby calls. Before extension-aware workers
+        // run, publish a direct declaration skeleton for the entire batch and
+        // resolve its namespace graph once. This preserves parallel collection
+        // while making superclass and mixin visibility independent of file
+        // traversal and editor-open order.
+        let requires_direct_semantic_seed = !uses_immutable_semantic_context
+            && registered_inputs.first().is_some_and(|registered| {
+                Url::from_file_path(&registered.input.path)
+                    .is_ok_and(|uri| file_processor_ref.requires_project_direct_semantic_seed(&uri))
+            });
+        let semantic_seed_started = Instant::now();
+        if requires_direct_semantic_seed {
+            let semantic_seed_outcomes = registered_inputs
+                .par_iter()
+                .map(
+                    |registered| -> Result<(PathBuf, ruby_analysis::engine::FileFacts)> {
+                        let uri = Url::from_file_path(&registered.input.path).map_err(|_| {
+                            anyhow!(
+                                "project source path is not a valid file URI: {}",
+                                registered.input.path.display()
+                            )
+                        })?;
+                        Ok((
+                            registered.input.path.clone(),
+                            file_processor_ref.collect_project_direct_semantic_seed(
+                                &uri,
+                                &registered.input.content,
+                                &semantic_read_engine,
+                                baseline_known_namespaces.as_ref(),
+                            ),
+                        ))
+                    },
+                )
+                .collect::<Vec<_>>();
+            let mut engine = semantic_read_engine.write();
+            for outcome in semantic_seed_outcomes {
+                let (path, facts) = outcome?;
+                let file_id = engine.file_id(&path).unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: project semantic seed lost the registered identity for {}. \
+                         This is a bug because declaration collection and replacement must address the \
+                         same batch file. Fix: preserve batch registration in the semantic snapshot.",
+                        path.display()
+                    )
+                });
+                engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+            }
+            engine.resolve();
+        }
+        let semantic_seed_elapsed = requires_direct_semantic_seed
+            .then(|| semantic_seed_started.elapsed())
+            .unwrap_or_default();
+        let known_namespaces = if requires_direct_semantic_seed {
             Arc::new({
                 let engine = semantic_read_engine.read();
                 ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
             })
+        } else {
+            baseline_known_namespaces
         };
 
-        let collect_file = |input: (PathBuf, String, std::time::Duration, std::time::Duration)| -> Result<(
+        let collect_file = |registered: RegisteredProjectFileInput| -> Result<(
             PathBuf,
+            SourceFileSnapshot,
             ruby_analysis::engine::FileFacts,
             StaticJavaNavigationPlan,
             StaticJavaSourceHint,
@@ -818,7 +1036,14 @@ impl IndexerProject {
             std::time::Duration,
             ProjectFileCollectionTiming,
         )> {
-            let (file_path, content, read_elapsed, dependency_elapsed) = input;
+            let ProjectFileInput {
+                path: file_path,
+                content,
+                read_elapsed,
+                dependency_elapsed,
+                expected_snapshot: _,
+                open_document: _,
+            } = registered.input;
             let uri = Url::from_file_path(&file_path).map_err(|_| {
                 anyhow!(
                     "project source path is not a valid file URI: {}",
@@ -840,6 +1065,7 @@ impl IndexerProject {
                 })?;
             Ok((
                 file_path.clone(),
+                registered.source_snapshot,
                 collected.file_facts,
                 collected.jruby_navigation_plan,
                 collected.jruby_source_hint,
@@ -848,22 +1074,37 @@ impl IndexerProject {
                 collected.timing,
             ))
         };
-        let outcomes = map_owned_project_inputs(inputs, priority_file_count, &collect_file);
+        let outcomes = map_owned_project_inputs(
+            registered_inputs,
+            registered_priority_file_count,
+            &collect_file,
+        );
         let mut jruby_navigation_plan = StaticJavaNavigationPlan::default();
         let mut jruby_source_hints = Vec::with_capacity(outcomes.len());
         let mut read_cpu = std::time::Duration::ZERO;
         let mut dependency_scan_cpu = std::time::Duration::ZERO;
         let mut timing = ProjectFileCollectionTiming::default();
+        timing.semantic_seed += semantic_seed_elapsed;
+        timing.total += semantic_seed_elapsed;
         timing.total += batch_registration_elapsed;
         timing.registration += batch_registration_elapsed;
         for outcome in outcomes {
-            let (path, file_facts, plan, hint, read, dependency_scan, file_timing) = outcome?;
+            let (path, source_snapshot, file_facts, plan, hint, read, dependency_scan, file_timing) =
+                outcome?;
             let replacement_started = Instant::now();
-            file_processor_ref.replace_collected_project_file_facts_as_deferred_resolution(
-                &path,
-                &analysis_engine,
-                file_facts,
-            );
+            let committed = file_processor_ref
+                .replace_collected_project_file_facts_if_source_snapshot_as_deferred_resolution(
+                    &path,
+                    &analysis_engine,
+                    source_snapshot,
+                    file_facts,
+                );
+            if !committed {
+                info!(
+                    "Discarded project facts collected from a superseded source snapshot: {}",
+                    path.display()
+                );
+            }
             let replacement_elapsed = replacement_started.elapsed();
             if providerless_collection {
                 jruby_source_hints.push((path, hint));
@@ -998,17 +1239,41 @@ impl IndexerProject {
         let outcomes = files
             .par_iter()
             .map(
-                |file_path| -> Result<(
+                |file_path| -> Result<Option<(
                     PathBuf,
+                    SourceFileSnapshot,
                     ruby_analysis::engine::FileFacts,
                     StaticJavaNavigationPlan,
-                )> {
-                    let content = std::fs::read_to_string(file_path).with_context(|| {
+                )>> {
+                    let (content, open_document) =
+                        Self::read_authoritative_project_source(server, file_path).with_context(|| {
                         format!(
                             "failed to reread JRuby catalog-sensitive project source {}",
                             file_path.display()
                         )
                     })?;
+                    let source_snapshot = {
+                        let engine = analysis_engine.read();
+                        let Some(file_id) = engine.file_id(file_path) else {
+                            panic!(
+                                "INVARIANT VIOLATED: JRuby project replay received an unregistered source {}. This is a bug because replay is selected only from the completed project pass. Fix: preserve project source registration through provider materialization.",
+                                file_path.display()
+                            );
+                        };
+                        if open_document && !engine.file_content_matches(file_id, &content) {
+                            info!(
+                                "Skipping stale JRuby replay snapshot for open document {}",
+                                file_path.display()
+                            );
+                            return Ok(None);
+                        }
+                        engine.source_snapshot_for_path(file_path).unwrap_or_else(|| {
+                            panic!(
+                                "INVARIANT VIOLATED: JRuby project replay lost source revision for {}. This is a bug because every registered source has one monotonic revision. Fix: keep source registration and revision capture atomic.",
+                                file_path.display()
+                            )
+                        })
+                    };
                     let uri = Url::from_file_path(file_path).map_err(|_| {
                         anyhow!(
                             "JRuby catalog-sensitive project source is not a valid file URI: {}",
@@ -1028,22 +1293,34 @@ impl IndexerProject {
                             file_path.display()
                         )
                     })?;
-                    Ok((
+                    Ok(Some((
                         file_path.clone(),
+                        source_snapshot,
                         collected.file_facts,
                         collected.jruby_navigation_plan,
-                    ))
+                    )))
                 },
             )
             .collect::<Vec<_>>();
         let mut plan = StaticJavaNavigationPlan::default();
         for outcome in outcomes {
-            let (path, file_facts, file_plan) = outcome?;
-            file_processor.replace_collected_project_file_facts_as_deferred_resolution(
-                &path,
-                &analysis_engine,
-                file_facts,
-            );
+            let Some((path, source_snapshot, file_facts, file_plan)) = outcome? else {
+                continue;
+            };
+            let committed = file_processor
+                .replace_collected_project_file_facts_if_source_snapshot_as_deferred_resolution(
+                    &path,
+                    &analysis_engine,
+                    source_snapshot,
+                    file_facts,
+                );
+            if !committed {
+                info!(
+                    "Discarded JRuby project replay facts collected from a superseded source snapshot: {}",
+                    path.display()
+                );
+                continue;
+            }
             plan.signature_class_names
                 .extend(file_plan.signature_class_names);
             plan.implementation_class_names
@@ -1697,6 +1974,69 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
+        let workspace = TempDir::new().unwrap();
+        let root = workspace.path();
+        let utility_path = root.join("utility.rb");
+        let caller_path = root.join("caller.rb");
+        let stale_disk_source = "module Example\n  module Utility\n  end\nend\n";
+        let open_source = "module Example\n  module Utility\n    def self.lookup(value)\n      value\n    end\n  end\nend\n";
+        let caller_source = "Example::Utility.lookup(\"value\")\n";
+        std::fs::write(&utility_path, stale_disk_source).unwrap();
+        std::fs::write(&caller_path, caller_source).unwrap();
+
+        let server = RubyLanguageServer::default();
+        let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
+        for (path, text) in [(&utility_path, open_source), (&caller_path, caller_source)] {
+            crate::capabilities::indexing::handle_did_open(
+                &server,
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: Url::from_file_path(path).unwrap(),
+                        language_id: "ruby".to_string(),
+                        version: 1,
+                        text: text.to_string(),
+                    },
+                },
+            )
+            .await;
+        }
+
+        let caller_file = workspace_state
+            .analysis_engine
+            .read()
+            .file_id(&caller_path)
+            .unwrap();
+        assert!(
+            !AnalysisQuery::new(&workspace_state.analysis_engine.read())
+                .resolved_reference_definition_ranges_at(caller_file, 19)
+                .is_empty(),
+            "the open-document pass must initially resolve the singleton method"
+        );
+
+        let mut indexer = IndexerProject::new(
+            root.to_path_buf(),
+            FileProcessor::new(),
+            IndexingConfig::default(),
+        );
+        indexer.collect_project_facts(&server).unwrap();
+        workspace_state.analysis_engine.write().resolve();
+
+        let engine = workspace_state.analysis_engine.read();
+        let utility_file = engine.file_id(&utility_path).unwrap();
+        assert!(
+            engine.file_content_matches(utility_file, open_source),
+            "cold indexing must retain the editor's newer source snapshot"
+        );
+        assert!(
+            !AnalysisQuery::new(&engine)
+                .resolved_reference_definition_ranges_at(caller_file, 19)
+                .is_empty(),
+            "a stale cold-index batch must not erase method facts from a newer open document"
+        );
+    }
+
     #[test]
     fn cold_project_result_is_independent_of_a_prior_identical_file_pass() {
         let workspace = TempDir::new().unwrap();
@@ -1946,6 +2286,12 @@ mod tests {
         end
         code
       end
+
+      def self.fallback_code
+        fallback = nil
+        fallback ||= Marketplace::Platform::Errors::PaymentCodes::FAILED
+        fallback
+      end
     end
   end
 end
@@ -2057,7 +2403,8 @@ end
             );
         }
         let first_file_id = engine.file_id(&first_consumer_path).unwrap();
-        let final_read_offset = u32::try_from(first_consumer.rfind("code\n").unwrap()).unwrap();
+        let final_read_offset =
+            u32::try_from(first_consumer.rfind("        code\n").unwrap() + 8).unwrap();
         assert_eq!(
             query.local_read_type_at(first_file_id, final_read_offset),
             Some(ruby_analysis::inference::RubyType::string()),
@@ -2095,6 +2442,18 @@ end
                 "method-return equations must retain the same constant dependency as assignment facts"
             );
         }
+        let fallback_start = u32::try_from(first_consumer.find("fallback ||=").unwrap()).unwrap();
+        assert_eq!(
+            query.variable_assignment_type_at(
+                ruby_analysis::engine::VariableTypeKind::Local,
+                "fallback",
+                first_file_id,
+                fallback_start,
+                fallback_start + u32::try_from("fallback".len()).unwrap(),
+            ),
+            Some(ruby_analysis::inference::RubyType::string()),
+            "a late-resolved value constant must update the stable source assignment for ||= writes"
+        );
         let cycle_file_id = engine.file_id(&cycle_consumer_path).unwrap();
         assert_eq!(
             query.variable_assignment_type_at(

@@ -471,7 +471,7 @@ async fn report_m0_scorecard() {
             .sum(),
         target_met: total_score >= scorecard.target_score,
         baseline_matches,
-        unknown_reason_schema_version: 2,
+        unknown_reason_schema_version: 3,
         unknown_reason_codes: UnknownReason::ALL
             .iter()
             .map(|reason| reason.code())

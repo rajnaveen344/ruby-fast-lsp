@@ -697,6 +697,7 @@ pub async fn handle_watched_files_changed(
     };
     let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
     let mut analysis_changed = false;
+    let mut changed_dependency_uris = Vec::new();
 
     for change in params.changes {
         let Some(workspace) = server.workspace_for_uri(&change.uri) else {
@@ -708,6 +709,7 @@ pub async fn handle_watched_files_changed(
         if server.docs.lock().contains_key(&change.uri) {
             continue;
         }
+        changed_dependency_uris.push(change.uri.clone());
 
         if path.extension().is_some_and(|extension| extension == "rbs") {
             if change.typ == FileChangeType::DELETED
@@ -774,8 +776,64 @@ pub async fn handle_watched_files_changed(
     }
 
     if analysis_changed {
+        refresh_open_project_files_for_dependency_engines(
+            &processor,
+            server,
+            &changed_dependency_uris,
+        );
         server.invalidate_namespace_tree_cache_debounced();
         debug!("Reindexed watched project files and invalidated namespace tree cache");
+    }
+}
+
+fn refresh_open_project_files_for_dependency_engines(
+    processor: &FileProcessor,
+    server: &RubyLanguageServer,
+    changed_uris: &[Url],
+) {
+    let mut changed_engines = Vec::new();
+    for uri in changed_uris {
+        let engine = server.analysis_engine_for_uri(uri);
+        if !changed_engines
+            .iter()
+            .any(|known| Arc::ptr_eq(known, &engine))
+        {
+            changed_engines.push(engine);
+        }
+    }
+    if changed_engines.is_empty() {
+        return;
+    }
+
+    let mut open_project_files = {
+        let docs = server.docs.lock();
+        docs.iter()
+            .filter_map(|(uri, document)| {
+                if analysis_file_kind(server, uri) != Some(SourceKind::Project) {
+                    return None;
+                }
+                let owning_engine = server.analysis_engine_for_uri(uri);
+                if !changed_engines
+                    .iter()
+                    .any(|changed| Arc::ptr_eq(changed, &owning_engine))
+                {
+                    return None;
+                }
+                Some((uri.clone(), document.read().content.clone()))
+            })
+            .collect::<Vec<_>>()
+    };
+    open_project_files.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+
+    for (uri, content) in open_project_files {
+        if let Err(error) =
+            processor.process_file_current_file_resolution_forced(&uri, &content, server)
+        {
+            log::warn!(
+                "Failed to refresh open project consumer after dependency change: {}: {error}",
+                uri.path()
+            );
+        }
     }
 }
 
@@ -818,6 +876,7 @@ mod tests {
         SymbolKind, TextRange,
     };
     use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
+    use tower_lsp::LanguageServer;
 
     use super::*;
 
@@ -985,6 +1044,130 @@ mod tests {
         )
         .await;
         assert!(!has_namespace(&server, &uri, "GeneratedWidget"));
+    }
+
+    #[tokio::test]
+    async fn watched_rbs_record_refreshes_an_early_open_consumer() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let consumer_path = workspace.path().join("consumer.rb");
+        let consumer_uri = Url::from_file_path(&consumer_path).unwrap();
+        let signature_path = workspace.path().join("sig/payload_factory.rbs");
+        std::fs::create_dir_all(signature_path.parent().unwrap()).unwrap();
+        let signature_uri = Url::from_file_path(&signature_path).unwrap();
+        let server = RubyLanguageServer::default();
+        server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: consumer_uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "payload = PayloadFactory.build\npayload[:name]\n".to_string(),
+                },
+            },
+        )
+        .await;
+        std::fs::write(
+            &signature_path,
+            "class PayloadFactory\n  def self.build: () -> { id: Integer, ?name: String }\nend\n",
+        )
+        .unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: signature_uri.clone(),
+                    typ: FileChangeType::CREATED,
+                }],
+            },
+        )
+        .await;
+
+        let hover = server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: consumer_uri.clone(),
+                    },
+                    position: Position::new(1, 14),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover request must succeed")
+            .expect("the refreshed consumer must publish a keyed-read hover");
+        assert!(
+            format!("{:?}", hover.contents).contains("String"),
+            "the RBS record return must refresh the early-open consumer, got {:?}",
+            hover.contents
+        );
+
+        std::fs::write(
+            &signature_path,
+            "class PayloadFactory\n  def self.build: () -> { id: Integer, ?name: Integer }\nend\n",
+        )
+        .unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: signature_uri.clone(),
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        )
+        .await;
+        let changed_hover = server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: consumer_uri.clone(),
+                    },
+                    position: Position::new(1, 14),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("changed hover request must succeed")
+            .expect("the refreshed consumer must retain a keyed-read hover");
+        assert!(
+            format!("{:?}", changed_hover.contents).contains("Integer"),
+            "the replacement RBS record must replace String with Integer, got {:?}",
+            changed_hover.contents
+        );
+
+        std::fs::remove_file(&signature_path).unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: signature_uri,
+                    typ: FileChangeType::DELETED,
+                }],
+            },
+        )
+        .await;
+        let deleted_hover = server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: consumer_uri },
+                    position: Position::new(1, 14),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("post-delete hover request must succeed")
+            .expect("the keyed read must retain an explained Unknown hover");
+        let deleted = format!("{:?}", deleted_hover.contents);
+        assert!(
+            deleted.contains("Unknown")
+                && !deleted.contains("String")
+                && !deleted.contains("Integer"),
+            "deleting the RBS contract must remove every stale concrete shape, got {:?}",
+            deleted_hover.contents
+        );
     }
 
     #[tokio::test]

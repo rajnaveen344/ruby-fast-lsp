@@ -138,7 +138,7 @@ impl FactCollector {
         self.scope_tracker.push_method_fqn(Some(fqn.clone()));
 
         // Owner FQN uses Namespace variant with kind to distinguish instance vs singleton methods
-        let _owner_fqn =
+        let owner_fqn =
             FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), actual_namespace_kind);
 
         let direct_params = params
@@ -236,7 +236,7 @@ impl FactCollector {
 
         // Convert YARD types to RubyType for type inference
         // Use namespace-aware conversion to resolve relative type names
-        let (yard_return_type, param_types) = if let Some(ref doc) = yard_doc {
+        let (yard_return_type, yard_param_types) = if let Some(ref doc) = yard_doc {
             let return_type = if !doc.returns.is_empty() {
                 let all_return_types: Vec<String> =
                     doc.returns.iter().flat_map(|r| r.types.clone()).collect();
@@ -267,9 +267,56 @@ impl FactCollector {
         } else {
             (None, Vec::new())
         };
+        let rbs_param_types = {
+            let engine = self.analysis_engine.read();
+            let query = crate::engine::AnalysisQuery::new(&engine);
+            params
+                .iter()
+                .filter_map(|parameter| {
+                    query
+                        .rbs_parameter_contract_type(&fqn, &owner_fqn, &parameter.name)
+                        .map(|ruby_type| (parameter.name.clone(), ruby_type, parameter.range))
+                })
+                .collect::<Vec<_>>()
+        };
+        let param_types = params
+            .iter()
+            .filter_map(|parameter| {
+                rbs_param_types
+                    .iter()
+                    .find(|(name, _, _)| name == &parameter.name)
+                    .map(|(_, ruby_type, range)| {
+                        (
+                            parameter.name.clone(),
+                            ruby_type.clone(),
+                            *range,
+                            TypeProvenance::Rbs,
+                        )
+                    })
+                    .or_else(|| {
+                        yard_param_types
+                            .iter()
+                            .find(|(name, _, _)| name == &parameter.name)
+                            .map(|(_, ruby_type, range)| {
+                                (
+                                    parameter.name.clone(),
+                                    ruby_type.clone(),
+                                    *range,
+                                    TypeProvenance::Yard,
+                                )
+                            })
+                    })
+            })
+            .collect::<Vec<_>>();
 
-        // Try to look up in RBS
-        let rbs_return_type = {
+        // Project RBS facts use the same isolated engine as Ruby source and
+        // outrank the process-wide bundled core signatures. Owner identity is
+        // required so instance/singleton homonyms cannot exchange contracts.
+        let project_rbs_return_type = {
+            let engine = self.analysis_engine.read();
+            crate::engine::AnalysisQuery::new(&engine).rbs_return_contract_type(&fqn, &owner_fqn)
+        };
+        let rbs_return_type = project_rbs_return_type.or_else(|| {
             let class_name = namespace_parts
                 .iter()
                 .map(|c| c.to_string())
@@ -282,7 +329,7 @@ impl FactCollector {
                 &method_name_str,
                 is_singleton,
             )
-        };
+        });
         let declared_return_type = rbs_return_type
             .as_ref()
             .or(yard_return_type.as_ref())
@@ -351,7 +398,7 @@ impl FactCollector {
             tracker = tracker.with_parameter_types(
                 param_types
                     .iter()
-                    .map(|(name, ruby_type, _range)| (name.clone(), ruby_type.clone()))
+                    .map(|(name, ruby_type, _range, _provenance)| (name.clone(), ruby_type.clone()))
                     .collect(),
             );
             if self.record_local_read_unknown_reasons {
@@ -366,6 +413,9 @@ impl FactCollector {
                 fqn.clone(),
                 self.local_method_candidates_for_tracker(),
             );
+            self.max_live_shape_aliases = self
+                .max_live_shape_aliases
+                .max(tracker.max_live_shape_aliases());
             if self.record_local_read_unknown_reasons {
                 self.install_local_read_types(tracker.take_local_read_types());
             }
@@ -392,7 +442,7 @@ impl FactCollector {
                 return_type_provenance,
             ));
         }
-        for (param_name, param_type, param_range) in &param_types {
+        for (param_name, param_type, param_range, provenance) in &param_types {
             if *param_type == RubyType::Unknown {
                 continue;
             }
@@ -403,7 +453,7 @@ impl FactCollector {
                 },
                 param_type.clone(),
                 *param_range,
-                TypeProvenance::Yard,
+                *provenance,
             ));
         }
 
@@ -417,7 +467,7 @@ impl FactCollector {
         true
     }
 
-    fn install_local_read_types(&mut self, reads: Vec<LocalReadType>) {
+    pub(super) fn install_local_read_types(&mut self, reads: Vec<LocalReadType>) {
         if reads.is_empty() {
             return;
         }
@@ -434,7 +484,27 @@ impl FactCollector {
                         read.constant_dependencies,
                     ));
             }
-            installed_reads.push((read.name, range, read.ruby_type));
+            match (read.ruby_type, read.unknown_reason) {
+                (RubyType::Unknown, Some(reason)) => {
+                    self.expression_unknown_reasons.push((range, reason));
+                    installed_reads.push((read.name, range, RubyType::Unknown));
+                }
+                (RubyType::Unknown, None) => {
+                    self.expression_unknown_reasons
+                        .push((range, UnknownReason::UnresolvedAssignmentValue));
+                    installed_reads.push((read.name, range, RubyType::Unknown));
+                }
+                (ruby_type, None) => installed_reads.push((read.name, range, ruby_type)),
+                (ruby_type, Some(reason)) => {
+                    assert!(
+                        RubyType::contains_unknown(&ruby_type),
+                        "INVARIANT VIOLATED: fully proven local-read type `{ruby_type}` carried Unknown reason `{}`. This is a bug because only a partially known outer container may coexist with a nested proof failure. Fix: synchronize FlowEnvironment type and unknown_reasons atomically.",
+                        reason.code()
+                    );
+                    self.expression_unknown_reasons.push((range, reason));
+                    installed_reads.push((read.name, range, ruby_type));
+                }
+            }
         }
         self.document
             .variable_scopes_mut()
@@ -669,7 +739,7 @@ impl FactCollector {
         &self,
     ) -> std::collections::HashMap<FullyQualifiedName, RubyType> {
         self.type_store
-            .known_method_return_types()
+            .method_return_types()
             .map(|(fqn, ruby_type)| (fqn.clone(), ruby_type.clone()))
             .collect()
     }

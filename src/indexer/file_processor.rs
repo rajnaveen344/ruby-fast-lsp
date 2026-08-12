@@ -1087,6 +1087,61 @@ impl FileProcessor {
         })
     }
 
+    /// Collect the direct, extension-independent declarations that form the
+    /// semantic skeleton for one deterministic project batch.
+    ///
+    /// The project indexer installs every file's skeleton and resolves the
+    /// resulting namespace graph before any extension-aware traversal begins.
+    /// This gives every parallel worker the same complete class/module lookup
+    /// universe without making extension behavior depend on file order.
+    pub fn collect_project_direct_semantic_seed(
+        &self,
+        uri: &Url,
+        content: &str,
+        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        known_namespaces: &HashSet<FullyQualifiedName>,
+    ) -> FileFacts {
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+        let file_id = analysis_engine.read().file_id(&path).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: project semantic seed received an unregistered source {}. \
+                 This is a bug because batch file identities must be fixed before declaration \
+                 collection. Fix: pre-register the complete project batch before collecting its \
+                 direct semantic seed.",
+                path.display()
+            )
+        });
+        let source = analysis_source(uri, content);
+        let parse = ruby_prism::parse(source.as_bytes());
+        let direct = collect_direct_facts(
+            analysis_engine,
+            &parse.node(),
+            source.as_ref(),
+            file_id,
+            Some(known_namespaces),
+        );
+        FileFacts {
+            methods: direct.methods,
+            method_visibility_overrides: direct.method_visibility_overrides,
+            graph_nodes: direct.graph_nodes,
+            graph_edges: direct.graph_edges,
+            unresolved_graph_edges: direct.unresolved_graph_edges,
+            ..FileFacts::default()
+        }
+    }
+
+    pub fn requires_project_direct_semantic_seed(&self, uri: &Url) -> bool {
+        let project_context = self.extension_project_context_seed.as_ref().map(|seed| {
+            seed.read()
+                .context_snapshot(uri.to_string(), SourceKind::Project)
+                .context
+        });
+        self.extension_registry
+            .has_applicable_semantic_targets(project_context.as_ref())
+    }
+
     pub(crate) fn ensure_project_semantic_seed(
         &self,
         uri: &Url,
@@ -1118,6 +1173,22 @@ impl FileProcessor {
             )
         });
         replace_file_analysis(analysis_engine, file_id, facts, FileResolution::Deferred);
+    }
+
+    pub fn replace_collected_project_file_facts_if_source_snapshot_as_deferred_resolution(
+        &self,
+        path: &Path,
+        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        source_snapshot: ruby_analysis::engine::SourceFileSnapshot,
+        facts: FileFacts,
+    ) -> bool {
+        let mut engine = analysis_engine.write();
+        if engine.source_snapshot_for_path(path) != Some(source_snapshot) {
+            return false;
+        }
+        engine
+            .replace_facts_if_source_snapshot(source_snapshot, facts, ResolveMode::Deferred)
+            .is_some()
     }
 
     pub fn collect_project_neutral_file_template_as_deferred_resolution_in_engine(
@@ -1771,11 +1842,41 @@ fn merge_precise_visitor_type_facts(visitor_facts: Vec<TypeFact>, merged: &mut V
         if visitor_fact.provenance != TypeProvenance::Runtime
             && !type_subject_is_assignment_slot(&visitor_fact.subject)
         {
-            let has_same_slot = merged.iter().any(|fact| {
-                fact.subject == visitor_fact.subject
-                    && (!type_subject_is_definition_slot(&visitor_fact.subject)
-                        || assignment_ranges_identify_same_write(fact.range, visitor_fact.range))
-            });
+            let same_slot_indexes = merged
+                .iter()
+                .enumerate()
+                .filter_map(|(index, fact)| {
+                    (fact.subject == visitor_fact.subject
+                        && (!type_subject_is_definition_slot(&visitor_fact.subject)
+                            || assignment_ranges_identify_same_write(
+                                fact.range,
+                                visitor_fact.range,
+                            )))
+                    .then_some(index)
+                })
+                .collect::<Vec<_>>();
+
+            // Direct indexing publishes a cheap syntax seed before the full
+            // flow visitor runs. For one inferred method definition, the
+            // visitor is the authoritative producer: it can retain structural
+            // shapes and can invalidate a formerly concrete result. Replace
+            // only inferred seeds. Declared/runtime facts remain independent
+            // contracts and must not be silently overwritten by body flow.
+            if matches!(visitor_fact.subject, TypeSubject::MethodReturn(_))
+                && visitor_fact.provenance == TypeProvenance::Inferred
+                && !same_slot_indexes.is_empty()
+                && same_slot_indexes
+                    .iter()
+                    .all(|index| merged[*index].provenance == TypeProvenance::Inferred)
+            {
+                for index in same_slot_indexes.into_iter().rev() {
+                    merged.remove(index);
+                }
+                merged.push(visitor_fact);
+                continue;
+            }
+
+            let has_same_slot = !same_slot_indexes.is_empty();
             if !has_same_slot {
                 merged.push(visitor_fact);
             }
@@ -2169,6 +2270,72 @@ mod tests {
         assert_eq!(merged[0].ruby_type, RubyType::string());
         assert_eq!(merged[1].ruby_type, RubyType::integer());
         assert_eq!(merged[1].range, second_range);
+    }
+
+    #[test]
+    fn precise_inferred_method_return_replaces_same_definition_syntax_seed() {
+        let file_id = ruby_analysis::core::SourceFileId(11);
+        let method = FullyQualifiedName::method(
+            vec![RubyConstant::new("PayloadFactory").unwrap()],
+            RubyMethod::new("build").unwrap(),
+        );
+        let subject = TypeSubject::MethodReturn(method);
+        let direct_range = TextRange::new(file_id, 10, 48);
+        let visitor_range = TextRange::new(file_id, 12, 45);
+        let mut merged = vec![TypeFact::new(
+            subject.clone(),
+            RubyType::Hash(vec![RubyType::symbol()], vec![RubyType::string()]),
+            direct_range,
+            TypeProvenance::Inferred,
+        )];
+
+        merge_precise_visitor_type_facts(
+            vec![TypeFact::new(
+                subject.clone(),
+                RubyType::string(),
+                visitor_range,
+                TypeProvenance::Inferred,
+            )],
+            &mut merged,
+        );
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].subject, subject);
+        assert_eq!(merged[0].ruby_type, RubyType::string());
+        assert_eq!(merged[0].range, visitor_range);
+    }
+
+    #[test]
+    fn unknown_inferred_method_return_replaces_same_definition_concrete_seed() {
+        let file_id = ruby_analysis::core::SourceFileId(12);
+        let method = FullyQualifiedName::method(
+            vec![RubyConstant::new("Service").unwrap()],
+            RubyMethod::new("value").unwrap(),
+        );
+        let subject = TypeSubject::MethodReturn(method);
+        let direct_range = TextRange::new(file_id, 0, 32);
+        let visitor_range = TextRange::new(file_id, 2, 30);
+        let mut merged = vec![TypeFact::new(
+            subject.clone(),
+            RubyType::integer(),
+            direct_range,
+            TypeProvenance::Inferred,
+        )];
+
+        merge_precise_visitor_type_facts(
+            vec![TypeFact::new(
+                subject.clone(),
+                RubyType::Unknown,
+                visitor_range,
+                TypeProvenance::Inferred,
+            )],
+            &mut merged,
+        );
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].subject, subject);
+        assert_eq!(merged[0].ruby_type, RubyType::Unknown);
+        assert_eq!(merged[0].range, visitor_range);
     }
 
     #[test]

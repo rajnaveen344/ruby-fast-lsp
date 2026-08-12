@@ -29,5 +29,5 @@ async fn array_literal() {
 
 #[tokio::test]
 async fn hash_literal() {
-    check(r#"x<hint label="Hash"> = { a: 1 }"#).await;
+    check(r#"x<hint label="{ a: Integer }"> = { a: 1 }"#).await;
 }

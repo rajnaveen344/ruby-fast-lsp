@@ -45,8 +45,10 @@ impl FactCollector {
                 RubyType::Class(_)
                 | RubyType::Module(_)
                 | RubyType::ModuleReference(_)
+                | RubyType::Literal(_)
                 | RubyType::Array(_)
                 | RubyType::Hash(_, _)
+                | RubyType::Shape(_)
                 | RubyType::Union(_)
                 | RubyType::Unknown => None,
             });

@@ -45,6 +45,8 @@ async fn open_sinatra_namespaces(editor: &mut FakeEditor, workspace: &TempDir) {
   end
 
   class Base
+    def params
+    end
   end
 
   class Application < Base
@@ -167,6 +169,124 @@ end
     assert!(
         editor.goto_definition(&app, 13, 8).await.is_empty(),
         "removing the helpers declaration must remove the stale route definition"
+    );
+}
+
+#[tokio::test]
+async fn packaged_sinatra_rust_wasm_supports_sinatra_2_cross_file_request_scope() {
+    if !sinatra_artifact_exists() {
+        eprintln!(
+            "skipping actual Sinatra Rust Wasm test; run extensions/sinatra-rust/build-and-test.sh"
+        );
+        return;
+    }
+    let workspace = TempDir::new().expect("Sinatra workspace must be created");
+    std::fs::create_dir(workspace.path().join("lib"))
+        .expect("Sinatra source directory must be created");
+    std::fs::write(
+        workspace.path().join("Gemfile"),
+        "source 'https://rubygems.org'\ngem 'sinatra'\n",
+    )
+    .expect("Sinatra Gemfile must be written");
+    std::fs::write(
+        workspace.path().join("Gemfile.lock"),
+        "GEM\n  remote: https://rubygems.org/\n  specs:\n    sinatra (2.2.4)\n",
+    )
+    .expect("Sinatra lockfile must be written");
+    std::fs::write(
+        workspace.path().join("lib/sinatra.rb"),
+        r#"module Sinatra
+  module Delegator
+  end
+
+  class Base
+    def params
+    end
+  end
+
+  class Application < Base
+  end
+end
+"#,
+    )
+    .expect("Sinatra stub must be written");
+    std::fs::write(
+        workspace.path().join("request_support.rb"),
+        r#"module RequestSupport
+  def fetch_records(context, values)
+  end
+end
+"#,
+    )
+    .expect("request support source must be written");
+    std::fs::write(
+        workspace.path().join("request_api.rb"),
+        r#"module RequestApi
+  include RequestSupport
+end
+"#,
+    )
+    .expect("request API source must be written");
+    std::fs::write(
+        workspace.path().join("base_app.rb"),
+        r#"class BaseApp < Sinatra::Base
+  helpers do
+    include RequestApi
+    def access_context
+    end
+  end
+end
+"#,
+    )
+    .expect("base application source must be written");
+    let app = workspace_file(&workspace, "app.rb");
+    let app_source = r#"class ApiApp < BaseApp
+  get "/records" do
+    fetch_records(access_context, params)
+  end
+end
+"#;
+    std::fs::write(&app, app_source).expect("application source must be written");
+
+    let mut editor =
+        FakeEditor::with_extension_package_and_workspace(sinatra_package_dir(), workspace.path())
+            .await;
+    editor.open(&app, app_source).await;
+    editor.wait_for_indexing_complete().await;
+
+    let method = editor.goto_definition(&app, 2, 5).await;
+    let statuses = editor.extension_status().await;
+    let sinatra = statuses
+        .iter()
+        .find(|status| status.id == "sinatra-rust")
+        .expect("the bundled Sinatra extension must be discoverable");
+    assert_eq!(
+        method.len(),
+        1,
+        "Sinatra 2 routes must resolve cross-file application methods: {method:?}; extension: {sinatra:?}"
+    );
+    assert_eq!(method[0].range.start.line, 1);
+
+    let context = editor.goto_definition(&app, 2, 19).await;
+    assert_eq!(
+        context.len(),
+        1,
+        "Sinatra 2 routes must resolve inherited helper methods: {context:?}"
+    );
+    assert_eq!(context[0].range.start.line, 3);
+
+    let params = editor.goto_definition(&app, 2, 35).await;
+    assert_eq!(
+        params.len(),
+        1,
+        "Sinatra 2 routes must resolve framework request methods: {params:?}"
+    );
+    assert_eq!(params[0].range.start.line, 5);
+
+    assert_eq!(sinatra.status, "loaded");
+    assert!(
+        sinatra.telemetry.emitted_execution_contexts >= 2,
+        "Sinatra 2 helpers and routes must be modeled by the extension, not the generic syntactic fallback: {sinatra:?}"
     );
 }
 

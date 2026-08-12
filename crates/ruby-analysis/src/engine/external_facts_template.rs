@@ -3,10 +3,12 @@ use crate::core::memory_estimate::{
     vec_payload_bytes,
 };
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
-    MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, MethodVisibilityOverrideFact,
-    NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact, SymbolKind,
-    TextRange, TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, LiteralKey,
+    LiteralValue, MethodAvailability, MethodFact, MethodParamFact, MethodParamKind,
+    MethodVisibilityOverrideFact, NamespaceKind, RubyConstant, RubyMethod, RubyType,
+    ShapeExactness, ShapeField, ShapeFieldPresence, ShapeRest, ShapeStability, ShapeType,
+    SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    UnresolvedGraphEdgeFact,
 };
 use crate::engine::FileFacts;
 use crate::method_store::MethodVisibility;
@@ -173,6 +175,9 @@ enum SnapshotRubyType {
     ModuleReference {
         fqn: SnapshotFqn,
     },
+    Literal {
+        value: SnapshotLiteral,
+    },
     Array {
         elements: Vec<SnapshotRubyType>,
     },
@@ -180,10 +185,57 @@ enum SnapshotRubyType {
         keys: Vec<SnapshotRubyType>,
         values: Vec<SnapshotRubyType>,
     },
+    Shape {
+        fields: Vec<SnapshotShapeField>,
+        rest: Option<Box<SnapshotShapeRest>>,
+        exactness: SnapshotShapeExactness,
+        stability: SnapshotShapeStability,
+    },
     Union {
         types: Vec<SnapshotRubyType>,
     },
     Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotLiteral {
+    Symbol(String),
+    String(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotShapeField {
+    key: SnapshotLiteral,
+    value: SnapshotRubyType,
+    presence: SnapshotShapeFieldPresence,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotShapeRest {
+    key: SnapshotRubyType,
+    value: SnapshotRubyType,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotShapeFieldPresence {
+    Required,
+    Optional,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotShapeExactness {
+    Exact,
+    Open,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotShapeStability {
+    TrackedMutable,
+    Frozen,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -489,7 +541,17 @@ fn ruby_type_has_generated_owner(ruby_type: &RubyType) -> bool {
             keys.iter().any(ruby_type_has_generated_owner)
                 || values.iter().any(ruby_type_has_generated_owner)
         }
-        RubyType::Unknown => false,
+        RubyType::Shape(shape) => {
+            shape
+                .fields()
+                .iter()
+                .any(|field| ruby_type_has_generated_owner(field.value()))
+                || shape.rest().is_some_and(|rest| {
+                    ruby_type_has_generated_owner(rest.key())
+                        || ruby_type_has_generated_owner(rest.value())
+                })
+        }
+        RubyType::Literal(_) | RubyType::Unknown => false,
     }
 }
 
@@ -961,6 +1023,9 @@ fn snapshot_ruby_type(ruby_type: &RubyType) -> Result<SnapshotRubyType, String> 
         RubyType::ModuleReference(fqn) => SnapshotRubyType::ModuleReference {
             fqn: snapshot_fqn(fqn)?,
         },
+        RubyType::Literal(value) => SnapshotRubyType::Literal {
+            value: snapshot_literal_value(value),
+        },
         RubyType::Array(elements) => SnapshotRubyType::Array {
             elements: elements
                 .iter()
@@ -976,6 +1041,39 @@ fn snapshot_ruby_type(ruby_type: &RubyType) -> Result<SnapshotRubyType, String> 
                 .iter()
                 .map(snapshot_ruby_type)
                 .collect::<Result<_, _>>()?,
+        },
+        RubyType::Shape(shape) => SnapshotRubyType::Shape {
+            fields: shape
+                .fields()
+                .iter()
+                .map(|field| {
+                    Ok(SnapshotShapeField {
+                        key: snapshot_literal_key(field.key()),
+                        value: snapshot_ruby_type(field.value())?,
+                        presence: match field.presence() {
+                            ShapeFieldPresence::Required => SnapshotShapeFieldPresence::Required,
+                            ShapeFieldPresence::Optional => SnapshotShapeFieldPresence::Optional,
+                        },
+                    })
+                })
+                .collect::<Result<_, String>>()?,
+            rest: shape
+                .rest()
+                .map(|rest| {
+                    Ok::<_, String>(Box::new(SnapshotShapeRest {
+                        key: snapshot_ruby_type(rest.key())?,
+                        value: snapshot_ruby_type(rest.value())?,
+                    }))
+                })
+                .transpose()?,
+            exactness: match shape.exactness() {
+                ShapeExactness::Exact => SnapshotShapeExactness::Exact,
+                ShapeExactness::Open => SnapshotShapeExactness::Open,
+            },
+            stability: match shape.stability() {
+                ShapeStability::TrackedMutable => SnapshotShapeStability::TrackedMutable,
+                ShapeStability::Frozen => SnapshotShapeStability::Frozen,
+            },
         },
         RubyType::Union(types) => SnapshotRubyType::Union {
             types: types
@@ -998,6 +1096,9 @@ fn restore_ruby_type(ruby_type: SnapshotRubyType, depth: usize) -> Result<RubyTy
         SnapshotRubyType::ModuleReference { fqn } => {
             Ok(RubyType::ModuleReference(restore_fqn(fqn)?))
         }
+        SnapshotRubyType::Literal { value } => {
+            Ok(RubyType::Literal(Box::new(restore_literal_value(value))))
+        }
         SnapshotRubyType::Array { elements } => Ok(RubyType::Array(
             elements
                 .into_iter()
@@ -1013,6 +1114,43 @@ fn restore_ruby_type(ruby_type: SnapshotRubyType, depth: usize) -> Result<RubyTy
                 .map(|value| restore_ruby_type(value, depth + 1))
                 .collect::<Result<_, _>>()?,
         )),
+        SnapshotRubyType::Shape {
+            fields,
+            rest,
+            exactness,
+            stability,
+        } => {
+            let fields = fields
+                .into_iter()
+                .map(|field| {
+                    let key = restore_literal_key(field.key);
+                    let value = restore_ruby_type(field.value, depth + 1)?;
+                    Ok(match field.presence {
+                        SnapshotShapeFieldPresence::Required => ShapeField::required(key, value),
+                        SnapshotShapeFieldPresence::Optional => ShapeField::optional(key, value),
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let rest = rest
+                .map(|rest| {
+                    Ok::<_, String>(ShapeRest::new(
+                        restore_ruby_type(rest.key, depth + 1)?,
+                        restore_ruby_type(rest.value, depth + 1)?,
+                    ))
+                })
+                .transpose()?;
+            let exactness = match exactness {
+                SnapshotShapeExactness::Exact => ShapeExactness::Exact,
+                SnapshotShapeExactness::Open => ShapeExactness::Open,
+            };
+            let stability = match stability {
+                SnapshotShapeStability::TrackedMutable => ShapeStability::TrackedMutable,
+                SnapshotShapeStability::Frozen => ShapeStability::Frozen,
+            };
+            ShapeType::try_new(fields, rest, exactness, stability)
+                .map(|shape| RubyType::Shape(Box::new(shape)))
+                .map_err(|error| format!("invalid persistent shape type: {error}"))
+        }
         SnapshotRubyType::Union { types } => Ok(RubyType::Union(
             types
                 .into_iter()
@@ -1020,6 +1158,34 @@ fn restore_ruby_type(ruby_type: SnapshotRubyType, depth: usize) -> Result<RubyTy
                 .collect::<Result<_, _>>()?,
         )),
         SnapshotRubyType::Unknown => Ok(RubyType::Unknown),
+    }
+}
+
+fn snapshot_literal_value(value: &LiteralValue) -> SnapshotLiteral {
+    match value {
+        LiteralValue::Symbol(value) => SnapshotLiteral::Symbol(value.clone()),
+        LiteralValue::String(value) => SnapshotLiteral::String(value.clone()),
+    }
+}
+
+fn snapshot_literal_key(key: &LiteralKey) -> SnapshotLiteral {
+    match key {
+        LiteralKey::Symbol(value) => SnapshotLiteral::Symbol(value.clone()),
+        LiteralKey::String(value) => SnapshotLiteral::String(value.clone()),
+    }
+}
+
+fn restore_literal_value(value: SnapshotLiteral) -> LiteralValue {
+    match value {
+        SnapshotLiteral::Symbol(value) => LiteralValue::Symbol(value),
+        SnapshotLiteral::String(value) => LiteralValue::String(value),
+    }
+}
+
+fn restore_literal_key(key: SnapshotLiteral) -> LiteralKey {
+    match key {
+        SnapshotLiteral::Symbol(value) => LiteralKey::Symbol(value),
+        SnapshotLiteral::String(value) => LiteralKey::String(value),
     }
 }
 
@@ -1330,10 +1496,12 @@ fn rebind_range(range: &mut TextRange, source: SourceFileId, target: SourceFileI
 
 #[cfg(test)]
 mod tests {
+    use super::{restore_ruby_type, snapshot_ruby_type};
     use crate::core::{
         DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeFact,
-        GraphEdgeKind, GraphNodeFact, GraphNodeKind, InferenceEvidence, MethodFact,
-        MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType, SourceFileId, SourceKind,
+        GraphEdgeKind, GraphNodeFact, GraphNodeKind, InferenceEvidence, LiteralKey, LiteralValue,
+        MethodFact, MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType,
+        ShapeExactness, ShapeField, ShapeRest, ShapeStability, ShapeType, SourceFileId, SourceKind,
         SymbolFact, SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance,
         TypeSubject, UnresolvedGraphEdgeFact,
     };
@@ -1346,6 +1514,26 @@ mod tests {
 
     fn namespace(name: &str) -> FullyQualifiedName {
         FullyQualifiedName::namespace(vec![RubyConstant::new(name).unwrap()])
+    }
+
+    #[test]
+    fn persistent_snapshot_round_trips_canonical_shape_and_literal_types() {
+        let shape = ShapeType::try_new(
+            [
+                ShapeField::required(
+                    LiteralKey::symbol("kind"),
+                    RubyType::Literal(Box::new(LiteralValue::symbol("ready"))),
+                ),
+                ShapeField::optional(LiteralKey::string("name"), RubyType::string()),
+            ],
+            Some(ShapeRest::new(RubyType::symbol(), RubyType::integer())),
+            ShapeExactness::Open,
+            ShapeStability::Frozen,
+        )
+        .unwrap();
+        let original = RubyType::Shape(Box::new(shape));
+        let snapshot = snapshot_ruby_type(&original).unwrap();
+        assert_eq!(restore_ruby_type(snapshot, 0).unwrap(), original);
     }
 
     fn assert_range_file(range: TextRange, expected: SourceFileId) {

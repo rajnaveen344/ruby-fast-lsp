@@ -37,7 +37,14 @@ pub fn rbs_type_to_string(rbs_type: &RbsType) -> String {
         RbsType::Record(fields) => {
             let field_strs: Vec<String> = fields
                 .iter()
-                .map(|(name, t)| format!("{}: {}", name, rbs_type_to_string(t)))
+                .map(|field| {
+                    format!(
+                        "{}{}: {}",
+                        if field.optional { "?" } else { "" },
+                        field.name,
+                        rbs_type_to_string(&field.r#type)
+                    )
+                })
                 .collect();
             format!("{{ {} }}", field_strs.join(", "))
         }

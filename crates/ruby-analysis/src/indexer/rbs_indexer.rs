@@ -179,7 +179,12 @@ fn push_method(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let return_type = method.return_type();
+    let complete_return_type = complete_rbs_type_union(
+        method
+            .overloads
+            .iter()
+            .map(|overload| &overload.return_type),
+    );
     let return_type_label = if is_constructor {
         Some(
             parts
@@ -189,7 +194,7 @@ fn push_method(
                 .join("::"),
         )
     } else {
-        return_type.map(rbs_type_to_string)
+        complete_return_type.as_ref().map(ToString::to_string)
     };
     let fact = MethodFact::with_param_facts(fqn.clone(), owner, range, params)
         .with_visibility(method_visibility(method.visibility))
@@ -198,6 +203,17 @@ fn push_method(
         .symbols
         .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
     facts.methods.push(fact);
+    for (name, ruby_type) in complete_parameter_contracts(method) {
+        facts.types.push(TypeFact::new(
+            TypeSubject::Parameter {
+                method: fqn.clone(),
+                name,
+            },
+            ruby_type,
+            range,
+            TypeProvenance::Rbs,
+        ));
+    }
     if is_constructor {
         facts.types.push(TypeFact::new(
             TypeSubject::MethodReturn(fqn),
@@ -205,10 +221,71 @@ fn push_method(
             range,
             TypeProvenance::Rbs,
         ));
-    } else if let Some(return_type) = return_type {
-        push_type_fact(facts, TypeSubject::MethodReturn(fqn), return_type, range);
+    } else if let Some(return_type) = complete_return_type {
+        facts.types.push(TypeFact::new(
+            TypeSubject::MethodReturn(fqn),
+            return_type,
+            range,
+            TypeProvenance::Rbs,
+        ));
     }
     Ok(())
+}
+
+fn complete_parameter_contracts(method: &MethodDecl) -> Vec<(String, RubyType)> {
+    let Some(first) = method.overloads.first() else {
+        return Vec::new();
+    };
+    if method
+        .overloads
+        .iter()
+        .any(|overload| overload.params.len() != first.params.len())
+    {
+        return Vec::new();
+    }
+
+    let mut contracts = Vec::with_capacity(first.params.len());
+    for (index, first_parameter) in first.params.iter().enumerate() {
+        let name = parameter_name(first_parameter, index);
+        let mut parameter_types = Vec::with_capacity(method.overloads.len());
+        for overload in &method.overloads {
+            let parameter = &overload.params[index];
+            if parameter_name(parameter, index) != name || parameter.kind != first_parameter.kind {
+                return Vec::new();
+            }
+            parameter_types.push(&parameter.r#type);
+        }
+        let Some(ruby_type) = complete_rbs_type_union(parameter_types) else {
+            return Vec::new();
+        };
+        contracts.push((name, ruby_type));
+    }
+    contracts
+}
+
+fn parameter_name(parameter: &rbs_parser::MethodParam, index: usize) -> String {
+    parameter
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("arg{}", index + 1))
+}
+
+fn complete_rbs_type_union<'a>(
+    rbs_types: impl IntoIterator<Item = &'a RbsType>,
+) -> Option<RubyType> {
+    let mut ruby_types = Vec::new();
+    for rbs_type in rbs_types {
+        let ruby_type = crate::inference::rbs::rbs_type_to_ruby_type(rbs_type);
+        if RubyType::contains_unknown(&ruby_type) {
+            return None;
+        }
+        ruby_types.push(ruby_type);
+    }
+    if ruby_types.is_empty() {
+        return None;
+    }
+    let union = RubyType::union(ruby_types);
+    (!RubyType::contains_unknown(&union)).then_some(union)
 }
 
 fn push_members(
@@ -324,7 +401,7 @@ fn push_type_fact(
     rbs_type: &RbsType,
     range: TextRange,
 ) {
-    let ruby_type = ruby_type(rbs_type);
+    let ruby_type = crate::inference::rbs::rbs_type_to_ruby_type(rbs_type);
     if ruby_type != RubyType::Unknown {
         facts.types.push(TypeFact::new(
             subject,
@@ -332,61 +409,6 @@ fn push_type_fact(
             range,
             TypeProvenance::Rbs,
         ));
-    }
-}
-
-fn ruby_type(rbs_type: &RbsType) -> RubyType {
-    match rbs_type {
-        RbsType::Class(name) => named_type(name),
-        RbsType::ClassInstance { name, args } if name.trim_start_matches(':') == "Array" => {
-            match args.as_slice() {
-                [element] => RubyType::array_of(ruby_type(element)),
-                _ => RubyType::Unknown,
-            }
-        }
-        RbsType::ClassInstance { name, args } if name.trim_start_matches(':') == "Hash" => {
-            match args.as_slice() {
-                [key, value] => RubyType::hash_of(ruby_type(key), ruby_type(value)),
-                _ => RubyType::Unknown,
-            }
-        }
-        RbsType::ClassInstance { name, .. } => named_type(name),
-        RbsType::Union(types) => RubyType::union(types.iter().map(ruby_type)),
-        RbsType::Optional(inner) => RubyType::optional(ruby_type(inner)),
-        RbsType::Nil | RbsType::Void => RubyType::nil_class(),
-        RbsType::Bool => RubyType::boolean(),
-        RbsType::Literal(rbs_parser::Literal::String(_)) => RubyType::string(),
-        RbsType::Literal(rbs_parser::Literal::Integer(_)) => RubyType::integer(),
-        RbsType::Literal(rbs_parser::Literal::Symbol(_)) => RubyType::symbol(),
-        RbsType::Literal(rbs_parser::Literal::True) => RubyType::true_class(),
-        RbsType::Literal(rbs_parser::Literal::False) => RubyType::false_class(),
-        RbsType::Interface(_)
-        | RbsType::TypeVar(_)
-        | RbsType::Intersection(_)
-        | RbsType::Tuple(_)
-        | RbsType::Record(_)
-        | RbsType::Proc(_)
-        | RbsType::SelfType
-        | RbsType::Instance
-        | RbsType::ClassType
-        | RbsType::Untyped
-        | RbsType::Top
-        | RbsType::Bot => RubyType::Unknown,
-    }
-}
-
-fn named_type(name: &str) -> RubyType {
-    let normalized = name.trim_start_matches("::");
-    match normalized {
-        "String" => RubyType::string(),
-        "Integer" => RubyType::integer(),
-        "Float" => RubyType::float(),
-        "Symbol" => RubyType::symbol(),
-        "NilClass" => RubyType::nil_class(),
-        other => constant_parts(other)
-            .map(FullyQualifiedName::namespace)
-            .map(RubyType::Class)
-            .unwrap_or(RubyType::Unknown),
     }
 }
 
@@ -509,5 +531,73 @@ mod tests {
             .types
             .iter()
             .any(|fact| fact.ruby_type == RubyType::string()));
+    }
+
+    #[test]
+    fn rbs_records_become_canonical_shape_facts_with_optional_fields() {
+        let source = "class PayloadFactory\n  def build: () -> { id: Integer, ?name: String }\nend\nPAYLOAD: { id: Integer, ?name: String }\n";
+        let facts = index_rbs(SourceFileId(8), source).expect("RBS record fixture must parse");
+        let expected = "{ id: Integer, name?: String }";
+
+        let method_return = facts
+            .types
+            .iter()
+            .find(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))
+            .expect("the RBS record return must produce a method-return type fact");
+        assert_eq!(method_return.ruby_type.to_string(), expected);
+
+        let constant = facts
+            .types
+            .iter()
+            .find(|fact| matches!(fact.subject, TypeSubject::Constant(_)))
+            .expect("the RBS record constant must produce a value-constant type fact");
+        assert_eq!(constant.ruby_type.to_string(), expected);
+    }
+
+    #[test]
+    fn overloaded_rbs_records_emit_exhaustive_parameter_and_return_unions() {
+        let source = r#"class PayloadService
+  def normalize: ({ kind: :number, value: Integer } payload) -> Integer
+               | ({ kind: :text, value: String } payload) -> String
+end
+"#;
+        let facts =
+            index_rbs(SourceFileId(9), source).expect("overloaded RBS record fixture must parse");
+
+        let parameter = facts
+            .types
+            .iter()
+            .find(|fact| matches!(fact.subject, TypeSubject::Parameter { .. }))
+            .expect("complete overloads must emit one exhaustive parameter union");
+        assert_eq!(
+            parameter.ruby_type.to_string(),
+            "({ kind: :number, value: Integer } | { kind: :text, value: String })"
+        );
+
+        let return_type = facts
+            .types
+            .iter()
+            .find(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))
+            .expect("complete overloads must emit one exhaustive return union");
+        assert_eq!(return_type.ruby_type.to_string(), "(Integer | String)");
+    }
+
+    #[test]
+    fn incomplete_overload_evidence_emits_no_partial_contract_fact() {
+        let source = r#"class PayloadService
+  def normalize: ({ value: Integer } payload) -> Integer
+               | (untyped payload) -> untyped
+end
+"#;
+        let facts = index_rbs(SourceFileId(10), source)
+            .expect("incomplete overloaded RBS fixture must parse");
+
+        assert!(
+            facts.types.iter().all(|fact| !matches!(
+                fact.subject,
+                TypeSubject::Parameter { .. } | TypeSubject::MethodReturn(_)
+            )),
+            "one unsupported overload must prevent a partial concrete contract"
+        );
     }
 }

@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind, ResolvedMethodCallee,
-    RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange, TypeFact, TypeInferenceOutcome,
-    TypeResolution, TypeSubject, UnknownReason,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, SourceKind, TextRange, TypeFact,
+    TypeInferenceOutcome, TypeResolution, TypeSubject, UnknownReason,
 };
 use parking_lot::Mutex;
 
@@ -153,6 +153,19 @@ impl<'a> AnalysisQuery<'a> {
                 TypeInferenceOutcomeRef::Proven(ruby_type) => ruby_type.clone(),
                 TypeInferenceOutcomeRef::Unknown(_) => RubyType::Unknown,
             });
+        }
+        if self.engine.expression_unknown_reason(range).is_some() {
+            return Some(RubyType::Unknown);
+        }
+        if let Some(reads) = self.engine.local_read_type_views_in_file(range.file_id) {
+            let exact = reads
+                .filter_map(|(candidate, ruby_type)| {
+                    (candidate == range).then_some(ruby_type.clone())
+                })
+                .collect::<Vec<_>>();
+            if !exact.is_empty() {
+                return Some(RubyType::union(exact));
+            }
         }
         match self.engine.type_store().type_at(
             &TypeSubject::Expression(range),
@@ -390,17 +403,19 @@ impl<'a> AnalysisQuery<'a> {
             .cloned()
     }
 
-    /// Return the proven type of the most specific expression ending at the
-    /// exact byte boundary.
+    /// Return the authoritative type outcome of the most specific expression
+    /// ending at the exact byte boundary.
     ///
-    /// Multiple facts for that expression are exhaustive alternatives. Every
-    /// alternative must be concrete; Unknown or missing evidence fails closed.
-    pub fn proven_expression_type_ending_at(
+    /// A stored call outcome owns its exact range and takes precedence over
+    /// expression facts for that same syntax. Explained Unknown evidence is
+    /// returned as `RubyType::Unknown` so request-time consumers cannot mistake
+    /// it for missing evidence and fall back to an older concrete type.
+    pub fn expression_type_ending_at(
         &self,
         file_id: SourceFileId,
         end_byte: u32,
     ) -> Option<RubyType> {
-        let mut expression_types = self
+        let expression_facts = self
             .engine
             .type_store()
             .facts_in_file(file_id)
@@ -419,20 +434,75 @@ impl<'a> AnalysisQuery<'a> {
                 | TypeSubject::Expression(_) => None,
             })
             .collect::<Vec<_>>();
-        if let Some(reads) = self.engine.local_read_types_in_file(file_id) {
-            expression_types.extend(
-                reads
-                    .iter()
-                    .filter(|(range, _)| range.end_byte == end_byte)
-                    .cloned(),
-            );
-        }
-        let most_specific_start = expression_types
+        let local_reads = self
+            .engine
+            .local_read_types_in_file(file_id)
+            .into_iter()
+            .flatten()
+            .filter(|(range, _)| range.end_byte == end_byte)
+            .collect::<Vec<_>>();
+        let call_ranges = self
+            .engine
+            .call_expression_outcome_views_in_file(file_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|(range, _)| (range.end_byte == end_byte).then_some(range))
+            .collect::<Vec<_>>();
+        let unknown_ranges = self
+            .engine
+            .expression_unknown_reasons_in_file(file_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|(range, _)| (range.end_byte == end_byte).then_some(*range))
+            .collect::<Vec<_>>();
+        let most_specific_start = expression_facts
             .iter()
             .map(|(range, _)| range.start_byte)
+            .chain(local_reads.iter().map(|(range, _)| range.start_byte))
+            .chain(call_ranges.iter().map(|range| range.start_byte))
+            .chain(unknown_ranges.iter().map(|range| range.start_byte))
             .max()?;
-        expression_types.retain(|(range, _)| range.start_byte == most_specific_start);
-        RubyType::union_from_proven(expression_types, |(_, ruby_type)| Some(ruby_type))
+        let range = TextRange::new(file_id, most_specific_start, end_byte);
+
+        if let Some(outcome) = self.engine.call_expression_outcome_at(range) {
+            return Some(match outcome {
+                TypeInferenceOutcomeRef::Proven(ruby_type) => ruby_type.clone(),
+                TypeInferenceOutcomeRef::Unknown(_) => RubyType::Unknown,
+            });
+        }
+        if self.engine.expression_unknown_reason(range).is_some() {
+            return Some(RubyType::Unknown);
+        }
+
+        let expression_types = expression_facts
+            .into_iter()
+            .chain(local_reads)
+            .filter_map(|(candidate, ruby_type)| (candidate == range).then_some(ruby_type))
+            .collect::<Vec<_>>();
+        assert!(
+            !expression_types.is_empty(),
+            "INVARIANT VIOLATED: expression end-boundary selection found range {range:?} without a call outcome, Unknown reason, expression fact, or local-read type. This is a bug because the selected range came from exactly those stores. Fix: keep candidate selection and exact-range projection exhaustive."
+        );
+        if expression_types
+            .iter()
+            .any(|ruby_type| *ruby_type == RubyType::Unknown)
+        {
+            return Some(RubyType::Unknown);
+        }
+        Some(RubyType::union(expression_types))
+    }
+
+    /// Return only a proven expression type at an exact end boundary.
+    ///
+    /// Inlay hints intentionally omit Unknown outcomes; consumers that must
+    /// distinguish Unknown from absent evidence use `expression_type_ending_at`.
+    pub fn proven_expression_type_ending_at(
+        &self,
+        file_id: SourceFileId,
+        end_byte: u32,
+    ) -> Option<RubyType> {
+        self.expression_type_ending_at(file_id, end_byte)
+            .filter(|ruby_type| *ruby_type != RubyType::Unknown)
     }
 
     pub fn method_return_type_at(
@@ -550,6 +620,123 @@ impl<'a> AnalysisQuery<'a> {
             })
             .max_by_key(|fact| fact.range.start_byte)
             .map(|fact| fact.ruby_type)
+    }
+
+    /// Return one complete project-RBS parameter contract for a Ruby method.
+    ///
+    /// Declaration ownership and source kind are part of the proof: a Ruby
+    /// implementation fact cannot accidentally become its own contract, and
+    /// instance/singleton homonyms remain isolated even though their method
+    /// subjects share one Ruby name FQN.
+    pub fn rbs_parameter_contract_type(
+        &self,
+        method: &FullyQualifiedName,
+        owner: &FullyQualifiedName,
+        parameter_name: &str,
+    ) -> Option<RubyType> {
+        let signature_methods = self
+            .engine
+            .method_facts_for(method)
+            .into_iter()
+            .filter(|fact| {
+                fact.owner == *owner
+                    && self
+                        .engine
+                        .file(fact.range.file_id)
+                        .is_some_and(|file| file.kind == SourceKind::Signature)
+            })
+            .collect::<Vec<_>>();
+        if signature_methods.is_empty() {
+            return None;
+        }
+
+        let mut contract_types = Vec::with_capacity(signature_methods.len());
+        for signature in signature_methods {
+            let contract = self
+                .engine
+                .type_store()
+                .facts_in_file(signature.range.file_id)
+                .into_iter()
+                .find_map(|fact| match &fact.subject {
+                    TypeSubject::Parameter { method, name }
+                        if method == &signature.fqn
+                            && name == parameter_name
+                            && signature.range.start_byte <= fact.range.start_byte
+                            && fact.range.end_byte <= signature.range.end_byte
+                            && fact.ruby_type != RubyType::Unknown =>
+                    {
+                        Some(fact.ruby_type)
+                    }
+                    TypeSubject::Constant(_)
+                    | TypeSubject::Local { .. }
+                    | TypeSubject::InstanceVariable { .. }
+                    | TypeSubject::ClassVariable { .. }
+                    | TypeSubject::GlobalVariable(_)
+                    | TypeSubject::MethodReturn(_)
+                    | TypeSubject::Parameter { .. }
+                    | TypeSubject::Expression(_) => None,
+                });
+            contract_types.push(contract?);
+        }
+
+        let contract = RubyType::union(contract_types);
+        (!RubyType::contains_unknown(&contract)).then_some(contract)
+    }
+
+    /// Return the exhaustive project-RBS return contract for one owner.
+    /// Every matching signature declaration must carry a complete type fact;
+    /// otherwise diagnostics and body inference stay fail-closed.
+    pub fn rbs_return_contract_type(
+        &self,
+        method: &FullyQualifiedName,
+        owner: &FullyQualifiedName,
+    ) -> Option<RubyType> {
+        let signature_methods = self
+            .engine
+            .method_facts_for(method)
+            .into_iter()
+            .filter(|fact| {
+                fact.owner == *owner
+                    && self
+                        .engine
+                        .file(fact.range.file_id)
+                        .is_some_and(|file| file.kind == SourceKind::Signature)
+            })
+            .collect::<Vec<_>>();
+        if signature_methods.is_empty() {
+            return None;
+        }
+
+        let mut contract_types = Vec::with_capacity(signature_methods.len());
+        for signature in signature_methods {
+            let contract = self
+                .engine
+                .type_store()
+                .facts_in_file(signature.range.file_id)
+                .into_iter()
+                .find_map(|fact| match &fact.subject {
+                    TypeSubject::MethodReturn(method)
+                        if method == &signature.fqn
+                            && signature.range.start_byte <= fact.range.start_byte
+                            && fact.range.end_byte <= signature.range.end_byte
+                            && fact.ruby_type != RubyType::Unknown =>
+                    {
+                        Some(fact.ruby_type)
+                    }
+                    TypeSubject::Constant(_)
+                    | TypeSubject::Local { .. }
+                    | TypeSubject::InstanceVariable { .. }
+                    | TypeSubject::ClassVariable { .. }
+                    | TypeSubject::GlobalVariable(_)
+                    | TypeSubject::MethodReturn(_)
+                    | TypeSubject::Parameter { .. }
+                    | TypeSubject::Expression(_) => None,
+                });
+            contract_types.push(contract?);
+        }
+
+        let contract = RubyType::union(contract_types);
+        (!RubyType::contains_unknown(&contract)).then_some(contract)
     }
 
     pub fn variable_type_before_in_owner(
@@ -826,6 +1013,11 @@ impl<'a> AnalysisQuery<'a> {
                 )],
                 crate::core::NamespaceKind::Instance,
             )),
+            RubyType::Shape(_) => self.type_to_namespace(&RubyType::Hash(
+                vec![RubyType::Unknown],
+                vec![RubyType::Unknown],
+            )),
+            RubyType::Literal(value) => self.type_to_namespace(&value.widened_type()),
             RubyType::Union(_) | RubyType::Unknown => None,
         }
     }

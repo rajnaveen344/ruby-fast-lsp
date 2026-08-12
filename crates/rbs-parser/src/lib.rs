@@ -97,6 +97,22 @@ end
     }
 
     #[test]
+    fn record_type_retains_required_and_optional_fields() {
+        let parsed =
+            parse_type("{ id: Integer, ?name: String }").expect("record type fixture must parse");
+        let RbsType::Record(fields) = parsed else {
+            panic!("record type fixture produced a non-record type: {parsed:?}");
+        };
+        assert_eq!(
+            fields,
+            vec![
+                RecordField::new("id", RbsType::Class("Integer".to_string()), false),
+                RecordField::new("name", RbsType::Class("String".to_string()), true),
+            ]
+        );
+    }
+
+    #[test]
     fn test_parse_generic_class() {
         let source = r#"
 class Array[Elem]

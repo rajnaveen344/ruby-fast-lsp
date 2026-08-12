@@ -1,12 +1,13 @@
 use crate::core::method_store::{MethodVisibility, MethodVisibilityOverrideFact};
+use crate::core::type_store::NamedTypeResolution;
 use crate::core::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeTarget, DiagnosticCandidate,
     DiagnosticFact, DiagnosticSeverity, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact,
     GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind, InferenceEvidence,
     InferenceTelemetry, MethodAvailability, MethodFact, MethodParamFact, MethodReturnEquation,
-    NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, SymbolFact, SymbolKind, TextRange,
-    TypeFact, TypeInferenceOutcome, TypeProvenance, TypeStore, TypeSubject, UnknownReason,
-    UnresolvedGraphEdgeFact,
+    NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, ShapeConstructionError,
+    SymbolFact, SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeStore,
+    TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
 };
 use crate::engine::{AnalysisEngine, AnalysisQueryCache, VariableTypeKind};
 use ruby_fast_lsp_extension_api::{IndexPatch, Receiver, ResolvedCall, SourceRange};
@@ -14,7 +15,13 @@ use ruby_prism::*;
 
 use super::AnalysisIndex;
 use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
-use crate::inference::r#type::literal::LiteralAnalyzer;
+use crate::inference::r#type::literal::{
+    infer_array_literal_type_fallible, infer_hash_literal_type_fallible, literal_key,
+    literal_shape_construction_unknown_reason, project_immediate_hash_receiver_type,
+    LiteralAnalyzer,
+};
+use crate::inference::r#type::shape as shape_reads;
+use crate::inference::type_tracker::TypeTracker;
 use crate::inference::RubyType;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 use crate::RubyDocument;
@@ -69,6 +76,13 @@ pub struct FactCollector {
     pub infer_expression_receivers: bool,
     pub diagnostics_enabled: bool,
     pub direct_facts: AnalysisIndex,
+    /// Append-only range index into `direct_facts.types` for expression facts.
+    ///
+    /// Recursive receiver inference consults expressions frequently while a
+    /// file is being traversed. Retaining compact vector indexes avoids an
+    /// O(expressions × all prior type facts) scan without creating a second
+    /// semantic store or duplicating RubyType payloads.
+    direct_expression_fact_indexes: HashMap<TextRange, smallvec::SmallVec<[usize; 1]>>,
     pub block_param_type_stack: Vec<Vec<RubyType>>,
     pub pattern_capture_type_stack: Vec<HashMap<String, RubyType>>,
     /// Positional RHS element types for the active `MultiWriteNode`, consumed by
@@ -85,6 +99,7 @@ pub struct FactCollector {
     method_return_equations: BTreeMap<Vec<RubyConstant>, Vec<MethodReturnEquation>>,
     finalized_method_return_equation_counts: HashMap<Vec<RubyConstant>, usize>,
     method_return_telemetry_by_namespace: BTreeMap<Vec<RubyConstant>, InferenceTelemetry>,
+    max_live_shape_aliases: usize,
     method_return_outcomes: BTreeMap<FullyQualifiedName, TypeInferenceOutcome>,
     call_expression_outcomes: Vec<(TextRange, TypeInferenceOutcome)>,
     /// Call expressions that have a retained method candidate capable of
@@ -241,6 +256,7 @@ impl FactCollector {
             infer_expression_receivers: true,
             diagnostics_enabled: true,
             direct_facts: AnalysisIndex::default(),
+            direct_expression_fact_indexes: HashMap::new(),
             block_param_type_stack: Vec::new(),
             pattern_capture_type_stack: Vec::new(),
             multi_write_lhs_types: Vec::new(),
@@ -250,6 +266,7 @@ impl FactCollector {
             method_return_equations: BTreeMap::new(),
             finalized_method_return_equation_counts: HashMap::new(),
             method_return_telemetry_by_namespace: BTreeMap::new(),
+            max_live_shape_aliases: 0,
             method_return_outcomes: BTreeMap::new(),
             call_expression_outcomes: Vec::new(),
             deferred_call_outcome_ranges: HashSet::new(),
@@ -1029,12 +1046,55 @@ impl FactCollector {
         ));
     }
 
+    fn push_direct_expression_fact(&mut self, fact: TypeFact) {
+        let TypeSubject::Expression(subject_range) = &fact.subject else {
+            panic!(
+                "INVARIANT VIOLATED: the direct expression index received a named type subject. This is a bug because the range index may only point to TypeSubject::Expression facts. Fix: route named facts through direct_push_type and expression facts through push_direct_expression_fact."
+            );
+        };
+        assert_eq!(
+            *subject_range,
+            fact.range,
+            "INVARIANT VIOLATED: a direct expression subject differs from its fact range. This is a bug because the compact range index uses that identity for exact lookup. Fix: construct both ranges from the same Prism node location."
+        );
+        let range = *subject_range;
+        let index = self.direct_facts.types.len();
+        self.direct_facts.types.push(fact);
+        self.direct_expression_fact_indexes
+            .entry(range)
+            .or_default()
+            .push(index);
+    }
+
+    fn direct_expression_fact(
+        &self,
+        range: TextRange,
+        provenance: Option<TypeProvenance>,
+    ) -> Option<&TypeFact> {
+        self.direct_expression_fact_indexes
+            .get(&range)?
+            .iter()
+            .rev()
+            .find_map(|index| {
+                let fact = self.direct_facts.types.get(*index).expect(
+                    "INVARIANT VIOLATED: the direct expression index points outside the append-only fact vector. This is a bug because direct facts are never removed during collection. Fix: record each index only after appending its owning fact and never reorder direct_facts.types.",
+                );
+                assert!(
+                    matches!(&fact.subject, TypeSubject::Expression(subject_range) if *subject_range == range)
+                        && fact.range == range,
+                    "INVARIANT VIOLATED: the direct expression range index points to a different semantic fact. This is a bug because an indexed lookup would return evidence for the wrong AST node. Fix: update the range index atomically with every expression-fact append."
+                );
+                provenance
+                    .is_none_or(|expected| fact.provenance == expected)
+                    .then_some(fact)
+            })
+    }
+
     pub fn assignment_type_and_provenance(&self, value: &Node<'_>) -> (RubyType, TypeProvenance) {
         let value_range = self.direct_range(&value.location());
-        if let Some(runtime_fact) = self.direct_facts.types.iter().rev().find(|fact| {
-            fact.subject == TypeSubject::Expression(value_range)
-                && fact.provenance == TypeProvenance::Runtime
-        }) {
+        if let Some(runtime_fact) =
+            self.direct_expression_fact(value_range, Some(TypeProvenance::Runtime))
+        {
             return (runtime_fact.ruby_type.clone(), TypeProvenance::Runtime);
         }
         (
@@ -1053,18 +1113,27 @@ impl FactCollector {
             return;
         }
         let range = self.direct_range(&node.location());
-        let subject = TypeSubject::Expression(range);
         if self
-            .direct_facts
-            .types
-            .iter()
-            .any(|fact| fact.subject == subject && fact.ruby_type == ruby_type)
+            .direct_expression_fact_indexes
+            .get(&range)
+            .into_iter()
+            .flatten()
+            .any(|index| {
+                self.direct_facts
+                    .types
+                    .get(*index)
+                    .expect(
+                        "INVARIANT VIOLATED: the direct expression deduplication index points outside the append-only fact vector. This is a bug because expression indexes and facts must be appended atomically. Fix: use push_direct_expression_fact for every expression fact.",
+                    )
+                    .ruby_type
+                    == ruby_type
+            })
         {
             return;
         }
-        let fact = TypeFact::new(subject, ruby_type, range, provenance);
+        let fact = TypeFact::new(TypeSubject::Expression(range), ruby_type, range, provenance);
         self.type_store.add(fact.clone());
-        self.direct_facts.types.push(fact);
+        self.push_direct_expression_fact(fact);
     }
 
     /// Infer type from a value node during indexing.
@@ -1083,14 +1152,8 @@ impl FactCollector {
         value_node: &Node,
         local_types: &HashMap<String, RubyType>,
     ) -> RubyType {
-        let expression_subject = TypeSubject::Expression(self.direct_range(&value_node.location()));
-        if let Some(fact) = self
-            .direct_facts
-            .types
-            .iter()
-            .rev()
-            .find(|fact| fact.subject == expression_subject)
-        {
+        let expression_range = self.direct_range(&value_node.location());
+        if let Some(fact) = self.direct_expression_fact(expression_range, None) {
             return fact.ruby_type.clone();
         }
         if let Some(statements) = value_node.as_statements_node() {
@@ -1101,11 +1164,8 @@ impl FactCollector {
                 .map(|node| self.infer_type_from_value_with_locals(&node, local_types))
                 .unwrap_or_else(RubyType::nil_class);
         }
-        if let Some(array_node) = value_node.as_array_node() {
-            return self.infer_array_type_from_elements(&array_node);
-        }
-        if let Some(hash_node) = value_node.as_hash_node() {
-            return self.infer_hash_type_from_elements(&hash_node);
+        if let Some(result) = self.infer_collection_type_from_value(value_node, local_types) {
+            return result.unwrap_or(RubyType::Unknown);
         }
         if let Some(if_node) = value_node.as_if_node() {
             return self.infer_if_expression_type(&if_node, local_types);
@@ -1184,16 +1244,38 @@ impl FactCollector {
         RubyType::Unknown
     }
 
+    fn infer_collection_type_from_value(
+        &self,
+        value_node: &Node<'_>,
+        local_types: &HashMap<String, RubyType>,
+    ) -> Option<Result<RubyType, ShapeConstructionError>> {
+        if let Some(hash) = value_node.as_hash_node() {
+            return Some(infer_hash_literal_type_fallible(&hash, |value| {
+                self.infer_collection_type_from_value(value, local_types)
+                    .unwrap_or_else(|| {
+                        Ok(self.infer_type_from_value_with_locals(value, local_types))
+                    })
+            }));
+        }
+        value_node.as_array_node().map(|array| {
+            infer_array_literal_type_fallible(&array, |value| {
+                self.infer_collection_type_from_value(value, local_types)
+                    .unwrap_or_else(|| {
+                        Ok(self.infer_type_from_value_with_locals(value, local_types))
+                    })
+            })
+        })
+    }
+
     fn infer_call_type_outcome_with_locals(
         &self,
         call_node: &CallNode<'_>,
         local_types: &HashMap<String, RubyType>,
     ) -> TypeInferenceOutcome {
-        let expression_subject = TypeSubject::Expression(self.direct_range(&call_node.location()));
-        if let Some(fact) =
-            self.direct_facts.types.iter().rev().find(|fact| {
-                fact.subject == expression_subject && fact.ruby_type != RubyType::Unknown
-            })
+        let expression_range = self.direct_range(&call_node.location());
+        if let Some(fact) = self
+            .direct_expression_fact(expression_range, None)
+            .filter(|fact| fact.ruby_type != RubyType::Unknown)
         {
             return TypeInferenceOutcome::proven(fact.ruby_type.clone());
         }
@@ -1210,7 +1292,8 @@ impl FactCollector {
 
         let method_name = String::from_utf8_lossy(call_node.name().as_slice());
         let receiver_type = if let Some(receiver) = call_node.receiver() {
-            self.infer_type_from_value_with_locals(&receiver, local_types)
+            let inferred = self.infer_type_from_value_with_locals(&receiver, local_types);
+            project_immediate_hash_receiver_type(&receiver, inferred)
         } else {
             // No receiver means `self`, which may differ from lexical constant
             // scope inside eval- or extension-provided execution contexts.
@@ -1226,7 +1309,64 @@ impl FactCollector {
         };
 
         if receiver_type == RubyType::Unknown {
-            return TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver);
+            let reason = call_node
+                .receiver()
+                .and_then(|receiver| {
+                    let range = self.direct_range(&receiver.location());
+                    self.expression_unknown_reasons
+                        .iter()
+                        .rev()
+                        .find_map(|(candidate, reason)| (*candidate == range).then_some(*reason))
+                })
+                .unwrap_or(UnknownReason::UnknownReceiver);
+            return TypeInferenceOutcome::unknown(reason);
+        }
+
+        if shape_reads::is_shape_only(&receiver_type) {
+            let argument_nodes = call_node
+                .arguments()
+                .map(|arguments| arguments.arguments().iter().collect::<Vec<_>>())
+                .unwrap_or_default();
+            let argument_types = argument_nodes
+                .iter()
+                .map(|argument| self.infer_type_from_value_with_locals(argument, local_types))
+                .collect::<Vec<_>>();
+            let precise = match method_name.as_ref() {
+                "[]" if argument_nodes.len() == 1 => Some(shape_reads::indexed_read(
+                    &receiver_type,
+                    literal_key(&argument_nodes[0]).as_ref(),
+                )),
+                "fetch" if matches!(argument_nodes.len(), 1 | 2) => Some(shape_reads::fetch(
+                    &receiver_type,
+                    literal_key(&argument_nodes[0]).as_ref(),
+                    argument_types.get(1),
+                )),
+                "dig" if !argument_nodes.is_empty() => {
+                    let keys = argument_nodes.iter().map(literal_key).collect::<Vec<_>>();
+                    Some(shape_reads::dig(&receiver_type, &keys))
+                }
+                "key?" | "has_key?" | "include?" | "member?" if argument_nodes.len() == 1 => {
+                    Some(shape_reads::key_presence(
+                        &receiver_type,
+                        literal_key(&argument_nodes[0]).as_ref(),
+                    ))
+                }
+                "keys" if argument_nodes.is_empty() => Some(shape_reads::keys(&receiver_type)),
+                "values" if argument_nodes.is_empty() => Some(shape_reads::values(&receiver_type)),
+                "each" | "each_pair" | "each_key" | "each_value" if argument_nodes.is_empty() => {
+                    Some(shape_reads::each_return(
+                        &receiver_type,
+                        call_node.block().is_some(),
+                    ))
+                }
+                _ => None,
+            };
+            if let Some(outcome) = precise {
+                return match outcome {
+                    Ok(ruby_type) => TypeInferenceOutcome::proven(ruby_type),
+                    Err(reason) => TypeInferenceOutcome::unknown(reason),
+                };
+            }
         }
 
         // Object#freeze preserves the receiver identity and type. RBS
@@ -1498,42 +1638,9 @@ impl FactCollector {
             .cloned()
     }
 
-    fn infer_array_type_from_elements(&self, array_node: &ArrayNode<'_>) -> RubyType {
-        let element_types = array_node
-            .elements()
-            .iter()
-            .map(|element| self.infer_type_from_value(&element))
-            .collect::<Vec<_>>();
-        RubyType::Array(RubyType::canonical_union_members(element_types))
-    }
-
-    fn infer_hash_type_from_elements(&self, hash_node: &HashNode<'_>) -> RubyType {
-        let mut key_types = Vec::new();
-        let mut value_types = Vec::new();
-        for element in hash_node.elements().iter() {
-            let Some(assoc) = element.as_assoc_node() else {
-                key_types.push(RubyType::Unknown);
-                value_types.push(RubyType::Unknown);
-                continue;
-            };
-            key_types.push(self.infer_type_from_value(&assoc.key()));
-            value_types.push(self.infer_type_from_value(&assoc.value()));
-        }
-        RubyType::Hash(
-            RubyType::canonical_union_members(key_types),
-            RubyType::canonical_union_members(value_types),
-        )
-    }
-
     pub fn infer_assignment_type_from_value(&self, value_node: &Node) -> RubyType {
-        let expression_subject = TypeSubject::Expression(self.direct_range(&value_node.location()));
-        if let Some(fact) = self
-            .direct_facts
-            .types
-            .iter()
-            .rev()
-            .find(|fact| fact.subject == expression_subject)
-        {
+        let expression_range = self.direct_range(&value_node.location());
+        if let Some(fact) = self.direct_expression_fact(expression_range, None) {
             return fact.ruby_type.clone();
         }
         if self.resolve_analysis_method_returns {
@@ -1560,6 +1667,20 @@ impl FactCollector {
         self.constant_reference_type(value_node)
             .map(RubyType::ClassReference)
             .unwrap_or(RubyType::Unknown)
+    }
+
+    pub(super) fn infer_assignment_type_from_value_with_reason(
+        &self,
+        value_node: &Node<'_>,
+    ) -> (RubyType, Option<UnknownReason>) {
+        match self.infer_collection_type_from_value(value_node, &HashMap::new()) {
+            Some(Ok(ruby_type)) => (ruby_type, None),
+            Some(Err(error)) => (
+                RubyType::Unknown,
+                Some(literal_shape_construction_unknown_reason(error)),
+            ),
+            None => (self.infer_assignment_type_from_value(value_node), None),
+        }
     }
 
     pub fn assign_current_block_parameter_type(
@@ -1620,7 +1741,46 @@ impl FactCollector {
 
         let method_name = node.name().as_slice();
         let param_count = block_required_param_count(node);
-        let receiver_type = self.infer_type_from_value(&receiver);
+        let receiver_type =
+            project_immediate_hash_receiver_type(&receiver, self.infer_type_from_value(&receiver));
+
+        if shape_reads::is_shape_only(&receiver_type)
+            && matches!(
+                method_name,
+                b"each" | b"each_pair" | b"each_key" | b"each_value"
+            )
+        {
+            let key_type = match shape_reads::keys(&receiver_type) {
+                Ok(RubyType::Array(types)) => RubyType::union(types),
+                Ok(ruby_type) => panic!(
+                    "INVARIANT VIOLATED: shape keys projection returned `{ruby_type}` instead of Array. This is a bug because Hash#keys always returns an Array. Fix: keep shape_reads::keys canonical."
+                ),
+                Err(_) => return Vec::new(),
+            };
+            let value_type = match shape_reads::values(&receiver_type) {
+                Ok(RubyType::Array(types)) => RubyType::union(types),
+                Ok(ruby_type) => panic!(
+                    "INVARIANT VIOLATED: shape values projection returned `{ruby_type}` instead of Array. This is a bug because Hash#values always returns an Array. Fix: keep shape_reads::values canonical."
+                ),
+                Err(_) => return Vec::new(),
+            };
+            if matches!(method_name, b"each" | b"each_pair") {
+                return if param_count == 1 {
+                    vec![RubyType::Array(vec![key_type, value_type])]
+                } else {
+                    vec![key_type, value_type]
+                };
+            }
+            if method_name == b"each_key" {
+                return vec![key_type];
+            }
+            if method_name == b"each_value" {
+                return vec![value_type];
+            }
+            panic!(
+                "INVARIANT VIOLATED: non-Hash iterator reached shape block parameter projection. This is a bug because the method-name guard accepts only each variants. Fix: keep the guard and exhaustive projection branches aligned."
+            );
+        }
 
         match receiver_type {
             RubyType::Array(element_types)
@@ -1659,6 +1819,8 @@ impl FactCollector {
             | RubyType::ModuleReference(_)
             | RubyType::Array(_)
             | RubyType::Hash(_, _)
+            | RubyType::Literal(_)
+            | RubyType::Shape(_)
             | RubyType::Union(_)
             | RubyType::Unknown => Vec::new(),
         }
@@ -1779,7 +1941,7 @@ impl FactCollector {
             TypeProvenance::Inferred,
         );
         self.type_store.add(fact.clone());
-        self.direct_facts.types.push(fact);
+        self.push_direct_expression_fact(fact);
     }
 
     fn constant_reference_type(&self, node: &Node) -> Option<FullyQualifiedName> {
@@ -2318,6 +2480,7 @@ impl FactCollector {
         for telemetry in self.method_return_telemetry_by_namespace.values() {
             aggregate.merge(telemetry);
         }
+        aggregate.observe_max_live_shape_aliases(self.max_live_shape_aliases);
         aggregate
     }
 
@@ -2429,7 +2592,9 @@ impl FactCollector {
         ) {
             UnknownReason::NoReachingAssignment => None,
             UnknownReason::UnresolvedAssignmentValue
-            | UnknownReason::AmbiguousReachingAssignment => Some(RubyType::Unknown),
+            | UnknownReason::AmbiguousReachingAssignment
+            | UnknownReason::ShapeBoundExceeded
+            | UnknownReason::MutableShapeInvalidated => Some(RubyType::Unknown),
             UnknownReason::UnknownReceiver
             | UnknownReason::InvalidMethodName
             | UnknownReason::UnresolvedMethodReturn
@@ -2486,49 +2651,31 @@ impl FactCollector {
         byte_offset: u32,
         matches_subject: impl Fn(&TypeSubject) -> bool,
     ) -> TypeInferenceOutcome {
-        let mut latest_start = None;
-        let mut latest_type = None;
-        let mut ambiguous = false;
-        for fact in
-            self.type_store
-                .facts_in_file(self.document.analysis_file_id())
-                .into_iter()
-                .filter(|fact| {
-                    fact.range.start_byte <= byte_offset
-                        && matches_subject(&fact.subject)
-                        && !self.active_nonlocal_writes.iter().any(|(subject, range)| {
-                            *subject == fact.subject && *range == fact.range
+        match self.type_store.named_type_in_file_before_matching(
+            self.document.analysis_file_id(),
+            byte_offset,
+            |subject, range| {
+                matches_subject(subject)
+                    && !self
+                        .active_nonlocal_writes
+                        .iter()
+                        .any(|(active_subject, active_range)| {
+                            active_subject == subject && *active_range == range
                         })
-                })
-        {
-            match latest_start {
-                None => {
-                    latest_start = Some(fact.range.start_byte);
-                    latest_type = Some(fact.ruby_type);
-                }
-                Some(start) if fact.range.start_byte > start => {
-                    latest_start = Some(fact.range.start_byte);
-                    latest_type = Some(fact.ruby_type);
-                    ambiguous = false;
-                }
-                Some(start) if fact.range.start_byte == start => {
-                    if latest_type.as_ref() != Some(&fact.ruby_type) {
-                        ambiguous = true;
-                    }
-                }
-                Some(_) => {}
+            },
+        ) {
+            NamedTypeResolution::Unresolved => {
+                TypeInferenceOutcome::unknown(UnknownReason::NoReachingAssignment)
             }
-        }
-
-        let Some(latest_type) = latest_type else {
-            return TypeInferenceOutcome::unknown(UnknownReason::NoReachingAssignment);
-        };
-        if ambiguous {
-            TypeInferenceOutcome::unknown(UnknownReason::AmbiguousReachingAssignment)
-        } else if latest_type == RubyType::Unknown {
-            TypeInferenceOutcome::unknown(UnknownReason::UnresolvedAssignmentValue)
-        } else {
-            TypeInferenceOutcome::proven(latest_type)
+            NamedTypeResolution::Ambiguous => {
+                TypeInferenceOutcome::unknown(UnknownReason::AmbiguousReachingAssignment)
+            }
+            NamedTypeResolution::Resolved(RubyType::Unknown) => {
+                TypeInferenceOutcome::unknown(UnknownReason::UnresolvedAssignmentValue)
+            }
+            NamedTypeResolution::Resolved(ruby_type) => {
+                TypeInferenceOutcome::proven(ruby_type.clone())
+            }
         }
     }
 
@@ -2629,6 +2776,19 @@ fn u32_offset(offset: usize) -> u32 {
 
 impl Visit<'_> for FactCollector {
     fn visit_program_node(&mut self, node: &ProgramNode<'_>) {
+        // Install exact root-scope flow evidence before the ordinary semantic
+        // traversal consumes local receivers. Method bodies do the same from
+        // `process_def_node_entry`; without the corresponding program pass,
+        // a top-level alias mutation or escape would be analyzed through the
+        // older assignment-only view and could publish stale shape fields.
+        if self.record_local_read_unknown_reasons {
+            let mut tracker = TypeTracker::new(self.document.content.as_bytes())
+                .with_analysis_engine(self.analysis_engine.clone())
+                .with_analysis_query_cache(self.analysis_query_cache.clone())
+                .with_local_read_types();
+            tracker.track_program(node);
+            self.install_local_read_types(tracker.take_local_read_types());
+        }
         visit_program_node(self, node);
         assert!(
             self.active_nonlocal_writes.is_empty(),
@@ -3126,6 +3286,109 @@ mod execution_context_tests {
         owner: RubyConstant,
     }
 
+    #[test]
+    fn nested_shape_invalidation_installs_a_fail_closed_local_read() {
+        let source = r#"def collect(condition)
+  entry = { id: 1 }
+  entries = [entry]
+  if condition
+    dynamic_sink(entry)
+  end
+  entries
+end
+"#;
+        let uri = Url::parse("file:///workspace/lib/collection.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/collection.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let start = u32::try_from(source.rfind("entries\nend").unwrap()).unwrap();
+        let range = TextRange::new(
+            file_id,
+            start,
+            start + u32::try_from("entries".len()).unwrap(),
+        );
+        assert!(
+            collector
+                .local_read_type_evidence()
+                .iter()
+                .any(|(candidate, ruby_type)| *candidate == range
+                    && *ruby_type == RubyType::Array(vec![RubyType::Unknown])),
+            "the safe outer Array constructor remains available internally"
+        );
+        assert!(
+            collector
+                .inference_evidence()
+                .expression_unknown_reasons
+                .contains(&(range, UnknownReason::MutableShapeInvalidated)),
+            "the exact expression remains fail-closed for public inference"
+        );
+    }
+
+    #[test]
+    fn direct_expression_range_index_preserves_latest_provenance_and_type_deduplication() {
+        let source = "1";
+        let uri = Url::parse("file:///workspace/lib/value.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/value.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine,
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+        let program = parse.node().as_program_node().unwrap();
+        let node = program.statements().body().iter().next().unwrap();
+        let range = collector.direct_range(&node.location());
+
+        collector.direct_push_expression_type(&node, RubyType::string(), TypeProvenance::Runtime);
+        collector.direct_push_expression_type(
+            &node,
+            RubyType::integer(),
+            TypeProvenance::Assignment,
+        );
+        collector.direct_push_expression_type(&node, RubyType::string(), TypeProvenance::Literal);
+
+        assert_eq!(
+            collector.direct_expression_fact_indexes[&range].len(),
+            2,
+            "a repeated type at one range must keep the existing direct-fact deduplication rule"
+        );
+        assert_eq!(
+            collector
+                .direct_expression_fact(range, None)
+                .map(|fact| fact.ruby_type.clone()),
+            Some(RubyType::integer()),
+            "the unfiltered lookup must select the latest appended expression fact"
+        );
+        assert_eq!(
+            collector
+                .direct_expression_fact(range, Some(TypeProvenance::Runtime))
+                .map(|fact| fact.ruby_type.clone()),
+            Some(RubyType::string()),
+            "a provenance-specific lookup must retain the latest matching fact"
+        );
+    }
+
     impl FactCollectorExtensionHost for SyntheticExecutionContextHost {
         fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) -> bool {
             if node.name().as_slice() != b"describe" {
@@ -3158,7 +3421,7 @@ mod execution_context_tests {
         let mut collector = FactCollector::analysis_only(
             document,
             Arc::new(NullFactCollectorExtensionHost),
-            engine,
+            engine.clone(),
         );
         let parse = ruby_prism::parse(source.as_bytes());
         collector.visit(&parse.node());
@@ -3251,7 +3514,7 @@ mod execution_context_tests {
         let mut collector = FactCollector::analysis_only(
             document,
             Arc::new(NullFactCollectorExtensionHost),
-            engine,
+            engine.clone(),
         );
         let parse = ruby_prism::parse(source.as_bytes());
 
@@ -3387,6 +3650,58 @@ mod execution_context_tests {
             outer_outcome.clone().into_proven_type(),
             Some(RubyType::string()),
             "nested value constants must use their proven value type instead of a guessed class reference"
+        );
+    }
+
+    #[test]
+    fn immediate_hash_literal_keeps_established_generic_read_methods() {
+        let source = "{one: 1}.keys\n";
+        let uri = Url::parse("file:///workspace/lib/immediate_hash.rb").unwrap();
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/workspace/lib/immediate_hash.rb"),
+            content: source.to_string(),
+            kind: SourceKind::Project,
+        });
+        let engine = Arc::new(RwLock::new(engine));
+        let document = RubyDocument::with_analysis_file_id(uri, source.to_string(), 0, file_id);
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            engine.clone(),
+        );
+        let parse = ruby_prism::parse(source.as_bytes());
+
+        collector.visit(&parse.node());
+
+        let range = TextRange::new(file_id, 0, 13);
+        let (_, outcome) = collector
+            .call_expression_outcomes
+            .iter()
+            .find(|(outcome_range, _)| *outcome_range == range)
+            .expect("the immediate Hash#keys call must retain a proof outcome");
+        assert_eq!(
+            outcome.clone().into_proven_type(),
+            Some(RubyType::array_of(RubyType::symbol())),
+            "an immediate Hash literal has no pre-existing alias and may retain its established generic Hash read result"
+        );
+
+        engine.write().replace_facts(
+            file_id,
+            FileFacts {
+                inference: collector.inference_evidence(),
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        let engine = engine.read();
+        let query = crate::engine::AnalysisQuery::new(&engine);
+        assert_eq!(
+            query
+                .call_expression_outcome_at_position(file_id, 10)
+                .and_then(|outcome| outcome.proven_type().cloned()),
+            Some(RubyType::array_of(RubyType::symbol())),
+            "installing file-owned inference evidence must preserve the immediate Hash#keys proof"
         );
     }
 

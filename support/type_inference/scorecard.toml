@@ -1,11 +1,11 @@
 schema_version = 1
 name = "Ruby Fast LSP type inference conformance"
-corpus_revision = "m0-seed-27"
+corpus_revision = "m5-discriminated-shapes-1"
 score_eligible = true
 target_score = 90
 critical_category_minimum = 85
 minimum_cases_for_claim = 50
-notes = "M0 corpus with 96 reviewed cases. Proven multiline chained-call inlays, embedded core runtime value constants, proof-checked deferred chained receivers and constructor origins, source-ordered owner isolation, exact local/nonlocal-read and call-expression proof outcomes, explicit parameter contracts through flow, explicit unmatched ordinary-case joins, raising unmatched pattern-case flow, unresolved flow joins as receiver proof barriers, short-circuit assignment joins, exception-prefix rescue joins, deferred complete-graph finalization, exhaustive reopened-call unions, visibility-complete explicit dispatch, cross-file recursive return components, namespaced value-constant dispatch, complete positional parameter shapes, attribute-macro ownership, Unknown reassignment invalidation, and fail-closed unresolved or inaccessible ancestry and top-level chains are covered. Differential CLI/LSP parity covers method returns, parameters, constants, local and nonlocal variable assignments, concrete and explained-Unknown variable reads and calls, proven chain expressions, deferred mixin dispatch, reopened implicit/explicit dispatch, and cross-file recursive calls. Differential CLI/LSP diagnostic parity covers unresolved-method with suggestions, unresolved-constant, missing-kwarg, unmatched YARD parameters, YARD/RBS return conflicts, unresolved require, parser syntax errors, and deterministic multi-diagnostic order. Eligibility is enabled after the separate 13-case, five-project reviewed precision corpus passed with zero false positives and the recorded seven-run deterministic performance/RSS matrix passed."
+notes = "M5 corpus with 111 reviewed cases. Exact local Hash shapes, correlated joins, bounded alias mutation, escape invalidation, precise literal/dynamic keyed reads, explained field/depth bound failures, equality/inequality discriminators, ordinary case discriminators, and Hash-pattern captures are passing. Unknown splats, invalidated discriminators, and incomplete unions remain fail-closed controls. Proven multiline chained-call inlays, embedded core runtime value constants, proof-checked deferred chained receivers and constructor origins, source-ordered owner isolation, exact local/nonlocal-read and call-expression proof outcomes, explicit parameter contracts through flow, explicit unmatched ordinary-case joins, raising unmatched pattern-case flow, unresolved flow joins as receiver proof barriers, short-circuit assignment joins, exception-prefix rescue joins, deferred complete-graph finalization, exhaustive reopened-call unions, visibility-complete explicit dispatch, cross-file recursive return components, namespaced value-constant dispatch, complete positional parameter shapes, attribute-macro ownership, Unknown reassignment invalidation, and fail-closed unresolved or inaccessible ancestry and top-level chains are covered. Differential CLI/LSP parity covers method returns, parameters, constants, local and nonlocal variable assignments, concrete and explained-Unknown variable reads and calls, proven chain expressions, deferred mixin dispatch, reopened implicit/explicit dispatch, and cross-file recursive calls. Differential CLI/LSP diagnostic parity covers unresolved-method with suggestions, unresolved-constant, missing-kwarg, unmatched YARD parameters, YARD/RBS return conflicts, unresolved require, parser syntax errors, and deterministic multi-diagnostic order. Eligibility is enabled after the separate 13-case, five-project reviewed precision corpus passed with zero false positives and the recorded seven-run deterministic performance/RSS matrix passed."
 
 [[categories]]
 id = "literals_collections"
@@ -831,7 +831,7 @@ rationale = "Every hash entry proves its key and value types."
 [[cases.files]]
 path = "main.rb"
 fixture = '''
-values<hover label="Hash<Symbol, Integer>"> = {one: 1, two: 2}
+values<hover label="{ one: Integer, two: Integer }"> = {one: 1, two: 2}
 '''
 
 [[cases]]
@@ -2235,5 +2235,331 @@ class PersonalizedFeed < BaseFeed
   def payload
     <warn none code="wrong-arity">user</warn>
   end
+end
+'''
+
+[[cases]]
+id = "nested_exact_hash_shape"
+category = "literals_collections"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A static nested Hash literal retains its exact Symbol-keyed field correlation instead of collapsing into independent generic key and value unions."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+payload<hover label="{ user: { age: Integer, name: String } }"> = {
+  user: { name: "Ada", age: 42 }
+}
+'''
+
+[[cases]]
+id = "correlated_hash_shape_union"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "An exhaustive conditional preserves complete shape variants so the kind/value relationship is not flattened field by field."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def build_result(condition)
+  result<hover label="({ kind: :number, value: Integer } | { kind: :text, value: String })"> =
+    if condition
+      { kind: :number, value: 1 }
+    else
+      { kind: :text, value: "ready" }
+    end
+  result
+end
+'''
+
+[[cases]]
+id = "missing_hash_shape_branch_includes_nil"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A shape-valued conditional without an else keeps the exact reaching variant and the implicit NilClass path. This extends the already-proven primitive missing-branch rule without weakening it."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def maybe_build(condition)
+  result = if condition
+    { kind: :number, value: 1 }
+  end
+  result<hover label="(NilClass | { kind: :number, value: Integer })">
+end
+'''
+
+[[cases]]
+id = "diverging_hash_shape_branch_is_excluded"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A raising branch cannot reach the join, so the surviving exact shape is the complete result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def build_or_raise(condition)
+  result = if condition
+    { state: :ready, value: "done" }
+  else
+    raise "failed"
+  end
+  result<hover label="{ state: :ready, value: String }">
+end
+'''
+
+[[cases]]
+id = "discriminated_hash_shape_union_narrows_correlated_value"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Comparing a required literal discriminator should retain only compatible complete variants on each path, proving the correlated value type without flattening the union."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def normalize(condition)
+  result = if condition
+    { kind: :number, value: 1 }
+  else
+    { kind: :text, value: "ready" }
+  end
+  result<hover label="({ kind: :number, value: Integer } | { kind: :text, value: String })">
+
+  if result[:kind] == :number
+    result[:value]<hover label="Integer">.abs
+  else
+    result[:value]<hover label="String">.upcase
+  end
+end
+'''
+
+[[cases]]
+id = "case_hash_shape_discriminator_narrows_correlated_value"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Each literal when clause filters the complete correlated shape variants, while the unmatched path excludes every proven matched discriminator."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def normalize(condition)
+  result = condition \
+    ? { kind: :number, value: 1 } \
+    : { kind: :text, value: "ready" }
+  case result[:kind]
+  when :number
+    result[:value]<hover label="Integer">.abs
+  when :text
+    result[:value]<hover label="String">.upcase
+  end
+end
+'''
+
+[[cases]]
+id = "hash_pattern_narrows_and_binds_correlated_value"
+category = "flow"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A successful Hash pattern proves required key presence, filters exact literal discriminator variants, and binds the selected correlated field type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def normalize(condition)
+  result = condition \
+    ? { kind: :number, value: 1 } \
+    : { kind: :text, value: "ready" }
+  case result
+  in { kind: :number, value: captured }
+    captured<hover label="Integer">.abs
+  in { kind: :text, value: captured }
+    captured<hover label="String">.upcase
+  end
+end
+'''
+
+[[cases]]
+id = "invalidated_shape_discriminator_does_not_restore_correlation"
+category = "flow"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "An unresolved escape invalidates the shared shape identity before the discriminator. Branch narrowing cannot reconstruct fields from obsolete variants."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def normalize(condition)
+  result = condition \
+    ? { kind: :number, value: 1 } \
+    : { kind: :text, value: "ready" }
+  dynamic_sink(result)
+  if result[:kind] == :number
+    result[:value]<hover label="Unknown[mutable_shape_invalidated]">
+  end
+end
+'''
+
+[[cases]]
+id = "dynamic_hash_key_uses_exhaustive_generic_projection"
+category = "literals_collections"
+points = 0
+expectation = "proof_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A dynamic key cannot select one structural field, so the canonical shape projection returns every proven value alternative plus NilClass."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+payload = { name: "Ada", age: 42 }
+key = dynamic_key
+payload[key]<hover label="(Integer | NilClass | String)">
+'''
+
+[[cases]]
+id = "unknown_hash_splat_discards_partial_field_proof"
+category = "literals_collections"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "An unresolved Hash splat absorbs known generic key/value members today. Future shapes may use a proven rest contract, but must never retain the known field as misleading partial structural truth."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+payload<hover label="Hash<?, ?>"> = { known: 1, **dynamic_fields }
+'''
+
+[[cases]]
+id = "known_alias_mutation_updates_original_hash_shape"
+category = "locals_scopes_attributes"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Two locals that alias one tracked mutable Hash must observe the same known literal-key write. The original alias must never retain the stale pre-write field type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+payload = { count: 1 }
+copy = payload
+copy[:count] = "many"
+payload[:count]<hover label="String">
+'''
+
+[[cases]]
+id = "escaped_mutable_hash_shape_drops_field_proof"
+category = "locals_scopes_attributes"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "Passing a mutable shape through an unresolved call invalidates every affected alias. A later keyed read must expose an explained Unknown instead of stale field precision."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+payload = { count: 1 }
+dynamic_sink(payload)
+payload[:count]<hover label="Unknown[mutable_shape_invalidated]">
+'''
+
+[[cases]]
+id = "hash_shape_field_bound_is_explained"
+category = "literals_collections"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "The measured 32-field limit is fail-closed. A 33-field literal becomes an explained Unknown rather than silently truncating its structural evidence."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+payload<hover label="Unknown[shape_bound_exceeded]"> = {
+  k01: 1, k02: 2, k03: 3, k04: 4, k05: 5, k06: 6, k07: 7, k08: 8,
+  k09: 9, k10: 10, k11: 11, k12: 12, k13: 13, k14: 14, k15: 15, k16: 16,
+  k17: 17, k18: 18, k19: 19, k20: 20, k21: 21, k22: 22, k23: 23, k24: 24,
+  k25: 25, k26: 26, k27: 27, k28: 28, k29: 29, k30: 30, k31: 31, k32: 32,
+  k33: 33
+}
+'''
+
+[[cases]]
+id = "hash_shape_depth_bound_is_explained"
+category = "literals_collections"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "The measured eight-level shape-depth limit is fail-closed. A ninth nested shape becomes an explained Unknown rather than retaining a partial prefix."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+payload<hover label="Unknown[shape_bound_exceeded]"> = {
+  value: {
+    value: {
+      value: {
+        value: {
+          value: {
+            value: {
+              value: {
+                value: {
+                  value: 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+'''
+
+[[cases]]
+id = "incomplete_hash_shape_union_fails_closed"
+category = "flow"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "One unresolved reachable branch absorbs the known Hash branch. The analyzer must not publish a partial shape union assembled only from the convenient concrete path."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def maybe_payload(condition)
+  payload = if condition
+    { count: 1 }
+  else
+    dynamic_payload
+  end
+  payload<hover label="Unknown[unresolved_assignment_value]">
 end
 '''

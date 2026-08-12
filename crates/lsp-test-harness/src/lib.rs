@@ -16,6 +16,7 @@ use tower_lsp::LanguageServer;
 
 const GOTO_DEFINITION_RETRIGGER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const GOTO_DEFINITION_RETRIGGER_BACKOFF: std::time::Duration = std::time::Duration::from_millis(25);
+const INDEXING_COMPLETION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub struct FakeEditor {
     server: RubyLanguageServer,
@@ -340,6 +341,22 @@ impl FakeEditor {
             .await
             .expect("INVARIANT VIOLATED: extension status request failed. This is a bug because FakeEditor expects in-process LSP custom requests to return JSON-RPC success. Fix: inspect extension status handler error path.")
             .extensions
+    }
+
+    pub async fn wait_for_indexing_complete(&self) {
+        let deadline = tokio::time::Instant::now() + INDEXING_COMPLETION_TIMEOUT;
+        loop {
+            if self.server.is_indexing_complete() {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "INVARIANT VIOLATED: FakeEditor workspace indexing did not complete within {:?}; snapshot: {:#?}. This is a bug because black-box cold-index tests require a terminal project generation. Fix: inspect the indexing phase or failure before asserting semantic results.",
+                INDEXING_COMPLETION_TIMEOUT,
+                self.server.indexing_status_snapshot()
+            );
+            tokio::time::sleep(GOTO_DEFINITION_RETRIGGER_BACKOFF).await;
+        }
     }
 
     pub fn content(&self, filename: &str) -> &str {

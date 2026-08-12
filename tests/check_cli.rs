@@ -28,7 +28,7 @@ fn check_json_uses_stable_output_and_failure_exit_code() {
     );
     let report: Value =
         serde_json::from_slice(&output.stdout).expect("check output must be valid JSON");
-    assert_eq!(report["schema_version"], 4);
+    assert_eq!(report["schema_version"], 5);
     assert_eq!(report["files_checked"], 1);
     assert_eq!(report["summary"]["warnings"], 1);
     assert_eq!(report["inference"]["method_return_outcomes"], 1);

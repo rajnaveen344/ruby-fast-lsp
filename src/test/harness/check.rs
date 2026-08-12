@@ -861,7 +861,12 @@ fn method_call_return_type_from_analysis(
         RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
             (fqn.clone(), ruby_analysis::core::NamespaceKind::Singleton)
         }
-        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Union(_) | RubyType::Unknown => {
+        RubyType::Literal(_)
+        | RubyType::Array(_)
+        | RubyType::Hash(_, _)
+        | RubyType::Shape(_)
+        | RubyType::Union(_)
+        | RubyType::Unknown => {
             return None;
         }
     };

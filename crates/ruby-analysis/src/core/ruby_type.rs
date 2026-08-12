@@ -1,4 +1,5 @@
 use crate::fully_qualified_name::FullyQualifiedName;
+use crate::shape_type::{LiteralValue, ShapeType, MAX_SHAPE_UNION_VARIANTS};
 use std::fmt::{self, Display, Formatter};
 
 /// Represents Ruby types in the type inference system
@@ -15,9 +16,15 @@ pub enum RubyType {
     // Module reference - represents a module object that can be used for inclusion/extension
     ModuleReference(FullyQualifiedName),
 
+    // Bounded literal evidence used by discriminated structural unions.
+    Literal(Box<LiteralValue>),
+
     // Parameterized collection types with polymorphic support
     Array(Vec<RubyType>),               // Supports multiple element types
     Hash(Vec<RubyType>, Vec<RubyType>), // Supports multiple key/value types
+
+    // Canonical bounded structural type for one Hash-backed value.
+    Shape(Box<ShapeType>),
 
     // Composite types
     Union(Vec<RubyType>),
@@ -145,10 +152,21 @@ impl RubyType {
                 keys.iter().any(Self::nested_union_contains_unknown)
                     || values.iter().any(Self::nested_union_contains_unknown)
             }
+            RubyType::Shape(shape) => {
+                shape
+                    .fields()
+                    .iter()
+                    .any(|field| Self::nested_union_contains_unknown(field.value()))
+                    || shape.rest().is_some_and(|rest| {
+                        Self::nested_union_contains_unknown(rest.key())
+                            || Self::nested_union_contains_unknown(rest.value())
+                    })
+            }
             RubyType::Class(_)
             | RubyType::Module(_)
             | RubyType::ClassReference(_)
-            | RubyType::ModuleReference(_) => false,
+            | RubyType::ModuleReference(_)
+            | RubyType::Literal(_) => false,
         }
     }
 
@@ -167,10 +185,20 @@ impl RubyType {
             RubyType::Hash(keys, values) => {
                 keys.iter().any(Self::contains_unknown) || values.iter().any(Self::contains_unknown)
             }
+            RubyType::Shape(shape) => {
+                shape
+                    .fields()
+                    .iter()
+                    .any(|field| Self::contains_unknown(field.value()))
+                    || shape.rest().is_some_and(|rest| {
+                        Self::contains_unknown(rest.key()) || Self::contains_unknown(rest.value())
+                    })
+            }
             RubyType::Class(_)
             | RubyType::Module(_)
             | RubyType::ClassReference(_)
-            | RubyType::ModuleReference(_) => false,
+            | RubyType::ModuleReference(_)
+            | RubyType::Literal(_) => false,
         }
     }
 
@@ -185,10 +213,21 @@ impl RubyType {
                 keys.iter().any(Self::nested_union_contains_unknown)
                     || values.iter().any(Self::nested_union_contains_unknown)
             }
+            RubyType::Shape(shape) => {
+                shape
+                    .fields()
+                    .iter()
+                    .any(|field| Self::nested_union_contains_unknown(field.value()))
+                    || shape.rest().is_some_and(|rest| {
+                        Self::nested_union_contains_unknown(rest.key())
+                            || Self::nested_union_contains_unknown(rest.value())
+                    })
+            }
             RubyType::Class(_)
             | RubyType::Module(_)
             | RubyType::ClassReference(_)
-            | RubyType::ModuleReference(_) => false,
+            | RubyType::ModuleReference(_)
+            | RubyType::Literal(_) => false,
         }
     }
 
@@ -238,6 +277,15 @@ impl RubyType {
         type_vec.sort();
         type_vec.dedup();
 
+        if type_vec
+            .iter()
+            .filter(|ruby_type| matches!(ruby_type, RubyType::Shape(_)))
+            .count()
+            > MAX_SHAPE_UNION_VARIANTS
+        {
+            return RubyType::Unknown;
+        }
+
         match type_vec.len() {
             0 => RubyType::Unknown,
             1 => type_vec.into_iter().next().unwrap(),
@@ -270,6 +318,14 @@ impl RubyType {
                     && v1.iter().all(|v| v2.iter().any(|v2| v.is_subtype_of(v2)))
             }
 
+            (RubyType::Literal(value), target) => value.widened_type().is_subtype_of(target),
+
+            (RubyType::Shape(source), RubyType::Shape(target)) => source.is_subtype_of(target),
+
+            (RubyType::Shape(source), RubyType::Hash(_, _)) => {
+                source.generic_hash_type().is_subtype_of(other)
+            }
+
             // Class hierarchy (simplified - in real implementation would check inheritance)
             (RubyType::Class(_), RubyType::Class(_)) => false,
 
@@ -298,6 +354,7 @@ impl RubyType {
     /// Check if this is a primitive type
     pub fn is_primitive(&self) -> bool {
         match self {
+            RubyType::Literal(_) => true,
             RubyType::Class(fqn) => {
                 let name = fqn.to_string();
                 matches!(
@@ -317,7 +374,10 @@ impl RubyType {
 
     /// Check if this is a collection type
     pub fn is_collection(&self) -> bool {
-        matches!(self, RubyType::Array(_) | RubyType::Hash(_, _))
+        matches!(
+            self,
+            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_)
+        )
     }
 
     /// Check if this type is nilable (can be nil)
@@ -397,6 +457,34 @@ impl RubyType {
         }
     }
 
+    /// Widen retained Symbol/String literals while preserving surrounding
+    /// collection and shape structure.
+    pub fn widen_literals(&self) -> RubyType {
+        match self {
+            RubyType::Literal(value) => value.widened_type(),
+            RubyType::Array(types) => {
+                RubyType::Array(Self::canonical_union_members(types.iter().map(Self::widen_literals)))
+            }
+            RubyType::Hash(keys, values) => RubyType::Hash(
+                Self::canonical_union_members(keys.iter().map(Self::widen_literals)),
+                Self::canonical_union_members(values.iter().map(Self::widen_literals)),
+            ),
+            RubyType::Shape(shape) => RubyType::Shape(Box::new(
+                shape
+                    .try_map_types(Self::widen_literals)
+                    .expect(
+                        "INVARIANT VIOLATED: widening proven shape literals produced an invalid shape. This is a bug because widening removes precision and cannot add Unknown, duplicate keys, or depth. Fix: keep ShapeType construction and RubyType::widen_literals aligned.",
+                    ),
+            )),
+            RubyType::Union(types) => RubyType::union(types.iter().map(Self::widen_literals)),
+            RubyType::Class(_)
+            | RubyType::Module(_)
+            | RubyType::ClassReference(_)
+            | RubyType::ModuleReference(_)
+            | RubyType::Unknown => self.clone(),
+        }
+    }
+
     /// Create a class type from a name
     pub fn class(name: &str) -> Self {
         RubyType::Class(FullyQualifiedName::try_from(name).unwrap_or_else(|error| {
@@ -418,6 +506,7 @@ impl Display for RubyType {
             RubyType::Module(fqn) => write!(f, "module {}", fqn),
             RubyType::ClassReference(fqn) => write!(f, "Class<{}>", fqn),
             RubyType::ModuleReference(fqn) => write!(f, "Module<{}>", fqn),
+            RubyType::Literal(value) => write!(f, "{value}"),
             RubyType::Array(elem_types) => {
                 if elem_types.len() == 1 {
                     write!(f, "Array<{}>", elem_types[0])
@@ -442,6 +531,7 @@ impl Display for RubyType {
                 };
                 write!(f, "Hash<{}, {}>", key_str, value_str)
             }
+            RubyType::Shape(shape) => write!(f, "{shape}"),
             RubyType::Union(types) => {
                 let type_strs: Vec<String> = types.iter().map(|t| t.to_string()).collect();
                 write!(f, "({})", type_strs.join(" | "))
@@ -549,6 +639,10 @@ mod tests {
     fn test_subtype_relationships() {
         assert!(RubyType::integer().is_subtype_of(&RubyType::integer()));
         assert!(!RubyType::integer().is_subtype_of(&RubyType::string()));
+        assert!(RubyType::Literal(Box::new(LiteralValue::symbol("ready")))
+            .is_subtype_of(&RubyType::symbol()));
+        assert!(!RubyType::symbol()
+            .is_subtype_of(&RubyType::Literal(Box::new(LiteralValue::symbol("ready")))));
     }
 
     #[test]
@@ -588,5 +682,72 @@ mod tests {
 
         let int_unknown = RubyType::integer().union_with(&RubyType::Unknown);
         assert_eq!(int_unknown, RubyType::Unknown);
+    }
+
+    #[test]
+    fn structurally_distinct_shape_union_variants_remain_correlated_and_bounded() {
+        fn variant(kind: &str, value: RubyType) -> RubyType {
+            RubyType::Shape(Box::new(
+                ShapeType::try_new(
+                    [
+                        crate::ShapeField::required(
+                            crate::LiteralKey::symbol("kind"),
+                            RubyType::Literal(Box::new(LiteralValue::symbol(kind))),
+                        ),
+                        crate::ShapeField::required(crate::LiteralKey::symbol("value"), value),
+                    ],
+                    None,
+                    crate::ShapeExactness::Exact,
+                    crate::ShapeStability::TrackedMutable,
+                )
+                .unwrap(),
+            ))
+        }
+
+        let number = variant("number", RubyType::integer());
+        let text = variant("text", RubyType::string());
+        let union = RubyType::union([number.clone(), text.clone()]);
+        assert_eq!(
+            union.to_string(),
+            "({ kind: :number, value: Integer } | { kind: :text, value: String })"
+        );
+        assert_eq!(RubyType::union([number.clone(), number.clone()]), number);
+
+        let excessive = (0..=MAX_SHAPE_UNION_VARIANTS)
+            .map(|index| variant(&format!("v{index}"), RubyType::integer()));
+        assert_eq!(RubyType::union(excessive), RubyType::Unknown);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn boxed_shape_variant_preserves_the_fixed_ruby_type_layout() {
+        #[allow(dead_code)]
+        enum PreShapeRubyTypeLayout {
+            Class(FullyQualifiedName),
+            Module(FullyQualifiedName),
+            ClassReference(FullyQualifiedName),
+            ModuleReference(FullyQualifiedName),
+            Array(Vec<PreShapeRubyTypeLayout>),
+            Hash(Vec<PreShapeRubyTypeLayout>, Vec<PreShapeRubyTypeLayout>),
+            Union(Vec<PreShapeRubyTypeLayout>),
+            Unknown,
+        }
+
+        let ruby_type_size = std::mem::size_of::<RubyType>();
+        assert!(
+            ruby_type_size <= std::mem::size_of::<PreShapeRubyTypeLayout>(),
+            "boxing Literal and Shape must not increase RubyType beyond the same-build pre-shape payload layout"
+        );
+        assert_eq!(std::mem::size_of::<ShapeType>(), 32);
+        assert_eq!(
+            std::mem::size_of::<crate::ShapeField>(),
+            ruby_type_size + 40,
+            "one field owns exactly one RubyType plus the fixed literal-key, presence, and alignment overhead"
+        );
+        assert_eq!(
+            std::mem::size_of::<crate::ShapeRest>(),
+            ruby_type_size * 2,
+            "one rest contract owns exactly its key and value RubyType payloads"
+        );
     }
 }

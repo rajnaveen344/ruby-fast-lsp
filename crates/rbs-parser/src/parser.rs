@@ -32,18 +32,9 @@ impl Parser {
     pub fn parse_type(&mut self, source: &str) -> Result<RbsType, ParseError> {
         // Wrap the type in a minimal declaration to parse it
         let wrapped = format!("type _t = {}", source);
-        let tree = self.parse_to_tree(&wrapped)?;
-
-        let root = tree.root_node();
-        let mut cursor = root.walk();
-
-        // Find the type alias declaration
-        for child in root.children(&mut cursor) {
-            if child.kind() == "type_alias_declaration" {
-                let visitor = Visitor::new(&wrapped);
-                if let Some(type_node) = child.child_by_field_name("type") {
-                    return visitor.visit_type(type_node);
-                }
+        for declaration in self.parse(&wrapped)? {
+            if let Declaration::TypeAlias(alias) = declaration {
+                return Ok(alias.r#type);
             }
         }
 

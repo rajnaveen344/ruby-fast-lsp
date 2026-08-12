@@ -20,6 +20,7 @@ pub mod reference_store;
 pub mod ruby_method;
 pub mod ruby_namespace;
 pub mod ruby_type;
+pub mod shape_type;
 pub mod source_file;
 pub mod source_position;
 pub mod symbol_store;
@@ -58,6 +59,11 @@ pub use reference_store::{
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::{GeneratedOwnerId, RubyConstant};
 pub use ruby_type::RubyType;
+pub use shape_type::{
+    LiteralKey, LiteralValue, ShapeConstructionError, ShapeExactness, ShapeField,
+    ShapeFieldPresence, ShapeRest, ShapeStability, ShapeType, MAX_SHAPE_ALIASES, MAX_SHAPE_DEPTH,
+    MAX_SHAPE_FIELDS, MAX_SHAPE_SOLVE_ITERATIONS, MAX_SHAPE_UNION_VARIANTS,
+};
 pub use source_file::{LibraryPackageId, SourceKind};
 pub use source_position::{SourcePosition, SourceRange};
 pub use symbol_store::{StoredSymbolFact, SymbolFact, SymbolKind, SymbolStore};

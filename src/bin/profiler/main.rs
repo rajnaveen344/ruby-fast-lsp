@@ -42,9 +42,9 @@ mod sample_project;
 use log::info;
 use ruby_analysis::core::{
     DiagnosticCandidate, DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
-    MethodFact, ReferenceCandidate, ReferenceFact, SourceKind, StoredConstantReferenceCandidate,
-    StoredMethodReferenceCandidate, StoredReferenceCandidate, StoredResolvedReferenceCandidate,
-    SymbolFact, TypeFact, TypeSubject,
+    InferenceTelemetry, MethodFact, ReferenceCandidate, ReferenceFact, SourceKind,
+    StoredConstantReferenceCandidate, StoredMethodReferenceCandidate, StoredReferenceCandidate,
+    StoredResolvedReferenceCandidate, SymbolFact, TypeFact, TypeSubject,
 };
 use ruby_fast_lsp::capabilities::indexing;
 use ruby_fast_lsp::capabilities::{completion, definitions, hover, references};
@@ -1477,6 +1477,7 @@ fn indexing_summary_json(
     let mut resolve_pass_ambiguous_method_return_cache_hits = 0usize;
     let mut resolve_pass_ambiguous_method_return_cache_misses = 0usize;
     let mut resolve_pass_ambiguous_method_return_cache_entries = 0usize;
+    let mut inference_telemetry = InferenceTelemetry::default();
     let mut project_evidence = Vec::new();
     let status_by_root = server
         .indexing_status_snapshot()
@@ -1490,6 +1491,7 @@ fn indexing_summary_json(
     for workspace in server.list_workspaces() {
         let engine = workspace.analysis_engine.read();
         let stats = engine.stats();
+        inference_telemetry.merge(&engine.inference_telemetry());
         files = files.checked_add(stats.files).expect(
             "INVARIANT VIOLATED: profiler aggregate file count overflowed usize. This is a bug because the measured process cannot contain more indexed files than addressable memory. Fix: inspect corrupt engine stats.",
         );
@@ -1765,7 +1767,7 @@ fn indexing_summary_json(
     let gem_binding = server.gem_dependency_binding_counters.snapshot();
 
     serde_json::json!({
-        "schema_version": 14,
+        "schema_version": 15,
         "ruby_fast_lsp_version": env!("CARGO_PKG_VERSION"),
         "target_os": std::env::consts::OS,
         "target_arch": std::env::consts::ARCH,
@@ -1861,6 +1863,7 @@ fn indexing_summary_json(
                 "ambiguous_method_return_cache_entries": resolve_pass_ambiguous_method_return_cache_entries
             }
         },
+        "inference_telemetry": inference_telemetry,
         "process": resource_delta,
         "process_local_core_templates": {
             "entries": core_cache.entries,
@@ -2279,6 +2282,15 @@ async fn run_production_benchmark(
     let uri = Url::from_file_path(&file_path)
         .map_err(|_| anyhow::anyhow!("invalid benchmark file path: {}", file_path.display()))?;
 
+    const COMPLETION_CALL: &str = "@service.list_users";
+    const COMPLETION_RECEIVER: &str = "@service.";
+    let completion_call_count = original.match_indices(COMPLETION_CALL).count();
+    assert_eq!(
+        completion_call_count, 1,
+        "INVARIANT VIOLATED: benchmark corpus contains {completion_call_count} occurrences of {COMPLETION_CALL:?}. This is a bug because the completion edit must target one deterministic call. Fix: retain exactly one benchmark completion call or select it with a stronger unique marker."
+    );
+    let completion_source = original.replacen(COMPLETION_CALL, COMPLETION_RECEIVER, 1);
+
     indexing::handle_did_open(
         server,
         DidOpenTextDocumentParams {
@@ -2286,13 +2298,13 @@ async fn run_production_benchmark(
                 uri: uri.clone(),
                 language_id: "ruby".to_string(),
                 version: 1,
-                text: original.clone(),
+                text: completion_source.clone(),
             },
         },
     )
     .await;
 
-    let completion_position = position_after(&original, "@service.")?;
+    let completion_position = position_after(&completion_source, COMPLETION_RECEIVER)?;
     let method_position = position_inside(&original, "list_users")?;
     let completion_context = Some(CompletionContext {
         trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
@@ -2307,8 +2319,6 @@ async fn run_production_benchmark(
             completion_context.clone(),
         )
         .await;
-        let _ =
-            definitions::find_definition_at_position(server, uri.clone(), method_position).await;
     }
 
     let mut completion_samples = Vec::with_capacity(iterations);
@@ -2322,10 +2332,42 @@ async fn run_production_benchmark(
         )
         .await;
         completion_samples.push(start.elapsed());
+        let completion_labels = match &result {
+            CompletionResponse::Array(items) => items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            CompletionResponse::List(list) => list
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+        };
         assert!(
-            matches!(result, CompletionResponse::Array(ref items) if items.iter().any(|item| item.label == "list_users")),
-            "INVARIANT VIOLATED: benchmark completion did not include list_users. This is a bug because timing an empty or semantically broken query would produce misleading evidence. Fix: repair the deterministic corpus or completion query position."
+            completion_labels.contains(&"list_users"),
+            "INVARIANT VIOLATED: benchmark completion did not include list_users; observed labels: {completion_labels:?}. This is a bug because timing an empty or semantically broken query would produce misleading evidence. Fix: repair the deterministic corpus or completion query position."
         );
+    }
+
+    indexing::handle_did_change(
+        server,
+        DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: original.clone(),
+            }],
+        },
+    )
+    .await;
+
+    for _ in 0..5 {
+        let _ =
+            definitions::find_definition_at_position(server, uri.clone(), method_position).await;
     }
 
     let hover_params = || HoverParams {
@@ -2392,7 +2434,7 @@ async fn run_production_benchmark(
             DidChangeTextDocumentParams {
                 text_document: VersionedTextDocumentIdentifier {
                     uri: uri.clone(),
-                    version: i32::try_from(iteration + 2).expect(
+                    version: i32::try_from(iteration + 3).expect(
                         "INVARIANT VIOLATED: benchmark iteration count exceeds LSP document versions. This is a bug because the benchmark cannot represent that many edits. Fix: use fewer than i32::MAX iterations.",
                     ),
                 },
@@ -2586,6 +2628,20 @@ fn print_stats(server: &RubyLanguageServer) {
         );
         info!("Resolved references: {}", stats.references);
         info!("Type facts: {}", stats.types);
+        let inference = engine.inference_telemetry();
+        info!(
+            "Shape proof telemetry: occurrences={}, fields_total={}, fields_max={}, depth_max={}, unions={}, union_variants_total={}, union_variants_max={}, aliases_max={}, invalidated_unknowns={}, bound_unknowns={}",
+            inference.retained_shape_occurrences,
+            inference.retained_shape_fields,
+            inference.max_retained_shape_fields,
+            inference.max_retained_shape_depth,
+            inference.retained_shape_unions,
+            inference.retained_shape_union_variants,
+            inference.max_retained_shape_union_variants,
+            inference.max_live_shape_aliases,
+            inference.shape_invalidated_outcomes,
+            inference.shape_bound_exceeded_outcomes,
+        );
         info!("Diagnostic candidates: {}", stats.diagnostic_candidates);
         info!("Diagnostics: {}", stats.diagnostics);
         info!("Graph nodes: {}", stats.graph_nodes);

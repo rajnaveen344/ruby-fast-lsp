@@ -1081,8 +1081,10 @@ impl AnalysisIndexer {
                         RubyType::Class(_)
                         | RubyType::Module(_)
                         | RubyType::ModuleReference(_)
+                        | RubyType::Literal(_)
                         | RubyType::Array(_)
                         | RubyType::Hash(_, _)
+                        | RubyType::Shape(_)
                         | RubyType::Union(_)
                         | RubyType::Unknown => None,
                     })
@@ -1146,8 +1148,10 @@ impl Visit<'_> for AnalysisIndexer {
                 RubyType::Class(_)
                 | RubyType::Module(_)
                 | RubyType::ModuleReference(_)
+                | RubyType::Literal(_)
                 | RubyType::Array(_)
                 | RubyType::Hash(_, _)
+                | RubyType::Shape(_)
                 | RubyType::Union(_)
                 | RubyType::Unknown => None,
             });
@@ -1276,8 +1280,10 @@ impl Visit<'_> for AnalysisIndexer {
                 RubyType::Class(_)
                 | RubyType::ClassReference(_)
                 | RubyType::Module(_)
+                | RubyType::Literal(_)
                 | RubyType::Array(_)
                 | RubyType::Hash(_, _)
+                | RubyType::Shape(_)
                 | RubyType::Union(_)
                 | RubyType::Unknown => None,
             });

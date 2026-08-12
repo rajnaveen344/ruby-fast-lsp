@@ -55,7 +55,7 @@ async fn test_infer_hash_literal() {
     check(
         r#"
 class Foo
-  def con<type label="Hash">fig
+  def con<type label="{ key: String }">fig
     { key: "value" }
   end
 end

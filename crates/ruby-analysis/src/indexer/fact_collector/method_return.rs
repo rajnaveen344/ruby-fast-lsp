@@ -6,6 +6,7 @@ use crate::core::{
 };
 use crate::engine::AnalysisQuery;
 
+use crate::inference::r#type::shape as shape_reads;
 use crate::inference::rbs::{
     get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
 };
@@ -14,28 +15,6 @@ use crate::inference::RubyType;
 use super::FactCollector;
 
 impl FactCollector {
-    pub(super) fn resolve_method_return_type(
-        &self,
-        receiver_type: &RubyType,
-        method_name: &str,
-    ) -> Option<RubyType> {
-        self.resolve_method_return_type_with_private(receiver_type, method_name, true)
-    }
-
-    pub(super) fn resolve_method_return_type_with_private(
-        &self,
-        receiver_type: &RubyType,
-        method_name: &str,
-        allow_private: bool,
-    ) -> Option<RubyType> {
-        self.resolve_method_return_type_outcome_with_private(
-            receiver_type,
-            method_name,
-            allow_private,
-        )
-        .into_proven_type()
-    }
-
     pub(super) fn resolve_method_return_type_outcome_with_private(
         &self,
         receiver_type: &RubyType,
@@ -44,6 +23,30 @@ impl FactCollector {
     ) -> TypeInferenceOutcome {
         if *receiver_type == RubyType::Unknown {
             return TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver);
+        }
+
+        if shape_reads::is_shape_only(receiver_type) {
+            if let Some(outcome) =
+                shape_reads::argument_free_method_return(receiver_type, method_name)
+            {
+                return match outcome {
+                    Ok(ruby_type) => TypeInferenceOutcome::proven(ruby_type),
+                    Err(reason) => TypeInferenceOutcome::unknown(reason),
+                };
+            }
+            if shape_reads::operation_requires_call_arguments(method_name) {
+                return TypeInferenceOutcome::unknown(UnknownReason::UnresolvedMethodReturn);
+            }
+            let projected =
+                shape_reads::generic_hash_projection(receiver_type).unwrap_or(RubyType::Unknown);
+            if projected == RubyType::Unknown {
+                return TypeInferenceOutcome::unknown(UnknownReason::UnresolvedMethodReturn);
+            }
+            return self.resolve_method_return_type_outcome_with_private(
+                &projected,
+                method_name,
+                allow_private,
+            );
         }
 
         if let RubyType::Union(types) = receiver_type {
@@ -305,7 +308,8 @@ fn receiver_namespace_for_analysis(receiver_type: &RubyType) -> Option<FullyQual
             fqn.to_singleton_namespace()
         }
         RubyType::Array(_) => builtin_namespace("Array"),
-        RubyType::Hash(_, _) => builtin_namespace("Hash"),
+        RubyType::Hash(_, _) | RubyType::Shape(_) => builtin_namespace("Hash"),
+        RubyType::Literal(value) => receiver_namespace_for_analysis(&value.widened_type()),
         RubyType::Union(_) => None,
         RubyType::Unknown => None,
     }
@@ -342,7 +346,8 @@ fn rbs_class_name(receiver_type: &RubyType) -> Option<String> {
         | RubyType::Module(fqn)
         | RubyType::ModuleReference(fqn) => fqn.namespace_parts().last().map(ToString::to_string),
         RubyType::Array(_) => Some("Array".to_string()),
-        RubyType::Hash(_, _) => Some("Hash".to_string()),
+        RubyType::Hash(_, _) | RubyType::Shape(_) => Some("Hash".to_string()),
+        RubyType::Literal(value) => rbs_class_name(&value.widened_type()),
         RubyType::Union(_) => None,
         RubyType::Unknown => None,
     }
@@ -368,6 +373,8 @@ fn type_args_for_receiver(receiver_type: &RubyType) -> Vec<RubyType> {
             };
             vec![key, value]
         }
+        RubyType::Shape(shape) => type_args_for_receiver(&shape.generic_hash_type()),
+        RubyType::Literal(_) => Vec::new(),
         RubyType::Class(_)
         | RubyType::Module(_)
         | RubyType::ClassReference(_)

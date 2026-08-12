@@ -25,6 +25,29 @@ pub struct SignatureHelpTarget {
     pub active_keyword: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapeKeySyntax {
+    Symbol,
+    String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShapeKeyCompletionTarget {
+    pub receiver_start: u32,
+    pub receiver_end: u32,
+    pub receiver_local_name: Option<String>,
+    pub syntax: ShapeKeySyntax,
+    pub partial: String,
+    pub replacement_start: u32,
+    pub replacement_end: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompletionReceiverTarget {
+    pub receiver_start: u32,
+    pub receiver_end: u32,
+}
+
 impl RubyPrismAnalyzer {
     pub fn new(uri: Url, code: String) -> Self {
         let analysis_code = if is_erb_path(uri.path()) {
@@ -59,14 +82,60 @@ impl RubyPrismAnalyzer {
         let parse_result = ruby_prism::parse(self.analysis_code.as_bytes());
         let root_node = parse_result.node();
 
+        self.get_identifier_from_root(byte_offset, &root_node)
+    }
+
+    fn get_identifier_from_root(
+        &self,
+        byte_offset: u32,
+        root_node: &ruby_prism::Node<'_>,
+    ) -> (
+        Option<Identifier>,
+        Option<IdentifierType>,
+        Vec<RubyConstant>,
+        LVScopeId,
+        crate::core::NamespaceKind,
+    ) {
         let mut iden_visitor = IdentifierVisitor::new_with_execution_context_at_offset(
             self.code.clone(),
             byte_offset,
             self.execution_context.clone(),
         );
-        iden_visitor.visit(&root_node);
+        iden_visitor.visit(root_node);
 
         iden_visitor.get_result()
+    }
+
+    pub fn get_completion_context(
+        &self,
+        byte_offset: u32,
+    ) -> (
+        (
+            Option<Identifier>,
+            Option<IdentifierType>,
+            Vec<RubyConstant>,
+            LVScopeId,
+            crate::core::NamespaceKind,
+        ),
+        Option<ShapeKeyCompletionTarget>,
+        Option<CompletionReceiverTarget>,
+    ) {
+        let parse_result = ruby_prism::parse(self.analysis_code.as_bytes());
+        let root_node = parse_result.node();
+        let identifier = self.get_identifier_from_root(byte_offset, &root_node);
+        let mut finder = ShapeKeyCompletionTargetFinder {
+            cursor_offset: usize::try_from(byte_offset).expect(
+                "INVARIANT VIOLATED: a completion byte offset did not fit usize. This is a bug because the offset came from the current in-memory source. Fix: keep document position conversion and analysis coordinates aligned.",
+            ),
+            best: None,
+            best_receiver: None,
+        };
+        finder.visit(&root_node);
+        (
+            identifier,
+            finder.best.map(|candidate| candidate.target),
+            finder.best_receiver.map(|candidate| candidate.target),
+        )
     }
 
     pub fn get_identifier_at_position(
@@ -187,6 +256,158 @@ impl RubyPrismAnalyzer {
                 }
             }
         }
+    }
+}
+
+struct ShapeKeyCompletionCandidate {
+    target: ShapeKeyCompletionTarget,
+    call_span: usize,
+}
+
+struct ShapeKeyCompletionTargetFinder {
+    cursor_offset: usize,
+    best: Option<ShapeKeyCompletionCandidate>,
+    best_receiver: Option<CompletionReceiverCandidate>,
+}
+
+struct CompletionReceiverCandidate {
+    target: CompletionReceiverTarget,
+    call_span: usize,
+}
+
+impl ShapeKeyCompletionTargetFinder {
+    fn consider(&mut self, node: &CallNode<'_>) {
+        if node.name().as_slice() != b"[]" {
+            return;
+        }
+        let Some(receiver) = node.receiver() else {
+            return;
+        };
+        let Some(arguments) = node.arguments() else {
+            return;
+        };
+        let mut arguments = arguments.arguments().iter();
+        let Some(argument) = arguments.next() else {
+            return;
+        };
+        if arguments.next().is_some() {
+            return;
+        }
+
+        let (syntax, partial, value_location) = if let Some(symbol) = argument.as_symbol_node() {
+            let Some(value_location) = symbol.value_loc() else {
+                return;
+            };
+            (
+                ShapeKeySyntax::Symbol,
+                String::from_utf8_lossy(symbol.unescaped()).to_string(),
+                value_location,
+            )
+        } else if let Some(string) = argument.as_string_node() {
+            (
+                ShapeKeySyntax::String,
+                String::from_utf8_lossy(string.unescaped()).to_string(),
+                string.content_loc(),
+            )
+        } else {
+            return;
+        };
+
+        // Complete only at the end of one already parsed literal token. This
+        // keeps replacement ranges exact and avoids guessing through escapes,
+        // interpolation, or malformed suffixes.
+        if self.cursor_offset != value_location.end_offset() {
+            return;
+        }
+        let receiver_location = receiver.location();
+        assert!(
+            receiver_location.start_offset() < receiver_location.end_offset(),
+            "INVARIANT VIOLATED: a Hash key completion receiver has an empty Prism range. This is a bug because `[]` requires a concrete receiver expression. Fix: reject recovered calls without a nonempty receiver before semantic lookup."
+        );
+        let call_location = node.location();
+        let call_span = call_location
+            .end_offset()
+            .checked_sub(call_location.start_offset())
+            .expect(
+                "INVARIANT VIOLATED: a Hash key completion call has an inverted Prism range. This is a parser bug because call ranges must be ordered. Fix: validate the recovered CallNode before visiting it.",
+            );
+        if self
+            .best
+            .as_ref()
+            .is_some_and(|current| current.call_span <= call_span)
+        {
+            return;
+        }
+        self.best = Some(ShapeKeyCompletionCandidate {
+            target: ShapeKeyCompletionTarget {
+                receiver_start: u32::try_from(receiver_location.start_offset()).expect(
+                    "INVARIANT VIOLATED: a Hash key receiver start exceeded u32. This is a bug because analysis source coordinates are u32-bounded. Fix: reject oversized documents before indexing.",
+                ),
+                receiver_end: u32::try_from(receiver_location.end_offset()).expect(
+                    "INVARIANT VIOLATED: a Hash key receiver end exceeded u32. This is a bug because analysis source coordinates are u32-bounded. Fix: reject oversized documents before indexing.",
+                ),
+                receiver_local_name: receiver.as_local_variable_read_node().map(|local| {
+                    String::from_utf8_lossy(local.name().as_slice()).to_string()
+                }),
+                syntax,
+                partial,
+                replacement_start: u32::try_from(value_location.start_offset()).expect(
+                    "INVARIANT VIOLATED: a Hash key replacement start exceeded u32. This is a bug because analysis source coordinates are u32-bounded. Fix: reject oversized documents before indexing.",
+                ),
+                replacement_end: u32::try_from(value_location.end_offset()).expect(
+                    "INVARIANT VIOLATED: a Hash key replacement end exceeded u32. This is a bug because analysis source coordinates are u32-bounded. Fix: reject oversized documents before indexing.",
+                ),
+            },
+            call_span,
+        });
+    }
+
+    fn consider_method_receiver(&mut self, node: &CallNode<'_>) {
+        let Some(receiver) = node.receiver() else {
+            return;
+        };
+        let Some(message) = node.message_loc() else {
+            return;
+        };
+        if self.cursor_offset < message.start_offset() || self.cursor_offset > message.end_offset()
+        {
+            return;
+        }
+        let call = node.location();
+        let call_span = call.end_offset().checked_sub(call.start_offset()).expect(
+            "INVARIANT VIOLATED: a completion CallNode has an inverted Prism range. This is a parser bug because call ranges must be ordered. Fix: validate the recovered CallNode before using its receiver.",
+        );
+        if self
+            .best_receiver
+            .as_ref()
+            .is_some_and(|current| current.call_span <= call_span)
+        {
+            return;
+        }
+        let receiver = receiver.location();
+        assert!(
+            receiver.start_offset() < receiver.end_offset(),
+            "INVARIANT VIOLATED: a method-completion receiver has an empty Prism range. This is a parser recovery bug because an explicit receiver must own syntax. Fix: reject recovered calls without a concrete receiver."
+        );
+        self.best_receiver = Some(CompletionReceiverCandidate {
+            target: CompletionReceiverTarget {
+                receiver_start: u32::try_from(receiver.start_offset()).expect(
+                    "INVARIANT VIOLATED: method-completion receiver start exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: reject oversized documents before completion.",
+                ),
+                receiver_end: u32::try_from(receiver.end_offset()).expect(
+                    "INVARIANT VIOLATED: method-completion receiver end exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: reject oversized documents before completion.",
+                ),
+            },
+            call_span,
+        });
+    }
+}
+
+impl<'pr> Visit<'pr> for ShapeKeyCompletionTargetFinder {
+    fn visit_call_node(&mut self, node: &CallNode<'pr>) {
+        self.consider(node);
+        self.consider_method_receiver(node);
+        visit_call_node(self, node);
     }
 }
 

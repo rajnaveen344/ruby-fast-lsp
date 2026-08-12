@@ -9,9 +9,10 @@ use rbs_parser::{Loader, RbsType};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::core::FullyQualifiedName;
-use crate::core::RubyConstant;
-use crate::core::{MethodParamKind, RubyType};
+use crate::core::{
+    FullyQualifiedName, LiteralKey, LiteralValue, MethodParamKind, RubyConstant, RubyType,
+    ShapeExactness, ShapeField, ShapeStability, ShapeType,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RbsMethodSignature {
@@ -227,6 +228,9 @@ fn rbs_type_to_ruby_type_with_substitutions(
                 _ => class_name_to_ruby_type(clean_name),
             }
         }
+        RbsType::Record(fields) => rbs_record_to_ruby_type(fields, |field_type| {
+            rbs_type_to_ruby_type_with_substitutions(field_type, substitutions)
+        }),
         // For all other types, fall back to the non-substitution version
         _ => rbs_type_to_ruby_type(rbs_type),
     }
@@ -246,14 +250,13 @@ fn class_name_to_ruby_type(name: &str) -> RubyType {
         "TrueClass" => RubyType::true_class(),
         "FalseClass" => RubyType::false_class(),
         "NilClass" => RubyType::nil_class(),
-        _ => {
-            // Try to create an FQN from the class name
-            if let Ok(constant) = RubyConstant::new(clean_name) {
-                RubyType::Class(FullyQualifiedName::constant(vec![constant]))
-            } else {
-                RubyType::Unknown
-            }
-        }
+        _ => clean_name
+            .split("::")
+            .map(RubyConstant::new)
+            .collect::<Result<Vec<_>, _>>()
+            .map(FullyQualifiedName::constant)
+            .map(RubyType::Class)
+            .unwrap_or(RubyType::Unknown),
     }
 }
 
@@ -302,7 +305,7 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
         RbsType::Tuple(types) => RubyType::Array(RubyType::canonical_union_members(
             types.iter().map(rbs_type_to_ruby_type),
         )),
-        RbsType::Record(_) => RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]),
+        RbsType::Record(fields) => rbs_record_to_ruby_type(fields, rbs_type_to_ruby_type),
         RbsType::Proc { .. } => {
             // Proc types - just use Proc class for now
             if let Ok(constant) = RubyConstant::new("Proc") {
@@ -311,10 +314,15 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
                 RubyType::Unknown
             }
         }
-        RbsType::Literal(_) => {
-            // Literal types - we can't represent these precisely yet
-            RubyType::Unknown
+        RbsType::Literal(rbs_parser::Literal::String(value)) => {
+            RubyType::Literal(Box::new(LiteralValue::string(value.clone())))
         }
+        RbsType::Literal(rbs_parser::Literal::Symbol(value)) => {
+            RubyType::Literal(Box::new(LiteralValue::symbol(value.clone())))
+        }
+        RbsType::Literal(rbs_parser::Literal::Integer(_)) => RubyType::integer(),
+        RbsType::Literal(rbs_parser::Literal::True) => RubyType::true_class(),
+        RbsType::Literal(rbs_parser::Literal::False) => RubyType::false_class(),
         RbsType::Interface(name) => {
             // Interface types
             if let Ok(constant) = RubyConstant::new(name) {
@@ -328,6 +336,29 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
             RubyType::Unknown
         }
     }
+}
+
+fn rbs_record_to_ruby_type(
+    fields: &[rbs_parser::RecordField],
+    mut convert: impl FnMut(&RbsType) -> RubyType,
+) -> RubyType {
+    let fields = fields.iter().map(|field| {
+        let key = LiteralKey::symbol(field.name.clone());
+        let value = convert(&field.r#type);
+        if field.optional {
+            ShapeField::optional(key, value)
+        } else {
+            ShapeField::required(key, value)
+        }
+    });
+    ShapeType::try_new(
+        fields,
+        None,
+        ShapeExactness::Exact,
+        ShapeStability::TrackedMutable,
+    )
+    .map(|shape| RubyType::Shape(Box::new(shape)))
+    .unwrap_or(RubyType::Unknown)
 }
 
 /// Check if a class exists in RBS definitions

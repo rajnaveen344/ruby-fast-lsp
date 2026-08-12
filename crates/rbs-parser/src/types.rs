@@ -334,6 +334,28 @@ pub struct Block {
     pub required: bool,
 }
 
+/// One Symbol-keyed field in an RBS record type.
+///
+/// The bundled tree-sitter grammar represents `name: T` and `?name: T` as
+/// repeated `key`/`value` fields on the record node, so optionality must be
+/// retained explicitly instead of being folded into the field name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordField {
+    pub name: String,
+    pub r#type: RbsType,
+    pub optional: bool,
+}
+
+impl RecordField {
+    pub fn new(name: impl Into<String>, r#type: RbsType, optional: bool) -> Self {
+        Self {
+            name: name.into(),
+            r#type,
+            optional,
+        }
+    }
+}
+
 /// RBS type representation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RbsType {
@@ -362,7 +384,7 @@ pub enum RbsType {
     Tuple(Vec<RbsType>),
 
     /// A record type like `{ name: String, age: Integer }`
-    Record(Vec<(String, RbsType)>),
+    Record(Vec<RecordField>),
 
     /// A proc type
     Proc(Box<MethodType>),
@@ -478,11 +500,14 @@ impl fmt::Display for RbsType {
             }
             RbsType::Record(fields) => {
                 write!(f, "{{ ")?;
-                for (i, (name, t)) in fields.iter().enumerate() {
+                for (i, field) in fields.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}: {}", name, t)?;
+                    if field.optional {
+                        write!(f, "?")?;
+                    }
+                    write!(f, "{}: {}", field.name, field.r#type)?;
                 }
                 write!(f, " }}")
             }

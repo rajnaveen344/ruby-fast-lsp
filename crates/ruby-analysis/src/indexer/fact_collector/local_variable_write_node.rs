@@ -1,6 +1,4 @@
-use crate::core::{
-    ConstantTypeProjection, FullyQualifiedName, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
-};
+use crate::core::{FullyQualifiedName, SymbolKind, TypeFact, TypeProvenance, TypeSubject};
 use log::error;
 use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
@@ -22,12 +20,12 @@ impl FactCollector {
         let variable_name = String::from_utf8_lossy(name).to_string();
 
         // Infer type from value if available
-        let inferred_type = if let Some(ty) = explicit_type {
-            ty
+        let (inferred_type, inferred_unknown_reason) = if let Some(ty) = explicit_type {
+            (ty, None)
         } else if let Some(value) = value_node {
-            self.infer_assignment_type_from_value(value)
+            self.infer_assignment_type_from_value_with_reason(value)
         } else {
-            RubyType::Unknown
+            (RubyType::Unknown, None)
         };
         let constant_dependency = value_node.and_then(|value| self.constant_type_dependency(value));
 
@@ -71,6 +69,15 @@ impl FactCollector {
 
         // Get location for both index entry and VariableScopes
         let location = self.document.prism_location_to_text_range(&name_loc);
+        if let Some(reason) = inferred_unknown_reason {
+            assert_eq!(
+                inferred_type,
+                RubyType::Unknown,
+                "INVARIANT VIOLATED: local assignment retained shape construction reason `{}` with concrete type `{inferred_type}`. This is a bug because a proof failure and a concrete result cannot describe the same assignment. Fix: return exactly one state from assignment inference.",
+                reason.code()
+            );
+            self.expression_unknown_reasons.push((location, reason));
+        }
         if let Ok(fqn) = FullyQualifiedName::local_variable(variable_name.clone()) {
             self.direct_push_variable_symbol(fqn, SymbolKind::LocalVariable, &name_loc);
         }
@@ -110,32 +117,13 @@ impl FactCollector {
                 name: variable_name.clone(),
             };
             self.type_store.add(TypeFact::new(
-                subject.clone(),
+                subject,
                 inferred_type.clone(),
                 self.document.prism_location_to_text_range(&name_loc),
                 TypeProvenance::Assignment,
             ));
             if let Some(dependency) = constant_dependency {
-                match dependency.projection() {
-                    ConstantTypeProjection::Value => {
-                        self.push_constant_type_equation(subject, location, dependency.clone());
-                        self.push_constant_type_equation(
-                            TypeSubject::Local {
-                                scope_id: 0,
-                                name: variable_name,
-                            },
-                            location,
-                            dependency,
-                        );
-                    }
-                    ConstantTypeProjection::ConstructorInstance => {
-                        self.push_constant_local_assignment_equation(
-                            variable_name,
-                            location,
-                            dependency,
-                        );
-                    }
-                }
+                self.push_constant_local_assignment_equation(variable_name, location, dependency);
             }
         }
     }

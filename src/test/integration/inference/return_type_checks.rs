@@ -1,6 +1,7 @@
 //! Tests for return type inference and diagnostics.
 
-use crate::test::harness::check;
+use crate::indexer::file_processor::FileProcessor;
+use crate::test::harness::{check, FakeEditor};
 
 #[tokio::test]
 async fn test_explicit_return_mismatch() {
@@ -92,4 +93,54 @@ end
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn complete_rbs_record_contract_reports_a_structural_return_mismatch() {
+    let mut editor = FakeEditor::new().await;
+    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/payload_factory.rbs")
+        .expect("test signature URI must be valid");
+    FileProcessor::default()
+        .collect_rbs_facts(
+            &signature_uri,
+            "class PayloadFactory\n  def build: () -> { id: Integer }\nend\n",
+            editor.server(),
+        )
+        .expect("RBS record return contract must enter the shared engine");
+    editor
+        .open_and_check_fixture(
+            "payload_factory.rb",
+            r#"class PayloadFactory
+  def build
+    <warn code="declared-return-type-mismatch" message="Expected return type { id: Integer }, but found { id: String }">{ id: "wrong" }</warn>
+  end
+end
+"#,
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn incomplete_rbs_record_return_evidence_does_not_report_a_mismatch() {
+    let mut editor = FakeEditor::new().await;
+    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/payload_factory.rbs")
+        .expect("test signature URI must be valid");
+    FileProcessor::default()
+        .collect_rbs_facts(
+            &signature_uri,
+            "class PayloadFactory\n  def build: () -> { id: Integer }\nend\n",
+            editor.server(),
+        )
+        .expect("RBS record return contract must enter the shared engine");
+    editor
+        .open_and_check_fixture(
+            "payload_factory.rb",
+            r#"class PayloadFactory
+  def build
+    <warn none code="declared-return-type-mismatch">{ id: dynamic_value }</warn>
+  end
+end
+"#,
+        )
+        .await;
 }

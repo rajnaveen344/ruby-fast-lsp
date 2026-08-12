@@ -790,6 +790,25 @@ impl<'a> Visitor<'a> {
         let text = self.node_text(&node).trim();
 
         match kind {
+            // The grammar wraps every concrete type node in a `type` field.
+            "type" => {
+                let mut cursor = node.walk();
+                let mut named = node.named_children(&mut cursor);
+                let child = named.next().ok_or_else(|| {
+                    ParseError::with_location(
+                        "RBS type wrapper has no concrete type",
+                        self.node_location(&node),
+                    )
+                })?;
+                if named.next().is_some() {
+                    return Err(ParseError::with_location(
+                        "RBS type wrapper has multiple concrete types",
+                        self.node_location(&node),
+                    ));
+                }
+                self.visit_type(child)
+            }
+
             // Simple types
             "class_type" | "class_name" | "namespace" | "constant" => {
                 Ok(self.parse_class_type(node))
@@ -803,7 +822,7 @@ impl<'a> Visitor<'a> {
             "union_type" => {
                 let mut types = Vec::new();
                 let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
+                for child in node.named_children(&mut cursor) {
                     if let Ok(t) = self.visit_type(child) {
                         types.push(t);
                     }
@@ -815,7 +834,7 @@ impl<'a> Visitor<'a> {
             "intersection_type" => {
                 let mut types = Vec::new();
                 let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
+                for child in node.named_children(&mut cursor) {
                     if let Ok(t) = self.visit_type(child) {
                         types.push(t);
                     }
@@ -826,7 +845,7 @@ impl<'a> Visitor<'a> {
             // Optional type
             "optional_type" => {
                 let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
+                for child in node.named_children(&mut cursor) {
                     if let Ok(t) = self.visit_type(child) {
                         return Ok(RbsType::optional(t));
                     }
@@ -838,7 +857,7 @@ impl<'a> Visitor<'a> {
             "tuple_type" => {
                 let mut types = Vec::new();
                 let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
+                for child in node.named_children(&mut cursor) {
                     if let Ok(t) = self.visit_type(child) {
                         types.push(t);
                     }
@@ -849,13 +868,37 @@ impl<'a> Visitor<'a> {
             // Record type
             "record_type" => {
                 let mut fields = Vec::new();
+                let mut pending_key = None;
                 let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
-                    if child.kind() == "record_field" {
-                        if let Ok((name, t)) = self.visit_record_field(child) {
-                            fields.push((name, t));
+                for child in node.named_children(&mut cursor) {
+                    match child.kind() {
+                        "record_key" => {
+                            assert!(
+                                pending_key.is_none(),
+                                "INVARIANT VIOLATED: an RBS record exposed two keys without an intervening value. This is a parser-shape bug because the grammar emits paired key/value fields. Fix: keep the visitor synchronized with tree-sitter-rbs record_type."
+                            );
+                            pending_key = Some((
+                                self.node_text(&child).to_string(),
+                                self.record_key_is_optional(&node, &child),
+                            ));
                         }
+                        "type" => {
+                            let Some((name, optional)) = pending_key.take() else {
+                                return Err(ParseError::with_location(
+                                    "RBS record value has no preceding key",
+                                    self.node_location(&child),
+                                ));
+                            };
+                            fields.push(RecordField::new(name, self.visit_type(child)?, optional));
+                        }
+                        _ => {}
                     }
+                }
+                if pending_key.is_some() {
+                    return Err(ParseError::with_location(
+                        "RBS record key has no value type",
+                        self.node_location(&node),
+                    ));
                 }
                 Ok(RbsType::Record(fields))
             }
@@ -899,14 +942,14 @@ impl<'a> Visitor<'a> {
                 let mut args = Vec::new();
                 let mut cursor = node.walk();
 
-                for child in node.children(&mut cursor) {
+                for child in node.named_children(&mut cursor) {
                     match child.kind() {
                         "class_name" | "namespace" | "constant" => {
                             name = self.node_text(&child).to_string();
                         }
                         "type_arguments" | "type_args" => {
                             let mut args_cursor = child.walk();
-                            for arg in child.children(&mut args_cursor) {
+                            for arg in child.named_children(&mut args_cursor) {
                                 if let Ok(t) = self.visit_type(arg) {
                                     args.push(t);
                                 }
@@ -930,7 +973,7 @@ impl<'a> Visitor<'a> {
             // Parenthesized type
             "parenthesized_type" | "grouped_type" => {
                 let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
+                for child in node.named_children(&mut cursor) {
                     if let Ok(t) = self.visit_type(child) {
                         return Ok(t);
                     }
@@ -950,10 +993,10 @@ impl<'a> Visitor<'a> {
 
         // Look for type arguments
         let mut args = Vec::new();
-        for child in node.children(&mut cursor) {
+        for child in node.named_children(&mut cursor) {
             if child.kind() == "type_arguments" || child.kind() == "type_args" {
                 let mut args_cursor = child.walk();
-                for arg in child.children(&mut args_cursor) {
+                for arg in child.named_children(&mut args_cursor) {
                     if let Ok(t) = self.visit_type(arg) {
                         args.push(t);
                     }
@@ -975,26 +1018,13 @@ impl<'a> Visitor<'a> {
         }
     }
 
-    /// Visit a record field
-    fn visit_record_field(&self, node: Node) -> Result<(String, RbsType), ParseError> {
-        let mut name = String::new();
-        let mut field_type = RbsType::Untyped;
-        let mut cursor = node.walk();
-
-        for child in node.children(&mut cursor) {
-            match child.kind() {
-                "record_key" | "key" | "symbol" | "identifier" => {
-                    name = self.node_text(&child).trim_start_matches(':').to_string();
-                }
-                _ => {
-                    if let Ok(t) = self.visit_type(child) {
-                        field_type = t;
-                    }
-                }
-            }
-        }
-
-        Ok((name, field_type))
+    fn record_key_is_optional(&self, record: &Node<'_>, key: &Node<'_>) -> bool {
+        let prefix = &self.source.as_bytes()[record.start_byte()..key.start_byte()];
+        prefix
+            .iter()
+            .rev()
+            .find(|byte| !byte.is_ascii_whitespace())
+            .is_some_and(|byte| *byte == b'?')
     }
 
     /// Parse a simple type from text
