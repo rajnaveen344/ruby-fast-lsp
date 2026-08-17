@@ -1,6 +1,6 @@
 {
   "name": "@ruby-fast/lsp-darwin-arm64",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "description": "ruby-fast-lsp binary for macOS ARM64 (Apple Silicon)",
   "license": "MIT",
   "repository": {

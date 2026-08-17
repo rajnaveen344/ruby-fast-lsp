@@ -987,10 +987,10 @@ impl IndexingCoordinator {
         // Install a providerless processor for the active-file frontier.
         // Ordinary Ruby facts do not depend on the JVM catalog and are the
         // interactive critical path. The exact JRuby provider is built
-        // concurrently below and handed to the running generation at the first
-        // bounded tail boundary after it becomes ready. Only files collected
-        // before that handoff need catalog-sensitive replay before this project
-        // reports readiness.
+        // concurrently with that frontier. Exhaustive project files and locked
+        // gems start after the catalog exists so they can share the cooperative
+        // partition; only frontier files collected before that need catalog-
+        // sensitive replay before this project reports readiness.
         server.set_runtime_classpath_fingerprint(&self.workspace_root, None);
         server.set_jruby_import_provider(&self.workspace_root, None);
         self.jruby_import_provider = None;
@@ -1036,11 +1036,8 @@ impl IndexingCoordinator {
         let is_jruby = runtime_selection
             .as_ref()
             .is_some_and(|runtime| runtime.implementation == RuntimeImplementation::Jruby);
-        let (runtime_provider_ready_tx, runtime_provider_ready_rx) =
-            tokio::sync::oneshot::channel();
         let runtime_provider = async move {
             if !is_jruby {
-                let _ = runtime_provider_ready_tx.send(Ok(None));
                 return Ok::<_, anyhow::Error>(((None, None), Duration::default()));
             }
             let started = Instant::now();
@@ -1054,11 +1051,6 @@ impl IndexingCoordinator {
                 IndexingWorkClass::RuntimeCompanionParallelIo,
             )
             .await;
-            let readiness = result
-                .as_ref()
-                .map(|(provider, _)| provider.clone())
-                .map_err(|error| error.to_string());
-            let _ = runtime_provider_ready_tx.send(readiness);
             Ok((result?, started.elapsed()))
         };
 
@@ -1117,7 +1109,9 @@ impl IndexingCoordinator {
         let project_indexing = async {
             // Project declarations are the interactive navigation critical
             // path. The active pass owns all but one CPU lane; that final lane
-            // is reserved for its exact JRuby runtime companion.
+            // is reserved for its exact JRuby runtime companion. Exhaustive
+            // remaining files wait until this join ends so they can overlap
+            // locked gem construction on the cooperative partition.
             self.transition_indexing_status(
                 server,
                 crate::indexing_status::IndexingPhase::IndexingProject,
@@ -1136,15 +1130,13 @@ impl IndexingCoordinator {
             server
                 .indexing_resources
                 .mark_project_navigation_complete_if_active(&self.workspace_root);
-            self.collect_remaining_project_facts(server, Some(runtime_provider_ready_rx))
-                .await?;
             Ok::<Duration, anyhow::Error>(project_start.elapsed())
         };
         // Poll the active dependency frontier before the other companion so
         // its exact locked source enters the governor queue first. The project
         // frontier releases its large parallel claim after the bounded target
-        // files, allowing this gem work and the exact runtime provider to
-        // overlap before exhaustive project scanning resumes.
+        // files, allowing exhaustive gems and remaining project files to share
+        // the cooperative partition instead of gems waiting behind the 50s tail.
         let (startup_gem_result, project_result, runtime_provider_result) =
             tokio::join!(startup_gem_indexing, project_indexing, runtime_provider);
         let ((provider, runtime_archive), runtime_provider_dur) = runtime_provider_result?;
@@ -1192,9 +1184,15 @@ impl IndexingCoordinator {
         let runtime_dur = runtime_selection_dur + runtime_provider_dur;
 
         // The exact dependency seed is now complete. Stream locked gems on the
-        // reserved companion lane while the active project's bounded Java-
-        // sensitive subset is replaced on its five project lanes.
+        // cooperative companion partition while exhaustive project files use the
+        // other partition. Waiting for the tail before gem work left gems and
+        // JARs queued behind a 50s visitor with idle lanes.
         let dependencies_start = Instant::now();
+        if let Some(provider) = self.jruby_import_provider.clone() {
+            if let Some(project_indexer) = self.project_indexer.as_mut() {
+                project_indexer.install_jruby_import_provider(provider);
+            }
+        }
         let gem_indexer = self.configure_discovered_gem_indexer(gem_indexer);
         let gem_workspace_root = self.workspace_root.clone();
         let gem_cancellation = self.resource_cancellation();
@@ -1213,43 +1211,47 @@ impl IndexingCoordinator {
             gem_priority_keys,
             dependency_navigation_demands,
         );
-        let provider_present = self.jruby_import_provider.is_some();
-        let project_completion = async {
-            let replay_dur = if provider_present {
-                let replay_start = Instant::now();
-                let replayed = self
-                    .replay_jruby_catalog_sensitive_project_facts(server)
-                    .await?;
-                info!(
-                    "Replaced {} JRuby catalog-sensitive project file(s) after exact provider setup",
-                    replayed
-                );
-                replay_start.elapsed()
-            } else {
-                self.discard_jruby_replay_semantic_context(server).await?;
-                Duration::default()
-            };
-            drop(project_navigation_reservation.take());
-            crate::runtime::jruby::imports::log_jruby_call_host_probe(
-                "project_navigation_ready",
-                &self.workspace_root,
-            );
-            self.transition_indexing_status(
-                server,
-                crate::indexing_status::IndexingPhase::ProjectNavigationReady,
-            )
-            .await?;
-            self.transition_indexing_status(
-                server,
-                crate::indexing_status::IndexingPhase::IndexingDependencies,
-            )
-            .await?;
-            Ok::<Duration, anyhow::Error>(replay_dur)
+        let remaining_project = async {
+            let remaining_start = Instant::now();
+            self.collect_remaining_project_facts(server, None).await?;
+            Ok::<Duration, anyhow::Error>(remaining_start.elapsed())
         };
-        let (project_completion_result, gem_indexing_result) =
-            tokio::join!(project_completion, gem_indexing);
-        project_dur += project_completion_result?;
+        let (remaining_project_result, gem_indexing_result) =
+            tokio::join!(remaining_project, gem_indexing);
+        project_dur += remaining_project_result?;
         self.gem_indexer = Some(gem_indexing_result?);
+
+        let provider_present = self.jruby_import_provider.is_some();
+        let replay_dur = if provider_present {
+            let replay_start = Instant::now();
+            let replayed = self
+                .replay_jruby_catalog_sensitive_project_facts(server)
+                .await?;
+            info!(
+                "Replaced {} JRuby catalog-sensitive project file(s) after exact provider setup",
+                replayed
+            );
+            replay_start.elapsed()
+        } else {
+            self.discard_jruby_replay_semantic_context(server).await?;
+            Duration::default()
+        };
+        project_dur += replay_dur;
+        drop(project_navigation_reservation.take());
+        crate::runtime::jruby::imports::log_jruby_call_host_probe(
+            "project_navigation_ready",
+            &self.workspace_root,
+        );
+        self.transition_indexing_status(
+            server,
+            crate::indexing_status::IndexingPhase::ProjectNavigationReady,
+        )
+        .await?;
+        self.transition_indexing_status(
+            server,
+            crate::indexing_status::IndexingPhase::IndexingDependencies,
+        )
+        .await?;
         crate::runtime::jruby::imports::log_jruby_call_host_probe(
             "after_dependencies",
             &self.workspace_root,

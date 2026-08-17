@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use crate::core::{
     CallableBlockTemplate, CallableSignature, CallableTypeTemplate, FullyQualifiedName, LiteralKey,
-    LiteralValue, MethodParamKind, RubyConstant, RubyMethod, RubyType, ShapeExactness, ShapeField,
-    ShapeStability, ShapeType,
+    LiteralValue, MethodFact, MethodParamKind, RubyConstant, RubyMethod, RubyType, ShapeExactness,
+    ShapeField, ShapeStability, ShapeType,
 };
 use crate::engine::AnalysisQuery;
 use crate::inference::higher_order::{
@@ -70,6 +70,13 @@ pub(crate) fn prepare_rbs_higher_order_call(
     )
 }
 
+fn receiver_uses_embedded_rbs_without_engine(receiver_type: &RubyType) -> bool {
+    matches!(
+        receiver_type,
+        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_)
+    )
+}
+
 /// Prepare a higher-order call from ordinary file-owned method facts, falling
 /// back to the embedded language signatures only when no project signature
 /// fact supplies callable evidence.
@@ -79,54 +86,45 @@ pub(crate) fn prepare_higher_order_call(
     method_name: &str,
     argument_types: &[RubyType],
 ) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
+    if receiver_uses_embedded_rbs_without_engine(receiver_type) {
+        return prepare_rbs_higher_order_call(receiver_type, method_name, argument_types);
+    }
     if let Some(query) = query {
         let method = RubyMethod::new(method_name)
             .map_err(|_| crate::core::UnknownReason::UnsupportedCallable)?;
         let signature_facts = query.resolve_method_signature_facts_for_type(receiver_type, &method);
-        let signatures = signature_facts
-            .iter()
-            .flat_map(|fact| fact.callable_signatures().iter().cloned())
-            .collect::<Vec<_>>();
-        if !signatures.is_empty() {
-            let receiver_parameter_names = signatures[0].receiver_type_parameters.clone();
-            if signatures
-                .iter()
-                .skip(1)
-                .any(|signature| signature.receiver_type_parameters != receiver_parameter_names)
-            {
-                return Err(crate::core::UnknownReason::AmbiguousCallableOverload);
-            }
-            let receiver_bindings = if receiver_parameter_names.is_empty() {
-                Vec::new()
-            } else {
-                let (_receiver_name, type_arguments) = rbs_receiver_identity(receiver_type)
-                    .ok_or(crate::core::UnknownReason::IncompleteBlockInput)?;
-                if receiver_parameter_names.len() != type_arguments.len() {
-                    return Err(crate::core::UnknownReason::IncompleteBlockInput);
-                }
-                receiver_parameter_names
-                    .into_iter()
-                    .zip(type_arguments)
-                    .collect()
-            };
-            return prepare_callable_set(
-                Some(receiver_type),
-                &signatures,
-                &receiver_bindings,
-                argument_types,
-            );
-        }
+        return fallback_unsupported_callable(
+            prepare_from_callable_signatures(Some(receiver_type), &signature_facts, argument_types),
+            || prepare_rbs_higher_order_call(receiver_type, method_name, argument_types),
+        );
     }
     prepare_rbs_higher_order_call(receiver_type, method_name, argument_types)
 }
 
-pub(crate) fn prepare_forwarded_higher_order_call(
-    query: &AnalysisQuery<'_>,
+/// One engine signature lookup shared by callable, forwarded-block, and
+/// direct-yield preparation. Collection receivers skip the engine and use the
+/// same embedded RBS path as ordinary Array/Hash method returns.
+pub(crate) fn prepare_higher_order_call_with_fallbacks(
+    query: Option<&AnalysisQuery<'_>>,
     receiver_type: Option<&RubyType>,
     implicit_namespace: Option<&FullyQualifiedName>,
     method_name: &str,
     argument_types: &[RubyType],
 ) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
+    if let Some(receiver_type) = receiver_type
+        .filter(|receiver_type| receiver_uses_embedded_rbs_without_engine(receiver_type))
+    {
+        return prepare_rbs_higher_order_call(receiver_type, method_name, argument_types);
+    }
+
+    let Some(query) = query else {
+        return receiver_type.map_or(
+            Err(crate::core::UnknownReason::UnsupportedCallable),
+            |receiver_type| {
+                prepare_rbs_higher_order_call(receiver_type, method_name, argument_types)
+            },
+        );
+    };
     let method = RubyMethod::new(method_name)
         .map_err(|_| crate::core::UnknownReason::UnsupportedCallable)?;
     let facts = match (receiver_type, implicit_namespace) {
@@ -136,6 +134,91 @@ pub(crate) fn prepare_forwarded_higher_order_call(
         (None, Some(namespace)) => query.resolve_method_signature_facts(namespace, &method),
         (None, None) => return Err(crate::core::UnknownReason::IncompleteBlockInput),
     };
+    fallback_unsupported_callable(
+        prepare_from_callable_signatures(receiver_type, &facts, argument_types),
+        || {
+            fallback_unsupported_callable(
+                prepare_forwarded_from_facts(query, &facts, argument_types),
+                || {
+                    fallback_unsupported_callable(
+                        prepare_direct_yield_from_facts(&facts, argument_types),
+                        || {
+                            receiver_type.map_or(
+                                Err(crate::core::UnknownReason::UnsupportedCallable),
+                                |receiver_type| {
+                                    prepare_rbs_higher_order_call(
+                                        receiver_type,
+                                        method_name,
+                                        argument_types,
+                                    )
+                                },
+                            )
+                        },
+                    )
+                },
+            )
+        },
+    )
+}
+
+fn fallback_unsupported_callable(
+    result: Result<PreparedCallableSet, crate::core::UnknownReason>,
+    next: impl FnOnce() -> Result<PreparedCallableSet, crate::core::UnknownReason>,
+) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
+    match result {
+        Err(crate::core::UnknownReason::UnsupportedCallable) => next(),
+        other => other,
+    }
+}
+
+fn prepare_from_callable_signatures(
+    receiver_type: Option<&RubyType>,
+    signature_facts: &[MethodFact],
+    argument_types: &[RubyType],
+) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
+    let signatures = signature_facts
+        .iter()
+        .flat_map(|fact| fact.callable_signatures().iter().cloned())
+        .collect::<Vec<_>>();
+    if signatures.is_empty() {
+        return Err(crate::core::UnknownReason::UnsupportedCallable);
+    }
+    let receiver_parameter_names = signatures[0].receiver_type_parameters.clone();
+    if signatures
+        .iter()
+        .skip(1)
+        .any(|signature| signature.receiver_type_parameters != receiver_parameter_names)
+    {
+        return Err(crate::core::UnknownReason::AmbiguousCallableOverload);
+    }
+    let receiver_bindings = if receiver_parameter_names.is_empty() {
+        Vec::new()
+    } else {
+        let receiver_type =
+            receiver_type.ok_or(crate::core::UnknownReason::IncompleteBlockInput)?;
+        let (_receiver_name, type_arguments) = rbs_receiver_identity(receiver_type)
+            .ok_or(crate::core::UnknownReason::IncompleteBlockInput)?;
+        if receiver_parameter_names.len() != type_arguments.len() {
+            return Err(crate::core::UnknownReason::IncompleteBlockInput);
+        }
+        receiver_parameter_names
+            .into_iter()
+            .zip(type_arguments)
+            .collect()
+    };
+    prepare_callable_set(
+        receiver_type,
+        &signatures,
+        &receiver_bindings,
+        argument_types,
+    )
+}
+
+fn prepare_forwarded_from_facts(
+    query: &AnalysisQuery<'_>,
+    facts: &[MethodFact],
+    argument_types: &[RubyType],
+) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
     let mut forwarded_targets = Vec::new();
     for fact in facts {
         let Some(forwarded) = fact.forwarded_block_call() else {
@@ -176,22 +259,10 @@ pub(crate) fn prepare_forwarded_higher_order_call(
     prepare_higher_order_call(Some(query), target_receiver, target_method.as_str(), &[])
 }
 
-pub(crate) fn prepare_direct_yield_higher_order_call(
-    query: &AnalysisQuery<'_>,
-    receiver_type: Option<&RubyType>,
-    implicit_namespace: Option<&FullyQualifiedName>,
-    method_name: &str,
+fn prepare_direct_yield_from_facts(
+    facts: &[MethodFact],
     argument_types: &[RubyType],
 ) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
-    let method = RubyMethod::new(method_name)
-        .map_err(|_| crate::core::UnknownReason::UnsupportedCallable)?;
-    let facts = match (receiver_type, implicit_namespace) {
-        (Some(receiver_type), _) => {
-            query.resolve_method_signature_facts_for_type(receiver_type, &method)
-        }
-        (None, Some(namespace)) => query.resolve_method_signature_facts(namespace, &method),
-        (None, None) => return Err(crate::core::UnknownReason::IncompleteBlockInput),
-    };
     let mut block_parameter_sets = Vec::new();
     for fact in facts {
         let Some(direct_yield) = fact.direct_yield_call() else {

@@ -1537,36 +1537,14 @@ impl FactCollector {
             .unwrap_or_default();
         let engine = self.analysis_engine.read();
         let query = crate::engine::AnalysisQuery::new(&engine);
-        let direct = receiver_type.as_ref().map_or_else(
-            || Err(UnknownReason::UnsupportedCallable),
-            |receiver_type| {
-                crate::inference::rbs::prepare_higher_order_call(
-                    Some(&query),
-                    receiver_type,
-                    &method_name,
-                    &argument_types,
-                )
-            },
-        );
-        direct.or_else(|_| {
-            let namespace = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
-            crate::inference::rbs::prepare_forwarded_higher_order_call(
-                &query,
-                receiver_type.as_ref(),
-                Some(&namespace),
-                &method_name,
-                &argument_types,
-            )
-            .or_else(|_| {
-                crate::inference::rbs::prepare_direct_yield_higher_order_call(
-                    &query,
-                    receiver_type.as_ref(),
-                    Some(&namespace),
-                    &method_name,
-                    &argument_types,
-                )
-            })
-        })
+        let namespace = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
+        crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
+            Some(&query),
+            receiver_type.as_ref(),
+            Some(&namespace),
+            &method_name,
+            &argument_types,
+        )
     }
 
     fn infer_rbs_higher_order_call_outcome(
