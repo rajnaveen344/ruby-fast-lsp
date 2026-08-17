@@ -89,7 +89,8 @@ pub struct FactCollector {
     /// `ConstantTargetNode` in left-to-right order.
     pub multi_write_lhs_types: Vec<Vec<RubyType>>,
     pub yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
-    pub proc_return_types_by_local: HashMap<String, RubyType>,
+    pub(crate) proc_return_types_by_local:
+        HashMap<String, crate::inference::higher_order::KnownProcType>,
     /// Nonlocal writes currently being traversed. Their target facts are
     /// collected before Prism visits the RHS, but reads inside that RHS must
     /// observe the previous value rather than the not-yet-completed write.
@@ -110,6 +111,7 @@ pub struct FactCollector {
     local_read_types: Vec<(TextRange, RubyType)>,
     expression_unknown_reasons: Vec<(TextRange, UnknownReason)>,
     constant_type_equations: Vec<ConstantTypeEquation>,
+    constant_callable_bodies: Vec<crate::core::ConstantCallableBodyFact>,
     local_method_candidates: Arc<HashSet<FullyQualifiedName>>,
     /// Same-pass method identities whose complete collected declaration set is
     /// currently public and available. `Arc::make_mut` keeps updates O(1) in
@@ -162,6 +164,123 @@ pub struct NullFactCollectorExtensionHost;
 impl FactCollectorExtensionHost for NullFactCollectorExtensionHost {}
 
 impl FactCollector {
+    pub(crate) fn invalidate_escaped_callables_in_value(&mut self, value: &Node<'_>) {
+        if self.proc_return_types_by_local.is_empty() {
+            return;
+        }
+        if crate::indexer::is_static_callable_literal(value)
+            || value.as_local_variable_read_node().is_some()
+        {
+            return;
+        }
+        let mut escaped = EscapedCallableReadCollector::default();
+        escaped.visit(value);
+        self.invalidate_callable_names(escaped.names);
+    }
+
+    fn invalidate_callable_names(&mut self, names: HashSet<String>) {
+        for name in names {
+            let Some(identity) = self
+                .proc_return_types_by_local
+                .get(&name)
+                .map(|callable| callable.identity)
+            else {
+                continue;
+            };
+            for callable in self.proc_return_types_by_local.values_mut() {
+                if callable.identity == identity {
+                    callable.summary = Err(UnknownReason::EscapedCallableValue);
+                }
+            }
+        }
+    }
+
+    fn invalidate_escaped_callables_in_call(&mut self, node: &CallNode<'_>) {
+        if self.proc_return_types_by_local.is_empty() {
+            return;
+        }
+        let mut escaped = EscapedCallableReadCollector::default();
+        if let Some(receiver) = node.receiver() {
+            let direct_invoke = node.name().as_slice() == b"call"
+                && receiver.as_local_variable_read_node().is_some();
+            if !direct_invoke {
+                escaped.visit(&receiver);
+            }
+        }
+        if let Some(arguments) = node.arguments() {
+            escaped.visit_arguments_node(&arguments);
+        }
+        if node
+            .block()
+            .is_some_and(|block| block.as_block_node().is_some())
+        {
+            escaped.visit(node.block().as_ref().expect("checked block presence"));
+        }
+        self.invalidate_callable_names(escaped.names);
+    }
+
+    pub(crate) fn bind_local_callable(
+        &mut self,
+        name: String,
+        mut callable: crate::inference::higher_order::KnownProcType,
+    ) {
+        if callable
+            .summary
+            .as_ref()
+            .is_ok_and(|summary| summary.captures.binary_search(&name).is_ok())
+        {
+            callable.summary = Err(UnknownReason::CallableRecursionUnsupported);
+        }
+        let alias_count = self
+            .proc_return_types_by_local
+            .iter()
+            .filter(|(existing_name, existing)| {
+                existing_name.as_str() != name && existing.identity == callable.identity
+            })
+            .count();
+        if alias_count >= crate::core::callable_body::MAX_CALLABLE_BODY_ALIASES {
+            callable.summary = Err(UnknownReason::CallableBodyBoundExceeded);
+            for existing in self.proc_return_types_by_local.values_mut() {
+                if existing.identity == callable.identity {
+                    existing.summary = Err(UnknownReason::CallableBodyBoundExceeded);
+                }
+            }
+        }
+        self.proc_return_types_by_local.insert(name, callable);
+    }
+
+    fn merge_local_callables(
+        left: HashMap<String, crate::inference::higher_order::KnownProcType>,
+        right: HashMap<String, crate::inference::higher_order::KnownProcType>,
+    ) -> HashMap<String, crate::inference::higher_order::KnownProcType> {
+        let names = left
+            .keys()
+            .chain(right.keys())
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut merged = HashMap::with_capacity(names.len());
+        for name in names {
+            let callable = match (left.get(&name), right.get(&name)) {
+                (Some(left), Some(right)) if left == right => left.clone(),
+                (Some(left), Some(right)) => crate::inference::higher_order::KnownProcType {
+                    identity: left.identity.min(right.identity),
+                    summary: Err(UnknownReason::AmbiguousCallableValue),
+                },
+                (Some(callable), None) | (None, Some(callable)) => {
+                    crate::inference::higher_order::KnownProcType {
+                        identity: callable.identity,
+                        summary: Err(UnknownReason::AmbiguousCallableValue),
+                    }
+                }
+                (None, None) => panic!(
+                    "INVARIANT VIOLATED: callable merge key `{name}` is absent from both branches. This is a bug because keys are derived from those exact maps. Fix: keep key collection and lookup atomic."
+                ),
+            };
+            merged.insert(name, callable);
+        }
+        merged
+    }
+
     pub fn push_warning_diagnostic(
         &mut self,
         range: TextRange,
@@ -273,6 +392,7 @@ impl FactCollector {
             local_read_types: Vec::new(),
             expression_unknown_reasons: Vec::new(),
             constant_type_equations: Vec::new(),
+            constant_callable_bodies: Vec::new(),
             local_method_candidates,
             local_public_method_candidates: Arc::new(HashSet::new()),
             direct_known_namespaces: HashSet::new(),
@@ -1283,11 +1403,16 @@ impl FactCollector {
         if let Some(const_get_type) = self.const_get_reference_type(call_node) {
             return TypeInferenceOutcome::proven(const_get_type);
         }
+        if let Some(outcome) =
+            self.infer_rbs_higher_order_call_outcome(call_node, local_types, None)
+        {
+            return outcome;
+        }
         if let Some(block_return_type) = self.infer_yielding_block_return_type_for_call(call_node) {
             return TypeInferenceOutcome::proven(block_return_type);
         }
-        if let Some(proc_return_type) = self.infer_proc_call_return_type(call_node) {
-            return TypeInferenceOutcome::proven(proc_return_type);
+        if let Some(proc_return_type) = self.infer_proc_call_return_type(call_node, local_types) {
+            return proc_return_type;
         }
 
         let method_name = String::from_utf8_lossy(call_node.name().as_slice());
@@ -1381,6 +1506,204 @@ impl FactCollector {
             &method_name,
             call_node.receiver().is_none(),
         )
+    }
+
+    fn prepare_higher_order_call_for_node(
+        &self,
+        call_node: &CallNode<'_>,
+        local_types: &HashMap<String, RubyType>,
+    ) -> Result<crate::inference::higher_order::PreparedCallableSet, UnknownReason> {
+        let method_name = String::from_utf8_lossy(call_node.name().as_slice());
+        let receiver_type = call_node.receiver().map(|receiver| {
+            project_immediate_hash_receiver_type(
+                &receiver,
+                self.infer_type_from_value_with_locals(&receiver, local_types),
+            )
+        });
+        if receiver_type.as_ref().is_some_and(|receiver| {
+            receiver == &RubyType::Unknown || RubyType::contains_unknown(receiver)
+        }) {
+            return Err(UnknownReason::IncompleteBlockInput);
+        }
+        let argument_types = call_node
+            .arguments()
+            .map(|arguments| {
+                arguments
+                    .arguments()
+                    .iter()
+                    .map(|argument| self.infer_type_from_value_with_locals(&argument, local_types))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let engine = self.analysis_engine.read();
+        let query = crate::engine::AnalysisQuery::new(&engine);
+        let direct = receiver_type.as_ref().map_or_else(
+            || Err(UnknownReason::UnsupportedCallable),
+            |receiver_type| {
+                crate::inference::rbs::prepare_higher_order_call(
+                    Some(&query),
+                    receiver_type,
+                    &method_name,
+                    &argument_types,
+                )
+            },
+        );
+        direct.or_else(|_| {
+            let namespace = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
+            crate::inference::rbs::prepare_forwarded_higher_order_call(
+                &query,
+                receiver_type.as_ref(),
+                Some(&namespace),
+                &method_name,
+                &argument_types,
+            )
+            .or_else(|_| {
+                crate::inference::rbs::prepare_direct_yield_higher_order_call(
+                    &query,
+                    receiver_type.as_ref(),
+                    Some(&namespace),
+                    &method_name,
+                    &argument_types,
+                )
+            })
+        })
+    }
+
+    fn infer_rbs_higher_order_call_outcome(
+        &self,
+        call_node: &CallNode<'_>,
+        local_types: &HashMap<String, RubyType>,
+        prepared: Option<
+            Result<crate::inference::higher_order::PreparedCallableSet, UnknownReason>,
+        >,
+    ) -> Option<TypeInferenceOutcome> {
+        let block_expression = call_node.block()?;
+        let method_name = String::from_utf8_lossy(call_node.name().as_slice());
+        if method_name.ends_with('!') {
+            return None;
+        }
+        let prepared = prepared
+            .unwrap_or_else(|| self.prepare_higher_order_call_for_node(call_node, local_types))
+            .ok()?;
+        if let Some(block) = block_expression.as_block_node() {
+            if block.body().as_ref().is_some_and(|body| {
+                crate::inference::control_flow::has_unsupported_higher_order_exit(body)
+            }) {
+                return Some(TypeInferenceOutcome::unknown(
+                    UnknownReason::UnsupportedBlockFlow,
+                ));
+            }
+            let parameter_types = prepared.block_parameter_types().to_vec();
+            let parameter_names = block_parameter_names(&block);
+            let mut block_locals = local_types.clone();
+            for (index, name) in parameter_names.iter().enumerate() {
+                let parameter_type = parameter_types
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(RubyType::nil_class);
+                block_locals.insert(name.clone(), parameter_type);
+            }
+            let tracked_parameters = parameter_names
+                .iter()
+                .enumerate()
+                .map(|(index, name)| {
+                    (
+                        name.clone(),
+                        parameter_types
+                            .get(index)
+                            .cloned()
+                            .unwrap_or_else(RubyType::nil_class),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut tracker = TypeTracker::new(self.document.content.as_bytes())
+                .with_analysis_engine(self.analysis_engine.clone())
+                .with_analysis_query_cache(self.analysis_query_cache.clone());
+            let namespace = self.scope_tracker.get_ns_stack();
+            if !namespace.is_empty() {
+                tracker.set_current_class(Some(FullyQualifiedName::namespace(namespace)));
+            }
+            let (block_return_type, tracked_post_types) =
+                tracker.track_isolated_block_body(block.body(), &block_locals, &tracked_parameters);
+            let mut post_parameter_types = parameter_types.clone();
+            for (index, ruby_type) in tracked_post_types.into_iter().enumerate() {
+                if let Some(slot) = post_parameter_types.get_mut(index) {
+                    *slot = ruby_type;
+                }
+            }
+            return Some(
+                prepared.finish_with_proven_block_state(&block_return_type, &post_parameter_types),
+            );
+        }
+
+        let Some(block_argument) = block_expression.as_block_argument_node() else {
+            return Some(TypeInferenceOutcome::unknown(
+                UnknownReason::UnsupportedCallable,
+            ));
+        };
+        let Some(expression) = block_argument.expression() else {
+            return Some(TypeInferenceOutcome::unknown(
+                UnknownReason::UnsupportedCallable,
+            ));
+        };
+        if let Some(symbol) = expression.as_symbol_node() {
+            let target = std::str::from_utf8(symbol.unescaped()).ok()?;
+            return Some(
+                prepared.finish_static_method(target, |receiver_type, target| {
+                    self.resolve_method_return_type_outcome_with_private(
+                        receiver_type,
+                        target,
+                        false,
+                    )
+                }),
+            );
+        }
+        let callable = if let Some(local) = expression.as_local_variable_read_node() {
+            let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+            self.proc_return_types_by_local.get(&name).cloned().map(Ok)
+        } else {
+            self.constant_callable_body_for_node(&expression)
+                .map(|result| {
+                    result.map(|summary| crate::inference::higher_order::KnownProcType {
+                        identity: u32::MAX,
+                        summary: Ok(summary),
+                    })
+                })
+        };
+        Some(callable.map_or_else(
+            || TypeInferenceOutcome::unknown(UnknownReason::UnsupportedCallable),
+            |callable| match callable {
+                Err(reason) => TypeInferenceOutcome::unknown(reason),
+                Ok(callable) => {
+                    let mut stack = vec![callable.identity];
+                    prepared.finish_known_proc(
+                        &callable,
+                        |capture| {
+                            local_types.get(capture).cloned().or_else(|| {
+                                self.get_local_var_type(capture, &expression.location())
+                            })
+                        },
+                        |capture, arguments| {
+                            let nested = self.proc_return_types_by_local.get(capture)?.clone();
+                            Some(self.instantiate_known_proc_with_stack(
+                                &nested,
+                                arguments,
+                                local_types,
+                                &expression.location(),
+                                &mut stack,
+                            ))
+                        },
+                        |receiver, method, _arguments| {
+                            self.resolve_method_return_type_outcome_with_private(
+                                receiver,
+                                method.as_str(),
+                                false,
+                            )
+                        },
+                    )
+                }
+            },
+        ))
     }
 
     fn infer_yielding_block_return_type_for_call(
@@ -1592,21 +1915,104 @@ impl FactCollector {
     }
 
     pub fn infer_proc_literal_return_type(&self, value_node: &Node) -> Option<RubyType> {
-        if let Some(lambda) = value_node.as_lambda_node() {
-            return self.infer_proc_body(lambda.body());
-        }
+        let callable = self.infer_known_proc_type(value_node)?;
+        let summary = callable.summary.ok()?;
+        crate::inference::callable_body::instantiate_callable_body(
+            &summary,
+            &[],
+            |capture| self.get_local_var_type(capture, &value_node.location()),
+            |_, _| None,
+            |receiver, method, _arguments| {
+                self.resolve_method_return_type_outcome_with_private(
+                    receiver,
+                    method.as_str(),
+                    false,
+                )
+            },
+        )
+        .into_proven_type()
+    }
 
-        let call = value_node.as_call_node()?;
-        if call.name().as_slice() != b"new" {
-            return None;
+    pub(crate) fn infer_known_proc_type(
+        &self,
+        value_node: &Node,
+    ) -> Option<crate::inference::higher_order::KnownProcType> {
+        crate::indexer::is_static_callable_literal(value_node).then(|| {
+            let scope_id = self.document.variable_scopes().current_scope().expect(
+                "INVARIANT VIOLATED: callable lowering ran without an active lexical scope. This is a bug because FactCollector and VariableScopes must enter and exit scopes together. Fix: keep callable lowering inside the ordinary collector traversal.",
+            );
+            let outer_locals = self
+                .document
+                .variable_scopes()
+                .get_visible_variables(scope_id)
+                .into_iter()
+                .map(|variable| variable.name.to_string());
+            crate::inference::higher_order::KnownProcType {
+                identity: u32::try_from(value_node.location().start_offset()).expect(
+                    "INVARIANT VIOLATED: callable literal offset exceeded u32. This is a bug because analysis ranges already require u32 offsets. Fix: reject oversized source before callable lowering.",
+                ),
+                summary: crate::indexer::lower_callable_literal_with_outer_locals(
+                    value_node,
+                    outer_locals,
+                ),
+            }
+        })
+    }
+
+    fn instantiate_known_proc_with_stack(
+        &self,
+        callable: &crate::inference::higher_order::KnownProcType,
+        arguments: &[RubyType],
+        local_types: &HashMap<String, RubyType>,
+        location: &Location<'_>,
+        stack: &mut Vec<u32>,
+    ) -> TypeInferenceOutcome {
+        if stack.contains(&callable.identity) {
+            return TypeInferenceOutcome::unknown(UnknownReason::CallableRecursionUnsupported);
         }
-        let receiver = call.receiver()?;
-        let constant = receiver.as_constant_read_node()?;
-        if constant.name().as_slice() != b"Proc" {
-            return None;
+        if stack.len() >= crate::core::callable_body::MAX_CALLABLE_BODY_INSTANTIATIONS {
+            return TypeInferenceOutcome::unknown(UnknownReason::CallableBodyBoundExceeded);
         }
-        let block = call.block()?.as_block_node()?;
-        self.infer_proc_body(block.body())
+        let summary = match &callable.summary {
+            Ok(summary) => summary,
+            Err(reason) => return TypeInferenceOutcome::unknown(*reason),
+        };
+        stack.push(callable.identity);
+        let result = crate::inference::callable_body::instantiate_callable_body(
+            summary,
+            arguments,
+            |capture| {
+                local_types
+                    .get(capture)
+                    .cloned()
+                    .or_else(|| self.get_local_var_type(capture, location))
+            },
+            |capture, nested_arguments| {
+                let nested = self.proc_return_types_by_local.get(capture)?.clone();
+                Some(self.instantiate_known_proc_with_stack(
+                    &nested,
+                    nested_arguments,
+                    local_types,
+                    location,
+                    stack,
+                ))
+            },
+            |receiver, method, _arguments| {
+                self.resolve_method_return_type_outcome_with_private(
+                    receiver,
+                    method.as_str(),
+                    false,
+                )
+            },
+        );
+        let popped = stack.pop().expect(
+            "INVARIANT VIOLATED: callable instantiation stack underflowed. This is a bug because every accepted callable pushes exactly one identity. Fix: keep push/evaluate/pop in one function.",
+        );
+        assert_eq!(
+            popped, callable.identity,
+            "INVARIANT VIOLATED: callable instantiation stack order changed during evaluation. This is a bug because nested evaluation must be strictly LIFO. Fix: do not retain or reorder stack entries."
+        );
+        result
     }
 
     fn infer_proc_body(&self, body: Option<Node<'_>>) -> Option<RubyType> {
@@ -1625,17 +2031,70 @@ impl FactCollector {
         self.infer_proc_body(block.body())
     }
 
-    fn infer_proc_call_return_type(&self, call_node: &CallNode<'_>) -> Option<RubyType> {
+    fn infer_proc_call_return_type(
+        &self,
+        call_node: &CallNode<'_>,
+        local_types: &HashMap<String, RubyType>,
+    ) -> Option<TypeInferenceOutcome> {
         if call_node.name().as_slice() != b"call" {
             return None;
         }
         let receiver = call_node.receiver()?;
-        let local = receiver.as_local_variable_read_node()?;
-        let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
-        self.proc_return_types_by_local
-            .get(&name)
-            .filter(|ty| **ty != RubyType::Unknown)
-            .cloned()
+        let callable = if let Some(local) = receiver.as_local_variable_read_node() {
+            let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+            self.proc_return_types_by_local.get(&name)?.clone()
+        } else {
+            match self.constant_callable_body_for_node(&receiver)? {
+                Ok(summary) => crate::inference::higher_order::KnownProcType {
+                    identity: u32::MAX,
+                    summary: Ok(summary),
+                },
+                Err(reason) => return Some(TypeInferenceOutcome::unknown(reason)),
+            }
+        };
+        let argument_types = call_node
+            .arguments()
+            .map(|arguments| {
+                arguments
+                    .arguments()
+                    .iter()
+                    .map(|argument| self.infer_type_from_value_with_locals(&argument, local_types))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Some(self.instantiate_known_proc_with_stack(
+            &callable,
+            &argument_types,
+            local_types,
+            &call_node.location(),
+            &mut Vec::new(),
+        ))
+    }
+
+    fn constant_callable_body_for_node(
+        &self,
+        node: &Node<'_>,
+    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+        let reference = crate::mixin_ref_from_node(node)?;
+        let lexical_context = self.scope_tracker.get_ns_stack();
+        let (constant, _) = self.resolve_constant_value_type_from(
+            &reference.parts,
+            reference.absolute,
+            &lexical_context,
+        )?;
+        let mut local = self
+            .constant_callable_bodies
+            .iter()
+            .filter(|fact| fact.constant == constant)
+            .map(|fact| &fact.summary);
+        if let Some(first) = local.next() {
+            if local.any(|summary| summary != first) {
+                return Some(Err(UnknownReason::AmbiguousCallableValue));
+            }
+            return Some(Ok(first.clone()));
+        }
+        let engine = self.analysis_engine.read();
+        crate::engine::AnalysisQuery::new(&engine).constant_callable_body(&constant)
     }
 
     pub fn infer_assignment_type_from_value(&self, value_node: &Node) -> RubyType {
@@ -1728,21 +2187,36 @@ impl FactCollector {
         ));
     }
 
-    fn infer_block_param_types_for_call(&self, node: &CallNode<'_>) -> Vec<RubyType> {
+    fn infer_block_param_types_for_call(
+        &self,
+        node: &CallNode<'_>,
+    ) -> (
+        Vec<RubyType>,
+        Option<Result<crate::inference::higher_order::PreparedCallableSet, UnknownReason>>,
+    ) {
         if node.block().is_none() {
-            return Vec::new();
+            return (Vec::new(), None);
         }
         if let Some(yield_param_types) = self.infer_block_param_types_from_yielding_method(node) {
-            return yield_param_types;
+            return (yield_param_types, None);
         }
-        let Some(receiver) = node.receiver() else {
-            return Vec::new();
-        };
-
         let method_name = node.name().as_slice();
         let param_count = block_required_param_count(node);
-        let receiver_type =
-            project_immediate_hash_receiver_type(&receiver, self.infer_type_from_value(&receiver));
+        let receiver_type = node.receiver().map(|receiver| {
+            project_immediate_hash_receiver_type(&receiver, self.infer_type_from_value(&receiver))
+        });
+
+        let prepared = self.prepare_higher_order_call_for_node(node, &HashMap::new());
+        let preparation_reason = match prepared {
+            Ok(prepared) => {
+                let parameter_types = prepared.block_parameter_types().to_vec();
+                return (parameter_types, Some(Ok(prepared)));
+            }
+            Err(reason) => reason,
+        };
+        let Some(receiver_type) = receiver_type else {
+            return (Vec::new(), Some(Err(preparation_reason)));
+        };
 
         if shape_reads::is_shape_only(&receiver_type)
             && matches!(
@@ -1755,27 +2229,30 @@ impl FactCollector {
                 Ok(ruby_type) => panic!(
                     "INVARIANT VIOLATED: shape keys projection returned `{ruby_type}` instead of Array. This is a bug because Hash#keys always returns an Array. Fix: keep shape_reads::keys canonical."
                 ),
-                Err(_) => return Vec::new(),
+                Err(_) => return (Vec::new(), Some(Err(preparation_reason))),
             };
             let value_type = match shape_reads::values(&receiver_type) {
                 Ok(RubyType::Array(types)) => RubyType::union(types),
                 Ok(ruby_type) => panic!(
                     "INVARIANT VIOLATED: shape values projection returned `{ruby_type}` instead of Array. This is a bug because Hash#values always returns an Array. Fix: keep shape_reads::values canonical."
                 ),
-                Err(_) => return Vec::new(),
+                Err(_) => return (Vec::new(), Some(Err(preparation_reason))),
             };
             if matches!(method_name, b"each" | b"each_pair") {
                 return if param_count == 1 {
-                    vec![RubyType::Array(vec![key_type, value_type])]
+                    (
+                        vec![RubyType::Array(vec![key_type, value_type])],
+                        Some(Err(preparation_reason)),
+                    )
                 } else {
-                    vec![key_type, value_type]
+                    (vec![key_type, value_type], Some(Err(preparation_reason)))
                 };
             }
             if method_name == b"each_key" {
-                return vec![key_type];
+                return (vec![key_type], Some(Err(preparation_reason)));
             }
             if method_name == b"each_value" {
-                return vec![value_type];
+                return (vec![value_type], Some(Err(preparation_reason)));
             }
             panic!(
                 "INVARIANT VIOLATED: non-Hash iterator reached shape block parameter projection. This is a bug because the method-name guard accepts only each variants. Fix: keep the guard and exhaustive projection branches aligned."
@@ -1783,34 +2260,24 @@ impl FactCollector {
         }
 
         match receiver_type {
-            RubyType::Array(element_types)
-                if matches!(
-                    method_name,
-                    b"each"
-                        | b"map"
-                        | b"collect"
-                        | b"select"
-                        | b"filter"
-                        | b"reject"
-                        | b"find"
-                        | b"detect"
-                        | b"any?"
-                        | b"all?"
-                        | b"none?"
-                ) =>
-            {
-                vec![RubyType::union(element_types)]
-            }
-            RubyType::Array(element_types) if method_name == b"each_with_index" => {
-                vec![RubyType::union(element_types), RubyType::integer()]
-            }
+            // Enumerable#each_with_index currently exposes its pair through a
+            // tuple signature, which is outside the first callable-template
+            // release. Keep this pre-existing precision until tuple templates
+            // are represented; collection transforms above are signature-only.
+            RubyType::Array(element_types) if method_name == b"each_with_index" => (
+                vec![RubyType::union(element_types), RubyType::integer()],
+                Some(Err(preparation_reason)),
+            ),
             RubyType::Hash(key_types, value_types) if method_name == b"each" => {
                 let key_type = RubyType::union(key_types);
                 let value_type = RubyType::union(value_types);
                 if param_count == 1 {
-                    vec![RubyType::Array(vec![key_type, value_type])]
+                    (
+                        vec![RubyType::Array(vec![key_type, value_type])],
+                        Some(Err(preparation_reason)),
+                    )
                 } else {
-                    vec![key_type, value_type]
+                    (vec![key_type, value_type], Some(Err(preparation_reason)))
                 }
             }
             RubyType::Class(_)
@@ -1822,7 +2289,7 @@ impl FactCollector {
             | RubyType::Literal(_)
             | RubyType::Shape(_)
             | RubyType::Union(_)
-            | RubyType::Unknown => Vec::new(),
+            | RubyType::Unknown => (Vec::new(), Some(Err(preparation_reason))),
         }
     }
 
@@ -1890,10 +2357,40 @@ impl FactCollector {
         merge_position_types(existing, yield_types);
     }
 
-    fn record_call_expression_type(&mut self, node: &CallNode<'_>) {
-        let Some(return_type) = self
-            .infer_yielding_block_return_type_for_call(node)
-            .or_else(|| self.infer_proc_call_return_type(node))
+    fn record_call_expression_type(
+        &mut self,
+        node: &CallNode<'_>,
+        prepared_higher_order: Option<
+            Result<crate::inference::higher_order::PreparedCallableSet, UnknownReason>,
+        >,
+    ) {
+        let higher_order_outcome =
+            self.infer_rbs_higher_order_call_outcome(node, &HashMap::new(), prepared_higher_order);
+        let range = self.direct_range(&node.location());
+        if let Some(outcome) = higher_order_outcome.as_ref() {
+            if outcome.unknown_reason().is_some() {
+                self.call_expression_outcomes
+                    .retain(|(outcome_range, _)| *outcome_range != range);
+                self.call_expression_outcomes.push((range, outcome.clone()));
+                self.suppress_deferred_call_outcome(range, "higher-order Unknown outcome");
+                return;
+            }
+        }
+        let proc_outcome = self.infer_proc_call_return_type(node, &HashMap::new());
+        if let Some(outcome) = proc_outcome.as_ref() {
+            if outcome.unknown_reason().is_some() {
+                self.call_expression_outcomes
+                    .retain(|(outcome_range, _)| *outcome_range != range);
+                self.call_expression_outcomes.push((range, outcome.clone()));
+                self.suppress_deferred_call_outcome(range, "callable-body Unknown outcome");
+                return;
+            }
+        }
+
+        let Some(return_type) = higher_order_outcome
+            .and_then(TypeInferenceOutcome::into_proven_type)
+            .or_else(|| self.infer_yielding_block_return_type_for_call(node))
+            .or_else(|| proc_outcome.and_then(TypeInferenceOutcome::into_proven_type))
             .or_else(|| {
                 crate::indexer::inlay_hints::has_multiline_chain_continuation(
                     self.document.analysis_content().as_bytes(),
@@ -1905,9 +2402,20 @@ impl FactCollector {
         else {
             return;
         };
-        let range = self.direct_range(&node.location());
         self.call_expression_outcomes
             .retain(|(outcome_range, _)| *outcome_range != range);
+        self.suppress_deferred_call_outcome(range, "proven special-call outcome");
+        let fact = TypeFact::new(
+            TypeSubject::Expression(range),
+            return_type,
+            range,
+            TypeProvenance::Inferred,
+        );
+        self.type_store.add(fact.clone());
+        self.push_direct_expression_fact(fact);
+    }
+
+    fn suppress_deferred_call_outcome(&mut self, range: TextRange, proof_kind: &str) {
         let mut suppressed_candidates = 0usize;
         for candidate in &mut self.reference_candidates {
             let crate::core::ReferenceCandidateKind::Method {
@@ -1926,7 +2434,7 @@ impl FactCollector {
         }
         assert!(
             suppressed_candidates <= 1,
-            "INVARIANT VIOLATED: one proven special call suppressed multiple deferred outcomes. This is a bug because each CallNode owns at most one method candidate. Fix: emit exactly one candidate for the runtime dispatch."
+            "INVARIANT VIOLATED: one {proof_kind} suppressed multiple deferred outcomes. This is a bug because each CallNode owns at most one method candidate. Fix: emit exactly one candidate for the runtime dispatch."
         );
         if suppressed_candidates == 1 {
             assert!(
@@ -1934,14 +2442,6 @@ impl FactCollector {
                 "INVARIANT VIOLATED: a suppressed deferred call candidate has no collector-local range marker. This is a bug because candidate and marker lifecycles must be identical. Fix: insert and remove deferred ranges with the owning method candidate."
             );
         }
-        let fact = TypeFact::new(
-            TypeSubject::Expression(range),
-            return_type,
-            range,
-            TypeProvenance::Inferred,
-        );
-        self.type_store.add(fact.clone());
-        self.push_direct_expression_fact(fact);
     }
 
     fn constant_reference_type(&self, node: &Node) -> Option<FullyQualifiedName> {
@@ -2535,6 +3035,7 @@ impl FactCollector {
             method_return_outcomes: self.method_return_outcomes.clone(),
             method_return_equations,
             constant_type_equations: self.constant_type_equations.clone(),
+            constant_callable_bodies: self.constant_callable_bodies.clone(),
             call_expression_outcomes,
             expression_unknown_reasons,
             telemetry: self.inference_telemetry(),
@@ -2599,7 +3100,22 @@ impl FactCollector {
             | UnknownReason::InvalidMethodName
             | UnknownReason::UnresolvedMethodReturn
             | UnknownReason::IncompleteUnionMember
-            | UnknownReason::UnprovenRecursiveCycle => panic!(
+            | UnknownReason::UnprovenRecursiveCycle
+            | UnknownReason::UnsupportedCallable
+            | UnknownReason::IncompleteBlockInput
+            | UnknownReason::IncompleteBlockResult
+            | UnknownReason::IncompleteGenericSubstitution
+            | UnknownReason::AmbiguousCallableOverload
+            | UnknownReason::HigherOrderBoundExceeded
+            | UnknownReason::UnsupportedBlockFlow
+            | UnknownReason::UnsupportedCallableBody
+            | UnknownReason::IncompleteCallableInput
+            | UnknownReason::IncompleteCallableCapture
+            | UnknownReason::AmbiguousCallableValue
+            | UnknownReason::EscapedCallableValue
+            | UnknownReason::CallableBodyBoundExceeded
+            | UnknownReason::CallableRecursionUnsupported
+            | UnknownReason::UnsupportedCallableFlow => panic!(
                 "INVARIANT VIOLATED: nonlocal reaching-assignment inference produced a method-call Unknown reason. This is a bug because the selector owns only assignment proof failures. Fix: keep reaching-assignment and method-call reason construction in their respective inference paths."
             ),
         }
@@ -2775,6 +3291,108 @@ fn u32_offset(offset: usize) -> u32 {
 }
 
 impl Visit<'_> for FactCollector {
+    fn visit_case_node(&mut self, node: &CaseNode<'_>) {
+        if let Some(predicate) = node.predicate() {
+            self.visit(&predicate);
+        }
+        let before = self.proc_return_types_by_local.clone();
+        let mut surviving = Vec::new();
+        for condition in node.conditions().iter() {
+            let when = condition.as_when_node().expect(
+                "INVARIANT VIOLATED: an ordinary CaseNode contains a non-When condition. This is a bug because Prism's CaseNode schema permits only WhenNode conditions. Fix: route pattern cases through CaseMatchNode instead of weakening this invariant.",
+            );
+            self.proc_return_types_by_local = before.clone();
+            for expression in when.conditions().iter() {
+                self.visit(&expression);
+            }
+            if let Some(statements) = when.statements() {
+                self.visit(&statements.as_node());
+                if !control_flow::diverges(&statements.as_node()) {
+                    surviving.push(self.proc_return_types_by_local.clone());
+                }
+            } else {
+                surviving.push(self.proc_return_types_by_local.clone());
+            }
+        }
+        self.proc_return_types_by_local = before.clone();
+        if let Some(else_clause) = node.else_clause() {
+            if let Some(statements) = else_clause.statements() {
+                self.visit(&statements.as_node());
+                if !control_flow::diverges(&statements.as_node()) {
+                    surviving.push(self.proc_return_types_by_local.clone());
+                }
+            } else {
+                surviving.push(self.proc_return_types_by_local.clone());
+            }
+        } else {
+            surviving.push(before.clone());
+        }
+        self.proc_return_types_by_local = surviving
+            .into_iter()
+            .reduce(Self::merge_local_callables)
+            .unwrap_or(before);
+    }
+
+    fn visit_if_node(&mut self, node: &IfNode<'_>) {
+        self.visit(&node.predicate());
+        let before = self.proc_return_types_by_local.clone();
+
+        self.proc_return_types_by_local = before.clone();
+        if let Some(statements) = node.statements() {
+            self.visit(&statements.as_node());
+        }
+        let then_callables = self.proc_return_types_by_local.clone();
+        let then_diverges = node
+            .statements()
+            .is_some_and(|statements| control_flow::diverges(&statements.as_node()));
+
+        self.proc_return_types_by_local = before.clone();
+        if let Some(subsequent) = node.subsequent() {
+            self.visit(&subsequent);
+        }
+        let else_callables = self.proc_return_types_by_local.clone();
+        let else_diverges = node
+            .subsequent()
+            .is_some_and(|subsequent| control_flow::diverges(&subsequent));
+
+        self.proc_return_types_by_local = match (then_diverges, else_diverges) {
+            (true, true) => before,
+            (true, false) => else_callables,
+            (false, true) => then_callables,
+            (false, false) => Self::merge_local_callables(then_callables, else_callables),
+        };
+    }
+
+    fn visit_unless_node(&mut self, node: &UnlessNode<'_>) {
+        self.visit(&node.predicate());
+        let before = self.proc_return_types_by_local.clone();
+
+        self.proc_return_types_by_local = before.clone();
+        if let Some(statements) = node.statements() {
+            self.visit(&statements.as_node());
+        }
+        let then_callables = self.proc_return_types_by_local.clone();
+        let then_diverges = node
+            .statements()
+            .is_some_and(|statements| control_flow::diverges(&statements.as_node()));
+
+        self.proc_return_types_by_local = before.clone();
+        if let Some(else_clause) = node.else_clause() {
+            self.visit(&else_clause.as_node());
+        }
+        let else_callables = self.proc_return_types_by_local.clone();
+        let else_diverges = node
+            .else_clause()
+            .is_some_and(|else_clause| control_flow::diverges(&else_clause.as_node()));
+
+        self.proc_return_types_by_local = match (then_diverges, else_diverges) {
+            (true, true) => before,
+            (true, false) => else_callables,
+            (false, true) => then_callables,
+            (false, false) => Self::merge_local_callables(then_callables, else_callables),
+        };
+    }
+
     fn visit_program_node(&mut self, node: &ProgramNode<'_>) {
         // Install exact root-scope flow evidence before the ordinary semantic
         // traversal consumes local receivers. Method bodies do the same from
@@ -2832,7 +3450,9 @@ impl Visit<'_> for FactCollector {
     }
 
     fn visit_call_node(&mut self, node: &CallNode) {
+        self.invalidate_escaped_callables_in_call(node);
         self.process_call_node_entry(node);
+        let mut prepared_higher_order = None;
         let extension_context = self.pending_block_execution_context.take();
         if let Some(context) = extension_context {
             if let Some(receiver) = node.receiver() {
@@ -2940,7 +3560,8 @@ impl Visit<'_> for FactCollector {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                let block_param_types = self.infer_block_param_types_for_call(node);
+                let (block_param_types, prepared) = self.infer_block_param_types_for_call(node);
+                prepared_higher_order = prepared;
                 self.block_param_type_stack.push(block_param_types);
                 let framework_instance_block =
                     crate::is_framework_instance_block_call_name(node.name().as_slice())
@@ -2961,7 +3582,7 @@ impl Visit<'_> for FactCollector {
             }
         }
         self.process_nested_receiver_call_reference_candidate(node);
-        self.record_call_expression_type(node);
+        self.record_call_expression_type(node, prepared_higher_order);
         self.record_current_method_forwarded_yield_types(node);
         self.process_call_node_exit(node);
     }
@@ -3270,6 +3891,37 @@ impl Visit<'_> for FactCollector {
         self.process_global_variable_operator_write_node_entry(node);
         visit_global_variable_operator_write_node(self, node);
         self.process_global_variable_operator_write_node_exit(node);
+    }
+}
+
+#[derive(Default)]
+struct EscapedCallableReadCollector {
+    names: HashSet<String>,
+}
+
+impl<'pr> Visit<'pr> for EscapedCallableReadCollector {
+    fn visit_local_variable_read_node(&mut self, node: &LocalVariableReadNode<'pr>) {
+        self.names
+            .insert(String::from_utf8_lossy(node.name().as_slice()).to_string());
+    }
+
+    fn visit_call_node(&mut self, node: &CallNode<'pr>) {
+        if let Some(receiver) = node.receiver() {
+            let direct_invoke = node.name().as_slice() == b"call"
+                && receiver.as_local_variable_read_node().is_some();
+            if !direct_invoke {
+                self.visit(&receiver);
+            }
+        }
+        if let Some(arguments) = node.arguments() {
+            self.visit_arguments_node(&arguments);
+        }
+        if node
+            .block()
+            .is_some_and(|block| block.as_block_node().is_some())
+        {
+            self.visit(node.block().as_ref().expect("checked block presence"));
+        }
     }
 }
 

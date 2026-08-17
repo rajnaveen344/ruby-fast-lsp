@@ -20,6 +20,7 @@ Supporting docs:
 | -------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | [README.md](README.md)                                                                 | Product overview and usage                      |
 | [docs/structural-hash-shapes.md](docs/structural-hash-shapes.md)                       | Structural Hash behavior and limits             |
+| [docs/higher-order-call-inference.md](docs/higher-order-call-inference.md)             | Higher-order inference behavior and limits      |
 | [NEXT.md](NEXT.md)                                                                     | Forward-looking engineering roadmap             |
 | [src/ARCHITECTURE.md](src/ARCHITECTURE.md)                                             | Current implementation architecture             |
 | [crates/ruby-analysis/src/inference/mod.rs](crates/ruby-analysis/src/inference/mod.rs) | Type-inference proof model and design rationale |
@@ -1510,9 +1511,42 @@ Mandatory repository-wide consequences:
 - Extend blocks, procs, symbol-to-proc, and generic collection transforms
   through one reusable higher-order call model in `ruby-analysis::inference`,
   not method-name cases in hover, inlay hints, completion, or the checker.
+- Parameter-dependent callable literals lower once from the existing Prism
+  tree into an AST-free `CallableBodySummary`. Direct `.call` and higher-order
+  `&callable` must instantiate that same summary; never reparse at use sites or
+  retain parser nodes/source instructions.
+- Local callable identities are bounded flow state. Capture-free constant
+  callables are ordinary file-owned inference facts, resolve through
+  `AnalysisQuery`, participate in stable fingerprints, and survive only the
+  validated project-neutral persistent snapshot lifecycle. Unsupported escape
+  invalidates every alias; conflicting facts, recursion, stale evidence, and
+  any bound excess fail closed with the stable callable-body Unknown reason.
+- Callable-body limits are four parameters, 64 nodes, eight captures, eight
+  aliases, eight nested instantiations, 16 call-constraint solve steps, eight
+  union variants, and eight structural/type levels. Each bound requires exact
+  boundary and +1 tests; never truncate or widen.
+- Callable facts must distinguish receiver-bound generic parameters from
+  method-local parameters and retain RBS `self` as a receiver template until
+  call preparation. Only a fully instantiated canonical `RubyType` or stable
+  explained Unknown may leave the solver.
+- Fixed higher-order limits are eight compatible overloads, eight type
+  variables, four block parameters, 16 binding iterations, eight template
+  levels, and eight block-result union variants. Exceeding any limit publishes
+  `higher_order_bound_exceeded`; never truncate candidates or unions.
+- A higher-order outcome atomically owns its call-result range, including an
+  explained Unknown, while preserving the ordinary method reference candidate
+  for navigation. Deferred ordinary return resolution must not overwrite it.
+- Higher-order method metadata is one optional boxed payload so ordinary method
+  facts pay only a nullable pointer. During one AST call visit, prepare the
+  callable proof once before block traversal and pass that exact ephemeral
+  preparation forward to result solving; never repeat lookup/substitution or
+  retain a parallel semantic cache.
 - New concrete results require a failing positive test, a partial-evidence
   Unknown counterexample, affected-consumer and edit-lifecycle coverage, and
   proportionate release-profile evidence.
+- Test and documentation fixtures must be neutral and synthetic. Never copy a
+  private application name, path, constant, or source fragment into this
+  repository merely to reproduce a semantic shape.
 
 ## Subagent Delegation
 

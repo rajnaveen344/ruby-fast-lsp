@@ -44,6 +44,14 @@ See [Structural Hash Shapes](docs/structural-hash-shapes.md) for the supported
 TypeScript-like Hash behavior, examples, conservative boundaries, and fixed
 inference limits.
 
+See [Higher-Order Call Inference](docs/higher-order-call-inference.md) for
+signature-driven blocks, collection transforms, static `&:method`, known
+callables, forwarding, and fail-closed boundaries.
+
+See [Callable-Body Inference](docs/callable-body-inference.md) for
+parameter-dependent lambda/proc bodies, local captures and aliases, cross-file
+callable constants, deterministic lifecycle behavior, and fixed proof bounds.
+
 See [Next Engineering Goals](NEXT.md) for the forward-looking inference and analysis roadmap.
 
 ## Installation

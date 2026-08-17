@@ -1171,6 +1171,108 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn watched_callable_signature_replaces_and_deletes_dependent_results() {
+        async fn hover_label(server: &RubyLanguageServer, uri: &Url) -> String {
+            let hover = server
+                .hover(HoverParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position: Position::new(1, 2),
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("callable lifecycle hover request must succeed")
+                .expect("the callable result local must retain hover evidence");
+            format!("{:?}", hover.contents)
+        }
+
+        let workspace = tempfile::TempDir::new().unwrap();
+        let consumer_path = workspace.path().join("consumer.rb");
+        let consumer_uri = Url::from_file_path(&consumer_path).unwrap();
+        let signature_path = workspace.path().join("sig/converter.rbs");
+        std::fs::create_dir_all(signature_path.parent().unwrap()).unwrap();
+        let signature_uri = Url::from_file_path(&signature_path).unwrap();
+        let server = RubyLanguageServer::default();
+        server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
+        let source = "result = Converter.new.apply(1) { |value| value.to_s }\nresult\n".to_string();
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: consumer_uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: source,
+                },
+            },
+        )
+        .await;
+
+        std::fs::write(
+            &signature_path,
+            "class Converter\n  def apply: [Input, Output] (Input value) { (Input) -> Output } -> Output\nend\n",
+        )
+        .unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: signature_uri.clone(),
+                    typ: FileChangeType::CREATED,
+                }],
+            },
+        )
+        .await;
+        let created = hover_label(&server, &consumer_uri).await;
+        assert!(
+            created.contains("String"),
+            "created callable signature did not refresh the consumer: {created}"
+        );
+
+        std::fs::write(
+            &signature_path,
+            "class Converter\n  def apply: [Input, Output] (Input value) { (Input) -> Output } -> Array[Output]\nend\n",
+        )
+        .unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: signature_uri.clone(),
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        )
+        .await;
+        let changed = hover_label(&server, &consumer_uri).await;
+        assert!(
+            changed.contains("Array&lt;String&gt;") || changed.contains("Array<String>"),
+            "replacement callable signature did not replace the result: {changed}"
+        );
+
+        std::fs::remove_file(&signature_path).unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: signature_uri,
+                    typ: FileChangeType::DELETED,
+                }],
+            },
+        )
+        .await;
+        let deleted = hover_label(&server, &consumer_uri).await;
+        assert!(
+            deleted.contains("Unknown")
+                && !deleted.contains("String")
+                && !deleted.contains("Array"),
+            "deleted callable signature left a stale concrete result: {deleted}"
+        );
+    }
+
+    #[tokio::test]
     async fn opening_default_external_workspace_file_does_not_make_it_project_owned() {
         let workspace = tempfile::TempDir::new().unwrap();
         let path = workspace.path().join("vendor/opened.rb");

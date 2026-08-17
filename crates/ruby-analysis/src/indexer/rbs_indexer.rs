@@ -50,12 +50,21 @@ pub fn index_rbs(
                     )?;
                 }
                 for method in &class.methods {
-                    push_method(&mut facts, &parts, method, &offsets, file_id, source.len())?;
+                    push_method(
+                        &mut facts,
+                        &parts,
+                        &class.type_params,
+                        method,
+                        &offsets,
+                        file_id,
+                        source.len(),
+                    )?;
                 }
                 push_members(
                     &mut facts,
                     &parts,
                     &namespace,
+                    &class.type_params,
                     &class.members,
                     &offsets,
                     file_id,
@@ -84,12 +93,21 @@ pub fn index_rbs(
                     range,
                 ));
                 for method in &module.methods {
-                    push_method(&mut facts, &parts, method, &offsets, file_id, source.len())?;
+                    push_method(
+                        &mut facts,
+                        &parts,
+                        &module.type_params,
+                        method,
+                        &offsets,
+                        file_id,
+                        source.len(),
+                    )?;
                 }
                 push_members(
                     &mut facts,
                     &parts,
                     &namespace,
+                    &module.type_params,
                     &module.members,
                     &offsets,
                     file_id,
@@ -142,6 +160,7 @@ pub fn index_rbs(
 fn push_method(
     facts: &mut AnalysisIndex,
     parts: &[RubyConstant],
+    owner_type_params: &[rbs_parser::TypeParam],
     method: &MethodDecl,
     offsets: &LineOffsets,
     file_id: SourceFileId,
@@ -196,9 +215,36 @@ fn push_method(
     } else {
         complete_return_type.as_ref().map(ToString::to_string)
     };
+    let owner_type_parameters = owner_type_params
+        .iter()
+        .map(normalized_type_parameter_name)
+        .collect::<Vec<_>>();
+    let mut callable_signatures = Vec::new();
+    for overload in &method.overloads {
+        let method_type_parameters = overload
+            .type_params
+            .iter()
+            .map(normalized_type_parameter_name)
+            .collect::<Vec<_>>();
+        let callable = crate::inference::higher_order::callable_signature_from_rbs(
+            &owner_type_parameters,
+            &method_type_parameters,
+            overload,
+        )
+        .map_err(|reason| {
+            rbs_parser::ParseError::new(format!(
+                "unsupported higher-order RBS signature for {normalized_name}: {}",
+                reason.code()
+            ))
+        })?;
+        if let Some(callable) = callable {
+            callable_signatures.push(callable);
+        }
+    }
     let fact = MethodFact::with_param_facts(fqn.clone(), owner, range, params)
         .with_visibility(method_visibility(method.visibility))
-        .with_signature_metadata(None, return_type_label);
+        .with_signature_metadata(None, return_type_label)
+        .with_callable_signatures(callable_signatures);
     facts
         .symbols
         .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
@@ -292,6 +338,7 @@ fn push_members(
     facts: &mut AnalysisIndex,
     parts: &[RubyConstant],
     namespace: &FullyQualifiedName,
+    owner_type_params: &[rbs_parser::TypeParam],
     members: &[rbs_parser::Member],
     offsets: &LineOffsets,
     file_id: SourceFileId,
@@ -338,7 +385,15 @@ fn push_members(
                         visibility: Visibility::Public,
                         location: attribute.location,
                     };
-                    push_method(facts, parts, &synthetic, offsets, file_id, source_len)?;
+                    push_method(
+                        facts,
+                        parts,
+                        owner_type_params,
+                        &synthetic,
+                        offsets,
+                        file_id,
+                        source_len,
+                    )?;
                 }
                 if matches!(attribute.kind, AttrKind::Writer | AttrKind::Accessor) {
                     let synthetic = MethodDecl {
@@ -352,7 +407,15 @@ fn push_members(
                         visibility: Visibility::Public,
                         location: attribute.location,
                     };
-                    push_method(facts, parts, &synthetic, offsets, file_id, source_len)?;
+                    push_method(
+                        facts,
+                        parts,
+                        owner_type_params,
+                        &synthetic,
+                        offsets,
+                        file_id,
+                        source_len,
+                    )?;
                 }
             }
             rbs_parser::Member::Alias(_)
@@ -361,6 +424,19 @@ fn push_members(
         }
     }
     Ok(())
+}
+
+fn normalized_type_parameter_name(parameter: &rbs_parser::TypeParam) -> String {
+    parameter
+        .name
+        .split_whitespace()
+        .last()
+        .unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: an RBS type parameter has no non-whitespace name. This is a bug because the parser accepted an unusable generic binding. Fix: reject empty type-parameter names during RBS indexing."
+            )
+        })
+        .to_string()
 }
 
 fn push_unresolved_edge(
@@ -598,6 +674,41 @@ end
                 TypeSubject::Parameter { .. } | TypeSubject::MethodReturn(_)
             )),
             "one unsupported overload must prevent a partial concrete contract"
+        );
+    }
+
+    #[test]
+    fn generic_block_templates_survive_rbs_indexing_on_the_method_fact() {
+        let source = r#"class Transformer
+  def apply: [Input, Output] (Input value) { (Input) -> Output } -> Output
+end
+"#;
+        let facts = index_rbs(SourceFileId(11), source)
+            .expect("the generic callable signature fixture must parse");
+        let method = facts
+            .methods
+            .iter()
+            .find(|fact| fact.fqn.name() == "apply")
+            .expect("the block-bearing method must be indexed");
+        let [signature] = method.callable_signatures() else {
+            panic!(
+                "INVARIANT VIOLATED: one RBS overload did not produce exactly one callable signature. This is a bug because callable overload evidence must remain file-owned and complete. Fix: retain every supported block-bearing MethodType on its MethodFact."
+            );
+        };
+        assert_eq!(signature.type_parameters, ["Input", "Output"]);
+        assert_eq!(
+            signature.block.parameters,
+            [crate::core::CallableTypeTemplate::Variable(
+                "Input".to_string()
+            )]
+        );
+        assert_eq!(
+            signature.block.return_type,
+            crate::core::CallableTypeTemplate::Variable("Output".to_string())
+        );
+        assert_eq!(
+            signature.return_type,
+            crate::core::CallableTypeTemplate::Variable("Output".to_string())
         );
     }
 }

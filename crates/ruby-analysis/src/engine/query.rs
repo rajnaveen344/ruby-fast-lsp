@@ -35,6 +35,13 @@ impl<'a> AnalysisQuery<'a> {
         self.engine.execution_context_at(file_id, byte_offset)
     }
 
+    pub(crate) fn constant_callable_body(
+        &self,
+        constant: &FullyQualifiedName,
+    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+        self.engine.constant_callable_body(constant)
+    }
+
     pub fn type_at(
         &self,
         subject: &TypeSubject,

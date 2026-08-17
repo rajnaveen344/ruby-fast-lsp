@@ -635,6 +635,22 @@ impl<'a> AnalysisQuery<'a> {
         )
     }
 
+    pub fn resolve_method_signature_facts_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+    ) -> Vec<MethodFact> {
+        self.resolve_method_signature_facts_for_type_inner(receiver_type, method, true, None)
+    }
+
+    pub fn resolve_public_method_signature_facts_for_type(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+    ) -> Vec<MethodFact> {
+        self.resolve_method_signature_facts_for_type_inner(receiver_type, method, false, None)
+    }
+
     fn resolve_method_signature_facts_for_type_inner(
         &self,
         receiver_type: &RubyType,

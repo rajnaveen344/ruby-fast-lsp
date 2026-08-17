@@ -20,45 +20,43 @@ inference module Rustdoc. Current acceptance results belong in
 `support/type_inference/scorecard.toml`; measurements belong under
 `support/performance/`.
 
-## P0: Higher-order calls and generic block inference
+Higher-order calls and generic block inference are current functionality, not
+roadmap work. One bounded, signature-driven callable model relates receiver and
+method generics, block inputs and exhaustive results, and the call result for
+explicit blocks, core collection transforms, static `&:method`, statically
+known callable values, bounded forwarding/direct-yield forms, and project RBS.
+The concise behavior contract lives in
+[`docs/higher-order-call-inference.md`](docs/higher-order-call-inference.md).
 
-Build one reusable model for methods whose result depends on a block or proc.
-The current analysis supports selected yielding methods and proc/lambda paths,
-but it does not have a general callable constraint model that relates:
+Parameter-dependent callable bodies are also current functionality. Statically
+visible lambda/proc literals are lowered once into bounded AST-free summaries;
+direct `.call` and `&callable` share one evaluator, while capture-free constant
+callables retain ordinary cross-file ownership and persistence. The concise
+contract lives in
+[`docs/callable-body-inference.md`](docs/callable-body-inference.md).
 
-- receiver type arguments;
-- method type variables and overloads;
-- block parameter types;
-- block return types; and
-- the resulting method type.
+## P0: Broader Ruby yield flow
 
-This layer should support explicit blocks, lambdas/procs, block forwarding, and
-static symbol-to-proc forms such as `&:to_s`. It should be driven by Ruby/RBS
-signatures rather than a hard-coded list of collection method names.
+Build on the accepted callable model without adding a second inference path.
+The next precision slice is broader Ruby-defined yielding methods whose yield
+sites require ordinary control-flow joins rather than the current bounded
+direct relation.
 
-Representative outcome:
+Representative next outcome:
 
 ```ruby
-values = [1, 2, "1", "2"]
-strings = values.map(&:to_s) # Array<String>
-strings.first.upcase         # String receiver
+def transform(values)
+  return yield(values.first) if fast_path?
+  yield(values.last)
+end
 ```
-
-The proof is valid only if the element type is complete, `to_s` resolves for
-every reachable element member, every selected return is proven, and generic
-substitution produces one canonical result. One unresolved member, callable,
-overload, or substitution keeps the result Unknown.
 
 Exit criteria:
 
-- `map`, `collect`, `filter_map`, `each_with_object`, and representative
-  user-defined/RBS yielding methods use the same abstraction.
-- Static `&:method` and its equivalent explicit block produce the same type.
-- Union receivers are exhaustive and partial evidence remains Unknown.
-- Hover, inlay hints, completion, chained dispatch, navigation, diagnostics,
-  and the check CLI consume the same stored outcome.
-- Edit/reindex tests prove stale block and result types are removed.
-- Scorecard, real-project precision, and release performance gates pass.
+- Multiple compatible direct yield sites join through ordinary flow evidence.
+- Explicit block, static-symbol, and known-callable forms remain equivalent
+  when they have the same complete proof.
+- Scorecard, precision, lifecycle, and release performance gates pass.
 
 ## P1: Type algebra needed by callable solving
 

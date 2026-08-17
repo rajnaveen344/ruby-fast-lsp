@@ -155,7 +155,43 @@ end
         let declarations = result.unwrap();
         if let Declaration::Module(module) = &declarations[0] {
             assert_eq!(module.name, "Enumerable");
+            assert_eq!(module.type_params, vec![TypeParam::new("Elem")]);
+            let method = module
+                .methods
+                .first()
+                .expect("Enumerable fixture must retain map");
+            let overload = method
+                .overloads
+                .first()
+                .expect("map fixture must retain its overload");
+            assert_eq!(overload.type_params, vec![TypeParam::new("U")]);
+            assert!(
+                overload
+                    .block
+                    .as_ref()
+                    .expect("map fixture must retain its block")
+                    .required
+            );
         }
+    }
+
+    #[test]
+    fn generic_mixin_arguments_are_preserved() {
+        let declarations = parse("class Collection[Elem]\n  include Enumerable[Elem]\nend\n")
+            .expect("generic mixin fixture must parse");
+        let Declaration::Class(class) = &declarations[0] else {
+            panic!(
+                "INVARIANT VIOLATED: generic class fixture produced a non-class declaration. This is a bug because the parser accepted `class Collection`. Fix: preserve declaration kinds during conversion."
+            );
+        };
+        assert_eq!(class.type_params, vec![TypeParam::new("Elem")]);
+        assert_eq!(
+            class.members,
+            vec![Member::Include(RbsType::generic(
+                "Enumerable",
+                vec![RbsType::Class("Elem".to_string())]
+            ))]
+        );
     }
 
     #[test]

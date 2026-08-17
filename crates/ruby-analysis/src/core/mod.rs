@@ -4,6 +4,8 @@
 //! dependencies. It is the shared contract for future editor and agent
 //! consumers.
 
+pub(crate) mod callable_body;
+pub(crate) mod callable_signature;
 pub mod constant_type_equation;
 pub mod diagnostic_candidate_store;
 pub mod diagnostic_store;
@@ -27,6 +29,14 @@ pub mod symbol_store;
 pub mod type_inference_outcome;
 pub mod type_store;
 
+pub(crate) use callable_body::{
+    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
+    ConstantCallableBodyFact,
+};
+pub(crate) use callable_signature::{
+    CallableBlockTemplate, CallableParameterTemplate, CallableSignature, CallableTypeTemplate,
+    DirectYieldCall, ForwardedBlockCall,
+};
 pub use constant_type_equation::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
 };

@@ -18,6 +18,9 @@ impl FactCollector {
         explicit_type: Option<RubyType>,
     ) {
         let variable_name = String::from_utf8_lossy(name).to_string();
+        if let Some(value) = value_node {
+            self.invalidate_escaped_callables_in_value(value);
+        }
 
         // Infer type from value if available
         let (inferred_type, inferred_unknown_reason) = if let Some(ty) = explicit_type {
@@ -59,9 +62,15 @@ impl FactCollector {
             return;
         }
         if let Some(value) = value_node {
-            if let Some(return_type) = self.infer_proc_literal_return_type(value) {
-                self.proc_return_types_by_local
-                    .insert(variable_name.clone(), return_type);
+            if let Some(return_type) = self.infer_known_proc_type(value) {
+                self.bind_local_callable(variable_name.clone(), return_type);
+            } else if let Some(alias) = value.as_local_variable_read_node() {
+                let alias_name = String::from_utf8_lossy(alias.name().as_slice()).to_string();
+                if let Some(callable) = self.proc_return_types_by_local.get(&alias_name).cloned() {
+                    self.bind_local_callable(variable_name.clone(), callable);
+                } else {
+                    self.proc_return_types_by_local.remove(&variable_name);
+                }
             } else {
                 self.proc_return_types_by_local.remove(&variable_name);
             }

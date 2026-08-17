@@ -214,6 +214,31 @@ impl FactCollector {
             );
         }
 
+        if let Some(forwarded_block_call) =
+            crate::indexer::forwarded_block::direct_forwarded_block_call(node)
+        {
+            let definition_range = self.direct_range(&full_location);
+            for fact in self
+                .direct_facts
+                .methods
+                .iter_mut()
+                .filter(|fact| fact.fqn == fqn && fact.range == definition_range)
+            {
+                fact.set_forwarded_block_call(Some(forwarded_block_call.clone()));
+            }
+        }
+        if let Some(direct_yield_call) = crate::indexer::forwarded_block::direct_yield_call(node) {
+            let definition_range = self.direct_range(&full_location);
+            for fact in self
+                .direct_facts
+                .methods
+                .iter_mut()
+                .filter(|fact| fact.fqn == fqn && fact.range == definition_range)
+            {
+                fact.set_direct_yield_call(Some(direct_yield_call.clone()));
+            }
+        }
+
         let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 
         let scope_kind = match namespace_kind {

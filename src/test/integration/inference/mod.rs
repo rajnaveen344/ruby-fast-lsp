@@ -6,6 +6,8 @@
 mod attrs;
 mod branch_variable_return;
 mod call_contexts;
+mod callable_bodies;
+mod higher_order_calls;
 mod inheritance_graphs;
 mod method_chaining;
 mod mixin_ambiguity;

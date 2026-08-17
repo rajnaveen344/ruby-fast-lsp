@@ -138,21 +138,41 @@
 //! reduce false Unknowns, but it does not get to regress the established
 //! latency, CPU, or RSS gates.
 //!
-//! # Higher-order call boundary
+//! # Higher-order calls
 //!
-//! The current implementation proves selected yielding methods, block bodies,
-//! proc/lambda calls, and receiver-generic RBS returns. It does **not** yet
-//! provide one general callable-constraint model that solves type variables
-//! from block parameters and block results. Static symbol-to-proc syntax such
-//! as `items.map(&:to_s)` is therefore a known false-Unknown boundary today.
+//! [`higher_order`] is the single callable-constraint model for block-bearing
+//! core and project RBS methods, bounded direct Ruby `yield`, proven block
+//! forwarding, statically known proc/lambda bodies, and static `&:method`.
+//! It separates receiver type parameters from method-local type parameters,
+//! instantiates block inputs, constrains every reachable block result, and
+//! substitutes one canonical call result. Type variables and receiver
+//! templates never escape into stored runtime types.
 //!
-//! Extend this as a reusable higher-order call rule, not as a list of editor
-//! or method-name special cases. A static `&:method` can be treated like an
-//! equivalent block only after the block input type is proven, the method
-//! resolves for every reachable union member, and generic substitution proves
-//! the container result. If any member or substitution is incomplete, retain
-//! Unknown. This same abstraction should serve `map`, `collect`,
-//! `filter_map`, `each_with_object`, and user/RBS-declared yielding methods.
+//! Static `&:method` is equivalent to an explicit one-parameter block only
+//! after lookup succeeds for every reachable input member. Dynamic callables,
+//! conflicting overloads, incomplete substitutions, unsupported non-local
+//! exits, or bound excess retain a stable explained Unknown. A higher-order
+//! outcome atomically owns the call result while the ordinary method candidate
+//! remains available for navigation.
+//! Fixed limits are eight compatible overloads, eight type variables, four
+//! block parameters, 16 binding iterations, eight template levels, and eight
+//! block-result union variants. The solver never truncates a candidate set or
+//! union and never widens an incomplete result to `Object`.
+//!
+//! [`callable_body`] evaluates the one AST-free summary emitted during the
+//! indexer's ordinary Prism traversal. Direct `.call` and `&callable` bind
+//! their proven inputs through that same evaluator. Local identities and
+//! aliases remain bounded flow state; only capture-free constant summaries
+//! become file-owned engine facts and persistent dependency products. Capture
+//! reads resolve at invocation, method calls delegate to engine lookup, and
+//! shapes reuse the canonical shape algebra. Unsupported escape invalidates
+//! every alias; ambiguity, recursion, stale evidence, incomplete inputs, and
+//! bound excess return stable whole-result Unknown reasons.
+//!
+//! Callable-body limits are four parameters, 64 summary nodes, eight captures,
+//! eight aliases, eight nested instantiations, 16 call-constraint steps, eight
+//! result-union variants, and eight structural/type levels. Neither the
+//! summary nor engine facts retain Prism nodes or source snippets.
 //!
 //! # Acceptance contract
 //!
@@ -185,9 +205,11 @@
 //! 5. Add or update the reviewed scorecard case and measure any material hot-
 //!    path or retained-memory change with the release profiler.
 
+pub(crate) mod callable_body;
 pub mod completion;
 pub(crate) mod constant;
 pub mod control_flow;
+pub(crate) mod higher_order;
 pub mod method;
 pub mod rbs;
 pub mod r#type;

@@ -1,7 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use super::memory_estimate::{map_table_bytes, string_heap_bytes, vec_payload_bytes};
-use crate::{FqnId, FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
+use super::memory_estimate::{
+    map_table_bytes, ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
+};
+use crate::{
+    CallableSignature, CallableTypeTemplate, DirectYieldCall, ForwardedBlockCall, FqnId,
+    FullyQualifiedName, RubyMethod, SourceFileId, TextRange,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MethodParamKind {
@@ -55,6 +60,21 @@ pub struct MethodParamFact {
     pub documentation: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct HigherOrderMethodMetadata {
+    pub(crate) callable_signatures: Vec<CallableSignature>,
+    pub(crate) forwarded_block_call: Option<ForwardedBlockCall>,
+    pub(crate) direct_yield_call: Option<DirectYieldCall>,
+}
+
+impl HigherOrderMethodMetadata {
+    fn is_empty(&self) -> bool {
+        self.callable_signatures.is_empty()
+            && self.forwarded_block_call.is_none()
+            && self.direct_yield_call.is_none()
+    }
+}
+
 impl MethodParamFact {
     pub fn new(name: impl Into<String>, kind: MethodParamKind) -> Self {
         let name = name.into();
@@ -97,6 +117,7 @@ pub struct MethodFact {
     pub availability: MethodAvailability,
     pub documentation: Option<String>,
     pub return_type_label: Option<String>,
+    pub(crate) higher_order: Option<Box<HigherOrderMethodMetadata>>,
 }
 
 impl MethodFact {
@@ -118,6 +139,7 @@ impl MethodFact {
             availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
+            higher_order: None,
         }
     }
 
@@ -154,6 +176,7 @@ impl MethodFact {
             availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
+            higher_order: None,
         }
     }
 
@@ -176,6 +199,7 @@ impl MethodFact {
             availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
+            higher_order: None,
         }
     }
 
@@ -226,6 +250,96 @@ impl MethodFact {
         self.return_type_label = return_type_label;
         self
     }
+
+    pub(crate) fn with_callable_signatures(
+        mut self,
+        callable_signatures: Vec<CallableSignature>,
+    ) -> Self {
+        if callable_signatures.is_empty() {
+            if let Some(metadata) = self.higher_order.as_mut() {
+                metadata.callable_signatures.clear();
+            }
+            self.clear_empty_higher_order();
+            return self;
+        }
+        self.higher_order_metadata_mut().callable_signatures = callable_signatures;
+        self
+    }
+
+    pub(crate) fn with_forwarded_block_call(
+        mut self,
+        forwarded_block_call: Option<ForwardedBlockCall>,
+    ) -> Self {
+        self.set_forwarded_block_call(forwarded_block_call);
+        self
+    }
+
+    pub(crate) fn with_direct_yield_call(
+        mut self,
+        direct_yield_call: Option<DirectYieldCall>,
+    ) -> Self {
+        self.set_direct_yield_call(direct_yield_call);
+        self
+    }
+
+    pub(crate) fn set_forwarded_block_call(
+        &mut self,
+        forwarded_block_call: Option<ForwardedBlockCall>,
+    ) {
+        if let Some(forwarded_block_call) = forwarded_block_call {
+            self.higher_order_metadata_mut().forwarded_block_call = Some(forwarded_block_call);
+        } else {
+            if let Some(metadata) = self.higher_order.as_mut() {
+                metadata.forwarded_block_call = None;
+            }
+            self.clear_empty_higher_order();
+        }
+    }
+
+    pub(crate) fn set_direct_yield_call(&mut self, direct_yield_call: Option<DirectYieldCall>) {
+        if let Some(direct_yield_call) = direct_yield_call {
+            self.higher_order_metadata_mut().direct_yield_call = Some(direct_yield_call);
+        } else {
+            if let Some(metadata) = self.higher_order.as_mut() {
+                metadata.direct_yield_call = None;
+            }
+            self.clear_empty_higher_order();
+        }
+    }
+
+    pub(crate) fn callable_signatures(&self) -> &[CallableSignature] {
+        self.higher_order
+            .as_deref()
+            .map(|metadata| metadata.callable_signatures.as_slice())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn forwarded_block_call(&self) -> Option<&ForwardedBlockCall> {
+        self.higher_order
+            .as_deref()
+            .and_then(|metadata| metadata.forwarded_block_call.as_ref())
+    }
+
+    pub(crate) fn direct_yield_call(&self) -> Option<&DirectYieldCall> {
+        self.higher_order
+            .as_deref()
+            .and_then(|metadata| metadata.direct_yield_call.as_ref())
+    }
+
+    fn higher_order_metadata_mut(&mut self) -> &mut HigherOrderMethodMetadata {
+        self.higher_order
+            .get_or_insert_with(|| Box::new(HigherOrderMethodMetadata::default()))
+    }
+
+    fn clear_empty_higher_order(&mut self) {
+        if self
+            .higher_order
+            .as_deref()
+            .is_some_and(HigherOrderMethodMetadata::is_empty)
+        {
+            self.higher_order = None;
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -267,6 +381,7 @@ pub struct StoredMethodFact {
     pub availability: MethodAvailability,
     pub documentation: Option<String>,
     pub return_type_label: Option<String>,
+    pub(crate) higher_order: Option<Box<HigherOrderMethodMetadata>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,6 +407,7 @@ impl StoredMethodFact {
             availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
+            higher_order: None,
         }
     }
 
@@ -317,6 +433,7 @@ impl StoredMethodFact {
             availability: MethodAvailability::Available,
             documentation: None,
             return_type_label: None,
+            higher_order: None,
         }
     }
 }
@@ -718,6 +835,88 @@ fn method_fact_heap_bytes(fact: &StoredMethodFact) -> usize {
             .as_ref()
             .map(string_heap_bytes)
             .unwrap_or(0)
+        + fact
+            .higher_order
+            .as_deref()
+            .map(higher_order_method_metadata_heap_bytes)
+            .unwrap_or(0)
+}
+
+fn higher_order_method_metadata_heap_bytes(metadata: &HigherOrderMethodMetadata) -> usize {
+    std::mem::size_of::<HigherOrderMethodMetadata>()
+        + vec_payload_bytes(&metadata.callable_signatures)
+        + metadata
+            .callable_signatures
+            .iter()
+            .map(callable_signature_heap_bytes)
+            .sum::<usize>()
+        + metadata
+            .forwarded_block_call
+            .as_ref()
+            .map(|forwarded| string_heap_bytes(&forwarded.receiver_parameter))
+            .unwrap_or(0)
+        + metadata
+            .direct_yield_call
+            .as_ref()
+            .map(|direct| {
+                vec_payload_bytes(&direct.parameter_names)
+                    + direct
+                        .parameter_names
+                        .iter()
+                        .map(string_heap_bytes)
+                        .sum::<usize>()
+            })
+            .unwrap_or(0)
+}
+
+fn callable_signature_heap_bytes(signature: &CallableSignature) -> usize {
+    vec_payload_bytes(&signature.receiver_type_parameters)
+        + signature
+            .receiver_type_parameters
+            .iter()
+            .map(string_heap_bytes)
+            .sum::<usize>()
+        + vec_payload_bytes(&signature.type_parameters)
+        + signature
+            .type_parameters
+            .iter()
+            .map(string_heap_bytes)
+            .sum::<usize>()
+        + vec_payload_bytes(&signature.parameters)
+        + signature
+            .parameters
+            .iter()
+            .map(|parameter| callable_template_heap_bytes(&parameter.ruby_type))
+            .sum::<usize>()
+        + vec_payload_bytes(&signature.block.parameters)
+        + signature
+            .block
+            .parameters
+            .iter()
+            .map(callable_template_heap_bytes)
+            .sum::<usize>()
+        + callable_template_heap_bytes(&signature.block.return_type)
+        + callable_template_heap_bytes(&signature.return_type)
+}
+
+fn callable_template_heap_bytes(template: &CallableTypeTemplate) -> usize {
+    match template {
+        CallableTypeTemplate::Concrete(ruby_type) => ruby_type_heap_bytes(ruby_type),
+        CallableTypeTemplate::Receiver => 0,
+        CallableTypeTemplate::Variable(name) => string_heap_bytes(name),
+        CallableTypeTemplate::Array(element) => callable_template_heap_bytes(element),
+        CallableTypeTemplate::Hash(key, value) => {
+            callable_template_heap_bytes(key) + callable_template_heap_bytes(value)
+        }
+        CallableTypeTemplate::Union(members) => {
+            vec_payload_bytes(members)
+                + members
+                    .iter()
+                    .map(callable_template_heap_bytes)
+                    .sum::<usize>()
+        }
+        CallableTypeTemplate::Unconstrained => 0,
+    }
 }
 
 fn sort_method_ids_by_fqn(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
@@ -765,12 +964,42 @@ fn sort_method_ids_by_file(facts: &[Option<StoredMethodFact>], ids: &mut [Method
 
 #[cfg(test)]
 mod tests {
-    use crate::{FqnId, RubyMethod, SourceFileId, TextRange};
+    use crate::{FqnId, FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
 
     use super::*;
 
     fn file() -> SourceFileId {
         SourceFileId(1)
+    }
+
+    #[test]
+    fn ordinary_method_has_no_higher_order_payload_and_empty_replacement_clears_it() {
+        let method = RubyMethod::new("transform").unwrap();
+        let ordinary = MethodFact::new(
+            FullyQualifiedName::method(Vec::new(), method),
+            FullyQualifiedName::namespace(Vec::new()),
+            TextRange::new(file(), 0, 8),
+        );
+        assert!(ordinary.higher_order.is_none());
+
+        let signature = CallableSignature {
+            receiver_type_parameters: Vec::new(),
+            type_parameters: Vec::new(),
+            parameters: Vec::new(),
+            block: crate::CallableBlockTemplate {
+                parameters: Vec::new(),
+                return_type: CallableTypeTemplate::Unconstrained,
+                required: true,
+            },
+            return_type: CallableTypeTemplate::Unconstrained,
+        };
+        let with_signature = ordinary.with_callable_signatures(vec![signature]);
+        assert_eq!(with_signature.callable_signatures().len(), 1);
+        assert!(with_signature.higher_order.is_some());
+
+        let cleared = with_signature.with_callable_signatures(Vec::new());
+        assert!(cleared.callable_signatures().is_empty());
+        assert!(cleared.higher_order.is_none());
     }
 
     #[test]

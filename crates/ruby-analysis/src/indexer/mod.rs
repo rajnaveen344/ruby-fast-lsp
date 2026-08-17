@@ -8,10 +8,12 @@ pub mod analyzer;
 #[cfg(test)]
 mod analyzer_tests;
 pub mod analyzer_utils;
+mod callable_body;
 pub mod code_lens;
 pub mod document_symbols;
 mod erb;
 pub mod fact_collector;
+mod forwarded_block;
 pub mod hover;
 pub mod identifier;
 pub mod identifier_visitor;
@@ -31,6 +33,9 @@ pub use analysis_indexer::{AnalysisIndex, AnalysisIndexer};
 pub use analyzer::{
     CompletionReceiverTarget, RubyPrismAnalyzer, ShapeKeyCompletionTarget, ShapeKeySyntax,
     SignatureHelpTarget,
+};
+pub(crate) use callable_body::{
+    is_static_callable_literal, lower_callable_literal, lower_callable_literal_with_outer_locals,
 };
 pub use code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
 pub use document_symbols::{

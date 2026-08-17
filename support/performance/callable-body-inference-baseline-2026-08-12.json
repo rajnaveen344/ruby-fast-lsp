@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "measurement": "callable-body-inference-baseline",
+  "date": "2026-08-12",
+  "status": "accepted_pre_implementation_baseline",
+  "claim": "This is the clean release baseline immediately before parameter-dependent callable-body implementation. It contains the accepted higher-order inference work, excludes the new goal and RED fixtures, has an empty tracked diff, and passes every fixed production budget.",
+  "build": {
+    "source_revision": "67afa643deeacd1222195422ac0423d40c548185",
+    "source_parent_revision": "bb8c0da414e839efb4aa83370323c09e40abad07",
+    "profiler_sha256": "4ea31d0db7b615422d221db34f7ff2bcd769795330d4cb8e867f8ddd558a7d90",
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "worktree_status": null,
+    "note": "The baseline was materialized as a detached, local-only clean commit so the user's existing dirty worktree was neither committed nor altered."
+  },
+  "machine": {
+    "target_os": "macos",
+    "target_arch": "aarch64",
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "physical_memory_bytes": 25769803776
+  },
+  "fixed_release_gate": {
+    "command": "RUST_LOG=error <clean-baseline-profiler> --benchmark-iterations 100 --check-budgets",
+    "dataset_fingerprint_sha256": "e83a623dd71e9f04daf3e36a8092c04458573e0f1450f58e61e9c38457a763ba",
+    "semantic_result_fingerprint_hex": "1838d4f66404f3c31a65d0278388c513",
+    "indexing_summary_wall_ms": 411.030542,
+    "indexing_process_cpu_ms": 272.470,
+    "cold_indexing_ms": 593.662417,
+    "edit_p95_ms": 4.127250,
+    "completion_p95_ms": 0.648250,
+    "hover_p95_ms": 0.053917,
+    "definition_p95_ms": 0.058916,
+    "references_p95_ms": 5.828458,
+    "diagnostics_p95_ms": 0.000792,
+    "estimated_engine_heap_bytes": 5974539,
+    "peak_rss_bytes": 111886336,
+    "result": "PASS"
+  },
+  "accepted_limits_for_comparison": {
+    "median_delta_percent": 3.0,
+    "warm_representative_peak_rss_ceiling_bytes": 1776846438,
+    "final_requirement": "Run five alternating baseline/candidate pairs from exact binaries and record every raw sample, cache state, semantic fingerprint, and decision."
+  }
+}

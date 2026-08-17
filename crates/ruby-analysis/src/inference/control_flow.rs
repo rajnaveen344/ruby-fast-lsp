@@ -161,6 +161,41 @@ pub fn exits_method(node: &Node<'_>) -> bool {
     }
 }
 
+/// True when a block body contains an exit whose effect on the enclosing
+/// higher-order call is not represented by the callable solver. Nested blocks
+/// and lambdas own their exits and are intentionally shielded.
+pub(crate) fn has_unsupported_higher_order_exit(node: &Node<'_>) -> bool {
+    let mut finder = UnsupportedHigherOrderExitFinder { found: false };
+    finder.visit(node);
+    finder.found
+}
+
+struct UnsupportedHigherOrderExitFinder {
+    found: bool,
+}
+
+impl<'pr> Visit<'pr> for UnsupportedHigherOrderExitFinder {
+    fn visit_break_node(&mut self, _node: &ruby_prism::BreakNode<'pr>) {
+        self.found = true;
+    }
+
+    fn visit_return_node(&mut self, _node: &ruby_prism::ReturnNode<'pr>) {
+        self.found = true;
+    }
+
+    fn visit_redo_node(&mut self, _node: &ruby_prism::RedoNode<'pr>) {
+        self.found = true;
+    }
+
+    fn visit_retry_node(&mut self, _node: &ruby_prism::RetryNode<'pr>) {
+        self.found = true;
+    }
+
+    fn visit_block_node(&mut self, _node: &ruby_prism::BlockNode<'pr>) {}
+
+    fn visit_lambda_node(&mut self, _node: &ruby_prism::LambdaNode<'pr>) {}
+}
+
 // --- IfNode / UnlessNode --------------------------------------------------
 
 fn analyze_if(if_n: &IfNode<'_>) -> Reachability {

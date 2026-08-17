@@ -155,6 +155,7 @@ struct FlowEnvironment {
     shape_containments: BTreeSet<ShapeContainment>,
     array_shape_aliases: HashMap<String, ArrayShapeAliases>,
     unknown_reasons: HashMap<String, UnknownReason>,
+    callables: HashMap<String, crate::inference::higher_order::KnownProcType>,
     max_live_shape_aliases: usize,
 }
 
@@ -239,6 +240,7 @@ impl FlowEnvironment {
         self.shape_containments.clear();
         self.array_shape_aliases.clear();
         self.unknown_reasons.clear();
+        self.callables.clear();
         self.max_live_shape_aliases = 0;
     }
 
@@ -628,9 +630,6 @@ pub struct TypeTracker<'a> {
     /// Same-file methods that contain `yield`, keyed by method FQN.
     yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
 
-    /// Local variables assigned lambda/proc literals, keyed by local name.
-    proc_return_types_by_local: HashMap<String, RubyType>,
-
     /// Private same-file return dependencies carried through straight-line
     /// local aliases such as `value = helper; value`.
     ///
@@ -682,6 +681,62 @@ pub struct TypeTracker<'a> {
 }
 
 impl<'a> TypeTracker<'a> {
+    fn invalidate_escaped_callables_in_value(&mut self, value: &Node<'_>) {
+        if self.vars.callables.is_empty() {
+            return;
+        }
+        if crate::indexer::is_static_callable_literal(value)
+            || value.as_local_variable_read_node().is_some()
+        {
+            return;
+        }
+        let mut escaped = EscapedCallableReadCollector::default();
+        escaped.visit(value);
+        self.invalidate_callable_names(escaped.names);
+    }
+
+    fn invalidate_callable_names(&mut self, names: HashSet<String>) {
+        for name in names {
+            let Some(identity) = self
+                .vars
+                .callables
+                .get(&name)
+                .map(|callable| callable.identity)
+            else {
+                continue;
+            };
+            for callable in self.vars.callables.values_mut() {
+                if callable.identity == identity {
+                    callable.summary = Err(UnknownReason::EscapedCallableValue);
+                }
+            }
+        }
+    }
+
+    fn invalidate_escaped_callables_in_call(&mut self, call: &CallNode<'_>) {
+        if self.vars.callables.is_empty() {
+            return;
+        }
+        let mut escaped = EscapedCallableReadCollector::default();
+        if let Some(receiver) = call.receiver() {
+            let direct_invoke = call.name().as_slice() == b"call"
+                && receiver.as_local_variable_read_node().is_some();
+            if !direct_invoke {
+                escaped.visit(&receiver);
+            }
+        }
+        if let Some(arguments) = call.arguments() {
+            escaped.visit_arguments_node(&arguments);
+        }
+        if call
+            .block()
+            .is_some_and(|block| block.as_block_node().is_some())
+        {
+            escaped.visit(call.block().as_ref().expect("checked block presence"));
+        }
+        self.invalidate_callable_names(escaped.names);
+    }
+
     /// Create a new type tracker for the given source.
     pub fn new(source: &'a [u8]) -> Self {
         Self {
@@ -706,7 +761,6 @@ impl<'a> TypeTracker<'a> {
             local_public_method_candidates: Arc::new(HashSet::new()),
             local_superclasses: HashMap::new(),
             yield_param_types_by_method: HashMap::new(),
-            proc_return_types_by_local: HashMap::new(),
             local_return_terms: HashMap::new(),
             inside_control_flow: false,
             recursive_return_approximation: None,
@@ -727,6 +781,37 @@ impl<'a> TypeTracker<'a> {
 
     pub(crate) fn max_live_shape_aliases(&self) -> usize {
         self.vars.max_live_shape_aliases
+    }
+
+    fn bind_local_callable(
+        &mut self,
+        name: String,
+        mut callable: crate::inference::higher_order::KnownProcType,
+    ) {
+        if callable
+            .summary
+            .as_ref()
+            .is_ok_and(|summary| summary.captures.binary_search(&name).is_ok())
+        {
+            callable.summary = Err(UnknownReason::CallableRecursionUnsupported);
+        }
+        let alias_count = self
+            .vars
+            .callables
+            .iter()
+            .filter(|(existing_name, existing)| {
+                existing_name.as_str() != name && existing.identity == callable.identity
+            })
+            .count();
+        if alias_count >= crate::core::callable_body::MAX_CALLABLE_BODY_ALIASES {
+            callable.summary = Err(UnknownReason::CallableBodyBoundExceeded);
+            for existing in self.vars.callables.values_mut() {
+                if existing.identity == callable.identity {
+                    existing.summary = Err(UnknownReason::CallableBodyBoundExceeded);
+                }
+            }
+        }
+        self.vars.callables.insert(name, callable);
     }
 
     pub fn with_analysis_query_cache(mut self, cache: Arc<AnalysisQueryCache>) -> Self {
@@ -806,6 +891,49 @@ impl<'a> TypeTracker<'a> {
             }
         }
         deduplicated
+    }
+
+    /// Infer one block body from an explicit environment and return the
+    /// post-body value of each tracked parameter only when the same bounded
+    /// mutable identity remains proven. This is the shared bridge used by the
+    /// indexer and ordinary flow tracker; local rebinding is not mistaken for
+    /// mutation of the yielded object.
+    pub(crate) fn track_isolated_block_body(
+        &mut self,
+        body: Option<Node<'_>>,
+        bindings: &HashMap<String, RubyType>,
+        tracked_parameters: &[(String, RubyType)],
+    ) -> (RubyType, Vec<RubyType>) {
+        self.vars.clear();
+        self.next_shape_identity = 0;
+        for (name, ruby_type) in bindings {
+            if type_is_shape_only(ruby_type) {
+                let identity = self.allocate_shape_identity(ruby_type.clone());
+                self.vars.bind_shape_identities(
+                    name.clone(),
+                    ruby_type.clone(),
+                    BTreeSet::from([identity]),
+                );
+            } else {
+                self.vars.insert(name.clone(), ruby_type.clone());
+            }
+        }
+        let result = body
+            .map(|body| self.track_node(&body))
+            .unwrap_or_else(RubyType::nil_class);
+        let post_parameters = tracked_parameters
+            .iter()
+            .map(|(name, original)| {
+                let identities = self.vars.shape_identities(name);
+                if identities.is_empty() {
+                    original.clone()
+                } else {
+                    self.shape_identity_type(&identities)
+                        .unwrap_or(RubyType::Unknown)
+                }
+            })
+            .collect();
+        (result, post_parameters)
     }
 
     /// Record current variable state at an offset
@@ -894,7 +1022,6 @@ impl<'a> TypeTracker<'a> {
         self.var_types.clear();
         self.local_read_types.clear();
         self.has_seen_control_flow = false;
-        self.proc_return_types_by_local.clear();
         self.local_return_terms.clear();
         self.explicit_return_types.clear();
         self.observed_return_dependencies.clear();
@@ -1138,6 +1265,7 @@ impl<'a> TypeTracker<'a> {
     fn track_assignment(&mut self, write: &LocalVariableWriteNode) -> RubyType {
         // Get variable name
         let var_name = String::from_utf8_lossy(write.name().as_slice()).to_string();
+        self.invalidate_escaped_callables_in_value(&write.value());
 
         // The RHS may raise before the local write commits. Every enclosing
         // rescue can therefore observe the prior value (or Ruby's implicit nil
@@ -1178,10 +1306,16 @@ impl<'a> TypeTracker<'a> {
             .as_call_node()
             .and_then(|call| self.return_term_dependency_for_call(&call));
         if let Some(return_type) = self.infer_proc_literal_return_type(&value) {
-            self.proc_return_types_by_local
-                .insert(var_name.clone(), return_type);
+            self.bind_local_callable(var_name.clone(), return_type);
+        } else if let Some(alias) = value.as_local_variable_read_node() {
+            let alias_name = String::from_utf8_lossy(alias.name().as_slice()).to_string();
+            if let Some(callable) = self.vars.callables.get(&alias_name).cloned() {
+                self.bind_local_callable(var_name.clone(), callable);
+            } else {
+                self.vars.callables.remove(&var_name);
+            }
         } else {
-            self.proc_return_types_by_local.remove(&var_name);
+            self.vars.callables.remove(&var_name);
         }
 
         if let Some((dependency, approximation)) = dependency.filter(|(dependency, _)| {
@@ -2847,7 +2981,14 @@ impl<'a> TypeTracker<'a> {
 
     /// Infer the return type of a method call
     fn infer_call(&mut self, call: &CallNode) -> RubyType {
+        self.invalidate_escaped_callables_in_call(call);
         let method_name = String::from_utf8_lossy(call.name().as_slice()).to_string();
+
+        if let Some(higher_order_type) = self.infer_rbs_higher_order_call(call, &method_name) {
+            self.direct_call_return_proofs
+                .insert(call.location().start_offset());
+            return higher_order_type;
+        }
 
         self.apply_array_shape_call_boundary(call, &method_name);
 
@@ -2957,6 +3098,201 @@ impl<'a> TypeTracker<'a> {
 
         self.resolve_rbs_method_return_type(&receiver_type, &method_name)
             .unwrap_or(RubyType::Unknown)
+    }
+
+    fn infer_rbs_higher_order_call(
+        &mut self,
+        call: &CallNode<'_>,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        let block_expression = call.block()?;
+        if method_name.ends_with('!') {
+            return None;
+        }
+        let receiver_type = call.receiver().map(|receiver| {
+            project_immediate_hash_receiver_type(&receiver, self.infer_expression(&receiver))
+        });
+        if receiver_type.as_ref().is_some_and(|receiver| {
+            receiver == &RubyType::Unknown || RubyType::contains_unknown(receiver)
+        }) {
+            return None;
+        }
+        let argument_types = call
+            .arguments()
+            .map(|arguments| {
+                arguments
+                    .arguments()
+                    .iter()
+                    .map(|argument| self.track_node(&argument))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let prepared_result = if let Some(analysis_engine) = &self.analysis_engine {
+            let engine = analysis_engine.read();
+            let query = AnalysisQuery::new(&engine);
+            let direct = receiver_type.as_ref().map_or_else(
+                || Err(UnknownReason::UnsupportedCallable),
+                |receiver_type| {
+                    crate::inference::rbs::prepare_higher_order_call(
+                        Some(&query),
+                        receiver_type,
+                        method_name,
+                        &argument_types,
+                    )
+                },
+            );
+            direct.or_else(|_| {
+                let namespace = FullyQualifiedName::namespace(
+                    self.current_class
+                        .as_ref()
+                        .map(FullyQualifiedName::namespace_parts)
+                        .unwrap_or_default(),
+                );
+                crate::inference::rbs::prepare_forwarded_higher_order_call(
+                    &query,
+                    receiver_type.as_ref(),
+                    Some(&namespace),
+                    method_name,
+                    &argument_types,
+                )
+                .or_else(|_| {
+                    crate::inference::rbs::prepare_direct_yield_higher_order_call(
+                        &query,
+                        receiver_type.as_ref(),
+                        Some(&namespace),
+                        method_name,
+                        &argument_types,
+                    )
+                })
+            })
+        } else {
+            receiver_type.as_ref().map_or_else(
+                || Err(UnknownReason::UnsupportedCallable),
+                |receiver_type| {
+                    crate::inference::rbs::prepare_higher_order_call(
+                        None,
+                        receiver_type,
+                        method_name,
+                        &argument_types,
+                    )
+                },
+            )
+        };
+        let prepared = prepared_result.ok()?;
+        if let Some(block) = block_expression.as_block_node() {
+            if block
+                .body()
+                .as_ref()
+                .is_some_and(|body| control_flow::has_unsupported_higher_order_exit(body))
+            {
+                return None;
+            }
+            let parameter_types = prepared.block_parameter_types().to_vec();
+            let parameter_names = block_parameter_names(&block);
+            let environment_before = self.vars.clone();
+            let explicit_return_count = self.explicit_return_types.len();
+            for (index, name) in parameter_names.iter().enumerate() {
+                let parameter_type = parameter_types
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(RubyType::nil_class);
+                if type_is_shape_only(&parameter_type) {
+                    let identity = self.allocate_shape_identity(parameter_type.clone());
+                    self.vars.bind_shape_identities(
+                        name.clone(),
+                        parameter_type,
+                        BTreeSet::from([identity]),
+                    );
+                } else {
+                    self.vars.insert(name.clone(), parameter_type);
+                }
+            }
+            let block_return_type = block
+                .body()
+                .map(|body| self.track_node(&body))
+                .unwrap_or_else(RubyType::nil_class);
+            let post_block_parameter_types = parameter_names
+                .iter()
+                .zip(&parameter_types)
+                .map(|(name, original)| {
+                    let identities = self.vars.shape_identities(name);
+                    if identities.is_empty() {
+                        original.clone()
+                    } else {
+                        self.shape_identity_type(&identities)
+                            .unwrap_or(RubyType::Unknown)
+                    }
+                })
+                .collect::<Vec<_>>();
+            self.vars = environment_before;
+            self.explicit_return_types.truncate(explicit_return_count);
+            return prepared
+                .finish_with_proven_block_state(&block_return_type, &post_block_parameter_types)
+                .into_proven_type();
+        }
+
+        let block_argument = block_expression.as_block_argument_node()?;
+        let expression = block_argument.expression()?;
+        if let Some(symbol) = expression.as_symbol_node() {
+            let target = std::str::from_utf8(symbol.unescaped()).ok()?;
+            return prepared
+                .finish_static_method(target, |receiver_type, target| {
+                    self.resolve_static_method_return_outcome(receiver_type, target)
+                })
+                .into_proven_type();
+        }
+        let callable = if let Some(local) = expression.as_local_variable_read_node() {
+            let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+            self.vars.callables.get(&name)?.clone()
+        } else {
+            match self.constant_callable_body_for_node(&expression)? {
+                Ok(summary) => crate::inference::higher_order::KnownProcType {
+                    identity: u32::MAX,
+                    summary: Ok(summary),
+                },
+                Err(_) => return None,
+            }
+        };
+        let mut stack = vec![callable.identity];
+        prepared
+            .finish_known_proc(
+                &callable,
+                |capture| self.vars.types.get(capture).cloned(),
+                |capture, arguments| {
+                    let nested = self.vars.callables.get(capture)?.clone();
+                    Some(self.instantiate_known_proc_with_stack(&nested, arguments, &mut stack))
+                },
+                |receiver, method, _arguments| {
+                    self.resolve_static_method_return_outcome(receiver, method.as_str())
+                },
+            )
+            .into_proven_type()
+    }
+
+    fn resolve_static_method_return_outcome(
+        &self,
+        receiver_type: &RubyType,
+        method_name: &str,
+    ) -> TypeInferenceOutcome {
+        if let RubyType::Union(members) = receiver_type {
+            let mut return_types = Vec::with_capacity(members.len());
+            for member in members {
+                let outcome = self.resolve_static_method_return_outcome(member, method_name);
+                let Some(return_type) = outcome.into_proven_type() else {
+                    return TypeInferenceOutcome::unknown(UnknownReason::IncompleteUnionMember);
+                };
+                return_types.push(return_type);
+            }
+            return TypeInferenceOutcome::from_optional(
+                (!return_types.is_empty()).then(|| RubyType::union(return_types)),
+                UnknownReason::IncompleteUnionMember,
+            );
+        }
+        TypeInferenceOutcome::from_optional(
+            self.resolve_method_return_type_from_analysis(receiver_type, method_name, false)
+                .or_else(|| self.resolve_rbs_method_return_type(receiver_type, method_name)),
+            UnknownReason::UnresolvedMethodReturn,
+        )
     }
 
     fn apply_array_shape_call_boundary(&mut self, call: &CallNode<'_>, method_name: &str) {
@@ -3530,46 +3866,96 @@ impl<'a> TypeTracker<'a> {
         Ok(())
     }
 
-    fn infer_proc_call_return_type(&self, call: &CallNode, method_name: &str) -> Option<RubyType> {
+    fn infer_proc_call_return_type(
+        &mut self,
+        call: &CallNode,
+        method_name: &str,
+    ) -> Option<RubyType> {
         if method_name != "call" {
             return None;
         }
         let receiver = call.receiver()?;
-        let local = receiver.as_local_variable_read_node()?;
-        let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
-        self.proc_return_types_by_local
-            .get(&name)
-            .filter(|ty| **ty != RubyType::Unknown)
-            .cloned()
+        let callable = if let Some(local) = receiver.as_local_variable_read_node() {
+            let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+            self.vars.callables.get(&name)?.clone()
+        } else {
+            match self.constant_callable_body_for_node(&receiver)? {
+                Ok(summary) => crate::inference::higher_order::KnownProcType {
+                    identity: u32::MAX,
+                    summary: Ok(summary),
+                },
+                Err(_) => return None,
+            }
+        };
+        let argument_types = call
+            .arguments()
+            .map(|arguments| {
+                arguments
+                    .arguments()
+                    .iter()
+                    .map(|argument| self.track_node(&argument))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        self.instantiate_known_proc_with_stack(&callable, &argument_types, &mut Vec::new())
+            .into_proven_type()
     }
 
-    fn infer_proc_literal_return_type(&mut self, value: &Node) -> Option<RubyType> {
-        if let Some(lambda) = value.as_lambda_node() {
-            return self.infer_isolated_proc_body(lambda.body());
+    fn instantiate_known_proc_with_stack(
+        &self,
+        callable: &crate::inference::higher_order::KnownProcType,
+        arguments: &[RubyType],
+        stack: &mut Vec<u32>,
+    ) -> TypeInferenceOutcome {
+        if stack.contains(&callable.identity) {
+            return TypeInferenceOutcome::unknown(UnknownReason::CallableRecursionUnsupported);
         }
-
-        let call = value.as_call_node()?;
-        if call.name().as_slice() != b"new" {
-            return None;
+        if stack.len() >= crate::core::callable_body::MAX_CALLABLE_BODY_INSTANTIATIONS {
+            return TypeInferenceOutcome::unknown(UnknownReason::CallableBodyBoundExceeded);
         }
-        let receiver = call.receiver()?;
-        let constant = receiver.as_constant_read_node()?;
-        if constant.name().as_slice() != b"Proc" {
-            return None;
-        }
-        let block = call.block()?.as_block_node()?;
-        self.infer_isolated_proc_body(block.body())
+        let summary = match &callable.summary {
+            Ok(summary) => summary,
+            Err(reason) => return TypeInferenceOutcome::unknown(*reason),
+        };
+        stack.push(callable.identity);
+        let result = crate::inference::callable_body::instantiate_callable_body(
+            summary,
+            arguments,
+            |capture| self.vars.types.get(capture).cloned(),
+            |capture, nested_arguments| {
+                let nested = self.vars.callables.get(capture)?.clone();
+                Some(self.instantiate_known_proc_with_stack(&nested, nested_arguments, stack))
+            },
+            |receiver, method, _arguments| {
+                self.resolve_static_method_return_outcome(receiver, method.as_str())
+            },
+        );
+        let popped = stack.pop().expect(
+            "INVARIANT VIOLATED: callable instantiation stack underflowed. This is a bug because every accepted callable pushes exactly one identity. Fix: keep push/evaluate/pop in one function.",
+        );
+        assert_eq!(
+            popped, callable.identity,
+            "INVARIANT VIOLATED: callable instantiation stack order changed during evaluation. This is a bug because nested evaluation must be strictly LIFO. Fix: do not retain or reorder stack entries."
+        );
+        result
     }
 
-    fn infer_isolated_proc_body(&mut self, body: Option<Node<'_>>) -> Option<RubyType> {
-        let previous_vars = self.vars.clone();
-        let explicit_return_count = self.explicit_return_types.len();
-        let return_type = body
-            .map(|body| self.track_node(&body))
-            .unwrap_or_else(RubyType::nil_class);
-        self.vars = previous_vars;
-        self.explicit_return_types.truncate(explicit_return_count);
-        (return_type != RubyType::Unknown).then_some(return_type)
+    fn infer_proc_literal_return_type(
+        &mut self,
+        value: &Node,
+    ) -> Option<crate::inference::higher_order::KnownProcType> {
+        crate::indexer::is_static_callable_literal(value).then(|| {
+            let outer_locals = self.vars.types.keys().cloned();
+            crate::inference::higher_order::KnownProcType {
+                identity: u32::try_from(value.location().start_offset()).expect(
+                    "INVARIANT VIOLATED: callable literal offset exceeded u32. This is a bug because analysis ranges already require u32 offsets. Fix: reject oversized source before callable lowering.",
+                ),
+                summary: crate::indexer::lower_callable_literal_with_outer_locals(
+                    value,
+                    outer_locals,
+                ),
+            }
+        })
     }
 
     fn resolve_rbs_method_return_type(
@@ -4034,6 +4420,28 @@ impl<'a> TypeTracker<'a> {
             .or_else(|| query.constant_reference_type(constant.namespace_parts_slice()))
     }
 
+    fn constant_callable_body_for_node(
+        &self,
+        node: &Node<'_>,
+    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+        let (parts, absolute) = Self::constant_reference(node)?;
+        let analysis_engine = self.analysis_engine.as_ref()?;
+        let engine = analysis_engine.read();
+        let query = AnalysisQuery::new(&engine);
+        let constant = if absolute {
+            FullyQualifiedName::constant(parts)
+        } else {
+            let lexical_context = self
+                .current_class
+                .as_ref()
+                .map(FullyQualifiedName::namespace_parts)
+                .unwrap_or_default();
+            let resolved = query.resolve_constant_in_context(&parts, &lexical_context)?;
+            FullyQualifiedName::constant(resolved.namespace_parts())
+        };
+        query.constant_callable_body(&constant)
+    }
+
     fn constant_reference(node: &Node<'_>) -> Option<(Vec<RubyConstant>, bool)> {
         if let Some(constant_read) = node.as_constant_read_node() {
             let name = String::from_utf8_lossy(constant_read.name().as_slice());
@@ -4322,6 +4730,36 @@ impl<'a> TypeTracker<'a> {
         self.vars.max_live_shape_aliases = this_env
             .max_live_shape_aliases
             .max(other_env.max_live_shape_aliases);
+        let callable_names = this_env
+            .callables
+            .keys()
+            .chain(other_env.callables.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut merged_callables = HashMap::new();
+        for name in callable_names {
+            let merged = match (
+                this_env.callables.get(&name),
+                other_env.callables.get(&name),
+            ) {
+                (Some(left), Some(right)) if left == right => left.clone(),
+                (Some(left), Some(right)) => crate::inference::higher_order::KnownProcType {
+                    identity: left.identity.min(right.identity),
+                    summary: Err(UnknownReason::AmbiguousCallableValue),
+                },
+                (Some(callable), None) | (None, Some(callable)) => {
+                    crate::inference::higher_order::KnownProcType {
+                        identity: callable.identity,
+                        summary: Err(UnknownReason::AmbiguousCallableValue),
+                    }
+                }
+                (None, None) => panic!(
+                    "INVARIANT VIOLATED: callable merge key `{name}` is absent from both branch environments. This is a bug because keys are derived from those exact maps. Fix: keep callable key collection and lookup atomic."
+                ),
+            };
+            merged_callables.insert(name, merged);
+        }
+        self.vars.callables = merged_callables;
         if !inconsistent_array_identities.is_empty() {
             self.vars.invalidate_identities(
                 &inconsistent_array_identities,
@@ -5225,6 +5663,37 @@ pub fn get_var_type_at(
         .range(..=offset)
         .next_back()
         .and_then(|(_, vars)| vars.get(var_name).cloned())
+}
+
+#[derive(Default)]
+struct EscapedCallableReadCollector {
+    names: HashSet<String>,
+}
+
+impl<'pr> Visit<'pr> for EscapedCallableReadCollector {
+    fn visit_local_variable_read_node(&mut self, node: &LocalVariableReadNode<'pr>) {
+        self.names
+            .insert(String::from_utf8_lossy(node.name().as_slice()).to_string());
+    }
+
+    fn visit_call_node(&mut self, node: &CallNode<'pr>) {
+        if let Some(receiver) = node.receiver() {
+            let direct_invoke = node.name().as_slice() == b"call"
+                && receiver.as_local_variable_read_node().is_some();
+            if !direct_invoke {
+                self.visit(&receiver);
+            }
+        }
+        if let Some(arguments) = node.arguments() {
+            self.visit_arguments_node(&arguments);
+        }
+        if node
+            .block()
+            .is_some_and(|block| block.as_block_node().is_some())
+        {
+            self.visit(node.block().as_ref().expect("checked block presence"));
+        }
+    }
 }
 
 #[cfg(test)]

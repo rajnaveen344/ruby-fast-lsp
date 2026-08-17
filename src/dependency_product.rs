@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::Url;
 
-const GEM_DEPENDENCY_PRODUCT_SCHEMA: u32 = 5;
-const PERSISTENT_GEM_DEPENDENCY_PRODUCT_SCHEMA: u32 = 5;
+const GEM_DEPENDENCY_PRODUCT_SCHEMA: u32 = 6;
+const PERSISTENT_GEM_DEPENDENCY_PRODUCT_SCHEMA: u32 = 6;
 const RUBY_PRISM_SEMANTIC_VERSION: &str = "1.4.0";
 const ANALYZER_DEPENDENCY_LOCK: &[u8] = include_bytes!("../Cargo.lock");
 include!(concat!(env!("OUT_DIR"), "/gem_fact_producer_identity.rs"));

@@ -3,10 +3,11 @@ use crate::core::memory_estimate::{
     vec_payload_bytes,
 };
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, LiteralKey,
-    LiteralValue, MethodAvailability, MethodFact, MethodParamFact, MethodParamKind,
-    MethodVisibilityOverrideFact, NamespaceKind, RubyConstant, RubyMethod, RubyType,
-    ShapeExactness, ShapeField, ShapeFieldPresence, ShapeRest, ShapeStability, ShapeType,
+    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
+    ConstantCallableBodyFact, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
+    GraphNodeKind, LiteralKey, LiteralValue, MethodAvailability, MethodFact, MethodParamFact,
+    MethodParamKind, MethodVisibilityOverrideFact, NamespaceKind, RubyConstant, RubyMethod,
+    RubyType, ShapeExactness, ShapeField, ShapeFieldPresence, ShapeRest, ShapeStability, ShapeType,
     SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
@@ -56,6 +57,55 @@ pub struct ProjectNeutralFileFactsSnapshot {
     graph_nodes: Vec<SnapshotGraphNodeFact>,
     graph_edges: Vec<SnapshotGraphEdgeFact>,
     unresolved_graph_edges: Vec<SnapshotUnresolvedGraphEdgeFact>,
+    constant_callable_bodies: Vec<SnapshotConstantCallableBodyFact>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotConstantCallableBodyFact {
+    constant: SnapshotFqn,
+    summary: SnapshotCallableBodySummary,
+    range: SnapshotRange,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotCallableBodySummary {
+    strict_arity: bool,
+    parameters: Vec<SnapshotCallableBodyParameter>,
+    captures: Vec<String>,
+    result: SnapshotCallableBodyExpression,
+    node_count: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotCallableBodyParameter {
+    name: String,
+    kind: SnapshotCallableBodyParameterKind,
+    default: Option<SnapshotCallableBodyExpression>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotCallableBodyParameterKind {
+    Required,
+    Optional,
+    Rest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotCallableBodyExpression {
+    Literal(SnapshotRubyType),
+    Parameter(usize),
+    Capture(String),
+    Array(Vec<SnapshotCallableBodyExpression>),
+    Shape(Vec<(SnapshotLiteral, SnapshotCallableBodyExpression)>),
+    Call {
+        receiver: Box<SnapshotCallableBodyExpression>,
+        method: String,
+        arguments: Vec<SnapshotCallableBodyExpression>,
+        literal_argument_keys: Vec<Option<SnapshotLiteral>>,
+    },
+    ExhaustiveUnion(Vec<SnapshotCallableBodyExpression>),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -137,6 +187,54 @@ struct SnapshotMethodParamFact {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotCallableTypeTemplate {
+    Concrete(SnapshotRubyType),
+    Receiver,
+    Variable(String),
+    Array(Box<SnapshotCallableTypeTemplate>),
+    Hash(
+        Box<SnapshotCallableTypeTemplate>,
+        Box<SnapshotCallableTypeTemplate>,
+    ),
+    Union(Vec<SnapshotCallableTypeTemplate>),
+    Unconstrained,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotCallableParameterTemplate {
+    kind: SnapshotMethodParamKind,
+    ruby_type: SnapshotCallableTypeTemplate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotCallableBlockTemplate {
+    parameters: Vec<SnapshotCallableTypeTemplate>,
+    return_type: SnapshotCallableTypeTemplate,
+    required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotCallableSignature {
+    receiver_type_parameters: Vec<String>,
+    type_parameters: Vec<String>,
+    parameters: Vec<SnapshotCallableParameterTemplate>,
+    block: SnapshotCallableBlockTemplate,
+    return_type: SnapshotCallableTypeTemplate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotForwardedBlockCall {
+    receiver_parameter: String,
+    method: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotDirectYieldCall {
+    parameter_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SnapshotMethodFact {
     fqn: SnapshotFqn,
     owner: SnapshotFqn,
@@ -150,6 +248,9 @@ struct SnapshotMethodFact {
     availability: SnapshotMethodAvailability,
     documentation: Option<String>,
     return_type_label: Option<String>,
+    callable_signatures: Vec<SnapshotCallableSignature>,
+    forwarded_block_call: Option<SnapshotForwardedBlockCall>,
+    direct_yield_call: Option<SnapshotDirectYieldCall>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -387,6 +488,9 @@ impl ProjectNeutralFileFactsTemplate {
         for fact in &facts.unresolved_graph_edges {
             validate_range(fact.range, source_file_id)?;
         }
+        for fact in &facts.inference.constant_callable_bodies {
+            validate_range(fact.range, source_file_id)?;
+        }
 
         Ok(Self {
             source_file_id,
@@ -493,6 +597,7 @@ impl ProjectNeutralFileFactsTemplate {
                         + fqn_heap_bytes(&fact.context)
                 })
                 .sum::<usize>()
+            + facts.inference.estimated_heap_bytes()
     }
 
     pub fn to_persistent_snapshot(&self) -> Result<ProjectNeutralFileFactsSnapshot, String> {
@@ -518,7 +623,13 @@ fn retain_project_neutral_declaration_facts(facts: &mut FileFacts) {
             TypeSubject::Local { .. } | TypeSubject::Expression(_)
         )
     });
+    facts
+        .inference
+        .constant_callable_bodies
+        .retain(|fact| fact.summary.is_capture_free());
+    let constant_callable_bodies = std::mem::take(&mut facts.inference.constant_callable_bodies);
     facts.inference = Default::default();
+    facts.inference.constant_callable_bodies = constant_callable_bodies;
     facts.local_read_types = Default::default();
 }
 
@@ -601,6 +712,11 @@ fn declaration_facts_have_generated_owner(facts: &FileFacts) -> bool {
                     .any(RubyConstant::is_generated_owner)
                 || fqn_has_generated_owner(&fact.context)
         })
+        || facts
+            .inference
+            .constant_callable_bodies
+            .iter()
+            .any(|fact| fqn_has_generated_owner(&fact.constant))
 }
 
 fn snapshot_declaration_facts(
@@ -642,6 +758,12 @@ fn snapshot_declaration_facts(
             .iter()
             .map(snapshot_unresolved_graph_edge)
             .collect::<Result<_, _>>()?,
+        constant_callable_bodies: facts
+            .inference
+            .constant_callable_bodies
+            .iter()
+            .map(snapshot_constant_callable_body)
+            .collect::<Result<_, _>>()?,
     })
 }
 
@@ -649,7 +771,7 @@ fn restore_declaration_facts(
     snapshot: ProjectNeutralFileFactsSnapshot,
     source_file_id: SourceFileId,
 ) -> Result<FileFacts, String> {
-    Ok(FileFacts {
+    let mut facts = FileFacts {
         symbols: snapshot
             .symbols
             .into_iter()
@@ -686,6 +808,257 @@ fn restore_declaration_facts(
             .map(|fact| restore_unresolved_graph_edge(fact, source_file_id))
             .collect::<Result<_, _>>()?,
         ..FileFacts::default()
+    };
+    facts.inference.constant_callable_bodies = snapshot
+        .constant_callable_bodies
+        .into_iter()
+        .map(|fact| restore_constant_callable_body(fact, source_file_id))
+        .collect::<Result<_, _>>()?;
+    Ok(facts)
+}
+
+fn snapshot_constant_callable_body(
+    fact: &ConstantCallableBodyFact,
+) -> Result<SnapshotConstantCallableBodyFact, String> {
+    if !fact.summary.is_capture_free() {
+        return Err("project-neutral callable body unexpectedly retains captures".to_string());
+    }
+    Ok(SnapshotConstantCallableBodyFact {
+        constant: snapshot_fqn(&fact.constant)?,
+        summary: snapshot_callable_body_summary(&fact.summary)?,
+        range: snapshot_range(fact.range),
+    })
+}
+
+fn restore_constant_callable_body(
+    fact: SnapshotConstantCallableBodyFact,
+    file_id: SourceFileId,
+) -> Result<ConstantCallableBodyFact, String> {
+    let summary = restore_callable_body_summary(fact.summary)?;
+    if !summary.is_capture_free() {
+        return Err("persistent project-neutral callable body contains captures".to_string());
+    }
+    Ok(ConstantCallableBodyFact {
+        constant: restore_fqn(fact.constant)?,
+        summary,
+        range: restore_range(fact.range, file_id)?,
+    })
+}
+
+fn snapshot_callable_body_summary(
+    summary: &CallableBodySummary,
+) -> Result<SnapshotCallableBodySummary, String> {
+    summary
+        .validate()
+        .map_err(|reason| format!("invalid callable body summary: {}", reason.code()))?;
+    Ok(SnapshotCallableBodySummary {
+        strict_arity: summary.strict_arity,
+        parameters: summary
+            .parameters
+            .iter()
+            .map(|parameter| {
+                Ok(SnapshotCallableBodyParameter {
+                    name: parameter.name.clone(),
+                    kind: match parameter.kind {
+                        CallableBodyParameterKind::Required => {
+                            SnapshotCallableBodyParameterKind::Required
+                        }
+                        CallableBodyParameterKind::Optional => {
+                            SnapshotCallableBodyParameterKind::Optional
+                        }
+                        CallableBodyParameterKind::Rest => SnapshotCallableBodyParameterKind::Rest,
+                    },
+                    default: parameter
+                        .default
+                        .as_ref()
+                        .map(snapshot_callable_body_expression)
+                        .transpose()?,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+        captures: summary.captures.clone(),
+        result: snapshot_callable_body_expression(&summary.result)?,
+        node_count: summary.node_count,
+    })
+}
+
+fn restore_callable_body_summary(
+    summary: SnapshotCallableBodySummary,
+) -> Result<CallableBodySummary, String> {
+    use crate::core::callable_body::{
+        MAX_CALLABLE_BODY_CAPTURES, MAX_CALLABLE_BODY_NODES, MAX_CALLABLE_BODY_PARAMETERS,
+    };
+    if summary.parameters.len() > MAX_CALLABLE_BODY_PARAMETERS
+        || summary.captures.len() > MAX_CALLABLE_BODY_CAPTURES
+        || usize::from(summary.node_count) > MAX_CALLABLE_BODY_NODES
+    {
+        return Err("persistent callable body exceeds a fixed proof bound".to_string());
+    }
+    if !summary.captures.is_empty() {
+        return Err("persistent project-neutral callable body contains captures".to_string());
+    }
+    let summary = CallableBodySummary {
+        strict_arity: summary.strict_arity,
+        parameters: summary
+            .parameters
+            .into_iter()
+            .map(|parameter| {
+                Ok(CallableBodyParameter {
+                    name: parameter.name,
+                    kind: match parameter.kind {
+                        SnapshotCallableBodyParameterKind::Required => {
+                            CallableBodyParameterKind::Required
+                        }
+                        SnapshotCallableBodyParameterKind::Optional => {
+                            CallableBodyParameterKind::Optional
+                        }
+                        SnapshotCallableBodyParameterKind::Rest => CallableBodyParameterKind::Rest,
+                    },
+                    default: parameter
+                        .default
+                        .map(|expression| restore_callable_body_expression(expression, 0))
+                        .transpose()?,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+        captures: summary.captures,
+        result: restore_callable_body_expression(summary.result, 0)?,
+        node_count: summary.node_count,
+    };
+    summary
+        .validate()
+        .map_err(|reason| format!("invalid persistent callable body: {}", reason.code()))?;
+    Ok(summary)
+}
+
+fn snapshot_callable_body_expression(
+    expression: &CallableBodyExpression,
+) -> Result<SnapshotCallableBodyExpression, String> {
+    Ok(match expression {
+        CallableBodyExpression::Literal(ruby_type) => {
+            SnapshotCallableBodyExpression::Literal(snapshot_ruby_type(ruby_type)?)
+        }
+        CallableBodyExpression::Parameter(index) => {
+            SnapshotCallableBodyExpression::Parameter(*index)
+        }
+        CallableBodyExpression::Capture(name) => {
+            SnapshotCallableBodyExpression::Capture(name.clone())
+        }
+        CallableBodyExpression::Array(values) => SnapshotCallableBodyExpression::Array(
+            values
+                .iter()
+                .map(snapshot_callable_body_expression)
+                .collect::<Result<_, _>>()?,
+        ),
+        CallableBodyExpression::Shape(fields) => SnapshotCallableBodyExpression::Shape(
+            fields
+                .iter()
+                .map(|(key, value)| {
+                    Ok((
+                        snapshot_literal_key(key),
+                        snapshot_callable_body_expression(value)?,
+                    ))
+                })
+                .collect::<Result<_, String>>()?,
+        ),
+        CallableBodyExpression::Call {
+            receiver,
+            method,
+            arguments,
+            literal_argument_keys,
+        } => SnapshotCallableBodyExpression::Call {
+            receiver: Box::new(snapshot_callable_body_expression(receiver)?),
+            method: method.as_str().to_string(),
+            arguments: arguments
+                .iter()
+                .map(snapshot_callable_body_expression)
+                .collect::<Result<_, _>>()?,
+            literal_argument_keys: literal_argument_keys
+                .iter()
+                .map(|key| key.as_ref().map(snapshot_literal_key))
+                .collect(),
+        },
+        CallableBodyExpression::ExhaustiveUnion(values) => {
+            SnapshotCallableBodyExpression::ExhaustiveUnion(
+                values
+                    .iter()
+                    .map(snapshot_callable_body_expression)
+                    .collect::<Result<_, _>>()?,
+            )
+        }
+    })
+}
+
+fn restore_callable_body_expression(
+    expression: SnapshotCallableBodyExpression,
+    depth: usize,
+) -> Result<CallableBodyExpression, String> {
+    use crate::core::callable_body::{
+        MAX_CALLABLE_BODY_TYPE_DEPTH, MAX_CALLABLE_BODY_UNION_VARIANTS,
+    };
+    if depth > MAX_CALLABLE_BODY_TYPE_DEPTH {
+        return Err("persistent callable expression exceeds the fixed type depth".to_string());
+    }
+    Ok(match expression {
+        SnapshotCallableBodyExpression::Literal(ruby_type) => {
+            CallableBodyExpression::Literal(restore_ruby_type(ruby_type, 1)?)
+        }
+        SnapshotCallableBodyExpression::Parameter(index) => {
+            CallableBodyExpression::Parameter(index)
+        }
+        SnapshotCallableBodyExpression::Capture(name) => CallableBodyExpression::Capture(name),
+        SnapshotCallableBodyExpression::Array(values) => CallableBodyExpression::Array(
+            values
+                .into_iter()
+                .map(|value| restore_callable_body_expression(value, depth + 1))
+                .collect::<Result<_, _>>()?,
+        ),
+        SnapshotCallableBodyExpression::Shape(fields) => CallableBodyExpression::Shape(
+            fields
+                .into_iter()
+                .map(|(key, value)| {
+                    Ok((
+                        restore_literal_key(key),
+                        restore_callable_body_expression(value, depth + 1)?,
+                    ))
+                })
+                .collect::<Result<_, String>>()?,
+        ),
+        SnapshotCallableBodyExpression::Call {
+            receiver,
+            method,
+            arguments,
+            literal_argument_keys,
+        } => {
+            if arguments.len() != literal_argument_keys.len() {
+                return Err("persistent callable call has mismatched argument metadata".to_string());
+            }
+            CallableBodyExpression::Call {
+                receiver: Box::new(restore_callable_body_expression(*receiver, depth + 1)?),
+                method: RubyMethod::new(&method).map_err(|error| {
+                    format!("invalid persistent callable method `{method}`: {error}")
+                })?,
+                arguments: arguments
+                    .into_iter()
+                    .map(|value| restore_callable_body_expression(value, depth + 1))
+                    .collect::<Result<_, _>>()?,
+                literal_argument_keys: literal_argument_keys
+                    .into_iter()
+                    .map(|key| key.map(restore_literal_key))
+                    .collect(),
+            }
+        }
+        SnapshotCallableBodyExpression::ExhaustiveUnion(values) => {
+            if values.len() > MAX_CALLABLE_BODY_UNION_VARIANTS {
+                return Err("persistent callable union exceeds the fixed variant bound".to_string());
+            }
+            CallableBodyExpression::ExhaustiveUnion(
+                values
+                    .into_iter()
+                    .map(|value| restore_callable_body_expression(value, depth + 1))
+                    .collect::<Result<_, _>>()?,
+            )
+        }
     })
 }
 
@@ -941,6 +1314,22 @@ fn snapshot_method(fact: &MethodFact) -> Result<SnapshotMethodFact, String> {
         availability: snapshot_availability(&fact.availability),
         documentation: fact.documentation.clone(),
         return_type_label: fact.return_type_label.clone(),
+        callable_signatures: fact
+            .callable_signatures()
+            .iter()
+            .map(snapshot_callable_signature)
+            .collect::<Result<Vec<_>, _>>()?,
+        forwarded_block_call: fact.forwarded_block_call().map(|forwarded| {
+            SnapshotForwardedBlockCall {
+                receiver_parameter: forwarded.receiver_parameter.clone(),
+                method: forwarded.method.as_str().to_string(),
+            }
+        }),
+        direct_yield_call: fact
+            .direct_yield_call()
+            .map(|direct| SnapshotDirectYieldCall {
+                parameter_names: direct.parameter_names.clone(),
+            }),
     })
 }
 
@@ -965,6 +1354,30 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
                 .map_err(|error| format!("invalid persistent delegate method `{name}`: {error}"))
         })
         .transpose()?;
+    let callable_signatures = fact
+        .callable_signatures
+        .into_iter()
+        .map(restore_callable_signature)
+        .collect::<Result<Vec<_>, _>>()?;
+    let forwarded_block_call = fact
+        .forwarded_block_call
+        .map(|forwarded| {
+            Ok::<crate::core::ForwardedBlockCall, String>(crate::core::ForwardedBlockCall {
+                receiver_parameter: forwarded.receiver_parameter,
+                method: RubyMethod::new(&forwarded.method).map_err(|error| {
+                    format!(
+                        "invalid persistent forwarded block method `{}`: {error}",
+                        forwarded.method
+                    )
+                })?,
+            })
+        })
+        .transpose()?;
+    let direct_yield_call = fact
+        .direct_yield_call
+        .map(|direct| crate::core::DirectYieldCall {
+            parameter_names: direct.parameter_names,
+        });
     Ok(MethodFact {
         fqn: restore_fqn(fact.fqn)?,
         owner: restore_fqn(fact.owner)?,
@@ -978,6 +1391,126 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
         availability: restore_availability(fact.availability)?,
         documentation: fact.documentation,
         return_type_label: fact.return_type_label,
+        higher_order: None,
+    }
+    .with_callable_signatures(callable_signatures)
+    .with_forwarded_block_call(forwarded_block_call)
+    .with_direct_yield_call(direct_yield_call))
+}
+
+fn snapshot_callable_signature(
+    signature: &crate::core::CallableSignature,
+) -> Result<SnapshotCallableSignature, String> {
+    Ok(SnapshotCallableSignature {
+        receiver_type_parameters: signature.receiver_type_parameters.clone(),
+        type_parameters: signature.type_parameters.clone(),
+        parameters: signature
+            .parameters
+            .iter()
+            .map(|parameter| {
+                Ok(SnapshotCallableParameterTemplate {
+                    kind: snapshot_param_kind(parameter.kind),
+                    ruby_type: snapshot_callable_template(&parameter.ruby_type)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        block: SnapshotCallableBlockTemplate {
+            parameters: signature
+                .block
+                .parameters
+                .iter()
+                .map(snapshot_callable_template)
+                .collect::<Result<Vec<_>, _>>()?,
+            return_type: snapshot_callable_template(&signature.block.return_type)?,
+            required: signature.block.required,
+        },
+        return_type: snapshot_callable_template(&signature.return_type)?,
+    })
+}
+
+fn snapshot_callable_template(
+    template: &crate::core::CallableTypeTemplate,
+) -> Result<SnapshotCallableTypeTemplate, String> {
+    use crate::core::CallableTypeTemplate;
+    Ok(match template {
+        CallableTypeTemplate::Concrete(ruby_type) => {
+            SnapshotCallableTypeTemplate::Concrete(snapshot_ruby_type(ruby_type)?)
+        }
+        CallableTypeTemplate::Receiver => SnapshotCallableTypeTemplate::Receiver,
+        CallableTypeTemplate::Variable(name) => {
+            SnapshotCallableTypeTemplate::Variable(name.clone())
+        }
+        CallableTypeTemplate::Array(element) => {
+            SnapshotCallableTypeTemplate::Array(Box::new(snapshot_callable_template(element)?))
+        }
+        CallableTypeTemplate::Hash(key, value) => SnapshotCallableTypeTemplate::Hash(
+            Box::new(snapshot_callable_template(key)?),
+            Box::new(snapshot_callable_template(value)?),
+        ),
+        CallableTypeTemplate::Union(members) => SnapshotCallableTypeTemplate::Union(
+            members
+                .iter()
+                .map(snapshot_callable_template)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        CallableTypeTemplate::Unconstrained => SnapshotCallableTypeTemplate::Unconstrained,
+    })
+}
+
+fn restore_callable_signature(
+    signature: SnapshotCallableSignature,
+) -> Result<crate::core::CallableSignature, String> {
+    Ok(crate::core::CallableSignature {
+        receiver_type_parameters: signature.receiver_type_parameters,
+        type_parameters: signature.type_parameters,
+        parameters: signature
+            .parameters
+            .into_iter()
+            .map(|parameter| {
+                Ok(crate::core::CallableParameterTemplate {
+                    kind: restore_param_kind(parameter.kind),
+                    ruby_type: restore_callable_template(parameter.ruby_type)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        block: crate::core::CallableBlockTemplate {
+            parameters: signature
+                .block
+                .parameters
+                .into_iter()
+                .map(restore_callable_template)
+                .collect::<Result<Vec<_>, _>>()?,
+            return_type: restore_callable_template(signature.block.return_type)?,
+            required: signature.block.required,
+        },
+        return_type: restore_callable_template(signature.return_type)?,
+    })
+}
+
+fn restore_callable_template(
+    template: SnapshotCallableTypeTemplate,
+) -> Result<crate::core::CallableTypeTemplate, String> {
+    use crate::core::CallableTypeTemplate;
+    Ok(match template {
+        SnapshotCallableTypeTemplate::Concrete(ruby_type) => {
+            CallableTypeTemplate::Concrete(restore_ruby_type(ruby_type, 1)?)
+        }
+        SnapshotCallableTypeTemplate::Receiver => CallableTypeTemplate::Receiver,
+        SnapshotCallableTypeTemplate::Variable(name) => CallableTypeTemplate::Variable(name),
+        SnapshotCallableTypeTemplate::Array(element) => {
+            CallableTypeTemplate::Array(Box::new(restore_callable_template(*element)?))
+        }
+        SnapshotCallableTypeTemplate::Hash(key, value) => CallableTypeTemplate::Hash(
+            Box::new(restore_callable_template(*key)?),
+            Box::new(restore_callable_template(*value)?),
+        ),
+        SnapshotCallableTypeTemplate::Union(members) => CallableTypeTemplate::Union(
+            members
+                .into_iter()
+                .map(restore_callable_template)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        SnapshotCallableTypeTemplate::Unconstrained => CallableTypeTemplate::Unconstrained,
     })
 }
 
@@ -1484,6 +2017,9 @@ fn rebind_all_ranges(facts: &mut FileFacts, source: SourceFileId, target: Source
     for fact in &mut facts.unresolved_graph_edges {
         rebind_range(&mut fact.range, source, target);
     }
+    for fact in &mut facts.inference.constant_callable_bodies {
+        rebind_range(&mut fact.range, source, target);
+    }
 }
 
 fn rebind_range(range: &mut TextRange, source: SourceFileId, target: SourceFileId) {
@@ -1496,14 +2032,19 @@ fn rebind_range(range: &mut TextRange, source: SourceFileId, target: SourceFileI
 
 #[cfg(test)]
 mod tests {
-    use super::{restore_ruby_type, snapshot_ruby_type};
+    use super::{
+        restore_ruby_type, snapshot_ruby_type, ProjectNeutralFileFactsSnapshot,
+        SnapshotCallableTypeTemplate,
+    };
     use crate::core::{
-        DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeFact,
-        GraphEdgeKind, GraphNodeFact, GraphNodeKind, InferenceEvidence, LiteralKey, LiteralValue,
-        MethodFact, MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType,
-        ShapeExactness, ShapeField, ShapeRest, ShapeStability, ShapeType, SourceFileId, SourceKind,
-        SymbolFact, SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance,
-        TypeSubject, UnresolvedGraphEdgeFact,
+        CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind,
+        CallableBodySummary, ConstantCallableBodyFact, DiagnosticCandidate,
+        DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
+        GraphNodeKind, InferenceEvidence, LiteralKey, LiteralValue, MethodFact,
+        MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType, ShapeExactness,
+        ShapeField, ShapeRest, ShapeStability, ShapeType, SourceFileId, SourceKind, SymbolFact,
+        SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
+        UnresolvedGraphEdgeFact,
     };
     use crate::engine::{
         AnalysisEngine, AnalysisQuery, FileFacts, ProjectNeutralFileFactsTemplate,
@@ -1534,6 +2075,70 @@ mod tests {
         let original = RubyType::Shape(Box::new(shape));
         let snapshot = snapshot_ruby_type(&original).unwrap();
         assert_eq!(restore_ruby_type(snapshot, 0).unwrap(), original);
+    }
+
+    #[test]
+    fn persistent_snapshot_round_trips_capture_free_callable_constant() {
+        let source = SourceFileId(41);
+        let target = SourceFileId(7);
+        let range = TextRange::new(source, 3, 29);
+        let constant = FullyQualifiedName::constant(vec![RubyConstant::new("CONVERT").unwrap()]);
+        let summary = CallableBodySummary {
+            strict_arity: true,
+            parameters: vec![CallableBodyParameter {
+                name: "value".to_string(),
+                kind: CallableBodyParameterKind::Required,
+                default: None,
+            }],
+            captures: Vec::new(),
+            result: CallableBodyExpression::Parameter(0),
+            node_count: 1,
+        };
+        let template = ProjectNeutralFileFactsTemplate::try_new(
+            source,
+            FileFacts {
+                inference: InferenceEvidence {
+                    constant_callable_bodies: vec![ConstantCallableBodyFact {
+                        constant: constant.clone(),
+                        summary: summary.clone(),
+                        range,
+                    }],
+                    ..InferenceEvidence::default()
+                },
+                ..FileFacts::default()
+            },
+        )
+        .unwrap();
+
+        let snapshot = template.to_persistent_snapshot().unwrap();
+        let encoded = postcard::to_allocvec(&snapshot).unwrap();
+        let decoded: ProjectNeutralFileFactsSnapshot = postcard::from_bytes(&encoded).unwrap();
+        let restored =
+            ProjectNeutralFileFactsTemplate::try_from_persistent_snapshot(decoded).unwrap();
+        let facts = restored.instantiate(target);
+        assert_eq!(facts.inference.constant_callable_bodies.len(), 1);
+        let fact = &facts.inference.constant_callable_bodies[0];
+        assert_eq!(fact.constant, constant);
+        assert_eq!(fact.summary, summary);
+        assert_eq!(fact.range.file_id, target);
+    }
+
+    #[test]
+    fn persistent_callable_template_uses_postcard_compatible_enum_encoding() {
+        let template = SnapshotCallableTypeTemplate::Array(Box::new(
+            SnapshotCallableTypeTemplate::Variable("element".to_string()),
+        ));
+        let encoded = postcard::to_allocvec(&template).unwrap();
+        let decoded: SnapshotCallableTypeTemplate = postcard::from_bytes(&encoded).unwrap();
+        let SnapshotCallableTypeTemplate::Array(element) = decoded else {
+            panic!(
+                "INVARIANT VIOLATED: persistent callable template changed variant during Postcard round-trip. This is a bug because dependency products must restore exact higher-order signatures. Fix: keep the persistence DTO externally tagged and add explicit wire migration for representation changes."
+            );
+        };
+        assert!(matches!(
+            *element,
+            SnapshotCallableTypeTemplate::Variable(ref name) if name == "element"
+        ));
     }
 
     fn assert_range_file(range: TextRange, expected: SourceFileId) {

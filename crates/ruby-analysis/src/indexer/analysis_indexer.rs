@@ -1385,6 +1385,8 @@ impl Visit<'_> for AnalysisIndexer {
                 )
             })
             .collect::<Vec<_>>();
+        let forwarded_block_call = super::forwarded_block::direct_forwarded_block_call(node);
+        let direct_yield_call = super::forwarded_block::direct_yield_call(node);
         let availability = match yard_doc.as_ref() {
             Some(doc) => match (&doc.unavailable, &doc.absent) {
                 (Some(reason), None) => MethodAvailability::Unavailable {
@@ -1415,7 +1417,9 @@ impl Visit<'_> for AnalysisIndexer {
                         .and_then(YardMethodDoc::format_return_type),
                 )
                 .with_availability(availability.clone())
-                .with_visibility(self.current_visibility()),
+                .with_visibility(self.current_visibility())
+                .with_forwarded_block_call(forwarded_block_call.clone())
+                .with_direct_yield_call(direct_yield_call.clone()),
         );
         if node.receiver().is_none()
             && owner_kind == NamespaceKind::Instance
@@ -1439,7 +1443,9 @@ impl Visit<'_> for AnalysisIndexer {
                             .and_then(YardMethodDoc::format_return_type),
                     )
                     .with_availability(availability)
-                    .with_visibility(self.current_visibility()),
+                    .with_visibility(self.current_visibility())
+                    .with_forwarded_block_call(forwarded_block_call)
+                    .with_direct_yield_call(direct_yield_call),
             );
         }
         if let Some(return_type) = method_body_literal_type(node) {

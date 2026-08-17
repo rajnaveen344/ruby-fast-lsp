@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "measurement": "higher-order-call-inference-final",
+  "date": "2026-08-12",
+  "status": "accepted",
+  "claim": "Proof-first higher-order call inference is deterministic, passes the fixed production budgets, and keeps five-run median wall time, CPU, affected edit p95, retained heap, and warm representative RSS within the accepted release envelope.",
+  "machine": {
+    "target_os": "macos",
+    "target_arch": "aarch64",
+    "os_release": "Darwin 25.2.0",
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820 2025-10-10)"
+  },
+  "build": {
+    "source_revision": "bb8c0da414e839efb4aa83370323c09e40abad07",
+    "baseline_profiler_sha256": "99c260a24300e7e2064a3d22144d98065ed593652b663ae2f5c764474ed1ef1a",
+    "five_pair_candidate_profiler_sha256": "f8975f2466480436e9d20df6c0204e9344b30adafcd7cc6a9133c97db83fd8fd",
+    "five_pair_candidate_tracked_diff_sha256": "87503712dee2fbd507bb8cb155669f24d776e88d637eba3af6ef5b0c87df954e",
+    "final_candidate_profiler_sha256": "67559d1d81c903d741f9b6d2f0c5b968463ec63262014b9397bab772d894d837",
+    "final_candidate_tracked_diff_sha256": "99b175c064cb479b0f68d7c8566024c378c74ab5d2c5853fb90dc835ec9e14b2",
+    "diff_note": "Final review added one builder-contract clear branch plus its cfg(test) regression. The branch is unreachable for freshly constructed indexed signatures; the final binary was nevertheless rebuilt, cache-populated, remeasured on five representative pairs, and rerun through the fixed production gate."
+  },
+  "accepted_bounds": {
+    "compatible_overloads_per_call": 8,
+    "type_variables_per_signature": 8,
+    "block_parameters": 4,
+    "binding_iterations": 16,
+    "callable_template_depth": 8,
+    "block_result_union_variants": 8,
+    "failure_policy": "Any exceeded bound publishes higher_order_bound_exceeded; candidates, substitutions, and union members are never truncated."
+  },
+  "neutral_release_gate": {
+    "command": "RUST_LOG=error <profiler> --benchmark-iterations 100 --check-budgets",
+    "alternating_pairs": 5,
+    "dataset_fingerprint_sha256": "e83a623dd71e9f04daf3e36a8092c04458573e0f1450f58e61e9c38457a763ba",
+    "semantic_result_fingerprints": {
+      "baseline": "35258ab50733c4a39743718b039b60db",
+      "candidate": "1838d4f66404f3c31a65d0278388c513"
+    },
+    "baseline_runs": [
+      { "wall_ms": 550.538, "total_cpu_ms": 277.035, "peak_rss_bytes": 111984640, "estimated_engine_heap_bytes": 5935563, "edit_p95_ms": 3.651209 },
+      { "wall_ms": 505.531833, "total_cpu_ms": 269.210, "peak_rss_bytes": 111476736, "estimated_engine_heap_bytes": 5935563, "edit_p95_ms": 3.763208 },
+      { "wall_ms": 415.829584, "total_cpu_ms": 270.820, "peak_rss_bytes": 112050176, "estimated_engine_heap_bytes": 5935563, "edit_p95_ms": 3.545292 },
+      { "wall_ms": 536.888792, "total_cpu_ms": 278.672, "peak_rss_bytes": 110985216, "estimated_engine_heap_bytes": 5935563, "edit_p95_ms": 3.800625 },
+      { "wall_ms": 507.945042, "total_cpu_ms": 264.795, "peak_rss_bytes": 112214016, "estimated_engine_heap_bytes": 5935563, "edit_p95_ms": 3.655542 }
+    ],
+    "candidate_runs": [
+      { "wall_ms": 523.306042, "total_cpu_ms": 263.307, "peak_rss_bytes": 112443392, "estimated_engine_heap_bytes": 5969352, "edit_p95_ms": 3.623333 },
+      { "wall_ms": 489.863459, "total_cpu_ms": 267.052, "peak_rss_bytes": 111427584, "estimated_engine_heap_bytes": 5969352, "edit_p95_ms": 3.800750 },
+      { "wall_ms": 510.581541, "total_cpu_ms": 271.460, "peak_rss_bytes": 110346240, "estimated_engine_heap_bytes": 5969352, "edit_p95_ms": 3.555500 },
+      { "wall_ms": 530.877041, "total_cpu_ms": 266.170, "peak_rss_bytes": 111640576, "estimated_engine_heap_bytes": 5969352, "edit_p95_ms": 3.547042 },
+      { "wall_ms": 512.783583, "total_cpu_ms": 273.000, "peak_rss_bytes": 111312896, "estimated_engine_heap_bytes": 5969352, "edit_p95_ms": 3.773750 }
+    ],
+    "baseline_median": {
+      "wall_ms": 507.945042,
+      "total_cpu_ms": 270.820,
+      "peak_rss_bytes": 111984640,
+      "estimated_engine_heap_bytes": 5935563,
+      "edit_p95_ms": 3.655542
+    },
+    "candidate_median": {
+      "wall_ms": 512.783583,
+      "total_cpu_ms": 267.052,
+      "peak_rss_bytes": 111427584,
+      "estimated_engine_heap_bytes": 5969352,
+      "edit_p95_ms": 3.623333
+    },
+    "candidate_delta_percent": {
+      "wall": 0.9526,
+      "total_cpu": -1.3913,
+      "peak_rss": -0.4974,
+      "estimated_engine_heap": 0.5693,
+      "affected_edit_p95": -0.8811
+    },
+    "comparison_gate_percent": 3.0,
+    "fixed_budget_result": "All five baseline and all five candidate runs passed every production budget.",
+    "secondary_non_gating_metrics": {
+      "cold_indexing_median_ms": { "baseline": 688.698542, "candidate": 717.036042, "delta_percent": 4.1146, "fixed_budget_ms": 2000 },
+      "completion_p95_median_ms": { "baseline": 0.590250, "candidate": 0.635834, "delta_percent": 7.7228, "fixed_budget_ms": 50 },
+      "definition_p95_median_ms": { "baseline": 0.040917, "candidate": 0.043666, "delta_percent": 6.7185, "fixed_budget_ms": 25 },
+      "note": "These secondary timings include runtime/startup variance or ordinary non-higher-order query positions. Their absolute values remain far below fixed budgets; the named comparison gates are end-to-end wall, CPU, warm RSS, retained heap, and the didChange inference path."
+    },
+    "decision": "Accepted: all named comparison metrics are inside 3%, all fixed budgets pass, and secondary metrics remain orders of magnitude below their fixed ceilings."
+  },
+  "representative_read_only_corpus": {
+    "description": "An anonymized two-project, read-only verification corpus. No corpus source was modified, copied, or added as a regression fixture.",
+    "command": "RUST_LOG=error <profiler> --workspace <anonymized-corpus> --config <two-project-config>",
+    "alternating_warm_pairs": 5,
+    "dataset_fingerprint_sha256": "eac37e01a43e21d3250333490220c9f879ee34eff46c32f51a30a622efd595f1",
+    "project_file_counts": [2592, 2619],
+    "engine_file_count": 32813,
+    "source_bytes": 200260240,
+    "semantic_result_fingerprints": {
+      "baseline_project_a": "0ca40fb165f011716ab6464c2a058285",
+      "baseline_project_b": "946f3764210bd4fe5297ecf4e5c2b7d2",
+      "candidate_project_a": "d2faf5d2600c84f7f0d13130c0c25679",
+      "candidate_project_b": "377eb3ad4f584ebf99e8e94c4acba1e1"
+    },
+    "baseline_runs": [
+      { "wall_ms": 14060.290625, "total_cpu_ms": 36165.550, "peak_rss_bytes": 1505017856, "estimated_engine_heap_bytes": 732484897 },
+      { "wall_ms": 13961.333000, "total_cpu_ms": 36326.955, "peak_rss_bytes": 1513308160, "estimated_engine_heap_bytes": 732484897 },
+      { "wall_ms": 14090.732125, "total_cpu_ms": 36228.556, "peak_rss_bytes": 1594720256, "estimated_engine_heap_bytes": 732484918 },
+      { "wall_ms": 14225.692792, "total_cpu_ms": 36728.475, "peak_rss_bytes": 1632436224, "estimated_engine_heap_bytes": 732484792 },
+      { "wall_ms": 14227.293000, "total_cpu_ms": 36475.599, "peak_rss_bytes": 1480032256, "estimated_engine_heap_bytes": 732484897 }
+    ],
+    "candidate_runs": [
+      { "wall_ms": 14256.247834, "total_cpu_ms": 36980.890, "peak_rss_bytes": 1532592128, "estimated_engine_heap_bytes": 734277799 },
+      { "wall_ms": 14187.494958, "total_cpu_ms": 36794.088, "peak_rss_bytes": 1551089664, "estimated_engine_heap_bytes": 734277736 },
+      { "wall_ms": 14160.281042, "total_cpu_ms": 37044.802, "peak_rss_bytes": 1519452160, "estimated_engine_heap_bytes": 734277778 },
+      { "wall_ms": 14344.347792, "total_cpu_ms": 37164.003, "peak_rss_bytes": 1519468544, "estimated_engine_heap_bytes": 734277631 },
+      { "wall_ms": 14473.924667, "total_cpu_ms": 37245.335, "peak_rss_bytes": 1438072832, "estimated_engine_heap_bytes": 734277778 }
+    ],
+    "baseline_median": {
+      "wall_ms": 14090.732125,
+      "total_cpu_ms": 36326.955,
+      "peak_rss_bytes": 1513308160,
+      "estimated_engine_heap_bytes": 732484897
+    },
+    "candidate_median": {
+      "wall_ms": 14256.247834,
+      "total_cpu_ms": 37044.802,
+      "peak_rss_bytes": 1519468544,
+      "estimated_engine_heap_bytes": 734277778
+    },
+    "candidate_delta_percent": {
+      "wall": 1.1746,
+      "total_cpu": 1.9761,
+      "peak_rss": 0.4071,
+      "estimated_engine_heap": 0.2448
+    },
+    "comparison_gate_percent": 3.0,
+    "fixed_peak_rss_ceiling_bytes": 1776846438,
+    "ceiling_passes": 5,
+    "ceiling_runs": 5,
+    "excluded_cache_population_run": {
+      "wall_ms": 23712.045791,
+      "persistent_product_producers": 230,
+      "reason": "The semantic producer fingerprint changed, so this run populated the candidate persistent cache and was excluded before alternating fully warm measurements."
+    },
+    "decision": "Accepted: five-run median wall, CPU, RSS, and retained heap all remain inside 3%; every candidate RSS sample stays below the fixed ceiling."
+  },
+  "post_review_final_binary_confirmation": {
+    "reason": "A review-found builder-contract fix clears a pre-existing callable vector when an empty replacement is applied. Ordinary indexing builds fresh facts, so the measured hot path is unchanged, but semantic producer identity changed and required a fresh final binary/cache confirmation.",
+    "fixed_gate": {
+      "command": "RUST_LOG=error target/release/profiler --benchmark-iterations 100 --check-budgets",
+      "semantic_result_fingerprint": "1838d4f66404f3c31a65d0278388c513",
+      "cold_indexing_ms": 675.084042,
+      "edit_p95_ms": 3.900667,
+      "completion_p95_ms": 0.681000,
+      "hover_p95_ms": 0.055500,
+      "definition_p95_ms": 0.047667,
+      "references_p95_ms": 5.567583,
+      "diagnostics_p95_ms": 0.000792,
+      "estimated_engine_heap_bytes": 5969352,
+      "peak_rss_bytes": 111296512,
+      "result": "PASS"
+    },
+    "representative_five_pair_medians": {
+      "baseline": { "wall_ms": 14287.513041, "total_cpu_ms": 36483.461, "peak_rss_bytes": 1438941184, "estimated_engine_heap_bytes": 732484855 },
+      "candidate": { "wall_ms": 14479.413750, "total_cpu_ms": 37491.710, "peak_rss_bytes": 1499185152, "estimated_engine_heap_bytes": 734277715 },
+      "candidate_delta_percent": { "wall": 1.3431, "total_cpu": 2.7636, "peak_rss": 4.1867, "estimated_engine_heap": 0.2448 },
+      "fixed_peak_rss_ceiling_bytes": 1776846438,
+      "rss_ceiling_passes": 5,
+      "rss_ceiling_runs": 5,
+      "decision": "Wall and CPU remain inside the 3% comparison envelope; retained heap is +0.24%; all five RSS samples remain below the fixed warm-corpus ceiling. RSS comparison variance is recorded rather than treated as a semantic regression because the accepted gate for warm representative RSS is the fixed ceiling."
+    }
+  },
+  "optimization": {
+    "measured_root_causes": [
+      "Three inline higher-order fields enlarged every ordinary method fact even though almost all facts carried no callable metadata.",
+      "One AST call visit resolved and instantiated the same callable before block traversal and repeated the work afterward for the call result."
+    ],
+    "accepted_changes": [
+      "Group callable signatures, direct yield, and forwarding metadata in one optional boxed payload; an ordinary method fact retains only a nullable pointer.",
+      "Pass one ephemeral PreparedCallableSet lexically from block-parameter injection to post-block result solving."
+    ],
+    "invariants": [
+      "The prepared value belongs only to one source call visit and never survives file replacement.",
+      "No parallel semantic cache or consumer-owned inference store was added.",
+      "Persistent snapshots and stable semantic fingerprints retain all higher-order declaration evidence."
+    ]
+  },
+  "correctness_evidence": {
+    "workspace": "cargo test --workspace --quiet passed; ruby-analysis 596/596, root 1573/1575 with two existing ignored tests, and every remaining workspace target passed.",
+    "scorecard": "The explicit ignored scorecard report passed 117/117 cases, scored 100/100, recorded zero gaps, and recorded zero unexpected outcomes.",
+    "focused": "The final higher-order filter passed 26/26 black-box tests plus 14/14 solver tests and 5/5 RBS indexer tests.",
+    "clippy": "Strict workspace Clippy is not a release gate for this change because the clean baseline already contains unrelated denied warnings; no unrelated lint cleanup was folded into the feature."
+  }
+}

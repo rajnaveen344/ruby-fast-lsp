@@ -144,7 +144,7 @@ impl<'a> Visitor<'a> {
                 "module_name" | "namespace" => {
                     module.name = self.node_text(&child).to_string();
                 }
-                "type_parameters" => {
+                "type_parameters" | "module_type_parameters" => {
                     module.type_params = self.visit_type_parameters(child)?;
                 }
                 "module_self_types" => {
@@ -275,34 +275,56 @@ impl<'a> Visitor<'a> {
         let mut cursor = node.walk();
 
         for child in node.children(&mut cursor) {
-            if child.kind() == "type_parameter" || child.kind() == "type_variable" {
-                let mut param = TypeParam::new(self.node_text(&child));
-
-                // Check for variance
-                let text = self.node_text(&child);
-                if text.starts_with("out ") {
-                    param.variance = Variance::Covariant;
-                    param.name = text.trim_start_matches("out ").to_string();
-                } else if text.starts_with("in ") {
-                    param.variance = Variance::Contravariant;
-                    param.name = text.trim_start_matches("in ").to_string();
-                }
-
-                params.push(param);
-            } else if child.is_named() {
-                // Try to extract name from nested structure
-                let text = self.node_text(&child).trim();
-                if !text.is_empty()
-                    && !text.starts_with('[')
-                    && !text.starts_with(',')
-                    && !text.starts_with(']')
-                {
-                    params.push(TypeParam::new(text));
-                }
+            if !child.is_named() {
+                continue;
+            }
+            if matches!(
+                child.kind(),
+                "type_parameter"
+                    | "module_type_parameter"
+                    | "type_variable"
+                    | "method_type_parameter"
+            ) {
+                params.push(self.visit_type_parameter(child)?);
             }
         }
 
         Ok(params)
+    }
+
+    fn visit_type_parameter(&self, node: Node) -> Result<TypeParam, ParseError> {
+        let text = self.node_text(&node).trim();
+        let mut variable_name = None;
+        let mut pending = vec![node];
+        while let Some(current) = pending.pop() {
+            if current.kind() == "type_variable" {
+                let mut cursor = current.walk();
+                variable_name = current
+                    .named_children(&mut cursor)
+                    .find(|child| matches!(child.kind(), "constant" | "identifier"))
+                    .map(|child| self.node_text(&child).to_string())
+                    .or_else(|| Some(self.node_text(&current).to_string()));
+                break;
+            }
+            let mut cursor = current.walk();
+            pending.extend(current.named_children(&mut cursor));
+        }
+        let name = variable_name.ok_or_else(|| {
+            ParseError::with_location(
+                "RBS type parameter has no type variable",
+                self.node_location(&node),
+            )
+        })?;
+        let mut parameter = TypeParam::new(name);
+        let tokens = text.split_whitespace().collect::<Vec<_>>();
+        parameter.variance = if tokens.contains(&"out") {
+            Variance::Covariant
+        } else if tokens.contains(&"in") {
+            Variance::Contravariant
+        } else {
+            Variance::Invariant
+        };
+        Ok(parameter)
     }
 
     /// Visit module self types
@@ -344,25 +366,13 @@ impl<'a> Visitor<'a> {
                     methods.push(method);
                 }
                 "include_member" | "include" => {
-                    if let Some(type_node) = child.child(1).or_else(|| child.child(0)) {
-                        if let Ok(t) = self.visit_type(type_node) {
-                            members.push(Member::Include(t));
-                        }
-                    }
+                    members.push(Member::Include(self.visit_member_target(child)?));
                 }
                 "extend_member" | "extend" => {
-                    if let Some(type_node) = child.child(1).or_else(|| child.child(0)) {
-                        if let Ok(t) = self.visit_type(type_node) {
-                            members.push(Member::Extend(t));
-                        }
-                    }
+                    members.push(Member::Extend(self.visit_member_target(child)?));
                 }
                 "prepend_member" | "prepend" => {
-                    if let Some(type_node) = child.child(1).or_else(|| child.child(0)) {
-                        if let Ok(t) = self.visit_type(type_node) {
-                            members.push(Member::Prepend(t));
-                        }
-                    }
+                    members.push(Member::Prepend(self.visit_member_target(child)?));
                 }
                 "attr_reader" | "attr_writer" | "attr_accessor" | "attribute_member" => {
                     if let Ok(attr) = self.visit_attribute(child) {
@@ -397,6 +407,37 @@ impl<'a> Visitor<'a> {
         }
 
         Ok(())
+    }
+
+    fn visit_member_target(&self, node: Node) -> Result<RbsType, ParseError> {
+        let mut name = None;
+        let mut arguments = Vec::new();
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            match child.kind() {
+                "class_name" | "namespace" | "constant" => {
+                    name = Some(self.node_text(&child).to_string());
+                }
+                "type_arguments" | "type_args" => {
+                    let mut argument_cursor = child.walk();
+                    for argument in child.named_children(&mut argument_cursor) {
+                        arguments.push(self.visit_type(argument)?);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let name = name.ok_or_else(|| {
+            ParseError::with_location(
+                "RBS mixin member has no target name",
+                self.node_location(&node),
+            )
+        })?;
+        if arguments.is_empty() {
+            Ok(RbsType::Class(name))
+        } else {
+            Ok(RbsType::generic(name, arguments))
+        }
     }
 
     /// Visit a method definition
@@ -490,7 +531,7 @@ impl<'a> Visitor<'a> {
 
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "type_parameters" => {
+                "type_parameters" | "method_type_parameters" => {
                     method_type.type_params = self.visit_type_parameters(child)?;
                 }
                 "parameters" => {
@@ -518,9 +559,11 @@ impl<'a> Visitor<'a> {
             match child.kind() {
                 // Delegate to method_type_body if present
                 "method_type_body" => {
-                    return self.visit_method_type_body(child);
+                    let mut body = self.visit_method_type_body(child)?;
+                    body.type_params = method_type.type_params;
+                    method_type = body;
                 }
-                "type_parameters" => {
+                "type_parameters" | "method_type_parameters" => {
                     method_type.type_params = self.visit_type_parameters(child)?;
                 }
                 "parameters" | "method_parameters" | "params" => {
@@ -697,7 +740,7 @@ impl<'a> Visitor<'a> {
         let mut block = Block {
             params: Vec::new(),
             return_type: RbsType::Void,
-            required: false,
+            required: true,
         };
 
         let mut cursor = node.walk();

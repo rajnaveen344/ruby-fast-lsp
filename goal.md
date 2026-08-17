@@ -1,577 +1,532 @@
-# Goal: Proof-First Structural Shapes for Ruby
+# Goal: Proof-First Parameter-Dependent Callable Bodies
 
-Status: **Complete — Phases 0–8 accepted**
+Status: **Complete — accepted 2026-08-13**
+
+## Implementation Progress
+
+- [x] Phase 0 — pin the proof domain, fixed bounds, neutral RED fixtures, and
+  exact pre-implementation release baseline.
+- [x] Phase 1 — introduce one compact AST-free callable-body summary and
+  stable explained-Unknown outcomes.
+- [x] Phase 2 — give local callables bounded flow identities and constant-held
+  callables ordinary file-owned fact lifecycle semantics.
+- [x] Phase 3 — instantiate direct `.call` bodies from proven arguments.
+- [x] Phase 4 — reuse the same instantiation in the higher-order call solver.
+- [x] Phase 5 — complete captures, aliases, flow, shapes, unions, and
+  lambda/proc arity semantics within the accepted bounds.
+- [x] Phase 6 — prove edit/reindex/file-order determinism and parity across
+  hover, inlay hints, completion, diagnostics, chained dispatch, and CLI.
+- [x] Phase 7 — complete architecture/docs/scorecard updates, full tests, and
+  alternating release performance/memory evidence.
+
+## Completion Evidence
+
+- One AST-free callable-body summary and one evaluator now serve direct
+  `.call` and higher-order `&callable` inference.
+- Local identities are bounded flow values; capture-free constant callables
+  use ordinary file-owned engine facts, replacement, ambiguity, fingerprints,
+  project isolation, and persistent dependency products.
+- The neutral callable-body suite passes 50/50, including local/cross-file
+  navigation, consumer parity, lifecycle replacement, every accepted bound,
+  and fail-closed controls.
+- `cargo test --workspace` passes: `ruby-analysis` 601/601, root 1,626 passed
+  with two intentional ignores, and every packaged extension and doc target
+  passes.
+- The explicit inference scorecard passes 121/121 at 100/100 with zero gaps
+  and zero unexpected outcomes.
+- Five alternating neutral release pairs pass every fixed production budget;
+  affected edit p95 is +1.79%, retained heap +0.003%, and wall/CPU/RSS improve.
+- Five alternating fully warm representative pairs restore 604/604 persistent
+  products per run with zero misses, producers, or corruptions. Median CPU is
+  +0.10%, retained heap +0.11%, and all RSS samples remain below the fixed
+  1,776,846,438-byte ceiling.
+- Machine-readable baseline and final evidence live in
+  `support/performance/callable-body-inference-baseline-2026-08-12.json` and
+  `support/performance/callable-body-inference-final-2026-08-12.json`.
 
 ## Objective
 
-Add TypeScript-style structural shape inference for Ruby values without
-pretending that dynamic or escaped mutable state is statically known.
+Infer the result of statically visible Ruby lambda/proc bodies from their
+proven call-site arguments, then reuse that result in direct callable calls and
+the existing higher-order call solver.
 
-The initial feature models Hash-backed structural values such as API payloads,
-configuration objects, options, and service results:
+The first release should make these results deterministic across cold indexing,
+open documents, edits, file ordering, and reindexing:
 
 ```ruby
-def build_user
-  {
-    id: 42,
-    profile: {
-      name: "Ada",
-      active: true
-    }
-  }
+stringify = ->(value) { value.to_s }
+
+direct = stringify.call(1)
+strings = [1, 2].map(&stringify)
+
+# direct: String
+# strings: Array<String>
+```
+
+It should also work when a capture-free callable constant is defined in one
+file and referenced from another:
+
+```ruby
+# converters.rb
+module Converters
+  STRINGIFY = ->(value) { value.to_s }
 end
 
-user = build_user
-# user: { id: Integer, profile: { name: String, active: TrueClass } }
+# report.rb
+labels = [1, "ready"].map(&Converters::STRINGIFY)
+# labels: Array<String>
 ```
 
-Shapes must propagate through local flow, constants, method returns,
-cross-file calls, arrays, unions, and supported RBS records. Hover, inlay
-hints, completion, diagnostics, and `ruby-fast-lsp check` must project the same
-engine-owned result.
+This must extend the accepted callable-signature architecture. It must not
+become a proc-name table, a second type-inference engine, retained Prism nodes,
+or a consumer-specific fallback.
 
-This is not a promise to infer every Ruby Hash. When mutation, aliasing,
-reflection, or an unresolved call makes the structure uncertain, inference
-must widen or return an explained `Unknown` rather than retain a convenient
-stale shape.
+## Product Outcome
 
-## Why This Is Feasible in Ruby
+Users should be able to extract an explicit block into a statically visible
+callable without losing type inference, completion, navigation, diagnostics,
+or structural precision.
 
-Ruby's dynamic typing does not prevent static reasoning about visible control
-flow. An unknown condition means every reachable branch contributes to the
-result:
+Initial product coverage:
+
+- `->(...) { ... }`, `lambda { ... }`, `proc { ... }`, and
+  `Proc.new { ... }` literals whose bodies can be summarized completely.
+- Direct local calls through `.call`.
+- Passing a proven local or constant callable through `&callable` to an
+  existing higher-order signature.
+- Capture-free callable constants referenced across files.
+- Bounded same-scope local aliases of a proven callable.
+- Parameter-dependent method calls, structural Hash reads, array/hash
+  construction, local temporaries, and exhaustive branches in callable bodies.
+- Proven same-scope captured local reads resolved with Ruby's source-ordered
+  binding semantics.
+- Strict lambda arity and lenient proc arity, including required, optional,
+  and rest parameters within fixed bounds.
+- Exhaustive union results and shape-preserving results.
+
+Representative supported cases:
 
 ```ruby
-if condition
-  value = 1
-else
-  value = "ready"
-end
-
-# value: Integer | String
+project_name = ->(row) { row[:name] }
+rows = [{ name: "Ada" }, { name: "Grace" }]
+names = rows.map(&project_name)
+# Array<String>
 ```
-
-At each program point, inference tracks the type proven on that path. At a
-join, it forms the exhaustive union of the reachable path types. A branch that
-always raises or returns does not reach the join. A missing branch contributes
-the previous value or `NilClass`, as Ruby semantics require.
-
-The same rule extends to shapes, but correlations between fields must be
-preserved:
 
 ```ruby
-result =
-  if condition
-    { kind: :number, value: 1 }
-  else
-    { kind: :text, value: "ready" }
-  end
+normalize = ->(value) { flag ? value : value.to_s }
+results = [1, 2].map(&normalize)
+# Array<Integer | String>
 ```
-
-The semantic result is a union of complete variants:
-
-```text
-{ kind: :number, value: Integer }
-|
-{ kind: :text, value: String }
-```
-
-It must not be flattened to the following type:
-
-```text
-{ kind: :number | :text, value: Integer | String }
-```
-
-Flattening loses the relationship between `kind` and `value` and makes
-discriminated narrowing impossible.
-
-## Soundness Contract
-
-The feature is proof-first relative to the indexed Ruby program and declared
-contracts.
-
-1. Every reachable branch participates in a join.
-2. Diverging branches do not contribute a result at the join.
-3. One unsupported or unknown variant prevents a partial concrete claim where
-   completeness is required.
-4. Shape variants remain correlated; field-wise display compression must not
-   alter semantic identity.
-5. Known mutations update the current abstract shape.
-6. Mutation through a tracked alias updates every alias of that abstract Hash.
-7. An unresolved mutation or escape invalidates every affected mutable alias.
-8. Frozen outer Hashes retain their key set, while nested mutable values keep
-   their own independent lifecycle.
-9. Reflection, unconstrained `send`, `eval`, native behavior without a
-   declaration, and unbounded metaprogramming remain dynamic boundaries.
-10. Exceeding a fixed shape, union, depth, alias, or solver bound produces an
-    explained `Unknown`; it never silently drops fields or widens to `Object`.
-
-This should be stricter than TypeScript in places. TypeScript deliberately
-accepts selected unsound JavaScript patterns. Ruby Fast LSP must retain its
-existing rule that incomplete evidence cannot prove a concrete result or a
-diagnostic.
-
-## Proposed Type Model
-
-Add domain types in `ruby-analysis::core`; storage IDs remain private to the
-engine.
-
-```text
-RubyType::Literal(...)
-RubyType::Shape(ShapeType)
-
-ShapeType
-  fields: canonical bounded list of ShapeField
-  rest: optional generic key/value contract
-  exactness: exact or open
-  stability: frozen or tracked-mutable proof state
-
-ShapeField
-  key: LiteralKey
-  value: RubyType
-  presence: required or optional
-```
-
-Initial literal keys:
-
-- Symbols
-- Strings
-
-Additional literal key forms require a reviewed use case. Dynamic keys project
-through the generic Hash key/value view and cannot select one exact field.
-
-`RubyType::Shape` remains a Ruby `Hash` instance for ordinary method lookup.
-Inference exposes canonical key and value projections when an RBS `Hash[K, V]`
-method is selected. Shape-specific operations may retain more precision than
-that generic projection.
-
-## Control-Flow Semantics
-
-### Primitive branch assignment
 
 ```ruby
-if condition
-  value = 1
-else
-  value = "ready"
-end
+prefix = "item"
+format = ->(value) { "#{prefix}:#{value}" }
+prefix = :item
+
+format.call(1)
+# String: every reachable prefix type still proves String interpolation
 ```
 
-- True branch: `Integer`
-- False branch: `String`
-- Join: `Integer | String`
+## Core Soundness Contract
 
-Only methods valid for every reachable union member can produce a proven
-chained result without narrowing.
+A concrete callable-body result may be published only when all of these are
+proven:
 
-### Missing branch
-
-```ruby
-if condition
-  value = 1
-end
-```
-
-If `value` had no prior assignment, the post-join type is
-`Integer | NilClass`. If it had a prior value, that prior type participates in
-the join.
-
-### Diverging branch
-
-```ruby
-if condition
-  value = 1
-else
-  raise "failed"
-end
-```
-
-The post-join type is `Integer` because the other branch cannot reach it.
-
-### Shape branches
-
-Shape branches remain a union of variants. Structurally identical variants may
-be deduplicated. They must not be field-wise merged when doing so would lose
-cross-field correlation.
-
-### Discriminated narrowing
-
-Literal field checks narrow a shape union:
-
-```ruby
-if result[:kind] == :number
-  result[:value].abs
-else
-  result[:value].upcase
-end
-```
-
-The true path retains only variants whose required `:kind` field can equal
-`:number`. The false path removes variants whose required field is exactly
-`:number`. Optional fields, generic rest keys, unknown values, and mutable
-escaped shapes narrow only when the proof remains exhaustive.
-
-## Structural Compatibility
-
-Shape compatibility is directional:
-
-- Every required target field must exist in the source with a compatible
-  value type.
-- An optional target field may be absent.
-- Extra source fields satisfy an open target shape.
-- An exact target rejects unaccounted source fields.
-- A source rest contract must be compatible with every target field it may
-  supply.
-- `Unknown` is not a structural wildcard.
-- Generic `Hash<K, V>` is not assumed to satisfy a required structural field.
-
-RBS record types should enter this same model rather than degrading to
-`Hash<?, ?>`. RBS interfaces and arbitrary object method-shapes are a separate
-future decision; the first project is specifically Hash-backed structural
-values.
-
-## Mutation, Aliasing, and Escape
-
-Mutation is the main correctness risk.
-
-### Known mutation
-
-```ruby
-payload = { count: 1 }
-payload[:count] = "many"
-```
-
-The current shape becomes `{ count: String }` after the write.
-
-### Known alias
-
-```ruby
-payload = { count: 1 }
-copy = payload
-copy[:count] = "many"
-```
-
-`payload` and `copy` must share one bounded abstract Hash identity, so both
-observe `{ count: String }` after the write.
-
-### Deletion and clearing
-
-- `delete(:known_key)` removes that required field from the reaching shape.
-- A dynamic delete makes matching fields optional or invalidates the exact
-  shape when the affected set cannot be bounded.
-- `clear` produces an exact empty shape for a tracked mutable Hash.
-
-### Merge and splat
-
-- A literal `**shape` or `merge` composes fields in Ruby overwrite order.
-- Unknown splats add or widen a rest contract when that is provable.
-- Otherwise the result becomes explained `Unknown` or a generic Hash; known
-  fields must not survive as a misleading partial shape.
-
-### Escape
-
-Passing a mutable shape to an unresolved call, storing it through an
-untracked/global boundary, or invoking an unsupported mutator invalidates the
-shape proof for all tracked aliases after that point. A later phase may
-preserve shapes across methods with an explicit non-mutating contract, but the
-initial implementation must fail closed.
-
-## Supported Operations by Milestone
-
-Initial precise operations:
-
-- Hash literal construction
-- `[]`
-- `fetch`
-- Nested `dig`
-- `key?` / `has_key?`
-- Literal `[]=`
-- `delete`
-- `clear`
-- Literal `merge` / `merge!`
-- Hash splat (`**`)
-- `keys`
-- `values`
-- Hash pattern matching
-
-Other ordinary Hash methods continue through the existing RBS method lookup
-using the shape's generic key/value projection. Unsupported mutators invalidate
-mutable shape precision.
-
-## Architecture and Ownership
-
-The existing one-way semantic path remains unchanged:
-
-```text
-Prism traversal in ruby-analysis::indexer
-        -> file-owned facts, flow evidence, and constraints
-        -> engine graph and immutable query context
-        -> bounded shape inference, joins, narrowing, and substitution
-        -> engine-owned solved outcomes
-        -> thin LSP and check-CLI projections
-```
-
-Layer ownership:
-
-- `ruby-analysis::core`: literal keys, shape domain types, canonical limits,
-  and public semantic values.
-- `ruby-analysis::indexer`: recognize Hash literals, literal keyed operations,
-  mutations, aliases, and escape syntax during the existing traversal.
-- `ruby-analysis::inference`: construct shapes, join control-flow variants,
-  track bounded abstract Hash identities, narrow discriminated unions, apply
-  mutation, and convert RBS records.
-- `ruby-analysis::engine`: store compact file-owned outcomes and expose
-  deterministic domain queries. Existing engine method/MRO/visibility policy
-  remains the only lookup authority.
-- `src/*`: convert domain results to hover, inlay, completion, diagnostics, and
-  CLI output. No adapter may infer or merge shapes independently.
-
-No parallel shape store, request-time reparse, LSP-only inference path, or
-framework-specific Hash rule is allowed.
-
-## Implementation Plan
-
-Implementation starts only after this document is reviewed and approved.
-
-### Phase 0: Acceptance contract and RED evidence
-
-1. Add neutral synthetic scorecard cases for primitive joins, nested shapes,
-   shape unions, missing branches, diverging branches, and discriminated
-   narrowing.
-2. Add negative cases for dynamic keys, unknown splats, alias mutation, escape,
-   excessive width/depth, and incomplete union evidence.
-3. Record the current expected failures before adding a shape type.
-4. Define fixed initial limits for fields, depth, union variants, aliases, and
-   solve iterations from small measurements rather than arbitrary growth.
-
-Gate: the positive cases fail for the documented reason, while existing
-generic Hash behavior and safety cases remain green.
-
-### Phase 1: Canonical shape and literal type algebra
-
-1. Add bounded literal Symbol/String types.
-2. Add canonical required/optional shape fields, exact/open shape state, and a
-   generic rest contract.
-3. Implement normalization, equality, ordering, hashing, display,
-   substitution, containment, generic Hash projection, and deep memory
-   accounting.
-4. Keep structurally distinct union variants separate.
-5. Add exhaustive match coverage for every `RubyType` consumer.
-
-Gate: domain tests pass with no LSP changes and fixed memory-layout/deep-weight
-coverage is updated.
-
-### Phase 2: Local literal construction and flow propagation
-
-1. Construct shapes from static Hash literals and nested literals.
-2. Propagate them through local assignment and `if`/`unless`/`case` joins.
-3. Preserve prior-value and implicit-nil paths correctly.
-4. Exclude diverging branches.
-5. Support literal Hash splats with Ruby overwrite order.
-
-Gate: local hover/check-domain tests prove shapes and variant unions, but no
-mutation-sensitive lookup is published until Phase 3 invalidation is present.
-
-### Phase 3: Mutable identity, aliasing, and invalidation
-
-1. Introduce bounded flow-local abstract Hash identities.
-2. Make local aliases share identity.
-3. Apply known writes, delete, clear, merge, and merge! to every live alias.
-4. Detect escape and unsupported mutation boundaries.
-5. Invalidate or widen all affected aliases after an uncertain boundary.
-6. Preserve exact outer keys for frozen Hashes without claiming deep freeze.
-
-Gate: no stale field proof survives a known alias mutation, unresolved escape,
-or edit/reindex lifecycle.
-
-### Phase 4: Keyed reads and generic Hash behavior
-
-1. Implement exact literal `[]` and `fetch` results.
-2. Implement nested `dig` through proven required/optional fields.
-3. Implement `key?`/`has_key?` field-presence narrowing.
-4. Project `keys`, `values`, `each`, and ordinary RBS Hash calls through
-   canonical key/value unions.
-5. Keep dynamic-key reads conservative and include `NilClass` where Ruby can
-   miss.
-
-Gate: every result is correct for required, optional, absent, rest, dynamic,
-and invalidated shapes.
-
-### Phase 5: Discriminated shape unions
-
-1. Narrow union variants using literal equality and inequality on required
-   fields.
-2. Extend narrowing to supported `case` and Hash pattern forms.
-3. Preserve exhaustive else/unmatched paths.
-4. Reject narrowing when optional, rest, mutation, or Unknown evidence makes
-   the discriminator inconclusive.
-
-Gate: correlated `kind`/`value` examples resolve correctly, and incomplete
-discriminators remain Unknown.
-
-### Phase 6: Contracts and cross-file propagation
-
-1. Convert supported RBS records to the canonical shape model.
-2. Propagate shapes through method-return equations, value constants,
-   parameters with contracts, and cross-file calls.
-3. Define structural compatibility for diagnostics only when both sides are
+1. The callable value has one unique static identity at the use site.
+2. Its syntax, arity mode, parameters, body summary, and capture set are
    complete.
-4. Preserve provenance and ordinary per-file replacement semantics.
+3. Every required call argument has a proven type.
+4. Lambda/proc arity adaptation is fully represented for the call shape.
+5. Every parameter read and supported local temporary has a proven reaching
+   value.
+6. Every captured binding has one source-ordered proof at the call site.
+7. Every reachable body exit has a proven result.
+8. Method lookup inside the body is complete for every receiver union member.
+9. The callable has not escaped through an unsupported storage or invocation
+   boundary.
+10. No callable-body, alias, capture, recursion, type-depth, or union bound is
+    exceeded.
 
-Gate: cold index, early-open, edit, and stale-fact removal produce identical
-final results independent of file and batch order.
+If any dependency is missing, ambiguous, stale, escaped, unsupported, or out of
+bounds, the complete dependent result must be a stable explained `Unknown`.
+Never reuse the callable's previous result, drop an unresolved union member,
+snapshot a mutable capture at definition time, or widen to `Object`.
 
-### Phase 7: Consumer parity and editor UX
-
-1. Render one canonical shape form in hover, inlay hints, and the check CLI.
-2. Use the same engine outcome for completion and chained dispatch.
-3. Add literal key completion only after semantic key availability is proven.
-4. Keep diagnostics fail-closed for incomplete structural compatibility.
-
-Gate: differential CLI/LSP tests prove parity; adapters contain formatting and
-position conversion only.
-
-### Phase 8: Performance and release acceptance
-
-1. Run the complete scorecard and reviewed real-project precision suite.
-2. Measure cold/warm indexing, typing latency, query latency, CPU, allocation,
-   and peak RSS in release mode.
-3. Measure retained shape counts, average/max fields, union widths, alias-set
-   sizes, invalidations, and bound-triggered Unknowns.
-4. Reject or redesign any representation that breaches fixed performance or
-   memory gates.
-5. Update `NEXT.md`, `src/ARCHITECTURE.md`, inference Rustdoc, and `AGENTS.md`
-   only after the accepted implementation establishes current truth.
-
-## Acceptance Examples
-
-The reviewed feature is not complete until all of these categories pass.
-
-### Exact nested shape
+Examples:
 
 ```ruby
-payload = { user: { name: "Ada", age: 42 } }
-name = payload[:user][:name] # String
+convert = ->(value) { value.to_s }
+input = condition ? 1 : unresolved_value
+convert.call(input)
+# Unknown[incomplete_callable_input]
 ```
-
-### Primitive branch union
 
 ```ruby
-value = condition ? 1 : "ready"
-# Integer | String
+convert = ->(value) { value.to_s }
+publish(convert) # unsupported escape
+loaded = fetch_converter
+loaded.call(1)
+# Unknown: no static identity connects loaded to convert
 ```
 
-### Correlated shape union
+## Ruby Semantic Rules
 
-```ruby
-result = condition \
-  ? { kind: :number, value: 1 } \
-  : { kind: :text, value: "ready" }
+### Callable identity
+
+- A direct literal assignment creates one bounded callable identity.
+- Source-ordered local aliases may share that identity while the alias bound
+  holds.
+- Reassigning a local to another callable replaces its identity from that
+  source position onward.
+- Reassigning it to a non-callable or unresolved value invalidates callable
+  proof.
+- A constant callable is file-owned. Reopened conflicting definitions are
+  ambiguous unless all effective facts are semantically identical.
+- A callable stored in an instance/class/global variable, collection, dynamic
+  constant target, or unknown call is escaped and cannot later regain identity
+  by guesswork.
+
+### Arity
+
+- Lambdas use strict method-like arity.
+- Procs use Ruby's lenient positional behavior: missing positional inputs bind
+  `NilClass`, and proven extra inputs are ignored only when Ruby would ignore
+  them.
+- Optional and rest parameters must preserve their exact supported call shape.
+- Keyword, destructured, numbered, and forwarding parameters remain Unknown
+  until their binding semantics are explicitly modeled.
+- The existing four-block-parameter bound also limits callable-body parameters
+  in the first release.
+
+### Captures
+
+- A local closure captures a binding, not a frozen type snapshot.
+- Read-only same-scope captures resolve from the reaching environment at the
+  invocation point.
+- An unresolved or ambiguous captured binding makes the dependent result
+  Unknown.
+- Writes to captured outer locals, mutable captured-object effects, capture
+  alias overflow, or invocation after unsupported escape fail closed.
+- Cross-file callable constants must be capture-free except for independently
+  resolvable constant/method references. A lexical local capture must never be
+  serialized as cross-file truth.
+
+### Body flow
+
+- Ordinary fallthrough and supported `next value` exits contribute results.
+- `return` is a local callable exit for lambdas but a non-local exit for procs;
+  proc `return` remains unsupported.
+- Raising paths do not reach the result join.
+- Exhaustive branches produce canonical unions.
+- `break`, proc non-local `return`, `redo`, `retry`, dynamic throw/catch, and
+  unsupported rescue/ensure effects produce an explicit flow-related Unknown.
+- Recursive callable invocation remains Unknown until a separately reviewed
+  bounded fixed-point model exists.
+
+## Architecture
+
+### One AST-free callable body summary
+
+Add one syntax-independent, compact callable-body domain in
+`ruby-analysis::core`. Exact Rust names may change during implementation, but
+the domain must represent:
+
+```text
+CallableBodyFact (only for file-owned/exportable callable values)
+  subject / callable identity
+  declaration and body ranges
+  arity mode and parameter shape
+  capture dependencies
+  bounded CallableBodySummary
+
+CallableBodySummary
+  parameter reads
+  capture reads
+  literals and supported construction
+  local bindings / source-ordered joins
+  method calls and arguments
+  structural reads
+  exhaustive flow joins
+  reachable result exits
 ```
 
-### Discriminated narrowing
+The summary is a constraint/equation representation, not a second runtime type
+algebra. It may refer to parameters and capture dependencies internally, but
+only a canonical `RubyType` or stable `UnknownReason` may leave evaluation.
 
-```ruby
-if result[:kind] == :number
-  result[:value].abs
-else
-  result[:value].upcase
-end
-```
+Never retain Prism nodes, reparse a body at each call site, store source slices
+as semantic instructions, or execute Ruby.
 
-### Alias mutation
+### Local and cross-file ownership
 
-```ruby
-payload = { count: 1 }
-copy = payload
-copy[:count] = "many"
-value = payload[:count] # String, never stale Integer
-```
+- `ruby-analysis::indexer` lowers supported callable literals during the
+  ordinary scope-aware Prism traversal.
+- Local callable summaries live only in the bounded flow environment for that
+  file analysis. They do not become a global name map.
+- Exportable constant callables enter the engine as ordinary file-owned facts
+  through `register_file -> replace_facts -> resolve`.
+- Engine state owns deterministic constant-callable identity, ambiguity,
+  replacement, memory accounting, and stable fingerprints.
+- `AnalysisQuery` exposes a domain query for callable identity/summary; it must
+  not expose the backing store.
+- Project constant-callable facts are not dependency stubs and must not leak
+  into another isolated project engine.
+- Edit, delete, parse failure, watcher replacement, and dynamic workspace
+  rehoming use the ordinary file lifecycle.
 
-### Unknown escape
+### One evaluator and one higher-order bridge
 
-```ruby
-payload = { count: 1 }
-unknown_call(payload)
-value = payload[:count] # no stale concrete claim
-```
+`ruby-analysis::inference` owns callable instantiation:
 
-### Cross-file method return
+1. Resolve one callable identity.
+2. Bind call-site arguments using lambda/proc arity rules.
+3. Resolve supported captures from the proven environment/query context.
+4. Evaluate the compact body constraints through existing type operations and
+   `AnalysisQuery` lookup.
+5. Join every reachable result or return an explained Unknown.
 
-```ruby
-# builder.rb
-def build_payload
-  { id: 1, name: "Ada" }
-end
+Direct `.call` and `&callable` must use this same evaluator. For
+`&callable`, the existing `PreparedCallableSet` supplies block-input types;
+the callable-body evaluator produces the block result; the existing solver
+then substitutes the enclosing call result.
 
-# consumer.rb
-payload = build_payload
-name = payload[:name] # String
-```
+The body evaluator may reuse type/shape/call primitives, but must not duplicate
+MRO, visibility, overload, ambiguity, or missing-method policy. Those remain
+single-sourced in engine queries.
 
-### Edit invalidation
+### Consumer boundary
 
-Changing `name: "Ada"` to `name: dynamic_call` must remove the prior `String`
-proof from every local and cross-file consumer. A delayed cold-index result
-must not restore the stale shape.
+Hover, inlay hints, completion, diagnostics, chained dispatch, navigation, and
+`ruby-fast-lsp check` consume the resulting ordinary engine-owned outcome.
+No consumer may recognize proc syntax, callable names, or collection methods.
 
-## Non-Goals for the First Project
+## Fixed Bounds
 
-- Full TypeScript syntax or annotations in Ruby source
-- TypeScript's mapped, conditional, `keyof`, template-literal, or utility types
-- Structural typing of arbitrary Ruby objects by their method sets
-- Treating every class instance variable set as a structural object shape
-- Runtime execution or reflection to discover Hash contents
-- Assuming unknown calls are non-mutating
-- Deep immutability from Ruby's shallow `freeze`
-- Unbounded recursive or self-referential shapes
-- Framework-specific payload schemas in the core analyzer
-- Replacing nominal Ruby class/module method lookup with structural dispatch
+The first implementation uses these reviewed hard limits:
 
-## Approved Review Decisions
+- four callable parameters;
+- 64 callable-body summary nodes;
+- eight captured bindings;
+- eight live aliases of one callable identity;
+- eight nested callable instantiations;
+- 16 body-constraint solve iterations;
+- eight body-result union variants;
+- eight nested structural/type levels, reusing the accepted type/shape depth
+  boundary.
 
-1. Phase 1 targets Hash-backed shapes only; arbitrary object method-shapes
-   remain out of scope.
-2. Initial literal keys are Symbol and String only.
-3. Inferred literal shapes are exact. Structural contracts are open unless an
-   explicit exact contract is available.
-4. Unresolved calls invalidate mutable shape precision after the call.
-5. Semantic unions preserve complete variants even if a future consumer offers
-   a correlation-safe compact display.
-6. RBS record support remains in the first release after local shapes and
-   mutation safety are proven.
-7. The initial fixed bounds are 32 fields per shape, eight nested shape levels,
-   eight shape variants per union, eight live aliases per mutable identity, and
-   16 shape-solver iterations. The aggregate evidence and selection rationale
-   are recorded in
-   `support/performance/type-inference-shape-bounds-2026-08-11.json`.
+Phase 0 must add exact boundary and boundary-plus-one fixtures and record their
+cost. A bound may be revised only with updated tests, documentation, and
+measurement evidence before implementation depends on it.
 
-Phase progress: Phase 0 fixed the neutral RED acceptance contract and measured
-bounds; Phase 1 established the canonical literal/shape algebra; Phase 2 proved
-local construction and control-flow propagation; Phase 3 established bounded
-flow-local identities, alias-wide known mutation, escape invalidation, shallow
-freeze semantics, and edit/reindex replacement; Phase 4 established exact and
-dynamic keyed reads, fetch/dig, presence narrowing, generic Hash projections,
-top-level flow parity, and explained shape-bound failures; Phase 5 established
-equality/inequality, ordinary `case`, and supported Hash-pattern narrowing while
-retaining optional, rest, invalidated, and otherwise inconclusive variants on
-every reachable path. Phase 6 established canonical RBS record conversion,
-exhaustive compatible-overload contracts, cross-file method-return and value-
-constant propagation, parameter flow, complete-only structural diagnostics,
-nested mutable identity through Hash and bounded Array containment, and
-deterministic early-open, reverse-order, edit, watcher replacement, and stale-
-fact removal behavior. Phase 7 established canonical hover, inlay, and CLI
-rendering; exact engine-owned completion and chained-dispatch proofs; proven
-Symbol/String literal-key completion with UTF-16-correct edits; fail-closed
-structural diagnostics; and differential CLI/LSP lifecycle evidence. Its edit
-gate also proves that a newly invalidated local method return blocks fallback
-to the previous engine snapshot while the replacement file is being derived.
-Phase 8 passed the complete 111-case scorecard at 100/100 with no recorded
-gaps or unexpected outcomes, the 13-case reviewed precision corpus with zero
-known false positives, the serialized workspace test suite, the fixed release
-latency and memory budgets, two deterministic warm representative-corpus runs,
-and an exact-source DHAT allocation audit. The accepted measurements and build
-identities are recorded in
-`support/performance/type-inference-shapes-final-2026-08-12.json`. `NEXT.md`,
-`src/ARCHITECTURE.md`, inference Rustdoc, and `AGENTS.md` now describe the
-implemented architecture and its proof-first boundaries.
+Exceeding any bound returns `callable_body_bound_exceeded`. Never truncate a
+body, discard captures/aliases, flatten a union, or continue with partial
+substitution.
+
+## Stable Unknown Reasons
+
+Extend the reason schema with precise callable-body failures. Exact Rust
+variant names may change, but stable external codes must distinguish at least:
+
+- `unsupported_callable_body`;
+- `incomplete_callable_input`;
+- `incomplete_callable_capture`;
+- `ambiguous_callable_value`;
+- `escaped_callable_value`;
+- `callable_body_bound_exceeded`;
+- `callable_recursion_unsupported`; and
+- `unsupported_callable_flow`.
+
+Do not collapse these into `unresolved_method_return`, and do not expose
+free-form text as the machine-readable contract.
+
+## Phased Plan
+
+### Phase 0 — RED contract, bounds, and baseline
+
+- Add neutral synthetic RED fixtures for parameter-dependent local lambda
+  `.call`, `map(&lambda)`, shape projection, exhaustive union results,
+  same-scope capture reads, strict/lenient arity, and a cross-file capture-free
+  callable constant.
+- Add negative controls for an unresolved argument member, unresolved capture,
+  non-callable reassignment, escaped callable, ambiguous constant callable,
+  proc non-local return, recursion, and every bound.
+- Prove the existing parameter-independent callable cases remain GREEN.
+- Record release-profile indexing, edit, affected-query, heap, and RSS baseline
+  using a clean revision and the accepted measurement workflow.
+
+Exit gate: positives are RED for the intended missing body substitution;
+negative controls fail closed or have a recorded bug; exact bounds are reviewed.
+
+### Phase 1 — Callable body domain and lowering
+
+- Add canonical arity, parameter, capture, constraint-node, result-exit, and
+  summary types without Prism or LSP dependencies.
+- Lower supported callable literals during the ordinary index traversal.
+- Represent local temporaries and exhaustive supported flow without retaining
+  AST nodes.
+- Enforce node, capture, parameter, depth, and union bounds while lowering.
+- Add normalization, equality, stable ordering, memory accounting, and
+  boundary-plus-one unit tests.
+
+Exit gate: supported bodies lower deterministically; unsupported syntax and
+bound excess produce exact reasons; no consumer behavior changes yet.
+
+### Phase 2 — File ownership and callable identity
+
+- Add bounded local callable identities and aliases to the flow environment.
+- Add file-owned constant callable facts to engine ingestion/replacement.
+- Add deterministic `AnalysisQuery` resolution for unique, identical, missing,
+  and ambiguous callable constants.
+- Include callable facts in semantic fingerprints, memory estimates, project
+  isolation, and any persistent product schema whose semantic producer includes
+  them.
+- Invalidate identities on non-callable reassignment or unsupported escape.
+
+Exit gate: cold index, edit, parse failure, delete, and cross-file constant
+resolution replace facts exactly once with no stale summary or public store API.
+
+### Phase 3 — Direct callable instantiation
+
+- Bind proven `.call` arguments through exact lambda/proc positional arity.
+- Evaluate parameter reads, supported local temporaries, literals,
+  construction, structural reads, and ordinary method calls.
+- Resolve every receiver union member through `AnalysisQuery`.
+- Publish one direct-call `TypeInferenceOutcome` and retain callable navigation.
+- Support bounded local aliases and capture-free constant callables.
+
+Exit gate: direct local/cross-file calls are GREEN; partial inputs, ambiguity,
+escape, and recursion publish stable Unknown reasons.
+
+### Phase 4 — Existing higher-order solver integration
+
+- Replace the parameter-independent `KnownProcType` result shortcut with the
+  shared callable-body evaluator.
+- Feed `PreparedCallableSet` block inputs into callable parameters.
+- Feed the exhaustive callable result back into the existing enclosing-call
+  substitution.
+- Prove explicit-block, static-symbol, and equivalent callable-body forms agree.
+- Remove superseded duplicate proc-body inference only after parity tests pass.
+
+Exit gate: `map(&callable)` and the supported collection pipeline surface are
+GREEN without method-name or consumer-specific cases.
+
+### Phase 5 — Captures, flow, shapes, and arity edges
+
+- Resolve same-scope captured reads at invocation using source-ordered binding
+  proof rather than definition-time snapshots.
+- Support exhaustive branches, fallthrough, raising paths, lambda-local return,
+  and supported `next` behavior.
+- Preserve canonical shapes and unions through callable bodies.
+- Implement strict lambda and lenient proc positional adaptation exactly.
+- Fail closed for captured writes/mutable escape, unsupported control flow,
+  destructuring/keywords/forwarding, and bound excess.
+
+Exit gate: positive capture/flow/shape/arity cases are precise and every
+counterexample remains an explained whole-result Unknown.
+
+### Phase 6 — Lifecycle, determinism, and consumer parity
+
+- Test cold/warm indexing, call-before-definition ordering, repeated seeded file
+  orders, open/close, body edit, capture edit, input edit, constant replacement,
+  parse failure, watcher deletion, and reindexing.
+- Prove delayed producers cannot overwrite newer callable facts or dependent
+  outcomes.
+- Verify hover, inlay hints, completion, diagnostics, chained dispatch,
+  definition/navigation, and check-CLI parity.
+- Add scorecard cases and stable reason-schema assertions.
+
+Exit gate: one source revision produces one result on every consumer regardless
+of file-open or indexing timing.
+
+### Phase 7 — Documentation, audit, and performance evidence
+
+- Add `docs/callable-body-inference.md` with concise supported/unsupported
+  examples and link it from README and the higher-order call guide.
+- Update inference Rustdoc, `src/ARCHITECTURE.md`, `AGENTS.md`, `NEXT.md`, and
+  the scorecard.
+- Run full workspace tests, explicit scorecard reporting, formatting, diff
+  checks, and architecture/review audits.
+- Run alternating baseline/candidate release measurements on neutral fixtures
+  and an anonymized read-only representative multi-project corpus.
+- Publish machine-readable evidence under `support/performance/`.
+
+Exit gate: correctness, precision, lifecycle, consumer parity, documentation,
+and performance evidence are accepted.
+
+## Acceptance Matrix
+
+| Case | Required result |
+| --- | --- |
+| `f = ->(x) { x.to_s }; f.call(1)` | `String` |
+| `[1, "x"].map(&->(x) { x.to_s })` or equivalent local | `Array<String>` |
+| shaped rows projected by a callable | `Array<String>` |
+| callable body with exhaustive `Integer`/`String` branches | exact union result |
+| same-scope proven capture read | result derived from reaching capture type |
+| capture-free callable constant used in another file | same result as local callable |
+| strict lambda with incompatible arity | explained Unknown |
+| lenient proc with missing positional input | missing parameter bound to `NilClass` |
+| one unresolved input union member | whole result Unknown |
+| capture reassigned to unresolved value | `incomplete_callable_capture` |
+| local callable reassigned to non-callable | no stale callable result |
+| callable passed through unknown escape | `escaped_callable_value` when identity is reused |
+| conflicting constant callable definitions | `ambiguous_callable_value` |
+| recursive callable | `callable_recursion_unsupported` |
+| unsupported proc non-local return | `unsupported_callable_flow` |
+| summary/capture/alias/depth bound exceeded | `callable_body_bound_exceeded` |
+| callable body or constant file edited/deleted | deterministic refreshed result |
+
+## Non-Goals for the First Release
+
+- Executing Ruby, application code, gems, `eval`, or runtime reflection.
+- Arbitrary Proc objects returned from unresolved methods.
+- `Method` objects, `method(:name).to_proc`, custom `to_proc`, currying,
+  composition, partial application, or dynamic callable factories.
+- Callables recovered from arrays, hashes, instance/class/global variables,
+  serialization, or unknown method calls.
+- Cross-file lexical-local captures.
+- Writes to captured outer locals or unproven mutation of captured objects.
+- Keyword, destructured, numbered, anonymous forwarding, or pattern parameters.
+- Recursive callable fixed points.
+- Full non-local proc `return`, `break`, `redo`, `retry`, throw/catch, or
+  arbitrary ensure semantics.
+- Broader multi-site Ruby `yield` flow; that remains a separate follow-up using
+  the same callable model.
+- Consumer-local fallbacks, refresh loops, indexing-order retries, or guessed
+  result reuse.
+
+## Performance Contract
+
+- Fixed production budgets must pass on every candidate run.
+- Five alternating baseline/candidate pairs must keep median end-to-end wall
+  time, total CPU, affected edit/query p95, and retained engine heap within the
+  accepted 3% comparison envelope.
+- Warm representative peak RSS must remain below the fixed ceiling documented
+  in `AGENTS.md`; all samples and comparison variance must be recorded.
+- Files without callable literals must not allocate callable summaries or dense
+  per-expression callable state.
+- Callable facts and summaries must have exact deep-memory accounting.
+- Any separately accepted tradeoff must be explicit in machine-readable
+  evidence; do not hide outliers or cache-population runs.
+
+## Completion Criteria
+
+This goal is complete only when:
+
+- Direct calls and `&callable` use one parameter-dependent body evaluator.
+- Local and cross-file constant callable identities are deterministic and
+  file-owned at their appropriate lifecycle boundary.
+- No Prism node, source snippet instruction, parallel semantic store, or
+  consumer-specific inference path is retained.
+- Lambda/proc arity, captures, exhaustive flow, shapes, ambiguity, escape,
+  recursion, and every bound are tested with positive and fail-closed controls.
+- Cold/warm indexing, file ordering, edits, parse failures, deletion, and
+  reindexing cannot publish stale callable results.
+- Hover, hints, completion, diagnostics, navigation, chained dispatch, and CLI
+  checks agree on concrete results and Unknown reasons.
+- No private project name, path, constant, or copied source appears in tests or
+  documentation.
+- Full tests, scorecard, architecture review, formatting, performance, memory,
+  and machine-readable evidence gates pass.
+- `AGENTS.md`, `NEXT.md`, architecture/inference docs, product docs, and the
+  scorecard describe the accepted implementation and remaining limits.

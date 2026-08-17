@@ -98,7 +98,22 @@ impl FactCollector {
         let Some((_constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
         };
-        self.record_constant_path_value_type(fqn, &node.value(), &constant_path, &node.location());
+        self.record_constant_path_value_type(
+            fqn.clone(),
+            &node.value(),
+            &constant_path,
+            &node.location(),
+        );
+        if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
+            if summary.is_capture_free() {
+                self.constant_callable_bodies
+                    .push(crate::core::ConstantCallableBodyFact {
+                        constant: fqn,
+                        summary,
+                        range: self.direct_range(&node.location()),
+                    });
+            }
+        }
     }
 
     pub fn process_constant_path_or_write_node_entry(&mut self, node: &ConstantPathOrWriteNode) {

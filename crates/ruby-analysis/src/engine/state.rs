@@ -11,19 +11,20 @@ use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::method_return_equation::MethodReturnBase;
 use crate::core::method_store::StoredMethodFactMatch;
 use crate::core::{
-    ConstLookup, ConstLookupId, ConstantPath, ConstantTypeDependency, ConstantTypeEquation,
-    ConstantTypeProjection, ConstantTypeTarget, DiagnosticCandidate, DiagnosticCandidateStore,
-    DiagnosticFact, DiagnosticSeverity, DiagnosticStore, ExecutionContextFact, ExecutionScopeMode,
-    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact,
-    GraphNodeKind, InferenceEvidence, InferenceTelemetry, MethodAvailability, MethodFact,
-    MethodParamKind, MethodReferenceAccess, MethodStore, MethodVisibilityOverrideFact,
-    NamespaceKind, ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore,
-    ReferenceFact, ReferenceStore, RubyConstant, RubyMethod, RubyType, SemanticGraph, SourceFileId,
-    SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact, StoredMethodFact,
-    StoredReferenceCandidate, StoredSuperclassResolution, StoredSymbolFact,
-    StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolKind, SymbolStore, TextRange, TypeFact,
-    TypeInferenceOutcome, TypeProvenance, TypeResolution, TypeStore, TypeSubject, UnknownReason,
-    UnresolvedGraphEdgeFact,
+    CallableBodyExpression, CallableBodyParameterKind, CallableBodySummary, CallableSignature,
+    CallableTypeTemplate, ConstLookup, ConstLookupId, ConstantPath, ConstantTypeDependency,
+    ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget, DiagnosticCandidate,
+    DiagnosticCandidateStore, DiagnosticFact, DiagnosticSeverity, DiagnosticStore,
+    ExecutionContextFact, ExecutionScopeMode, FqnId, FullyQualifiedName, GraphEdgeFact,
+    GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind, InferenceEvidence,
+    InferenceTelemetry, MethodAvailability, MethodFact, MethodParamKind, MethodReferenceAccess,
+    MethodStore, MethodVisibilityOverrideFact, NamespaceKind, ReferenceCandidate,
+    ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact, ReferenceStore, RubyConstant,
+    RubyMethod, RubyType, SemanticGraph, SourceFileId, SourceKind, StoredGraphEdgeFact,
+    StoredGraphNodeFact, StoredMethodFact, StoredReferenceCandidate, StoredSuperclassResolution,
+    StoredSymbolFact, StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolKind, SymbolStore,
+    TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeResolution, TypeStore,
+    TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
@@ -294,6 +295,9 @@ impl SemanticExportFingerprint {
                 stable_method_availability(hasher, &fact.availability);
                 stable_optional_string(hasher, fact.documentation.as_deref());
                 stable_optional_string(hasher, fact.return_type_label.as_deref());
+                stable_callable_signatures(hasher, fact.callable_signatures());
+                stable_forwarded_block_call(hasher, fact.forwarded_block_call());
+                stable_direct_yield_call(hasher, fact.direct_yield_call());
             }));
         }
         for fact in &facts.method_visibility_overrides {
@@ -338,6 +342,13 @@ impl SemanticExportFingerprint {
                 for dependency in equation.dependencies() {
                     stable_fqn(hasher, dependency);
                 }
+            }));
+        }
+        for fact in &facts.inference.constant_callable_bodies {
+            exports.push(export_hash(|hasher| {
+                stable_u8(hasher, 9);
+                stable_fqn(hasher, &fact.constant);
+                stable_callable_body_summary(hasher, &fact.summary);
             }));
         }
         for fact in &facts.graph_nodes {
@@ -734,6 +745,189 @@ fn stable_ruby_type(hasher: &mut StableExportHasher, ruby_type: &RubyType) {
             }
         }
         RubyType::Unknown => stable_u8(hasher, 8),
+    }
+}
+
+fn stable_callable_signatures(hasher: &mut StableExportHasher, signatures: &[CallableSignature]) {
+    stable_len(hasher, signatures.len());
+    for signature in signatures {
+        stable_strings(hasher, &signature.receiver_type_parameters);
+        stable_strings(hasher, &signature.type_parameters);
+        stable_len(hasher, signature.parameters.len());
+        for parameter in &signature.parameters {
+            stable_method_param_kind(hasher, parameter.kind);
+            stable_callable_template(hasher, &parameter.ruby_type);
+        }
+        stable_len(hasher, signature.block.parameters.len());
+        for parameter in &signature.block.parameters {
+            stable_callable_template(hasher, parameter);
+        }
+        stable_callable_template(hasher, &signature.block.return_type);
+        stable_u8(hasher, u8::from(signature.block.required));
+        stable_callable_template(hasher, &signature.return_type);
+    }
+}
+
+fn stable_callable_body_summary(hasher: &mut StableExportHasher, summary: &CallableBodySummary) {
+    stable_bool(hasher, summary.strict_arity);
+    stable_len(hasher, summary.parameters.len());
+    for parameter in &summary.parameters {
+        stable_string(hasher, &parameter.name);
+        stable_u8(
+            hasher,
+            match parameter.kind {
+                CallableBodyParameterKind::Required => 1,
+                CallableBodyParameterKind::Optional => 2,
+                CallableBodyParameterKind::Rest => 3,
+            },
+        );
+        match &parameter.default {
+            Some(default) => {
+                stable_u8(hasher, 1);
+                stable_callable_body_expression(hasher, default);
+            }
+            None => stable_u8(hasher, 0),
+        }
+    }
+    stable_strings(hasher, &summary.captures);
+    stable_callable_body_expression(hasher, &summary.result);
+    stable_u8(hasher, summary.node_count);
+}
+
+fn stable_callable_body_expression(
+    hasher: &mut StableExportHasher,
+    expression: &CallableBodyExpression,
+) {
+    match expression {
+        CallableBodyExpression::Literal(ruby_type) => {
+            stable_u8(hasher, 1);
+            stable_ruby_type(hasher, ruby_type);
+        }
+        CallableBodyExpression::Parameter(index) => {
+            stable_u8(hasher, 2);
+            stable_len(hasher, *index);
+        }
+        CallableBodyExpression::Capture(name) => {
+            stable_u8(hasher, 3);
+            stable_string(hasher, name);
+        }
+        CallableBodyExpression::Array(values) => {
+            stable_u8(hasher, 4);
+            stable_len(hasher, values.len());
+            for value in values {
+                stable_callable_body_expression(hasher, value);
+            }
+        }
+        CallableBodyExpression::Shape(fields) => {
+            stable_u8(hasher, 5);
+            stable_len(hasher, fields.len());
+            for (key, value) in fields {
+                stable_literal_key(hasher, key);
+                stable_callable_body_expression(hasher, value);
+            }
+        }
+        CallableBodyExpression::Call {
+            receiver,
+            method,
+            arguments,
+            literal_argument_keys,
+        } => {
+            stable_u8(hasher, 6);
+            stable_callable_body_expression(hasher, receiver);
+            stable_method(hasher, *method);
+            stable_len(hasher, arguments.len());
+            for argument in arguments {
+                stable_callable_body_expression(hasher, argument);
+            }
+            stable_len(hasher, literal_argument_keys.len());
+            for key in literal_argument_keys {
+                match key {
+                    Some(key) => {
+                        stable_u8(hasher, 1);
+                        stable_literal_key(hasher, key);
+                    }
+                    None => stable_u8(hasher, 0),
+                }
+            }
+        }
+        CallableBodyExpression::ExhaustiveUnion(values) => {
+            stable_u8(hasher, 7);
+            stable_len(hasher, values.len());
+            for value in values {
+                stable_callable_body_expression(hasher, value);
+            }
+        }
+    }
+}
+
+fn stable_literal_key(hasher: &mut StableExportHasher, key: &crate::core::LiteralKey) {
+    match key {
+        crate::core::LiteralKey::Symbol(value) => {
+            stable_u8(hasher, 1);
+            stable_string(hasher, value);
+        }
+        crate::core::LiteralKey::String(value) => {
+            stable_u8(hasher, 2);
+            stable_string(hasher, value);
+        }
+    }
+}
+
+fn stable_callable_template(hasher: &mut StableExportHasher, template: &CallableTypeTemplate) {
+    match template {
+        CallableTypeTemplate::Concrete(ruby_type) => {
+            stable_u8(hasher, 1);
+            stable_ruby_type(hasher, ruby_type);
+        }
+        CallableTypeTemplate::Receiver => stable_u8(hasher, 2),
+        CallableTypeTemplate::Variable(name) => {
+            stable_u8(hasher, 3);
+            stable_string(hasher, name);
+        }
+        CallableTypeTemplate::Array(element) => {
+            stable_u8(hasher, 4);
+            stable_callable_template(hasher, element);
+        }
+        CallableTypeTemplate::Hash(key, value) => {
+            stable_u8(hasher, 5);
+            stable_callable_template(hasher, key);
+            stable_callable_template(hasher, value);
+        }
+        CallableTypeTemplate::Union(members) => {
+            stable_u8(hasher, 6);
+            stable_len(hasher, members.len());
+            for member in members {
+                stable_callable_template(hasher, member);
+            }
+        }
+        CallableTypeTemplate::Unconstrained => stable_u8(hasher, 7),
+    }
+}
+
+fn stable_forwarded_block_call(
+    hasher: &mut StableExportHasher,
+    forwarded: Option<&crate::core::ForwardedBlockCall>,
+) {
+    match forwarded {
+        Some(forwarded) => {
+            stable_u8(hasher, 1);
+            stable_string(hasher, &forwarded.receiver_parameter);
+            stable_method(hasher, forwarded.method);
+        }
+        None => stable_u8(hasher, 0),
+    }
+}
+
+fn stable_direct_yield_call(
+    hasher: &mut StableExportHasher,
+    direct: Option<&crate::core::DirectYieldCall>,
+) {
+    match direct {
+        Some(direct) => {
+            stable_u8(hasher, 1);
+            stable_strings(hasher, &direct.parameter_names);
+        }
+        None => stable_u8(hasher, 0),
     }
 }
 
@@ -1748,6 +1942,9 @@ impl AnalysisEngine {
                     stable_method_availability(hasher, &fact.availability);
                     stable_optional_string(hasher, fact.documentation.as_deref());
                     stable_optional_string(hasher, fact.return_type_label.as_deref());
+                    stable_callable_signatures(hasher, fact.callable_signatures());
+                    stable_forwarded_block_call(hasher, fact.forwarded_block_call());
+                    stable_direct_yield_call(hasher, fact.direct_yield_call());
                 }),
             );
         }
@@ -2529,6 +2726,23 @@ impl AnalysisEngine {
             .call_expression_outcomes_in_file(file_id)
             .unwrap_or_default();
         Some(evidence)
+    }
+
+    pub(super) fn constant_callable_body(
+        &self,
+        constant: &FullyQualifiedName,
+    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+        let mut summaries = self
+            .inference_by_file
+            .values()
+            .flat_map(|evidence| evidence.constant_callable_bodies.iter())
+            .filter(|fact| &fact.constant == constant)
+            .map(|fact| &fact.summary);
+        let first = summaries.next()?.clone();
+        if summaries.any(|summary| summary != &first) {
+            return Some(Err(UnknownReason::AmbiguousCallableValue));
+        }
+        Some(Ok(first))
     }
 
     pub(crate) fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool {
@@ -3362,6 +3576,7 @@ impl AnalysisEngine {
                     availability: fact.availability,
                     documentation: fact.documentation,
                     return_type_label: fact.return_type_label,
+                    higher_order: fact.higher_order,
                 }
             })
             .collect()
@@ -3454,6 +3669,7 @@ impl AnalysisEngine {
             availability: fact.availability,
             documentation: fact.documentation,
             return_type_label: fact.return_type_label,
+            higher_order: fact.higher_order,
         }
     }
 

@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "measurement": "callable-body-inference-final",
+  "measurement_started": "2026-08-12",
+  "measurement_completed": "2026-08-13",
+  "status": "accepted",
+  "claim": "Parameter-dependent callable-body inference is deterministic, passes every fixed production budget, restores exact dependency products across process restarts, and stays inside the accepted neutral comparison and representative warm-memory envelopes.",
+  "machine": {
+    "target_os": "macos",
+    "target_arch": "aarch64",
+    "os_release": "macOS 26.2",
+    "cpu_model": "Apple M4 Pro",
+    "rustc": "1.91.1 (ed61e7d7e 2025-11-07)",
+    "cargo": "1.91.1 (ea2d97820 2025-10-10)"
+  },
+  "build": {
+    "baseline_source_revision": "67afa643deeacd1222195422ac0423d40c548185",
+    "baseline_profiler_sha256": "4ea31d0db7b615422d221db34f7ff2bcd769795330d4cb8e867f8ddd558a7d90",
+    "candidate_source_parent_revision": "bb8c0da414e839efb4aa83370323c09e40abad07",
+    "candidate_profiler_sha256": "583b553e0201edc3cc97fc43d1d337ea580465afc6df0679827bfcc5de0ce658",
+    "candidate_diff_from_baseline_without_goal_sha256": "3e5970e1328dc058e9cce571a5773047d42d70133028a207347cd4e9decccc32",
+    "note": "The baseline is the clean local-only detached commit recorded in callable-body-inference-baseline-2026-08-12.json. The candidate remained intentionally uncommitted in the user's working tree. Exact profiler hashes identify both measured binaries."
+  },
+  "accepted_bounds": {
+    "parameters": 4,
+    "summary_nodes": 64,
+    "captures": 8,
+    "live_aliases_per_identity": 8,
+    "nested_instantiations": 8,
+    "solve_iterations": 16,
+    "result_union_variants": 8,
+    "structural_type_depth": 8,
+    "failure_policy": "Every bound excess publishes callable_body_bound_exceeded. No body, capture, alias, type, or union member is truncated."
+  },
+  "neutral_release_gate": {
+    "command": "RUST_LOG=error <profiler> --benchmark-iterations 100 --check-budgets",
+    "alternating_pairs": 5,
+    "dataset_fingerprint_sha256": "e83a623dd71e9f04daf3e36a8092c04458573e0f1450f58e61e9c38457a763ba",
+    "semantic_result_fingerprints": {
+      "baseline": "1838d4f66404f3c31a65d0278388c513",
+      "candidate": "1838d4f66404f3c31a65d0278388c513"
+    },
+    "baseline_runs": [
+      { "wall_ms": 641.174625, "total_cpu_ms": 312.138, "peak_rss_bytes": 111034368, "estimated_engine_heap_bytes": 5974539, "edit_p95_ms": 3.992500 },
+      { "wall_ms": 508.418500, "total_cpu_ms": 278.054, "peak_rss_bytes": 112246784, "estimated_engine_heap_bytes": 5974539, "edit_p95_ms": 3.902125 },
+      { "wall_ms": 543.941250, "total_cpu_ms": 298.062, "peak_rss_bytes": 112705536, "estimated_engine_heap_bytes": 5974539, "edit_p95_ms": 4.255292 },
+      { "wall_ms": 564.711750, "total_cpu_ms": 292.023, "peak_rss_bytes": 112869376, "estimated_engine_heap_bytes": 5974539, "edit_p95_ms": 4.193375 },
+      { "wall_ms": 577.197125, "total_cpu_ms": 277.334, "peak_rss_bytes": 113115136, "estimated_engine_heap_bytes": 5974539, "edit_p95_ms": 4.070708 }
+    ],
+    "candidate_runs": [
+      { "wall_ms": 483.442583, "total_cpu_ms": 277.454, "peak_rss_bytes": 111312896, "estimated_engine_heap_bytes": 5974728, "edit_p95_ms": 3.923875 },
+      { "wall_ms": 555.014250, "total_cpu_ms": 279.117, "peak_rss_bytes": 112803840, "estimated_engine_heap_bytes": 5974728, "edit_p95_ms": 4.151458 },
+      { "wall_ms": 530.339083, "total_cpu_ms": 280.362, "peak_rss_bytes": 111280128, "estimated_engine_heap_bytes": 5974728, "edit_p95_ms": 4.748292 },
+      { "wall_ms": 498.160125, "total_cpu_ms": 277.937, "peak_rss_bytes": 111558656, "estimated_engine_heap_bytes": 5974728, "edit_p95_ms": 4.143458 },
+      { "wall_ms": 503.889125, "total_cpu_ms": 274.028, "peak_rss_bytes": 111542272, "estimated_engine_heap_bytes": 5974728, "edit_p95_ms": 3.978667 }
+    ],
+    "baseline_median": {
+      "wall_ms": 564.711750,
+      "total_cpu_ms": 292.023,
+      "peak_rss_bytes": 112705536,
+      "estimated_engine_heap_bytes": 5974539,
+      "edit_p95_ms": 4.070708
+    },
+    "candidate_median": {
+      "wall_ms": 503.889125,
+      "total_cpu_ms": 277.937,
+      "peak_rss_bytes": 111542272,
+      "estimated_engine_heap_bytes": 5974728,
+      "edit_p95_ms": 4.143458
+    },
+    "candidate_delta_percent": {
+      "wall": -10.770561,
+      "total_cpu": -4.823593,
+      "peak_rss": -1.032127,
+      "estimated_engine_heap": 0.003163,
+      "affected_edit_p95": 1.787158
+    },
+    "comparison_gate_percent": 3.0,
+    "fixed_budget_result": "All five baseline and all five candidate runs passed every production budget.",
+    "decision": "Accepted: every named regression metric is within 3%; wall, CPU, and RSS improved, retained heap is effectively flat, and edit p95 is +1.79%."
+  },
+  "representative_read_only_corpus": {
+    "description": "An anonymized two-project, read-only verification corpus. No corpus source was modified, copied, or added as a regression fixture. The corpus had grown since earlier same-day evidence, so this comparison freezes its current dataset fingerprint and uses exact isolated cache roots for each semantic producer identity.",
+    "command": "RUBY_FAST_LSP_CACHE_DIR=<binary-specific-cache> RUST_LOG=error <profiler> --workspace <anonymized-corpus> --config <two-project-config> --extension-path <packaged-extension>",
+    "alternating_warm_pairs": 5,
+    "dataset_fingerprint_sha256": "1972e0653d4aa0a20ff46e77aca0c1d8a667f2957615a155809de9573842d898",
+    "cache_acceptance": "Every measured run reported 604 persistent gem-product hits, zero misses, zero producers, and zero corruptions.",
+    "semantic_result_fingerprints": {
+      "baseline_project_a": "5a12eea2d1bbae8e746ff016d894fdb9",
+      "baseline_project_b": "b6de9afc393d1ea984277ad64921cbd1",
+      "candidate_project_a": "dc311a65ea346cd5fab04b9fb7d1b2fd",
+      "candidate_project_b": "237743ef06ae3809c9440cf962dfc802"
+    },
+    "baseline_runs": [
+      { "wall_ms": 201307.998750, "total_cpu_ms": 413023.834, "peak_rss_bytes": 1411039232, "estimated_engine_heap_bytes": 794814847 },
+      { "wall_ms": 107458.718125, "total_cpu_ms": 456418.595, "peak_rss_bytes": 1352744960, "estimated_engine_heap_bytes": 794813943 },
+      { "wall_ms": 136568.777416, "total_cpu_ms": 430596.450, "peak_rss_bytes": 1494745088, "estimated_engine_heap_bytes": 794815174 },
+      { "wall_ms": 93502.195417, "total_cpu_ms": 423298.323, "peak_rss_bytes": 1574862848, "estimated_engine_heap_bytes": 794815282 },
+      { "wall_ms": 91306.035708, "total_cpu_ms": 416978.825, "peak_rss_bytes": 1534640128, "estimated_engine_heap_bytes": 794814876 }
+    ],
+    "candidate_runs": [
+      { "wall_ms": 96831.746541, "total_cpu_ms": 423724.348, "peak_rss_bytes": 1359364096, "estimated_engine_heap_bytes": 795667945 },
+      { "wall_ms": 109611.372250, "total_cpu_ms": 479043.156, "peak_rss_bytes": 1513357312, "estimated_engine_heap_bytes": 795668185 },
+      { "wall_ms": 95660.354791, "total_cpu_ms": 429531.459, "peak_rss_bytes": 1634861056, "estimated_engine_heap_bytes": 795669192 },
+      { "wall_ms": 93153.895542, "total_cpu_ms": 421072.613, "peak_rss_bytes": 1562787840, "estimated_engine_heap_bytes": 795668372 },
+      { "wall_ms": 91643.578958, "total_cpu_ms": 416110.822, "peak_rss_bytes": 1575026688, "estimated_engine_heap_bytes": 795669503 }
+    ],
+    "baseline_median": {
+      "wall_ms": 107458.718125,
+      "total_cpu_ms": 423298.323,
+      "peak_rss_bytes": 1494745088,
+      "estimated_engine_heap_bytes": 794814876
+    },
+    "candidate_median": {
+      "wall_ms": 95660.354791,
+      "total_cpu_ms": 423724.348,
+      "peak_rss_bytes": 1562787840,
+      "estimated_engine_heap_bytes": 795668372
+    },
+    "candidate_delta_percent": {
+      "wall": -10.979438,
+      "total_cpu": 0.100644,
+      "peak_rss": 4.552131,
+      "estimated_engine_heap": 0.107383
+    },
+    "fixed_peak_rss_ceiling_bytes": 1776846438,
+    "candidate_peak_rss_max_bytes": 1634861056,
+    "rss_ceiling_passes": 5,
+    "rss_ceiling_runs": 5,
+    "decision": "Accepted: median wall improved, CPU and retained heap are within 3%, every cache lifecycle counter is clean, and all candidate RSS samples stay below the fixed warm-corpus ceiling. The +4.55% median RSS variance is recorded and governed by the fixed ceiling rather than hidden."
+  },
+  "persistence_defect_and_fix": {
+    "finding": "The initial candidate encoded callable-body and higher-order persistence enums with Serde adjacent tagging. Postcard can encode that representation but cannot deserialize it, so affected gem products were rejected and rebuilt on every process restart.",
+    "observed_failure": "Twenty affected products repeatedly reported `failed to decode persistent dependency product: This is a feature that PostCard will never implement` before the root cause was fixed.",
+    "fix": "Use Postcard-compatible externally tagged persistence DTO enums and test actual Postcard bytes before restoring the domain snapshot.",
+    "producer_identity": "The semantic producer fingerprint changed after the fix, forcing a disjoint product key and preventing selection of older invalid payloads.",
+    "post_fix_proof": "A fresh population completed with zero corruptions; the next process restored 604/604 products with zero misses, producers, or corruptions. All ten accepted representative runs repeated that exact cache outcome."
+  },
+  "optimization": {
+    "measured_root_causes": [
+      "Escape analysis recursively visited every assignment RHS and call even when no callable identity existed in the flow environment.",
+      "Static callable-literal recognition allocated a UTF-8 method-name string for ordinary call-shaped assignments."
+    ],
+    "accepted_changes": [
+      "Return immediately from escape analysis when the callable environment is empty.",
+      "Match the three supported callable constructor names directly as bytes without allocation."
+    ],
+    "result": "The exact final neutral five-pair candidate has edit p95 +1.79%, wall -10.77%, CPU -4.82%, RSS -1.03%, and retained heap +0.003% versus baseline."
+  },
+  "correctness_evidence": {
+    "workspace": "The final cargo test --workspace passed every target after the persistence fix: root 1626/1628 with two intentional ignores, ruby-analysis 601/601, and all extension, integration, CLI, and doc targets passed.",
+    "focused": "Callable-body black-box suite passed 50/50 including local and cross-file definition navigation; Postcard callable-body and higher-order persistence wire tests passed.",
+    "scorecard": "The final explicit scorecard report passed 121/121 cases, scored 100/100, recorded zero gaps, and recorded zero unexpected outcomes.",
+    "review": "The final architecture audit found no retained Prism nodes, consumer-owned callable inference, duplicate MRO/visibility policy, or parallel semantic store."
+  }
+}

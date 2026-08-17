@@ -1,11 +1,11 @@
 schema_version = 1
 name = "Ruby Fast LSP type inference conformance"
-corpus_revision = "m5-discriminated-shapes-1"
+corpus_revision = "m7-proof-first-callable-bodies-1"
 score_eligible = true
 target_score = 90
 critical_category_minimum = 85
 minimum_cases_for_claim = 50
-notes = "M5 corpus with 111 reviewed cases. Exact local Hash shapes, correlated joins, bounded alias mutation, escape invalidation, precise literal/dynamic keyed reads, explained field/depth bound failures, equality/inequality discriminators, ordinary case discriminators, and Hash-pattern captures are passing. Unknown splats, invalidated discriminators, and incomplete unions remain fail-closed controls. Proven multiline chained-call inlays, embedded core runtime value constants, proof-checked deferred chained receivers and constructor origins, source-ordered owner isolation, exact local/nonlocal-read and call-expression proof outcomes, explicit parameter contracts through flow, explicit unmatched ordinary-case joins, raising unmatched pattern-case flow, unresolved flow joins as receiver proof barriers, short-circuit assignment joins, exception-prefix rescue joins, deferred complete-graph finalization, exhaustive reopened-call unions, visibility-complete explicit dispatch, cross-file recursive return components, namespaced value-constant dispatch, complete positional parameter shapes, attribute-macro ownership, Unknown reassignment invalidation, and fail-closed unresolved or inaccessible ancestry and top-level chains are covered. Differential CLI/LSP parity covers method returns, parameters, constants, local and nonlocal variable assignments, concrete and explained-Unknown variable reads and calls, proven chain expressions, deferred mixin dispatch, reopened implicit/explicit dispatch, and cross-file recursive calls. Differential CLI/LSP diagnostic parity covers unresolved-method with suggestions, unresolved-constant, missing-kwarg, unmatched YARD parameters, YARD/RBS return conflicts, unresolved require, parser syntax errors, and deterministic multi-diagnostic order. Eligibility is enabled after the separate 13-case, five-project reviewed precision corpus passed with zero false positives and the recorded seven-run deterministic performance/RSS matrix passed."
+notes = "M7 corpus with 121 reviewed cases. It adds parameter-dependent callable bodies for direct and higher-order calls, structural projection through callables, and stable escape invalidation controls on top of signature-driven explicit blocks, static symbol-to-proc, generic RBS yielding calls, and structural collection pipelines. Exact local Hash shapes, correlated joins, bounded alias mutation, escape invalidation, precise literal/dynamic keyed reads, explained field/depth bound failures, equality/inequality discriminators, ordinary case discriminators, and Hash-pattern captures are passing. Unknown splats, invalidated discriminators, incomplete unions, dynamic callables, unsupported block exits, and unsupported callable bodies remain fail-closed controls. Proven multiline chained-call inlays, embedded core runtime value constants, proof-checked deferred chained receivers and constructor origins, source-ordered owner isolation, exact local/nonlocal-read and call-expression proof outcomes, explicit parameter contracts through flow, exhaustive joins, deferred complete-graph finalization, visibility-complete dispatch, cross-file recursive return components, callable constant lifecycle replacement, and Unknown reassignment invalidation are covered. Differential CLI/LSP parity covers method returns, parameters, constants, local and nonlocal variable assignments, concrete and explained-Unknown variable reads and calls, proven chain expressions, higher-order and callable-body calls, deferred mixin dispatch, reopened dispatch, and cross-file recursive calls. Differential CLI/LSP diagnostic parity covers unresolved-method with suggestions, unresolved-constant, missing-kwarg, unmatched YARD parameters, YARD/RBS return conflicts, unresolved require, parser syntax errors, and deterministic multi-diagnostic order. Eligibility remains gated by the separate reviewed precision corpus and recorded deterministic performance/RSS evidence."
 
 [[categories]]
 id = "literals_collections"
@@ -2560,6 +2560,169 @@ def maybe_payload(condition)
   else
     dynamic_payload
   end
-  payload<hover label="Unknown[unresolved_assignment_value]">
+payload<hover label="Unknown[unresolved_assignment_value]">
 end
+'''
+
+[[cases]]
+id = "higher_order_explicit_map"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A core callable signature binds the Array element to the block parameter and substitutes the exhaustive block result into one canonical call result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+strings<hint label="Array<String>"> = [1, 2].map { |value| value.to_s }
+'''
+
+[[cases]]
+id = "higher_order_static_symbol_to_proc"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A static symbol-to-proc target resolves on every input member and enters the same block-result constraint as an explicit block."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+strings<hint label="Array<String>"> = [1, "two"].map(&:to_s)
+'''
+
+[[cases]]
+id = "higher_order_shape_pipeline"
+category = "literals_collections"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "Structural row variants remain correlated inside the collection element while an explicit transform projects one proven field."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+rows = [{ name: "Ada" }, { name: "Grace" }]
+names<hint label="Array<String>"> = rows.map { |row| row[:name] }
+'''
+
+[[cases]]
+id = "higher_order_dynamic_callable_fails_closed"
+category = "methods_blocks"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "An arbitrary dynamic block object has no proven callable signature, so the complete call retains the stable unsupported-callable reason."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+callable = dynamic_value
+result<hint label=": ?"> = [1, 2].map(&callable)
+'''
+
+[[cases]]
+id = "higher_order_unsupported_block_exit_fails_closed"
+category = "flow"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "A non-local break changes the enclosing call result and remains an explicit unsupported-block-flow boundary until that control effect is modeled."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+result<hint label=": ?"> = [1, 2].map { |value| break value.to_s }
+'''
+
+[[cases]]
+id = "higher_order_direct_ruby_yield"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A bounded Ruby method that directly yields one parameter is adapted to the shared callable constraint and returns the exhaustive block result. Project RBS generic coverage lives in the black-box lifecycle suite because the scorecard harness opens Ruby source fixtures only."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+def transform(value)
+  yield(value)
+end
+
+result<hint label="String"> = transform(1) { |value| value.to_s }
+'''
+
+[[cases]]
+id = "callable_body_direct_parameter_substitution"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A direct lambda call binds the proven argument to the AST-free callable-body summary and resolves the parameter-dependent method result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+stringify = ->(value) { value.to_s }
+result<hint label="String"> = stringify.call(1)
+'''
+
+[[cases]]
+id = "callable_body_higher_order_parameter_substitution"
+category = "methods_blocks"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "A known callable body consumes the higher-order signature's proven block input and returns one substituted Array result."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+stringify = ->(value) { value.to_s }
+result<hint label="Array<String>"> = [1, 2].map(&stringify)
+'''
+
+[[cases]]
+id = "callable_body_shape_projection"
+category = "literals_collections"
+points = 0
+expectation = "coverage"
+allow_unknown = false
+baseline = "pass"
+rationale = "The callable-body evaluator reuses the canonical structural Hash read and preserves its projected field type."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+read_name = ->(row) { row[:name] }
+rows = [{ name: "Ada" }, { name: "Grace" }]
+result<hint label="Array<String>"> = rows.map(&read_name)
+'''
+
+[[cases]]
+id = "callable_body_escape_fails_closed"
+category = "flow"
+points = 0
+expectation = "unknown_safety"
+allow_unknown = true
+baseline = "pass"
+rationale = "Passing a callable through an unsupported invocation boundary invalidates all aliases rather than retaining a stale body proof."
+
+[[cases.files]]
+path = "main.rb"
+fixture = '''
+convert = ->(value) { value.to_s }
+alias_convert = convert
+consume(convert)
+result<hint label=": ?"> = alias_convert.call(1)
 '''

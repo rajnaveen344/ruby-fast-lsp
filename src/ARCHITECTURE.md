@@ -549,14 +549,49 @@ its semantic return is the constructed instance. Explicit `self.new` remains
 an ordinary method, and modules never acquire constructor semantics from
 syntax alone.
 
-The remaining reusable infrastructure seam is higher-order call solving. The
-current analysis handles selected yields, block bodies, proc/lambda calls, and
-receiver-generic RBS returns, but there is not yet one callable constraint model
-that solves generic results from block input/output. Static symbol-to-proc forms
-such as `items.map(&:to_s)` therefore remain a known false Unknown. That gap
-belongs in `ruby-analysis::inference` as a general block/proc/generic
-substitution rule, not as collection-method cases in LSP features or the
-checker.
+Higher-order calls use one private callable-template domain in
+`ruby-analysis::inference`. RBS indexing retains receiver and method type
+parameters, ordinary arguments, block inputs/result, and call-result templates
+on file-owned method facts. Bounded Ruby direct-yield and forwarding relations
+are adapted to that same model. The solver binds receiver generics separately
+from method generics, injects proven block parameter types into an isolated
+flow pass, joins all reachable block exits, and publishes one substituted
+`TypeInferenceOutcome`.
+
+Ordinary method facts retain only a nullable pointer to optional higher-order
+metadata. During an AST call visit, the collector prepares a callable proof
+once before traversing the block and passes that exact ephemeral value into
+result solving afterward. It is neither recomputed nor retained as a second
+semantic cache; file-owned method/type facts remain the only durable truth.
+
+Static `&:method` resolves exhaustively over the block-input union. Statically
+visible proc/lambda literals are lowered once from the existing Prism tree into
+a compact AST-free `CallableBodySummary`. Local callable identities remain in
+bounded flow state; capture-free constant summaries enter ordinary file-owned
+inference facts and persistent project-neutral dependency snapshots. Direct
+`.call` and `&callable` instantiate the same summary from proven arguments,
+current read-only captures, canonical shape/type operations, and engine-owned
+method lookup.
+
+Callable identity joins across `if`, `unless`, and ordinary `case` are exact.
+Unsupported storage or calls invalidate every live alias. Conflicting constant
+facts are ambiguous; edits and parse failures replace them through the ordinary
+file lifecycle. Semantic fingerprints include the complete summary, and no
+Prism node or source instruction enters engine state.
+
+Conflicting overloads, dynamic callables, incomplete substitution, unsupported
+control flow, and bound excess stay explained Unknown. The higher-order result
+suppresses only the ordinary deferred return projection for its exact call;
+the method reference candidate remains available for navigation. No LSP or CLI
+consumer contains collection-specific inference.
+
+Callable facts follow ordinary register/replace/delete ownership, including
+RBS parse failure and watcher deletion. Fixed bounds are eight overloads, eight
+type variables, four block parameters, 16 binding iterations, eight template
+levels, and eight union variants. See
+`docs/higher-order-call-inference.md` for the concise product contract.
+Callable-body behavior and its additional fixed bounds are documented in
+`docs/callable-body-inference.md`.
 
 The reviewed acceptance contract is
 `support/type_inference/scorecard.toml`. Historical accepted and rejected

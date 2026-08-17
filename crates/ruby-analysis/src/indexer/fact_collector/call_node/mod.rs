@@ -948,7 +948,22 @@ impl FactCollector {
                 // generic receiver failure.
                 Some(
                     UnknownReason::ShapeBoundExceeded
-                    | UnknownReason::MutableShapeInvalidated,
+                    | UnknownReason::MutableShapeInvalidated
+                    | UnknownReason::UnsupportedCallable
+                    | UnknownReason::IncompleteBlockInput
+                    | UnknownReason::IncompleteBlockResult
+                    | UnknownReason::IncompleteGenericSubstitution
+                    | UnknownReason::AmbiguousCallableOverload
+                    | UnknownReason::HigherOrderBoundExceeded
+                    | UnknownReason::UnsupportedBlockFlow
+                    | UnknownReason::UnsupportedCallableBody
+                    | UnknownReason::IncompleteCallableInput
+                    | UnknownReason::IncompleteCallableCapture
+                    | UnknownReason::AmbiguousCallableValue
+                    | UnknownReason::EscapedCallableValue
+                    | UnknownReason::CallableBodyBoundExceeded
+                    | UnknownReason::CallableRecursionUnsupported
+                    | UnknownReason::UnsupportedCallableFlow,
                 ) => receiver_reason.expect(
                     "INVARIANT VIOLATED: checked shape receiver reason disappeared. This is a bug because receiver_reason is immutable. Fix: bind the matched reason directly.",
                 ),
@@ -995,7 +1010,22 @@ impl FactCollector {
                     | Some(
                         UnknownReason::IncompleteUnionMember
                         | UnknownReason::ShapeBoundExceeded
-                        | UnknownReason::MutableShapeInvalidated,
+                        | UnknownReason::MutableShapeInvalidated
+                        | UnknownReason::UnsupportedCallable
+                        | UnknownReason::IncompleteBlockInput
+                        | UnknownReason::IncompleteBlockResult
+                        | UnknownReason::IncompleteGenericSubstitution
+                        | UnknownReason::AmbiguousCallableOverload
+                        | UnknownReason::HigherOrderBoundExceeded
+                        | UnknownReason::UnsupportedBlockFlow
+                        | UnknownReason::UnsupportedCallableBody
+                        | UnknownReason::IncompleteCallableInput
+                        | UnknownReason::IncompleteCallableCapture
+                        | UnknownReason::AmbiguousCallableValue
+                        | UnknownReason::EscapedCallableValue
+                        | UnknownReason::CallableBodyBoundExceeded
+                        | UnknownReason::CallableRecursionUnsupported
+                        | UnknownReason::UnsupportedCallableFlow,
                     ) => Some(outcome),
                     Some(
                         UnknownReason::NoReachingAssignment

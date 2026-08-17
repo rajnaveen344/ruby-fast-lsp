@@ -5,7 +5,8 @@
 //! the same decision and explain it without reimplementing inference policy.
 
 use crate::core::{
-    ConstantTypeEquation, FullyQualifiedName, MethodReturnEquation, RubyType, TextRange,
+    ConstantCallableBodyFact, ConstantTypeEquation, FullyQualifiedName, MethodReturnEquation,
+    RubyType, TextRange,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -42,10 +43,40 @@ pub enum UnknownReason {
     ShapeBoundExceeded,
     /// A mutable shape escaped or crossed an unsupported mutation boundary.
     MutableShapeInvalidated,
+    /// A call has a block/callable shape that the static model cannot represent.
+    UnsupportedCallable,
+    /// A callable signature did not prove every block input type.
+    IncompleteBlockInput,
+    /// A reachable block exit did not prove a result type.
+    IncompleteBlockResult,
+    /// Generic variables required by the callable result were not fully solved.
+    IncompleteGenericSubstitution,
+    /// More than one compatible callable overload produced a distinct result.
+    AmbiguousCallableOverload,
+    /// Higher-order solving exceeded a reviewed overload, variable, depth, or union bound.
+    HigherOrderBoundExceeded,
+    /// Block control flow changes the enclosing call result and is not yet modeled exactly.
+    UnsupportedBlockFlow,
+    /// The callable body contains syntax outside the reviewed summary domain.
+    UnsupportedCallableBody,
+    /// At least one callable argument has no complete proven type.
+    IncompleteCallableInput,
+    /// A source-ordered captured binding has no complete proven type.
+    IncompleteCallableCapture,
+    /// More than one callable identity reaches the invocation.
+    AmbiguousCallableValue,
+    /// The callable crossed an unsupported storage or invocation boundary.
+    EscapedCallableValue,
+    /// Callable lowering or evaluation exceeded a reviewed fixed bound.
+    CallableBodyBoundExceeded,
+    /// Recursive callable instantiation is deliberately unsupported.
+    CallableRecursionUnsupported,
+    /// Callable-local control flow cannot be represented completely.
+    UnsupportedCallableFlow,
 }
 
 impl UnknownReason {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 25] = [
         Self::NoReachingAssignment,
         Self::UnresolvedAssignmentValue,
         Self::AmbiguousReachingAssignment,
@@ -56,6 +87,21 @@ impl UnknownReason {
         Self::UnprovenRecursiveCycle,
         Self::ShapeBoundExceeded,
         Self::MutableShapeInvalidated,
+        Self::UnsupportedCallable,
+        Self::IncompleteBlockInput,
+        Self::IncompleteBlockResult,
+        Self::IncompleteGenericSubstitution,
+        Self::AmbiguousCallableOverload,
+        Self::HigherOrderBoundExceeded,
+        Self::UnsupportedBlockFlow,
+        Self::UnsupportedCallableBody,
+        Self::IncompleteCallableInput,
+        Self::IncompleteCallableCapture,
+        Self::AmbiguousCallableValue,
+        Self::EscapedCallableValue,
+        Self::CallableBodyBoundExceeded,
+        Self::CallableRecursionUnsupported,
+        Self::UnsupportedCallableFlow,
     ];
 
     /// Stable identifier for CLI/JSON output and scorecard expectations.
@@ -71,6 +117,21 @@ impl UnknownReason {
             Self::UnprovenRecursiveCycle => "unproven_recursive_cycle",
             Self::ShapeBoundExceeded => "shape_bound_exceeded",
             Self::MutableShapeInvalidated => "mutable_shape_invalidated",
+            Self::UnsupportedCallable => "unsupported_callable",
+            Self::IncompleteBlockInput => "incomplete_block_input",
+            Self::IncompleteBlockResult => "incomplete_block_result",
+            Self::IncompleteGenericSubstitution => "incomplete_generic_substitution",
+            Self::AmbiguousCallableOverload => "ambiguous_callable_overload",
+            Self::HigherOrderBoundExceeded => "higher_order_bound_exceeded",
+            Self::UnsupportedBlockFlow => "unsupported_block_flow",
+            Self::UnsupportedCallableBody => "unsupported_callable_body",
+            Self::IncompleteCallableInput => "incomplete_callable_input",
+            Self::IncompleteCallableCapture => "incomplete_callable_capture",
+            Self::AmbiguousCallableValue => "ambiguous_callable_value",
+            Self::EscapedCallableValue => "escaped_callable_value",
+            Self::CallableBodyBoundExceeded => "callable_body_bound_exceeded",
+            Self::CallableRecursionUnsupported => "callable_recursion_unsupported",
+            Self::UnsupportedCallableFlow => "unsupported_callable_flow",
         }
     }
 
@@ -100,6 +161,51 @@ impl UnknownReason {
             }
             Self::MutableShapeInvalidated => {
                 "the mutable shape crossed an unresolved mutation or escape boundary"
+            }
+            Self::UnsupportedCallable => {
+                "the block or callable shape is not supported by static higher-order inference"
+            }
+            Self::IncompleteBlockInput => {
+                "at least one block input type is not proven by the callable signature"
+            }
+            Self::IncompleteBlockResult => {
+                "at least one reachable block exit does not have a proven result type"
+            }
+            Self::IncompleteGenericSubstitution => {
+                "the callable result depends on a generic variable that was not fully solved"
+            }
+            Self::AmbiguousCallableOverload => {
+                "compatible callable overloads do not prove one canonical result"
+            }
+            Self::HigherOrderBoundExceeded => {
+                "higher-order inference exceeded a fixed overload, variable, depth, or union bound"
+            }
+            Self::UnsupportedBlockFlow => {
+                "block control flow changes the enclosing call result and is not modeled exactly"
+            }
+            Self::UnsupportedCallableBody => {
+                "the callable body contains syntax outside the reviewed static summary domain"
+            }
+            Self::IncompleteCallableInput => {
+                "at least one callable argument does not have a complete proven type"
+            }
+            Self::IncompleteCallableCapture => {
+                "at least one captured binding does not have a complete source-ordered type proof"
+            }
+            Self::AmbiguousCallableValue => {
+                "more than one incompatible callable identity reaches the invocation"
+            }
+            Self::EscapedCallableValue => {
+                "the callable crossed an unsupported storage or invocation boundary"
+            }
+            Self::CallableBodyBoundExceeded => {
+                "callable-body inference exceeded a reviewed fixed bound"
+            }
+            Self::CallableRecursionUnsupported => {
+                "recursive callable instantiation is not supported"
+            }
+            Self::UnsupportedCallableFlow => {
+                "callable-local control flow cannot be represented completely"
             }
         }
     }
@@ -170,6 +276,10 @@ pub struct InferenceEvidence {
     /// lookups. The engine solves them after the complete namespace graph is
     /// installed and before method-return equations consume their results.
     pub constant_type_equations: Vec<ConstantTypeEquation>,
+    /// Capture-free callable constants lowered during the owning file's
+    /// ordinary traversal. Cross-file consumers resolve these facts through
+    /// `AnalysisQuery`; replacement removes them with the source file.
+    pub(crate) constant_callable_bodies: Vec<ConstantCallableBodyFact>,
     /// Compact, file-owned results for complete call expressions. These are
     /// resolved from the same method candidates as navigation and diagnostics
     /// instead of duplicating method lookup in the AST visitor.
@@ -198,6 +308,12 @@ impl InferenceEvidence {
                 .map(MethodReturnEquation::estimated_heap_bytes)
                 .sum::<usize>()
             + self.constant_type_equations.capacity() * size_of::<ConstantTypeEquation>()
+            + self.constant_callable_bodies.capacity() * size_of::<ConstantCallableBodyFact>()
+            + self
+                .constant_callable_bodies
+                .iter()
+                .map(ConstantCallableBodyFact::estimated_heap_bytes)
+                .sum::<usize>()
             + self.call_expression_outcomes.capacity()
                 * size_of::<(TextRange, TypeInferenceOutcome)>()
             + self
@@ -419,7 +535,22 @@ impl InferenceTelemetry {
             | UnknownReason::InvalidMethodName
             | UnknownReason::UnresolvedMethodReturn
             | UnknownReason::IncompleteUnionMember
-            | UnknownReason::UnprovenRecursiveCycle => {}
+            | UnknownReason::UnprovenRecursiveCycle
+            | UnknownReason::UnsupportedCallable
+            | UnknownReason::IncompleteBlockInput
+            | UnknownReason::IncompleteBlockResult
+            | UnknownReason::IncompleteGenericSubstitution
+            | UnknownReason::AmbiguousCallableOverload
+            | UnknownReason::HigherOrderBoundExceeded
+            | UnknownReason::UnsupportedBlockFlow
+            | UnknownReason::UnsupportedCallableBody
+            | UnknownReason::IncompleteCallableInput
+            | UnknownReason::IncompleteCallableCapture
+            | UnknownReason::AmbiguousCallableValue
+            | UnknownReason::EscapedCallableValue
+            | UnknownReason::CallableBodyBoundExceeded
+            | UnknownReason::CallableRecursionUnsupported
+            | UnknownReason::UnsupportedCallableFlow => {}
         }
     }
 
