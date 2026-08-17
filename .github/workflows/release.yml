@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -86,6 +87,7 @@ jobs:
           path: editors/vscode/vsix/bin/${{ matrix.vsix-platform }}
 
   publish-npm:
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -143,9 +145,11 @@ jobs:
           echo "Publishing @ruby-fast/lsp@${VERSION}..."
           (cd editors/npm/ruby-fast-lsp && npm publish --access public) || echo "Already published, skipping"
 
-  publish-vsix:
+  package-vsix:
     needs: build
     runs-on: ubuntu-latest
+    outputs:
+      vsix-version: ${{ steps.prepare.outputs.version }}
 
     steps:
       - uses: actions/checkout@v5
@@ -161,6 +165,7 @@ jobs:
           path: editors/vscode/vsix/bin-artifacts
 
       - name: Prepare VSIX
+        id: prepare
         run: |
           # VSIX uses CalVer: YYYY.WW.PATCH (e.g., 2026.14.0)
           YEAR=$(date -u +%Y)
@@ -179,6 +184,7 @@ jobs:
           " || echo "0")
           VSIX_VERSION="${YEAR}.${WEEK}.${EXISTING}"
           echo "VSIX_VERSION=${VSIX_VERSION}" >> $GITHUB_ENV
+          echo "version=${VSIX_VERSION}" >> $GITHUB_OUTPUT
           echo "VSIX version: ${VSIX_VERSION}"
 
           # Move binaries into place
@@ -204,16 +210,64 @@ jobs:
           cd editors/vscode/vsix
           npx --yes @vscode/vsce@3.9.2 package
 
+      - name: Upload VSIX package
+        uses: actions/upload-artifact@v5
+        with:
+          name: vsix-package
+          path: editors/vscode/vsix/ruby-fast-lsp-${{ steps.prepare.outputs.version }}.vsix
+
+  publish-marketplace:
+    needs: package-vsix
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Download VSIX package
+        uses: actions/download-artifact@v5
+        with:
+          name: vsix-package
+          path: vsix
+
       - name: Publish to VS Code Marketplace
+        working-directory: vsix
         run: |
-          cd editors/vscode/vsix
-          npx --yes @vscode/vsce@3.9.2 publish -p ${{ secrets.VSCE_TOKEN }}
+          for attempt in 1 2 3; do
+            if npx --yes @vscode/vsce@3.9.2 publish --packagePath "ruby-fast-lsp-${VSIX_VERSION}.vsix" -p ${{ secrets.VSCE_TOKEN }}; then
+              exit 0
+            fi
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            echo "VS Code Marketplace publish failed; retrying in 60 seconds..."
+            sleep 60
+          done
+        env:
+          VSIX_VERSION: ${{ needs.package-vsix.outputs.vsix-version }}
+
+  publish-open-vsx:
+    needs: package-vsix
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Download VSIX package
+        uses: actions/download-artifact@v5
+        with:
+          name: vsix-package
+          path: vsix
 
       - name: Publish to Open VSX
+        working-directory: vsix
         env:
           OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
+          VSIX_VERSION: ${{ needs.package-vsix.outputs.vsix-version }}
         run: |
-          cd editors/vscode/vsix
           # Documented Open VSX path: npx ovsx publish <file> with OVSX_PAT.
           for attempt in 1 2 3; do
             if npx --yes ovsx@1.1.1 publish "ruby-fast-lsp-${VSIX_VERSION}.vsix"; then
@@ -227,8 +281,8 @@ jobs:
           done
 
   create-release:
-    needs: [publish-npm, publish-vsix]
-    if: always() && !cancelled()
+    needs: [publish-npm, package-vsix]
+    if: always() && !cancelled() && github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
