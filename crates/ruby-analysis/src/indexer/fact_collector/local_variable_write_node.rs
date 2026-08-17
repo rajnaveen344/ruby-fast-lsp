@@ -115,7 +115,7 @@ impl FactCollector {
                 "INVARIANT VIOLATED: local assignment retained shape construction reason `{}` with concrete type `{inferred_type}`. This is a bug because a proof failure and a concrete result cannot describe the same assignment. Fix: return exactly one state from assignment inference.",
                 reason.code()
             );
-            self.expression_unknown_reasons.push((location, reason));
+            self.expression_unknown_reasons.insert(location, reason);
         }
         let root_subject = TypeSubject::Local {
             scope_id: 0,

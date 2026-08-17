@@ -20,7 +20,7 @@ impl FactCollector {
         let outcome =
             self.collected_nonlocal_variable_outcome_before(kind, name, &owner, range.start_byte);
         if let Some(reason) = outcome.unknown_reason() {
-            self.expression_unknown_reasons.push((range, reason));
+            self.expression_unknown_reasons.insert(range, reason);
         }
         let ruby_type = outcome.into_ruby_type();
 

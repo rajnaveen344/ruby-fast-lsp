@@ -935,12 +935,8 @@ impl FactCollector {
         let immediate_outcome = if inference_failed && deferred_receiver_may_resolve {
             None
         } else if inference_failed {
-            let receiver_reason = receiver_expression_range.and_then(|range| {
-                self.expression_unknown_reasons
-                    .iter()
-                    .rev()
-                    .find_map(|(candidate, reason)| (*candidate == range).then_some(*reason))
-            });
+            let receiver_reason = receiver_expression_range
+                .and_then(|range| self.expression_unknown_reasons.get(&range).copied());
             let reason = match receiver_reason {
                 // These reasons describe why a previously complete shape is
                 // no longer available. Preserve that boundary at the keyed

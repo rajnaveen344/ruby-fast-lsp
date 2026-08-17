@@ -19,6 +19,19 @@ strings<hint label="Array<String>"> = values.map { |value| value.to_s }
 }
 
 #[tokio::test]
+async fn method_body_map_block_reuses_the_collector_call_proof() {
+    check(
+        r#"
+def all_names<hint label=" -> Array<String>">
+  rows = [{ name: "Ada" }, { name: "Grace" }]
+  rows.map { |row| row[:name] }
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn branching_map_block_preserves_the_exhaustive_element_union() {
     check(
         r#"

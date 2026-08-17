@@ -60,13 +60,14 @@ impl FactCollector {
             // ordinary visitor reaches this exact read. Keep that proof
             // barrier instead of adding the generic Unknown projection as a
             // conflicting second result.
-            if !self
-                .expression_unknown_reasons
-                .iter()
-                .any(|(candidate, _)| *candidate == range)
-            {
-                self.expression_unknown_reasons.push((range, reason));
-            }
+            // TypeTracker may already have installed a more precise flow
+            // reason (for example mutable_shape_invalidated) before the
+            // ordinary visitor reaches this exact read. Keep that proof
+            // barrier instead of adding the generic Unknown projection as a
+            // conflicting second result.
+            self.expression_unknown_reasons
+                .entry(range)
+                .or_insert(reason);
         }
     }
 

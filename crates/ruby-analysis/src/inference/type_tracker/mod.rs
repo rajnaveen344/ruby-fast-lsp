@@ -662,6 +662,13 @@ pub struct TypeTracker<'a> {
     /// ordinary return equation of the invoked method.
     direct_call_return_proofs: HashSet<usize>,
 
+    /// Proven call results already recorded by FactCollector for this file.
+    /// Block/proc calls reuse these so method-return tracking does not repeat
+    /// higher-order prepare. Ordinary implicit-self calls are not seeded so
+    /// same-file return dependencies stay intact. Shared by pointer so each
+    /// method does not clone the file map.
+    seeded_call_outcomes: Option<Arc<HashMap<usize, RubyType>>>,
+
     /// Explicit `return` values found during the current method pass. Ruby
     /// methods return from these paths as well as from their fallthrough tail.
     explicit_return_types: Vec<RecursiveReturnApproximation>,
@@ -768,6 +775,7 @@ impl<'a> TypeTracker<'a> {
             observed_return_dependencies: BTreeSet::new(),
             observed_return_constant_dependencies: BTreeSet::new(),
             direct_call_return_proofs: HashSet::new(),
+            seeded_call_outcomes: None,
             explicit_return_types: Vec::new(),
             saw_direct_recursive_call: false,
             rescue_entry_types: Vec::new(),
@@ -856,6 +864,14 @@ impl<'a> TypeTracker<'a> {
         yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
     ) -> Self {
         self.yield_param_types_by_method = yield_param_types_by_method;
+        self
+    }
+
+    pub(crate) fn with_seeded_call_outcomes(
+        mut self,
+        seeded_call_outcomes: Arc<HashMap<usize, RubyType>>,
+    ) -> Self {
+        self.seeded_call_outcomes = Some(seeded_call_outcomes);
         self
     }
 
@@ -2984,6 +3000,19 @@ impl<'a> TypeTracker<'a> {
         self.invalidate_escaped_callables_in_call(call);
         let method_name = String::from_utf8_lossy(call.name().as_slice()).to_string();
 
+        if call.block().is_some() {
+            if let Some(seeded_type) = self
+                .seeded_call_outcomes
+                .as_ref()
+                .and_then(|outcomes| outcomes.get(&call.location().start_offset()))
+                .cloned()
+            {
+                self.direct_call_return_proofs
+                    .insert(call.location().start_offset());
+                return seeded_type;
+            }
+        }
+
         if let Some(higher_order_type) = self.infer_rbs_higher_order_call(call, &method_name) {
             self.direct_call_return_proofs
                 .insert(call.location().start_offset());
@@ -2991,10 +3020,9 @@ impl<'a> TypeTracker<'a> {
         }
 
         self.apply_array_shape_call_boundary(call, &method_name);
-
         // Shape effects are flow state, not ordinary Hash method-return
-        // lookup. Apply them before resolving the call result so every later
-        // alias read observes the same abstract identity state.
+        // lookup. Apply them before resolving the remaining call result so
+        // every later alias read observes the same abstract identity state.
         if let Some(result) = self.infer_shape_call_effect(call, &method_name) {
             return result;
         }
