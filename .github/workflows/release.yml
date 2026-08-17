@@ -45,7 +45,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -74,13 +74,13 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.bin }} editors/vscode/vsix/bin/${{ matrix.vsix-platform }}/${{ matrix.bin }}
 
       - name: Upload npm artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: npm-${{ matrix.npm-pkg }}
           path: editors/npm/${{ matrix.npm-pkg }}
 
       - name: Upload VSIX binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: vsix-bin-${{ matrix.vsix-platform }}
           path: editors/vscode/vsix/bin/${{ matrix.vsix-platform }}
@@ -93,7 +93,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v6
         with:
@@ -101,7 +101,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Download all npm artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: npm-*
           path: artifacts
@@ -148,14 +148,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Download all VSIX binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: vsix-bin-*
           path: editors/vscode/vsix/bin-artifacts
@@ -166,7 +166,7 @@ jobs:
           YEAR=$(date -u +%Y)
           WEEK=$(date -u +%-V)
           # Check if this year.week already exists, increment patch if so
-          EXISTING=$(npx @vscode/vsce show naveenraj.ruby-fast-lsp --json 2>/dev/null | node -e "
+          EXISTING=$(npx --yes @vscode/vsce@3.9.2 show naveenraj.ruby-fast-lsp --json 2>/dev/null | node -e "
             const d = require('fs').readFileSync('/dev/stdin','utf8');
             try {
               const v = JSON.parse(d).versions.map(v=>v.version);
@@ -202,18 +202,21 @@ jobs:
       - name: Package VSIX
         run: |
           cd editors/vscode/vsix
-          npx @vscode/vsce package
+          npx --yes @vscode/vsce@3.9.2 package
 
       - name: Publish to VS Code Marketplace
         run: |
           cd editors/vscode/vsix
-          npx @vscode/vsce publish -p ${{ secrets.VSCE_TOKEN }}
+          npx --yes @vscode/vsce@3.9.2 publish -p ${{ secrets.VSCE_TOKEN }}
 
       - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
         run: |
           cd editors/vscode/vsix
+          # Documented Open VSX path: npx ovsx publish <file> with OVSX_PAT.
           for attempt in 1 2 3; do
-            if npx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}; then
+            if npx --yes ovsx@1.1.1 publish "ruby-fast-lsp-${VSIX_VERSION}.vsix"; then
               exit 0
             fi
             if [ "$attempt" = "3" ]; then
@@ -229,7 +232,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
