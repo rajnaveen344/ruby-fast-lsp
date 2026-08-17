@@ -2,7 +2,7 @@ id = "cucumber-rust"
 name = "Cucumber Rust"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.6, <0.3.0"
+server_version = ">=0.2.6, <0.4.0"
 runtime = "wasm"
 wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_cucumber_extension.wasm"
 checksum_sha256 = "96ef16debb1c44222b474bb0cc7dc1e50ba6ab995bbe9b42fb968311ba305eed"

@@ -2,7 +2,7 @@ id = "minitest-ruby"
 name = "Minitest Ruby"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.6, <0.3.0"
+server_version = ">=0.2.6, <0.4.0"
 runtime = "wasm"
 wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_minitest_extension.wasm"
 checksum_sha256 = "7f09fe7c6a02f8bef0eba652cdb23a90ec22aba489852f65e3808039499e76d6"

@@ -129,7 +129,7 @@ id = "rspec-ruby"
 name = "RSpec Ruby"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.3, <0.3.0"
+server_version = ">=0.2.3, <0.4.0"
 runtime = "mruby-wasm"
 wasm = "rspec-ruby.wasm"
 checksum_sha256 = "<64 lowercase hex chars>"

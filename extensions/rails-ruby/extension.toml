@@ -2,7 +2,7 @@ id = "rails-ruby"
 name = "Rails Ruby"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.6, <0.3.0"
+server_version = ">=0.2.6, <0.4.0"
 runtime = "wasm"
 wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_rails_extension.wasm"
 checksum_sha256 = "edd80fb7d9a27f8434f64cf1954543ad4708a1f91220d9fac9251af54726b133"

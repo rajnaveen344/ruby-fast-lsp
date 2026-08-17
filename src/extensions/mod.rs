@@ -5621,7 +5621,7 @@ id = "cacheable-extension"
 name = "Cacheable Extension"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.0, <0.3.0"
+server_version = ">=0.2.0, <0.4.0"
 runtime = "mruby-wasm"
 wasm = "extension.wasm"
 capabilities = []
@@ -5666,7 +5666,7 @@ id = "activation-failure"
 name = "Activation Failure"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.0, <0.3.0"
+server_version = ">=0.2.0, <0.4.0"
 runtime = "mruby-wasm"
 wasm = "extension.wasm"
 capabilities = []
@@ -5710,7 +5710,7 @@ id = "resource-limit-failure"
 name = "Resource Limit Failure"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.0, <0.3.0"
+server_version = ">=0.2.0, <0.4.0"
 runtime = "wasm"
 wasm = "extension.wasm"
 capabilities = []
@@ -5754,7 +5754,7 @@ id = "trap-failure"
 name = "Trap Failure"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.0, <0.3.0"
+server_version = ">=0.2.0, <0.4.0"
 runtime = "wasm"
 wasm = "extension.wasm"
 capabilities = []
@@ -5809,7 +5809,7 @@ id = "settings-failure"
 name = "Settings Failure"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.0, <0.3.0"
+server_version = ">=0.2.0, <0.4.0"
 runtime = "mruby-wasm"
 wasm = "extension.wasm"
 capabilities = []
@@ -5864,7 +5864,7 @@ id = "watched-file-failure"
 name = "Watched File Failure"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.0, <0.3.0"
+server_version = ">=0.2.0, <0.4.0"
 runtime = "mruby-wasm"
 wasm = "extension.wasm"
 capabilities = ["watching"]
@@ -7184,7 +7184,7 @@ id = "checksum"
 name = "Checksum"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.3, <0.3.0"
+server_version = ">=0.2.3, <0.4.0"
 runtime = "mruby-wasm"
 wasm = "extension.wasm"
 checksum_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -7227,7 +7227,7 @@ id = "process"
 name = "Process"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.3, <0.3.0"
+server_version = ">=0.2.3, <0.4.0"
 runtime = "mruby-wasm"
 wasm = "extension.wasm"
 capabilities = ["process"]

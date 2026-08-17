@@ -2,7 +2,7 @@ id = "sinatra-rust"
 name = "Sinatra Rust"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.6, <0.3.0"
+server_version = ">=0.2.6, <0.4.0"
 runtime = "wasm"
 wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_sinatra_extension.wasm"
 checksum_sha256 = "5135239e1481fadd8ae05723e163979c047f56fa2fa927d6335d36b92c6cc59c"

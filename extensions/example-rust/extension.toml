@@ -2,7 +2,7 @@ id = "example-rust"
 name = "Example Rust Extension"
 version = "0.1.0"
 abi_version = 1
-server_version = ">=0.2.6, <0.3.0"
+server_version = ">=0.2.6, <0.4.0"
 runtime = "wasm"
 wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_example_rust_extension.wasm"
 checksum_sha256 = "6a45645724f08e297ca657aa1144eabb171b626192ec9cb0479cc1c177742c60"
