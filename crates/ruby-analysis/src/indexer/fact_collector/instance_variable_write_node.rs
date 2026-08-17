@@ -10,68 +10,86 @@ use crate::inference::RubyType;
 use super::FactCollector;
 
 impl FactCollector {
-    fn process_instance_variable_write(
-        &mut self,
-        name: &[u8],
-        name_loc: ruby_prism::Location,
-        value_node: Option<&Node>,
-    ) {
+    fn parsed_instance_variable_name(name: &[u8]) -> Option<String> {
         let variable_name = String::from_utf8_lossy(name).to_string();
         trace!("Processing instance variable: {}", variable_name);
 
-        // Validate instance variable name
         if !variable_name.starts_with('@') {
             error!(
                 "Instance variable name must start with @: {}",
                 variable_name
             );
-            return;
+            return None;
         }
 
         if variable_name.len() < 2 {
             error!("Instance variable name too short: {}", variable_name);
-            return;
+            return None;
         }
+
+        Some(variable_name)
+    }
+
+    fn instance_variable_subject(&self, variable_name: String) -> TypeSubject {
+        let owner = FullyQualifiedName::namespace_with_kind(
+            self.scope_tracker.get_ns_stack(),
+            self.scope_tracker.current_method_context(),
+        );
+        TypeSubject::InstanceVariable {
+            owner,
+            name: variable_name,
+        }
+    }
+
+    fn declare_instance_variable_write(&mut self, name: &[u8], name_loc: ruby_prism::Location) {
+        let Some(variable_name) = Self::parsed_instance_variable_name(name) else {
+            return;
+        };
         if let Ok(fqn) = FullyQualifiedName::instance_variable(variable_name.clone()) {
             self.direct_push_variable_symbol(fqn, SymbolKind::InstanceVariable, &name_loc);
         }
+        let subject = self.instance_variable_subject(variable_name);
+        let range = self.document.prism_location_to_text_range(&name_loc);
+        self.begin_nonlocal_write(subject, range);
+    }
 
-        // Infer type from value if available
+    fn bind_instance_variable_write(
+        &mut self,
+        name: &[u8],
+        name_loc: ruby_prism::Location,
+        value_node: Option<&Node>,
+    ) {
+        let Some(variable_name) = Self::parsed_instance_variable_name(name) else {
+            return;
+        };
         let inferred_type = if let Some(value) = value_node {
             self.infer_assignment_type_from_value(value)
         } else {
             RubyType::Unknown
         };
-        let owner = FullyQualifiedName::namespace_with_kind(
-            self.scope_tracker.get_ns_stack(),
-            self.scope_tracker.current_method_context(),
-        );
-        let subject = TypeSubject::InstanceVariable {
-            owner,
-            name: variable_name.clone(),
-        };
+        let subject = self.instance_variable_subject(variable_name);
         let range = self.document.prism_location_to_text_range(&name_loc);
         self.direct_push_assignment_type(subject.clone(), inferred_type.clone(), &name_loc);
 
         self.type_store.add(TypeFact::new(
-            subject.clone(),
+            subject,
             inferred_type,
             range,
             TypeProvenance::Assignment,
         ));
-        self.begin_nonlocal_write(subject, range);
     }
 
     // InstanceVariableWriteNode
     pub fn process_instance_variable_write_node_entry(&mut self, node: &InstanceVariableWriteNode) {
-        self.process_instance_variable_write(
+        self.declare_instance_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
+    pub fn process_instance_variable_write_node_exit(&mut self, node: &InstanceVariableWriteNode) {
+        self.bind_instance_variable_write(
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
         );
-    }
-
-    pub fn process_instance_variable_write_node_exit(&mut self, _node: &InstanceVariableWriteNode) {
         self.finish_nonlocal_write();
     }
 
@@ -80,7 +98,8 @@ impl FactCollector {
         &mut self,
         node: &InstanceVariableTargetNode,
     ) {
-        self.process_instance_variable_write(node.name().as_slice(), node.location(), None);
+        self.declare_instance_variable_write(node.name().as_slice(), node.location());
+        self.bind_instance_variable_write(node.name().as_slice(), node.location(), None);
     }
 
     pub fn process_instance_variable_target_node_exit(
@@ -95,17 +114,18 @@ impl FactCollector {
         &mut self,
         node: &InstanceVariableOrWriteNode,
     ) {
-        self.process_instance_variable_write(
-            node.name().as_slice(),
-            node.name_loc(),
-            Some(&node.value()),
-        );
+        self.declare_instance_variable_write(node.name().as_slice(), node.name_loc());
     }
 
     pub fn process_instance_variable_or_write_node_exit(
         &mut self,
-        _node: &InstanceVariableOrWriteNode,
+        node: &InstanceVariableOrWriteNode,
     ) {
+        self.bind_instance_variable_write(
+            node.name().as_slice(),
+            node.name_loc(),
+            Some(&node.value()),
+        );
         self.finish_nonlocal_write();
     }
 
@@ -114,17 +134,18 @@ impl FactCollector {
         &mut self,
         node: &InstanceVariableAndWriteNode,
     ) {
-        self.process_instance_variable_write(
-            node.name().as_slice(),
-            node.name_loc(),
-            Some(&node.value()),
-        );
+        self.declare_instance_variable_write(node.name().as_slice(), node.name_loc());
     }
 
     pub fn process_instance_variable_and_write_node_exit(
         &mut self,
-        _node: &InstanceVariableAndWriteNode,
+        node: &InstanceVariableAndWriteNode,
     ) {
+        self.bind_instance_variable_write(
+            node.name().as_slice(),
+            node.name_loc(),
+            Some(&node.value()),
+        );
         self.finish_nonlocal_write();
     }
 
@@ -133,17 +154,18 @@ impl FactCollector {
         &mut self,
         node: &InstanceVariableOperatorWriteNode,
     ) {
-        self.process_instance_variable_write(
-            node.name().as_slice(),
-            node.name_loc(),
-            Some(&node.value()),
-        );
+        self.declare_instance_variable_write(node.name().as_slice(), node.name_loc());
     }
 
     pub fn process_instance_variable_operator_write_node_exit(
         &mut self,
-        _node: &InstanceVariableOperatorWriteNode,
+        node: &InstanceVariableOperatorWriteNode,
     ) {
+        self.bind_instance_variable_write(
+            node.name().as_slice(),
+            node.name_loc(),
+            Some(&node.value()),
+        );
         self.finish_nonlocal_write();
     }
 }

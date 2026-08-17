@@ -822,10 +822,10 @@ impl FactCollector {
         let call_range =
             self.text_range_from_prism_location(&node.location(), "method reference candidate");
         if !RubyMethod::is_valid_ruby_method_name(method_name) {
-            self.call_expression_outcomes.push((
+            self.record_immediate_call_outcome(
                 call_range,
                 TypeInferenceOutcome::unknown(UnknownReason::InvalidMethodName),
-            ));
+            );
             trace!("Skipping method call with invalid name: {}", method_name);
             return;
         }
@@ -835,10 +835,10 @@ impl FactCollector {
             .is_none_or(|receiver| receiver.as_self_node().is_some());
         if receiver_uses_implicit_self && !self.scope_tracker.implicit_receiver_context_is_proven()
         {
-            self.call_expression_outcomes.push((
+            self.record_immediate_call_outcome(
                 call_range,
                 TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver),
-            ));
+            );
             return;
         }
 
@@ -1052,7 +1052,7 @@ impl FactCollector {
         };
         let defer_call_outcome = immediate_outcome.is_none();
         if let Some(outcome) = immediate_outcome {
-            self.call_expression_outcomes.push((call_range, outcome));
+            self.record_immediate_call_outcome(call_range, outcome);
         }
 
         if !inference_failed || deferred_receiver_may_resolve {

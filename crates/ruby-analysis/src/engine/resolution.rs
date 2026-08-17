@@ -599,6 +599,32 @@ impl<'a> AnalysisQuery<'a> {
         self.resolve_method_signature_facts_inner(namespace_fqn, method, true, None)
     }
 
+    pub fn resolve_method_signature_facts_cached(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        cache: &AnalysisQueryCache,
+    ) -> Vec<MethodFact> {
+        self.resolve_method_signature_facts_cached_arc(namespace_fqn, method, cache)
+            .as_ref()
+            .clone()
+    }
+
+    pub(crate) fn resolve_method_signature_facts_cached_arc(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        cache: &AnalysisQueryCache,
+    ) -> std::sync::Arc<Vec<MethodFact>> {
+        self.resolve_method_signature_facts_maybe_cached(
+            namespace_fqn,
+            method,
+            true,
+            None,
+            Some(cache),
+        )
+    }
+
     pub fn resolve_public_method_signature_facts(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -632,6 +658,7 @@ impl<'a> AnalysisQuery<'a> {
             method,
             false,
             Some(caller_namespace_fqn),
+            None,
         )
     }
 
@@ -640,7 +667,22 @@ impl<'a> AnalysisQuery<'a> {
         receiver_type: &RubyType,
         method: &RubyMethod,
     ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_for_type_inner(receiver_type, method, true, None)
+        self.resolve_method_signature_facts_for_type_inner(receiver_type, method, true, None, None)
+    }
+
+    pub fn resolve_method_signature_facts_for_type_cached(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+        cache: &AnalysisQueryCache,
+    ) -> Vec<MethodFact> {
+        self.resolve_method_signature_facts_for_type_inner(
+            receiver_type,
+            method,
+            true,
+            None,
+            Some(cache),
+        )
     }
 
     pub fn resolve_public_method_signature_facts_for_type(
@@ -648,7 +690,7 @@ impl<'a> AnalysisQuery<'a> {
         receiver_type: &RubyType,
         method: &RubyMethod,
     ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_for_type_inner(receiver_type, method, false, None)
+        self.resolve_method_signature_facts_for_type_inner(receiver_type, method, false, None, None)
     }
 
     fn resolve_method_signature_facts_for_type_inner(
@@ -657,6 +699,7 @@ impl<'a> AnalysisQuery<'a> {
         method: &RubyMethod,
         allow_private: bool,
         protected_caller: Option<&FullyQualifiedName>,
+        cache: Option<&AnalysisQueryCache>,
     ) -> Vec<MethodFact> {
         let members = receiver_type_members(receiver_type);
         let mut all_facts = Vec::new();
@@ -668,12 +711,17 @@ impl<'a> AnalysisQuery<'a> {
 
             let mut member_facts = Vec::new();
             for namespace in namespaces {
-                member_facts.extend(self.resolve_method_signature_facts_inner(
-                    &namespace,
-                    method,
-                    allow_private,
-                    protected_caller,
-                ));
+                member_facts.extend(
+                    self.resolve_method_signature_facts_maybe_cached(
+                        &namespace,
+                        method,
+                        allow_private,
+                        protected_caller,
+                        cache,
+                    )
+                    .iter()
+                    .cloned(),
+                );
             }
             if member_facts.is_empty() {
                 return Vec::new();
@@ -691,6 +739,45 @@ impl<'a> AnalysisQuery<'a> {
         });
         all_facts.dedup();
         all_facts
+    }
+
+    fn resolve_method_signature_facts_maybe_cached(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+        cache: Option<&AnalysisQueryCache>,
+    ) -> std::sync::Arc<Vec<MethodFact>> {
+        let Some(cache) = cache else {
+            return std::sync::Arc::new(self.resolve_method_signature_facts_inner(
+                namespace_fqn,
+                method,
+                allow_private,
+                protected_caller,
+            ));
+        };
+        let access = if let Some(caller) = protected_caller {
+            MethodReturnQueryAccess::Protected(caller.clone())
+        } else if allow_private {
+            MethodReturnQueryAccess::Private
+        } else {
+            MethodReturnQueryAccess::Public
+        };
+        cache.method_signature_facts(
+            self.engine.query_cache_identity(),
+            namespace_fqn,
+            *method,
+            access,
+            || {
+                self.resolve_method_signature_facts_inner(
+                    namespace_fqn,
+                    method,
+                    allow_private,
+                    protected_caller,
+                )
+            },
+        )
     }
 
     fn resolve_method_signature_facts_inner(

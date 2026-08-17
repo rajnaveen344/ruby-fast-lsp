@@ -102,7 +102,10 @@ pub struct FactCollector {
     method_return_telemetry_by_namespace: BTreeMap<Vec<RubyConstant>, InferenceTelemetry>,
     max_live_shape_aliases: usize,
     method_return_outcomes: BTreeMap<FullyQualifiedName, TypeInferenceOutcome>,
-    call_expression_outcomes: Vec<(TextRange, TypeInferenceOutcome)>,
+    /// Immediate call proofs keyed by expression range. Lookups during
+    /// nested-receiver and assignment inference must be O(1); a Vec scan was
+    /// repeating work already paid during `visit_call_node`.
+    call_expression_outcomes: HashMap<TextRange, TypeInferenceOutcome>,
     /// Call expressions that have a retained method candidate capable of
     /// producing a concrete outcome after complete engine resolution. This is
     /// collector-local and prevents terminal Unknown chains from becoming
@@ -387,7 +390,7 @@ impl FactCollector {
             method_return_telemetry_by_namespace: BTreeMap::new(),
             max_live_shape_aliases: 0,
             method_return_outcomes: BTreeMap::new(),
-            call_expression_outcomes: Vec::new(),
+            call_expression_outcomes: HashMap::new(),
             deferred_call_outcome_ranges: HashSet::new(),
             local_read_types: Vec::new(),
             expression_unknown_reasons: Vec::new(),
@@ -406,6 +409,10 @@ impl FactCollector {
             "INVARIANT VIOLATED: more than one block execution context was applied to the same call. This is a bug because extension conflicts must be resolved before AST traversal. Fix: validate and deterministically resolve extension execution contexts in the host."
         );
         self.pending_block_execution_context = Some(context);
+    }
+
+    pub fn analysis_query_cache(&self) -> &AnalysisQueryCache {
+        self.analysis_query_cache.as_ref()
     }
 
     pub fn without_analysis_method_return_resolution(mut self) -> Self {
@@ -1256,6 +1263,17 @@ impl FactCollector {
         self.push_direct_expression_fact(fact);
     }
 
+    /// Reuse a call's already-recorded proof instead of walking the same AST
+    /// node again. Nested receivers and later assignment/HO lookups consult
+    /// this after the inner CallNode has classified its immediate outcome.
+    fn recorded_call_expression_outcome(&self, range: TextRange) -> Option<&TypeInferenceOutcome> {
+        self.call_expression_outcomes.get(&range)
+    }
+
+    fn record_immediate_call_outcome(&mut self, range: TextRange, outcome: TypeInferenceOutcome) {
+        self.call_expression_outcomes.insert(range, outcome);
+    }
+
     /// Infer type from a value node during indexing.
     ///
     /// This recursively walks the AST to infer types:
@@ -1275,6 +1293,11 @@ impl FactCollector {
         let expression_range = self.direct_range(&value_node.location());
         if let Some(fact) = self.direct_expression_fact(expression_range, None) {
             return fact.ruby_type.clone();
+        }
+        if value_node.as_call_node().is_some() {
+            if let Some(outcome) = self.recorded_call_expression_outcome(expression_range) {
+                return outcome.clone().into_ruby_type();
+            }
         }
         if let Some(statements) = value_node.as_statements_node() {
             return statements
@@ -1399,21 +1422,17 @@ impl FactCollector {
         {
             return TypeInferenceOutcome::proven(fact.ruby_type.clone());
         }
+        if let Some(outcome) = self.recorded_call_expression_outcome(expression_range) {
+            return outcome.clone();
+        }
 
         if let Some(const_get_type) = self.const_get_reference_type(call_node) {
             return TypeInferenceOutcome::proven(const_get_type);
         }
-        if let Some(outcome) =
-            self.infer_rbs_higher_order_call_outcome(call_node, local_types, None)
-        {
-            return outcome;
-        }
-        if let Some(block_return_type) = self.infer_yielding_block_return_type_for_call(call_node) {
-            return TypeInferenceOutcome::proven(block_return_type);
-        }
-        if let Some(proc_return_type) = self.infer_proc_call_return_type(call_node, local_types) {
-            return proc_return_type;
-        }
+        // Higher-order, yield, and proc proofs are recorded during
+        // `visit_call_node`. Re-solving them here repeats prepare/block work
+        // for calls that already ran that path and produced no immediate
+        // outcome.
 
         let method_name = String::from_utf8_lossy(call_node.name().as_slice());
         let receiver_type = if let Some(receiver) = call_node.receiver() {
@@ -1540,6 +1559,7 @@ impl FactCollector {
         let namespace = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
         crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
             Some(&query),
+            Some(self.analysis_query_cache.as_ref()),
             receiver_type.as_ref(),
             Some(&namespace),
             &method_name,
@@ -2347,9 +2367,7 @@ impl FactCollector {
         let range = self.direct_range(&node.location());
         if let Some(outcome) = higher_order_outcome.as_ref() {
             if outcome.unknown_reason().is_some() {
-                self.call_expression_outcomes
-                    .retain(|(outcome_range, _)| *outcome_range != range);
-                self.call_expression_outcomes.push((range, outcome.clone()));
+                self.record_immediate_call_outcome(range, outcome.clone());
                 self.suppress_deferred_call_outcome(range, "higher-order Unknown outcome");
                 return;
             }
@@ -2357,9 +2375,7 @@ impl FactCollector {
         let proc_outcome = self.infer_proc_call_return_type(node, &HashMap::new());
         if let Some(outcome) = proc_outcome.as_ref() {
             if outcome.unknown_reason().is_some() {
-                self.call_expression_outcomes
-                    .retain(|(outcome_range, _)| *outcome_range != range);
-                self.call_expression_outcomes.push((range, outcome.clone()));
+                self.record_immediate_call_outcome(range, outcome.clone());
                 self.suppress_deferred_call_outcome(range, "callable-body Unknown outcome");
                 return;
             }
@@ -2380,8 +2396,7 @@ impl FactCollector {
         else {
             return;
         };
-        self.call_expression_outcomes
-            .retain(|(outcome_range, _)| *outcome_range != range);
+        self.call_expression_outcomes.remove(&range);
         self.suppress_deferred_call_outcome(range, "proven special-call outcome");
         let fact = TypeFact::new(
             TypeSubject::Expression(range),
@@ -2984,7 +2999,11 @@ impl FactCollector {
             );
         }
 
-        let mut call_expression_outcomes = self.call_expression_outcomes.clone();
+        let mut call_expression_outcomes = self
+            .call_expression_outcomes
+            .iter()
+            .map(|(range, outcome)| (*range, outcome.clone()))
+            .collect::<Vec<_>>();
         call_expression_outcomes.sort_unstable_by_key(|(range, _)| *range);
         for adjacent in call_expression_outcomes.windows(2) {
             assert!(
@@ -4219,9 +4238,8 @@ end
         assert_eq!(
             collector
                 .call_expression_outcomes
-                .iter()
-                .find(|(range, _)| *range == label_range)
-                .map(|(_, outcome)| outcome.unknown_reason()),
+                .get(&label_range)
+                .map(TypeInferenceOutcome::unknown_reason),
             Some(Some(UnknownReason::UnknownReceiver))
         );
     }
@@ -4271,10 +4289,12 @@ end
 
         collector.visit(&parse.node());
 
-        let (_, outer_outcome) = collector
+        let outer_outcome = collector
             .call_expression_outcomes
             .iter()
-            .find(|(range, _)| range.start_byte == 0 && range.end_byte == 17)
+            .find_map(|(range, outcome)| {
+                (range.start_byte == 0 && range.end_byte == 17).then_some(outcome)
+            })
             .expect("outer ARGV.first.upcase call must retain a type outcome");
         assert_eq!(
             outer_outcome.clone().into_proven_type(),
@@ -4305,10 +4325,9 @@ end
         collector.visit(&parse.node());
 
         let range = TextRange::new(file_id, 0, 13);
-        let (_, outcome) = collector
+        let outcome = collector
             .call_expression_outcomes
-            .iter()
-            .find(|(outcome_range, _)| *outcome_range == range)
+            .get(&range)
             .expect("the immediate Hash#keys call must retain a proof outcome");
         assert_eq!(
             outcome.clone().into_proven_type(),

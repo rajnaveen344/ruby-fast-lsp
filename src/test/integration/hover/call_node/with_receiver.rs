@@ -990,6 +990,7 @@ async fn structural_hash_reads_use_exact_and_dynamic_key_evidence() {
 def inspect_payload(dynamic_key)
   payload = { count: 1, user: { name: "Ada" } }
   payload[:count]<hover label="Integer">
+  payload[:user][:name]<hover label="String">
   payload[:missing]<hover label="NilClass">
   payload[dynamic_key]<hover label="(Integer | NilClass | { name: String })">
   payload.fetch<hover label="Integer">(:count)

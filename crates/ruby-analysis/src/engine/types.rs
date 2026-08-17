@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind, ResolvedMethodCallee,
@@ -9,7 +10,8 @@ use parking_lot::Mutex;
 
 use super::state::TypeInferenceOutcomeRef;
 
-const MAX_RESOLVED_METHOD_CACHE_ENTRIES_PER_SOURCE: usize = 64;
+const MAX_RESOLVED_METHOD_CACHE_ENTRIES_PER_SOURCE: usize = 256;
+const MAX_METHOD_SIGNATURE_FACT_CACHE_ENTRIES_PER_SOURCE: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum MethodReturnQueryAccess {
@@ -30,6 +32,18 @@ struct AnalysisQueryCacheState {
     engine_identity: Option<(u64, u64)>,
     method_returns: HashMap<MethodReturnQueryKey, Option<RubyType>>,
     method_callees: HashMap<MethodReturnQueryKey, Option<Vec<ResolvedMethodCallee>>>,
+    method_signature_facts: HashMap<MethodReturnQueryKey, Arc<Vec<MethodFact>>>,
+}
+
+impl AnalysisQueryCacheState {
+    fn bind_engine_identity(&mut self, engine_identity: (u64, u64)) {
+        if self.engine_identity != Some(engine_identity) {
+            self.engine_identity = Some(engine_identity);
+            self.method_returns.clear();
+            self.method_callees.clear();
+            self.method_signature_facts.clear();
+        }
+    }
 }
 
 /// Bounded-lifetime memoization for repeated semantic queries while collecting
@@ -52,11 +66,7 @@ impl AnalysisQueryCache {
     ) -> Option<RubyType> {
         {
             let mut state = self.state.lock();
-            if state.engine_identity != Some(engine_identity) {
-                state.engine_identity = Some(engine_identity);
-                state.method_returns.clear();
-                state.method_callees.clear();
-            }
+            state.bind_engine_identity(engine_identity);
             if let Some(cached) = state.method_returns.get(&key) {
                 return cached.clone();
             }
@@ -85,11 +95,7 @@ impl AnalysisQueryCache {
         };
         {
             let mut state = self.state.lock();
-            if state.engine_identity != Some(engine_identity) {
-                state.engine_identity = Some(engine_identity);
-                state.method_returns.clear();
-                state.method_callees.clear();
-            }
+            state.bind_engine_identity(engine_identity);
             if let Some(cached) = state.method_callees.get(&key) {
                 return cached.clone();
             }
@@ -105,10 +111,46 @@ impl AnalysisQueryCache {
         result
     }
 
+    pub(super) fn method_signature_facts(
+        &self,
+        engine_identity: (u64, u64),
+        namespace: &FullyQualifiedName,
+        method: RubyMethod,
+        access: MethodReturnQueryAccess,
+        compute: impl FnOnce() -> Vec<MethodFact>,
+    ) -> Arc<Vec<MethodFact>> {
+        let key = MethodReturnQueryKey {
+            namespace: namespace.clone(),
+            method,
+            access,
+        };
+        {
+            let mut state = self.state.lock();
+            state.bind_engine_identity(engine_identity);
+            if let Some(cached) = state.method_signature_facts.get(&key) {
+                return cached.clone();
+            }
+        }
+
+        let result = Arc::new(compute());
+        let mut state = self.state.lock();
+        if state.engine_identity == Some(engine_identity)
+            && state.method_signature_facts.len()
+                < MAX_METHOD_SIGNATURE_FACT_CACHE_ENTRIES_PER_SOURCE
+        {
+            state.method_signature_facts.insert(key, result.clone());
+        }
+        result
+    }
+
     #[cfg(test)]
-    pub(crate) fn valid_entry_counts_for_test(&self) -> (usize, usize) {
+    pub(crate) fn valid_entry_counts_for_test(&self) -> (usize, usize, usize) {
         let state = self.state.lock();
-        (state.method_returns.len(), state.method_callees.len())
+        (
+            state.method_returns.len(),
+            state.method_callees.len(),
+            state.method_signature_facts.len(),
+        )
     }
 }
 use crate::engine::lookup_types::{ConstantHover, ConstantHoverKind, VariableTypeKind};

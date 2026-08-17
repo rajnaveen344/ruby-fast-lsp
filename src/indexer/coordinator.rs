@@ -1931,7 +1931,7 @@ impl IndexingCoordinator {
                     let mut providerless_batch_count = 0usize;
                     let mut provider_aware_batch_count = 0usize;
                     let mut provider_handoff_complete = runtime_provider_ready_rx.is_none();
-                    let mut provider_installed = false;
+                    let mut provider_installed = project_indexer.has_jruby_import_provider();
                     loop {
                         if loop_cancellation
                             .as_ref()

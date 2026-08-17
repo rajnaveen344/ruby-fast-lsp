@@ -3138,6 +3138,7 @@ impl<'a> TypeTracker<'a> {
             );
             crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
                 Some(&query),
+                self.analysis_query_cache.as_deref(),
                 receiver_type.as_ref(),
                 Some(&namespace),
                 method_name,
@@ -3145,6 +3146,7 @@ impl<'a> TypeTracker<'a> {
             )
         } else {
             crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
+                None,
                 None,
                 receiver_type.as_ref(),
                 None,

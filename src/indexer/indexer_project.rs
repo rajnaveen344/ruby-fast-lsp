@@ -151,6 +151,10 @@ impl IndexerProject {
         self.dependency_navigation_priority_keys.clone()
     }
 
+    pub(crate) fn has_jruby_import_provider(&self) -> bool {
+        self.file_processor.jruby_import_provider().is_some()
+    }
+
     pub(crate) fn install_jruby_import_provider(&mut self, provider: Arc<JrubyImportProvider>) {
         assert!(
             self.pending_project_files.is_some(),

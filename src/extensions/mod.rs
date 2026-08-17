@@ -48,7 +48,7 @@ use ruby_analysis::core::{
     ReferenceCandidate, RubyConstant, RubyMethod, RubyType as AnalysisRubyType, SourceKind,
     SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
-use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
+use ruby_analysis::engine::{AnalysisQueryCache, FileFacts, ResolveMode, SourceFileInput};
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::{
     BlockExecutionContext, FactCollector, FactCollectorExtensionHost,
@@ -4990,6 +4990,7 @@ fn resolved_core_callees_for_call(
 
     resolved_core_callees_for_call_analysis(
         &visitor.analysis_engine,
+        visitor.analysis_query_cache(),
         &core_receiver,
         &method,
         &visitor.scope_tracker.get_ns_stack(),
@@ -4999,6 +5000,7 @@ fn resolved_core_callees_for_call(
 
 fn resolved_core_callees_for_call_analysis(
     engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    cache: &AnalysisQueryCache,
     receiver: &CoreMethodReceiver,
     method: &RubyMethod,
     current_namespace: &[RubyConstant],
@@ -5022,7 +5024,7 @@ fn resolved_core_callees_for_call_analysis(
         | CoreMethodReceiver::Literal(_) => return Vec::new(),
     };
 
-    let Some(callees) = query.resolve_method_callees(&namespace_fqn, method) else {
+    let Some(callees) = query.resolve_method_callees_cached(&namespace_fqn, method, cache) else {
         return Vec::new();
     };
 

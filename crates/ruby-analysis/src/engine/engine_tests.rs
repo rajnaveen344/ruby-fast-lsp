@@ -2144,7 +2144,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
             .method_return_type_for_callee(&cached_callees[0]),
         Some(RubyType::string())
     );
-    assert_eq!(cache.valid_entry_counts_for_test(), (1, 1));
+    assert_eq!(cache.valid_entry_counts_for_test(), (1, 1, 0));
 
     engine.replace_facts(file_id, facts(RubyType::integer()), ResolveMode::Immediate);
     assert_eq!(
@@ -2167,7 +2167,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
     );
     assert_eq!(
         cache.valid_entry_counts_for_test(),
-        (1, 1),
+        (1, 1, 0),
         "replacement must discard both cache families before inserting new-revision entries"
     );
 }
@@ -2201,8 +2201,95 @@ fn resolved_method_callee_cache_is_bounded_per_source_collection() {
 
     assert_eq!(
         cache.valid_entry_counts_for_test(),
-        (0, 64),
+        (0, 256, 0),
         "one pathological source must not retain an unbounded method-callee catalog"
+    );
+}
+
+#[test]
+fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/widget.rb",
+        "class Widget\n  def value = 'first'\nend\n",
+    );
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    let method_name = RubyMethod::new("value").unwrap();
+    let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
+    let first_range = TextRange::new(file_id, 15, 34);
+    let second_range = TextRange::new(file_id, 15, 35);
+    let facts = |range| FileFacts {
+        graph_nodes: vec![GraphNodeFact::new(
+            owner.clone(),
+            GraphNodeKind::Class,
+            TextRange::new(file_id, 0, 41),
+        )],
+        methods: vec![MethodFact::new(method.clone(), owner.clone(), range)],
+        ..Default::default()
+    };
+    engine.replace_facts(file_id, facts(first_range), ResolveMode::Immediate);
+    let cache = AnalysisQueryCache::default();
+
+    let uncached = engine
+        .query()
+        .resolve_method_signature_facts(&owner, &method_name);
+    let cached = engine
+        .query()
+        .resolve_method_signature_facts_cached(&owner, &method_name, &cache);
+    assert_eq!(uncached, cached);
+    assert_eq!(uncached.len(), 1);
+    assert_eq!(uncached[0].range, first_range);
+    assert_eq!(cache.valid_entry_counts_for_test(), (0, 0, 1));
+
+    engine.replace_facts(file_id, facts(second_range), ResolveMode::Immediate);
+    let replaced =
+        engine
+            .query()
+            .resolve_method_signature_facts_cached(&owner, &method_name, &cache);
+    assert_eq!(replaced.len(), 1);
+    assert_eq!(
+        replaced[0].range, second_range,
+        "a semantic replacement must invalidate cached signature facts"
+    );
+    assert_eq!(
+        cache.valid_entry_counts_for_test(),
+        (0, 0, 1),
+        "replacement must discard signature facts before inserting the new-revision entry"
+    );
+}
+
+#[test]
+fn method_signature_fact_cache_is_bounded_per_source_collection() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "lib/widget.rb", "class Widget; end\n");
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(file_id, 0, 17),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    let cache = AnalysisQueryCache::default();
+
+    for index in 0..300 {
+        let method = RubyMethod::new(&format!("missing_{index}")).unwrap();
+        assert!(engine
+            .query()
+            .resolve_method_signature_facts_cached(&owner, &method, &cache)
+            .is_empty());
+    }
+
+    assert_eq!(
+        cache.valid_entry_counts_for_test(),
+        (0, 0, 256),
+        "one pathological source must not retain an unbounded signature-fact catalog"
     );
 }
 

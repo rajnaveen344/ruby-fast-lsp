@@ -5,6 +5,76 @@
 
 use crate::test::harness::{check, FakeEditor};
 
+/// Reassignment evaluates the RHS against the previous binding.
+#[tokio::test]
+async fn reassignment_rhs_uses_the_previous_type() {
+    check(
+        r#"
+def tick
+  count = 1
+  count = count<hover label="Integer"> + 1
+  count<hover label="Integer">
+end
+"#,
+    )
+    .await;
+}
+
+/// Nested call proofs recorded while visiting the RHS must type the assignment.
+#[tokio::test]
+async fn assigned_call_chain_keeps_the_inner_return_type() {
+    check(
+        r#"
+class User
+  # @return [Profile]
+  def profile
+    Profile.new
+  end
+end
+
+class Profile
+  # @return [String]
+  def name
+    "Ada"
+  end
+end
+
+def inspect_user
+  user = User.new
+  name<hover label="String"> = user.profile.name
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn assigned_shape_chain_keeps_the_nested_field_type() {
+    check(
+        r#"
+def inspect_payload
+  payload = { user: { name: "Ada" } }
+  name<hover label="String"> = payload[:user][:name]
+end
+"#,
+    )
+    .await;
+}
+
+/// The assigned name is a local while its RHS block runs, not a method call.
+#[tokio::test]
+async fn assigned_block_treats_the_name_as_a_local() {
+    check(
+        r#"
+def wrap
+  values = [1]
+  strings = values.map { |value| <err none>strings</err>; value.to_s }
+end
+"#,
+    )
+    .await;
+}
+
 /// Hover shows different types at different positions after reassignment
 #[tokio::test]
 async fn reassigned_variable() {

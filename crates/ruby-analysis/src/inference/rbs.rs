@@ -14,7 +14,7 @@ use crate::core::{
     LiteralValue, MethodFact, MethodParamKind, RubyConstant, RubyMethod, RubyType, ShapeExactness,
     ShapeField, ShapeStability, ShapeType,
 };
-use crate::engine::AnalysisQuery;
+use crate::engine::{AnalysisQuery, AnalysisQueryCache};
 use crate::inference::higher_order::{
     callable_signature_from_rbs, prepare_callable_set, PreparedCallableSet,
 };
@@ -82,6 +82,7 @@ fn receiver_uses_embedded_rbs_without_engine(receiver_type: &RubyType) -> bool {
 /// fact supplies callable evidence.
 pub(crate) fn prepare_higher_order_call(
     query: Option<&AnalysisQuery<'_>>,
+    cache: Option<&AnalysisQueryCache>,
     receiver_type: &RubyType,
     method_name: &str,
     argument_types: &[RubyType],
@@ -92,9 +93,14 @@ pub(crate) fn prepare_higher_order_call(
     if let Some(query) = query {
         let method = RubyMethod::new(method_name)
             .map_err(|_| crate::core::UnknownReason::UnsupportedCallable)?;
-        let signature_facts = query.resolve_method_signature_facts_for_type(receiver_type, &method);
+        let signature_facts =
+            resolve_signature_facts_for_type(query, cache, receiver_type, &method);
         return fallback_unsupported_callable(
-            prepare_from_callable_signatures(Some(receiver_type), &signature_facts, argument_types),
+            prepare_from_callable_signatures(
+                Some(receiver_type),
+                signature_facts.as_slice(),
+                argument_types,
+            ),
             || prepare_rbs_higher_order_call(receiver_type, method_name, argument_types),
         );
     }
@@ -106,6 +112,7 @@ pub(crate) fn prepare_higher_order_call(
 /// same embedded RBS path as ordinary Array/Hash method returns.
 pub(crate) fn prepare_higher_order_call_with_fallbacks(
     query: Option<&AnalysisQuery<'_>>,
+    cache: Option<&AnalysisQueryCache>,
     receiver_type: Option<&RubyType>,
     implicit_namespace: Option<&FullyQualifiedName>,
     method_name: &str,
@@ -129,16 +136,16 @@ pub(crate) fn prepare_higher_order_call_with_fallbacks(
         .map_err(|_| crate::core::UnknownReason::UnsupportedCallable)?;
     let facts = match (receiver_type, implicit_namespace) {
         (Some(receiver_type), _) => {
-            query.resolve_method_signature_facts_for_type(receiver_type, &method)
+            resolve_signature_facts_for_type(query, cache, receiver_type, &method)
         }
-        (None, Some(namespace)) => query.resolve_method_signature_facts(namespace, &method),
+        (None, Some(namespace)) => resolve_signature_facts(query, cache, namespace, &method),
         (None, None) => return Err(crate::core::UnknownReason::IncompleteBlockInput),
     };
     fallback_unsupported_callable(
         prepare_from_callable_signatures(receiver_type, &facts, argument_types),
         || {
             fallback_unsupported_callable(
-                prepare_forwarded_from_facts(query, &facts, argument_types),
+                prepare_forwarded_from_facts(query, cache, &facts, argument_types),
                 || {
                     fallback_unsupported_callable(
                         prepare_direct_yield_from_facts(&facts, argument_types),
@@ -158,6 +165,40 @@ pub(crate) fn prepare_higher_order_call_with_fallbacks(
                 },
             )
         },
+    )
+}
+
+fn resolve_signature_facts_for_type(
+    query: &AnalysisQuery<'_>,
+    cache: Option<&AnalysisQueryCache>,
+    receiver_type: &RubyType,
+    method: &RubyMethod,
+) -> std::sync::Arc<Vec<MethodFact>> {
+    cache.map_or_else(
+        || {
+            std::sync::Arc::new(
+                query.resolve_method_signature_facts_for_type(receiver_type, method),
+            )
+        },
+        |cache| {
+            std::sync::Arc::new(query.resolve_method_signature_facts_for_type_cached(
+                receiver_type,
+                method,
+                cache,
+            ))
+        },
+    )
+}
+
+fn resolve_signature_facts(
+    query: &AnalysisQuery<'_>,
+    cache: Option<&AnalysisQueryCache>,
+    namespace: &FullyQualifiedName,
+    method: &RubyMethod,
+) -> std::sync::Arc<Vec<MethodFact>> {
+    cache.map_or_else(
+        || std::sync::Arc::new(query.resolve_method_signature_facts(namespace, method)),
+        |cache| query.resolve_method_signature_facts_cached_arc(namespace, method, cache),
     )
 }
 
@@ -216,6 +257,7 @@ fn prepare_from_callable_signatures(
 
 fn prepare_forwarded_from_facts(
     query: &AnalysisQuery<'_>,
+    cache: Option<&AnalysisQueryCache>,
     facts: &[MethodFact],
     argument_types: &[RubyType],
 ) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
@@ -256,7 +298,13 @@ fn prepare_forwarded_from_facts(
             crate::core::UnknownReason::AmbiguousCallableOverload
         });
     };
-    prepare_higher_order_call(Some(query), target_receiver, target_method.as_str(), &[])
+    prepare_higher_order_call(
+        Some(query),
+        cache,
+        target_receiver,
+        target_method.as_str(),
+        &[],
+    )
 }
 
 fn prepare_direct_yield_from_facts(
