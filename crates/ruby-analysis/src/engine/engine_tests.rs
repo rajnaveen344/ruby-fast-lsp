@@ -2333,24 +2333,28 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
 
     let first_cache = AnalysisQueryCache::default();
     assert_eq!(
-        engine.query().method_return_type_for_protected_receiver_cached(
-            &owner,
-            &method_name,
-            &controller,
-            &first_cache,
-        ),
+        engine
+            .query()
+            .method_return_type_for_protected_receiver_cached(
+                &owner,
+                &method_name,
+                &controller,
+                &first_cache,
+            ),
         Some(RubyType::string())
     );
     assert_eq!(first_cache.valid_entry_counts_for_test(), (1, 0, 0));
 
     let second_cache = AnalysisQueryCache::default();
     assert_eq!(
-        engine.query().method_return_type_for_protected_receiver_cached(
-            &owner,
-            &method_name,
-            &helper,
-            &second_cache,
-        ),
+        engine
+            .query()
+            .method_return_type_for_protected_receiver_cached(
+                &owner,
+                &method_name,
+                &helper,
+                &second_cache,
+            ),
         Some(RubyType::string()),
         "public Widget#value must reuse the thread-local return across callers"
     );
@@ -2434,14 +2438,132 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
         "a same-family explicit call must keep the closer protected Child#value return"
     );
     assert_eq!(
-        engine.query().method_return_type_for_protected_receiver_cached(
-            &child,
-            &method_name,
-            &outsider,
-            &cache,
-        ),
+        engine
+            .query()
+            .method_return_type_for_protected_receiver_cached(
+                &child,
+                &method_name,
+                &outsider,
+                &cache,
+            ),
         Some(RubyType::string()),
         "an outsider explicit call must keep the public Parent#value return"
+    );
+}
+
+#[test]
+fn default_basic_object_method_missing_is_not_a_return_type() {
+    let mut engine = AnalysisEngine::new();
+    let stub_file = engine.register_file(SourceFileInput {
+        path: "core/basic_object.rb".into(),
+        content: "class BasicObject; def method_missing(name, *args); end; end".into(),
+        kind: SourceKind::Stub,
+    });
+    let project_file = register_project_file(
+        &mut engine,
+        "lib/widget.rb",
+        "class Widget; end\nclass Dynamic; def method_missing(name, *args); 1; end; end\n",
+    );
+    let basic_object =
+        FullyQualifiedName::namespace(vec![RubyConstant::new("BasicObject").unwrap()]);
+    let widget = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    let dynamic = FullyQualifiedName::namespace(vec![RubyConstant::new("Dynamic").unwrap()]);
+    let method_missing = RubyMethod::new("method_missing").unwrap();
+    let ghost = RubyMethod::new("ghost").unwrap();
+    let stub_range = TextRange::new(stub_file, 18, 56);
+    let dynamic_range = TextRange::new(project_file, 28, 70);
+    let stub_method = FullyQualifiedName::method(basic_object.namespace_parts(), method_missing);
+    let dynamic_method = FullyQualifiedName::method(dynamic.namespace_parts(), method_missing);
+
+    engine.replace_facts(
+        stub_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                basic_object.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(stub_file, 0, 62),
+            )],
+            methods: vec![MethodFact::new(
+                stub_method.clone(),
+                basic_object.clone(),
+                stub_range,
+            )],
+            types: vec![TypeFact::new(
+                TypeSubject::MethodReturn(stub_method),
+                RubyType::string(),
+                stub_range,
+                TypeProvenance::Rbs,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+    engine.replace_facts(
+        project_file,
+        FileFacts {
+            graph_nodes: vec![
+                GraphNodeFact::new(
+                    widget.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(project_file, 0, 14),
+                ),
+                GraphNodeFact::new(
+                    dynamic.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(project_file, 15, 80),
+                ),
+            ],
+            graph_edges: vec![
+                GraphEdgeFact::new(
+                    widget.clone(),
+                    basic_object.clone(),
+                    GraphEdgeKind::Superclass,
+                    TextRange::new(project_file, 0, 14),
+                ),
+                GraphEdgeFact::new(
+                    dynamic.clone(),
+                    basic_object.clone(),
+                    GraphEdgeKind::Superclass,
+                    TextRange::new(project_file, 15, 29),
+                ),
+            ],
+            methods: vec![MethodFact::new(
+                dynamic_method.clone(),
+                dynamic.clone(),
+                dynamic_range,
+            )],
+            types: vec![TypeFact::new(
+                TypeSubject::MethodReturn(dynamic_method),
+                RubyType::integer(),
+                dynamic_range,
+                TypeProvenance::Inferred,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert!(
+        method_lookup_chain(&engine, &widget)
+            .iter()
+            .any(|fqn| fqn == &basic_object),
+        "Widget must inherit BasicObject so the stub method_missing is on the lookup chain"
+    );
+    assert_eq!(
+        engine
+            .query()
+            .method_return_type_for_receiver(&widget, &ghost),
+        None,
+        "INVARIANT VIOLATED: Widget#ghost inherited BasicObject#method_missing's stub return. \
+         This is a bug because default language fallback is not a proven return. \
+         Fix: skip stub/signature BasicObject#method_missing in receiver return lookup."
+    );
+    assert_eq!(
+        engine
+            .query()
+            .method_return_type_for_receiver(&dynamic, &ghost),
+        Some(RubyType::integer()),
+        "a project method_missing must still prove the fallback return"
     );
 }
 

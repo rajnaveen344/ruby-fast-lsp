@@ -1266,6 +1266,19 @@ budget to accept a candidate or trade semantic correctness for timing.
   lookups reuse the public-access entry when the receiver chain has no
   private/protected method of that name, so caller namespace is not part of
   the hot key. Do not raise the cap further without an RSS measurement.
+- Receiver method-return lookup must not treat stub/signature
+  `BasicObject#method_missing` as a proven return. Navigation already classifies
+  that fallback as Missing; walking it on every unresolved call redid MRO on the
+  JRuby project visitor. Custom project `method_missing` still supplies the
+  fallback return.
+- JRuby `process_call_node` runs only for Java DSL names (`java_import`,
+  `new`, `include`, …) and dotted proxies whose root is `Java` or a catalog
+  top-level package. Ordinary Ruby calls such as `plain.save` must not enter
+  the host. On the JRuby `server` visitor that dropped host entries from ~1.38M
+  to ~59k; ExtHost wall stayed ~2.2s because extension `tracks_call` still runs
+  on every call. Do not restore an unconditional seed walk, and do not merge
+  `tracks_call` with enclosing-frame classification (August 1 2026 RSS
+  rejection).
 - Current implementation: `AnalysisEngine::replace_facts` records a
   range/order-independent semantic export fingerprint over declarations,
   method signatures/visibility, exported types, and graph relationships.

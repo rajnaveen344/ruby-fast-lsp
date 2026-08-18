@@ -3236,6 +3236,21 @@ pub(super) fn method_missing_method() -> RubyMethod {
     )
 }
 
+pub(super) fn chain_has_custom_method_missing(
+    engine: &crate::AnalysisEngine,
+    ancestor_chain: &[FullyQualifiedName],
+) -> bool {
+    let method = method_missing_method();
+    let basic_object = basic_object_instance_fqn();
+    ancestor_chain.iter().any(|owner| {
+        *owner != basic_object
+            && !matches!(
+                engine.effective_method_fact_matching_owner_name(owner, &method),
+                EffectiveMethodFactMatch::Missing
+            )
+    })
+}
+
 fn resolve_constant_fqn(
     engine: &crate::AnalysisEngine,
     parts: &[RubyConstant],

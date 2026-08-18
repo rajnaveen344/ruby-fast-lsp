@@ -127,7 +127,8 @@ struct HigherOrderPrepareKey {
 /// cap without an RSS measurement; do not key this cache only on method name.
 struct HigherOrderPrepareCache {
     identity: Option<(u64, u64)>,
-    entries: HashMap<HigherOrderPrepareKey, Result<PreparedCallableSet, crate::core::UnknownReason>>,
+    entries:
+        HashMap<HigherOrderPrepareKey, Result<PreparedCallableSet, crate::core::UnknownReason>>,
     order: VecDeque<HigherOrderPrepareKey>,
 }
 

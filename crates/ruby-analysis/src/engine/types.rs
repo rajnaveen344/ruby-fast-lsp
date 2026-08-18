@@ -307,8 +307,8 @@ impl AnalysisQueryCache {
 use crate::engine::lookup_types::{ConstantHover, ConstantHoverKind, VariableTypeKind};
 use crate::engine::query::AnalysisQuery;
 use crate::engine::resolution::{
-    execution_context_application_targets, method_facts_in_chain, method_lookup_chain,
-    method_missing_method, namespace_target_exists,
+    chain_has_custom_method_missing, execution_context_application_targets, method_facts_in_chain,
+    method_lookup_chain, method_missing_method, namespace_target_exists,
 };
 
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
@@ -1547,7 +1547,12 @@ impl<'a> AnalysisQuery<'a> {
             });
         }
 
-        if *method != method_missing_method() {
+        // Default BasicObject#method_missing is language fallback, not a proven
+        // return. Navigation already treats that stub as Missing; walking it
+        // here redoes MRO on every unresolved call.
+        if *method != method_missing_method()
+            && chain_has_custom_method_missing(self.engine, &ancestor_chain)
+        {
             return self.method_return_type_for_receiver_inner(
                 namespace_fqn,
                 &method_missing_method(),

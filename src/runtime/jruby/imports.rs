@@ -493,6 +493,43 @@ impl JrubyImportProvider {
             })
     }
 
+    fn call_may_need_jruby_host(&self, node: &CallNode<'_>) -> bool {
+        match node.name().as_slice() {
+            b"java_import" | b"import" | b"include_package" | b"include" | b"java_implements"
+            | b"java_package" | b"java_alias" | b"java_send" | b"java_method" | b"to_java"
+            | b"new" => true,
+            _ => self.call_may_be_static_java_proxy(node),
+        }
+    }
+
+    fn should_seed_static_proxy(&self, node: &CallNode<'_>) -> bool {
+        if self.call_may_be_static_java_proxy(node) {
+            return true;
+        }
+        if node.name().as_slice() != b"new" {
+            return false;
+        }
+        node.receiver().is_some_and(|receiver| {
+            receiver
+                .as_call_node()
+                .is_some_and(|call| self.call_may_be_static_java_proxy(&call))
+                || receiver
+                    .as_constant_read_node()
+                    .is_some_and(|constant| constant.name().as_slice() == b"Java")
+                || receiver.as_constant_path_node().is_some()
+        })
+    }
+
+    fn call_may_be_static_java_proxy(&self, call: &CallNode<'_>) -> bool {
+        let Some(root) = dotted_call_root(call) else {
+            return false;
+        };
+        let Ok(root) = std::str::from_utf8(root) else {
+            return false;
+        };
+        root == "Java" || self.static_top_level_packages.contains(root)
+    }
+
     pub fn static_navigation_plan(&self, source: &str) -> Result<StaticJavaNavigationPlan, String> {
         let parse = ruby_prism::parse(source.as_bytes());
         self.static_navigation_plan_for_node(&parse.node())
@@ -1685,10 +1722,15 @@ fn supplemental_implementation_location(
 
 impl FactCollectorExtensionHost for JrubyImportProvider {
     fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode<'_>) -> bool {
+        if !self.call_may_need_jruby_host(node) {
+            return false;
+        }
         CALL_HOST_ENTRIES.fetch_add(1, Ordering::Relaxed);
 
-        record_call_host_hit(&CALL_HOST_SEED_NS);
-        self.seed_static_proxy_expression(visitor, &node.as_node());
+        if self.should_seed_static_proxy(node) {
+            record_call_host_hit(&CALL_HOST_SEED_NS);
+            self.seed_static_proxy_expression(visitor, &node.as_node());
+        }
 
         match node.name().as_slice() {
             b"java_import" => {
@@ -1813,6 +1855,24 @@ fn dotted_call_name(call: &CallNode<'_>) -> Option<String> {
         return Some(format!("{prefix}.{name}"));
     }
     Some(name.to_string())
+}
+
+fn dotted_call_root<'a>(call: &CallNode<'a>) -> Option<&'a [u8]> {
+    if call.arguments().is_some() || call.block().is_some() {
+        return None;
+    }
+    match call.receiver() {
+        None => Some(call.name().as_slice()),
+        Some(receiver) => {
+            if receiver
+                .as_constant_read_node()
+                .is_some_and(|constant| constant.name().as_slice() == b"Java")
+            {
+                return Some(b"Java");
+            }
+            dotted_call_root(&receiver.as_call_node()?)
+        }
+    }
 }
 
 fn imported_name_length(name: &str) -> usize {
@@ -3108,8 +3168,8 @@ mod tests {
         );
         let after = jruby_call_host_probe_snapshot();
         assert!(
-            after.entries >= 3,
-            "java_import, String.new, and plain.save must each enter the call host: {after:?}"
+            after.entries >= 2,
+            "java_import and String.new must enter the call host: {after:?}"
         );
         assert!(
             after.seed_ns > 0 && after.import_ns > 0 && after.java_ctor_ns > 0,
@@ -3117,7 +3177,7 @@ mod tests {
         );
         assert!(
             after.seed_catalog_hits >= 1,
-            "Java::JavaLang::String must count as a seed catalog hit: {after:?}"
+            "java.lang.String must count as a seed catalog hit: {after:?}"
         );
         assert!(
             after.java_ctor_inferred >= 1,
@@ -3126,6 +3186,35 @@ mod tests {
         assert!(
             after.total_handler_ns() > 0,
             "handler hits must sum to a positive total: {after:?}"
+        );
+    }
+
+    #[test]
+    fn ordinary_ruby_calls_do_not_seed_java_proxy_types() {
+        let collector = collect(
+            "module Admin\n  user.profile.name\n  plain.save(record)\nend\n",
+            &["java/lang/String"],
+        );
+        assert!(
+            collector
+                .direct_facts
+                .types
+                .iter()
+                .all(|fact| match &fact.ruby_type {
+                    RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
+                        !fqn.to_string().contains("Java::")
+                    }
+                    RubyType::Class(_)
+                    | RubyType::Module(_)
+                    | RubyType::Array(_)
+                    | RubyType::Hash(_, _)
+                    | RubyType::Literal(_)
+                    | RubyType::Shape(_)
+                    | RubyType::Union(_)
+                    | RubyType::Unknown => true,
+                }),
+            "ordinary Ruby call chains must not receive JRuby proxy expression types: {:?}",
+            collector.direct_facts.types
         );
     }
 
