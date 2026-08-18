@@ -1260,6 +1260,12 @@ budget to accept a candidate or trade semantic correctness for timing.
   measured and rejected because gem binding changes engine identity
   mid-batch and the shared mutex plus miss stampede turned one batch
   into 75s visitor CPU. Keep the cache per FactCollector / source.
+  Cross-file repeats of the same engine return wrap that per-source map
+  with a thread-local 8192-entry FIFO keyed by engine identity. Hits are
+  O(1); do not restore O(n) LRU touching on the get path. Explicit `foo.bar`
+  lookups reuse the public-access entry when the receiver chain has no
+  private/protected method of that name, so caller namespace is not part of
+  the hot key. Do not raise the cap further without an RSS measurement.
 - Current implementation: `AnalysisEngine::replace_facts` records a
   range/order-independent semantic export fingerprint over declarations,
   method signatures/visibility, exported types, and graph relationships.

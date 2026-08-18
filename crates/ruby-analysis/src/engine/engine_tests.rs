@@ -2173,6 +2173,279 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
 }
 
 #[test]
+fn thread_local_method_return_cache_reuses_across_per_source_caches() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/widget.rb",
+        "class Widget\n  def value = 'first'\nend\n",
+    );
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    let method_name = RubyMethod::new("value").unwrap();
+    let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
+    let range = TextRange::new(file_id, 15, 34);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(file_id, 0, 41),
+            )],
+            methods: vec![MethodFact::new(method.clone(), owner.clone(), range)],
+            types: vec![TypeFact::new(
+                TypeSubject::MethodReturn(method),
+                RubyType::string(),
+                range,
+                TypeProvenance::Inferred,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let first_cache = AnalysisQueryCache::default();
+    assert_eq!(
+        engine
+            .query()
+            .method_return_type_for_receiver_cached(&owner, &method_name, &first_cache),
+        Some(RubyType::string())
+    );
+    assert_eq!(first_cache.valid_entry_counts_for_test(), (1, 0, 0));
+
+    let second_cache = AnalysisQueryCache::default();
+    assert_eq!(
+        engine
+            .query()
+            .method_return_type_for_receiver_cached(&owner, &method_name, &second_cache),
+        Some(RubyType::string()),
+        "identical receiver/method lookups on one engine identity must reuse the thread-local return"
+    );
+    assert_eq!(
+        second_cache.valid_entry_counts_for_test(),
+        (0, 0, 0),
+        "thread-local reuse must not populate a second per-source cache"
+    );
+}
+
+#[test]
+fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/widget.rb",
+        "class Widget\n  def value = 'first'\n  def count = 1\nend\n",
+    );
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    let value = RubyMethod::new("value").unwrap();
+    let count = RubyMethod::new("count").unwrap();
+    let value_fqn = FullyQualifiedName::method(owner.namespace_parts(), value);
+    let count_fqn = FullyQualifiedName::method(owner.namespace_parts(), count);
+    let value_range = TextRange::new(file_id, 15, 34);
+    let count_range = TextRange::new(file_id, 37, 50);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(file_id, 0, 56),
+            )],
+            methods: vec![
+                MethodFact::new(value_fqn.clone(), owner.clone(), value_range),
+                MethodFact::new(count_fqn.clone(), owner.clone(), count_range),
+            ],
+            types: vec![
+                TypeFact::new(
+                    TypeSubject::MethodReturn(value_fqn),
+                    RubyType::string(),
+                    value_range,
+                    TypeProvenance::Inferred,
+                ),
+                TypeFact::new(
+                    TypeSubject::MethodReturn(count_fqn),
+                    RubyType::integer(),
+                    count_range,
+                    TypeProvenance::Inferred,
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let first_cache = AnalysisQueryCache::default();
+    assert_eq!(
+        engine
+            .query()
+            .method_return_type_for_receiver_cached(&owner, &value, &first_cache),
+        Some(RubyType::string())
+    );
+
+    let second_cache = AnalysisQueryCache::default();
+    assert_eq!(
+        engine
+            .query()
+            .method_return_type_for_receiver_cached(&owner, &count, &second_cache),
+        Some(RubyType::integer()),
+        "a different method on the same owner must not reuse the thread-local Widget#value return"
+    );
+    assert_eq!(
+        second_cache.valid_entry_counts_for_test(),
+        (1, 0, 0),
+        "a thread-local miss must still populate the per-source cache that computed the new method"
+    );
+}
+
+#[test]
+fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/widget.rb",
+        "class Widget\n  def value = 'first'\nend\n",
+    );
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    let controller = FullyQualifiedName::namespace(vec![RubyConstant::new("Controller").unwrap()]);
+    let helper = FullyQualifiedName::namespace(vec![RubyConstant::new("Helper").unwrap()]);
+    let method_name = RubyMethod::new("value").unwrap();
+    let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
+    let range = TextRange::new(file_id, 15, 34);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(file_id, 0, 41),
+            )],
+            methods: vec![MethodFact::new(method.clone(), owner.clone(), range)],
+            types: vec![TypeFact::new(
+                TypeSubject::MethodReturn(method),
+                RubyType::string(),
+                range,
+                TypeProvenance::Inferred,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let first_cache = AnalysisQueryCache::default();
+    assert_eq!(
+        engine.query().method_return_type_for_protected_receiver_cached(
+            &owner,
+            &method_name,
+            &controller,
+            &first_cache,
+        ),
+        Some(RubyType::string())
+    );
+    assert_eq!(first_cache.valid_entry_counts_for_test(), (1, 0, 0));
+
+    let second_cache = AnalysisQueryCache::default();
+    assert_eq!(
+        engine.query().method_return_type_for_protected_receiver_cached(
+            &owner,
+            &method_name,
+            &helper,
+            &second_cache,
+        ),
+        Some(RubyType::string()),
+        "public Widget#value must reuse the thread-local return across callers"
+    );
+    assert_eq!(
+        second_cache.valid_entry_counts_for_test(),
+        (0, 0, 0),
+        "caller-insensitive public returns must not populate a second per-source cache"
+    );
+}
+
+#[test]
+fn protected_override_does_not_reuse_a_parent_public_return() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/vault.rb",
+        "class Parent\n  def value = 'public'\nend\nclass Child < Parent\n  def value = 1\n  protected :value\nend\n",
+    );
+    let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
+    let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
+    let outsider = FullyQualifiedName::namespace(vec![RubyConstant::new("Outsider").unwrap()]);
+    let method_name = RubyMethod::new("value").unwrap();
+    let parent_method = FullyQualifiedName::method(parent.namespace_parts(), method_name);
+    let child_method = FullyQualifiedName::method(child.namespace_parts(), method_name);
+    let parent_range = TextRange::new(file_id, 15, 36);
+    let child_range = TextRange::new(file_id, 70, 84);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![
+                GraphNodeFact::new(
+                    parent.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 0, 40),
+                ),
+                GraphNodeFact::new(
+                    child.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 41, 110),
+                ),
+            ],
+            graph_edges: vec![GraphEdgeFact::new(
+                child.clone(),
+                parent.clone(),
+                GraphEdgeKind::Superclass,
+                TextRange::new(file_id, 41, 60),
+            )],
+            methods: vec![
+                MethodFact::new(parent_method.clone(), parent.clone(), parent_range),
+                MethodFact::new(child_method.clone(), child.clone(), child_range)
+                    .with_visibility(crate::method_store::MethodVisibility::Protected),
+            ],
+            types: vec![
+                TypeFact::new(
+                    TypeSubject::MethodReturn(parent_method),
+                    RubyType::string(),
+                    parent_range,
+                    TypeProvenance::Inferred,
+                ),
+                TypeFact::new(
+                    TypeSubject::MethodReturn(child_method),
+                    RubyType::integer(),
+                    child_range,
+                    TypeProvenance::Inferred,
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let cache = AnalysisQueryCache::default();
+    assert_eq!(
+        engine.query().method_return_type_for_protected_receiver_cached(
+            &child,
+            &method_name,
+            &child,
+            &cache,
+        ),
+        Some(RubyType::integer()),
+        "a same-family explicit call must keep the closer protected Child#value return"
+    );
+    assert_eq!(
+        engine.query().method_return_type_for_protected_receiver_cached(
+            &child,
+            &method_name,
+            &outsider,
+            &cache,
+        ),
+        Some(RubyType::string()),
+        "an outsider explicit call must keep the public Parent#value return"
+    );
+}
+
+#[test]
 fn resolved_method_callee_cache_is_bounded_per_source_collection() {
     let mut engine = AnalysisEngine::new();
     let file_id = register_project_file(&mut engine, "lib/widget.rb", "class Widget; end\n");

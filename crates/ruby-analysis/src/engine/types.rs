@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::core::{
@@ -12,6 +13,7 @@ use super::state::TypeInferenceOutcomeRef;
 
 const MAX_RESOLVED_METHOD_CACHE_ENTRIES_PER_SOURCE: usize = 256;
 const MAX_METHOD_SIGNATURE_FACT_CACHE_ENTRIES_PER_SOURCE: usize = 256;
+const MAX_THREAD_METHOD_RETURN_CACHE_ENTRIES: usize = 8192;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum MethodReturnQueryAccess {
@@ -46,12 +48,153 @@ impl AnalysisQueryCacheState {
     }
 }
 
+/// Thread-local memo of engine method-return lookups for one engine identity.
+///
+/// Parallel project collection keeps this cache on the worker thread so identical
+/// `Integer#to_s` / `User#new` lookups reuse the same bounded result without
+/// sharing `AnalysisQueryCache` across a file batch. Explicit calls use the
+/// public cache when the receiver chain has no private/protected method of that
+/// name, so caller namespace is not part of the hot key. Identity changes drop
+/// the entries. A 256-entry cap left ~52k misses and ~4s of engine return
+/// lookup on the JRuby project visitor; 8192 holds one worker's unique
+/// receiver/method set. Hits are O(1); eviction is insertion-order FIFO. Do
+/// not raise the cap further without an RSS measurement; do not key this
+/// cache only on method name.
+struct ThreadMethodReturnCache {
+    identity: Option<(u64, u64)>,
+    entries: HashMap<MethodReturnQueryKey, Option<RubyType>>,
+    order: VecDeque<MethodReturnQueryKey>,
+    non_public: HashMap<(FullyQualifiedName, RubyMethod), bool>,
+    non_public_order: VecDeque<(FullyQualifiedName, RubyMethod)>,
+}
+
+impl Default for ThreadMethodReturnCache {
+    fn default() -> Self {
+        Self {
+            identity: None,
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            non_public: HashMap::new(),
+            non_public_order: VecDeque::new(),
+        }
+    }
+}
+
+impl ThreadMethodReturnCache {
+    fn bind(&mut self, identity: (u64, u64)) {
+        if self.identity != Some(identity) {
+            self.identity = Some(identity);
+            self.entries.clear();
+            self.order.clear();
+            self.non_public.clear();
+            self.non_public_order.clear();
+        }
+    }
+
+    fn get(&mut self, key: &MethodReturnQueryKey) -> Option<Option<RubyType>> {
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: MethodReturnQueryKey, value: Option<RubyType>) {
+        if self.entries.contains_key(&key) {
+            self.entries.insert(key, value);
+            return;
+        }
+        while self.entries.len() >= MAX_THREAD_METHOD_RETURN_CACHE_ENTRIES {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&oldest);
+        }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
+    }
+
+    fn get_non_public(&mut self, key: &(FullyQualifiedName, RubyMethod)) -> Option<bool> {
+        self.non_public.get(key).copied()
+    }
+
+    fn insert_non_public(&mut self, key: (FullyQualifiedName, RubyMethod), value: bool) {
+        if self.non_public.contains_key(&key) {
+            self.non_public.insert(key, value);
+            return;
+        }
+        while self.non_public.len() >= MAX_THREAD_METHOD_RETURN_CACHE_ENTRIES {
+            let Some(oldest) = self.non_public_order.pop_front() else {
+                break;
+            };
+            self.non_public.remove(&oldest);
+        }
+        self.non_public_order.push_back(key.clone());
+        self.non_public.insert(key, value);
+    }
+}
+
+thread_local! {
+    static THREAD_METHOD_RETURN_CACHE: RefCell<ThreadMethodReturnCache> =
+        RefCell::new(ThreadMethodReturnCache::default());
+}
+
+fn thread_method_return_get(
+    identity: (u64, u64),
+    key: &MethodReturnQueryKey,
+) -> Option<Option<RubyType>> {
+    THREAD_METHOD_RETURN_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        cache.bind(identity);
+        cache.get(key)
+    })
+}
+
+fn thread_method_return_insert(
+    identity: (u64, u64),
+    key: MethodReturnQueryKey,
+    value: Option<RubyType>,
+) {
+    THREAD_METHOD_RETURN_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        cache.bind(identity);
+        cache.insert(key, value);
+    });
+}
+
+fn thread_receiver_has_non_public(
+    identity: (u64, u64),
+    namespace: &FullyQualifiedName,
+    method: RubyMethod,
+    compute: impl FnOnce() -> bool,
+) -> bool {
+    let key = (namespace.clone(), method);
+    if let Some(hit) = THREAD_METHOD_RETURN_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        cache.bind(identity);
+        cache.get_non_public(&key)
+    }) {
+        return hit;
+    }
+
+    let value = compute();
+    THREAD_METHOD_RETURN_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        cache.bind(identity);
+        cache.insert_non_public(key, value);
+    });
+    value
+}
+
 /// Bounded-lifetime memoization for repeated semantic queries while collecting
 /// one source product.
 ///
 /// The cache binds itself to one exact engine instance and semantic revision.
 /// Replacements and engine clones receive different identities, so callers
 /// cannot accidentally reuse results across isolated project engines.
+/// Engine method-return lookups additionally reuse a thread-local 8192-entry
+/// FIFO keyed by that same identity so parallel file collection can share
+/// identical receiver/method results without one `AnalysisQueryCache` mutex
+/// spanning the batch. Explicit `foo.bar` lookups reuse the public-access
+/// entry when the receiver chain has no private/protected method of that
+/// name, so caller namespace is not part of the hot key. Hits are O(1). Do
+/// not raise the cap further without an RSS measurement.
 #[derive(Debug, Default)]
 pub struct AnalysisQueryCache {
     state: Mutex<AnalysisQueryCacheState>,
@@ -64,15 +207,23 @@ impl AnalysisQueryCache {
         key: MethodReturnQueryKey,
         compute: impl FnOnce() -> Option<RubyType>,
     ) -> Option<RubyType> {
+        if let Some(hit) = thread_method_return_get(engine_identity, &key) {
+            return hit;
+        }
+
         {
             let mut state = self.state.lock();
             state.bind_engine_identity(engine_identity);
             if let Some(cached) = state.method_returns.get(&key) {
-                return cached.clone();
+                let result = cached.clone();
+                drop(state);
+                thread_method_return_insert(engine_identity, key, result.clone());
+                return result;
             }
         }
 
         let result = compute();
+        thread_method_return_insert(engine_identity, key.clone(), result.clone());
         let mut state = self.state.lock();
         if state.engine_identity == Some(engine_identity) {
             state.method_returns.insert(key, result.clone());
@@ -1313,18 +1464,49 @@ impl<'a> AnalysisQuery<'a> {
         caller_namespace_fqn: &FullyQualifiedName,
         cache: &AnalysisQueryCache,
     ) -> Option<crate::core::RubyType> {
+        let identity = self.engine.query_cache_identity();
+        if !thread_receiver_has_non_public(identity, namespace_fqn, *method, || {
+            self.receiver_method_has_non_public(namespace_fqn, method)
+        }) {
+            return self.method_return_type_for_public_receiver_cached(
+                namespace_fqn,
+                method,
+                cache,
+            );
+        }
         let key = MethodReturnQueryKey {
             namespace: namespace_fqn.clone(),
             method: *method,
             access: MethodReturnQueryAccess::Protected(caller_namespace_fqn.clone()),
         };
-        cache.method_return(self.engine.query_cache_identity(), key, || {
+        cache.method_return(identity, key, || {
             self.method_return_type_for_protected_receiver(
                 namespace_fqn,
                 method,
                 caller_namespace_fqn,
             )
         })
+    }
+
+    fn receiver_method_has_non_public(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> bool {
+        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
+        let private_facts = method_facts_in_chain(self.engine, &ancestor_chain, method, true, None);
+        let public_facts = method_facts_in_chain(self.engine, &ancestor_chain, method, false, None);
+        match (private_facts, public_facts) {
+            (None, None) => false,
+            (Some((private_owner, private_facts)), Some((public_owner, public_facts))) => {
+                private_owner != public_owner
+                    || private_facts
+                        .iter()
+                        .map(|fact| fact.range)
+                        .ne(public_facts.iter().map(|fact| fact.range))
+            }
+            (Some(_), None) | (None, Some(_)) => true,
+        }
     }
 
     fn method_return_type_for_receiver_inner(
