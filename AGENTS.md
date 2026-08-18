@@ -1246,6 +1246,20 @@ budget to accept a candidate or trade semantic correctness for timing.
   changes from body-only changes. Future direction: semantic export fingerprints
   plus bounded/visible-file diagnostic refresh, with project-wide refresh outside
   the typing critical path.
+- Rejected August 17 2026: defer TypeTracker / higher-order / local-flow
+  inference to open buffers so cold index only stores declarations. That
+  would make `Unknown` mean both "not proven" and "not inferred yet," and
+  closed-file methods without RBS/YARD would lose cross-file returns.
+  Keep inferring every project file at index time; speed up that visitor.
+- First-walk `infer_type` engine returns use the same cached
+  `method_return_type_for_receiver*` path as TypeTracker after same-file
+  local checks. Do not restore the per-expression callee vector plus
+  `method_return_type_for_callee` loop: on the JRuby project visitor it
+  was 44s of exclusive `infer_type` CPU. Do not share one
+  `AnalysisQueryCache` across a parallel 512-file batch; that was
+  measured and rejected because gem binding changes engine identity
+  mid-batch and the shared mutex plus miss stampede turned one batch
+  into 75s visitor CPU. Keep the cache per FactCollector / source.
 - Current implementation: `AnalysisEngine::replace_facts` records a
   range/order-independent semantic export fingerprint over declarations,
   method signatures/visibility, exported types, and graph relationships.
@@ -1508,6 +1522,16 @@ Mandatory repository-wide consequences:
   lifecycle, so edits remove stale outcomes without a parallel type store.
 - CLI and LSP features project the same engine-owned outcomes and Unknown
   reasons. A consumer-specific second inference path is forbidden.
+- Cold project indexing must run the same body inference as an open buffer
+  (TypeTracker, higher-order calls, local flow, inferred method returns) for
+  every project file. Do not defer that walk to `didOpen`, chase only
+  call-graph-reachable methods, or treat closed-file inferred returns as
+  Unknown until the defining file is opened. `Unknown` means the proof was
+  attempted and failed; it must not mean "not inferred yet." Declared
+  returns (RBS, YARD, language-defined constructors) stay available either
+  way. Indexing latency must come from cheapening this walk, not from
+  skipping it. `didOpen` of an unchanged indexed file reuses those facts;
+  body-only `didChange` still stays on the current file.
 - Extend blocks, procs, symbol-to-proc, and generic collection transforms
   through one reusable higher-order call model in `ruby-analysis::inference`,
   not method-name cases in hover, inlay hints, completion, or the checker.

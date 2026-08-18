@@ -138,6 +138,13 @@
 //! reduce false Unknowns, but it does not get to regress the established
 //! latency, CPU, or RSS gates.
 //!
+//! Cold project indexing must attempt body inference for every project file.
+//! Do not defer TypeTracker, higher-order calls, local flow, or inferred
+//! method returns until `didOpen`, and do not chase only methods referenced
+//! from the current buffer. [`crate::core::RubyType::Unknown`] is an attempted
+//! proof that failed; it is not a placeholder for a closed file that was
+//! never walked. Indexing speedups must cheapen that walk.
+//!
 //! # Higher-order calls
 //!
 //! [`higher_order`] is the single callable-constraint model for block-bearing

@@ -97,8 +97,6 @@ impl FactCollector {
     ) -> Option<RubyType> {
         let method = RubyMethod::new(method_name).ok()?;
         let namespace = receiver_namespace_for_analysis(receiver_type)?;
-        let engine = self.analysis_engine.read();
-        let query = AnalysisQuery::new(&engine);
         let (caller_parts, caller_kind) = self.scope_tracker.implicit_receiver_context();
         let caller_namespace = FullyQualifiedName::namespace_with_kind(caller_parts, caller_kind);
         let local_method_fqn = FullyQualifiedName::method(namespace.namespace_parts(), method);
@@ -121,54 +119,25 @@ impl FactCollector {
         ) {
             return Some(return_type);
         }
-        let callees = if allow_private {
-            query.resolve_method_callees_cached(&namespace, &method, &self.analysis_query_cache)?
+
+        // Same-file facts are not in the engine yet. Engine lookup is the
+        // TypeTracker path: one cached receiver return, not a fresh callee
+        // vector plus per-callee type_at on every expression.
+        let engine = self.analysis_engine.read();
+        let query = AnalysisQuery::new(&engine);
+        if allow_private {
+            query.method_return_type_for_receiver_cached(
+                &namespace,
+                &method,
+                &self.analysis_query_cache,
+            )
         } else {
-            query.resolve_protected_method_callees_cached(
+            query.method_return_type_for_protected_receiver_cached(
                 &namespace,
                 &method,
                 &caller_namespace,
                 &self.analysis_query_cache,
-            )?
-        };
-
-        let mut return_types = Vec::new();
-        for callee in callees {
-            if callee.definition_ranges.is_empty() {
-                continue;
-            }
-
-            let method_fqn =
-                FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method);
-            let direct_method_is_visible = self.direct_method_fact_is_visible(
-                &method_fqn,
-                &callee.owner,
-                &namespace,
-                allow_private,
-                &caller_namespace,
-            );
-            if direct_method_is_visible {
-                let local_return_type = self.local_method_return_type(&method_fqn);
-                if let Some(return_type) = local_return_type {
-                    if !return_types.contains(&return_type) {
-                        return_types.push(return_type);
-                    }
-                    continue;
-                }
-            }
-
-            let return_type = query.method_return_type_for_callee(&callee);
-            if let Some(return_type) = return_type {
-                if !return_types.contains(&return_type) {
-                    return_types.push(return_type);
-                }
-            }
-        }
-
-        match return_types.len() {
-            0 => None,
-            1 => return_types.pop(),
-            2.. => Some(RubyType::union(return_types)),
+            )
         }
     }
 
