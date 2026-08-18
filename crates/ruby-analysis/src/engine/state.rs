@@ -2955,7 +2955,7 @@ impl AnalysisEngine {
             .map(|evidence| evidence.expression_unknown_reasons.as_slice())
     }
 
-    pub(super) fn query_cache_identity(&self) -> (u64, u64) {
+    pub(crate) fn query_cache_identity(&self) -> (u64, u64) {
         (self.instance_id, self.semantic_revision)
     }
 

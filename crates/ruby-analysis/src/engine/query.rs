@@ -19,6 +19,10 @@ impl<'a> AnalysisQuery<'a> {
         Self { engine }
     }
 
+    pub(crate) fn query_cache_identity(&self) -> (u64, u64) {
+        self.engine.query_cache_identity()
+    }
+
     pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
         self.engine.file_id(path)
     }
