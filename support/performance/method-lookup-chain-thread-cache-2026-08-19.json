@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-19",
+  "decision": "accept",
+  "purpose": "One measured cut inside the project-file visitor after dependency-source inference skip. Do not skip project-file body inference.",
+  "cut": {
+    "rank": 1,
+    "path": "method_lookup_chain used by FactCollector infer_type / call references",
+    "why": "Symbolized sequential samply on goshposh/server put method_lookup_chain at 43.3% of all samples. Each probe rebuilt MRO and cloned every unresolved graph edge into a HashSet (HashMap::insert 29.7%).",
+    "changes": [
+      "SemanticGraph maintains an explicit unresolved-source count index; has_explicit_unresolved_edge_from is O(1) and covers Include/Prepend/Extend as well as Superclass. ImplicitObject provenance is excluded.",
+      "method_lookup_chain reuses a thread-local 8192-entry FIFO keyed by engine identity, matching method-return memoization. Hits are O(1) and do not touch FIFO order. Identity changes drop the entries.",
+      "Resolve-path MethodLookupChainCache remains the borrowed FqnId slice cache. Do not share one chain HashMap across a parallel file batch."
+    ],
+    "not_done": [
+      "Do not restore unresolved_edges().collect() on every lookup.",
+      "Do not share AnalysisQueryCache or this chain map across a parallel 512-file batch.",
+      "Do not skip TypeTracker / higher-order / local flow / inferred returns on project files.",
+      "Do not raise the 8192 cap without an RSS measurement."
+    ]
+  },
+  "harness": {
+    "sequential": {
+      "binary": "profile_project_collection",
+      "corpus": "/Users/naveenraj/goshposh/server",
+      "files": 2619,
+      "notes": [
+        "Sequential collect+replace; RAYON_NUM_THREADS=1",
+        "FileProcessor::new() without JRuby import provider",
+        "replace_facts per file changes engine identity, so the thread-local chain cache is per-file; within-file reuse plus the unresolved-source index still dominate."
+      ]
+    },
+    "two_project": {
+      "binary": "profiler",
+      "workspace": "/Users/naveenraj/goshposh",
+      "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
+      "scheduler_concurrency": 2,
+      "runtime": "jruby-9.2.21.0",
+      "jdk": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home",
+      "extension_path": "./editors/vscode/vsix"
+    }
+  },
+  "before": {
+    "commit": "3711d3c",
+    "sequential": {
+      "wall_s": 13.341480167,
+      "visitor_s": 10.833330402,
+      "visitor_pct": 82.4
+    },
+    "samply": {
+      "path": "/tmp/ruby-fast-lsp-sync-project-collection-3711d3c-profile.json.gz",
+      "samples_main_thread": 1375,
+      "inclusive_pct_of_all_samples": {
+        "Visit::visit": 77.6,
+        "visit_call_node": 46.7,
+        "method_lookup_chain": 43.3,
+        "method_lookup_chain_has_unresolved_dependency": 42.3,
+        "infer_type_from_value_with_locals": 24.1,
+        "resolve_method_return": 22.1,
+        "TypeTracker::track_statements": 16.9,
+        "process_call_node_entry": 11.2
+      }
+    },
+    "two_project_warm": {
+      "source": "/tmp/ruby-fast-lsp-rss-ab/candidate-warm.jsonl",
+      "wall_ms": 23116.0,
+      "process_peak_rss_bytes": 2074771456,
+      "engine_estimated_heap_bytes": 775198527,
+      "server_project_batch_s": 7.982872958,
+      "devops_project_batch_s": 7.077392542,
+      "inference_telemetry": {
+        "method_return_outcomes": 61722,
+        "proven_method_returns": 28663
+      }
+    }
+  },
+  "after": {
+    "sequential": {
+      "wall_s": 7.441301583,
+      "visitor_s": 4.931366441,
+      "visitor_pct": 67.9,
+      "confirm_visitor_s": 4.552659743
+    },
+    "two_project_warm_repeat": {
+      "source": "/tmp/ruby-fast-lsp-mro-cache/warm-2p-repeat.jsonl",
+      "wall_ms": 19697.6,
+      "process_peak_rss_bytes": 2050670592,
+      "engine_estimated_heap_bytes": 775222548,
+      "server_project_batch_s": 5.543404084,
+      "devops_project_batch_s": 4.530593292,
+      "inference_telemetry": {
+        "method_return_outcomes": 61722,
+        "proven_method_returns": 28663
+      }
+    }
+  },
+  "delta": {
+    "sequential_visitor_s": -5.90,
+    "two_project_wall_ms": -3418,
+    "two_project_process_peak_rss_bytes": -24100864,
+    "server_project_batch_s": -2.44,
+    "devops_project_batch_s": -2.55,
+    "inference_telemetry_unchanged": true
+  },
+  "rss_note": "Official two-project peak RSS remains above the fixed 1,776,846,438-byte ceiling on this branch and its parent. This cut did not raise process RSS on the warm repeat."
+}

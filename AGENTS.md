@@ -1297,6 +1297,17 @@ budget to accept a candidate or trade semantic correctness for timing.
   lookups reuse the public-access entry when the receiver chain has no
   private/protected method of that name, so caller namespace is not part of
   the hot key. Do not raise the cap further without an RSS measurement.
+- Accepted August 19 2026: first-walk `method_lookup_chain` rebuilt MRO and
+  cloned every unresolved graph edge on each inference probe (43% of sequential
+  `goshposh/server` samples). The graph now keeps an explicit unresolved-source
+  count index (`has_explicit_unresolved_edge_from`). Constructed chains reuse a
+  thread-local 8192-entry FIFO keyed by the same engine identity as method
+  returns. Hits are O(1). Do not restore `unresolved_edges().collect()` per
+  lookup, share one chain map across a parallel file batch, or raise the cap
+  without an RSS measurement. Sequential visitor 10.83s → 4.93s; official
+  two-project warm project-batch wall 7.98s/7.08s → 5.54s/4.53s with inference
+  telemetry unchanged. Evidence:
+  `support/performance/method-lookup-chain-thread-cache-2026-08-19.json`.
 - Receiver method-return lookup must not treat stub/signature
   `BasicObject#method_missing` as a proven return. Navigation already classifies
   that fallback as Missing; walking it on every unresolved call redid MRO on the
@@ -1382,7 +1393,9 @@ budget to accept a candidate or trade semantic correctness for timing.
   in the ID-keyed graph/method stores; hits must not clone the vector, rebuild
   FQNs, or probe each owner merely to release the cache borrow before recursive
   execution-context lookup. Keep the borrow scoped before recursion and do not
-  replace it with a second MRO cache. The test-only `NameRegistry` lookup
+  replace this borrowed ID cache with another resolve-pass MRO map. Thread-local
+  reuse inside `method_lookup_chain` itself is the inference-path cache above,
+  not a second resolve-pass store. The test-only `NameRegistry` lookup
   counter is measurement instrumentation and must remain absent from production
   builds.
 - Rejected August 1 2026 experiment: traversing MRO directly through graph

@@ -246,6 +246,7 @@ pub struct SemanticGraph {
     edges_by_file: HashMap<SourceFileId, Vec<GraphEdgeId>>,
     unresolved_by_file: HashMap<SourceFileId, Vec<StoredUnresolvedGraphEdgeFact>>,
     unresolved_explicit_superclasses_by_source: HashMap<FqnId, usize>,
+    unresolved_explicit_sources_by_source: HashMap<FqnId, usize>,
 }
 
 impl SemanticGraph {
@@ -328,6 +329,11 @@ impl SemanticGraph {
 
     pub fn has_unresolved_explicit_superclass(&self, source: FqnId) -> bool {
         self.unresolved_explicit_superclasses_by_source
+            .contains_key(&source)
+    }
+
+    pub fn has_explicit_unresolved_edge_from(&self, source: FqnId) -> bool {
+        self.unresolved_explicit_sources_by_source
             .contains_key(&source)
     }
 
@@ -418,7 +424,7 @@ impl SemanticGraph {
 
         if let Some(unresolved) = self.unresolved_by_file.remove(&file_id) {
             for edge in unresolved {
-                self.remove_unresolved_explicit_superclass_source(edge);
+                self.remove_unresolved_edge_indexes(edge);
             }
         }
 
@@ -488,6 +494,7 @@ impl SemanticGraph {
     pub fn take_unresolved_edges(&mut self) -> Vec<StoredUnresolvedGraphEdgeFact> {
         let pending = std::mem::take(&mut self.unresolved_by_file);
         self.unresolved_explicit_superclasses_by_source.clear();
+        self.unresolved_explicit_sources_by_source.clear();
         pending
             .into_values()
             .flat_map(|edges| edges.into_iter())
@@ -495,16 +502,19 @@ impl SemanticGraph {
     }
 
     pub fn add_unresolved_edge(&mut self, edge: StoredUnresolvedGraphEdgeFact) {
-        if edge.kind == GraphEdgeKind::Superclass
-            && edge.provenance == GraphEdgeProvenance::Explicit
-        {
-            let count = self
-                .unresolved_explicit_superclasses_by_source
-                .entry(edge.source)
-                .or_default();
-            *count = count.checked_add(1).expect(
-                "INVARIANT VIOLATED: unresolved explicit superclass source count overflowed usize. This is a bug because one graph cannot contain more edges than addressable memory. Fix: inspect duplicate unresolved edge insertion.",
+        if edge.provenance == GraphEdgeProvenance::Explicit {
+            bump_unresolved_source_count(
+                &mut self.unresolved_explicit_sources_by_source,
+                edge.source,
+                "explicit unresolved edge source",
             );
+            if edge.kind == GraphEdgeKind::Superclass {
+                bump_unresolved_source_count(
+                    &mut self.unresolved_explicit_superclasses_by_source,
+                    edge.source,
+                    "unresolved explicit superclass source",
+                );
+            }
         }
         self.unresolved_by_file
             .entry(edge.range.file_id)
@@ -512,27 +522,20 @@ impl SemanticGraph {
             .push(edge);
     }
 
-    fn remove_unresolved_explicit_superclass_source(
-        &mut self,
-        edge: StoredUnresolvedGraphEdgeFact,
-    ) {
-        if edge.kind != GraphEdgeKind::Superclass
-            || edge.provenance != GraphEdgeProvenance::Explicit
-        {
-            return;
-        }
-        let count = self
-            .unresolved_explicit_superclasses_by_source
-            .get_mut(&edge.source)
-            .expect(
-                "INVARIANT VIOLATED: unresolved explicit superclass edge has no source count. This is a bug because the source index and file-owned edge were inserted atomically. Fix: update both indexes on every unresolved edge lifecycle operation.",
+    fn remove_unresolved_edge_indexes(&mut self, edge: StoredUnresolvedGraphEdgeFact) {
+        if edge.provenance == GraphEdgeProvenance::Explicit {
+            release_unresolved_source_count(
+                &mut self.unresolved_explicit_sources_by_source,
+                edge.source,
+                "explicit unresolved edge source",
             );
-        *count = count.checked_sub(1).expect(
-            "INVARIANT VIOLATED: unresolved explicit superclass source count underflowed. This is a bug because an edge was removed more than once. Fix: remove each file-owned unresolved edge exactly once.",
-        );
-        if *count == 0 {
-            self.unresolved_explicit_superclasses_by_source
-                .remove(&edge.source);
+            if edge.kind == GraphEdgeKind::Superclass {
+                release_unresolved_source_count(
+                    &mut self.unresolved_explicit_superclasses_by_source,
+                    edge.source,
+                    "unresolved explicit superclass source",
+                );
+            }
         }
     }
 
@@ -543,6 +546,7 @@ impl SemanticGraph {
             + set_table_bytes(&self.node_definition_files)
             + map_table_bytes(&self.edges_by_file)
             + map_table_bytes(&self.unresolved_explicit_superclasses_by_source)
+            + map_table_bytes(&self.unresolved_explicit_sources_by_source)
             + self
                 .nodes
                 .values()
@@ -583,6 +587,7 @@ impl SemanticGraph {
         self.unresolved_by_file.shrink_to_fit();
         self.unresolved_explicit_superclasses_by_source
             .shrink_to_fit();
+        self.unresolved_explicit_sources_by_source.shrink_to_fit();
         for node in self.nodes.values_mut() {
             node.definitions.shrink_to_fit();
             node.superclasses.shrink_to_fit();
@@ -776,6 +781,39 @@ fn graph_edge_order_key(
     )
 }
 
+fn bump_unresolved_source_count(
+    counts: &mut HashMap<FqnId, usize>,
+    source: FqnId,
+    what: &'static str,
+) {
+    let count = counts.entry(source).or_default();
+    *count = count.checked_add(1).unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: {what} count overflowed usize. This is a bug because one graph cannot contain more edges than addressable memory. Fix: inspect duplicate unresolved edge insertion."
+        )
+    });
+}
+
+fn release_unresolved_source_count(
+    counts: &mut HashMap<FqnId, usize>,
+    source: FqnId,
+    what: &'static str,
+) {
+    let count = counts.get_mut(&source).unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: {what} has no source count. This is a bug because the source index and file-owned edge were inserted atomically. Fix: update both indexes on every unresolved edge lifecycle operation."
+        )
+    });
+    *count = count.checked_sub(1).unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: {what} count underflowed. This is a bug because an edge was removed more than once. Fix: remove each file-owned unresolved edge exactly once."
+        )
+    });
+    if *count == 0 {
+        counts.remove(&source);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{FqnId, SourceFileId, TextRange};
@@ -917,6 +955,35 @@ mod tests {
         store.add_unresolved_edge(unresolved);
         store.replace_file(file_id, [], [], []);
         assert!(!store.has_unresolved_explicit_superclass(source));
+    }
+
+    #[test]
+    fn unresolved_explicit_edge_source_index_covers_include_and_ignores_implicit() {
+        let file_id = SourceFileId(1);
+        let source = FqnId(1);
+        let include_edge = StoredUnresolvedGraphEdgeFact::new(
+            source,
+            ConstLookupId(1),
+            GraphEdgeKind::Include,
+            TextRange::new(file_id, 0, 10),
+        );
+        let implicit_superclass = StoredUnresolvedGraphEdgeFact::new(
+            FqnId(2),
+            ConstLookupId(2),
+            GraphEdgeKind::Superclass,
+            TextRange::new(file_id, 10, 20),
+        )
+        .with_provenance(GraphEdgeProvenance::ImplicitObject);
+        let mut store = SemanticGraph::new();
+        store.add_unresolved_edge(include_edge);
+        store.add_unresolved_edge(implicit_superclass);
+
+        assert!(store.has_explicit_unresolved_edge_from(source));
+        assert!(!store.has_unresolved_explicit_superclass(source));
+        assert!(!store.has_explicit_unresolved_edge_from(FqnId(2)));
+
+        store.replace_file(file_id, [], [], []);
+        assert!(!store.has_explicit_unresolved_edge_from(source));
     }
 
     #[test]

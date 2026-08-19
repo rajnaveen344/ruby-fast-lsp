@@ -8,7 +8,8 @@ use crate::core::{
 
 use super::*;
 use crate::engine::resolution::{
-    method_lookup_chain, method_lookup_chain_for_reference_cached, MethodLookupChainCache,
+    method_lookup_chain, method_lookup_chain_for_reference_cached,
+    method_lookup_chain_uncached_construction_count, MethodLookupChainCache,
 };
 use crate::engine::AnalysisQueryCache;
 use crate::ConstantLookupRequest;
@@ -2750,6 +2751,67 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
         engine.valid_method_lookup_chain_cache_len_for_test(),
         0,
         "semantic replacement must invalidate cached lookup chains"
+    );
+}
+
+#[test]
+fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/child.rb",
+        "class Parent\n  def value = 'ok'\nend\nclass Child < Parent\nend\n",
+    );
+    let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
+    let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![
+                GraphNodeFact::new(
+                    parent.clone(),
+                    GraphNodeKind::Class,
+                    crate::core::TextRange::new(file_id, 0, 38),
+                ),
+                GraphNodeFact::new(
+                    child.clone(),
+                    GraphNodeKind::Class,
+                    crate::core::TextRange::new(file_id, 39, 63),
+                ),
+            ],
+            graph_edges: vec![GraphEdgeFact::new(
+                child.clone(),
+                parent.clone(),
+                GraphEdgeKind::Superclass,
+                crate::core::TextRange::new(file_id, 39, 59),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let before = method_lookup_chain_uncached_construction_count();
+    let first = method_lookup_chain(&engine, &child);
+    let second = method_lookup_chain(&engine, &child);
+    assert_eq!(first, second);
+    assert!(first.contains(&parent));
+    assert_eq!(
+        method_lookup_chain_uncached_construction_count() - before,
+        1,
+        "repeated lookup of one owner must reuse the constructed MRO for the current engine identity"
+    );
+
+    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    let after_replace = method_lookup_chain_uncached_construction_count();
+    let replaced = method_lookup_chain(&engine, &child);
+    assert!(
+        !replaced.contains(&parent),
+        "replacement must drop stale ancestry instead of returning a cached pre-replacement chain"
+    );
+    assert_eq!(
+        method_lookup_chain_uncached_construction_count() - after_replace,
+        1,
+        "semantic replacement must rebuild the lookup chain for the new engine identity"
     );
 }
 

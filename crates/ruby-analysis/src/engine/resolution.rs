@@ -1,12 +1,15 @@
-use std::collections::{HashMap, HashSet};
+#[cfg(test)]
+use std::cell::Cell;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
-    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind,
-    MethodCalleeResolution, MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant,
-    RubyMethod, RubyType, SourceFileId, SourceKind, StoredMethodReferenceCandidate,
-    StoredReferenceCandidateRef, SymbolKind, TextRange, TypeSubject,
+    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
+    MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType,
+    SourceFileId, SourceKind, StoredMethodReferenceCandidate, StoredReferenceCandidateRef,
+    SymbolKind, TextRange, TypeSubject,
 };
 use crate::engine::query::AnalysisQuery;
 use crate::engine::state::EffectiveMethodFactMatch;
@@ -16,7 +19,6 @@ use crate::engine::types::{AnalysisQueryCache, MethodReturnQueryAccess};
 pub(crate) struct MethodLookupChainCache {
     chains: HashMap<FullyQualifiedName, Vec<FqnId>>,
     metaclass_methods: HashMap<(FqnId, RubyMethod), MethodLookupResult>,
-    unresolved_edge_sources: Option<HashSet<FqnId>>,
     unresolved_dependencies: HashMap<FullyQualifiedName, bool>,
     unproven_universal_methods: HashMap<FqnId, HashSet<RubyMethod>>,
 }
@@ -1134,7 +1136,7 @@ impl<'a> AnalysisQuery<'a> {
         call_range: TextRange,
     ) -> Option<Arc<MethodFact>> {
         if namespace_fqn.namespace_parts().is_empty()
-            || method_lookup_chain_has_unresolved_dependency(self.engine, namespace_fqn)
+            || method_lookup_chain_has_unresolved_dependency_from_graph(self.engine, namespace_fqn)
         {
             return None;
         }
@@ -2371,7 +2373,121 @@ fn module_includers(
     result
 }
 
+#[cfg(test)]
+thread_local! {
+    static METHOD_LOOKUP_CHAIN_UNCACHED_CONSTRUCTIONS: Cell<u64> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn method_lookup_chain_uncached_construction_count() -> u64 {
+    METHOD_LOOKUP_CHAIN_UNCACHED_CONSTRUCTIONS.with(Cell::get)
+}
+
+fn record_method_lookup_chain_uncached_construction() {
+    #[cfg(test)]
+    METHOD_LOOKUP_CHAIN_UNCACHED_CONSTRUCTIONS.with(|count| {
+        count.set(count.get().saturating_add(1));
+    });
+}
+
+const MAX_THREAD_METHOD_LOOKUP_CHAIN_CACHE_ENTRIES: usize = 8192;
+
+/// Thread-local memo of constructed method lookup chains for one engine identity.
+///
+/// Fact collection calls `method_lookup_chain` on every receiver/method return
+/// probe. Rebuilding MRO plus scanning every unresolved graph edge on each
+/// probe dominated the project visitor. Hits are O(1) and do not touch FIFO
+/// order. Identity changes drop the entries. Do not share one map across a
+/// parallel file batch; keep this on the worker thread like method-return
+/// memoization. Do not raise the cap without an RSS measurement.
+struct ThreadMethodLookupChainCache {
+    identity: Option<(u64, u64)>,
+    chains: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
+    order: VecDeque<FullyQualifiedName>,
+}
+
+impl Default for ThreadMethodLookupChainCache {
+    fn default() -> Self {
+        Self {
+            identity: None,
+            chains: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+}
+
+impl ThreadMethodLookupChainCache {
+    fn bind(&mut self, identity: (u64, u64)) {
+        if self.identity != Some(identity) {
+            self.identity = Some(identity);
+            self.chains.clear();
+            self.order.clear();
+        }
+    }
+
+    fn get(&self, owner: &FullyQualifiedName) -> Option<Vec<FullyQualifiedName>> {
+        self.chains.get(owner).cloned()
+    }
+
+    fn insert(&mut self, owner: FullyQualifiedName, chain: Vec<FullyQualifiedName>) {
+        if self.chains.contains_key(&owner) {
+            self.chains.insert(owner, chain);
+            return;
+        }
+        while self.chains.len() >= MAX_THREAD_METHOD_LOOKUP_CHAIN_CACHE_ENTRIES {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            self.chains.remove(&oldest);
+        }
+        self.order.push_back(owner.clone());
+        self.chains.insert(owner, chain);
+    }
+}
+
+thread_local! {
+    static THREAD_METHOD_LOOKUP_CHAIN_CACHE: RefCell<ThreadMethodLookupChainCache> =
+        RefCell::new(ThreadMethodLookupChainCache::default());
+}
+
+fn thread_method_lookup_chain_get(
+    identity: (u64, u64),
+    owner: &FullyQualifiedName,
+) -> Option<Vec<FullyQualifiedName>> {
+    THREAD_METHOD_LOOKUP_CHAIN_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        cache.bind(identity);
+        cache.get(owner)
+    })
+}
+
+fn thread_method_lookup_chain_insert(
+    identity: (u64, u64),
+    owner: FullyQualifiedName,
+    chain: Vec<FullyQualifiedName>,
+) {
+    THREAD_METHOD_LOOKUP_CHAIN_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        cache.bind(identity);
+        cache.insert(owner, chain);
+    })
+}
+
 pub(super) fn method_lookup_chain(
+    engine: &crate::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+) -> Vec<FullyQualifiedName> {
+    let identity = engine.query_cache_identity();
+    if let Some(cached) = thread_method_lookup_chain_get(identity, fqn) {
+        return cached;
+    }
+    record_method_lookup_chain_uncached_construction();
+    let chain = method_lookup_chain_uncached(engine, fqn);
+    thread_method_lookup_chain_insert(identity, fqn.clone(), chain.clone());
+    chain
+}
+
+fn method_lookup_chain_uncached(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
@@ -2391,7 +2507,8 @@ fn method_lookup_chain_without_metaclass(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
-    let allow_top_level_fallback = !method_lookup_chain_has_unresolved_dependency(engine, fqn);
+    let allow_top_level_fallback =
+        !method_lookup_chain_has_unresolved_dependency_from_graph(engine, fqn);
     method_lookup_chain_without_metaclass_with_fallback(engine, fqn, allow_top_level_fallback)
 }
 
@@ -2451,20 +2568,6 @@ fn method_lookup_chain_without_metaclass_with_fallback(
     }
 }
 
-fn method_lookup_chain_has_unresolved_dependency(
-    engine: &crate::AnalysisEngine,
-    owner: &FullyQualifiedName,
-) -> bool {
-    let unresolved_sources = engine
-        .graph
-        .unresolved_edges()
-        .into_iter()
-        .filter(|edge| edge.provenance == GraphEdgeProvenance::Explicit)
-        .map(|edge| edge.source)
-        .collect::<HashSet<_>>();
-    method_lookup_chain_has_unresolved_dependency_from_sources(engine, owner, &unresolved_sources)
-}
-
 fn method_lookup_chain_has_unresolved_dependency_cached(
     engine: &crate::AnalysisEngine,
     owner: &FullyQualifiedName,
@@ -2473,24 +2576,7 @@ fn method_lookup_chain_has_unresolved_dependency_cached(
     if let Some(incomplete) = cache.unresolved_dependencies.get(owner) {
         return *incomplete;
     }
-    if cache.unresolved_edge_sources.is_none() {
-        cache.unresolved_edge_sources = Some(
-            engine
-                .graph
-                .unresolved_edges()
-                .into_iter()
-                .filter(|edge| edge.provenance == GraphEdgeProvenance::Explicit)
-                .map(|edge| edge.source)
-                .collect(),
-        );
-    }
-    let incomplete = method_lookup_chain_has_unresolved_dependency_from_sources(
-        engine,
-        owner,
-        cache.unresolved_edge_sources.as_ref().expect(
-            "INVARIANT VIOLATED: unresolved method-edge sources disappeared after initialization. This is a bug because a resolution-local cache is immutable between candidate lookups. Fix: initialize the source set once and retain it for the resolve pass.",
-        ),
-    );
+    let incomplete = method_lookup_chain_has_unresolved_dependency_from_graph(engine, owner);
     assert!(
         cache
             .unresolved_dependencies
@@ -2501,10 +2587,9 @@ fn method_lookup_chain_has_unresolved_dependency_cached(
     incomplete
 }
 
-fn method_lookup_chain_has_unresolved_dependency_from_sources(
+fn method_lookup_chain_has_unresolved_dependency_from_graph(
     engine: &crate::AnalysisEngine,
     owner: &FullyQualifiedName,
-    unresolved_sources: &HashSet<FqnId>,
 ) -> bool {
     let mut pending = vec![owner.clone()];
     let mut visited = HashSet::new();
@@ -2529,7 +2614,7 @@ fn method_lookup_chain_has_unresolved_dependency_from_sources(
             ),
         };
         if let Some(source_id) = engine.names.fqn_id(&unresolved_source) {
-            if unresolved_sources.contains(&source_id) {
+            if engine.graph.has_explicit_unresolved_edge_from(source_id) {
                 return true;
             }
         }
