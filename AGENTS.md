@@ -1347,6 +1347,15 @@ budget to accept a candidate or trade semantic correctness for timing.
   lifetime overlaps the full collector traversal. Both were measured, rejected,
   and removed; keep same-file return context short-lived unless a new profile
   proves a different ownership lifetime stays below the fixed RSS ceiling.
+- Accepted August 19 2026: after method-lookup-chain caching, sequential
+  `goshposh/server` assembly was `TypeSubject` PartialEq while merging visitor
+  type facts into the syntax seed (10% of samples, ~800 ms). Index live merge
+  slots by subject for that assembly step only, then drop the map. Do not keep
+  it for the collector traversal (August 1 TypeStore HashMap RSS rejection).
+  Sequential assembly 790–825 ms → 113–118 ms; official two-project warm
+  project-batch wall 5.54s/4.53s → 5.24s/4.23s with inference telemetry
+  unchanged. Evidence:
+  `support/performance/visitor-type-fact-merge-index-2026-08-19.json`.
 - Disabling `TypeTracker`'s discarded per-statement variable snapshots only for
   `FactCollector` return inference was also measured and removed. It preserved
   the exact semantic manifest and fingerprints, but the profiled target was

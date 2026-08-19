@@ -1868,23 +1868,34 @@ fn merge_collected_visitor_type_facts(visitor: &FactCollector, merged: &mut Vec<
 }
 
 fn merge_precise_visitor_type_facts(visitor_facts: Vec<TypeFact>, merged: &mut Vec<TypeFact>) {
+    // Subject equality against the whole merged vector is O(n*m) and showed up
+    // as TypeSubject PartialEq on the project-file assembly path. Index live
+    // slots by subject for this merge only; the map does not outlive assembly.
+    let mut slots: Vec<Option<TypeFact>> = merged.drain(..).map(Some).collect();
+    let mut indexes_by_subject: HashMap<TypeSubject, Vec<usize>> = HashMap::new();
+    for (index, fact) in slots.iter().enumerate() {
+        let Some(fact) = fact.as_ref() else {
+            continue;
+        };
+        indexes_by_subject
+            .entry(fact.subject.clone())
+            .or_default()
+            .push(index);
+    }
+
     for visitor_fact in visitor_facts {
         if visitor_fact.provenance != TypeProvenance::Runtime
             && !type_subject_is_assignment_slot(&visitor_fact.subject)
         {
-            let same_slot_indexes = merged
-                .iter()
-                .enumerate()
-                .filter_map(|(index, fact)| {
-                    (fact.subject == visitor_fact.subject
-                        && (!type_subject_is_definition_slot(&visitor_fact.subject)
-                            || assignment_ranges_identify_same_write(
-                                fact.range,
-                                visitor_fact.range,
-                            )))
-                    .then_some(index)
-                })
-                .collect::<Vec<_>>();
+            let same_slot_indexes = live_subject_slot_indexes(
+                &slots,
+                &indexes_by_subject,
+                &visitor_fact.subject,
+                |fact| {
+                    !type_subject_is_definition_slot(&visitor_fact.subject)
+                        || assignment_ranges_identify_same_write(fact.range, visitor_fact.range)
+                },
+            );
 
             // Direct indexing publishes a cheap syntax seed before the full
             // flow visitor runs. For one inferred method definition, the
@@ -1895,60 +1906,93 @@ fn merge_precise_visitor_type_facts(visitor_facts: Vec<TypeFact>, merged: &mut V
             if matches!(visitor_fact.subject, TypeSubject::MethodReturn(_))
                 && visitor_fact.provenance == TypeProvenance::Inferred
                 && !same_slot_indexes.is_empty()
-                && same_slot_indexes
-                    .iter()
-                    .all(|index| merged[*index].provenance == TypeProvenance::Inferred)
+                && same_slot_indexes.iter().all(|&index| {
+                    slots[index].as_ref().expect(
+                        "INVARIANT VIOLATED: merge selected a tombstoned type-fact slot. This is a bug because live_subject_slot_indexes must skip cleared entries. Fix: keep slot liveness and subject indexes in the same merge step.",
+                    ).provenance == TypeProvenance::Inferred
+                })
             {
-                for index in same_slot_indexes.into_iter().rev() {
-                    merged.remove(index);
-                }
-                merged.push(visitor_fact);
+                tombstone_merged_slots(&mut slots, &same_slot_indexes);
+                push_merged_type_fact(&mut slots, &mut indexes_by_subject, visitor_fact);
                 continue;
             }
 
-            let has_same_slot = !same_slot_indexes.is_empty();
-            if !has_same_slot {
-                merged.push(visitor_fact);
+            if same_slot_indexes.is_empty() {
+                push_merged_type_fact(&mut slots, &mut indexes_by_subject, visitor_fact);
             }
             continue;
         }
-        let matching_slot_indexes = merged
-            .iter()
-            .enumerate()
-            .filter_map(|(index, fact)| {
-                (fact.subject == visitor_fact.subject
-                    && assignment_ranges_identify_same_write(fact.range, visitor_fact.range))
-                .then_some(index)
-            })
-            .collect::<Vec<_>>();
+        let matching_slot_indexes =
+            live_subject_slot_indexes(&slots, &indexes_by_subject, &visitor_fact.subject, |fact| {
+                assignment_ranges_identify_same_write(fact.range, visitor_fact.range)
+            });
         if matching_slot_indexes.is_empty() {
             // A different source range is a different write, even when the
             // variable subject is identical. Unknown writes are semantic kill
             // facts: dropping one would let a query resurrect an obsolete
             // concrete type from an earlier assignment.
-            merged.push(visitor_fact);
+            push_merged_type_fact(&mut slots, &mut indexes_by_subject, visitor_fact);
             continue;
         }
         if visitor_fact.ruby_type == RubyType::Unknown {
             continue;
         }
-        if matching_slot_indexes
-            .iter()
-            .any(|index| merged[*index].ruby_type == visitor_fact.ruby_type)
-        {
+        if matching_slot_indexes.iter().any(|&index| {
+            slots[index].as_ref().expect(
+                "INVARIANT VIOLATED: merge selected a tombstoned type-fact slot while comparing assignment types. This is a bug because live_subject_slot_indexes must skip cleared entries. Fix: keep slot liveness and subject indexes in the same merge step.",
+            ).ruby_type == visitor_fact.ruby_type
+        }) {
             continue;
         }
         if visitor_fact.provenance != TypeProvenance::Runtime {
             // Two non-runtime producers disagreeing about the same write are
             // retained as ambiguity. TypeStore queries must fail closed rather
             // than silently selecting either derivation.
-            merged.push(visitor_fact);
+            push_merged_type_fact(&mut slots, &mut indexes_by_subject, visitor_fact);
             continue;
         }
-        for index in matching_slot_indexes.into_iter().rev() {
-            merged.remove(index);
-        }
-        merged.push(visitor_fact);
+        tombstone_merged_slots(&mut slots, &matching_slot_indexes);
+        push_merged_type_fact(&mut slots, &mut indexes_by_subject, visitor_fact);
+    }
+
+    *merged = slots.into_iter().flatten().collect();
+}
+
+fn live_subject_slot_indexes(
+    slots: &[Option<TypeFact>],
+    indexes_by_subject: &HashMap<TypeSubject, Vec<usize>>,
+    subject: &TypeSubject,
+    mut keep: impl FnMut(&TypeFact) -> bool,
+) -> Vec<usize> {
+    indexes_by_subject
+        .get(subject)
+        .into_iter()
+        .flatten()
+        .copied()
+        .filter(|&index| slots[index].as_ref().is_some_and(|fact| keep(fact)))
+        .collect()
+}
+
+fn push_merged_type_fact(
+    slots: &mut Vec<Option<TypeFact>>,
+    indexes_by_subject: &mut HashMap<TypeSubject, Vec<usize>>,
+    fact: TypeFact,
+) {
+    let index = slots.len();
+    indexes_by_subject
+        .entry(fact.subject.clone())
+        .or_default()
+        .push(index);
+    slots.push(Some(fact));
+}
+
+fn tombstone_merged_slots(slots: &mut [Option<TypeFact>], indexes: &[usize]) {
+    for &index in indexes {
+        assert!(
+            slots[index].is_some(),
+            "INVARIANT VIOLATED: merge tombstoned a type-fact slot twice. This is a bug because each live slot may be replaced at most once per visitor fact. Fix: filter live indexes before replacement."
+        );
+        slots[index] = None;
     }
 }
 
@@ -2366,6 +2410,65 @@ mod tests {
         assert_eq!(merged[0].subject, subject);
         assert_eq!(merged[0].ruby_type, RubyType::Unknown);
         assert_eq!(merged[0].range, visitor_range);
+    }
+
+    #[test]
+    fn inferred_method_return_replace_keeps_unrelated_neighbors() {
+        let file_id = ruby_analysis::core::SourceFileId(13);
+        let method = FullyQualifiedName::method(
+            vec![RubyConstant::new("Owner").unwrap()],
+            RubyMethod::new("value").unwrap(),
+        );
+        let method_subject = TypeSubject::MethodReturn(method);
+        let first_local = TypeSubject::Local {
+            scope_id: 1,
+            name: "before".to_string(),
+        };
+        let last_local = TypeSubject::Local {
+            scope_id: 1,
+            name: "after".to_string(),
+        };
+        let seed_range = TextRange::new(file_id, 10, 40);
+        let visitor_range = TextRange::new(file_id, 12, 38);
+        let mut merged = vec![
+            TypeFact::new(
+                first_local.clone(),
+                RubyType::integer(),
+                TextRange::new(file_id, 0, 8),
+                TypeProvenance::Assignment,
+            ),
+            TypeFact::new(
+                method_subject.clone(),
+                RubyType::integer(),
+                seed_range,
+                TypeProvenance::Inferred,
+            ),
+            TypeFact::new(
+                last_local.clone(),
+                RubyType::string(),
+                TextRange::new(file_id, 50, 58),
+                TypeProvenance::Assignment,
+            ),
+        ];
+
+        merge_precise_visitor_type_facts(
+            vec![TypeFact::new(
+                method_subject.clone(),
+                RubyType::string(),
+                visitor_range,
+                TypeProvenance::Inferred,
+            )],
+            &mut merged,
+        );
+
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].subject, first_local);
+        assert_eq!(merged[0].ruby_type, RubyType::integer());
+        assert_eq!(merged[1].subject, last_local);
+        assert_eq!(merged[1].ruby_type, RubyType::string());
+        assert_eq!(merged[2].subject, method_subject);
+        assert_eq!(merged[2].ruby_type, RubyType::string());
+        assert_eq!(merged[2].range, visitor_range);
     }
 
     #[test]
