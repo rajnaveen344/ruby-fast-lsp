@@ -1251,6 +1251,37 @@ budget to accept a candidate or trade semantic correctness for timing.
   would make `Unknown` mean both "not proven" and "not inferred yet," and
   closed-file methods without RBS/YARD would lose cross-file returns.
   Keep inferring every project file at index time; speed up that visitor.
+- Accepted August 19 2026: dependency sources (`Signature` / `External` /
+  `Stub` / `Stdlib` / `Gem`) skip TypeTracker, higher-order prepare,
+  call-expression outcomes, expression-receiver inference, and JRuby call
+  hosting. RBS, YARD, and constructor returns stay. Project files still run
+  the full body walk. Gem/stdlib hover without a declared return may be
+  Unknown; do not restore gem TypeTracker to keep an old semantic-result
+  fingerprint.
+- FileProcessor clones an `Arc` name-only tracked-call set once per project
+  file so ordinary Ruby calls never take the extension registry lock. Hits
+  still dispatch Wasm patches and classify enclosing frames as separate
+  locked operations. Do not merge those operations or retain a registry
+  snapshot; that RSS path was rejected August 1 2026.
+- Persistent derived-product cleanup must `try_lock` exclusive maintenance
+  and skip when in-flight reservations hold the shared lease. Blocking
+  cleanup deadlocks concurrent gem publication after the 64-write rescan
+  (180s ownership lock timeout). Retry on a later publication.
+- Rejected August 19 2026: a process-local retained decoded-gem cache (256
+  entries / 256 MiB) so sibling engines skip a second zstd+postcard. On the
+  official two-project pair it moved process peak RSS to 2.27 GB, still
+  2.08 GB after revert, both above the fixed 1.777 GB ceiling. Completed gem
+  products stay ephemeral single-flight. Bounded `GEM_PRODUCT_LOAD_PREFETCH=2`
+  decode then serial bind is not prefetch-during-remaining.
+- Stopped August 19 2026: 28 auto-discovered Gemfile roots under a local
+  umbrella were still ~38s warm and ~55s cold complete, including gem bind
+  and `engine.resolve()`. Leftover bars are project TypeTracker on the three
+  large JRuby apps (~5600 files; server project batch ~8.7s warm) and cloning
+  gem declaration facts into isolated engines (server product_binding ~8.9s
+  warm). Evidence:
+  `support/performance/all-goshposh-10s-index-leftover-2026-08-19.json`.
+  Do not skip project-file body inference or merge isolated engines to hit
+  a wall-clock target.
 - First-walk `infer_type` engine returns use the same cached
   `method_return_type_for_receiver*` path as TypeTracker after same-file
   local checks. Do not restore the per-expression callee vector plus

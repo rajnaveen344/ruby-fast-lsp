@@ -583,7 +583,16 @@ impl PersistentDerivedProductCache {
 
     fn cleanup_to_limits(&self) -> Result<()> {
         let maintenance_lock = self.open_maintenance_lock()?;
-        acquire_lock(&maintenance_lock, true, &self.inner.counters)?;
+        if !try_acquire_lock(&maintenance_lock, true)? {
+            // In-flight reservations hold a shared maintenance lease across
+            // product construction. Blocking for exclusive cleanup deadlocks
+            // those producers when they later publish. Retry on a later
+            // publication once the lease is free.
+            log::info!(
+                "Skipping persistent product cleanup because in-flight reservations hold the maintenance lease"
+            );
+            return Ok(());
+        }
         let mut entries = scan_product_entries(&self.namespace_root())?;
         entries.sort_by(|left, right| {
             left.modified
@@ -929,23 +938,31 @@ fn open_private_lock_file(path: &Path) -> Result<File> {
         .with_context(|| format!("opening persistent cache lock {}", path.display()))
 }
 
+fn try_acquire_lock(file: &File, exclusive: bool) -> Result<bool> {
+    let result = if exclusive {
+        FileExt::try_lock_exclusive(file)
+    } else {
+        FileExt::try_lock_shared(file)
+    };
+    match result {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(false),
+        Err(error) => Err(error).context("acquiring persistent cache ownership lock"),
+    }
+}
+
 fn acquire_lock(file: &File, exclusive: bool, counters: &PersistentProductCounters) -> Result<()> {
     let started = Instant::now();
     let mut waited = false;
     loop {
-        let result = if exclusive {
-            FileExt::try_lock_exclusive(file)
-        } else {
-            FileExt::try_lock_shared(file)
-        };
-        match result {
-            Ok(()) => {
+        match try_acquire_lock(file, exclusive)? {
+            true => {
                 if waited {
                     counters.lock_waits.fetch_add(1, Ordering::Relaxed);
                 }
                 return Ok(());
             }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+            false => {
                 waited = true;
                 if started.elapsed() >= LOCK_WAIT_TIMEOUT {
                     return Err(anyhow!(
@@ -955,7 +972,6 @@ fn acquire_lock(file: &File, exclusive: bool, counters: &PersistentProductCounte
                 }
                 std::thread::sleep(LOCK_RETRY_INTERVAL);
             }
-            Err(error) => return Err(error).context("acquiring persistent cache ownership lock"),
         }
     }
 }
@@ -1225,7 +1241,7 @@ mod tests {
         decode_envelope, CompiledWasmProductKey, PersistentCompiledWasmLookup,
         PersistentDerivedProductCache, PersistentGemProductLookup, PersistentJavaArtifactLookup,
         PersistentProductKind, COMPILED_WASM_PRODUCT_MAGIC, ENVELOPE_HEADER_BYTES, ENVELOPE_SCHEMA,
-        MAX_COMPILED_WASM_LOGICAL_ENTRY_BYTES,
+        MAX_COMPILED_WASM_LOGICAL_ENTRY_BYTES, RESCAN_PUBLICATION_INTERVAL,
     };
     use crate::dependency_product::{
         GemDependencyFileTemplate, GemDependencyManifest, GemDependencyProduct, GemDependencySource,
@@ -1241,6 +1257,7 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::io::{Cursor, Write};
     use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
     use zip::write::SimpleFileOptions;
 
     use crate::runtime::jruby::classpath::{ArtifactKind, ArtifactOrigin, ClasspathArtifact};
@@ -1708,6 +1725,51 @@ mod tests {
         };
         assert_eq!(recovering.compiled_wasm_snapshot().corruptions, 1);
         rebuild.publish(&key, &artifact).unwrap();
+    }
+
+    #[test]
+    fn in_flight_reservation_does_not_block_sibling_publication_cleanup() {
+        let fixture = tempfile::tempdir().unwrap();
+        let cache = PersistentDerivedProductCache::with_limits(
+            fixture.path().to_path_buf(),
+            4096,
+            2 * 1024 * 1024 * 1024,
+        );
+        let held = unique_test_manifest(fixture.path(), "held");
+        let PersistentGemProductLookup::Reservation(_held) =
+            cache.lookup_or_reserve(&held).unwrap()
+        else {
+            panic!("held identity must reserve while siblings publish");
+        };
+
+        let started = Instant::now();
+        for index in 0..=RESCAN_PUBLICATION_INTERVAL {
+            let item = unique_test_manifest(fixture.path(), &format!("sibling{index}"));
+            let PersistentGemProductLookup::Reservation(reservation) =
+                cache.lookup_or_reserve(&item).unwrap()
+            else {
+                panic!("sibling identity must reserve");
+            };
+            reservation.publish(&product(&item)).unwrap();
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "sibling publication must not wait for the 180s exclusive maintenance lock while a reservation holds the shared lease"
+        );
+    }
+
+    fn unique_test_manifest(root: &Path, name: &str) -> GemDependencyManifest {
+        let path = root.join(name).join("lib/g.rb");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let content = format!("class {name}; end");
+        std::fs::write(&path, &content).unwrap();
+        manifest_with_inputs(
+            &path,
+            &content,
+            None,
+            &[format!("{name}:1.0.0:ruby:registry")],
+            "class CacheSeed; end",
+        )
     }
 
     #[test]

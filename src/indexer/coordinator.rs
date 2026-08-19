@@ -28,6 +28,7 @@ use crate::runtime::jruby::runtime_sources::materialize_jruby_runtime_sources;
 use crate::runtime::jruby::source_navigation::{JavaSourceResolutionLimits, JavaSourceResolver};
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
+use futures::stream::{self, StreamExt};
 use log::{debug, info, warn};
 use rayon::prelude::*;
 use ruby_analysis::core::{
@@ -47,6 +48,10 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Posit
 
 const MIB: usize = 1024 * 1024;
 const MAX_ACTIVE_PROJECT_FILE_PRIORITY_KEYS: usize = 8;
+/// Overlap at most this many gem product loads ahead of lockfile-ordered bind.
+/// Each load still claims gem-product transient memory, so two is the largest
+/// prefetch that fits the 512 MiB governor without restoring unbounded hold.
+const GEM_PRODUCT_LOAD_PREFETCH: usize = 2;
 // Deterministic collection retains one batch's complete file-owned facts until
 // every worker has observed the same immutable engine context. Keep the batch
 // small enough that those retained facts stay inside the measured multi-root
@@ -2629,10 +2634,10 @@ impl IndexingCoordinator {
 
     /// Bind already-discovered locked gems into one isolated project engine.
     ///
-    /// Manifest preparation overlaps the preceding product's load and binding
-    /// through a one-slot ordered pipeline. At most the current product, one
-    /// queued manifest, and the producer's next manifest are retained while
-    /// insertion remains strictly lockfile ordered.
+    /// Manifest preparation overlaps the next product's load through a bounded
+    /// ordered pipeline. Bind remains strictly lockfile ordered. At most
+    /// `GEM_PRODUCT_LOAD_PREFETCH` decoded products are in flight, plus the
+    /// product currently being inserted.
     async fn index_configured_gems(
         server: &RubyLanguageServer,
         workspace_root: PathBuf,
@@ -2668,13 +2673,13 @@ impl IndexingCoordinator {
         let producer_server = server.clone();
         let producer_root = workspace_root.clone();
         let producer_cancellation = cancellation.clone();
-        let (manifest_sender, mut manifest_receiver) = tokio::sync::mpsc::channel::<
+        let (manifest_sender, manifest_receiver) = tokio::sync::mpsc::channel::<
             Result<(
                 String,
                 crate::dependency_product::GemDependencyManifest,
                 Vec<String>,
             )>,
-        >(1);
+        >(GEM_PRODUCT_LOAD_PREFETCH);
         let producer_navigation_demands = navigation_demands.clone();
         let manifest_producer = async move {
             let mut prepared_products = 0usize;
@@ -2784,42 +2789,40 @@ impl IndexingCoordinator {
             let mut indexed_files = 0usize;
             let mut product_load_wall = Duration::default();
             let mut product_binding_wall = Duration::default();
-            while let Some(manifest) = manifest_receiver.recv().await {
-                let (gem_name, manifest, matched_demand_keys) = match manifest {
-                    Ok(manifest) => manifest,
-                    Err(error) => {
-                        manifest_receiver.close();
-                        return Err(error);
-                    }
-                };
-                let loading_started = Instant::now();
-                let loaded = match consumer_indexer
-                    .load_prepared_required_gem_with_shared_product(server, manifest)
-                    .await
-                {
-                    Ok(loaded) => loaded,
-                    Err(error) => {
-                        manifest_receiver.close();
-                        return Err(error);
-                    }
-                };
-                product_load_wall += loading_started.elapsed();
+            let loads = stream::unfold(manifest_receiver, |mut receiver| async move {
+                let item = receiver.recv().await?;
+                Some((item, receiver))
+            })
+            .map(|item| {
+                let indexer = consumer_indexer.clone();
+                async move {
+                    let (gem_name, manifest, matched_demand_keys) = item?;
+                    let loading_started = Instant::now();
+                    let loaded = indexer
+                        .load_prepared_required_gem_with_shared_product(server, manifest)
+                        .await?;
+                    Ok::<_, anyhow::Error>((
+                        gem_name,
+                        loaded,
+                        matched_demand_keys,
+                        loading_started.elapsed(),
+                    ))
+                }
+            })
+            .buffered(GEM_PRODUCT_LOAD_PREFETCH);
+            futures::pin_mut!(loads);
+            while let Some(loaded) = loads.next().await {
+                let (gem_name, loaded, matched_demand_keys, load_elapsed) = loaded?;
+                product_load_wall += load_elapsed;
                 let binding_started = Instant::now();
-                let bound = match consumer_indexer
+                let bound = consumer_indexer
                     .bind_loaded_required_gem_product(
                         server,
                         analysis_engine.clone(),
                         loaded,
                         cancellation.clone(),
                     )
-                    .await
-                {
-                    Ok(bound) => bound,
-                    Err(error) => {
-                        manifest_receiver.close();
-                        return Err(error);
-                    }
-                };
+                    .await?;
                 indexed_files += bound.len();
                 product_binding_wall += binding_started.elapsed();
                 let dependency_key = dependency_priority_key(&gem_name);
@@ -3288,6 +3291,39 @@ mod coordinator_integration_tests {
             coordinator.extension_registry.is_none(),
             "project coordinators must consume the server-owned extension registry instead of loading every package once per project"
         );
+    }
+
+    #[test]
+    fn mri_runtime_does_not_materialize_a_jruby_import_provider() {
+        let fixture = TempDir::new().unwrap();
+        let root = fixture.path().join("tool");
+        fs::create_dir_all(&root).unwrap();
+        let executable = root.join("ruby");
+        fs::write(&executable, b"fixture").unwrap();
+        let runtime = SelectedRuntimeDescriptor {
+            implementation: RuntimeImplementation::Mri,
+            family: "3.3".to_string(),
+            engine_version: "3.3.11".to_string(),
+            compatibility_version: "3.3".to_string(),
+            executable,
+            discovery_source: RuntimeDiscoverySource::Path,
+            java_home: None,
+        };
+        let (provider, archive) = build_jruby_import_provider(
+            root,
+            RubyFastLspConfig::default(),
+            Some(runtime),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(
+            provider.is_none(),
+            "MRI Gemfile roots must skip JRuby classpath and Java catalog work"
+        );
+        assert!(archive.is_none());
     }
 
     #[cfg(unix)]

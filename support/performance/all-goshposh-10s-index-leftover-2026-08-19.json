@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-19",
+  "decision": "stop",
+  "purpose": "Record the 28-root complete-index campaign after the legal cuts (dependency body-inference skip, bounded gem-load prefetch with serial bind, Arc name-only tracked-call prefilter). The 10s warm-and-cold gate was not met. Leftover bars are contract-required project TypeTracker and per-engine gem-fact clone. Do not skip project-file body inference or merge isolated engines.",
+  "gate": {
+    "workspace": "/Users/naveenraj/goshposh",
+    "discovered_gemfile_roots": 28,
+    "target_complete_index_ms": 10000,
+    "includes_background": "gem bind and engine.resolve()",
+    "two_project_peak_rss_ceiling_bytes": 1776846438
+  },
+  "accepted_cuts": {
+    "dependency_body_inference_skip": "SourceKind::is_dependency_source collection uses FactCollector::without_body_inference (no TypeTracker, higher-order prepare, call-expression outcomes, expression-receiver inference, or JRuby process_call_node). RBS/YARD/constructor returns remain. Project files still infer undeclared returns.",
+    "gem_load_prefetch": "GEM_PRODUCT_LOAD_PREFETCH=2 independent product loads, then lockfile-ordered serial bind. This is not prefetch-during-remaining.",
+    "tracked_call_name_set": "ProjectFactCollectorHost clones Arc<HashSet<String>> once per file. Ordinary names miss without a registry lock. Hits still dispatch and classify frames as separate locked operations.",
+    "persistent_cleanup_try_lock": "cleanup_to_limits try-locks exclusive maintenance and skips when in-flight reservations hold the shared lease. Blocking cleanup deadlocked concurrent gem publication after 64 writes (180s ownership lock timeout).",
+    "mri_jruby_skip": "build_jruby_import_provider returns (None, None) for non-JRuby; tiny MRI Gemfile roots stay Bundler+core only (products=0)."
+  },
+  "rejected_cuts": {
+    "decoded_gem_ram_cache": {
+      "design": "BoundedSingleFlightCache::new(256 entries, 256 MiB) for decoded gem products so sibling engines avoid a second zstd+postcard of the same payload.",
+      "two_project_process_peak_rss_bytes": 2271625216,
+      "two_project_external_peak_rss_bytes": 2320498688,
+      "after_revert_to_ephemeral_process_peak_rss_bytes": 2079588352,
+      "after_revert_to_ephemeral_external_peak_rss_bytes": 2127101952,
+      "reason": "Retained decoded products moved two-project process peak RSS further above the fixed 1.777 GB ceiling (2.27 GB with the cache, 2.08 GB ephemeral). Completed gem products stay ephemeral single-flight. Do not restore a retained decoded-gem cache without a design that stays under the ceiling."
+    }
+  },
+  "configuration": {
+    "runtime": "jruby-9.2.21.0 for server, server-devops-5441, admin, charts, show-notifier; remaining roots MRI/auto",
+    "jdk": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home",
+    "scheduler_concurrency": 2,
+    "extension_path": "./editors/vscode/vsix",
+    "cpu_lanes": 6,
+    "top_level_tasks": 2,
+    "transient_memory_bytes": 536870912,
+    "io_slots": 2,
+    "machine": {
+      "cpu_model": "Apple M4 Pro",
+      "logical_cpus": 14,
+      "physical_memory_bytes": 25769803776,
+      "os_release": "Darwin 25.2.0"
+    }
+  },
+  "baseline_before_cuts": {
+    "note": "Phase 0 on the then-current binary. First 28-root run was mostly gem miss against a stale persistent identity; second run had more hits. Two-project warm complete was historically ~14.4s median.",
+    "warm_two_project_complete_ms": 14400,
+    "cold_one_server_complete_ms": 25500,
+    "cold_one_server_product_load_ms": 14400,
+    "first_28_root_wall_ms": 77400,
+    "second_28_root_wall_ms": 46000
+  },
+  "final_binary": {
+    "source_revision": "1bad1bdd7874bebef73369435bfd1fa91725f755",
+    "source_worktree": "uncommitted dependency-visitor prune, gem-load prefetch 2, tracked-call name Arc, persistent cleanup try-lock; decoded-gem RAM cache reverted to ephemeral",
+    "profiler_executable_sha256": "8add6db19edccc35e42aa156e61ae84254fb74b6b2fabe2b6ba0070d34230bbd",
+    "tracked_diff_sha256": "d8dc2fb66fa3170b115f06beb22dea881716967d0026170140eb684ecc015e17"
+  },
+  "commands": {
+    "cold_28": "JAVA_HOME=<jdk17> RUBY_FAST_LSP_CACHE_DIR=<empty-cache> RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --phase all --config /tmp/ruby-fast-lsp-goshposh-all-gemfiles.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2",
+    "warm_28": "same command against the populated cache directory",
+    "warm_two_project": "same cache; --config /tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json with indexing.projectRoots [server, server-devops-5441] --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest"
+  },
+  "cold_28_empty_cache": {
+    "note": "Empty RUBY_FAST_LSP_CACHE_DIR. This binary still had the later-reverted 256-entry decoded-gem RAM cache; in-process hits were 70/1064. Persistent gem misses 899. Java artifacts were also cold (209 misses).",
+    "profiler_executable_sha256": "2e88e5020086155b21a7aa6143f314924db579dd3a2b71771fbe81b29217dd1f",
+    "log": "/tmp/ruby-fast-lsp-10s-remeasure/cold-28.log",
+    "jsonl": "/tmp/ruby-fast-lsp-10s-remeasure/cold-28.jsonl",
+    "log_sha256": "cc76df6f7588e118084d043a3ceb120f288729af44e9707eb879acddd80c42c0",
+    "jsonl_sha256": "0beb88beaaa4a63c6a811f8f10b398da90450dfcf494b1d11fc7235120c0a808",
+    "wall_ms": 54958.657958,
+    "profiler_total_s": 57.806481333,
+    "process_peak_rss_bytes": 3269459968,
+    "external_peak_rss_bytes": 3321102336,
+    "persistent_gem": {
+      "lookups": 957,
+      "hits": 58,
+      "misses": 899,
+      "producers": 899
+    },
+    "persistent_java": {
+      "lookups": 322,
+      "hits": 113,
+      "misses": 209
+    },
+    "largest_complete_s": {
+      "server": 28.72042625,
+      "server_devops_5441": 24.652370375,
+      "admin": 19.469395167
+    },
+    "project_batch_stream_s": {
+      "server": 9.85034875,
+      "server_devops_5441": 7.367922333,
+      "admin": 1.557825167
+    },
+    "gem_pipeline_s": {
+      "server": {
+        "products": 303,
+        "product_load": 23.938091741,
+        "product_binding": 2.909468368,
+        "pipeline": 18.217356916
+      },
+      "server_devops_5441": {
+        "products": 301,
+        "product_load": 12.242558748,
+        "product_binding": 2.497595209,
+        "pipeline": 14.615272917
+      }
+    }
+  },
+  "warm_28_ephemeral_gem_cache": {
+    "persistent_cache_state": "populated from the cold run; gem and Java hits",
+    "log": "/tmp/ruby-fast-lsp-10s-remeasure/warm-28-ephemeral.log",
+    "jsonl": "/tmp/ruby-fast-lsp-10s-remeasure/warm-28-ephemeral.jsonl",
+    "log_sha256": "630a7b41e8017af081ee96abc9d278079dd26d15683ed46912b242954463fa6f",
+    "jsonl_sha256": "2ae2e290da065f0e014b81e7d94e1fa5ea1ec0aa28d8902058f68721cbc4995b",
+    "wall_ms": 37746.278959,
+    "profiler_total_s": 40.081015459,
+    "process_peak_rss_bytes": 3059171328,
+    "external_peak_rss_bytes": 3162521600,
+    "user_cpu_ms": 69690.866,
+    "dataset_fingerprint_sha256": "6751512c59943709fa891cc1cf087b4a88cd7bce82942f14f7cb40659d3ffb9e",
+    "engine_estimated_heap_bytes": 1236047380,
+    "engine_files": 62839,
+    "persistent_gem": {
+      "lookups": 1062,
+      "hits": 1062,
+      "misses": 0
+    },
+    "process_local_gem": {
+      "entries": 0,
+      "lookups": 1064,
+      "hits": 0,
+      "producers": 1062,
+      "retained_weight_bytes": 0
+    },
+    "semantic_complete_ms": {
+      "min": 5829,
+      "p50": 11157,
+      "p95": 36399,
+      "max": 37746
+    },
+    "largest_complete_s": {
+      "server": 21.2,
+      "server_devops_5441": 18.43,
+      "admin": 10.27
+    },
+    "project_batch_stream_s": {
+      "server": 8.740027584,
+      "server_devops_5441": 7.155408917,
+      "admin": 1.436062666
+    },
+    "gem_pipeline_s": {
+      "server": {
+        "products": 303,
+        "product_load": 10.430364329,
+        "product_binding": 8.874906758,
+        "pipeline": 12.706220166
+      },
+      "server_devops_5441": {
+        "products": 301,
+        "product_load": 3.948757215,
+        "product_binding": 2.337697627,
+        "pipeline": 10.336951458
+      },
+      "admin": {
+        "products": 289,
+        "product_load": 4.413179676,
+        "product_binding": 2.330411915,
+        "pipeline": 3.905958375
+      }
+    }
+  },
+  "warm_two_project_ephemeral_gem_cache": {
+    "projects": [
+      "/Users/naveenraj/goshposh/server/",
+      "/Users/naveenraj/goshposh/server-devops-5441/"
+    ],
+    "log": "/tmp/ruby-fast-lsp-10s-remeasure/warm-2p-ephemeral.log",
+    "jsonl": "/tmp/ruby-fast-lsp-10s-remeasure/warm-2p-ephemeral.jsonl",
+    "log_sha256": "7f74d5994629884413829c5f8bc05e77757d0a789c33cb6809fb63c498ebd4f2",
+    "jsonl_sha256": "6d5cea071c53f7b67c5b450ad322943b2b22eb6fb7f878c8dcc74327f3ae4ce1",
+    "wall_ms": 22484.45775,
+    "profiler_total_s": 24.283236667,
+    "process_peak_rss_bytes": 2079588352,
+    "external_peak_rss_bytes": 2127101952,
+    "user_cpu_ms": 58362.617,
+    "engine_estimated_heap_bytes": 775199049,
+    "engine_files": 35580,
+    "ceiling_excess_process_rss_bytes": 302741914,
+    "project_semantic_result_fingerprints": {
+      "/Users/naveenraj/goshposh/server": "a6c4319260a4eec1a0035c5b71bff724",
+      "/Users/naveenraj/goshposh/server-devops-5441": "752cab0cbc17af1d17f0acd9e599a919"
+    },
+    "note": "Fingerprints changed versus historical two-project hashes because gem/stdlib methods without RBS/YARD no longer persist inferred returns. Do not restore gem TypeTracker to keep an old fingerprint."
+  },
+  "leftover_bars": {
+    "project_type_tracker": {
+      "why_required": "AGENTS / project-file-inference: TypeTracker, higher-order calls, local flow, and inferred returns must run for every project file. Unknown means proof was attempted.",
+      "warm_28_server_project_batch_s": 8.740027584,
+      "warm_28_devops_project_batch_s": 7.155408917,
+      "warm_28_admin_project_batch_s": 1.436062666,
+      "approx_project_ruby_files": 5600
+    },
+    "isolated_engine_gem_clone": {
+      "why_required": "Each Gemfile root owns an isolated AnalysisEngine. instantiate() deep-clones FileFacts per consumer. Warm server product_binding 8.87s is bind into one engine after persistent hits.",
+      "warm_28_server_product_binding_s": 8.874906758,
+      "warm_28_devops_product_binding_s": 2.337697627,
+      "warm_28_admin_product_binding_s": 2.330411915,
+      "warm_28_server_resolve_s": 2.6
+    }
+  },
+  "outcome": {
+    "warm_28_under_10s": false,
+    "cold_28_under_10s": false,
+    "two_project_rss_ceiling_held": false,
+    "project_file_inference_unchanged": true,
+    "next": "Do not skip project bodies or merge engines. Further wall cuts need a cheaper project visitor or interned/Arc declaration blobs measured under the two-project RSS ceiling."
+  }
+}

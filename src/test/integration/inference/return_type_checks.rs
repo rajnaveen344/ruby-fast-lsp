@@ -81,6 +81,22 @@ end
 }
 
 #[tokio::test]
+async fn project_files_still_infer_undeclared_method_returns() {
+    check(
+        r#"
+class Widget
+  def value
+    1
+  end
+end
+
+result<hint label="Integer"> = Widget.new.value
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn inferred_return_type_is_not_treated_as_a_declaration() {
     check(
         r#"

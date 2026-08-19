@@ -74,6 +74,7 @@ pub struct FactCollector {
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
     pub resolve_analysis_method_returns: bool,
     pub infer_expression_receivers: bool,
+    infer_call_outcomes: bool,
     pub diagnostics_enabled: bool,
     pub direct_facts: AnalysisIndex,
     /// Append-only range index into `direct_facts.types` for expression facts.
@@ -392,6 +393,7 @@ impl FactCollector {
             diagnostic_candidates: Vec::new(),
             resolve_analysis_method_returns: true,
             infer_expression_receivers: true,
+            infer_call_outcomes: true,
             diagnostics_enabled: true,
             direct_facts: AnalysisIndex::default(),
             direct_expression_fact_indexes: HashMap::new(),
@@ -449,6 +451,19 @@ impl FactCollector {
 
     pub fn without_expression_receiver_inference(mut self) -> Self {
         self.infer_expression_receivers = false;
+        self
+    }
+
+    /// Declaration-shaped collection for immutable dependency sources.
+    ///
+    /// RBS/YARD/constructor returns stay. TypeTracker, higher-order prepare,
+    /// call-expression outcomes, expression-receiver inference, and local-read
+    /// Unknown evidence do not: project-neutral templates strip those anyway.
+    pub fn without_body_inference(mut self) -> Self {
+        self.record_local_read_unknown_reasons = false;
+        self.infer_expression_receivers = false;
+        self.resolve_analysis_method_returns = false;
+        self.infer_call_outcomes = false;
         self
     }
 
@@ -3578,7 +3593,11 @@ impl Visit<'_> for FactCollector {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                let (block_param_types, prepared) = self.infer_block_param_types_for_call(node);
+                let (block_param_types, prepared) = if self.infer_call_outcomes {
+                    self.infer_block_param_types_for_call(node)
+                } else {
+                    (Vec::new(), None)
+                };
                 prepared_higher_order = prepared;
                 self.block_param_type_stack.push(block_param_types);
                 let framework_instance_block =
@@ -3600,7 +3619,9 @@ impl Visit<'_> for FactCollector {
             }
         }
         self.process_nested_receiver_call_reference_candidate(node);
-        self.record_call_expression_type(node, prepared_higher_order);
+        if self.infer_call_outcomes {
+            self.record_call_expression_type(node, prepared_higher_order);
+        }
         self.record_current_method_forwarded_yield_types(node);
         self.process_call_node_exit(node);
     }

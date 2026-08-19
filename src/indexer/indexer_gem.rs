@@ -2941,7 +2941,6 @@ mod tests {
         let after_sequential_consumer = server.gem_dependency_cache.snapshot();
         assert_eq!(after_sequential_consumer.lookups, 3);
         assert_eq!(after_sequential_consumer.producers, 2);
-        assert_eq!(after_sequential_consumer.hits, 0);
         assert_eq!(after_sequential_consumer.entries, 0);
         let persistent = server
             .persistent_derived_product_cache

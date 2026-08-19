@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -88,7 +88,7 @@ impl std::fmt::Debug for ExtensionRegistryHandle {
 
 struct ExtensionRegistry {
     extensions: Vec<Arc<LoadedWasmExtension>>,
-    tracked_call_names: BTreeSet<String>,
+    tracked_call_names: Arc<HashSet<String>>,
     semantic_seeded_engines: Mutex<Vec<SeededExtensionEngine>>,
     load_config: ExtensionLoadConfig,
     discovery_fingerprint: [u8; 32],
@@ -866,11 +866,8 @@ impl ExtensionRegistryHandle {
         self.inner.read().applicability_snapshot(project)
     }
 
-    pub(crate) fn tracks_call(&self, node: &CallNode) -> bool {
-        self.inner
-            .read()
-            .tracked_call_names
-            .contains(utils::utf8_str(node.name().as_slice()))
+    pub(crate) fn tracked_call_names(&self) -> Arc<HashSet<String>> {
+        Arc::clone(&self.inner.read().tracked_call_names)
     }
 
     pub(crate) fn process_call_node_with_applicability(
@@ -1908,17 +1905,17 @@ impl LoadedWasmExtension {
     }
 }
 
-fn tracked_call_names(extensions: &[Arc<LoadedWasmExtension>]) -> BTreeSet<String> {
+fn tracked_call_names(extensions: &[Arc<LoadedWasmExtension>]) -> Arc<HashSet<String>> {
     let mut names = ruby_fast_lsp_extension_rspec::extension()
         .indexed_call_names()
         .iter()
         .map(|name| (*name).to_string())
-        .collect::<BTreeSet<_>>();
+        .collect::<HashSet<_>>();
     for extension in extensions {
         names.extend(extension.indexed_call_names.iter().cloned());
         names.extend(extension.frame_call_names.iter().cloned());
     }
-    names
+    Arc::new(names)
 }
 
 fn extension_target_owner_exists(visitor: &FactCollector, target: &ExtensionMethodTarget) -> bool {
@@ -5576,6 +5573,25 @@ mod tests {
 
     use super::*;
     use crate::server::RubyLanguageServer;
+
+    #[test]
+    fn tracked_call_name_set_is_shared_arc_and_covers_rspec_without_ordinary_ruby_names() {
+        let registry = ExtensionRegistryHandle::empty();
+        let names = registry.tracked_call_names();
+        let again = registry.tracked_call_names();
+        assert!(
+            Arc::ptr_eq(&names, &again),
+            "file hosts must clone the name-only Arc rather than copying the set"
+        );
+        assert!(
+            names.contains("describe"),
+            "RSpec frame names must remain in the name-only prefilter"
+        );
+        assert!(
+            !names.contains("save"),
+            "ordinary Ruby method names must miss the name-only prefilter so they never take the registry lock"
+        );
+    }
 
     fn copy_rspec_package(destination: &Path, version: &str) {
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");

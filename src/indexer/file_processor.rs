@@ -104,6 +104,15 @@ enum JrubyNavigationResolution {
     },
 }
 
+/// Name-only prefilter cloned once per file. Ordinary Ruby calls (`save`,
+/// `to_s`, ...) never take the registry lock. Hits still dispatch and classify
+/// frames as separate locked operations; do not merge those or retain a full
+/// registry snapshot for the visit.
+fn empty_tracked_call_names() -> Arc<HashSet<String>> {
+    static EMPTY: OnceLock<Arc<HashSet<String>>> = OnceLock::new();
+    Arc::clone(EMPTY.get_or_init(|| Arc::new(HashSet::new())))
+}
+
 /// Server-owned composition of built-in runtime semantics and public Wasm
 /// extensions. Runtime providers may add ordinary facts, while the extension
 /// registry remains the sole owner of extension frame tracking and resolved
@@ -112,8 +121,10 @@ enum JrubyNavigationResolution {
 struct ProjectFactCollectorHost {
     extension_registry: ExtensionRegistryHandle,
     extension_applicability: OnceLock<ExtensionApplicabilitySnapshot>,
+    tracked_call_names: Arc<HashSet<String>>,
     jruby_import_provider: Option<Arc<JrubyImportProvider>>,
     extensions_enabled: bool,
+    jruby_call_host_enabled: bool,
 }
 
 impl ProjectFactCollectorHost {
@@ -128,14 +139,23 @@ impl ProjectFactCollectorHost {
         self.extension_applicability
             .get_or_init(|| self.extension_registry.applicability_snapshot(project))
     }
+
+    fn tracks_call_name(&self, node: &CallNode<'_>) -> bool {
+        let Ok(name) = std::str::from_utf8(node.name().as_slice()) else {
+            return false;
+        };
+        self.tracked_call_names.contains(name)
+    }
 }
 
 impl FactCollectorExtensionHost for ProjectFactCollectorHost {
     fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode<'_>) -> bool {
-        if let Some(provider) = &self.jruby_import_provider {
-            let _ = provider.process_call_node(visitor, node);
+        if self.jruby_call_host_enabled {
+            if let Some(provider) = &self.jruby_import_provider {
+                let _ = provider.process_call_node(visitor, node);
+            }
         }
-        if self.extensions_enabled && self.extension_registry.tracks_call(node) {
+        if self.extensions_enabled && self.tracks_call_name(node) {
             return self
                 .extension_registry
                 .process_call_node_with_applicability(
@@ -149,7 +169,7 @@ impl FactCollectorExtensionHost for ProjectFactCollectorHost {
 
     fn should_track_enclosing_call(&self, visitor: &FactCollector, node: &CallNode<'_>) -> bool {
         self.extensions_enabled
-            && self.extension_registry.tracks_call(node)
+            && self.tracks_call_name(node)
             && self
                 .extension_registry
                 .should_track_enclosing_call_with_applicability(
@@ -271,12 +291,22 @@ impl FileProcessor {
         self.jruby_import_provider.as_ref()
     }
 
-    fn fact_collector_host(&self, extensions_enabled: bool) -> Arc<dyn FactCollectorExtensionHost> {
+    fn fact_collector_host(
+        &self,
+        extensions_enabled: bool,
+        jruby_call_host_enabled: bool,
+    ) -> Arc<dyn FactCollectorExtensionHost> {
         Arc::new(ProjectFactCollectorHost {
             extension_registry: self.extension_registry.clone(),
             extension_applicability: OnceLock::new(),
+            tracked_call_names: if extensions_enabled {
+                self.extension_registry.tracked_call_names()
+            } else {
+                empty_tracked_call_names()
+            },
             jruby_import_provider: self.jruby_import_provider.clone(),
             extensions_enabled,
+            jruby_call_host_enabled,
         })
     }
 
@@ -467,11 +497,11 @@ impl FileProcessor {
         let visitor_start = Instant::now();
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
-            self.fact_collector_host(extensions_enabled),
+            self.fact_collector_host(extensions_enabled, !source_kind.is_dependency_source()),
             analysis_engine.clone(),
         );
         if source_kind.is_dependency_source() {
-            visitor = visitor.without_local_read_unknown_reasons();
+            visitor = visitor.without_body_inference();
         }
         visitor.extension_project_context = extension_project_context.clone();
         visitor.visit(&node);
@@ -1438,11 +1468,11 @@ impl FileProcessor {
 
         let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
-            self.fact_collector_host(extensions_enabled),
+            self.fact_collector_host(extensions_enabled, !source_kind.is_dependency_source()),
             analysis_engine.clone(),
         );
         if source_kind.is_dependency_source() {
-            fact_collector = fact_collector.without_local_read_unknown_reasons();
+            fact_collector = fact_collector.without_body_inference();
         }
         fact_collector.extension_project_context = extension_project_context.clone();
         let shared_direct_known_namespaces = known_namespaces
@@ -2460,6 +2490,65 @@ mod tests {
             .expect("gem source must be registered");
         assert_eq!(engine.file(file_id).unwrap().kind, SourceKind::Gem);
         assert!(server.analysis_engine.read().file_id(&path).is_none());
+    }
+
+    fn collect_gem_template_facts(source: &str) -> FileFacts {
+        let server = RubyLanguageServer::default();
+        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
+        let dependency_uri = Url::parse("file:///shared/gems/widget/lib/widget.rb").unwrap();
+        let template = processor
+            .collect_project_neutral_file_template_as_deferred_resolution_in_engine(
+                &dependency_uri,
+                source,
+                producer_engine,
+                SourceKind::Gem,
+                Arc::new(HashSet::new()),
+            )
+            .unwrap();
+        template.instantiate(ruby_analysis::core::SourceFileId(1))
+    }
+
+    fn gem_method_returns(source: &str) -> Vec<(RubyType, TypeProvenance)> {
+        collect_gem_template_facts(source)
+            .types
+            .into_iter()
+            .filter_map(|fact| match fact.subject {
+                TypeSubject::MethodReturn(_) => Some((fact.ruby_type, fact.provenance)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn gem_collection_does_not_persist_inferred_method_returns() {
+        let returns = gem_method_returns("class SharedWidget\n  def value\n    1\n  end\nend\n");
+        assert!(
+            returns.iter().all(
+                |(ruby_type, provenance)| *provenance != TypeProvenance::Inferred
+                    || *ruby_type == RubyType::Unknown
+            ),
+            "dependency collection must not persist inferred-only method returns: {returns:?}"
+        );
+        assert!(
+            !returns
+                .iter()
+                .any(|(ruby_type, _)| *ruby_type == RubyType::integer()),
+            "inferred Integer must not survive gem product templates: {returns:?}"
+        );
+    }
+
+    #[test]
+    fn gem_collection_persists_yard_method_returns() {
+        let returns = gem_method_returns(
+            "class SharedWidget\n  # @return [Integer]\n  def value\n    'cached'\n  end\nend\n",
+        );
+        assert!(
+            returns.iter().any(|(ruby_type, provenance)| {
+                *ruby_type == RubyType::integer() && *provenance == TypeProvenance::Yard
+            }),
+            "YARD-declared gem returns must remain in project-neutral templates: {returns:?}"
+        );
     }
 
     #[test]

@@ -230,6 +230,17 @@ fn new_core_engine_cache(
     )
 }
 
+fn new_gem_dependency_cache() -> crate::single_flight::BoundedSingleFlightCache<
+    crate::dependency_product::GemDependencyProductKey,
+    crate::dependency_product::GemDependencyProduct,
+> {
+    crate::single_flight::BoundedSingleFlightCache::ephemeral(
+        |product: &crate::dependency_product::GemDependencyProduct| {
+            product.estimated_weight_bytes()
+        },
+    )
+}
+
 fn new_orphan_analysis_engine() -> Arc<RwLock<AnalysisEngine>> {
     let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
     crate::indexer::indexer_stdlib::IndexerStdlib::new(
@@ -479,11 +490,7 @@ impl RubyLanguageServer {
             indexing_resources: IndexingResourceGovernor::default(),
             core_engine_cache: new_core_engine_cache(),
             runtime_stdlib_path_cache: new_runtime_stdlib_path_cache(),
-            gem_dependency_cache: crate::single_flight::BoundedSingleFlightCache::ephemeral(
-                |product: &crate::dependency_product::GemDependencyProduct| {
-                    product.estimated_weight_bytes()
-                },
-            ),
+            gem_dependency_cache: new_gem_dependency_cache(),
             classpath_file_product_cache:
                 crate::runtime::jruby::classpath::ClasspathFileProductCache::default(),
             java_artifact_product_cache:
@@ -1671,11 +1678,7 @@ impl Default for RubyLanguageServer {
             indexing_resources: IndexingResourceGovernor::default(),
             core_engine_cache: new_core_engine_cache(),
             runtime_stdlib_path_cache: new_runtime_stdlib_path_cache(),
-            gem_dependency_cache: crate::single_flight::BoundedSingleFlightCache::ephemeral(
-                |product: &crate::dependency_product::GemDependencyProduct| {
-                    product.estimated_weight_bytes()
-                },
-            ),
+            gem_dependency_cache: new_gem_dependency_cache(),
             classpath_file_product_cache:
                 crate::runtime::jruby::classpath::ClasspathFileProductCache::default(),
             java_artifact_product_cache:
