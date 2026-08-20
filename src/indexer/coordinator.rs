@@ -5,6 +5,7 @@ use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::indexer_gem::{discover_locked_java_gem_roots, IndexerGem};
 use crate::indexer::indexer_project::IndexerProject;
 use crate::indexer::indexer_stdlib::{IndexerStdlib, RuntimeStdlibPathKey, RuntimeStdlibPaths};
+use crate::indexer::require_paths::RequireFeatureIndex;
 
 use crate::indexer::version::ruby_version::{RubyImplementation, RubyVersion};
 use crate::indexer::version::version_detector::RubyVersionDetector;
@@ -1290,6 +1291,7 @@ impl IndexingCoordinator {
         .await?;
         let resolve_start = Instant::now();
         let analysis_engine = self.analysis_engine(server);
+        let resolve_project = self.workspace_root.clone();
         run_cpu_indexing_task(
             server,
             Some(self.workspace_root.clone()),
@@ -1302,8 +1304,17 @@ impl IndexingCoordinator {
                 // the final resolve pass materializes reference and diagnostic
                 // indexes, otherwise the retired collection pages and the live
                 // resolved stores overlap in peak RSS.
+                let malloc_started = Instant::now();
                 release_allocator_free_pages();
+                let malloc_elapsed = malloc_started.elapsed();
+                let resolve_started = Instant::now();
                 analysis_engine.write().resolve();
+                info!(
+                    "[PERF][final semantic resolution] project={} malloc_relief={:?} resolve={:?}",
+                    resolve_project.display(),
+                    malloc_elapsed,
+                    resolve_started.elapsed()
+                );
             },
         )
         .await?;
@@ -2262,15 +2273,31 @@ impl IndexingCoordinator {
         paths.retain(|path| {
             !path.as_os_str().is_empty() && path.is_absolute() && seen.insert(path.clone())
         });
+        let index_started = Instant::now();
+        let index = {
+            let analysis_engine = self.analysis_engine(server);
+            let engine = analysis_engine.read();
+            RequireFeatureIndex::build(&paths, Some(&engine))
+        };
+        let features = index.feature_count();
+        let index = std::sync::Arc::new(index);
+        info!(
+            "[PERF][require feature index] project={} roots={} features={} elapsed={:?}",
+            self.workspace_root.display(),
+            paths.len(),
+            features,
+            index_started.elapsed()
+        );
         if let Some(workspace) = server
             .list_workspaces()
             .into_iter()
             .find(|workspace| workspace.root_path == self.workspace_root)
         {
-            workspace.set_dependency_require_paths(paths.clone());
+            workspace.set_dependency_require_resolution(paths.clone(), index.clone());
         }
         if let Some(processor) = self.file_processor.as_mut() {
             processor.set_require_dependency_roots(paths);
+            processor.set_require_feature_index(index);
         }
     }
 

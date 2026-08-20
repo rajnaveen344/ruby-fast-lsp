@@ -1065,7 +1065,7 @@ async fn run_diagnostics_check(
                         .load_paths
                         .paths_for_project(&project_root)
                         .to_vec();
-                    let dependency_roots = server.dependency_require_paths_for_uri(uri);
+                    let feature_index = server.require_feature_index_for_uri(uri);
                     diagnostics.extend(
                         crate::indexer::require_paths::unresolved_require_diagnostics(
                             content,
@@ -1073,7 +1073,7 @@ async fn run_diagnostics_check(
                             &current_path,
                             &project_root,
                             &load_paths,
-                            &dependency_roots,
+                            &feature_index,
                             Some(&engine),
                         ),
                     );

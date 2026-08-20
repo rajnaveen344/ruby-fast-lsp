@@ -168,6 +168,122 @@ async fn unresolved_require_clears_after_dependency_roots_without_edit() {
 }
 
 #[tokio::test]
+async fn unresolved_require_stays_after_refresh_when_still_missing() {
+    let gem = tempfile::tempdir().unwrap();
+    let gem_lib = gem.path().join("lib");
+    std::fs::create_dir_all(&gem_lib).unwrap();
+
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("project");
+    editor
+        .open("project/main.rb", "require 'still_missing'\n")
+        .await;
+
+    let workspace = editor
+        .workspace_for("project/main.rb")
+        .expect("project workspace");
+    workspace.set_dependency_require_paths(vec![gem_lib]);
+    editor
+        .server()
+        .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
+        .await;
+
+    let published = editor.published_diagnostics("project/main.rb");
+    assert!(
+        published.iter().any(|diag| {
+            matches!(&diag.code, Some(NumberOrString::String(code)) if code == "unresolved-require")
+        }),
+        "a still-missing require must stay unresolved after dependency-root refresh, got {published:?}"
+    );
+}
+
+#[tokio::test]
+async fn unresolved_require_refresh_clears_only_resolved_requires_in_one_file() {
+    let gem = tempfile::tempdir().unwrap();
+    let gem_lib = gem.path().join("lib");
+    let target = gem_lib.join("found.rb");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "# found\n").unwrap();
+
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("project");
+    editor
+        .open(
+            "project/main.rb",
+            "require 'found'\nrequire 'still_missing'\n",
+        )
+        .await;
+
+    let workspace = editor
+        .workspace_for("project/main.rb")
+        .expect("project workspace");
+    workspace.set_dependency_require_paths(vec![gem_lib]);
+    editor
+        .server()
+        .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
+        .await;
+
+    let published = editor.published_diagnostics("project/main.rb");
+    assert!(
+        published
+            .iter()
+            .all(|diag| { !matches!(&diag.message, message if message.contains("found")) }),
+        "the require that gained a gem root must clear, got {published:?}"
+    );
+    assert!(
+        published.iter().any(|diag| {
+            matches!(&diag.code, Some(NumberOrString::String(code)) if code == "unresolved-require")
+                && diag.message.contains("still_missing")
+        }),
+        "the still-missing require must stay, got {published:?}"
+    );
+}
+
+#[tokio::test]
+async fn unresolved_require_clears_on_closed_file_after_dependency_roots() {
+    let gem = tempfile::tempdir().unwrap();
+    let gem_lib = gem.path().join("lib");
+    let target = gem_lib.join("platform/helpers/json.rb");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "# gem json\n").unwrap();
+
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace("project");
+    editor
+        .open("project/app.rb", "require 'platform/helpers/json'\n")
+        .await;
+
+    let published_before = editor.published_diagnostics("project/app.rb");
+    assert!(
+        published_before.iter().any(|diag| {
+            matches!(&diag.code, Some(NumberOrString::String(code)) if code == "unresolved-require")
+        }),
+        "closed-file refresh fixture must start unresolved, got {published_before:?}"
+    );
+
+    editor.close("project/app.rb").await;
+    let workspace = editor
+        .workspace_for("project/app.rb")
+        .expect("project workspace");
+    workspace.set_dependency_require_paths(vec![gem_lib]);
+    editor
+        .server()
+        .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
+        .await;
+
+    editor
+        .open("project/app.rb", "require 'platform/helpers/json'\n")
+        .await;
+    let published_after = editor.published_diagnostics("project/app.rb");
+    assert!(
+        published_after.iter().all(|diag| {
+            !matches!(&diag.code, Some(NumberOrString::String(code)) if code == "unresolved-require")
+        }),
+        "closed-file stored-fact refresh must clear unresolved-require without a reparse, got {published_after:?}"
+    );
+}
+
+#[tokio::test]
 async fn goto_require_lib_file() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("project");

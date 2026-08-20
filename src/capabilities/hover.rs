@@ -83,7 +83,7 @@ fn require_path_hover(
         .load_paths
         .paths_for_project(&project_root)
         .to_vec();
-    let dependency_roots = server.dependency_require_paths_for_uri(uri);
+    let feature_index = server.require_feature_index_for_uri(uri);
     let engine = server.analysis_engine_for_uri(uri);
     let engine_guard = engine.read();
     let resolved = resolve_require_path(
@@ -92,7 +92,7 @@ fn require_path_hover(
         &current_file,
         &project_root,
         &load_paths,
-        &dependency_roots,
+        &feature_index,
         Some(&engine_guard),
     );
     let range = require_string_lsp_range(document, &target);

@@ -18,13 +18,19 @@
 //!   not by a full gem/stdlib indexing run that publishes roots then refreshes.
 //! - **Precedence**: project `loadPaths` vs `lib` is tested; project-local
 //!   hit winning over a same-named gem/stdlib feature is not.
-//! - **True miss stays after refresh**: clear-on-ready is tested; a still-missing
-//!   path remaining red after refresh is not asserted.
+//! - **True miss stays after refresh**: covered by
+//!   `unresolved_require_stays_after_refresh_when_still_missing` and the
+//!   stored-fact reresolve tests in this module.
+//! - **Feature index**: published gem/stdlib roots are walked once into
+//!   `RequireFeatureIndex`. Goto, hover, collection, and refresh share that
+//!   map. Project `loadPaths` / `lib` / root still `stat`. Native `.so` stays
+//!   out of scope.
 //! - **`Kernel.require` / `%q` delimiters**: finder accepts `Kernel`; content
 //!   ranges only strip `'`/`"`. No FakeEditor coverage for either.
 //! - **Out of scope (intentional)**: `autoload`, `load`, interpolated/dynamic
 //!   arguments, non-`.rb` native extensions.
 
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use log::trace;
@@ -32,6 +38,159 @@ use ruby_analysis::core::{DiagnosticFact, DiagnosticSeverity, SourceFileId, Text
 use ruby_analysis::engine::AnalysisEngine;
 use ruby_prism::{visit_call_node, CallNode, Visit};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
+
+/// One-shot map from a `require` feature string to the first matching file.
+///
+/// Built from published gem/stdlib require roots. With an engine, snapshot
+/// indexed `.rb` paths once and scan prefix ranges. Without an engine, walk
+/// those roots on disk (tests / FakeEditor). Lookup is O(1). Project
+/// `loadPaths` / `lib` / root are still probed with `is_file` first.
+#[derive(Debug, Clone, Default)]
+pub struct RequireFeatureIndex {
+    by_feature: HashMap<String, PathBuf>,
+}
+
+impl RequireFeatureIndex {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// When `engine` is present, snapshot its `.rb` paths once and assign each
+    /// file to the first published root that is a prefix (sorted range scan).
+    /// Without an engine (tests and FakeEditor root injection), walk on-disk
+    /// `.rb` files. First insert wins, matching sequential `$LOAD_PATH` search.
+    pub fn build(roots: &[PathBuf], engine: Option<&AnalysisEngine>) -> Self {
+        if let Some(engine) = engine {
+            let paths: Vec<PathBuf> = engine
+                .files()
+                .filter(|file| {
+                    file.path
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("rb"))
+                })
+                .map(|file| file.path.clone())
+                .collect();
+            return Self::from_indexed_paths(roots, &paths);
+        }
+        let mut index = Self::empty();
+        for root in roots {
+            if root.as_os_str().is_empty() {
+                continue;
+            }
+            index.add_disk_root(root);
+        }
+        index
+    }
+
+    fn from_indexed_paths(roots: &[PathBuf], paths: &[PathBuf]) -> Self {
+        let mut index = Self::empty();
+        let mut sorted: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+        sorted.sort();
+        for root in roots {
+            if root.as_os_str().is_empty() {
+                continue;
+            }
+            let start = sorted.partition_point(|path| *path < root.as_path());
+            for path in &sorted[start..] {
+                if !path.starts_with(root) {
+                    break;
+                }
+                let Ok(relative) = path.strip_prefix(root) else {
+                    continue;
+                };
+                index.insert_relative(relative, (*path).to_path_buf());
+            }
+        }
+        index
+    }
+
+    pub fn feature_count(&self) -> usize {
+        self.by_feature.len()
+    }
+
+    pub fn lookup(&self, argument: &str) -> Option<&Path> {
+        self.by_feature.get(argument).map(PathBuf::as_path)
+    }
+
+    fn add_disk_root(&mut self, root: &Path) {
+        self.walk_rb_files(root, root, 0);
+    }
+
+    fn walk_rb_files(&mut self, dir: &Path, root: &Path, depth: u32) {
+        if depth > 64 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('.'))
+                {
+                    continue;
+                }
+                self.walk_rb_files(&path, root, depth + 1);
+                continue;
+            }
+            if !path.is_file() {
+                continue;
+            }
+            if !path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("rb"))
+            {
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(root) else {
+                continue;
+            };
+            self.insert_relative(relative, path.clone());
+        }
+    }
+
+    fn insert_relative(&mut self, relative: &Path, absolute: PathBuf) {
+        let Some((with_ext, bare)) = require_feature_keys(relative) else {
+            return;
+        };
+        self.by_feature
+            .entry(with_ext)
+            .or_insert_with(|| absolute.clone());
+        if let Some(bare) = bare {
+            self.by_feature.entry(bare).or_insert(absolute);
+        }
+    }
+}
+
+fn require_feature_keys(relative: &Path) -> Option<(String, Option<String>)> {
+    let mut key = String::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => {
+                let part = part.to_str()?;
+                if !key.is_empty() {
+                    key.push('/');
+                }
+                key.push_str(part);
+            }
+            Component::CurDir => {}
+            Component::Prefix(_) | Component::RootDir | Component::ParentDir => {
+                return None;
+            }
+        }
+    }
+    if key.is_empty() {
+        return None;
+    }
+    let bare = key
+        .strip_suffix(".rb")
+        .or_else(|| key.strip_suffix(".RB"))
+        .map(ToOwned::to_owned);
+    Some((key, bare))
+}
 
 /// Diagnostic code for a static `require` / `require_relative` that cannot be resolved.
 pub const UNRESOLVED_REQUIRE_CODE: &str = "unresolved-require";
@@ -132,7 +291,7 @@ pub fn unresolved_require_diagnostics(
     current_file: &Path,
     project_root: &Path,
     load_paths: &[String],
-    dependency_roots: &[PathBuf],
+    feature_index: &RequireFeatureIndex,
     engine: Option<&AnalysisEngine>,
 ) -> Vec<DiagnosticFact> {
     let mut diagnostics = Vec::new();
@@ -143,7 +302,7 @@ pub fn unresolved_require_diagnostics(
             current_file,
             project_root,
             load_paths,
-            dependency_roots,
+            feature_index,
             engine,
         )
         .is_some()
@@ -165,14 +324,73 @@ pub fn unresolved_require_diagnostics(
             TextRange::new(file_id, start_byte, end_byte),
             DiagnosticSeverity::Error,
             UNRESOLVED_REQUIRE_CODE,
-            format!(
-                "Cannot resolve {} \"{}\"",
-                target.kind.as_str(),
-                target.argument
-            ),
+            unresolved_require_message(target.kind, &target.argument),
         ));
     }
     diagnostics
+}
+
+/// Re-check stored `unresolved-require` facts after dependency roots change.
+///
+/// Closed project files were already parsed during collection. ASCII sources
+/// are not retained in the engine, so refresh must not Prism-parse them again
+/// or re-read them just to recover the require string. Kind and argument live
+/// in the diagnostic message; keep the fact only when the path is still missing.
+/// Adding gem/stdlib roots can only clear diagnostics, not invent new ones.
+pub fn reresolve_unresolved_require_diagnostics(
+    current_file: &Path,
+    project_root: &Path,
+    load_paths: &[String],
+    feature_index: &RequireFeatureIndex,
+    engine: Option<&AnalysisEngine>,
+    existing: &[DiagnosticFact],
+) -> Vec<DiagnosticFact> {
+    existing
+        .iter()
+        .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
+        .filter(|fact| {
+            let (kind, argument) = require_target_from_unresolved_message(&fact.message);
+            resolve_require_path(
+                kind,
+                argument,
+                current_file,
+                project_root,
+                load_paths,
+                feature_index,
+                engine,
+            )
+            .is_none()
+        })
+        .cloned()
+        .collect()
+}
+
+fn unresolved_require_message(kind: RequireKind, argument: &str) -> String {
+    format!("Cannot resolve {} \"{}\"", kind.as_str(), argument)
+}
+
+fn require_target_from_unresolved_message(message: &str) -> (RequireKind, &str) {
+    let (kind, rest) =
+        if let Some(rest) = message.strip_prefix("Cannot resolve require_relative \"") {
+            (RequireKind::RequireRelative, rest)
+        } else if let Some(rest) = message.strip_prefix("Cannot resolve require \"") {
+            (RequireKind::Require, rest)
+        } else {
+            panic!(
+            "INVARIANT VIOLATED: unresolved-require diagnostic message `{message}` is not a \
+             require diagnostic. This is a bug because require refresh must only see facts \
+             emitted by unresolved_require_diagnostics. Fix: filter by code \
+             `{UNRESOLVED_REQUIRE_CODE}` and keep the message format in unresolved_require_message."
+        );
+        };
+    let argument = rest.strip_suffix('"').unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: unresolved-require diagnostic message `{message}` is missing its \
+             closing quote. This is a bug because unresolved_require_message always quote-wraps \
+             the require argument. Fix: keep message construction and parsing in this module."
+        )
+    });
+    (kind, argument)
 }
 
 /// Resolve a require string to an existing file path.
@@ -180,54 +398,50 @@ pub fn unresolved_require_diagnostics(
 /// Search order:
 /// - `require_relative`: `dirname(current_file)` only
 /// - `require`: configured project `loadPaths`, then `<project>/lib`, then
-///   project root, then absolute dependency require roots (gem/stdlib
-///   `require_paths` discovered for this project)
+///   project root (each probed as-is and with `.rb`), then the published
+///   gem/stdlib feature index
 ///
-/// Each candidate is tried as-is and with a `.rb` suffix. A hit is any path that
-/// exists on disk or is already registered in the project engine.
+/// Project probes hit any path that exists on disk or is already registered in
+/// the project engine. Dependency hits come from `RequireFeatureIndex` only.
 pub fn resolve_require_path(
     kind: RequireKind,
     argument: &str,
     current_file: &Path,
     project_root: &Path,
     load_paths: &[String],
-    dependency_roots: &[PathBuf],
+    feature_index: &RequireFeatureIndex,
     engine: Option<&AnalysisEngine>,
 ) -> Option<PathBuf> {
     if argument.is_empty() {
         return None;
     }
 
-    let candidates = match kind {
+    match kind {
         RequireKind::RequireRelative => {
             let parent = current_file.parent()?;
-            vec![parent.join(argument)]
+            existing_require_candidate(&parent.join(argument), engine)
         }
         RequireKind::Require => {
-            let mut roots = Vec::new();
             for configured in load_paths {
                 if let Some(root) = validated_project_relative_dir(project_root, configured) {
-                    roots.push(root);
+                    if let Some(resolved) = existing_require_candidate(&root.join(argument), engine)
+                    {
+                        return Some(resolved);
+                    }
                 }
             }
-            roots.push(project_root.join("lib"));
-            roots.push(project_root.to_path_buf());
-            for dependency_root in dependency_roots {
-                if dependency_root.as_os_str().is_empty() {
-                    continue;
-                }
-                roots.push(dependency_root.clone());
+            if let Some(resolved) =
+                existing_require_candidate(&project_root.join("lib").join(argument), engine)
+            {
+                return Some(resolved);
             }
-            roots.into_iter().map(|root| root.join(argument)).collect()
-        }
-    };
-
-    for candidate in candidates {
-        if let Some(resolved) = existing_require_candidate(&candidate, engine) {
-            return Some(resolved);
+            if let Some(resolved) = existing_require_candidate(&project_root.join(argument), engine)
+            {
+                return Some(resolved);
+            }
+            feature_index.lookup(argument).map(Path::to_path_buf)
         }
     }
-    None
 }
 
 /// Build a goto location that selects the entire target file contents.
@@ -450,7 +664,7 @@ mod tests {
             Path::new("/project/main.rb"),
             Path::new("/project"),
             &[],
-            &[],
+            &RequireFeatureIndex::empty(),
             None,
         );
         assert_eq!(diagnostics.len(), 1);
@@ -475,7 +689,7 @@ mod tests {
             &dir.path().join("main.rb"),
             dir.path(),
             &[],
-            &[],
+            &RequireFeatureIndex::empty(),
             None,
         );
         assert!(diagnostics.is_empty());
@@ -496,11 +710,38 @@ mod tests {
             &current,
             dir.path(),
             &[],
-            &[],
+            &RequireFeatureIndex::empty(),
             None,
         )
         .unwrap();
         assert_eq!(resolved, target);
+    }
+
+    #[test]
+    fn require_relative_does_not_use_the_feature_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("app").join("main.rb");
+        let gem_lib = dir.path().join("gems/demo-1.0.0/lib");
+        let gem_target = gem_lib.join("foo.rb");
+        std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(gem_target.parent().unwrap()).unwrap();
+        std::fs::write(&current, "require_relative \"./foo\"\n").unwrap();
+        std::fs::write(&gem_target, "# gem foo\n").unwrap();
+        let index = RequireFeatureIndex::build(&[gem_lib], None);
+
+        assert!(
+            resolve_require_path(
+                RequireKind::RequireRelative,
+                "./foo",
+                &current,
+                dir.path(),
+                &[],
+                &index,
+                None,
+            )
+            .is_none(),
+            "require_relative must stay dirname-only even when the feature index has foo"
+        );
     }
 
     #[test]
@@ -519,7 +760,7 @@ mod tests {
             &dir.path().join("main.rb"),
             dir.path(),
             &["custom".to_string()],
-            &[],
+            &RequireFeatureIndex::empty(),
             None,
         )
         .unwrap();
@@ -542,7 +783,7 @@ mod tests {
             Path::new("/project/main.rb"),
             Path::new("/project"),
             &[],
-            &[],
+            &RequireFeatureIndex::empty(),
             Some(&engine),
         )
         .unwrap();
@@ -556,6 +797,7 @@ mod tests {
         let target = gem_lib.join("platform/helpers/json.rb");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "# gem json\n").unwrap();
+        let index = RequireFeatureIndex::build(&[gem_lib], None);
 
         let resolved = resolve_require_path(
             RequireKind::Require,
@@ -563,11 +805,64 @@ mod tests {
             &dir.path().join("main.rb"),
             dir.path(),
             &[],
-            &[gem_lib],
+            &index,
             None,
         )
         .unwrap();
         assert_eq!(resolved, target);
+        assert_eq!(
+            index.lookup("platform/helpers/json.rb"),
+            Some(target.as_path())
+        );
+    }
+
+    #[test]
+    fn feature_index_first_published_root_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("gems/first-1.0.0/lib");
+        let second = dir.path().join("gems/second-1.0.0/lib");
+        let first_target = first.join("dup.rb");
+        let second_target = second.join("dup.rb");
+        std::fs::create_dir_all(first).unwrap();
+        std::fs::create_dir_all(second).unwrap();
+        std::fs::write(&first_target, "# first\n").unwrap();
+        std::fs::write(&second_target, "# second\n").unwrap();
+        let index = RequireFeatureIndex::build(
+            &[
+                dir.path().join("gems/first-1.0.0/lib"),
+                dir.path().join("gems/second-1.0.0/lib"),
+            ],
+            None,
+        );
+
+        assert_eq!(index.lookup("dup"), Some(first_target.as_path()));
+        let resolved = resolve_require_path(
+            RequireKind::Require,
+            "dup",
+            &dir.path().join("main.rb"),
+            dir.path(),
+            &[],
+            &index,
+            None,
+        )
+        .unwrap();
+        assert_eq!(resolved, first_target);
+    }
+
+    #[test]
+    fn feature_index_miss_does_not_need_dependency_roots_on_disk() {
+        let index = RequireFeatureIndex::build(&[PathBuf::from("/missing/gem/lib")], None);
+        assert!(index.lookup("still_missing").is_none());
+        assert!(resolve_require_path(
+            RequireKind::Require,
+            "still_missing",
+            Path::new("/project/main.rb"),
+            Path::new("/project"),
+            &[],
+            &index,
+            None,
+        )
+        .is_none());
     }
 
     #[test]
@@ -580,6 +875,7 @@ mod tests {
         std::fs::create_dir_all(project_target.parent().unwrap()).unwrap();
         std::fs::write(&gem_target, "# gem\n").unwrap();
         std::fs::write(&project_target, "# project\n").unwrap();
+        let index = RequireFeatureIndex::build(&[gem_lib], None);
 
         let resolved = resolve_require_path(
             RequireKind::Require,
@@ -587,7 +883,7 @@ mod tests {
             &dir.path().join("main.rb"),
             dir.path(),
             &[],
-            &[gem_lib],
+            &index,
             None,
         )
         .unwrap();
@@ -604,5 +900,192 @@ mod tests {
         let location = location_for_require_target(&path, None).unwrap();
         assert_eq!(location.range.start, Position::new(0, 0));
         assert_eq!(location.range.end, Position::new(3, 0));
+    }
+
+    #[test]
+    fn reresolve_clears_stored_require_when_dependency_root_appears() {
+        let dir = tempfile::tempdir().unwrap();
+        let gem_lib = dir.path().join("gems/demo-1.0.0/lib");
+        let target = gem_lib.join("platform/helpers/json.rb");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "# gem json\n").unwrap();
+
+        let source = "require 'platform/helpers/json'\n";
+        let file_id = SourceFileId(1);
+        let current = dir.path().join("main.rb");
+        let existing = unresolved_require_diagnostics(
+            source,
+            file_id,
+            &current,
+            dir.path(),
+            &[],
+            &RequireFeatureIndex::empty(),
+            None,
+        );
+        assert_eq!(existing.len(), 1);
+
+        let index = RequireFeatureIndex::build(&[gem_lib], None);
+        let refreshed = reresolve_unresolved_require_diagnostics(
+            &current,
+            dir.path(),
+            &[],
+            &index,
+            None,
+            &existing,
+        );
+        assert!(
+            refreshed.is_empty(),
+            "stored unresolved-require must clear once the gem root exists, got {refreshed:?}"
+        );
+        assert!(target.exists());
+    }
+
+    #[test]
+    fn reresolve_keeps_stored_require_when_path_is_still_missing() {
+        let source = "require \"missing\"\n";
+        let file_id = SourceFileId(1);
+        let existing = unresolved_require_diagnostics(
+            source,
+            file_id,
+            Path::new("/project/main.rb"),
+            Path::new("/project"),
+            &[],
+            &RequireFeatureIndex::empty(),
+            None,
+        );
+        assert_eq!(existing.len(), 1);
+
+        let refreshed = reresolve_unresolved_require_diagnostics(
+            Path::new("/project/main.rb"),
+            Path::new("/project"),
+            &[],
+            &RequireFeatureIndex::empty(),
+            None,
+            &existing,
+        );
+        assert_eq!(refreshed, existing);
+    }
+
+    #[test]
+    fn reresolve_clears_only_the_require_that_gained_a_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let gem_lib = dir.path().join("gems/demo-1.0.0/lib");
+        let target = gem_lib.join("found.rb");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "# found\n").unwrap();
+
+        let source = "require \"found\"\nrequire \"still_missing\"\n";
+        let file_id = SourceFileId(1);
+        let current = dir.path().join("main.rb");
+        let existing = unresolved_require_diagnostics(
+            source,
+            file_id,
+            &current,
+            dir.path(),
+            &[],
+            &RequireFeatureIndex::empty(),
+            None,
+        );
+        assert_eq!(existing.len(), 2);
+
+        let index = RequireFeatureIndex::build(&[gem_lib], None);
+        let refreshed = reresolve_unresolved_require_diagnostics(
+            &current,
+            dir.path(),
+            &[],
+            &index,
+            None,
+            &existing,
+        );
+        assert_eq!(refreshed.len(), 1);
+        assert!(refreshed[0].message.contains("still_missing"));
+    }
+
+    #[test]
+    fn reresolve_keeps_require_relative_kind_from_the_stored_message() {
+        let source = "require_relative \"./missing\"\n";
+        let file_id = SourceFileId(1);
+        let existing = unresolved_require_diagnostics(
+            source,
+            file_id,
+            Path::new("/project/app/main.rb"),
+            Path::new("/project"),
+            &[],
+            &RequireFeatureIndex::empty(),
+            None,
+        );
+        assert_eq!(existing.len(), 1);
+        assert!(existing[0].message.contains("require_relative"));
+
+        let refreshed = reresolve_unresolved_require_diagnostics(
+            Path::new("/project/app/main.rb"),
+            Path::new("/project"),
+            &[],
+            &RequireFeatureIndex::empty(),
+            None,
+            &existing,
+        );
+        assert_eq!(refreshed, existing);
+    }
+
+    #[test]
+    fn reresolve_clears_from_engine_indexed_files_without_disk() {
+        let mut engine = AnalysisEngine::new();
+        let gem_lib = PathBuf::from("/gems/demo-1.0.0/lib");
+        let path = gem_lib.join("platform/helpers/json.rb");
+        engine.register_file(SourceFileInput {
+            path: path.clone(),
+            content: "# json\n".to_string(),
+            kind: SourceKind::Project,
+        });
+
+        let source = "require 'platform/helpers/json'\n";
+        let existing = unresolved_require_diagnostics(
+            source,
+            SourceFileId(1),
+            Path::new("/project/main.rb"),
+            Path::new("/project"),
+            &[],
+            &RequireFeatureIndex::empty(),
+            None,
+        );
+        assert_eq!(existing.len(), 1);
+
+        let index = RequireFeatureIndex::build(&[gem_lib], Some(&engine));
+        let refreshed = reresolve_unresolved_require_diagnostics(
+            Path::new("/project/main.rb"),
+            Path::new("/project"),
+            &[],
+            &index,
+            Some(&engine),
+            &existing,
+        );
+        assert!(
+            refreshed.is_empty(),
+            "engine-indexed gem files must clear stored unresolved-require without a disk hit, got {refreshed:?}"
+        );
+    }
+
+    #[test]
+    fn engine_present_build_skips_unindexed_disk_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let gem_lib = dir.path().join("lib");
+        let disk_only = gem_lib.join("disk_only.rb");
+        let engine_path = gem_lib.join("in_engine.rb");
+        std::fs::create_dir_all(&gem_lib).unwrap();
+        std::fs::write(&disk_only, "# disk\n").unwrap();
+        std::fs::write(&engine_path, "# engine\n").unwrap();
+        let mut engine = AnalysisEngine::new();
+        engine.register_file(SourceFileInput {
+            path: engine_path.clone(),
+            content: "# engine\n".to_string(),
+            kind: SourceKind::Gem,
+        });
+        let index = RequireFeatureIndex::build(&[gem_lib], Some(&engine));
+        assert_eq!(index.lookup("in_engine"), Some(engine_path.as_path()));
+        assert!(
+            index.lookup("disk_only").is_none(),
+            "publish-time index must not readdir unindexed gem files"
+        );
     }
 }

@@ -19,7 +19,7 @@ use crate::extensions::{
     analysis_ruby_type_from_extension, ExtensionApplicabilitySnapshot, ExtensionRegistryHandle,
     ProjectContextSeed,
 };
-use crate::indexer::require_paths::unresolved_require_diagnostics;
+use crate::indexer::require_paths::{unresolved_require_diagnostics, RequireFeatureIndex};
 use crate::runtime::jruby::imports::{
     JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
 };
@@ -233,6 +233,8 @@ pub struct FileProcessor {
     require_load_paths: Vec<String>,
     /// Absolute gem/stdlib require roots for require-path diagnostics.
     require_dependency_roots: Vec<PathBuf>,
+    /// Published gem/stdlib feature map shared across cloned processors.
+    require_feature_index: Arc<RequireFeatureIndex>,
 }
 
 impl FileProcessor {
@@ -244,6 +246,7 @@ impl FileProcessor {
             require_project_root: None,
             require_load_paths: Vec::new(),
             require_dependency_roots: Vec::new(),
+            require_feature_index: Arc::new(RequireFeatureIndex::empty()),
         }
     }
 
@@ -255,6 +258,7 @@ impl FileProcessor {
             require_project_root: None,
             require_load_paths: Vec::new(),
             require_dependency_roots: Vec::new(),
+            require_feature_index: Arc::new(RequireFeatureIndex::empty()),
         }
     }
 
@@ -279,12 +283,17 @@ impl FileProcessor {
     ) -> Self {
         self.require_project_root = Some(project_root);
         self.require_load_paths = load_paths;
+        self.require_feature_index = Arc::new(RequireFeatureIndex::build(&dependency_roots, None));
         self.require_dependency_roots = dependency_roots;
         self
     }
 
     pub(crate) fn set_require_dependency_roots(&mut self, dependency_roots: Vec<PathBuf>) {
         self.require_dependency_roots = dependency_roots;
+    }
+
+    pub(crate) fn set_require_feature_index(&mut self, index: Arc<RequireFeatureIndex>) {
+        self.require_feature_index = index;
     }
 
     pub(crate) fn jruby_import_provider(&self) -> Option<&Arc<JrubyImportProvider>> {
@@ -551,7 +560,7 @@ impl FileProcessor {
                     .load_paths
                     .paths_for_project(&project_root)
                     .to_vec();
-                let dependency_roots = server.dependency_require_paths_for_uri(uri);
+                let feature_index = server.require_feature_index_for_uri(uri);
                 let engine = analysis_engine.read();
                 file_diagnostics.extend(unresolved_require_diagnostics(
                     content,
@@ -559,7 +568,7 @@ impl FileProcessor {
                     &current_path,
                     &project_root,
                     &load_paths,
-                    &dependency_roots,
+                    &feature_index,
                     Some(&engine),
                 ));
             }
@@ -1530,7 +1539,7 @@ impl FileProcessor {
                     &require_current_path,
                     project_root,
                     &self.require_load_paths,
-                    &self.require_dependency_roots,
+                    &self.require_feature_index,
                     Some(&engine),
                 ));
             }

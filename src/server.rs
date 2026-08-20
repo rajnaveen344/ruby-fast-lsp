@@ -323,6 +323,8 @@ pub struct Workspace {
     pub(crate) navigation_demands: NavigationDemandController,
     /// Absolute gem/stdlib require roots for this project (`spec.require_paths`).
     dependency_require_paths: Arc<RwLock<Vec<PathBuf>>>,
+    /// Feature → path map built from `dependency_require_paths` (disk, then engine).
+    require_feature_index: Arc<RwLock<Arc<crate::indexer::require_paths::RequireFeatureIndex>>>,
     workspace_folder_uris: Arc<RwLock<std::collections::HashSet<Url>>>,
 }
 
@@ -357,6 +359,9 @@ impl Workspace {
             extension_project_context_seed,
             navigation_demands: NavigationDemandController::default(),
             dependency_require_paths: Arc::new(RwLock::new(Vec::new())),
+            require_feature_index: Arc::new(RwLock::new(Arc::new(
+                crate::indexer::require_paths::RequireFeatureIndex::empty(),
+            ))),
             workspace_folder_uris: Arc::new(RwLock::new(std::collections::HashSet::from([
                 workspace_folder_uri,
             ]))),
@@ -381,8 +386,25 @@ impl Workspace {
         self.dependency_require_paths.read().clone()
     }
 
+    #[cfg(test)]
     pub(crate) fn set_dependency_require_paths(&self, paths: Vec<PathBuf>) {
+        let index = Arc::new(crate::indexer::require_paths::RequireFeatureIndex::build(
+            &paths, None,
+        ));
+        self.set_dependency_require_resolution(paths, index);
+    }
+
+    pub fn require_feature_index(&self) -> Arc<crate::indexer::require_paths::RequireFeatureIndex> {
+        self.require_feature_index.read().clone()
+    }
+
+    pub(crate) fn set_dependency_require_resolution(
+        &self,
+        paths: Vec<PathBuf>,
+        index: Arc<crate::indexer::require_paths::RequireFeatureIndex>,
+    ) {
         *self.dependency_require_paths.write() = paths;
+        *self.require_feature_index.write() = index;
     }
 }
 
@@ -850,6 +872,17 @@ impl RubyLanguageServer {
             .unwrap_or_default()
     }
 
+    pub fn require_feature_index_for_uri(
+        &self,
+        uri: &Url,
+    ) -> Arc<crate::indexer::require_paths::RequireFeatureIndex> {
+        self.workspace_for_uri(uri)
+            .map(|workspace| workspace.require_feature_index())
+            .unwrap_or_else(
+                || Arc::new(crate::indexer::require_paths::RequireFeatureIndex::empty()),
+            )
+    }
+
     /// Recompute `unresolved-require` after dependency require roots change.
     ///
     /// Project files may be indexed before gem/stdlib roots exist, which leaves
@@ -862,11 +895,12 @@ impl RubyLanguageServer {
         workspace: &Workspace,
     ) {
         use crate::indexer::require_paths::{
-            unresolved_require_diagnostics, UNRESOLVED_REQUIRE_CODE,
+            reresolve_unresolved_require_diagnostics, unresolved_require_diagnostics,
+            UNRESOLVED_REQUIRE_CODE,
         };
         use crate::query::EngineQuery;
 
-        let dependency_roots = workspace.dependency_require_paths();
+        let feature_index = workspace.require_feature_index();
         let load_paths = self
             .config
             .lock()
@@ -889,40 +923,73 @@ impl RubyLanguageServer {
                 .collect()
         };
 
+        let refresh_started = Instant::now();
+        let mut open_files = 0usize;
+        let mut closed_files = 0usize;
         let updates = {
             let engine = workspace.analysis_engine.read();
             engine
                 .files()
                 .filter(|file| file.kind.contributes_project_diagnostics())
-                .filter(|file| {
-                    open_content_by_path.contains_key(&file.path)
-                        || engine
-                            .diagnostic_facts_in_file(file.id)
-                            .iter()
-                            .any(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
-                })
                 .filter_map(|file| {
-                    let content = open_content_by_path
-                        .get(&file.path)
-                        .map(|(_, content)| content.clone())
-                        .or_else(|| file.source_text().map(str::to_string))
-                        .or_else(|| std::fs::read_to_string(&file.path).ok())?;
                     let open_uri = open_content_by_path
                         .get(&file.path)
                         .map(|(uri, _)| uri.clone());
-                    let diagnostics = unresolved_require_diagnostics(
-                        &content,
-                        file.id,
-                        &file.path,
-                        &project_root,
-                        &load_paths,
-                        &dependency_roots,
-                        Some(&engine),
-                    );
+                    let existing_requires = engine
+                        .diagnostic_facts_in_file(file.id)
+                        .into_iter()
+                        .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
+                        .collect::<Vec<_>>();
+                    if open_uri.is_none() && existing_requires.is_empty() {
+                        return None;
+                    }
+                    let diagnostics = if let Some((_, content)) =
+                        open_content_by_path.get(&file.path)
+                    {
+                        open_files = open_files
+                            .checked_add(1)
+                            .expect(
+                                "INVARIANT VIOLATED: unresolved-require open-file refresh counter overflowed usize. \
+                                 This is a bug because one workspace cannot contain more open documents than addressable memory. \
+                                 Fix: inspect corrupt document-cache iteration.",
+                            );
+                        unresolved_require_diagnostics(
+                            content,
+                            file.id,
+                            &file.path,
+                            &project_root,
+                            &load_paths,
+                            &feature_index,
+                            Some(&engine),
+                        )
+                    } else {
+                        closed_files = closed_files
+                            .checked_add(1)
+                            .expect(
+                                "INVARIANT VIOLATED: unresolved-require closed-file refresh counter overflowed usize. \
+                                 This is a bug because one workspace cannot contain more project files than addressable memory. \
+                                 Fix: inspect corrupt file-store iteration.",
+                            );
+                        reresolve_unresolved_require_diagnostics(
+                            &file.path,
+                            &project_root,
+                            &load_paths,
+                            &feature_index,
+                            Some(&engine),
+                            &existing_requires,
+                        )
+                    };
                     Some((file.id, open_uri, diagnostics))
                 })
                 .collect::<Vec<_>>()
         };
+        info!(
+            "[PERF][unresolved-require refresh] project={} open_files={} closed_files={} elapsed={:?}",
+            workspace.root_path.display(),
+            open_files,
+            closed_files,
+            refresh_started.elapsed()
+        );
 
         let mut refreshed_open = Vec::new();
         {
