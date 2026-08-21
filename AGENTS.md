@@ -299,10 +299,13 @@ Explicit `includedGems` is the sole unlocked exception and may select the
 active Ruby's highest installed version by deliberate user request. Validate a
 project archive's package metadata against the lockfile, extract only declared
 require paths without executing package code, and index them as
-`SourceKind::Gem`. Extraction belongs in the user cache under a
-canonical-project identity and archive checksum; never write generated
-extraction state into the Ruby project or share semantic ownership across
-isolated projects.
+`SourceKind::Gem`. Extraction belongs in the user cache under a readable
+`{project-directory}-{digest-prefix}` identity and `{name}-{locked-version}`
+gem root, with the archive checksum stored in the completion marker; never
+write generated extraction state into the Ruby project or share semantic
+ownership across isolated projects. Do not put raw SHA-256 hashes in those
+displayed path components: editors surface the file URI, and 64-character
+directories hide the gem identity.
 
 Bundled core Ruby stubs are language semantics and must be indexed independently
 of runtime stdlib discovery. If the owning project's Ruby executable or version

@@ -38,6 +38,8 @@ const MAX_LOCKFILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_JAVA_GEM_SEARCH_ENTRIES: usize = 100_000;
 const GEM_PRODUCT_COLLECTION_LANES: usize = 12;
 const GEM_PRODUCT_TRANSIENT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
+const CACHED_GEM_PROJECT_DIGEST_PREFIX_CHARS: usize = 12;
+const CACHED_GEM_PROJECT_DIGEST_MARKER: &str = ".project-digest";
 
 pub fn discover_locked_java_gem_roots(
     project_root: &Path,
@@ -1685,7 +1687,7 @@ impl IndexerGem {
         if !cache_root.is_dir() {
             return Ok(());
         }
-        let extraction_root = self.cached_gem_extraction_root(root)?;
+        let (extraction_root, project_digest) = self.cached_gem_extraction_context(root)?;
 
         let mut locked_registry_gems = self
             .locked_gems
@@ -1727,7 +1729,12 @@ impl IndexerGem {
                 continue;
             }
 
-            match extract_cached_gem_archive(&extraction_root, &archive_path, &locked) {
+            match extract_cached_gem_archive(
+                &extraction_root,
+                &archive_path,
+                locked,
+                &project_digest,
+            ) {
                 Ok(gem) => {
                     info!(
                         "Discovered locked vendor cache gem: {} v{}",
@@ -1750,7 +1757,12 @@ impl IndexerGem {
         Ok(())
     }
 
+    #[cfg(test)]
     fn cached_gem_extraction_root(&self, project_root: &Path) -> Result<PathBuf> {
+        Ok(self.cached_gem_extraction_context(project_root)?.0)
+    }
+
+    fn cached_gem_extraction_context(&self, project_root: &Path) -> Result<(PathBuf, String)> {
         let cache_root = match &self.cached_gem_root_override {
             Some(root) => root.clone(),
             None => crate::utils::ruby_fast_lsp_user_cache_root()?,
@@ -1761,11 +1773,11 @@ impl IndexerGem {
                 project_root.display()
             )
         })?;
-        let project_key = format!(
-            "{:x}",
-            Sha256::digest(canonical_project_root.to_string_lossy().as_bytes())
-        );
-        Ok(cache_root.join("gems").join(project_key))
+        let project_digest = cached_gem_project_digest(&canonical_project_root);
+        Ok((
+            cached_gem_project_extraction_root(&cache_root, &canonical_project_root),
+            project_digest,
+        ))
     }
 
     /// Find Gemfile in workspace hierarchy
@@ -2311,10 +2323,75 @@ fn validate_archive_identity_component(kind: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+fn cached_gem_project_digest(canonical_project_root: &Path) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(canonical_project_root.to_string_lossy().as_bytes())
+    )
+}
+
+fn is_safe_cache_identity_component(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn cached_gem_project_leaf(canonical_project_root: &Path) -> &str {
+    canonical_project_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| is_safe_cache_identity_component(name))
+        .unwrap_or("project")
+}
+
+fn cached_gem_project_identity(canonical_project_root: &Path) -> String {
+    format!(
+        "{}-{}",
+        cached_gem_project_leaf(canonical_project_root),
+        &cached_gem_project_digest(canonical_project_root)
+            [..CACHED_GEM_PROJECT_DIGEST_PREFIX_CHARS]
+    )
+}
+
+fn cached_gem_project_extraction_root(cache_root: &Path, canonical_project_root: &Path) -> PathBuf {
+    let digest = cached_gem_project_digest(canonical_project_root);
+    let leaf = cached_gem_project_leaf(canonical_project_root);
+    let gems_root = cache_root.join("gems");
+    let short_root = gems_root.join(cached_gem_project_identity(canonical_project_root));
+    match std::fs::read_to_string(short_root.join(CACHED_GEM_PROJECT_DIGEST_MARKER)) {
+        Ok(existing) if existing == digest => short_root,
+        Ok(_) => gems_root.join(format!("{leaf}-{digest}")),
+        Err(_) => short_root,
+    }
+}
+
+fn bind_cached_gem_project_digest(extraction_root: &Path, project_digest: &str) -> Result<()> {
+    let marker = extraction_root.join(CACHED_GEM_PROJECT_DIGEST_MARKER);
+    match std::fs::read_to_string(&marker) {
+        Ok(existing) => {
+            assert_eq!(
+                existing,
+                project_digest,
+                "INVARIANT VIOLATED: cached gem extraction root {} is bound to digest {existing}, expected {project_digest}. This is a bug because a project identity directory must belong to one canonical project. Fix: resolve the unoccupied short identity or the full-digest fallback before extracting.",
+                extraction_root.display()
+            );
+            Ok(())
+        }
+        Err(_) => std::fs::write(&marker, project_digest).with_context(|| {
+            format!(
+                "failed to write cached gem project identity marker {}",
+                marker.display()
+            )
+        }),
+    }
+}
+
 fn extract_cached_gem_archive(
     extraction_root: &Path,
     archive_path: &Path,
     locked: &LockedGemIdentity,
+    project_digest: &str,
 ) -> Result<GemInfo> {
     let archive_size = std::fs::metadata(archive_path)
         .with_context(|| format!("failed to inspect {}", archive_path.display()))?
@@ -2345,9 +2422,7 @@ fn extract_cached_gem_archive(
     }
 
     let checksum = format!("{:x}", Sha256::digest(&archive_bytes));
-    let gem_root = extraction_root
-        .join(&checksum)
-        .join(format!("{}-{}", locked.name, locked.locked_version));
+    let gem_root = extraction_root.join(format!("{}-{}", locked.name, locked.locked_version));
     let completion_marker = gem_root.join(".complete");
     let marker_matches =
         std::fs::read_to_string(&completion_marker).is_ok_and(|contents| contents == checksum);
@@ -2360,6 +2435,7 @@ fn extract_cached_gem_archive(
             &metadata.require_paths,
         )?;
     }
+    bind_cached_gem_project_digest(extraction_root, project_digest)?;
 
     let lib_paths = metadata
         .require_paths
@@ -2643,16 +2719,16 @@ fn extract_cached_gem_data(
         return Err(error);
     }
 
-    let checksum_root = gem_root.parent().ok_or_else(|| {
+    let extraction_parent = gem_root.parent().ok_or_else(|| {
         anyhow!(
-            "cached gem destination {} has no checksum parent",
+            "cached gem destination {} has no project extraction parent",
             gem_root.display()
         )
     })?;
-    std::fs::create_dir_all(checksum_root).with_context(|| {
+    std::fs::create_dir_all(extraction_parent).with_context(|| {
         format!(
-            "failed to create cached gem checksum directory {}",
-            checksum_root.display()
+            "failed to create cached gem project extraction directory {}",
+            extraction_parent.display()
         )
     })?;
     if gem_root.exists() {
@@ -3243,6 +3319,14 @@ mod tests {
         indexer
     }
 
+    fn extraction_path_contains_sha256_directory(path: &Path) -> bool {
+        path.components().any(|component| {
+            component.as_os_str().to_str().is_some_and(|name| {
+                name.len() == 64 && name.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        })
+    }
+
     #[test]
     fn locked_registry_gem_uses_project_local_vendor_cache_archive() {
         let workspace = TempDir::new().unwrap();
@@ -3279,6 +3363,92 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(gem.path.join("lib/example.rb")).unwrap(),
             "module Example; class Cached; end; end\n"
+        );
+        assert_eq!(
+            gem.path.file_name().and_then(|name| name.to_str()),
+            Some("example-1.2.3-java"),
+            "editors display this path, so the gem identity must be the extracted root"
+        );
+        assert!(
+            !extraction_path_contains_sha256_directory(&gem.path),
+            "SHA-256 directory names hide the gem identity in editor breadcrumbs: {}",
+            gem.path.display()
+        );
+        let project_leaf = workspace.path().file_name().unwrap().to_str().unwrap();
+        let relative = gem
+            .path
+            .strip_prefix(extraction_cache.path().join("gems"))
+            .unwrap();
+        let project_component = relative
+            .components()
+            .next()
+            .and_then(|component| component.as_os_str().to_str())
+            .unwrap();
+        assert!(
+            project_component.starts_with(&format!("{project_leaf}-")),
+            "project identity `{project_component}` should start with the project directory name"
+        );
+        assert_eq!(
+            std::fs::read_to_string(gem.path.join(".complete"))
+                .unwrap()
+                .len(),
+            64,
+            "archive checksum belongs in the completion marker, not the displayed path"
+        );
+    }
+
+    #[test]
+    fn cached_gem_project_identity_uses_directory_name_and_short_digest() {
+        let identity = cached_gem_project_identity(Path::new("/workspace/server"));
+        assert!(
+            identity.starts_with("server-"),
+            "project identity should lead with the directory name, got {identity}"
+        );
+        assert_eq!(
+            identity.len(),
+            "server-".len() + CACHED_GEM_PROJECT_DIGEST_PREFIX_CHARS
+        );
+        assert!(
+            identity["server-".len()..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit()),
+            "project identity suffix should be a digest prefix, got {identity}"
+        );
+        assert_ne!(
+            identity,
+            cached_gem_project_identity(Path::new("/other/server")),
+            "distinct project paths must not share an extraction identity"
+        );
+        assert!(
+            cached_gem_project_identity(Path::new("/workspace/weird name")).starts_with("project-"),
+            "unsafe directory names must fall back to a stable project leaf"
+        );
+    }
+
+    #[test]
+    fn cached_gem_project_identity_disambiguates_short_digest_collisions() {
+        let cache = TempDir::new().unwrap();
+        let project = Path::new("/workspace/server");
+        let short_root = cache
+            .path()
+            .join("gems")
+            .join(cached_gem_project_identity(project));
+        std::fs::create_dir_all(&short_root).unwrap();
+        std::fs::write(
+            short_root.join(CACHED_GEM_PROJECT_DIGEST_MARKER),
+            "0".repeat(64),
+        )
+        .unwrap();
+
+        let resolved = cached_gem_project_extraction_root(cache.path(), project);
+        let expected = format!("server-{}", cached_gem_project_digest(project));
+        assert_ne!(
+            resolved, short_root,
+            "a colliding short digest must not reuse the other project's extraction root"
+        );
+        assert_eq!(
+            resolved.file_name().and_then(|name| name.to_str()),
+            Some(expected.as_str())
         );
     }
 
@@ -3372,7 +3542,7 @@ mod tests {
         );
         assert!(
             !extraction_cache.path().join("lib").exists(),
-            "unsafe archive paths must never escape their checksum directory"
+            "unsafe archive paths must never escape their extraction destination"
         );
     }
 
