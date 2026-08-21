@@ -57,6 +57,7 @@ const GEM_PRODUCT_LOAD_PREFETCH: usize = 2;
 // every worker has observed the same immutable engine context. Keep the batch
 // small enough that those retained facts stay inside the measured multi-root
 // memory envelope while still amortizing registration and resolution work.
+// File-progress counters still advance as each file in the batch is collected.
 const EXHAUSTIVE_PROJECT_FILE_BATCH_SIZE: usize = 512;
 
 #[derive(Default)]

@@ -2,12 +2,15 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+    gemfileLanguageStatusPresentation,
+    projectGemfilePath,
+    runtimeLanguageStatusPresentation,
     runtimeStatusForDocument,
     runtimeStatusItem,
-    runtimeStatusPresentation,
     runtimeVersionMarker,
     selectRuntime
 } = require('../runtime_selector');
+const { lspStatusBarPresentation } = require('../indexing_status');
 
 function jruby(version, family, ruby, executable, supportStatus = 'supported') {
     return {
@@ -229,8 +232,54 @@ test('selects the deepest owning project status for the active document', () => 
     assert.equal(runtimeStatusForDocument(projects, '/outside/app.rb'), undefined);
 });
 
+test('language status shows Gemfile and runtime like Java pom.xml and JavaSE', () => {
+    assert.equal(projectGemfilePath('/repo/admin'), '/repo/admin/Gemfile');
+    assert.deepEqual(gemfileLanguageStatusPresentation({
+        root: '/repo/admin'
+    }, true), {
+        name: 'Ruby Fast LSP',
+        text: 'Gemfile',
+        detail: undefined,
+        busy: false,
+        severity: 'information',
+        command: 'ruby-fast-lsp.openGemfile'
+    });
+    assert.deepEqual(gemfileLanguageStatusPresentation({
+        root: '/repo/standalone'
+    }, false), {
+        name: 'Ruby Fast LSP',
+        text: 'No Gemfile',
+        detail: undefined,
+        busy: false,
+        severity: 'information',
+        command: undefined
+    });
+    assert.deepEqual(runtimeLanguageStatusPresentation({
+        root: '/repo/admin',
+        mode: 'explicit',
+        implementation: 'jruby',
+        engineVersion: '9.2.21.0',
+        compatibilityVersion: '2.5'
+    }), {
+        name: 'Ruby Fast LSP',
+        text: 'JRuby 9.2.21.0',
+        detail: undefined,
+        busy: false,
+        severity: 'information',
+        command: 'ruby-fast-lsp.runtime.configure'
+    });
+    assert.deepEqual(runtimeLanguageStatusPresentation(undefined), {
+        name: 'Ruby Fast LSP',
+        text: 'No runtime',
+        detail: undefined,
+        busy: false,
+        severity: 'information',
+        command: 'ruby-fast-lsp.runtime.configure'
+    });
+});
+
 test('renders exact runtime identity and indexing state for the status bar', () => {
-    assert.deepEqual(runtimeStatusPresentation({
+    assert.deepEqual(runtimeLanguageStatusPresentation({
         root: '/repo/admin',
         mode: 'explicit',
         implementation: 'jruby',
@@ -238,11 +287,15 @@ test('renders exact runtime identity and indexing state for the status bar', () 
         compatibilityVersion: '2.5',
         indexingComplete: true
     }), {
-        text: '$(ruby) JRuby 9.2.21.0',
-        tooltip: 'admin: JRuby 9.2.21.0 (Ruby 2.5) — ready'
+        name: 'Ruby Fast LSP',
+        text: 'JRuby 9.2.21.0',
+        detail: undefined,
+        busy: false,
+        severity: 'information',
+        command: 'ruby-fast-lsp.runtime.configure'
     });
 
-    assert.deepEqual(runtimeStatusPresentation({
+    assert.deepEqual(lspStatusBarPresentation({
         root: '/repo/server',
         mode: 'auto',
         implementation: 'mri',
@@ -250,13 +303,14 @@ test('renders exact runtime identity and indexing state for the status bar', () 
         compatibilityVersion: '3.3',
         indexingComplete: false
     }), {
-        text: '$(sync~spin) server: indexing 0.0s / 5s',
-        tooltip: 'server: indexing — 0.0s / 5s'
+        text: '$(sync~spin) Ruby: Indexing',
+        tooltip: 'server: Indexing — 0.0s',
+        command: 'ruby-fast-lsp.indexing.status'
     });
 });
 
-test('renders authoritative project phases, deadlines, and terminal failures', () => {
-    assert.deepEqual(runtimeStatusPresentation({
+test('left status bar keeps indexing progress; timers live in the tooltip', () => {
+    assert.deepEqual(lspStatusBarPresentation({
         root: '/repo/admin',
         mode: 'explicit',
         implementation: 'jruby',
@@ -270,12 +324,13 @@ test('renders authoritative project phases, deadlines, and terminal failures', (
             total: 300,
             elapsedMs: 3200
         }
-    }), {
-        text: '$(sync~spin) admin: project 3.2s / 5s',
-        tooltip: 'admin: project 120/300 — 3.2s / 5s'
+    }, undefined, 11_250, 10_000), {
+        text: '$(sync~spin) Ruby: 120/300 files',
+        tooltip: 'admin: Indexing 120/300 files — 4.5s',
+        command: 'ruby-fast-lsp.indexing.status'
     });
 
-    assert.deepEqual(runtimeStatusPresentation({
+    assert.deepEqual(lspStatusBarPresentation({
         root: '/repo/admin',
         indexing: {
             generation: 3,
@@ -284,11 +339,12 @@ test('renders authoritative project phases, deadlines, and terminal failures', (
             elapsedMs: 18100
         }
     }), {
-        text: '$(warning) admin: slow indexing · 18s',
-        tooltip: 'admin: dependencies — 18s / 15s (target exceeded)'
+        text: '$(sync~spin) Ruby: Dependencies',
+        tooltip: 'admin: Indexing dependencies — 18s',
+        command: 'ruby-fast-lsp.indexing.status'
     });
 
-    assert.deepEqual(runtimeStatusPresentation({
+    assert.deepEqual(lspStatusBarPresentation({
         root: '/repo/admin',
         indexing: {
             generation: 3,
@@ -298,8 +354,40 @@ test('renders authoritative project phases, deadlines, and terminal failures', (
             failure: 'Gemfile.lock could not be read'
         }
     }), {
-        text: '$(warning) admin: indexing failed',
-        tooltip: 'admin: Gemfile.lock could not be read'
+        text: '$(warning) Ruby: Failed',
+        tooltip: 'admin: Gemfile.lock could not be read',
+        command: 'ruby-fast-lsp.indexing.status'
+    });
+});
+
+test('status bar keeps showing indexing when sibling projects are still in flight', () => {
+    assert.deepEqual(lspStatusBarPresentation({
+        root: '/repo/admin',
+        mode: 'explicit',
+        implementation: 'jruby',
+        engineVersion: '9.2.21.0',
+        compatibilityVersion: '2.5',
+        indexingComplete: true,
+        indexing: {
+            phase: 'ready',
+            elapsedMs: 11_000
+        }
+    }, {
+        projects: [
+            { root: '/repo/admin', phase: 'ready', elapsedMs: 11_000 },
+            {
+                root: '/repo/server',
+                phase: 'indexingProject',
+                completed: 0,
+                total: 10,
+                elapsedMs: 47_000
+            },
+            { root: '/repo/web', phase: 'queued', elapsedMs: 400 }
+        ]
+    }, 50_000, 50_000), {
+        text: '$(sync~spin) Ruby (server): 0/10 files',
+        tooltip: 'server: Indexing 0/10 files — 47s · 2 projects indexing',
+        command: 'ruby-fast-lsp.indexing.status'
     });
 });
 

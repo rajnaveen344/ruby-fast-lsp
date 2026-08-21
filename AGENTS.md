@@ -217,6 +217,21 @@ reset the sequence only after the old transport has stopped, and then refresh
 one authoritative snapshot. Disposal permanently rejects delayed
 notifications. Never carry a previous server process's sequence into a new
 server, whose sequence begins again at one.
+Indexing chrome is editor-owned. `{ } Ruby` language status shows Gemfile
+(`Open Gemfile`) and the active runtime (`Configure Runtime`), matching Java's
+`pom.xml` / `JavaSE` rows. The left-hand status item uses `$(sync~spin) Ruby: 120/300 files` while work is in
+flight and `$(ruby) Ruby: Ready` when ready, matching Java's compact
+cup-plus-name icon. Single-project and multi-project workspaces share that
+same left-bar contract. Multi-project busy text uses a
+`Ruby (<project>):` prefix for the lead project's counts; click the item for
+the queued list. Do not use `window.withProgress` or `$/progress`.
+Elapsed time ticks locally from the last accepted snapshot and lives in
+tooltips; do not heartbeat `elapsed_ms` from the server. During
+`IndexingProject`, the indexer
+publishes a stable `completed/total` file count so the editor can show `m/n files`.
+Completed counts advance as each project file finishes collection; LSP
+counter-only updates stay coalesced on a 200 ms flush so the client is not
+flooded.
 
 An editor workspace folder is a project container, not necessarily one Ruby
 project. A root `Gemfile` owns the folder. Without one, discover the nearest

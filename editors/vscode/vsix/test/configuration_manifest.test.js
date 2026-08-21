@@ -24,17 +24,24 @@ test('editor-managed product choices have commands instead of JSON settings', ()
     );
     assert(commands.has('ruby-fast-lsp.runtime.select'));
     assert(commands.has('ruby-fast-lsp.runtime.configure'));
-    assert(commands.has('ruby-fast-lsp.indexing.status'));
+    assert(commands.has('ruby-fast-lsp.openGemfile'));
     assert(commands.has('ruby-fast-lsp.linter.select'));
     assert(commands.has('ruby-fast-lsp.formatter.select'));
     assert(commands.has('ruby-fast-lsp.indexing.configureLoadPaths'));
     assert(commands.has('rubyIndex.toggleExternalTypes'));
 });
 
-test('one right-hand status item renders structured indexing state', () => {
+test('left-hand indexing item plus Gemfile and runtime language status', () => {
     const statusItems = extensionSource.match(/createStatusBarItem\(/g) || [];
     assert.equal(statusItems.length, 1);
-    assert.match(extensionSource, /StatusBarAlignment\.Right/);
+    assert.match(extensionSource, /StatusBarAlignment\.Left/);
+    assert.doesNotMatch(extensionSource, /StatusBarAlignment\.Right/);
+    const languageItems = extensionSource.match(/createLanguageStatusItem\(/g) || [];
+    assert.equal(languageItems.length, 2);
+    assert.match(extensionSource, /ruby-fast-lsp\.gemfile/);
+    assert.match(extensionSource, /ruby-fast-lsp\.runtime/);
+    assert.doesNotMatch(extensionSource, /withProgress\(/);
+    assert.doesNotMatch(extensionSource, /ProgressLocation\.Notification/);
     assert.match(extensionSource, /ruby-fast-lsp\/indexing\/statusChanged/);
     assert.doesNotMatch(extensionSource, /onNotification\(['"]\\$\/progress/);
     assert.doesNotMatch(extensionSource, /statusBarItem\.hide/);

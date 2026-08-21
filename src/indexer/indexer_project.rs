@@ -13,6 +13,7 @@ use ruby_analysis::core::{FullyQualifiedName, SourceKind};
 use ruby_analysis::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileSnapshot};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::Url;
@@ -90,6 +91,8 @@ pub struct IndexerProject {
     jruby_replay_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
     jruby_replay_analysis_engine: Option<Arc<parking_lot::RwLock<AnalysisEngine>>>,
     project_navigation_started_at: Option<Instant>,
+    project_file_total: Option<u64>,
+    project_file_completed: AtomicU64,
 }
 
 impl IndexerProject {
@@ -135,6 +138,8 @@ impl IndexerProject {
             jruby_replay_known_namespaces: None,
             jruby_replay_analysis_engine: None,
             project_navigation_started_at: None,
+            project_file_total: None,
+            project_file_completed: AtomicU64::new(0),
         }
     }
 
@@ -230,6 +235,8 @@ impl IndexerProject {
         self.jruby_source_hints.clear();
         self.pending_jruby_navigation_plan = StaticJavaNavigationPlan::default();
         self.processed_project_files.clear();
+        self.project_file_total = None;
+        self.project_file_completed.store(0, Ordering::Relaxed);
         self.exhaustive_known_namespaces = None;
         self.exhaustive_analysis_engine = None;
         self.exhaustive_collection_started = false;
@@ -258,6 +265,8 @@ impl IndexerProject {
             priority_file_count
         );
 
+        self.begin_project_file_progress(total_files, server);
+
         self.collect_signature_facts(&signature_files, server);
         self.initialize_project_collection_semantic_context(server, &all_project_files)?;
         let collection_known_namespaces = self.exhaustive_known_namespaces.clone().expect(
@@ -274,7 +283,7 @@ impl IndexerProject {
             Some(collection_known_namespaces),
             Some(collection_analysis_engine),
         )?;
-        self.record_processed_project_files(&selection.files);
+        self.record_processed_project_files(&selection.files, server);
         self.pending_project_navigation_files = Some(ruby_files);
         self.pending_project_files = Some(exhaustive_files);
 
@@ -318,7 +327,7 @@ impl IndexerProject {
                 "INVARIANT VIOLATED: active project frontier lost the generation-owned analysis baseline. This is a bug because frontier ordering must not change collected facts. Fix: retain the baseline through project completion.",
             )),
         )?;
-        self.record_processed_project_files(&ruby_files);
+        self.record_processed_project_files(&ruby_files, server);
         self.refresh_exhaustive_semantic_context(server)?;
 
         info!(
@@ -367,7 +376,7 @@ impl IndexerProject {
             Some(known_namespaces.clone()),
             Some(semantic_context_engine.clone()),
         )?;
-        self.record_processed_project_files(&files);
+        self.record_processed_project_files(&files, server);
         self.exhaustive_known_namespaces = None;
         assert!(
             self.jruby_replay_known_namespaces
@@ -474,11 +483,32 @@ impl IndexerProject {
             Some(known_namespaces),
             Some(semantic_context_engine),
         )?;
-        self.record_processed_project_files(files);
+        self.record_processed_project_files(files, server);
         Ok(())
     }
 
-    fn record_processed_project_files(&mut self, files: &[PathBuf]) {
+    fn begin_project_file_progress(&mut self, total_files: usize, server: &RubyLanguageServer) {
+        self.project_file_total = Some(u64::try_from(total_files).expect(
+            "INVARIANT VIOLATED: project file count exceeds u64. This is a bug because a filesystem cannot contain that many paths. Fix: inspect collect_project_files.",
+        ));
+        self.report_project_file_progress(server);
+    }
+
+    fn report_project_file_progress(&self, server: &RubyLanguageServer) {
+        let Some(total) = self.project_file_total else {
+            return;
+        };
+        if total == 0 {
+            return;
+        }
+        let completed = u64::try_from(self.processed_project_files.len()).expect(
+            "INVARIANT VIOLATED: processed project file count exceeds u64. This is a bug because processed files are a subset of the discovered set. Fix: inspect record_processed_project_files.",
+        );
+        self.project_file_completed.store(completed, Ordering::Relaxed);
+        server.report_project_indexing_progress(&self.workspace_root, completed, total);
+    }
+
+    fn record_processed_project_files(&mut self, files: &[PathBuf], server: &RubyLanguageServer) {
         for file in files {
             assert!(
                 self.processed_project_files.insert(file.clone()),
@@ -488,6 +518,9 @@ impl IndexerProject {
                  partitioning and demand-file removal.",
                 file.display()
             );
+        }
+        if !files.is_empty() {
+            self.report_project_file_progress(server);
         }
     }
 
@@ -1030,6 +1063,9 @@ impl IndexerProject {
             baseline_known_namespaces
         };
 
+        let project_file_completed = &self.project_file_completed;
+        let project_file_total = self.project_file_total;
+        let workspace_root = &self.workspace_root;
         let collect_file = |registered: RegisteredProjectFileInput| -> Result<(
             PathBuf,
             SourceFileSnapshot,
@@ -1067,6 +1103,10 @@ impl IndexerProject {
                         file_path.display()
                     )
                 })?;
+            if let Some(total) = project_file_total {
+                let completed = project_file_completed.fetch_add(1, Ordering::Relaxed) + 1;
+                server.report_project_indexing_progress(workspace_root, completed, total);
+            }
             Ok((
                 file_path.clone(),
                 registered.source_snapshot,
@@ -1843,6 +1883,65 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(indexer.remaining_project_file_count(), 0);
+    }
+
+    #[test]
+    fn project_indexing_status_reports_completed_files_against_a_stable_total() {
+        let workspace = TempDir::new().unwrap();
+        let root = workspace.path();
+        for name in ["alpha.rb", "beta.rb", "gamma.rb", "delta.rb"] {
+            std::fs::write(root.join(name), "class Sample\nend\n").unwrap();
+        }
+
+        let server = RubyLanguageServer::default();
+        let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
+        let run = workspace_state.begin_indexing_run();
+        workspace_state
+            .indexing_status
+            .transition(
+                run.generation(),
+                crate::indexing_status::IndexingPhase::IndexingProject,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let mut indexer = IndexerProject::new(
+            root.to_path_buf(),
+            FileProcessor::new(),
+            IndexingConfig::default(),
+        );
+        indexer.set_navigation_priority_keys(HashSet::from(["alpha".to_string()]), HashSet::new());
+
+        indexer
+            .collect_initial_project_navigation_demand_facts(&[], &server)
+            .unwrap();
+        let discovered = workspace_state.indexing_status.snapshot();
+        assert_eq!(discovered.total, Some(4));
+        assert_eq!(
+            discovered.completed,
+            Some(0),
+            "file discovery must publish a stable denominator before the first batch"
+        );
+
+        indexer.finish_project_navigation_facts(&server).unwrap();
+        let after_frontier = workspace_state.indexing_status.snapshot();
+        assert_eq!(after_frontier.total, Some(4));
+        assert_eq!(after_frontier.completed, Some(1));
+
+        indexer.collect_remaining_project_facts(&server).unwrap();
+        let after_all = workspace_state.indexing_status.snapshot();
+        assert_eq!(after_all.total, Some(4));
+        assert_eq!(after_all.completed, Some(4));
+        let reported_completed = server
+            .indexing_progress_reports()
+            .into_iter()
+            .map(|(_, completed, _)| completed)
+            .collect::<Vec<_>>();
+        assert!(
+            reported_completed.contains(&2) && reported_completed.contains(&3),
+            "a multi-file batch must report each collected file, not only the batch boundary; got {reported_completed:?}"
+        );
     }
 
     fn jruby_provider(class_names: &[&str]) -> JrubyImportProvider {

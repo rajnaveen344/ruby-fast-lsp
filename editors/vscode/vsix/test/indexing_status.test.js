@@ -4,10 +4,15 @@ const test = require('node:test');
 const {
     acceptNewerIndexingSnapshot,
     createIndexingStatusSession,
+    indexingClockShouldRun,
     indexingStatusBarCommand,
     indexingStatusQuickPickPlaceholder,
     indexingStatusQuickPickItems,
-    indexingStatusRequestParams
+    indexingStatusRequestParams,
+    liveElapsedMs,
+    lspStatusBarError,
+    lspStatusBarPresentation,
+    lspStatusBarStarting
 } = require('../indexing_status');
 
 test('active editor URI is sent with the authoritative status request', () => {
@@ -67,7 +72,8 @@ test('status session rejects old transport events and accepts the restarted serv
         sequence: 0,
         aggregate: undefined,
         reuse: undefined,
-        projects: []
+        projects: [],
+        receivedAtMs: undefined
     });
     assert.equal(session.accept({
         sequence: 1,
@@ -141,7 +147,7 @@ test('project status details are deterministic and put the active project first'
     assert.equal(items.length, 2);
     assert.deepEqual(items[0], {
         label: '$(sync~spin) server',
-        description: 'active · dependencies 41/100 · 8.4s / 15s',
+        description: 'active · dependencies 41/100 files · 8.4s',
         detail: '/repo/server · generation 3 · project navigation 2.3s · dependency navigation pending',
         project: snapshot.projects[1]
     });
@@ -201,9 +207,242 @@ test('status bar opens indexing details only while project indexing needs attent
         'ruby-fast-lsp.runtime.configure'
     );
     assert.equal(
+        indexingStatusBarCommand({ phase: 'ready' }, {
+            projects: [{ root: '/repo/server', phase: 'indexingProject' }]
+        }),
+        'ruby-fast-lsp.indexing.status'
+    );
+    assert.equal(
         indexingStatusBarCommand(undefined),
         'ruby-fast-lsp.runtime.configure'
     );
+});
+
+test('left status bar always uses a short Ruby: label', () => {
+    const texts = {
+        ready: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexingComplete: true
+        }).text,
+        noProject: lspStatusBarPresentation(undefined).text,
+        starting: lspStatusBarStarting().text,
+        error: lspStatusBarError('runtime failed').text,
+        discovered: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'discovered', elapsedMs: 0 }
+        }).text,
+        queued: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'queued', elapsedMs: 0 }
+        }).text,
+        runtime: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'resolvingRuntime', elapsedMs: 0 }
+        }).text,
+        inputs: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'discoveringInputs', elapsedMs: 0 }
+        }).text,
+        core: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'indexingCore', elapsedMs: 0 }
+        }).text,
+        indexing: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'indexingProject', elapsedMs: 0 }
+        }).text,
+        files: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: {
+                phase: 'indexingProject',
+                completed: 120,
+                total: 300,
+                elapsedMs: 0
+            }
+        }).text,
+        dependencies: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'indexingDependencies', elapsedMs: 0 }
+        }).text,
+        semantics: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'resolvingSemantics', elapsedMs: 0 }
+        }).text,
+        diagnostics: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'publishingDiagnostics', elapsedMs: 0 }
+        }).text,
+        failed: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'failed', elapsedMs: 0, failure: 'boom' }
+        }).text,
+        cancelled: lspStatusBarPresentation({
+            root: '/repo/admin',
+            indexing: { phase: 'cancelled', elapsedMs: 0 }
+        }).text
+    };
+
+    assert.deepEqual(texts, {
+        ready: '$(ruby) Ruby: Ready',
+        noProject: '$(ruby) Ruby: No project',
+        starting: '$(sync~spin) Ruby: Starting',
+        error: '$(warning) Ruby: Error',
+        discovered: '$(sync~spin) Ruby: Discovered',
+        queued: '$(sync~spin) Ruby: Queued',
+        runtime: '$(sync~spin) Ruby: Runtime',
+        inputs: '$(sync~spin) Ruby: Inputs',
+        core: '$(sync~spin) Ruby: Core',
+        indexing: '$(sync~spin) Ruby: Indexing',
+        files: '$(sync~spin) Ruby: 120/300 files',
+        dependencies: '$(sync~spin) Ruby: Dependencies',
+        semantics: '$(sync~spin) Ruby: Semantics',
+        diagnostics: '$(sync~spin) Ruby: Diagnostics',
+        failed: '$(warning) Ruby: Failed',
+        cancelled: '$(clock) Ruby: Cancelled'
+    });
+});
+
+test('single-project and multi-project ready use the same left status bar', () => {
+    const single = lspStatusBarPresentation({
+        root: '/repo/admin',
+        indexingComplete: true,
+        indexing: { phase: 'ready', elapsedMs: 12_000 }
+    }, {
+        projects: [{ root: '/repo/admin', phase: 'ready', elapsedMs: 12_000 }]
+    });
+    const multiAllReady = lspStatusBarPresentation({
+        root: '/repo/admin',
+        indexingComplete: true,
+        indexing: { phase: 'ready', elapsedMs: 12_000 }
+    }, {
+        projects: [
+            { root: '/repo/admin', phase: 'ready', elapsedMs: 12_000 },
+            { root: '/repo/server', phase: 'ready', elapsedMs: 18_000 }
+        ]
+    });
+
+    assert.equal(single.text, '$(ruby) Ruby: Ready');
+    assert.equal(multiAllReady.text, single.text);
+});
+
+test('in-progress elapsed keeps ticking from the last accepted snapshot', () => {
+    assert.equal(liveElapsedMs({
+        phase: 'indexingProject',
+        elapsedMs: 3200
+    }, 10_000, 10_000), 3200);
+    assert.equal(liveElapsedMs({
+        phase: 'indexingProject',
+        elapsedMs: 3200
+    }, 11_250, 10_000), 4450);
+    assert.equal(liveElapsedMs({
+        phase: 'ready',
+        elapsedMs: 12_400
+    }, 20_000, 10_000), 12_400);
+    assert.equal(liveElapsedMs({
+        phase: 'failed',
+        elapsedMs: 19_000
+    }, 20_000, 10_000), 19_000);
+    assert.equal(liveElapsedMs({
+        phase: 'indexingProject',
+        elapsedMs: 3200
+    }, 11_250), 3200);
+});
+
+test('status session records when the client accepted a snapshot', () => {
+    const session = createIndexingStatusSession();
+    assert.equal(session.accept({
+        sequence: 1,
+        aggregate: { active: 1 },
+        projects: [{ root: '/repo/admin', phase: 'indexingProject', elapsedMs: 1000 }]
+    }, 50_000), true);
+    assert.equal(session.snapshot().receivedAtMs, 50_000);
+    assert.equal(session.accept({
+        sequence: 1,
+        aggregate: { active: 0 },
+        projects: [{ root: '/repo/admin', phase: 'ready' }]
+    }, 60_000), false);
+    assert.equal(session.snapshot().receivedAtMs, 50_000);
+});
+
+test('single-project busy omits the project prefix', () => {
+    assert.equal(lspStatusBarPresentation({
+        root: '/repo/admin',
+        indexing: {
+            phase: 'indexingProject',
+            completed: 2048,
+            total: 2658,
+            elapsedMs: 12_000
+        }
+    }, {
+        projects: [{
+            root: '/repo/admin',
+            phase: 'indexingProject',
+            completed: 2048,
+            total: 2658,
+            elapsedMs: 12_000
+        }]
+    }).text, '$(sync~spin) Ruby: 2048/2658 files');
+});
+
+test('multi-project busy names the lead project on the left status bar', () => {
+    assert.equal(lspStatusBarPresentation({
+        root: '/repo/server',
+        indexing: {
+            phase: 'indexingProject',
+            completed: 2048,
+            total: 2658,
+            elapsedMs: 12_000
+        }
+    }, {
+        projects: [
+            { root: '/repo/admin', phase: 'ready', elapsedMs: 11_000 },
+            {
+                root: '/repo/server',
+                phase: 'indexingProject',
+                completed: 2048,
+                total: 2658,
+                elapsedMs: 12_000
+            },
+            { root: '/repo/web', phase: 'queued', elapsedMs: 400 }
+        ]
+    }).text, '$(sync~spin) Ruby (server): 2048/2658 files');
+});
+
+test('sibling background work uses the lead project prefix', () => {
+    assert.deepEqual(lspStatusBarPresentation({
+        root: '/repo/admin',
+        indexingComplete: true,
+        indexing: { phase: 'ready', elapsedMs: 11_000 }
+    }, {
+        projects: [
+            { root: '/repo/admin', phase: 'ready', elapsedMs: 11_000 },
+            {
+                root: '/repo/server',
+                phase: 'indexingProject',
+                completed: 0,
+                total: 10,
+                elapsedMs: 47_500
+            },
+            { root: '/repo/web', phase: 'queued', elapsedMs: 400 }
+        ]
+    }), {
+        text: '$(sync~spin) Ruby (server): 0/10 files',
+        tooltip: 'server: Indexing 0/10 files — 48s · 2 projects indexing',
+        command: 'ruby-fast-lsp.indexing.status'
+    });
+});
+
+test('the local indexing clock runs only while a generation is in flight', () => {
+    assert.equal(indexingClockShouldRun({
+        projects: [{ phase: 'indexingProject' }]
+    }), true);
+    assert.equal(indexingClockShouldRun({
+        projects: [{ phase: 'ready' }, { phase: 'queued' }]
+    }), true);
+    assert.equal(indexingClockShouldRun({
+        projects: [{ phase: 'ready' }, { phase: 'failed' }]
+    }), false);
+    assert.equal(indexingClockShouldRun({ projects: [] }), false);
 });
 
 test('project status picker summarizes bounded scheduler state', () => {

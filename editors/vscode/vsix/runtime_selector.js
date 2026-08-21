@@ -1,5 +1,10 @@
 'use strict';
 
+const {
+    indexingStatusBarPresentation,
+    phasePresentation
+} = require('./indexing_status');
+
 async function selectRuntime({ window, client, applySelection, preferredProjectRoot }) {
     const catalog = await client.sendRequest('ruby-fast-lsp/runtime/discover', {});
     const projects = Array.isArray(catalog?.projects) ? catalog.projects : [];
@@ -198,50 +203,52 @@ function runtimeStatusForDocument(projects, documentPath) {
         .sort((left, right) => normalizePath(right.root).length - normalizePath(left.root).length)[0];
 }
 
-function runtimeStatusPresentation(status) {
+function runtimeStatusPresentation(status, nowMs, receivedAtMs, snapshot) {
     const project = status.root
         ? normalizePath(status.root).split('/').filter(Boolean).pop()
         : 'Ruby project';
     const indexing = status.indexing;
     const phase = indexing?.phase;
+    const identity = runtimeBarIdentity(status);
     if (phase === 'failed') {
         return {
-            text: `$(warning) ${project}: indexing failed`,
+            text: `$(warning) ${identity}`,
             tooltip: `${project}: ${indexing.failure || 'Indexing failed'}`
         };
     }
     if (phase === 'cancelled') {
         return {
-            text: `$(clock) ${project}: cancelled`,
+            text: `$(clock) ${identity}`,
             tooltip: `${project}: indexing was cancelled`
         };
     }
-    const ready = phase === 'ready' || (!phase && status.indexingComplete);
-    if (!ready) {
-        const elapsedSeconds = Math.max(0, Number(indexing?.elapsedMs || 0) / 1000);
-        const targetSeconds = dependencyPhase(phase) ? 15 : 5;
-        const slow = elapsedSeconds > targetSeconds;
-        const label = phaseLabel(phase);
-        const progress = indexingProgress(indexing);
-        const timing = `${formatSeconds(elapsedSeconds)} / ${targetSeconds}s`;
-        return {
-            text: slow
-                ? `$(warning) ${project}: slow indexing · ${formatSeconds(elapsedSeconds)}`
-                : `$(sync~spin) ${project}: ${label} ${timing}`,
-            tooltip: `${project}: ${label}${progress} — ${timing}${slow ? ' (target exceeded)' : ''}`
-        };
+    const indexingBar = indexingStatusBarPresentation(
+        status,
+        snapshot,
+        nowMs,
+        receivedAtMs
+    );
+    if (indexingBar) {
+        return indexingBar;
     }
-    const runtime = shortRuntimeIdentity(status);
     if (status.mode === 'auto') {
         return {
-            text: `$(ruby) ${runtime === 'Auto' ? 'Auto' : `Auto: ${runtime}`}`,
-            tooltip: `${project}: ${runtime === 'Auto' ? 'Auto runtime detection' : `Auto → ${runtime}`} — ready`
+            text: `$(ruby) ${identity}`,
+            tooltip: `${project}: ${identity === 'Auto' ? 'Auto runtime detection' : `Auto → ${shortRuntimeIdentity(status)}`} — ready`
         };
     }
     return {
-        text: `$(ruby) ${runtime}`,
+        text: `$(ruby) ${identity}`,
         tooltip: `${project}: ${detailedRuntimeIdentity(status)} — ready`
     };
+}
+
+function runtimeBarIdentity(status) {
+    const runtime = shortRuntimeIdentity(status);
+    if (status.mode === 'auto') {
+        return runtime === 'Auto' ? 'Auto' : `Auto: ${runtime}`;
+    }
+    return runtime;
 }
 
 function indexingDescription(status) {
@@ -252,52 +259,7 @@ function indexingDescription(status) {
     if (phase === 'failed') {
         return `failed: ${status.indexing.failure || 'unknown error'}`;
     }
-    return phaseLabel(phase);
-}
-
-function dependencyPhase(phase) {
-    return [
-        'indexingDependencies',
-        'dependencyNavigationReady',
-        'resolvingSemantics',
-        'publishingDiagnostics'
-    ].includes(phase);
-}
-
-function phaseLabel(phase) {
-    switch (phase) {
-        case 'discovered': return 'discovered';
-        case 'queued': return 'queued';
-        case 'resolvingRuntime': return 'runtime';
-        case 'discoveringInputs': return 'inputs';
-        case 'indexingCore': return 'core';
-        case 'indexingProject': return 'project';
-        case 'projectNavigationReady': return 'dependencies';
-        case 'indexingDependencies': return 'dependencies';
-        case 'dependencyNavigationReady': return 'semantics';
-        case 'resolvingSemantics': return 'semantics';
-        case 'publishingDiagnostics': return 'diagnostics';
-        case 'failed': return 'failed';
-        case 'cancelled': return 'cancelled';
-        case 'ready': return 'ready';
-        case undefined: return 'indexing';
-        default:
-            throw new Error(`INVARIANT VIOLATED: unknown indexing phase '${phase}'`);
-    }
-}
-
-function indexingProgress(indexing) {
-    if (!indexing || indexing.completed === undefined || indexing.completed === null) {
-        return '';
-    }
-    if (indexing.total === undefined || indexing.total === null) {
-        throw new Error('INVARIANT VIOLATED: indexing status has completed work without a total');
-    }
-    return ` ${indexing.completed}/${indexing.total}`;
-}
-
-function formatSeconds(seconds) {
-    return seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
+    return phase === undefined ? 'indexing' : phasePresentation(phase).label;
 }
 
 function runtimeVersionMarker(status) {
@@ -354,7 +316,49 @@ function uniqueBy(values, key) {
     });
 }
 
+function projectGemfilePath(root) {
+    const normalized = normalizePath(root);
+    if (!normalized) {
+        return undefined;
+    }
+    return `${normalized}/Gemfile`;
+}
+
+function languageStatusRow(text, extras = {}) {
+    return {
+        name: 'Ruby Fast LSP',
+        text,
+        detail: extras.detail,
+        busy: Boolean(extras.busy),
+        severity: extras.severity || 'information',
+        command: extras.command
+    };
+}
+
+function gemfileLanguageStatusPresentation(status, gemfileExists) {
+    if (!status?.root || !gemfileExists) {
+        return languageStatusRow('No Gemfile');
+    }
+    return languageStatusRow('Gemfile', {
+        command: 'ruby-fast-lsp.openGemfile'
+    });
+}
+
+function runtimeLanguageStatusPresentation(status) {
+    if (!status) {
+        return languageStatusRow('No runtime', {
+            command: 'ruby-fast-lsp.runtime.configure'
+        });
+    }
+    return languageStatusRow(shortRuntimeIdentity(status), {
+        command: 'ruby-fast-lsp.runtime.configure'
+    });
+}
+
 module.exports = {
+    gemfileLanguageStatusPresentation,
+    projectGemfilePath,
+    runtimeLanguageStatusPresentation,
     runtimeStatusForDocument,
     runtimeStatusItem,
     runtimeStatusPresentation,

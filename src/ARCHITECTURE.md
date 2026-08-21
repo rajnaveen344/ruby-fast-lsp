@@ -270,7 +270,8 @@ under one async publication lock. The VS Code adapter applies only strictly
 newer complete snapshots and caches both aggregate and per-project state, so an
 older delayed request cannot overwrite projects from a newer notification.
 Generation, phase, aggregate scheduler state, readiness, cancellation, and
-failure changes publish immediately. Same-phase counter-only updates share one
+failure changes publish immediately. File-progress counters advance as each
+project file is collected. Same-phase counter-only updates share one
 200 ms pending flush, and an immediate transition cancels that stale flush.
 The editor renders accepted notifications directly; it does not echo each
 notification into another status request.

@@ -32,11 +32,12 @@ function createIndexingStatusSession() {
     let aggregate;
     let reuse;
     let projects = [];
+    let receivedAtMs;
     let suspended = false;
     let disposed = false;
 
     return {
-        accept(snapshot) {
+        accept(snapshot, nowMs = Date.now()) {
             if (suspended || disposed) {
                 return false;
             }
@@ -48,6 +49,7 @@ function createIndexingStatusSession() {
             aggregate = accepted.aggregate;
             reuse = accepted.reuse;
             projects = accepted.projects;
+            receivedAtMs = nowMs;
             return true;
         },
         suspendForRestart() {
@@ -82,6 +84,7 @@ function createIndexingStatusSession() {
             aggregate = undefined;
             reuse = undefined;
             projects = [];
+            receivedAtMs = undefined;
             suspended = false;
             return true;
         },
@@ -91,19 +94,26 @@ function createIndexingStatusSession() {
             aggregate = undefined;
             reuse = undefined;
             projects = [];
+            receivedAtMs = undefined;
         },
         snapshot() {
             return {
                 sequence,
                 aggregate,
                 reuse,
-                projects
+                projects,
+                receivedAtMs
             };
         }
     };
 }
 
-function indexingStatusQuickPickItems(snapshot, activeProjectRoot, runtimeProjects = []) {
+function indexingStatusQuickPickItems(
+    snapshot,
+    activeProjectRoot,
+    runtimeProjects = [],
+    nowMs = Date.now()
+) {
     const activeRoot = normalizePath(activeProjectRoot);
     const runtimesByRoot = new Map(
         runtimeProjects.map(runtime => [normalizePath(runtime?.root), runtime])
@@ -122,17 +132,14 @@ function indexingStatusQuickPickItems(snapshot, activeProjectRoot, runtimeProjec
 
     return projects.map(project => {
         const phase = phasePresentation(project.phase);
-        const elapsed = formatSeconds(project.elapsedMs);
+        const elapsed = formatSeconds(liveElapsedMs(project, nowMs, snapshot?.receivedAtMs));
         const progress = project.phase === 'ready' ? '' : indexingProgress(project);
-        const target = phase.targetSeconds === undefined
-            ? ''
-            : ` / ${phase.targetSeconds}s`;
         const active = normalizePath(project.root) === activeRoot;
         const runtime = runtimesByRoot.get(normalizePath(project.root));
         const description = [
             active ? 'active' : undefined,
             `${phase.label}${progress}`,
-            `${elapsed}${target}`
+            elapsed
         ].filter(Boolean).join(' · ');
         const details = [
             String(project.root),
@@ -155,8 +162,11 @@ function indexingStatusQuickPickItems(snapshot, activeProjectRoot, runtimeProjec
     });
 }
 
-function indexingStatusBarCommand(indexing) {
+function indexingStatusBarCommand(indexing, snapshot) {
     if (indexing?.phase && indexing.phase !== 'ready') {
+        return 'ruby-fast-lsp.indexing.status';
+    }
+    if (inFlightIndexingProjects(snapshot).length > 0) {
         return 'ruby-fast-lsp.indexing.status';
     }
     return 'ruby-fast-lsp.runtime.configure';
@@ -272,25 +282,25 @@ function runtimePresentation(runtime) {
 function phasePresentation(phase) {
     switch (phase) {
         case 'discovered':
-            return { icon: '$(clock)', label: 'discovered', targetSeconds: 5 };
+            return { icon: '$(clock)', label: 'discovered' };
         case 'queued':
-            return { icon: '$(clock)', label: 'queued', targetSeconds: 5 };
+            return { icon: '$(clock)', label: 'queued' };
         case 'resolvingRuntime':
-            return { icon: '$(sync~spin)', label: 'runtime', targetSeconds: 5 };
+            return { icon: '$(sync~spin)', label: 'runtime' };
         case 'discoveringInputs':
-            return { icon: '$(sync~spin)', label: 'inputs', targetSeconds: 5 };
+            return { icon: '$(sync~spin)', label: 'inputs' };
         case 'indexingCore':
-            return { icon: '$(sync~spin)', label: 'core', targetSeconds: 5 };
+            return { icon: '$(sync~spin)', label: 'core' };
         case 'indexingProject':
-            return { icon: '$(sync~spin)', label: 'project', targetSeconds: 5 };
+            return { icon: '$(sync~spin)', label: 'indexing' };
         case 'projectNavigationReady':
         case 'indexingDependencies':
-            return { icon: '$(sync~spin)', label: 'dependencies', targetSeconds: 15 };
+            return { icon: '$(sync~spin)', label: 'dependencies' };
         case 'dependencyNavigationReady':
         case 'resolvingSemantics':
-            return { icon: '$(sync~spin)', label: 'semantics', targetSeconds: 15 };
+            return { icon: '$(sync~spin)', label: 'semantics' };
         case 'publishingDiagnostics':
-            return { icon: '$(sync~spin)', label: 'diagnostics', targetSeconds: 15 };
+            return { icon: '$(sync~spin)', label: 'diagnostics' };
         case 'ready':
             return { icon: '$(pass-filled)', label: 'ready' };
         case 'failed':
@@ -306,8 +316,8 @@ function phasePresentation(phase) {
     }
 }
 
-function indexingProgress(project) {
-    if (project.completed === undefined || project.completed === null) {
+function indexingFileCounts(project) {
+    if (!project || project.completed === undefined || project.completed === null) {
         return '';
     }
     if (project.total === undefined || project.total === null) {
@@ -317,7 +327,250 @@ function indexingProgress(project) {
             + 'Fix: publish both completed and total counters.'
         );
     }
-    return ` ${project.completed}/${project.total}`;
+    return `${project.completed}/${project.total}`;
+}
+
+function indexingProgress(project) {
+    const counts = indexingFileCounts(project);
+    return counts ? ` ${counts} files` : '';
+}
+
+function indexingBusyPhrase(phase) {
+    switch (phase) {
+        case undefined:
+            return 'Indexing';
+        case 'discovered':
+            return 'Discovered';
+        case 'queued':
+            return 'Queued';
+        case 'resolvingRuntime':
+            return 'Resolving runtime';
+        case 'discoveringInputs':
+            return 'Discovering inputs';
+        case 'indexingCore':
+            return 'Indexing core';
+        case 'indexingProject':
+            return 'Indexing';
+        case 'projectNavigationReady':
+        case 'indexingDependencies':
+            return 'Indexing dependencies';
+        case 'dependencyNavigationReady':
+        case 'resolvingSemantics':
+            return 'Resolving semantics';
+        case 'publishingDiagnostics':
+            return 'Publishing diagnostics';
+        case 'ready':
+            return 'Ready';
+        case 'failed':
+            return 'Failed';
+        case 'cancelled':
+            return 'Cancelled';
+        default:
+            return phasePresentation(phase).label;
+    }
+}
+
+function isTerminalIndexingPhase(phase) {
+    return phase === 'ready' || phase === 'failed' || phase === 'cancelled';
+}
+
+function liveElapsedMs(indexing, nowMs, receivedAtMs) {
+    const snapshotElapsed = Math.max(0, Number(indexing?.elapsedMs || 0));
+    if (!indexing || isTerminalIndexingPhase(indexing.phase)) {
+        return snapshotElapsed;
+    }
+    if (!Number.isFinite(nowMs) || !Number.isFinite(receivedAtMs)) {
+        return snapshotElapsed;
+    }
+    return snapshotElapsed + Math.max(0, nowMs - receivedAtMs);
+}
+
+function indexingClockShouldRun(snapshot) {
+    const projects = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+    return projects.some(project => !isTerminalIndexingPhase(project.phase));
+}
+
+function phaseLabel(phase) {
+    if (phase === undefined) {
+        return 'indexing';
+    }
+    return phasePresentation(phase).label;
+}
+
+function rubyStatusText(icon, message, project) {
+    const label = project ? `Ruby (${project})` : 'Ruby';
+    return `${icon || '$(ruby)'} ${label}: ${message}`;
+}
+
+function lspBusyMessage(phase, counts) {
+    if (counts) {
+        return `${counts} files`;
+    }
+    switch (phase) {
+        case undefined:
+            return 'Indexing';
+        case 'discovered':
+            return 'Discovered';
+        case 'queued':
+            return 'Queued';
+        case 'resolvingRuntime':
+            return 'Runtime';
+        case 'discoveringInputs':
+            return 'Inputs';
+        case 'indexingCore':
+            return 'Core';
+        case 'indexingProject':
+            return 'Indexing';
+        case 'projectNavigationReady':
+        case 'indexingDependencies':
+            return 'Dependencies';
+        case 'dependencyNavigationReady':
+        case 'resolvingSemantics':
+            return 'Semantics';
+        case 'publishingDiagnostics':
+            return 'Diagnostics';
+        default:
+            return phasePresentation(phase).label;
+    }
+}
+
+function lspStatusBarStarting(tooltip = 'Determining the owning project') {
+    return {
+        text: rubyStatusText('$(sync~spin)', 'Starting'),
+        tooltip,
+        command: 'ruby-fast-lsp.indexing.status'
+    };
+}
+
+function lspStatusBarError(tooltip) {
+    return {
+        text: rubyStatusText('$(warning)', 'Error'),
+        tooltip,
+        command: 'ruby-fast-lsp.runtime.configure'
+    };
+}
+
+function lspStatusBarPresentation(status, snapshot, nowMs, receivedAtMs) {
+    if (!status) {
+        return {
+            text: rubyStatusText(undefined, 'No project'),
+            tooltip: 'The active document is not owned by a discovered Ruby project',
+            command: 'ruby-fast-lsp.runtime.configure'
+        };
+    }
+    const project = projectName(status.root);
+    const phase = status.indexing?.phase;
+    if (phase === 'failed') {
+        return {
+            text: rubyStatusText('$(warning)', 'Failed'),
+            tooltip: `${project}: ${status.indexing.failure || 'Indexing failed'}`,
+            command: 'ruby-fast-lsp.indexing.status'
+        };
+    }
+    if (phase === 'cancelled') {
+        return {
+            text: rubyStatusText('$(clock)', 'Cancelled'),
+            tooltip: `${project}: indexing was cancelled`,
+            command: 'ruby-fast-lsp.indexing.status'
+        };
+    }
+    const indexingBar = indexingStatusBarPresentation(
+        status,
+        snapshot,
+        nowMs,
+        receivedAtMs
+    );
+    if (indexingBar) {
+        return {
+            ...indexingBar,
+            command: 'ruby-fast-lsp.indexing.status'
+        };
+    }
+    return {
+        text: rubyStatusText(undefined, 'Ready'),
+        tooltip: `${project}: indexed and ready`,
+        command: 'ruby-fast-lsp.indexing.status'
+    };
+}
+
+function indexingStatusBarPresentation(status, snapshot, nowMs, receivedAtMs) {
+    const inFlight = inFlightIndexingProjects(snapshot, status?.root);
+    let lead = leadIndexingProject(inFlight, status?.root);
+    let inFlightCount = inFlight.length;
+    if (!lead && status && indexingStatusIsInFlight(status)) {
+        lead = { ...(status.indexing || { elapsedMs: 0 }), root: status.root };
+        inFlightCount = 1;
+    }
+    if (!lead) {
+        return undefined;
+    }
+    const name = projectName(lead.root);
+    const counts = indexingFileCounts(lead);
+    const elapsedMs = liveElapsedMs(lead, nowMs, receivedAtMs);
+    const message = lspBusyMessage(lead.phase, counts);
+    const phrase = indexingBusyPhrase(lead.phase);
+    const countLabel = counts ? ` ${counts} files` : '';
+    const more = inFlightCount > 1 ? ` · ${inFlightCount} projects indexing` : '';
+    const project = indexingStatusProjectPrefix(snapshot, lead);
+    return {
+        text: rubyStatusText('$(sync~spin)', message, project),
+        tooltip: `${name}: ${phrase}${countLabel} — ${formatSeconds(elapsedMs)}${more}`
+    };
+}
+
+function indexingStatusIsInFlight(status) {
+    const phase = status.indexing?.phase;
+    if (isTerminalIndexingPhase(phase)) {
+        return false;
+    }
+    if (phase === undefined && status.indexingComplete) {
+        return false;
+    }
+    return Boolean(status.indexing) || status.indexingComplete === false;
+}
+
+function inFlightIndexingProjects(snapshot, activeProjectRoot) {
+    const projects = Array.isArray(snapshot?.projects) ? [...snapshot.projects] : [];
+    const inFlight = projects.filter(project => !isTerminalIndexingPhase(project.phase));
+    const activeRoot = normalizePath(activeProjectRoot);
+    inFlight.sort((left, right) => {
+        const leftRoot = normalizePath(left?.root);
+        const rightRoot = normalizePath(right?.root);
+        const leftActive = leftRoot === activeRoot;
+        const rightActive = rightRoot === activeRoot;
+        if (leftActive !== rightActive) {
+            return leftActive ? -1 : 1;
+        }
+        return leftRoot < rightRoot ? -1 : leftRoot > rightRoot ? 1 : 0;
+    });
+    return inFlight;
+}
+
+function leadIndexingProject(inFlight, activeProjectRoot) {
+    if (inFlight.length === 0) {
+        return undefined;
+    }
+    const activeRoot = normalizePath(activeProjectRoot);
+    const active = inFlight.find(project => normalizePath(project.root) === activeRoot);
+    if (active) {
+        return active;
+    }
+    const withCounts = inFlight.find(project => indexingFileCounts(project));
+    if (withCounts) {
+        return withCounts;
+    }
+    const running = inFlight.find(project => (
+        project.phase !== 'queued' && project.phase !== 'discovered'
+    ));
+    return running || inFlight[0];
+}
+
+function indexingStatusProjectPrefix(snapshot, lead) {
+    const projects = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+    if (projects.length <= 1) {
+        return undefined;
+    }
+    return projectName(lead.root);
 }
 
 function navigationMilestone(label, milliseconds) {
@@ -347,8 +600,17 @@ function nonNegativeInteger(value) {
 module.exports = {
     acceptNewerIndexingSnapshot,
     createIndexingStatusSession,
+    indexingClockShouldRun,
+    indexingProgress,
+    indexingStatusBarPresentation,
+    lspStatusBarError,
+    lspStatusBarPresentation,
+    lspStatusBarStarting,
     indexingStatusBarCommand,
     indexingStatusQuickPickPlaceholder,
     indexingStatusQuickPickItems,
-    indexingStatusRequestParams
+    indexingStatusRequestParams,
+    liveElapsedMs,
+    phaseLabel,
+    phasePresentation
 };

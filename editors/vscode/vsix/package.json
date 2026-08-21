@@ -181,6 +181,10 @@
         "title": "Ruby Fast LSP: Show Runtime Status"
       },
       {
+        "command": "ruby-fast-lsp.openGemfile",
+        "title": "Ruby Fast LSP: Open Gemfile"
+      },
+      {
         "command": "ruby-fast-lsp.indexing.status",
         "title": "Ruby Fast LSP: Show Project Indexing Status"
       },

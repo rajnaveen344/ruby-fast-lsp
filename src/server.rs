@@ -449,6 +449,8 @@ pub struct RubyLanguageServer {
         Arc<crate::dependency_product::GemDependencyBindingCounters>,
     indexing_status_sequence: Arc<AtomicU64>,
     indexing_status_publication: Arc<tokio::sync::Mutex<IndexingStatusPublicationState>>,
+    indexing_status_wakeup: Arc<AtomicBool>,
+    tokio_handle: Option<tokio::runtime::Handle>,
     diagnostic_publication: Arc<Mutex<DiagnosticPublicationState>>,
     watched_file_changes: Arc<Mutex<WatchedFileChangeBatch>>,
     pub extension_watch_dynamic_registration: Arc<AtomicBool>,
@@ -464,6 +466,8 @@ pub struct RubyLanguageServer {
     published_diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
     #[cfg(test)]
     user_cache_root_override: Arc<Mutex<Option<PathBuf>>>,
+    #[cfg(test)]
+    indexing_progress_reports: Arc<Mutex<Vec<(PathBuf, u64, u64)>>>,
 }
 
 impl RubyLanguageServer {
@@ -525,6 +529,8 @@ impl RubyLanguageServer {
             indexing_status_publication: Arc::new(tokio::sync::Mutex::new(
                 IndexingStatusPublicationState::default(),
             )),
+            indexing_status_wakeup: Arc::new(AtomicBool::new(false)),
+            tokio_handle: tokio::runtime::Handle::try_current().ok(),
             diagnostic_publication: Arc::new(Mutex::new(DiagnosticPublicationState::default())),
             watched_file_changes: Arc::new(Mutex::new(WatchedFileChangeBatch::default())),
             extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
@@ -537,7 +543,14 @@ impl RubyLanguageServer {
             published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             user_cache_root_override: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            indexing_progress_reports: Arc::new(Mutex::new(Vec::new())),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn indexing_progress_reports(&self) -> Vec<(PathBuf, u64, u64)> {
+        self.indexing_progress_reports.lock().clone()
     }
 
     /// Returns true once every registered workspace has finished its initial
@@ -704,6 +717,78 @@ impl RubyLanguageServer {
             );
         snapshot.sequence = sequence;
         snapshot
+    }
+
+    pub fn report_project_indexing_progress(&self, root: &Path, completed: u64, total: u64) {
+        #[cfg(test)]
+        self.indexing_progress_reports
+            .lock()
+            .push((root.to_path_buf(), completed, total));
+        let workspace = self
+            .workspaces
+            .read()
+            .iter()
+            .find(|workspace| workspace.root_path == root)
+            .cloned();
+        let Some(workspace) = workspace else {
+            return;
+        };
+        let snapshot = workspace.indexing_status.snapshot();
+        if snapshot.phase != IndexingPhase::IndexingProject {
+            return;
+        }
+        if snapshot.completed == Some(completed) && snapshot.total == Some(total) {
+            return;
+        }
+        if snapshot
+            .completed
+            .is_some_and(|previous| completed < previous)
+        {
+            return;
+        }
+        if workspace
+            .indexing_status
+            .transition(
+                snapshot.generation,
+                IndexingPhase::IndexingProject,
+                Some(completed),
+                Some(total),
+            )
+            .is_none()
+        {
+            return;
+        }
+        self.schedule_publish_indexing_status();
+    }
+
+    fn schedule_publish_indexing_status(&self) {
+        if self.indexing_status_wakeup.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let server = self.clone();
+        self.spawn_on_server_runtime(async move {
+            loop {
+                server
+                    .indexing_status_wakeup
+                    .store(false, Ordering::Release);
+                server.publish_indexing_status().await;
+                if !server.indexing_status_wakeup.swap(false, Ordering::AcqRel) {
+                    return;
+                }
+            }
+        });
+    }
+
+    fn spawn_on_server_runtime<Fut>(&self, fut: Fut)
+    where
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let handle = tokio::runtime::Handle::try_current()
+            .ok()
+            .or_else(|| self.tokio_handle.clone());
+        if let Some(handle) = handle {
+            handle.spawn(fut);
+        }
     }
 
     pub async fn publish_indexing_status(&self) {
@@ -1738,6 +1823,8 @@ impl Default for RubyLanguageServer {
             published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             user_cache_root_override: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            indexing_progress_reports: Arc::new(Mutex::new(Vec::new())),
             extension_registry: ExtensionRegistryHandle::from_environment_with_cache(
                 persistent_cache.clone(),
             ),
@@ -1758,6 +1845,8 @@ impl Default for RubyLanguageServer {
             indexing_status_publication: Arc::new(tokio::sync::Mutex::new(
                 IndexingStatusPublicationState::default(),
             )),
+            indexing_status_wakeup: Arc::new(AtomicBool::new(false)),
+            tokio_handle: tokio::runtime::Handle::try_current().ok(),
             diagnostic_publication: Arc::new(Mutex::new(DiagnosticPublicationState::default())),
             watched_file_changes: Arc::new(Mutex::new(WatchedFileChangeBatch::default())),
             extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
