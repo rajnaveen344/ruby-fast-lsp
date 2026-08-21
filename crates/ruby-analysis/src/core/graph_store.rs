@@ -282,6 +282,40 @@ impl SemanticGraph {
             .unwrap_or_default()
     }
 
+    pub fn has_node_definition(&self, fqn: FqnId) -> bool {
+        self.nodes
+            .get(&fqn)
+            .is_some_and(|node| !node.definitions.is_empty())
+    }
+
+    pub fn first_node_kind(&self, fqn: FqnId) -> Option<GraphNodeKind> {
+        self.nodes
+            .get(&fqn)
+            .and_then(|node| node.definitions.first().map(|definition| definition.kind))
+    }
+
+    pub fn latest_node_kind(&self, fqn: FqnId) -> Option<GraphNodeKind> {
+        self.nodes
+            .get(&fqn)
+            .and_then(|node| node.definitions.last().map(|definition| definition.kind))
+    }
+
+    pub fn has_node_kind(&self, fqn: FqnId, kind: GraphNodeKind) -> bool {
+        self.nodes.get(&fqn).is_some_and(|node| {
+            node.definitions
+                .iter()
+                .any(|definition| definition.kind == kind)
+        })
+    }
+
+    pub fn first_node_definition(&self, fqn: FqnId) -> Option<(GraphNodeKind, TextRange)> {
+        self.nodes.get(&fqn).and_then(|node| {
+            node.definitions
+                .first()
+                .map(|definition| (definition.kind, definition.range))
+        })
+    }
+
     pub fn edges_from(&self, source: FqnId) -> Vec<StoredGraphEdgeFact> {
         let Some(node) = self.nodes.get(&source) else {
             return Vec::new();
@@ -292,6 +326,35 @@ impl SemanticGraph {
         ids.extend(node.prepends.iter().copied());
         ids.extend(node.extends.iter().copied());
         ids.extend(node.execution_context_applications.iter().copied());
+        self.edges_by_ids(&ids)
+    }
+
+    /// Outgoing edges of one kind, sorted by the same source-range key as
+    /// [`Self::edges_from`]. Callers that only need include/prepend/extend
+    /// must not clone every other outgoing kind.
+    pub fn edges_from_kind(&self, source: FqnId, kind: GraphEdgeKind) -> Vec<StoredGraphEdgeFact> {
+        let Some(node) = self.nodes.get(&source) else {
+            return Vec::new();
+        };
+        self.edges_by_ids(outgoing_ids(node, kind))
+    }
+
+    /// Superclass, include, prepend, and extend edges only. Execution-context
+    /// applications are not Ruby ancestry and must not enter this list.
+    pub fn ancestry_edges_from(&self, source: FqnId) -> Vec<StoredGraphEdgeFact> {
+        let Some(node) = self.nodes.get(&source) else {
+            return Vec::new();
+        };
+        let mut ids = Vec::with_capacity(
+            node.superclasses.len()
+                + node.includes.len()
+                + node.prepends.len()
+                + node.extends.len(),
+        );
+        ids.extend(node.superclasses.iter().copied());
+        ids.extend(node.includes.iter().copied());
+        ids.extend(node.prepends.iter().copied());
+        ids.extend(node.extends.iter().copied());
         self.edges_by_ids(&ids)
     }
 
@@ -721,6 +784,18 @@ impl GraphNode {
     }
 }
 
+fn outgoing_ids(node: &GraphNode, kind: GraphEdgeKind) -> &[GraphEdgeId] {
+    match kind {
+        GraphEdgeKind::Superclass => node.superclasses.as_slice(),
+        GraphEdgeKind::Include => node.includes.as_slice(),
+        GraphEdgeKind::Prepend => node.prepends.as_slice(),
+        GraphEdgeKind::Extend => node.extends.as_slice(),
+        GraphEdgeKind::ExecutionContextApplication => {
+            node.execution_context_applications.as_slice()
+        }
+    }
+}
+
 fn node_has_no_edges(node: &GraphNode) -> bool {
     node.superclasses.is_empty()
         && node.includes.is_empty()
@@ -1050,6 +1125,158 @@ mod tests {
         assert_eq!(
             forward.edges_to(second_target),
             reverse.edges_to(second_target)
+        );
+    }
+
+    #[test]
+    fn node_definition_queries_do_not_treat_edge_only_entries_as_namespaces() {
+        let source = FqnId(1);
+        let target = FqnId(2);
+        let mut store = SemanticGraph::new();
+        store.add_node(StoredGraphNodeFact::new(
+            source,
+            GraphNodeKind::Class,
+            TextRange::new(file(), 0, 10),
+        ));
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            target,
+            GraphEdgeKind::Superclass,
+            TextRange::new(file(), 0, 10),
+        ));
+
+        assert!(store.has_node_definition(source));
+        assert!(!store.has_node_definition(target));
+        assert_eq!(store.first_node_kind(source), Some(GraphNodeKind::Class));
+        assert_eq!(store.latest_node_kind(source), Some(GraphNodeKind::Class));
+        assert_eq!(store.first_node_kind(target), None);
+        assert_eq!(store.latest_node_kind(target), None);
+        assert!(store.has_node_kind(source, GraphNodeKind::Class));
+        assert!(!store.has_node_kind(source, GraphNodeKind::Module));
+        assert!(!store.has_node_kind(target, GraphNodeKind::Class));
+        assert_eq!(
+            store.first_node_definition(source),
+            Some((GraphNodeKind::Class, TextRange::new(file(), 0, 10)))
+        );
+        assert_eq!(store.first_node_definition(target), None);
+    }
+
+    #[test]
+    fn edges_from_kind_matches_filtered_edges_from_in_source_order() {
+        let source = FqnId(1);
+        let parent = FqnId(2);
+        let early = FqnId(3);
+        let late = FqnId(4);
+        let template = FqnId(5);
+        let mut store = SemanticGraph::new();
+        store.add_node(StoredGraphNodeFact::new(
+            source,
+            GraphNodeKind::Class,
+            TextRange::new(file(), 0, 80),
+        ));
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            late,
+            GraphEdgeKind::Include,
+            TextRange::new(file(), 60, 72),
+        ));
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            parent,
+            GraphEdgeKind::Superclass,
+            TextRange::new(file(), 0, 10),
+        ));
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            early,
+            GraphEdgeKind::Include,
+            TextRange::new(file(), 20, 32),
+        ));
+        store.add_edge(StoredGraphEdgeFact::new(
+            source,
+            template,
+            GraphEdgeKind::ExecutionContextApplication,
+            TextRange::new(file(), 40, 50),
+        ));
+
+        let includes = store.edges_from_kind(source, GraphEdgeKind::Include);
+        assert_eq!(
+            includes,
+            vec![
+                StoredGraphEdgeFact::new(
+                    source,
+                    early,
+                    GraphEdgeKind::Include,
+                    TextRange::new(file(), 20, 32),
+                ),
+                StoredGraphEdgeFact::new(
+                    source,
+                    late,
+                    GraphEdgeKind::Include,
+                    TextRange::new(file(), 60, 72),
+                ),
+            ],
+            "kind-specific outgoing edges must sort by source range, not insertion order"
+        );
+        assert_eq!(
+            includes,
+            store
+                .edges_from(source)
+                .into_iter()
+                .filter(|edge| edge.kind == GraphEdgeKind::Include)
+                .collect::<Vec<_>>(),
+            "edges_from_kind must match filtering the concatenated outgoing list"
+        );
+        assert_eq!(
+            store
+                .edges_from_kind(source, GraphEdgeKind::Superclass)
+                .len(),
+            1
+        );
+        assert!(store
+            .edges_from_kind(source, GraphEdgeKind::Prepend)
+            .is_empty());
+        assert_eq!(
+            store.ancestry_edges_from(source),
+            store
+                .edges_from(source)
+                .into_iter()
+                .filter(|edge| matches!(
+                    edge.kind,
+                    GraphEdgeKind::Superclass
+                        | GraphEdgeKind::Include
+                        | GraphEdgeKind::Prepend
+                        | GraphEdgeKind::Extend
+                ))
+                .collect::<Vec<_>>(),
+            "ancestry edges must omit execution-context applications while keeping source order"
+        );
+    }
+
+    #[test]
+    fn latest_node_kind_follows_sorted_definition_order() {
+        let fqn = FqnId(1);
+        let earlier = SourceFileId(1);
+        let later = SourceFileId(2);
+        let mut store = SemanticGraph::new();
+        store.add_node(StoredGraphNodeFact::new(
+            fqn,
+            GraphNodeKind::Module,
+            TextRange::new(later, 0, 20),
+        ));
+        store.add_node(StoredGraphNodeFact::new(
+            fqn,
+            GraphNodeKind::Class,
+            TextRange::new(earlier, 0, 10),
+        ));
+
+        assert_eq!(store.first_node_kind(fqn), Some(GraphNodeKind::Class));
+        assert_eq!(store.latest_node_kind(fqn), Some(GraphNodeKind::Module));
+        assert!(store.has_node_kind(fqn, GraphNodeKind::Class));
+        assert!(store.has_node_kind(fqn, GraphNodeKind::Module));
+        assert_eq!(
+            store.first_node_definition(fqn),
+            Some((GraphNodeKind::Class, TextRange::new(earlier, 0, 10)))
         );
     }
 }

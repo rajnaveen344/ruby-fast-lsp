@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::core::method_store::MethodVisibilityOverrideFact;
 use crate::core::{
     DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
-    MethodCalleeResolution, MethodFact, ReferenceFact, RubyType, SourceFileId,
+    GraphNodeKind, MethodCalleeResolution, MethodFact, ReferenceFact, RubyType, SourceFileId,
     StoredMethodReferenceCandidate, StoredReferenceCandidateKind, SymbolFact, TextRange, TypeFact,
     TypeResolution, TypeSubject, UnknownReason,
 };
@@ -361,6 +361,18 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {
         self.engine.graph_nodes_for(fqn)
+    }
+
+    pub fn has_graph_node(&self, fqn: &FullyQualifiedName) -> bool {
+        self.engine.has_graph_node(fqn)
+    }
+
+    pub fn first_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        self.engine.first_graph_node_kind(fqn)
+    }
+
+    pub fn latest_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        self.engine.latest_graph_node_kind(fqn)
     }
 
     pub fn graph_edges_from(&self, fqn: &FullyQualifiedName) -> Vec<GraphEdgeFact> {

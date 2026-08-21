@@ -110,7 +110,7 @@ impl TypeFact {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StoredTypeFact {
     subject: StoredTypeSubject,
     ruby_type: RubyTypeId,
@@ -374,6 +374,35 @@ impl TypeStore {
     ) -> impl Iterator<Item = (&FullyQualifiedName, &RubyType)> {
         self.method_return_types()
             .filter(|(_, ruby_type)| **ruby_type != RubyType::Unknown)
+    }
+
+    /// Borrow each value-constant type in fact-arena order, including Unknown.
+    ///
+    /// This is a domain view rather than a store exposure: callers that only
+    /// need constant types must not materialize and clone unrelated type facts.
+    /// Arena order matches `all_facts` filtered to `TypeSubject::Constant`.
+    pub fn constant_type_facts(
+        &self,
+    ) -> impl Iterator<Item = (&FullyQualifiedName, TextRange, &RubyType)> {
+        self.facts.iter().filter_map(|stored| {
+            let fact = stored.as_ref()?;
+            let ruby_type = self.ruby_type(fact.ruby_type);
+            match fact.subject.interned_id() {
+                Some(subject_id) => match self.subject(subject_id) {
+                    TypeSubject::Constant(fqn) => Some((fqn, fact.range, ruby_type)),
+                    TypeSubject::Local { .. }
+                    | TypeSubject::InstanceVariable { .. }
+                    | TypeSubject::ClassVariable { .. }
+                    | TypeSubject::GlobalVariable(_)
+                    | TypeSubject::MethodReturn(_)
+                    | TypeSubject::Parameter { .. } => None,
+                    TypeSubject::Expression(_) => panic!(
+                        "INVARIANT VIOLATED: an expression subject was inserted into the general type-subject interner. This is a bug because expressions must use their compact file-local range identity. Fix: route every inserted TypeSubject through TypeStore::store_subject."
+                    ),
+                },
+                None => None,
+            }
+        })
     }
 
     /// Update inferred method-return facts without rebuilding the file-owned
@@ -735,6 +764,13 @@ impl TypeStore {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> TypeResolution {
+        if let TypeSubject::Expression(range) = subject {
+            let Some(ids) = self.facts_by_file.get(&range.file_id) else {
+                return TypeResolution::Unresolved;
+            };
+            return self.resolution_from_expanded_facts(self.clone_expression_facts(ids, *range));
+        }
+
         let Some(ids) = self.fact_ids_for_subject(subject) else {
             return TypeResolution::Unresolved;
         };
@@ -750,18 +786,20 @@ impl TypeStore {
             return TypeResolution::Unresolved;
         };
 
-        let mut candidates: Vec<TypeFact> = ids
+        let candidates = ids
             .iter()
             .filter_map(|id| self.fact(*id))
             .filter(|fact| self.stored_subject_matches(fact, subject))
             .filter(|fact| fact.range.file_id == file_id && fact.range.start_byte == latest_start)
             .map(|fact| self.expand_fact(fact))
             .collect();
+        self.resolution_from_expanded_facts(candidates)
+    }
 
+    fn resolution_from_expanded_facts(&self, mut candidates: Vec<TypeFact>) -> TypeResolution {
         candidates
             .sort_by_key(|fact| (fact.ruby_type.to_string(), provenance_rank(fact.provenance)));
         candidates.dedup_by(|a, b| a.ruby_type == b.ruby_type && a.provenance == b.provenance);
-
         match candidates.len() {
             0 => TypeResolution::Unresolved,
             1 => TypeResolution::Resolved(candidates.remove(0)),
@@ -806,11 +844,51 @@ impl TypeStore {
     }
 
     fn clone_expression_facts(&self, ids: &[TypeFactId], range: TextRange) -> Vec<TypeFact> {
+        if self.file_owned_indexes_ordered {
+            return self.clone_sorted_expression_facts(ids, range);
+        }
         ids.iter()
             .filter_map(|id| self.fact(*id))
             .filter(|fact| fact.subject.is_expression() && fact.range == range)
             .map(|fact| self.expand_fact(fact))
             .collect()
+    }
+
+    /// Exact-range expression lookup on a file bucket ordered by
+    /// `(start_byte, end_byte, provenance)`.
+    ///
+    /// Production `replace_file` keeps that order. Scanning every fact in the
+    /// file for `TypeSubject::Expression` is the deferred-receiver resolve
+    /// hotspot: `exact_expression_type` → `type_at` on goshposh. Named subjects
+    /// keep their interned buckets; expressions are range-owned and must not
+    /// borrow that file-wide scan. `TypeStore::add` may unsort the bucket, so
+    /// callers fall back to a linear scan when `file_owned_indexes_ordered` is
+    /// false.
+    fn clone_sorted_expression_facts(&self, ids: &[TypeFactId], range: TextRange) -> Vec<TypeFact> {
+        let target = (range.start_byte, range.end_byte);
+        let start = ids.partition_point(|id| {
+            let fact = self.indexed_file_fact(*id);
+            (fact.range.start_byte, fact.range.end_byte) < target
+        });
+        let mut facts = Vec::new();
+        for id in &ids[start..] {
+            let fact = *self.indexed_file_fact(*id);
+            if (fact.range.start_byte, fact.range.end_byte) != target {
+                break;
+            }
+            if fact.subject.is_expression() {
+                facts.push(self.expand_fact(&fact));
+            }
+        }
+        facts
+    }
+
+    fn indexed_file_fact(&self, id: TypeFactId) -> &StoredTypeFact {
+        self.fact(id).expect(
+            "INVARIANT VIOLATED: type file index points to missing fact. \
+             This is a bug because indexes must be removed before arena facts. \
+             Fix: remove stale ids from every TypeStore index.",
+        )
     }
 
     fn store_subject(&mut self, subject: TypeSubject, fact_range: TextRange) -> StoredTypeSubject {
@@ -1109,6 +1187,90 @@ mod tests {
     }
 
     #[test]
+    fn constant_type_facts_match_all_facts_constant_filter_in_arena_order() {
+        let first = constant_subject("FIRST");
+        let ignored_method = method_return_subject("Owner", "call");
+        let unknown = constant_subject("UNKNOWN");
+        let expression_range = TextRange::new(file(), 30, 36);
+        let second = constant_subject("SECOND");
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            first.clone(),
+            RubyType::string(),
+            TextRange::new(file(), 0, 8),
+            TypeProvenance::Assignment,
+        ));
+        store.add(TypeFact::new(
+            ignored_method,
+            RubyType::integer(),
+            TextRange::new(file(), 10, 18),
+            TypeProvenance::Inferred,
+        ));
+        store.add(TypeFact::new(
+            TypeSubject::Expression(expression_range),
+            RubyType::boolean(),
+            expression_range,
+            TypeProvenance::Literal,
+        ));
+        store.add(TypeFact::new(
+            unknown.clone(),
+            RubyType::Unknown,
+            TextRange::new(file(), 40, 48),
+            TypeProvenance::Inferred,
+        ));
+        store.add(TypeFact::new(
+            second.clone(),
+            RubyType::integer(),
+            TextRange::new(SourceFileId(2), 0, 8),
+            TypeProvenance::Assignment,
+        ));
+
+        let from_view = store
+            .constant_type_facts()
+            .map(|(fqn, range, ruby_type)| (fqn.clone(), range, ruby_type.clone()))
+            .collect::<Vec<_>>();
+        let from_all = store
+            .all_facts()
+            .into_iter()
+            .filter_map(|fact| {
+                let TypeSubject::Constant(constant) = fact.subject else {
+                    return None;
+                };
+                Some((constant, fact.range, fact.ruby_type))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            from_view, from_all,
+            "the constant view must match all_facts filtered to Constant subjects in arena order"
+        );
+        let TypeSubject::Constant(first_fqn) = first else {
+            panic!("test constant subject must be a constant");
+        };
+        let TypeSubject::Constant(unknown_fqn) = unknown else {
+            panic!("test unknown constant subject must be a constant");
+        };
+        let TypeSubject::Constant(second_fqn) = second else {
+            panic!("test second constant subject must be a constant");
+        };
+        assert_eq!(
+            from_view,
+            vec![
+                (first_fqn, TextRange::new(file(), 0, 8), RubyType::string()),
+                (
+                    unknown_fqn,
+                    TextRange::new(file(), 40, 48),
+                    RubyType::Unknown
+                ),
+                (
+                    second_fqn,
+                    TextRange::new(SourceFileId(2), 0, 8),
+                    RubyType::integer()
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn identical_ruby_types_share_one_internal_value() {
         let mut store = TypeStore::new();
         store.add(TypeFact::new(
@@ -1399,6 +1561,116 @@ mod tests {
             NamedTypeResolution::Ambiguous => {}
             other => panic!("expected conflicting latest named facts, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn expression_type_at_selects_exact_range_among_many_file_facts() {
+        let mut facts = Vec::new();
+        for index in 0..64u32 {
+            let range = TextRange::new(file(), index * 10, index * 10 + 5);
+            facts.push(TypeFact::new(
+                TypeSubject::Expression(range),
+                if index == 32 {
+                    RubyType::string()
+                } else {
+                    RubyType::integer()
+                },
+                range,
+                TypeProvenance::Literal,
+            ));
+        }
+        let overlapping_local = TextRange::new(file(), 320, 325);
+        facts.push(TypeFact::new(
+            TypeSubject::Local {
+                scope_id: 0,
+                name: "value".to_string(),
+            },
+            RubyType::boolean(),
+            overlapping_local,
+            TypeProvenance::Assignment,
+        ));
+
+        let mut store = TypeStore::new();
+        store.replace_file(file(), facts);
+
+        let target = TextRange::new(file(), 320, 325);
+        match store.type_at(&TypeSubject::Expression(target), file(), 320) {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
+            other => panic!("expected the exact expression fact, got {other:?}"),
+        }
+        assert_eq!(
+            store.facts_for(&TypeSubject::Expression(target))[0].ruby_type,
+            RubyType::string()
+        );
+        assert!(matches!(
+            store.type_at(
+                &TypeSubject::Expression(TextRange::new(file(), 320, 330)),
+                file(),
+                320
+            ),
+            TypeResolution::Unresolved
+        ));
+    }
+
+    #[test]
+    fn expression_type_at_distinguishes_shared_start_bytes() {
+        let short_range = TextRange::new(file(), 0, 5);
+        let long_range = TextRange::new(file(), 0, 10);
+        let mut store = TypeStore::new();
+        store.replace_file(
+            file(),
+            [
+                TypeFact::new(
+                    TypeSubject::Expression(short_range),
+                    RubyType::string(),
+                    short_range,
+                    TypeProvenance::Literal,
+                ),
+                TypeFact::new(
+                    TypeSubject::Expression(long_range),
+                    RubyType::integer(),
+                    long_range,
+                    TypeProvenance::Literal,
+                ),
+            ],
+        );
+
+        match store.type_at(&TypeSubject::Expression(short_range), file(), 0) {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
+            other => panic!("expected the short expression, got {other:?}"),
+        }
+        match store.type_at(&TypeSubject::Expression(long_range), file(), 0) {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::integer()),
+            other => panic!("expected the long expression, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn append_only_expression_lookup_survives_unsorted_file_index() {
+        let later_range = TextRange::new(file(), 40, 45);
+        let earlier_range = TextRange::new(file(), 0, 5);
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            TypeSubject::Expression(later_range),
+            RubyType::integer(),
+            later_range,
+            TypeProvenance::Literal,
+        ));
+        store.add(TypeFact::new(
+            TypeSubject::Expression(earlier_range),
+            RubyType::string(),
+            earlier_range,
+            TypeProvenance::Literal,
+        ));
+
+        match store.type_at(&TypeSubject::Expression(earlier_range), file(), 0) {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
+            other => panic!("expected unsorted add() lookup to stay linear, got {other:?}"),
+        }
+        assert_eq!(
+            store.facts_for(&TypeSubject::Expression(later_range))[0].ruby_type,
+            RubyType::integer()
+        );
     }
 
     #[test]

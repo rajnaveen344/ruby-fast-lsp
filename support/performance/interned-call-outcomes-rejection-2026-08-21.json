@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-21",
+  "decision": "reject",
+  "purpose": "Cheapen AnalysisEngine::resolve call-expression outcome write on the official two-project warm complete index. Do not skip project-file body inference, restore FqnId-adjacency MRO, restore the August 1 resolve cache-hit fast path, or add a resolve HashMap.",
+  "cut": {
+    "rank": 11,
+    "path": "intern TypeInferenceOutcome to Copy StoredTypeInferenceOutcome ids at insert, drain-sort compact pairs at write",
+    "why": "CPU-weighted samply of remaining AnalysisEngine::resolve after interned universal open-root ids ranked replace_resolved_call_expression_outcomes at 0.15s inclusive (from_domain intern 0.06s). The resolve-local HashMap owned cloned RubyType values and re-interned them after the candidate loop.",
+    "changes": [
+      "insert_resolved_call_outcome interned via StoredTypeInferenceOutcome::from_domain during the candidate loop.",
+      "proven_deferred_receiver_type / deferred_receiver_is_unknown read Copy ids through TypeStore.",
+      "replace_resolved_call_expression_outcomes drained the compact map and merged already-interned pairs."
+    ],
+    "not_done": [
+      "Same-session exclusive resolve was not outside noise: interned-roots quiet control 1.148s/1.157s, candidate 1.123s/1.106s then 1.251s/1.232s on a third run.",
+      "Complete wall 14.96s → 19.07s/16.66s moved with runtime-phase overlap, not a durable write-path claim.",
+      "Reverted intern-at-insert. Do not restore it without a new quiet pairing that improves exclusive resolve outside noise and does not regress complete wall or RSS.",
+      "Do not restore FqnId-adjacency MRO, IndexSet FqnIdentity intern probes, the sorted-ref equation wrap, the stored-fact callee miss walk, or the August 1 resolve cache-hit fast path.",
+      "Remaining exclusive resolve is still ~1.14s. Further resolve micro-cuts were stopped here."
+    ]
+  },
+  "harness": {
+    "two_project": {
+      "binary": "profiler",
+      "profiler_sha256": "e7a728b9deb1802ad46e4ac0d62238c3d0220833b7121d2df1af944b2022d4e0",
+      "workspace": "/Users/naveenraj/goshposh",
+      "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
+      "scheduler_concurrency": 2,
+      "runtime": "jruby-9.2.21.0",
+      "jdk": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home",
+      "extension_path": "./editors/vscode/vsix",
+      "cache_dir": "/tmp/ruby-fast-lsp-10s-remeasure-cache-20260819",
+      "definition_probes": [
+        "server/lib/workers/batch_worker.rb:1173:55",
+        "server/lib/workers/batch_worker.rb:2798:37"
+      ]
+    }
+  },
+  "before": {
+    "notes": "Interned universal open-root ids already in the worktree. Quiet official resolve 1.148s/1.157s, complete 14.96s, RSS 1.822 GB from the same-session control repeat (SHA 29bd0f8e). First same-session control resolve 1.180s/1.183s was slightly slower; exclusive resolve is claimed from the quiet pairing.",
+    "two_project_warm_control_quiet": {
+      "source": "/tmp/ruby-fast-lsp-interned-call-outcomes/control-repeat.jsonl",
+      "log": "/tmp/ruby-fast-lsp-interned-call-outcomes/control-repeat.log",
+      "profiler_sha256": "29bd0f8eafec64a11c8a7ff7a7ee7050e9127ee84b4842b6aba67fd504a44364",
+      "wall_ms": 15005.63,
+      "complete_index_s": [14.964, 14.955],
+      "resolve_s": [1.148, 1.157],
+      "method_candidates_ns": 1556191875,
+      "process_peak_rss_bytes": 1821523968,
+      "user_cpu_s": 36.227,
+      "runtime_phase_s": 4.67,
+      "resolve_phase_s": 2.305
+    },
+    "samply": {
+      "path": "/tmp/ruby-fast-lsp-resolve-after-interned-roots/warm-2p.json.gz",
+      "weight": "threadCPUDelta",
+      "resolve_inclusive_cpu_s": {
+        "AnalysisEngine::resolve": 2.165,
+        "replace_resolved_call_expression_outcomes": 0.15,
+        "StoredTypeInferenceOutcome::from_domain": 0.06
+      }
+    }
+  },
+  "after": {
+    "two_project_warm": {
+      "source": "/tmp/ruby-fast-lsp-interned-call-outcomes/candidate-warm.jsonl",
+      "log": "/tmp/ruby-fast-lsp-interned-call-outcomes/candidate-warm.log",
+      "wall_ms": 21298.35,
+      "complete_index_s": [21.232, 21.257],
+      "resolve_s": [1.125, 1.117],
+      "method_candidates_ns": 1532265667,
+      "process_peak_rss_bytes": 1647345664,
+      "user_cpu_s": 44.213,
+      "notes": "Complete wall moved with gem-bind overlap (dependencies 15.7s/16.3s). Quiet pairing is the claim."
+    },
+    "two_project_warm_quiet": {
+      "source": "/tmp/ruby-fast-lsp-interned-call-outcomes/candidate-repeat.jsonl",
+      "log": "/tmp/ruby-fast-lsp-interned-call-outcomes/candidate-repeat.log",
+      "wall_ms": 19111.031,
+      "complete_index_s": [19.071, 19.031],
+      "resolve_s": [1.123, 1.106],
+      "method_candidates_ns": 1539020000,
+      "process_peak_rss_bytes": 1763213312,
+      "user_cpu_s": 39.199,
+      "runtime_phase_s": 8.777,
+      "resolve_phase_s": 2.229
+    },
+    "two_project_warm_third": {
+      "source": "/tmp/ruby-fast-lsp-interned-call-outcomes/candidate-repeat2.jsonl",
+      "log": "/tmp/ruby-fast-lsp-interned-call-outcomes/candidate-repeat2.log",
+      "wall_ms": 16721.1,
+      "complete_index_s": [16.665, 16.626],
+      "resolve_s": [1.251, 1.232],
+      "method_candidates_ns": 1716902250,
+      "process_peak_rss_bytes": 1753776128,
+      "user_cpu_s": 39.61,
+      "notes": "Third run exclusive resolve 1.25s is slower than the interned-roots quiet control. Candidate loop CPU also jumped (method_candidates_ns 1.54s → 1.72s), so the earlier ~30ms delta is noise."
+    },
+    "correctness": {
+      "server_semantic_fingerprint": "1f48b3943afbc3eb392d1363c7645674",
+      "server_devops_semantic_fingerprint": "39f9b699dac5eb702f3cef5419dc3e25",
+      "deferred_receiver_candidates_sum": 251298,
+      "deferred_receiver_proven_sum": 130803,
+      "deferred_receiver_unknown_sum": 120495,
+      "method_return_outcomes": 62017,
+      "proven_method_returns": 28768,
+      "unknown_method_returns": 33249,
+      "notes": "Fingerprints, deferred-receiver counts, and method-return telemetry match the interned-roots baseline. Intern-at-insert was reverted after the quiet pairing."
+    }
+  },
+  "result": {
+    "resolve": "interned-roots quiet 1.148s/1.157s → intern-at-insert 1.123s/1.106s then 1.251s/1.232s exclusive per engine (inside noise / no win)",
+    "complete_index_paired": "14.96s → 19.07s/16.66s moved with runtime-phase overlap",
+    "rss_ceiling_bytes": 1776846438,
+    "rss_notes": "Quiet intern-at-insert process peak 1.763 GB vs interned-roots quiet control 1.822 GB. Resolve did not improve outside noise. Reverted. Further resolve micro-cuts stopped."
+  }
+}

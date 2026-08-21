@@ -794,9 +794,7 @@ impl FactCollector {
             return true;
         }
         let engine = self.analysis_engine.read();
-        !crate::engine::AnalysisQuery::new(&engine)
-            .graph_nodes_for(fqn)
-            .is_empty()
+        crate::engine::AnalysisQuery::new(&engine).has_graph_node(fqn)
     }
 
     pub fn resolve_constant_value_type_from(

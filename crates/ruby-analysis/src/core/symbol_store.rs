@@ -129,6 +129,12 @@ impl SymbolStore {
             .unwrap_or_default()
     }
 
+    pub fn has_facts(&self, fqn: FqnId) -> bool {
+        self.facts_by_fqn
+            .get(&fqn)
+            .is_some_and(|ids| !ids.is_empty())
+    }
+
     pub fn all_facts(&self) -> Vec<StoredSymbolFact> {
         self.facts.iter().filter_map(|fact| *fact).collect()
     }
@@ -354,5 +360,8 @@ mod tests {
         assert_eq!(store.facts_for(fqn).len(), 1);
         assert_eq!(store.facts_for(fqn)[0].range.start_byte, 10);
         assert_eq!(store.facts_for(other_fqn).len(), 1);
+        assert!(store.has_facts(fqn));
+        assert!(store.has_facts(other_fqn));
+        assert!(!store.has_facts(FqnId(3)));
     }
 }

@@ -339,7 +339,9 @@ impl<'a> AnalysisQuery<'a> {
     ///
     /// This query never borrows a narrower child or wider enclosing
     /// expression. Deferred receiver resolution uses it so an enclosing call
-    /// result cannot be mistaken for the receiver's own type.
+    /// result cannot be mistaken for the receiver's own type. Local-read and
+    /// expression-fact fallbacks are exact-range lookups on the file-owned
+    /// sorted indexes; they must not scan every fact in the file.
     pub fn exact_expression_type(&self, range: TextRange) -> Option<RubyType> {
         if let Some(outcome) = self.engine.call_expression_outcome_at(range) {
             return Some(match outcome {
@@ -350,15 +352,8 @@ impl<'a> AnalysisQuery<'a> {
         if self.engine.expression_unknown_reason(range).is_some() {
             return Some(RubyType::Unknown);
         }
-        if let Some(reads) = self.engine.local_read_type_views_in_file(range.file_id) {
-            let exact = reads
-                .filter_map(|(candidate, ruby_type)| {
-                    (candidate == range).then_some(ruby_type.clone())
-                })
-                .collect::<Vec<_>>();
-            if !exact.is_empty() {
-                return Some(RubyType::union(exact));
-            }
+        if let Some(ruby_type) = self.engine.exact_local_read_type_at(range) {
+            return Some(ruby_type.clone());
         }
         match self.engine.type_store().type_at(
             &TypeSubject::Expression(range),
@@ -1143,17 +1138,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn namespace_node_kind(&self, namespace_fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        self.engine
-            .graph_nodes_for(namespace_fqn)
-            .iter()
-            .max_by_key(|fact| {
-                (
-                    fact.range.file_id,
-                    fact.range.start_byte,
-                    fact.range.end_byte,
-                )
-            })
-            .map(|fact| fact.kind)
+        self.engine.latest_graph_node_kind(namespace_fqn)
     }
 
     pub fn namespace_exists(&self, namespace_fqn: &FullyQualifiedName) -> bool {

@@ -485,7 +485,7 @@ fn analysis_find_includers(
 }
 
 fn analysis_node_kind(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
-    engine.graph_nodes_for(fqn).first().map(|node| node.kind)
+    engine.first_graph_node_kind(fqn)
 }
 
 fn analysis_namespace_is_project(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> bool {

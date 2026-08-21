@@ -1347,6 +1347,8 @@ budget to accept a candidate or trade semantic correctness for timing.
   lifetime overlaps the full collector traversal. Both were measured, rejected,
   and removed; keep same-file return context short-lived unless a new profile
   proves a different ownership lifetime stays below the fixed RSS ceiling.
+  Constant-equation resolve uses the borrowed `TypeStore::constant_type_facts`
+  domain view for the same reason: do not restore `all_facts` expansion there.
 - Accepted August 19 2026: after method-lookup-chain caching, sequential
   `goshposh/server` assembly was `TypeSubject` PartialEq while merging visitor
   type facts into the syntax seed (10% of samples, ~800 ms). Index live merge
@@ -1407,6 +1409,86 @@ budget to accept a candidate or trade semantic correctness for timing.
   not a second resolve-pass store. The test-only `NameRegistry` lookup
   counter is measurement instrumentation and must remain absent from production
   builds.
+- Accepted August 20 2026: `TypeStore::type_at(Expression)` and
+  `facts_for(Expression)` binary-search the already sorted file-owned bucket
+  by exact `(start_byte, end_byte)`. Named `type_at` keeps the reaching
+  assignment scan. Production `replace_file` sorts; unsorted `add()` stays
+  linear. Local-read fallback uses `binary_search_by_key` on the file-owned
+  read index. Official two-project warm resolve 2.19s → 1.85s exclusive.
+  Evidence: `support/performance/exact-expression-type-lookup-2026-08-20.json`.
+- Accepted August 20 2026: graph/symbol existence and kind queries must not
+  clone `GraphNodeFact` / `SymbolFact` vectors. `SemanticGraph` answers
+  definition presence and first/latest kind from the already sorted
+  definition list; edge-only interned endpoints still have no definition.
+  `namespace_node_kind` keeps latest-by-range and `node_kind` keeps first.
+  Official two-project warm resolve 1.73s/1.75s → 1.54s on a same-session
+  exact-expression control (yesterday's 1.85s). Do not restore
+  `graph_nodes_for().is_empty()` on the resolve path. Evidence:
+  `support/performance/graph-node-existence-kind-2026-08-20.json`.
+- Accepted August 21 2026: method-return SCC solving interns distinct
+  equation methods as dense `MethodSolveId` in FQN sort order. Tarjan,
+  component membership, and Jacobi use integer ids; FQN `Ord`/clone only
+  at intern construction and the public `BTreeMap<FQN, Outcome>`.
+  Approximations are sized to the current SCC. Visit order matches the
+  previous FQN-keyed walk. Official two-project warm resolve 1.54s →
+  1.36s exclusive. Do not restore FQN-keyed Tarjan on that path.
+  Evidence: `support/performance/method-return-intern-scc-2026-08-21.json`.
+- Accepted August 21 2026: `TypeStore::constant_type_facts` is the
+  arena-order domain view of value-constant types, including Unknown.
+  Constant-equation resolve maps that view into solver input and must not
+  call `all_facts` then filter. Official two-project warm resolve 1.36s →
+  1.31s exclusive. Do not restore `all_facts` on that path.
+  Evidence: `support/performance/constant-type-facts-view-2026-08-21.json`.
+- Accepted August 21 2026: constant-equation Jacobi interns latest facts
+  and equation targets as sorted vectors, then iterates integer indexes.
+  FQN `Ord`/clone and `ConstantTypeTarget` hashing belong only to intern
+  construction. Official two-project warm resolve 1.31s → 1.27s exclusive.
+  Do not restore `HashMap<ConstantTypeTarget, index>` or `BTreeMap<FQN, fact>`
+  on that loop.
+  Evidence: `support/performance/constant-intern-jacobi-2026-08-21.json`.
+- Accepted August 21 2026: method-reference/MRO construction reads
+  kind-specific stored graph edges and expands only interned target FQNs.
+  `SemanticGraph::edges_from_kind` / `ancestry_edges_from` keep the same
+  source-range order as filtering `edges_from`. Official two-project warm
+  resolve 1.27s → 1.22s exclusive. Do not restore expanding every outgoing
+  `GraphEdgeFact` on that path, and do not restore FqnId-adjacency MRO.
+  Evidence: `support/performance/kind-specific-mro-edges-2026-08-21.json`.
+- Accepted August 21 2026: method-reference lookup identifies universal
+  open roots by interned `FqnId` (at most 12 language-closed ids on the
+  resolve-local chain cache) and probes `namespace_target_exists` from the
+  interned Namespace identity first. Official two-project warm resolve
+  1.26s → 1.14s exclusive. Do not restore expanding every ancestor FQN to
+  string-match Object/Kernel on that walk, and do not restore FqnId-adjacency
+  MRO.
+  Evidence: `support/performance/interned-universal-open-roots-2026-08-21.json`.
+- Rejected August 21 2026: borrowed `FqnIdentity` intern lookup for
+  constant-reference lexical probes. Quiet exclusive resolve 1.14s → 1.10s
+  was inside the same-session control swing; quiet complete 14.11s → 14.35s
+  and RSS 1.78 GB → 1.94 GB. Do not restore IndexSet identity probes on that
+  path without a new quiet pairing. Constant-equation wrap was also a no-win;
+  do not restore ID-adjacency MRO.
+  Evidence: `support/performance/constant-fqn-identity-lookup-rejection-2026-08-21.json`.
+- Rejected August 21 2026: sort unique constant-equation/dependency refs
+  before cloning into the solver, replacing the wrap `BTreeMap`. Quiet
+  exclusive resolve 1.081s → 1.117s did not win; quiet complete 14.04s →
+  14.13s. Do not restore that wrap without a new quiet pairing. Next allowed
+  owner is method-reference `callees_inner` only if the cut is not
+  ID-adjacency MRO; otherwise call-expression outcome write.
+  Evidence: `support/performance/constant-equation-wrap-rejection-2026-08-21.json`.
+- Rejected August 21 2026: borrowed stored-fact walk for `callees_inner` /
+  `method_facts_in_chain` so MRO misses did not clone and expand every
+  matching `MethodFact`. Quiet exclusive resolve 1.152s → 1.169s did not
+  win. Do not restore that walk without a new quiet pairing. Call-expression
+  outcome intern-at-insert was also a no-win; remaining exclusive resolve is
+  ~1.14s.
+  Evidence: `support/performance/stored-callee-facts-rejection-2026-08-21.json`.
+- Rejected August 21 2026: intern call-expression outcomes to Copy type ids at
+  insert and drain-sort the compact map at write. Same-session candidate
+  exclusive resolve swung 1.11s–1.25s around the interned-roots quiet 1.15s
+  control; complete wall moved with runtime-phase overlap. Reverted. Do not
+  restore intern-at-insert on that path without a new quiet pairing outside
+  noise. Further resolve micro-cuts were stopped here.
+  Evidence: `support/performance/interned-call-outcomes-rejection-2026-08-21.json`.
 - Rejected August 1 2026 experiment: traversing MRO directly through graph
   `FqnId` adjacency first changed complete semantic-result fingerprints because
   edge-only endpoint entries were mistaken for declared namespaces. The focused

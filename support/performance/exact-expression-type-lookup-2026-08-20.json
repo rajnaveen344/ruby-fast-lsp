@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-20",
+  "decision": "accept",
+  "purpose": "Cheapen AnalysisEngine::resolve deferred-receiver lookup on the official two-project warm complete index. Do not skip project-file body inference or restore the August 1 resolve cache-hit fast path.",
+  "cut": {
+    "rank": 2,
+    "path": "TypeStore expression exact-range lookup + exact_local_read_type_at",
+    "why": "CPU-weighted samply of AnalysisEngine::resolve put proven_deferred_receiver_type at 0.927s inclusive, of which exact_expression_type was 0.886s. type_at(Expression) scanned every type fact in the file; local-read fallback scanned every read in the file. facts_by_file is already sorted by (start_byte, end_byte) after replace_file.",
+    "changes": [
+      "type_at(Expression) and facts_for(Expression) binary-search the sorted file bucket for the exact range.",
+      "Named type_at keeps the reaching-assignment scan. Expression identity is the range, not a start_byte prefix.",
+      "TypeStore::add may unsort the file bucket; those lookups stay linear when file_owned_indexes_ordered is false.",
+      "exact_expression_type local-read fallback uses binary_search_by_key on the file-owned sorted read index."
+    ],
+    "not_done": [
+      "Do not restore the August 1 resolve cache-hit fast path (semantic complete regressed 7–16%).",
+      "Do not iterate all file type facts for TypeSubject::Expression on the production replace_file path.",
+      "Do not skip TypeTracker / higher-order / local flow / inferred returns on project files.",
+      "Remaining exclusive resolve is still ~1.85s. Re-flame before the next micro-cut."
+    ]
+  },
+  "harness": {
+    "two_project": {
+      "binary": "profiler",
+      "profiler_sha256": "67438d1d3d4374ad4bc6a7af74099357464654bfd1c6e3f0411e000a661bcb29",
+      "workspace": "/Users/naveenraj/goshposh",
+      "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
+      "scheduler_concurrency": 2,
+      "runtime": "jruby-9.2.21.0",
+      "jdk": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home",
+      "extension_path": "./editors/vscode/vsix",
+      "cache_dir": "/tmp/ruby-fast-lsp-10s-remeasure-cache-20260819",
+      "definition_probes": [
+        "server/lib/workers/batch_worker.rb:1173:55",
+        "server/lib/workers/batch_worker.rb:2798:37"
+      ]
+    }
+  },
+  "before": {
+    "commit": "8be1e84",
+    "notes": "RequireFeatureIndex already shipped. Closed-file refresh is ~15ms. Exclusive tail is engine.resolve().",
+    "two_project_warm": {
+      "source": "/tmp/ruby-fast-lsp-feature-index/warm-2p-sorted.jsonl",
+      "complete_index_s": [17.123, 17.120],
+      "profiler_total_s": 19.405,
+      "resolve_s": [2.178, 2.193],
+      "method_candidates_s_sum": 3.028,
+      "process_peak_rss_bytes": 1830797312
+    },
+    "two_project_warm_committed": {
+      "source": "/tmp/ruby-fast-lsp-resolve-flame/warm-2p.jsonl",
+      "complete_index_s": [16.931, 16.929],
+      "resolve_s": [2.273, 2.288],
+      "method_candidates_s_sum": 3.183,
+      "process_peak_rss_bytes": 1830780928
+    },
+    "samply": {
+      "path": "/tmp/ruby-fast-lsp-two-project-flame/warm-2p.json.gz",
+      "weight": "threadCPUDelta",
+      "resolve_inclusive_cpu_s": {
+        "AnalysisEngine::resolve": 4.503,
+        "proven_deferred_receiver_type": 0.927,
+        "exact_expression_type": 0.886,
+        "TypeStore::type_at": 0.367
+      }
+    }
+  },
+  "after": {
+    "two_project_warm": {
+      "source": "/tmp/ruby-fast-lsp-exact-expression-lookup/warm-2p.jsonl",
+      "log": "/tmp/ruby-fast-lsp-exact-expression-lookup/warm-2p.log",
+      "wall_ms": 21162.7,
+      "profiler_total_s": 23.449,
+      "complete_index_s": [21.112, 21.162],
+      "resolve_s": [1.834, 1.850],
+      "method_candidates_s_sum": 2.295,
+      "process_peak_rss_bytes": 1750794240,
+      "user_cpu_s": 47.8,
+      "notes": "Complete wall moved with gem-bind overlap (dependencies phase 29.5s). Resolve stayed ~1.85s."
+    },
+    "two_project_warm_repeat": {
+      "source": "/tmp/ruby-fast-lsp-exact-expression-lookup/warm-2p-repeat.jsonl",
+      "log": "/tmp/ruby-fast-lsp-exact-expression-lookup/warm-2p-repeat.log",
+      "wall_ms": 16334.2,
+      "profiler_total_s": 18.447,
+      "complete_index_s": [16.289, 16.334],
+      "resolve_s": [1.875, 1.884],
+      "method_candidates_s_sum": 2.365,
+      "process_peak_rss_bytes": 1772896256,
+      "user_cpu_s": 39.69
+    },
+    "correctness": {
+      "server_semantic_fingerprint": "1f48b3943afbc3eb392d1363c7645674",
+      "server_devops_semantic_fingerprint": "39f9b699dac5eb702f3cef5419dc3e25",
+      "deferred_receiver_candidates": 251298,
+      "deferred_receiver_proven": 130803,
+      "deferred_receiver_unknown": 120495,
+      "notes": "Fingerprints and deferred-receiver counts match the 8be1e84 feature-index baseline."
+    }
+  },
+  "result": {
+    "resolve": "2.18s/2.19s → 1.83s–1.88s exclusive per engine",
+    "method_candidates_cpu_sum": "3.03s → 2.30s",
+    "complete_index_best": "17.12s → 16.33s",
+    "exclusive_tail_now": "engine.resolve() ~1.85s",
+    "rss_ceiling_bytes": 1776846438,
+    "rss_notes": "Profiler peak RSS 1.75–1.77 GB on the two after runs; under the 1.777 GB ceiling. Feature-index best was 1.83 GB."
+  }
+}

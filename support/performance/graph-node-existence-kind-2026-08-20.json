@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-20",
+  "decision": "accept",
+  "purpose": "Cheapen AnalysisEngine::resolve constant/namespace existence and kind queries on the official two-project warm complete index. Do not skip project-file body inference, restore the August 1 resolve cache-hit fast path, or add a resolve HashMap.",
+  "cut": {
+    "rank": 3,
+    "path": "borrowed graph-node existence/kind + symbol existence",
+    "why": "CPU-weighted samply of remaining AnalysisEngine::resolve after exact-range expression lookup ranked graph_nodes_for clones as the hottest remaining contract smell under resolve_constant_reference (0.309s) and proven_receiver_namespace/namespace_node_kind (0.150s). Callers only needed existence or GraphNodeKind; expand_graph_node_fact cloned FullyQualifiedName for every definition.",
+    "changes": [
+      "SemanticGraph::has_node_definition / first_node_kind / latest_node_kind / has_node_kind / first_node_definition read the already sorted definition vector without materializing StoredGraphNodeFact.",
+      "SymbolStore::has_facts answers existence without cloning StoredSymbolFact.",
+      "AnalysisEngine/AnalysisQuery expose has_graph_node, first/latest_graph_node_kind, graph_node_has_kind, first_graph_node_definition, and has_symbol_facts.",
+      "Resolve, diagnostics, hierarchy, namespace tree, and fact-collector existence/kind callers use those APIs. graph_nodes_for remains for callers that need every file-owned range.",
+      "Edge-only interned graph endpoints still have no node definition. namespace_node_kind keeps latest-by-range; node_kind keeps first-after-sort."
+    ],
+    "not_done": [
+      "Do not restore the August 1 resolve cache-hit fast path (semantic complete regressed 7–16%).",
+      "Do not restore FqnId-adjacency MRO walk (fingerprints then production A/B rejected).",
+      "Do not treat HashMap presence of a graph node as a declared namespace; definitions must be non-empty.",
+      "Remaining exclusive resolve is still ~1.54s. Re-flame before the next micro-cut. Hottest leftover from the previous flame, now that graph clones are gone, is solve_method_return_equations FQN Ord / Tarjan, then TypeStore::all_facts in the constant solver."
+    ]
+  },
+  "harness": {
+    "two_project": {
+      "binary": "profiler",
+      "profiler_sha256": "acb743ec41b023f6f8b38c2e04128324969ad4f83e04a79f0fbf6d86f60454b1",
+      "workspace": "/Users/naveenraj/goshposh",
+      "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
+      "scheduler_concurrency": 2,
+      "runtime": "jruby-9.2.21.0",
+      "jdk": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home",
+      "extension_path": "./editors/vscode/vsix",
+      "cache_dir": "/tmp/ruby-fast-lsp-10s-remeasure-cache-20260819",
+      "definition_probes": [
+        "server/lib/workers/batch_worker.rb:1173:55",
+        "server/lib/workers/batch_worker.rb:2798:37"
+      ]
+    }
+  },
+  "before": {
+    "notes": "Exact-range expression lookup already in the worktree. Official yesterday resolve 1.83s–1.88s / complete best 16.33s / RSS 1.75–1.77 GB. Same-session control rebuilt the exact-expression profiler SHA 67438d1d… immediately after the candidate runs.",
+    "two_project_warm_yesterday": {
+      "source": "/tmp/ruby-fast-lsp-exact-expression-lookup/warm-2p-repeat.jsonl",
+      "profiler_sha256": "67438d1d3d4374ad4bc6a7af74099357464654bfd1c6e3f0411e000a661bcb29",
+      "complete_index_s": [16.289, 16.334],
+      "profiler_total_s": 18.447,
+      "resolve_s": [1.875, 1.884],
+      "method_candidates_s_sum": 2.365,
+      "process_peak_rss_bytes": 1772896256
+    },
+    "two_project_warm_same_session_control": {
+      "source": "/tmp/ruby-fast-lsp-graph-node-existence/control-exact-expression.jsonl",
+      "log": "/tmp/ruby-fast-lsp-graph-node-existence/control-exact-expression.log",
+      "profiler_sha256": "67438d1d3d4374ad4bc6a7af74099357464654bfd1c6e3f0411e000a661bcb29",
+      "wall_ms": 15227.0,
+      "profiler_total_s": 17.01,
+      "complete_index_s": [15.185, 15.182],
+      "resolve_s": [1.732, 1.747],
+      "method_candidates_ns": 2183875416,
+      "process_peak_rss_bytes": 2125938688,
+      "user_cpu_s": 38.71
+    },
+    "samply": {
+      "path": "/tmp/ruby-fast-lsp-resolve-remaining-flame/warm-2p.json.gz",
+      "weight": "threadCPUDelta",
+      "resolve_inclusive_cpu_s": {
+        "AnalysisEngine::resolve": 3.38,
+        "solve_method_return_equations_with_telemetry": 0.719,
+        "resolve_method_reference_with_chain_cache": 0.529,
+        "resolve_constant_reference": 0.457,
+        "graph_nodes_for_clone_under_constant_reference": 0.309,
+        "solve_constant_type_equations": 0.413,
+        "proven_receiver_namespace": 0.211,
+        "graph_nodes_for_clone_under_namespace_kind": 0.150
+      }
+    }
+  },
+  "after": {
+    "two_project_warm": {
+      "source": "/tmp/ruby-fast-lsp-graph-node-existence/warm-2p.jsonl",
+      "log": "/tmp/ruby-fast-lsp-graph-node-existence/warm-2p.log",
+      "wall_ms": 20021.254833,
+      "profiler_total_s": 22.137,
+      "complete_index_s": [19.945, 19.980],
+      "resolve_s": [1.537, 1.540],
+      "method_candidates_ns": 1795432459,
+      "process_peak_rss_bytes": 2103083008,
+      "user_cpu_s": 45.4,
+      "notes": "Complete wall moved with gem-bind overlap (dependencies 13.7s/14.6s). Resolve stayed ~1.54s."
+    },
+    "two_project_warm_repeat": {
+      "source": "/tmp/ruby-fast-lsp-graph-node-existence/warm-2p-repeat.jsonl",
+      "log": "/tmp/ruby-fast-lsp-graph-node-existence/warm-2p-repeat.log",
+      "wall_ms": 14984.103084,
+      "profiler_total_s": 16.745,
+      "complete_index_s": [14.909, 14.943],
+      "resolve_s": [1.535, 1.539],
+      "method_candidates_ns": 1789310583,
+      "process_peak_rss_bytes": 2108473344,
+      "user_cpu_s": 37.65,
+      "refresh_ms": [10.532, 15.769]
+    },
+    "correctness": {
+      "server_semantic_fingerprint": "1f48b3943afbc3eb392d1363c7645674",
+      "server_devops_semantic_fingerprint": "39f9b699dac5eb702f3cef5419dc3e25",
+      "deferred_receiver_candidates_sum": 251298,
+      "deferred_receiver_proven_sum": 130803,
+      "deferred_receiver_unknown_sum": 120495,
+      "notes": "Fingerprints and deferred-receiver counts match the exact-expression / RequireFeatureIndex baseline. edge_only_graph_entries_do_not_promote_missing_namespaces still holds."
+    }
+  },
+  "result": {
+    "resolve": "same-session control 1.73s/1.75s → 1.54s exclusive per engine; yesterday exact-expression 1.83s–1.88s",
+    "method_candidates_cpu_sum": "same-session 2.18s → 1.79s",
+    "complete_index_paired": "15.18s → 14.91s",
+    "exclusive_tail_now": "engine.resolve() ~1.54s",
+    "rss_ceiling_bytes": 1776846438,
+    "rss_notes": "This cut did not raise RSS. Same-session exact-expression control SHA 67438d1d peaked at 2.126 GB; the cut peaked at 2.103–2.108 GB. Yesterday the same control SHA measured 1.75–1.77 GB. Session RSS is above the 1.777 GB ceiling for both binaries; do not attribute that gap to this cut."
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-21",
+  "decision": "accept",
+  "purpose": "Cheapen AnalysisEngine::resolve method-reference/MRO construction on the official two-project warm complete index. Do not skip project-file body inference, restore FqnId-adjacency MRO, restore the August 1 resolve cache-hit fast path, or add a resolve HashMap.",
+  "cut": {
+    "rank": 7,
+    "path": "kind-specific stored MRO edges (no GraphEdgeFact clone)",
+    "why": "CPU-weighted samply of remaining AnalysisEngine::resolve after interned constant Jacobi ranked resolve_method_reference_with_chain_cache at 0.56s, with build_mro 0.77s inclusive. build_mro cloned every outgoing GraphEdgeFact (source+target FQN expand) then filtered by kind. The graph already stores per-kind edge-id lists.",
+    "changes": [
+      "SemanticGraph::edges_from_kind returns one kind's Copy StoredGraphEdgeFact slice, sorted by the same source-range key as edges_from.",
+      "SemanticGraph::ancestry_edges_from returns superclass/include/prepend/extend only.",
+      "build_mro, included-hook extends, unresolved-dependency walks, and execution-context application targets expand only interned target FQNs.",
+      "MRO identity remains FullyQualifiedName-keyed recursion with has_graph_node definition checks. Edge-only interned endpoints still have no definition."
+    ],
+    "not_done": [
+      "Do not restore FqnId-adjacency MRO walk (fingerprints then production A/B rejected August 1).",
+      "Do not restore expanding graph_edges_from then filtering by kind on the MRO path.",
+      "Do not restore the August 1 resolve cache-hit fast path (semantic complete regressed 7–16%).",
+      "Do not skip TypeTracker / higher-order / local flow / inferred returns on project files.",
+      "Remaining exclusive resolve is still ~1.22s. Re-flame before the next micro-cut. Hottest leftover: method-reference 0.51s (build_mro 0.44s inclusive, was 0.77s), constant equations 0.38s, call-expression outcome write 0.17s. Do not restore ID-adjacency MRO."
+    ]
+  },
+  "harness": {
+    "two_project": {
+      "binary": "profiler",
+      "profiler_sha256": "bdca918f318b3269664005be8b7edfcabf1dac03c0e74067fc6142fa16110a65",
+      "workspace": "/Users/naveenraj/goshposh",
+      "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
+      "scheduler_concurrency": 2,
+      "runtime": "jruby-9.2.21.0",
+      "jdk": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home",
+      "extension_path": "./editors/vscode/vsix",
+      "cache_dir": "/tmp/ruby-fast-lsp-10s-remeasure-cache-20260819",
+      "definition_probes": [
+        "server/lib/workers/batch_worker.rb:1173:55",
+        "server/lib/workers/batch_worker.rb:2798:37"
+      ]
+    }
+  },
+  "before": {
+    "notes": "Interned constant Jacobi already in the worktree. Quiet official resolve 1.272s/1.282s, complete 14.22s, RSS 2.011 GB from the same-session control repeat (SHA 7c8f15e8). First same-session control resolve 1.888s/1.966s was a cold/noisy start; exclusive resolve is claimed from the quiet pairing.",
+    "two_project_warm_control_quiet": {
+      "source": "/tmp/ruby-fast-lsp-kind-mro/control-warm-repeat.jsonl",
+      "log": "/tmp/ruby-fast-lsp-kind-mro/control-warm-repeat.log",
+      "profiler_sha256": "7c8f15e8a1fc6301e7dc4b94a2a5e5152176462b3cfbe3115b36acc5670c6a59",
+      "wall_ms": 14303.617125,
+      "profiler_total_s": 16.092,
+      "complete_index_s": [14.219, 14.261],
+      "resolve_s": [1.272, 1.282],
+      "method_candidates_ns": 1769983417,
+      "process_peak_rss_bytes": 2010693632,
+      "user_cpu_s": 36.58,
+      "runtime_phase_s": 7.032,
+      "resolve_phase_s": 2.554,
+      "refresh_ms": [11.23, 16.499]
+    },
+    "samply": {
+      "path": "/tmp/ruby-fast-lsp-resolve-after-constant-intern/warm-2p.json.gz",
+      "weight": "threadCPUDelta",
+      "resolve_inclusive_cpu_s": {
+        "AnalysisEngine::resolve": 3.04,
+        "resolve_method_reference_with_chain_cache": 0.56,
+        "build_mro": 0.77,
+        "resolve_constant_type_equations": 0.37,
+        "solve_constant_type_equations": 0.18
+      }
+    }
+  },
+  "after": {
+    "two_project_warm": {
+      "source": "/tmp/ruby-fast-lsp-kind-mro/candidate-warm.jsonl",
+      "log": "/tmp/ruby-fast-lsp-kind-mro/candidate-warm.log",
+      "wall_ms": 20829.195334,
+      "profiler_total_s": 22.686,
+      "complete_index_s": [20.755, 20.789],
+      "resolve_s": [1.218, 1.22],
+      "method_candidates_ns": 1687107625,
+      "process_peak_rss_bytes": 2094235648,
+      "user_cpu_s": 43.68,
+      "runtime_phase_s": 7.295,
+      "resolve_phase_s": 2.439,
+      "notes": "Complete wall moved with gem-bind overlap (dependencies 30.8s). Resolve stayed ~1.22s."
+    },
+    "two_project_warm_quiet": {
+      "source": "/tmp/ruby-fast-lsp-kind-mro/candidate-warm-repeat.jsonl",
+      "log": "/tmp/ruby-fast-lsp-kind-mro/candidate-warm-repeat.log",
+      "wall_ms": 14275.232375,
+      "profiler_total_s": 16.01,
+      "complete_index_s": [14.204, 14.234],
+      "resolve_s": [1.22, 1.219],
+      "method_candidates_ns": 1676260626,
+      "process_peak_rss_bytes": 1923022848,
+      "user_cpu_s": 35.96,
+      "runtime_phase_s": 7.231,
+      "resolve_phase_s": 2.439,
+      "refresh_ms": [11.207, 16.321]
+    },
+    "correctness": {
+      "server_semantic_fingerprint": "1f48b3943afbc3eb392d1363c7645674",
+      "server_devops_semantic_fingerprint": "39f9b699dac5eb702f3cef5419dc3e25",
+      "deferred_receiver_candidates_sum": 251298,
+      "deferred_receiver_proven_sum": 130803,
+      "deferred_receiver_unknown_sum": 120495,
+      "method_return_outcomes": 62017,
+      "proven_method_returns": 28768,
+      "unknown_method_returns": 33249,
+      "notes": "Fingerprints, deferred-receiver counts, and method-return telemetry match the intern Jacobi / constant-view / intern SCC / graph-kind / exact-expression / RequireFeatureIndex baseline."
+    }
+  },
+  "result": {
+    "resolve": "intern Jacobi quiet 1.272s/1.282s → kind-MRO quiet 1.220s/1.219s exclusive per engine (~50–60ms)",
+    "method_candidates_cpu_sum": "intern quiet 1.770s → kind-MRO quiet 1.676s",
+    "complete_index_paired": "14.22s → 14.20s on quiet runtime (~7.0–7.2s). Noisy candidate complete 20.79s was gem-bind overlap, not this MRO walk.",
+    "exclusive_tail_now": "engine.resolve() ~1.22s",
+    "rss_ceiling_bytes": 1776846438,
+    "rss_notes": "Quiet kind-MRO process peak 1.923 GB vs intern quiet control 2.011 GB. This cut did not add a HashMap. Session RSS remains at or above the 1.777 GB ceiling across recent binaries; the quiet pairing does not justify reverting the cut."
+  }
+}

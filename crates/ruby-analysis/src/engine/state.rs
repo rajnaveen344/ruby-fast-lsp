@@ -2468,25 +2468,15 @@ impl AnalysisEngine {
         let constant_facts = self
             .facts
             .types
-            .all_facts()
-            .into_iter()
-            .filter_map(|fact| {
-                let TypeSubject::Constant(constant) = &fact.subject else {
-                    return None;
-                };
-                Some(ConstantFactInput {
-                    constant: constant.clone(),
-                    target: ConstantTypeTarget::Fact {
-                        subject: fact.subject.clone(),
-                        range: fact.range,
-                    },
-                    ruby_type: fact.ruby_type,
-                    order: (
-                        fact.range.file_id.0,
-                        fact.range.start_byte,
-                        fact.range.end_byte,
-                    ),
-                })
+            .constant_type_facts()
+            .map(|(constant, range, ruby_type)| ConstantFactInput {
+                constant: constant.clone(),
+                target: ConstantTypeTarget::Fact {
+                    subject: TypeSubject::Constant(constant.clone()),
+                    range,
+                },
+                ruby_type: ruby_type.clone(),
+                order: (range.file_id.0, range.start_byte, range.end_byte),
             })
             .collect::<Vec<_>>();
         let outcomes =
@@ -2841,6 +2831,15 @@ impl AnalysisEngine {
                 .iter()
                 .map(|(range, ruby_type)| (*range, self.facts.types.ruby_type(*ruby_type))),
         )
+    }
+
+    pub(super) fn exact_local_read_type_at(&self, range: TextRange) -> Option<&RubyType> {
+        self.inference_by_file.get(&range.file_id)?;
+        let reads = self.local_read_types_by_file.get(&range.file_id)?;
+        let index = reads
+            .binary_search_by_key(&range, |(candidate, _)| *candidate)
+            .ok()?;
+        Some(self.facts.types.ruby_type(reads[index].1))
     }
 
     pub(super) fn local_read_type_at(
@@ -3281,15 +3280,128 @@ impl AnalysisEngine {
             .collect()
     }
 
-    pub fn graph_edges_from(&self, source: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
-        let Some(source_id) = self.names.fqn_id(source) else {
-            return Vec::new();
+    pub fn has_graph_node(&self, fqn: &FullyQualifiedName) -> bool {
+        let Some(fqn_id) = self.names.fqn_id(fqn) else {
+            return false;
         };
-        self.graph
-            .edges_from(source_id)
+        self.graph.has_node_definition(fqn_id)
+    }
+
+    pub fn first_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        let fqn_id = self.names.fqn_id(fqn)?;
+        self.graph.first_node_kind(fqn_id)
+    }
+
+    pub fn latest_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        let fqn_id = self.names.fqn_id(fqn)?;
+        self.graph.latest_node_kind(fqn_id)
+    }
+
+    pub fn graph_node_has_kind(&self, fqn: &FullyQualifiedName, kind: GraphNodeKind) -> bool {
+        let Some(fqn_id) = self.names.fqn_id(fqn) else {
+            return false;
+        };
+        self.graph.has_node_kind(fqn_id, kind)
+    }
+
+    pub fn first_graph_node_definition(
+        &self,
+        fqn: &FullyQualifiedName,
+    ) -> Option<(GraphNodeKind, TextRange)> {
+        let fqn_id = self.names.fqn_id(fqn)?;
+        self.graph.first_node_definition(fqn_id)
+    }
+
+    pub fn has_symbol_facts(&self, fqn: &FullyQualifiedName) -> bool {
+        let Some(fqn_id) = self.names.fqn_id(fqn) else {
+            return false;
+        };
+        self.facts.definitions.symbols.has_facts(fqn_id)
+    }
+
+    pub(super) fn resolve_constant_reference(
+        &self,
+        parts: &[RubyConstant],
+        current_namespace: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
+        self.resolve_constant_path(parts, current_namespace, true, true)
+    }
+
+    pub(super) fn resolve_constant_path(
+        &self,
+        parts: &[RubyConstant],
+        current_namespace: &[RubyConstant],
+        namespace_symbols: bool,
+        value_constants: bool,
+    ) -> Option<FullyQualifiedName> {
+        let mut search = current_namespace.to_vec();
+        loop {
+            let mut probe = search.clone();
+            probe.extend(parts.iter().cloned());
+            let namespace_fqn = FullyQualifiedName::namespace(probe.clone());
+            if self.has_graph_node(&namespace_fqn)
+                || (namespace_symbols && self.has_symbol_facts(&namespace_fqn))
+            {
+                return Some(namespace_fqn);
+            }
+            if value_constants {
+                let constant_fqn = FullyQualifiedName::constant(probe);
+                if self.has_symbol_facts(&constant_fqn) {
+                    return Some(constant_fqn);
+                }
+            }
+            if search.is_empty() {
+                break;
+            }
+            search.pop();
+        }
+        None
+    }
+
+    pub fn graph_edges_from(&self, source: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
+        self.graph_stored_edges_from(source)
             .into_iter()
             .map(|fact| self.expand_graph_edge_fact(fact))
             .collect()
+    }
+
+    pub(super) fn graph_stored_edges_from_kind(
+        &self,
+        source: &FullyQualifiedName,
+        kind: GraphEdgeKind,
+    ) -> Vec<StoredGraphEdgeFact> {
+        let Some(source_id) = self.names.fqn_id(source) else {
+            return Vec::new();
+        };
+        self.graph.edges_from_kind(source_id, kind)
+    }
+
+    pub(super) fn graph_ancestry_edges_from(
+        &self,
+        source: &FullyQualifiedName,
+    ) -> Vec<StoredGraphEdgeFact> {
+        let Some(source_id) = self.names.fqn_id(source) else {
+            return Vec::new();
+        };
+        self.graph.ancestry_edges_from(source_id)
+    }
+
+    fn graph_stored_edges_from(&self, source: &FullyQualifiedName) -> Vec<StoredGraphEdgeFact> {
+        let Some(source_id) = self.names.fqn_id(source) else {
+            return Vec::new();
+        };
+        self.graph.edges_from(source_id)
+    }
+
+    pub(super) fn expand_interned_fqn(&self, id: FqnId) -> FullyQualifiedName {
+        self.names
+            .fqn(id)
+            .expect(
+                "INVARIANT VIOLATED: graph edge points to missing FQN id. \
+                 This is a bug because graph edges must only store interned FQN ids. \
+                 Fix: intern graph edge FQNs before inserting facts.",
+            )
+            .clone()
     }
 
     /// Returns the one superclass that is statically proven for `source`.
@@ -3298,12 +3410,20 @@ impl AnalysisEngine {
     /// make the superclass unknown. Duplicate declarations of the same target
     /// remain one semantic proof while retaining every file-owned fact.
     pub fn proven_superclass_edge(&self, source: &FullyQualifiedName) -> Option<GraphEdgeFact> {
+        self.proven_superclass_stored_edge(source)
+            .map(|edge| self.expand_graph_edge_fact(edge))
+    }
+
+    pub(super) fn proven_superclass_stored_edge(
+        &self,
+        source: &FullyQualifiedName,
+    ) -> Option<StoredGraphEdgeFact> {
         if self.superclass_source_has_unresolved_explicit_edge(source) {
             return None;
         }
         let source_id = self.names.fqn_id(source)?;
         match self.graph.superclass_resolution(source_id) {
-            StoredSuperclassResolution::Unique(edge) => Some(self.expand_graph_edge_fact(edge)),
+            StoredSuperclassResolution::Unique(edge) => Some(edge),
             StoredSuperclassResolution::Missing | StoredSuperclassResolution::Ambiguous => None,
         }
     }
@@ -3687,25 +3807,13 @@ impl AnalysisEngine {
     }
 
     fn expand_graph_edge_fact(&self, fact: StoredGraphEdgeFact) -> GraphEdgeFact {
-        let source = self
-            .names
-            .fqn(fact.source)
-            .expect(
-                "INVARIANT VIOLATED: graph edge points to missing source FQN id. \
-                 This is a bug because graph edges must only store interned source FQN ids. \
-                 Fix: intern graph edge source FQNs before inserting facts.",
-            )
-            .clone();
-        let target = self
-            .names
-            .fqn(fact.target)
-            .expect(
-                "INVARIANT VIOLATED: graph edge points to missing target FQN id. \
-                 This is a bug because graph edges must only store interned target FQN ids. \
-                 Fix: intern graph edge target FQNs before inserting facts.",
-            )
-            .clone();
-        GraphEdgeFact::new(source, target, fact.kind, fact.range).with_provenance(fact.provenance)
+        GraphEdgeFact::new(
+            self.expand_interned_fqn(fact.source),
+            self.expand_interned_fqn(fact.target),
+            fact.kind,
+            fact.range,
+        )
+        .with_provenance(fact.provenance)
     }
 
     fn expand_unresolved_graph_edge_fact(
@@ -3805,14 +3913,8 @@ impl AnalysisEngine {
             "INVARIANT VIOLATED: unresolved superclass edge points to a missing source FQN. This is a bug because graph edges retain interned sources for their full lifetime. Fix: retain source FQNs until unresolved edges are removed.",
         );
         if source.namespace_kind() != Some(NamespaceKind::Instance)
-            || !self
-                .graph_nodes_for(source)
-                .iter()
-                .any(|fact| fact.kind == GraphNodeKind::Class)
-            || !self
-                .graph_nodes_for(target)
-                .iter()
-                .any(|fact| fact.kind == GraphNodeKind::Class)
+            || !self.graph_node_has_kind(source, GraphNodeKind::Class)
+            || !self.graph_node_has_kind(target, GraphNodeKind::Class)
         {
             return None;
         }
@@ -3835,32 +3937,20 @@ impl AnalysisEngine {
              This is a bug because unresolved graph edges must only store interned constant lookup ids. \
              Fix: intern unresolved graph edge targets before inserting facts.",
         );
-        let context = self.names.fqn(lookup.context).expect(
-            "INVARIANT VIOLATED: unresolved graph edge lookup points to missing context FQN id. \
-             This is a bug because constant lookups must only store interned context FQN ids. \
-             Fix: intern constant lookup contexts before inserting facts.",
-        );
-        let mut search_namespaces = if lookup.absolute {
+        let path = lookup.path.clone();
+        let current_namespace = if lookup.absolute {
             Vec::new()
         } else {
-            context.namespace_parts()
+            self.names
+                .fqn(lookup.context)
+                .expect(
+                    "INVARIANT VIOLATED: unresolved graph edge lookup points to missing context FQN id. \
+                     This is a bug because constant lookups must only store interned context FQN ids. \
+                     Fix: intern constant lookup contexts before inserting facts.",
+                )
+                .namespace_parts()
         };
-
-        loop {
-            let mut probe = search_namespaces.clone();
-            probe.extend(lookup.path.iter().cloned());
-            let namespace_fqn = FullyQualifiedName::namespace(probe);
-            if !self.graph_nodes_for(&namespace_fqn).is_empty() {
-                return Some(namespace_fqn);
-            }
-
-            if lookup.absolute || search_namespaces.is_empty() {
-                break;
-            }
-            search_namespaces.pop();
-        }
-
-        None
+        self.resolve_constant_path(&path, &current_namespace, false, false)
     }
 }
 

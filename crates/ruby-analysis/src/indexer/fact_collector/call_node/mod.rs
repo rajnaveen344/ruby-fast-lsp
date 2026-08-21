@@ -1354,9 +1354,7 @@ impl FactCollector {
                     .any(|fact| fact.fqn == namespace_fqn)
                     || {
                         let engine = self.analysis_engine.read();
-                        !AnalysisQuery::new(&engine)
-                            .graph_nodes_for(&namespace_fqn)
-                            .is_empty()
+                        AnalysisQuery::new(&engine).has_graph_node(&namespace_fqn)
                     };
                 if is_namespace {
                     return (

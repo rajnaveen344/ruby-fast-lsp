@@ -1497,7 +1497,7 @@ impl AnalysisEngine {
             return true;
         }
         if owner.namespace_kind() == Some(NamespaceKind::Singleton) {
-            let metaclass = match self.graph_nodes_for(owner).first().map(|fact| fact.kind) {
+            let metaclass = match self.first_graph_node_kind(owner) {
                 Some(GraphNodeKind::Class) => Some("Class"),
                 Some(GraphNodeKind::Module) => Some("Module"),
                 None => None,
@@ -1508,8 +1508,7 @@ impl AnalysisEngine {
                         "INVARIANT VIOLATED: Ruby metaclass name `{name}` is invalid: {error}. This is a bug because Class and Module are universal Ruby constants. Fix: preserve RubyConstant support for language-defined class names."
                     )
                 });
-                self.graph_nodes_for(&FullyQualifiedName::namespace(vec![constant]))
-                    .is_empty()
+                !self.has_graph_node(&FullyQualifiedName::namespace(vec![constant]))
             }) {
                 return true;
             }
@@ -1962,7 +1961,7 @@ impl AnalysisEngine {
             vec![ruby_const],
             crate::core::NamespaceKind::Instance,
         );
-        if self.graph_nodes_for(&ns_fqn).is_empty() && self.symbol_facts_for(&ns_fqn).is_empty() {
+        if !self.has_graph_node(&ns_fqn) && !self.has_symbol_facts(&ns_fqn) {
             return true;
         }
 
@@ -2031,44 +2030,10 @@ impl AnalysisEngine {
             parts.clone(),
             crate::core::NamespaceKind::Singleton,
         );
-        !self.graph_nodes_for(&instance_fqn).is_empty()
-            || !self.graph_nodes_for(&singleton_fqn).is_empty()
-            || !self
-                .symbol_facts_for(&FullyQualifiedName::constant(parts))
-                .is_empty()
+        self.has_graph_node(&instance_fqn)
+            || self.has_graph_node(&singleton_fqn)
+            || self.has_symbol_facts(&FullyQualifiedName::constant(parts))
             || !self.method_facts_matching_owner(fqn, "").is_empty()
-    }
-
-    fn resolve_constant_reference(
-        &self,
-        parts: &[crate::core::RubyConstant],
-        current_namespace: &[crate::core::RubyConstant],
-    ) -> Option<FullyQualifiedName> {
-        let mut search = current_namespace.to_vec();
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-
-            let namespace_fqn = FullyQualifiedName::namespace(probe.clone());
-            if !self.graph_nodes_for(&namespace_fqn).is_empty()
-                || !self.symbol_facts_for(&namespace_fqn).is_empty()
-            {
-                return Some(namespace_fqn);
-            }
-
-            let constant_fqn = FullyQualifiedName::constant(probe);
-            if !self.symbol_facts_for(&constant_fqn).is_empty() {
-                return Some(constant_fqn);
-            }
-
-            if search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        None
     }
 }
 

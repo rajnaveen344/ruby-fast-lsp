@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
-    FqnId, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
-    MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType,
-    SourceFileId, SourceKind, StoredMethodReferenceCandidate, StoredReferenceCandidateRef,
+    FqnId, FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution, MethodFact,
+    MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId,
+    SourceKind, StoredGraphEdgeFact, StoredMethodReferenceCandidate, StoredReferenceCandidateRef,
     SymbolKind, TextRange, TypeSubject,
 };
 use crate::engine::query::AnalysisQuery;
@@ -21,6 +21,9 @@ pub(crate) struct MethodLookupChainCache {
     metaclass_methods: HashMap<(FqnId, RubyMethod), MethodLookupResult>,
     unresolved_dependencies: HashMap<FullyQualifiedName, bool>,
     unproven_universal_methods: HashMap<FqnId, HashSet<RubyMethod>>,
+    /// Interned Object/Kernel/Class/Module/BasicObject identities, both
+    /// instance and singleton. Language-closed; not a resolve HashMap.
+    universal_open_root_ids: Option<Vec<FqnId>>,
 }
 
 impl MethodLookupChainCache {
@@ -576,18 +579,9 @@ impl<'a> AnalysisQuery<'a> {
             }
             pending.extend(
                 self.engine
-                    .graph_edges_from(&current)
+                    .graph_ancestry_edges_from(&current)
                     .into_iter()
-                    .filter(|edge| {
-                        matches!(
-                            edge.kind,
-                            GraphEdgeKind::Superclass
-                                | GraphEdgeKind::Include
-                                | GraphEdgeKind::Prepend
-                                | GraphEdgeKind::Extend
-                        )
-                    })
-                    .map(|edge| edge.target),
+                    .map(|edge| self.engine.expand_interned_fqn(edge.target)),
             );
         }
         false
@@ -1185,25 +1179,18 @@ impl<'a> AnalysisQuery<'a> {
             return MethodLookupResult::Missing;
         }
 
+        let universal_root_ids = interned_universal_open_root_ids(self.engine, chain_cache);
         let ancestor_chain =
             method_lookup_chain_for_reference_cached(self.engine, namespace_fqn, chain_cache);
         let universal_roots = ancestor_chain
             .iter()
             .copied()
-            .filter(|owner| {
-                self.engine
-                    .names
-                    .fqn(*owner)
-                    .is_some_and(is_universal_open_root)
-            })
+            .filter(|owner| universal_root_ids.contains(owner))
             .collect::<Vec<_>>();
         let mut crossed_universal_root = false;
 
         for owner_id in ancestor_chain.iter().copied() {
-            let owner = self.engine.names.fqn(owner_id).expect(
-                "INVARIANT VIOLATED: cached method-chain owner ID is absent from the name registry. This is a bug because resolution-local chain IDs originate from that same immutable registry. Fix: invalidate all resolution-local chain caches whenever names can change.",
-            );
-            crossed_universal_root |= is_universal_open_root(owner);
+            crossed_universal_root |= universal_root_ids.contains(&owner_id);
             match self
                 .engine
                 .effective_method_fact_matching_owner_id(owner_id, method)
@@ -2138,31 +2125,8 @@ impl<'a> AnalysisQuery<'a> {
         parts: &[RubyConstant],
         current_namespace: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let mut search = current_namespace.to_vec();
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-
-            let namespace_fqn = FullyQualifiedName::namespace(probe.clone());
-            if !self.engine.graph_nodes_for(&namespace_fqn).is_empty()
-                || !self.engine.symbol_facts_for(&namespace_fqn).is_empty()
-            {
-                return Some(namespace_fqn);
-            }
-
-            let constant_fqn = FullyQualifiedName::constant(probe);
-            if !self.engine.symbol_facts_for(&constant_fqn).is_empty() {
-                return Some(constant_fqn);
-            }
-
-            if search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        None
+        self.engine
+            .resolve_constant_reference(parts, current_namespace)
     }
 }
 
@@ -2194,17 +2158,57 @@ fn non_core_fact_requires_ancestry_proof(
 }
 
 fn is_universal_open_root(owner: &FullyQualifiedName) -> bool {
-    if owner.namespace_parts().is_empty() {
-        return true;
+    match owner.namespace_parts_slice() {
+        [] => true,
+        [name] => matches!(
+            name.as_str(),
+            "BasicObject" | "Object" | "Kernel" | "Module" | "Class"
+        ),
+        [_, _, ..] => false,
     }
-    matches!(
-        owner.namespace_parts().as_slice(),
-        [name]
-            if matches!(
-                name.as_str(),
-                "BasicObject" | "Object" | "Kernel" | "Module" | "Class"
-            )
-    )
+}
+
+const UNIVERSAL_OPEN_ROOT_NAMES: [&str; 5] = ["BasicObject", "Object", "Kernel", "Module", "Class"];
+
+fn interned_universal_open_root_ids(
+    engine: &crate::AnalysisEngine,
+    cache: &mut MethodLookupChainCache,
+) -> Vec<FqnId> {
+    if cache.universal_open_root_ids.is_none() {
+        cache.universal_open_root_ids = Some(collect_interned_universal_open_root_ids(engine));
+    }
+    cache
+        .universal_open_root_ids
+        .as_ref()
+        .expect(
+            "INVARIANT VIOLATED: universal open-root ids disappeared after insertion. This is a bug because the resolve-local chain cache retains that list for one pass. Fix: populate interned universal roots once before method lookup.",
+        )
+        .clone()
+}
+
+fn collect_interned_universal_open_root_ids(engine: &crate::AnalysisEngine) -> Vec<FqnId> {
+    let mut ids = Vec::with_capacity(12);
+    for kind in [
+        crate::core::NamespaceKind::Instance,
+        crate::core::NamespaceKind::Singleton,
+    ] {
+        let empty = FullyQualifiedName::namespace_with_kind(Vec::new(), kind);
+        if let Some(id) = engine.names.fqn_id(&empty) {
+            ids.push(id);
+        }
+        for name in UNIVERSAL_OPEN_ROOT_NAMES {
+            let constant = RubyConstant::new(name).unwrap_or_else(|error| {
+                panic!(
+                    "INVARIANT VIOLATED: Ruby universal root name `{name}` is invalid: {error}. This is a bug because BasicObject, Object, Kernel, Module, and Class are language-defined constants. Fix: preserve RubyConstant support for those names."
+                )
+            });
+            let fqn = FullyQualifiedName::namespace_with_kind(vec![constant], kind);
+            if let Some(id) = engine.names.fqn_id(&fqn) {
+                ids.push(id);
+            }
+        }
+    }
+    ids
 }
 
 fn method_name_is_refactorable(method: RubyMethod) -> bool {
@@ -2286,9 +2290,9 @@ fn constant_name_collides(
 
     let namespace = FullyQualifiedName::namespace(parts.clone());
     let constant = FullyQualifiedName::constant(parts);
-    !engine.symbol_facts_for(&namespace).is_empty()
-        || !engine.graph_nodes_for(&namespace).is_empty()
-        || !engine.symbol_facts_for(&constant).is_empty()
+    engine.has_symbol_facts(&namespace)
+        || engine.has_graph_node(&namespace)
+        || engine.has_symbol_facts(&constant)
 }
 
 fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
@@ -2307,33 +2311,43 @@ pub(super) fn namespace_target_exists(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> bool {
-    let parts = fqn.namespace_parts();
+    let parts = fqn.namespace_parts_slice();
     if parts.is_empty() {
         return true;
     }
-    let instance_fqn = FullyQualifiedName::namespace_with_kind(
-        parts.clone(),
-        crate::core::NamespaceKind::Instance,
-    );
-    let singleton_fqn = FullyQualifiedName::namespace_with_kind(
-        parts.clone(),
-        crate::core::NamespaceKind::Singleton,
-    );
-    let constant_fqn = FullyQualifiedName::constant(parts);
-
-    !engine.graph_nodes_for(&instance_fqn).is_empty()
-        || !engine.graph_nodes_for(&singleton_fqn).is_empty()
-        || !engine.symbol_facts_for(&constant_fqn).is_empty()
+    if matches!(fqn, FullyQualifiedName::Namespace(_, _)) && engine.has_graph_node(fqn) {
+        return true;
+    }
+    if let Some(kind) = fqn.namespace_kind() {
+        let other_kind = match kind {
+            crate::core::NamespaceKind::Instance => crate::core::NamespaceKind::Singleton,
+            crate::core::NamespaceKind::Singleton => crate::core::NamespaceKind::Instance,
+        };
+        let other = FullyQualifiedName::namespace_with_kind(parts.to_vec(), other_kind);
+        if engine.has_graph_node(&other) {
+            return true;
+        }
+    } else {
+        let instance = FullyQualifiedName::namespace_with_kind(
+            parts.to_vec(),
+            crate::core::NamespaceKind::Instance,
+        );
+        let singleton = FullyQualifiedName::namespace_with_kind(
+            parts.to_vec(),
+            crate::core::NamespaceKind::Singleton,
+        );
+        if engine.has_graph_node(&instance) || engine.has_graph_node(&singleton) {
+            return true;
+        }
+    }
+    engine.has_symbol_facts(&FullyQualifiedName::constant(parts.to_vec()))
 }
 
 fn is_module_instance_namespace(engine: &crate::AnalysisEngine, fqn: &FullyQualifiedName) -> bool {
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Instance) {
         return false;
     }
-    engine
-        .graph_nodes_for(fqn)
-        .iter()
-        .any(|fact| fact.kind == GraphNodeKind::Module)
+    engine.graph_node_has_kind(fqn, GraphNodeKind::Module)
 }
 
 fn module_includers(
@@ -2524,7 +2538,7 @@ fn method_lookup_chain_without_metaclass_with_fallback(
          Fix: resolve receivers to Namespace FQNs before method lookup."
     );
 
-    if engine.graph_nodes_for(fqn).is_empty() {
+    if !engine.has_graph_node(fqn) {
         if fqn.namespace_parts().is_empty() {
             let mut chain = Vec::new();
             let mut visited = std::collections::HashSet::new();
@@ -2621,18 +2635,9 @@ fn method_lookup_chain_has_unresolved_dependency_from_graph(
 
         pending.extend(
             engine
-                .graph_edges_from(&current)
+                .graph_ancestry_edges_from(&current)
                 .into_iter()
-                .filter(|edge| {
-                    matches!(
-                        edge.kind,
-                        GraphEdgeKind::Superclass
-                            | GraphEdgeKind::Include
-                            | GraphEdgeKind::Prepend
-                            | GraphEdgeKind::Extend
-                    )
-                })
-                .map(|edge| edge.target),
+                .map(|edge| engine.expand_interned_fqn(edge.target)),
         );
     }
 
@@ -2659,7 +2664,7 @@ fn metaclass_namespace_for_object(
         })],
         crate::core::NamespaceKind::Instance,
     );
-    (!engine.graph_nodes_for(&metaclass).is_empty()).then_some(metaclass)
+    engine.has_graph_node(&metaclass).then_some(metaclass)
 }
 
 pub(super) fn method_lookup_chain_for_reference_cached<'cache>(
@@ -2736,7 +2741,7 @@ fn compute_universal_object_fallback(engine: &crate::AnalysisEngine) -> Vec<Full
     let mut fallback = Vec::new();
     let mut visited = std::collections::HashSet::new();
     let object = top_level_object_instance_fqn();
-    if !engine.graph_nodes_for(&object).is_empty() {
+    if engine.has_graph_node(&object) {
         build_mro(engine, &object, &mut fallback, &mut visited, false);
     }
     engine.cache_universal_object_method_lookup_chain(fallback.clone());
@@ -2800,7 +2805,7 @@ fn compute_top_level_instance_fallback(
     build_mro(engine, &root, chain, visited, true);
 
     let object_fqn = top_level_object_instance_fqn();
-    if !engine.graph_nodes_for(&object_fqn).is_empty() {
+    if engine.has_graph_node(&object_fqn) {
         build_mro(engine, &object_fqn, chain, visited, true);
     }
 }
@@ -2828,18 +2833,20 @@ fn build_mro(
     }
 
     let language_owned_only = is_universal_open_root(fqn) && !allow_non_language_universal_edges;
-    let edge_is_allowed = |edge: &GraphEdgeFact| {
+    let edge_is_allowed = |edge: &StoredGraphEdgeFact| {
         !language_owned_only || method_lookup_edge_is_language_owned(engine, edge)
     };
 
-    let mut prepends = edges_from(engine, fqn, GraphEdgeKind::Prepend)
+    let prepends = engine
+        .graph_stored_edges_from_kind(fqn, GraphEdgeKind::Prepend)
         .into_iter()
         .filter(&edge_is_allowed)
         .collect::<Vec<_>>();
-    for edge in prepends.iter_mut().rev() {
+    for edge in prepends.iter().rev() {
+        let target = engine.expand_interned_fqn(edge.target);
         build_mro(
             engine,
-            &edge.target,
+            &target,
             chain,
             visited,
             allow_non_language_universal_edges,
@@ -2848,38 +2855,45 @@ fn build_mro(
 
     chain.push(fqn.clone());
 
-    let mut includes = edges_from(engine, fqn, GraphEdgeKind::Include)
+    let includes = engine
+        .graph_stored_edges_from_kind(fqn, GraphEdgeKind::Include)
         .into_iter()
         .filter(&edge_is_allowed)
         .collect::<Vec<_>>();
-    for edge in includes.iter_mut().rev() {
+    for edge in includes.iter().rev() {
+        let target = engine.expand_interned_fqn(edge.target);
         build_mro(
             engine,
-            &edge.target,
+            &target,
             chain,
             visited,
             allow_non_language_universal_edges,
         );
     }
 
-    let mut included_hook_extends = included_hook_extend_edges(engine, fqn, language_owned_only)
+    let included_hook_extends = included_hook_extend_edges(engine, fqn, language_owned_only)
         .into_iter()
         .filter(&edge_is_allowed)
         .collect::<Vec<_>>();
-    for edge in included_hook_extends.iter_mut().rev() {
+    for edge in included_hook_extends.iter().rev() {
+        let target = engine.expand_interned_fqn(edge.target);
         build_mro(
             engine,
-            &edge.target,
+            &target,
             chain,
             visited,
             allow_non_language_universal_edges,
         );
     }
 
-    if let Some(superclass) = engine.proven_superclass_edge(fqn).filter(&edge_is_allowed) {
+    if let Some(superclass) = engine
+        .proven_superclass_stored_edge(fqn)
+        .filter(&edge_is_allowed)
+    {
+        let target = engine.expand_interned_fqn(superclass.target);
         build_mro(
             engine,
-            &superclass.target,
+            &target,
             chain,
             visited,
             allow_non_language_universal_edges,
@@ -2889,7 +2903,7 @@ fn build_mro(
 
 fn method_lookup_edge_is_language_owned(
     engine: &crate::AnalysisEngine,
-    edge: &GraphEdgeFact,
+    edge: &StoredGraphEdgeFact,
 ) -> bool {
     matches!(
         engine
@@ -2909,7 +2923,7 @@ fn included_hook_extend_edges(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
     language_owned_only: bool,
-) -> Vec<GraphEdgeFact> {
+) -> Vec<StoredGraphEdgeFact> {
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Singleton) {
         return Vec::new();
     }
@@ -2918,13 +2932,16 @@ fn included_hook_extend_edges(
     };
 
     let mut hook_edges = Vec::new();
-    for edge in edges_from(engine, &instance_fqn, GraphEdgeKind::Include)
+    for edge in engine
+        .graph_stored_edges_from_kind(&instance_fqn, GraphEdgeKind::Include)
         .into_iter()
-        .chain(edges_from(engine, &instance_fqn, GraphEdgeKind::Prepend))
+        .chain(engine.graph_stored_edges_from_kind(&instance_fqn, GraphEdgeKind::Prepend))
         .filter(|edge| !language_owned_only || method_lookup_edge_is_language_owned(engine, edge))
     {
+        let mixin = engine.expand_interned_fqn(edge.target);
         hook_edges.extend(
-            edges_from(engine, &edge.target, GraphEdgeKind::Extend)
+            engine
+                .graph_stored_edges_from_kind(&mixin, GraphEdgeKind::Extend)
                 .into_iter()
                 .filter(|hook| {
                     !language_owned_only || method_lookup_edge_is_language_owned(engine, hook)
@@ -2934,26 +2951,14 @@ fn included_hook_extend_edges(
     hook_edges
 }
 
-fn edges_from(
-    engine: &crate::AnalysisEngine,
-    fqn: &FullyQualifiedName,
-    kind: GraphEdgeKind,
-) -> Vec<GraphEdgeFact> {
-    engine
-        .graph_edges_from(fqn)
-        .iter()
-        .filter(|edge| edge.kind == kind)
-        .cloned()
-        .collect()
-}
-
 pub(super) fn execution_context_application_targets(
     engine: &crate::AnalysisEngine,
     template: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
-    let mut targets = edges_from(engine, template, GraphEdgeKind::ExecutionContextApplication)
+    let mut targets = engine
+        .graph_stored_edges_from_kind(template, GraphEdgeKind::ExecutionContextApplication)
         .into_iter()
-        .map(|edge| edge.target)
+        .map(|edge| engine.expand_interned_fqn(edge.target))
         .collect::<Vec<_>>();
     targets.sort_by_key(ToString::to_string);
     targets.dedup();
@@ -3342,41 +3347,17 @@ fn resolve_constant_fqn(
     absolute: bool,
     context_fqn: &FullyQualifiedName,
 ) -> Option<FullyQualifiedName> {
-    let mut search_namespaces = if absolute {
-        Vec::new()
+    let current_namespace = if absolute {
+        &[][..]
     } else {
-        context_fqn.namespace_parts()
+        context_fqn.namespace_parts_slice()
     };
-
-    loop {
-        let mut probe = search_namespaces.clone();
-        probe.extend(parts.iter().cloned());
-
-        let namespace_fqn = FullyQualifiedName::namespace_with_kind(
-            probe.clone(),
-            crate::core::NamespaceKind::Instance,
-        );
-        if !engine.graph_nodes_for(&namespace_fqn).is_empty() {
-            return Some(namespace_fqn);
-        }
-
-        let constant_fqn = FullyQualifiedName::constant(probe);
-        if !engine.symbol_facts_for(&constant_fqn).is_empty() {
-            return Some(constant_fqn);
-        }
-
-        if absolute || search_namespaces.is_empty() {
-            break;
-        }
-        search_namespaces.pop();
-    }
-
-    None
+    engine.resolve_constant_path(parts, current_namespace, false, true)
 }
 
 pub(super) fn node_kind(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Option<GraphNodeKind> {
-    engine.graph_nodes_for(fqn).first().map(|fact| fact.kind)
+    engine.first_graph_node_kind(fqn)
 }

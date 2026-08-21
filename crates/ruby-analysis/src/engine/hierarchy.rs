@@ -95,9 +95,7 @@ impl<'a> AnalysisQuery<'a> {
         &self,
         fqn: &FullyQualifiedName,
     ) -> Option<(GraphNodeKind, TextRange)> {
-        let nodes = self.engine.graph_nodes_for(fqn);
-        let node = nodes.first()?;
-        Some((node.kind, node.range))
+        self.engine.first_graph_node_definition(fqn)
     }
 
     pub fn type_hierarchy_node_for_constant(
@@ -106,19 +104,17 @@ impl<'a> AnalysisQuery<'a> {
         ancestors: &[RubyConstant],
     ) -> Option<TypeHierarchyNode> {
         let fqn = self.resolve_constant_in_context(constant_parts, ancestors)?;
-        let nodes = self.engine.graph_nodes_for(&fqn);
-        let node = nodes.first()?;
+        let (node_kind, range) = self.engine.first_graph_node_definition(&fqn)?;
         Some(TypeHierarchyNode {
             fqn,
-            node_kind: node.kind,
-            range: node.range,
+            node_kind,
+            range,
         })
     }
 
     pub fn supertypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
-        let nodes = self.engine.graph_nodes_for(fqn);
-        let primary_file_id = match nodes.first() {
-            Some(node) => node.range.file_id,
+        let primary_file_id = match self.engine.first_graph_node_definition(fqn) {
+            Some((_, range)) => range.file_id,
             None => return Vec::new(),
         };
 
@@ -164,7 +160,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn subtypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
-        if self.engine.graph_nodes_for(fqn).is_empty() {
+        if !self.engine.has_graph_node(fqn) {
             return Vec::new();
         }
 
@@ -256,9 +252,8 @@ impl<'a> AnalysisQuery<'a> {
             .iter()
             .filter_map(|impl_fqn| {
                 self.engine
-                    .graph_nodes_for(impl_fqn)
-                    .first()
-                    .map(|fact| fact.range)
+                    .first_graph_node_definition(impl_fqn)
+                    .map(|(_, range)| range)
             })
             .collect()
     }
@@ -374,13 +369,12 @@ fn hierarchy_entry_for_node(
     edge_file_id: Option<SourceFileId>,
     unresolved: bool,
 ) -> Option<TypeHierarchyEntry> {
-    let nodes = engine.graph_nodes_for(fqn);
-    let node = nodes.first()?;
+    let (node_kind, range) = engine.first_graph_node_definition(fqn)?;
     Some(TypeHierarchyEntry {
         fqn: fqn.clone(),
-        node_kind: Some(node.kind),
+        node_kind: Some(node_kind),
         relation,
-        range: node.range,
+        range,
         edge_file_id,
         unresolved,
     })

@@ -9,7 +9,8 @@ use crate::core::{
 use super::*;
 use crate::engine::resolution::{
     method_lookup_chain, method_lookup_chain_for_reference_cached,
-    method_lookup_chain_uncached_construction_count, MethodLookupChainCache,
+    method_lookup_chain_uncached_construction_count, namespace_target_exists,
+    MethodLookupChainCache,
 };
 use crate::engine::AnalysisQueryCache;
 use crate::ConstantLookupRequest;
@@ -1111,6 +1112,299 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
         .all(|(_, outcome)| outcome.proven_type() == Some(&RubyType::string())));
 }
 
+fn explicit_method_call_candidate(
+    method_range: TextRange,
+    call_range: TextRange,
+    owner: Vec<RubyConstant>,
+    owner_kind: NamespaceKind,
+    method: RubyMethod,
+    receiver_expression_range: Option<TextRange>,
+) -> ReferenceCandidate {
+    ReferenceCandidate::method(
+        method_range,
+        crate::core::MethodReferenceCandidate {
+            owner,
+            owner_kind,
+            method,
+            is_super: false,
+            access: crate::core::MethodReferenceAccess::ExplicitReceiver,
+            caller: None,
+            call_expression_range: Some(call_range),
+            preferred_definition_range: None,
+            diagnostics: crate::core::MethodReferenceDiagnostics {
+                diagnostic_range: method_range,
+                receiver_label: None,
+                receiver_expression_range,
+                receiver_type: None,
+                diagnose_unresolved: true,
+                allow_unindexed_owner: false,
+                signature: Some(crate::core::MethodCallSignatureCandidate::default()),
+            },
+        },
+    )
+}
+
+#[test]
+fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
+    let mut engine = AnalysisEngine::new();
+    let def_file = register_project_file(
+        &mut engine,
+        "app/user.rb",
+        "class User; def child; self; end; def name = 'Ada'; end",
+    );
+    let ref_file = register_project_file(&mut engine, "app/use_user.rb", "user.child.name");
+    let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+    let user_constant = FullyQualifiedName::constant(user.namespace_parts());
+    let instance_user =
+        FullyQualifiedName::namespace_with_kind(user.namespace_parts(), NamespaceKind::Instance);
+    let child = RubyMethod::new("child").unwrap();
+    let name = RubyMethod::new("name").unwrap();
+    let child_fqn = FullyQualifiedName::method(user.namespace_parts(), child);
+    let name_fqn = FullyQualifiedName::method(user.namespace_parts(), name);
+    let child_def = TextRange::new(def_file, 12, 30);
+    let name_def = TextRange::new(def_file, 32, 50);
+
+    engine.replace_facts(
+        def_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                user.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(def_file, 0, 54),
+            )],
+            methods: vec![
+                MethodFact::new(child_fqn.clone(), instance_user.clone(), child_def),
+                MethodFact::new(name_fqn.clone(), instance_user, name_def),
+            ],
+            types: vec![
+                TypeFact::new(
+                    TypeSubject::MethodReturn(child_fqn),
+                    RubyType::Class(user_constant),
+                    child_def,
+                    TypeProvenance::Inferred,
+                ),
+                TypeFact::new(
+                    TypeSubject::MethodReturn(name_fqn),
+                    RubyType::string(),
+                    name_def,
+                    TypeProvenance::Inferred,
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+
+    let inner_call = TextRange::new(ref_file, 0, 10);
+    let outer_call = TextRange::new(ref_file, 0, 15);
+    let missing_owner = vec![RubyConstant::new("MissingOwner").unwrap()];
+    engine.replace_facts(
+        ref_file,
+        FileFacts {
+            reference_candidates: vec![
+                explicit_method_call_candidate(
+                    TextRange::new(ref_file, 5, 10),
+                    inner_call,
+                    user.namespace_parts(),
+                    NamespaceKind::Instance,
+                    child,
+                    None,
+                ),
+                explicit_method_call_candidate(
+                    TextRange::new(ref_file, 11, 15),
+                    outer_call,
+                    missing_owner,
+                    NamespaceKind::Instance,
+                    name,
+                    Some(inner_call),
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+
+    engine.resolve();
+
+    let resolve_pass = engine.last_resolve_stats();
+    assert_eq!(resolve_pass.deferred_receiver_candidates, 1);
+    assert_eq!(resolve_pass.deferred_receiver_proven, 1);
+    assert_eq!(resolve_pass.deferred_receiver_unknown, 0);
+    let query = engine.query();
+    let outcomes = query
+        .call_expression_outcomes_in_file(ref_file)
+        .expect("nested calls must retain same-pass proof outcomes");
+    assert_eq!(outcomes.len(), 2);
+    let inner = outcomes
+        .iter()
+        .find(|(range, _)| *range == inner_call)
+        .map(|(_, outcome)| outcome.proven_type().cloned());
+    let outer = outcomes
+        .iter()
+        .find(|(range, _)| *range == outer_call)
+        .map(|(_, outcome)| outcome.proven_type().cloned());
+    assert_eq!(
+        inner,
+        Some(Some(RubyType::Class(FullyQualifiedName::constant(
+            user.namespace_parts()
+        ))))
+    );
+    assert_eq!(outer, Some(Some(RubyType::string())));
+}
+
+#[test]
+fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
+    let mut engine = AnalysisEngine::new();
+    let def_file = register_project_file(
+        &mut engine,
+        "app/user.rb",
+        "class User; def name = 'Ada'; end",
+    );
+    let ref_file = register_project_file(&mut engine, "app/use_user.rb", "kept()\nuser.name");
+    let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+    let instance_user =
+        FullyQualifiedName::namespace_with_kind(user.namespace_parts(), NamespaceKind::Instance);
+    let method = RubyMethod::new("name").unwrap();
+    let method_fqn = FullyQualifiedName::method(user.namespace_parts(), method);
+    let method_range = TextRange::new(def_file, 12, 28);
+    let kept_range = TextRange::new(ref_file, 0, 6);
+    let name_call = TextRange::new(ref_file, 7, 16);
+
+    engine.replace_facts(
+        def_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                user.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(def_file, 0, 34),
+            )],
+            methods: vec![MethodFact::new(
+                method_fqn.clone(),
+                instance_user,
+                method_range,
+            )],
+            types: vec![TypeFact::new(
+                TypeSubject::MethodReturn(method_fqn),
+                RubyType::string(),
+                method_range,
+                TypeProvenance::Inferred,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+    engine.replace_facts(
+        ref_file,
+        FileFacts {
+            inference: InferenceEvidence {
+                call_expression_outcomes: vec![(
+                    kept_range,
+                    TypeInferenceOutcome::proven(RubyType::integer()),
+                )],
+                ..Default::default()
+            },
+            reference_candidates: vec![explicit_method_call_candidate(
+                TextRange::new(ref_file, 12, 16),
+                name_call,
+                user.namespace_parts(),
+                NamespaceKind::Instance,
+                method,
+                None,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+
+    engine.resolve();
+
+    let query = engine.query();
+    let outcomes = query
+        .call_expression_outcomes_in_file(ref_file)
+        .expect("disjoint file-owned and resolved call outcomes must both remain");
+    assert_eq!(outcomes.len(), 2);
+    let kept = outcomes
+        .iter()
+        .find(|(range, _)| *range == kept_range)
+        .map(|(_, outcome)| outcome.proven_type().cloned());
+    let resolved = outcomes
+        .iter()
+        .find(|(range, _)| *range == name_call)
+        .map(|(_, outcome)| outcome.proven_type().cloned());
+    assert_eq!(kept, Some(Some(RubyType::integer())));
+    assert_eq!(resolved, Some(Some(RubyType::string())));
+}
+
+#[test]
+#[should_panic(expected = "one call expression resolved through multiple method candidates")]
+fn duplicate_call_expression_range_is_an_invariant_violation() {
+    let mut engine = AnalysisEngine::new();
+    let def_file = register_project_file(
+        &mut engine,
+        "app/user.rb",
+        "class User; def name = 'Ada'; end",
+    );
+    let ref_file = register_project_file(&mut engine, "app/use_user.rb", "user.name");
+    let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+    let instance_user =
+        FullyQualifiedName::namespace_with_kind(user.namespace_parts(), NamespaceKind::Instance);
+    let method = RubyMethod::new("name").unwrap();
+    let method_fqn = FullyQualifiedName::method(user.namespace_parts(), method);
+    let method_range = TextRange::new(def_file, 12, 28);
+    let call_range = TextRange::new(ref_file, 0, 9);
+
+    engine.replace_facts(
+        def_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                user.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(def_file, 0, 34),
+            )],
+            methods: vec![MethodFact::new(
+                method_fqn.clone(),
+                instance_user,
+                method_range,
+            )],
+            types: vec![TypeFact::new(
+                TypeSubject::MethodReturn(method_fqn),
+                RubyType::string(),
+                method_range,
+                TypeProvenance::Inferred,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+    engine.replace_facts(
+        ref_file,
+        FileFacts {
+            reference_candidates: vec![
+                explicit_method_call_candidate(
+                    TextRange::new(ref_file, 5, 9),
+                    call_range,
+                    user.namespace_parts(),
+                    NamespaceKind::Instance,
+                    method,
+                    None,
+                ),
+                explicit_method_call_candidate(
+                    TextRange::new(ref_file, 5, 8),
+                    call_range,
+                    user.namespace_parts(),
+                    NamespaceKind::Instance,
+                    method,
+                    None,
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+
+    engine.resolve();
+}
+
 #[test]
 fn resolve_files_materializes_only_selected_open_document_candidates() {
     let mut engine = AnalysisEngine::new();
@@ -2021,6 +2315,109 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
             .constant_definition_ranges(&[RubyConstant::new("Widget").unwrap()], &[],),
         vec![TextRange::new(implementation_file, 0, 37)]
     );
+}
+
+#[test]
+fn inherited_method_callee_keeps_the_defining_parent_owner() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/child.rb",
+        "class Parent\n  def value = 'ok'\nend\nclass Child < Parent\nend\n",
+    );
+    let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
+    let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
+    let method = RubyMethod::new("value").unwrap();
+    let definition_range = TextRange::new(file_id, 15, 31);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![
+                GraphNodeFact::new(
+                    parent.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 0, 38),
+                ),
+                GraphNodeFact::new(
+                    child.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 39, 63),
+                ),
+            ],
+            graph_edges: vec![GraphEdgeFact::new(
+                child.clone(),
+                parent.clone(),
+                GraphEdgeKind::Superclass,
+                TextRange::new(file_id, 39, 59),
+            )],
+            methods: vec![MethodFact::new(
+                FullyQualifiedName::method(parent.namespace_parts(), method),
+                parent.clone(),
+                definition_range,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let callees = engine
+        .query()
+        .resolve_method_callees(&child, &method)
+        .expect("Child must resolve Parent#value through ordinary ancestry");
+    assert_eq!(callees.len(), 1);
+    assert_eq!(callees[0].owner, parent);
+    assert_eq!(callees[0].resolution, MethodCalleeResolution::Exact);
+    assert_eq!(callees[0].definition_ranges, vec![definition_range]);
+}
+
+#[test]
+fn public_lookup_of_a_private_method_is_receiver_only() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/user.rb",
+        "class User\n  def secret; end\nend\n",
+    );
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+    let method = RubyMethod::new("secret").unwrap();
+    let definition_range = TextRange::new(file_id, 13, 24);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(file_id, 0, 34),
+            )],
+            methods: vec![MethodFact::new(
+                FullyQualifiedName::method(owner.namespace_parts(), method),
+                owner.clone(),
+                definition_range,
+            )
+            .with_visibility(crate::method_store::MethodVisibility::Private)],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let private_callees = engine
+        .query()
+        .resolve_method_callees(&owner, &method)
+        .expect("private lookup must still see User#secret");
+    assert_eq!(private_callees.len(), 1);
+    assert_eq!(private_callees[0].resolution, MethodCalleeResolution::Exact);
+    assert_eq!(private_callees[0].definition_ranges, vec![definition_range]);
+
+    let public_callees = engine
+        .query()
+        .resolve_public_method_callees(&owner, &method)
+        .expect("public lookup must retain the receiver when the method is private");
+    assert_eq!(public_callees.len(), 1);
+    assert_eq!(
+        public_callees[0].resolution,
+        MethodCalleeResolution::ReceiverOnly
+    );
+    assert!(public_callees[0].definition_ranges.is_empty());
 }
 
 #[test]
@@ -3015,6 +3412,334 @@ fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
 }
 
 #[test]
+fn namespace_target_exists_accepts_interned_instance_without_a_sibling_declaration() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "lib/user.rb", "class User; end\n");
+    let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+    let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                user.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(file_id, 0, 16),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert!(namespace_target_exists(&engine, &user));
+    assert!(
+        !namespace_target_exists(&engine, &missing),
+        "an interned-looking name without a graph node or constant fact must not exist"
+    );
+}
+
+#[test]
+fn namespace_target_exists_accepts_singleton_when_instance_is_absent() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "lib/eigen.rb", "class << User; end\n");
+    let instance = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+    let singleton =
+        FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                singleton.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(file_id, 0, 18),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert!(namespace_target_exists(&engine, &singleton));
+    assert!(
+        namespace_target_exists(&engine, &instance),
+        "method lookup on the instance identity must see a declared singleton of the same parts"
+    );
+}
+
+#[test]
+fn namespace_target_exists_accepts_a_value_constant_without_a_namespace_node() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "lib/status.rb", "STATUS = 1\n");
+    let constant = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
+    let as_namespace = FullyQualifiedName::namespace(vec![RubyConstant::new("STATUS").unwrap()]);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                constant.clone(),
+                SymbolKind::Constant,
+                TextRange::new(file_id, 0, 6),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert!(
+        namespace_target_exists(&engine, &as_namespace),
+        "a value constant of the same parts must still be a method-lookup target"
+    );
+    assert!(namespace_target_exists(&engine, &constant));
+}
+
+#[test]
+fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
+    let mut engine = AnalysisEngine::new();
+    let def_file = register_project_file(&mut engine, "lib/status.rb", "STATUS = 1\n");
+    let ref_file = register_project_file(&mut engine, "lib/use_status.rb", "STATUS\n");
+    let status = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
+    engine.replace_facts(
+        def_file,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                status.clone(),
+                SymbolKind::Constant,
+                TextRange::new(def_file, 0, 6),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.replace_facts(
+        ref_file,
+        FileFacts {
+            reference_candidates: vec![ReferenceCandidate::constant(
+                TextRange::new(ref_file, 0, 6),
+                status.namespace_parts(),
+                Vec::new(),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(engine.reference_facts_for(&status).len(), 1);
+    assert!(engine
+        .diagnostic_facts_in_file(ref_file)
+        .iter()
+        .all(|fact| fact.code != "unresolved-constant"));
+}
+
+#[test]
+fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
+    let mut engine = AnalysisEngine::new();
+    let def_file = register_project_file(
+        &mut engine,
+        "lib/nested.rb",
+        "class Outer\n  C = 1\n  class Inner\n    class C; end\n  end\nend\n",
+    );
+    let ref_file = register_project_file(&mut engine, "lib/use_nested.rb", "C\n");
+    let outer = FullyQualifiedName::namespace(vec![RubyConstant::new("Outer").unwrap()]);
+    let inner = FullyQualifiedName::namespace(vec![
+        RubyConstant::new("Outer").unwrap(),
+        RubyConstant::new("Inner").unwrap(),
+    ]);
+    let nested_class = FullyQualifiedName::namespace(vec![
+        RubyConstant::new("Outer").unwrap(),
+        RubyConstant::new("Inner").unwrap(),
+        RubyConstant::new("C").unwrap(),
+    ]);
+    let outer_constant = FullyQualifiedName::constant(vec![
+        RubyConstant::new("Outer").unwrap(),
+        RubyConstant::new("C").unwrap(),
+    ]);
+    engine.replace_facts(
+        def_file,
+        FileFacts {
+            symbols: vec![
+                SymbolFact::new(
+                    outer.clone(),
+                    SymbolKind::Class,
+                    TextRange::new(def_file, 6, 11),
+                ),
+                SymbolFact::new(
+                    outer_constant.clone(),
+                    SymbolKind::Constant,
+                    TextRange::new(def_file, 14, 15),
+                ),
+                SymbolFact::new(
+                    inner.clone(),
+                    SymbolKind::Class,
+                    TextRange::new(def_file, 28, 33),
+                ),
+                SymbolFact::new(
+                    nested_class.clone(),
+                    SymbolKind::Class,
+                    TextRange::new(def_file, 44, 45),
+                ),
+            ],
+            graph_nodes: vec![
+                GraphNodeFact::new(outer, GraphNodeKind::Class, TextRange::new(def_file, 0, 64)),
+                GraphNodeFact::new(
+                    inner.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(def_file, 22, 58),
+                ),
+                GraphNodeFact::new(
+                    nested_class.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(def_file, 38, 52),
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.replace_facts(
+        ref_file,
+        FileFacts {
+            reference_candidates: vec![ReferenceCandidate::constant(
+                TextRange::new(ref_file, 0, 1),
+                vec![RubyConstant::new("C").unwrap()],
+                inner.namespace_parts(),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(engine.reference_facts_for(&nested_class).len(), 1);
+    assert!(
+        engine.reference_facts_for(&outer_constant).is_empty(),
+        "lexical Inner::C must win over Outer::C"
+    );
+}
+
+#[test]
+fn constant_reference_walks_out_to_an_outer_value_constant() {
+    let mut engine = AnalysisEngine::new();
+    let def_file = register_project_file(
+        &mut engine,
+        "lib/outer.rb",
+        "class Outer\n  C = 1\n  class Inner; end\nend\n",
+    );
+    let ref_file = register_project_file(&mut engine, "lib/use_outer.rb", "C\n");
+    let outer = FullyQualifiedName::namespace(vec![RubyConstant::new("Outer").unwrap()]);
+    let inner = FullyQualifiedName::namespace(vec![
+        RubyConstant::new("Outer").unwrap(),
+        RubyConstant::new("Inner").unwrap(),
+    ]);
+    let outer_constant = FullyQualifiedName::constant(vec![
+        RubyConstant::new("Outer").unwrap(),
+        RubyConstant::new("C").unwrap(),
+    ]);
+    engine.replace_facts(
+        def_file,
+        FileFacts {
+            symbols: vec![
+                SymbolFact::new(
+                    outer.clone(),
+                    SymbolKind::Class,
+                    TextRange::new(def_file, 6, 11),
+                ),
+                SymbolFact::new(
+                    outer_constant.clone(),
+                    SymbolKind::Constant,
+                    TextRange::new(def_file, 14, 15),
+                ),
+                SymbolFact::new(
+                    inner.clone(),
+                    SymbolKind::Class,
+                    TextRange::new(def_file, 28, 33),
+                ),
+            ],
+            graph_nodes: vec![
+                GraphNodeFact::new(outer, GraphNodeKind::Class, TextRange::new(def_file, 0, 44)),
+                GraphNodeFact::new(
+                    inner.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(def_file, 22, 38),
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.replace_facts(
+        ref_file,
+        FileFacts {
+            reference_candidates: vec![ReferenceCandidate::constant(
+                TextRange::new(ref_file, 0, 1),
+                vec![RubyConstant::new("C").unwrap()],
+                inner.namespace_parts(),
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(engine.reference_facts_for(&outer_constant).len(), 1);
+}
+
+#[test]
+fn later_include_wins_mro_when_facts_are_inserted_out_of_range_order() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(
+        &mut engine,
+        "lib/child.rb",
+        "module Early; end\nmodule Late; end\nclass Child\n  include Early\n  include Late\nend\n",
+    );
+    let early = FullyQualifiedName::namespace(vec![RubyConstant::new("Early").unwrap()]);
+    let late = FullyQualifiedName::namespace(vec![RubyConstant::new("Late").unwrap()]);
+    let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            graph_nodes: vec![
+                GraphNodeFact::new(
+                    early.clone(),
+                    GraphNodeKind::Module,
+                    TextRange::new(file_id, 0, 16),
+                ),
+                GraphNodeFact::new(
+                    late.clone(),
+                    GraphNodeKind::Module,
+                    TextRange::new(file_id, 17, 32),
+                ),
+                GraphNodeFact::new(
+                    child.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(file_id, 33, 80),
+                ),
+            ],
+            graph_edges: vec![
+                GraphEdgeFact::new(
+                    child.clone(),
+                    late.clone(),
+                    GraphEdgeKind::Include,
+                    TextRange::new(file_id, 60, 72),
+                ),
+                GraphEdgeFact::new(
+                    child.clone(),
+                    early.clone(),
+                    GraphEdgeKind::Include,
+                    TextRange::new(file_id, 46, 58),
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let chain = method_lookup_chain(&engine, &child);
+    let child_idx = chain.iter().position(|fqn| fqn == &child).expect("Child");
+    let late_idx = chain.iter().position(|fqn| fqn == &late).expect("Late");
+    let early_idx = chain.iter().position(|fqn| fqn == &early).expect("Early");
+    assert!(
+        child_idx < late_idx && late_idx < early_idx,
+        "later include must precede earlier include even when the later edge is inserted first; chain={chain:?}"
+    );
+}
+
+#[test]
 fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
     let mut engine = AnalysisEngine::new();
     let file_id = register_project_file(&mut engine, "lib/edge.rb", "class Parent\nend\n");
@@ -3030,7 +3755,7 @@ fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
             )],
             graph_edges: vec![GraphEdgeFact::new(
                 missing.clone(),
-                parent,
+                parent.clone(),
                 GraphEdgeKind::Superclass,
                 TextRange::new(file_id, 0, 16),
             )],
@@ -3041,8 +3766,26 @@ fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
 
     assert_eq!(
         method_lookup_chain(&engine, &missing),
-        vec![missing],
+        vec![missing.clone()],
         "an edge-only namespace has no proven Object/Kernel ancestry and must not gain top-level method lookup"
+    );
+    assert!(engine.has_graph_node(&parent));
+    assert!(
+        !engine.has_graph_node(&missing),
+        "edge-only interned endpoints must not count as declared namespaces"
+    );
+    assert_eq!(
+        engine.latest_graph_node_kind(&parent),
+        Some(GraphNodeKind::Class)
+    );
+    assert_eq!(engine.latest_graph_node_kind(&missing), None);
+    assert_eq!(
+        AnalysisQuery::new(&engine).namespace_node_kind(&parent),
+        Some(GraphNodeKind::Class)
+    );
+    assert_eq!(
+        AnalysisQuery::new(&engine).namespace_node_kind(&missing),
+        None
     );
 }
 

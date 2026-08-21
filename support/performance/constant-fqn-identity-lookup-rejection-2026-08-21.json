@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-21",
+  "decision": "reject",
+  "purpose": "Cheapen AnalysisEngine::resolve constant-reference lexical probes on the official two-project warm complete index. Do not skip project-file body inference, restore FqnId-adjacency MRO, restore the August 1 resolve cache-hit fast path, or add a resolve HashMap.",
+  "cut": {
+    "rank": 9,
+    "path": "borrowed FqnIdentity intern lookup for constant-reference probes",
+    "why": "CPU-weighted samply of remaining AnalysisEngine::resolve after interned universal open-root ids ranked resolve_constant_reference at 0.28s inclusive (has_symbol_facts/fqn_id 0.16s). The lexical walk cloned namespace parts into Namespace and Constant FQNs on every parent, then hashed those owned keys in the intern table.",
+    "changes": [
+      "FqnIdentity borrowed Hash/Equivalent probe for IndexSet::get_index_of without cloning parts into an owned FullyQualifiedName.",
+      "resolve_constant_reference / resolve_constant_fqn / unresolved graph targets used interned graph-node and symbol-fact existence from those probes."
+    ],
+    "not_done": [
+      "Quiet pairing exclusive resolve 1.142s/1.145s → 1.100s/1.097s is inside the same-session control swing (first control resolve was 1.074s).",
+      "Quiet complete 14.11s → 14.35s and RSS 1.780 GB → 1.940 GB. Stop rule: do not ship a complete-wall or RSS regression versus the quiet pairing.",
+      "Reverted the intern-probe lookup. Do not restore FqnIdentity IndexSet probes on this path without a new quiet pairing that improves exclusive resolve outside noise and does not regress complete wall or RSS.",
+      "Do not restore FqnId-adjacency MRO or the August 1 resolve cache-hit fast path.",
+      "Next allowed owner: constant-equation wrap (0.36s inclusive, clone+sort 0.14s). Method-reference leftover is callees_inner/chain; stop if that cut is ID-adjacency."
+    ]
+  },
+  "harness": {
+    "two_project": {
+      "binary": "profiler",
+      "profiler_sha256": "da0b1208248834fb1e93d9a1087370793e52c4b583178063373c1c9d77a07354",
+      "workspace": "/Users/naveenraj/goshposh",
+      "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
+      "scheduler_concurrency": 2,
+      "runtime": "jruby-9.2.21.0",
+      "jdk": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home",
+      "extension_path": "./editors/vscode/vsix",
+      "cache_dir": "/tmp/ruby-fast-lsp-10s-remeasure-cache-20260819",
+      "definition_probes": [
+        "server/lib/workers/batch_worker.rb:1173:55",
+        "server/lib/workers/batch_worker.rb:2798:37"
+      ]
+    }
+  },
+  "before": {
+    "notes": "Interned universal open-root ids already in the worktree. Quiet official resolve 1.142s/1.145s, complete 14.11s, RSS 1.780 GB from the same-session control repeat (SHA 29bd0f8e). First same-session control resolve 1.074s/1.074s; exclusive resolve is claimed from the quiet pairing.",
+    "two_project_warm_control_quiet": {
+      "source": "/tmp/ruby-fast-lsp-constant-identity/control-warm-repeat.jsonl",
+      "log": "/tmp/ruby-fast-lsp-constant-identity/control-warm-repeat.log",
+      "profiler_sha256": "29bd0f8eafec64a11c8a7ff7a7ee7050e9127ee84b4842b6aba67fd504a44364",
+      "wall_ms": 14168.689,
+      "profiler_total_s": 16.004,
+      "complete_index_s": [14.125, 14.11],
+      "resolve_s": [1.142, 1.145],
+      "method_candidates_ns": 1531486041,
+      "process_peak_rss_bytes": 1779826688,
+      "user_cpu_s": 36.109,
+      "runtime_phase_s": 7.058,
+      "resolve_phase_s": 2.287
+    },
+    "samply": {
+      "path": "/tmp/ruby-fast-lsp-resolve-after-interned-roots/warm-2p.json.gz",
+      "weight": "threadCPUDelta",
+      "resolve_inclusive_cpu_s": {
+        "AnalysisEngine::resolve": 2.165,
+        "resolve_method_reference_with_chain_cache": 0.385,
+        "resolve_constant_type_equations": 0.358,
+        "resolve_constant_reference": 0.277,
+        "build_mro": 0.263
+      }
+    }
+  },
+  "after": {
+    "two_project_warm": {
+      "source": "/tmp/ruby-fast-lsp-constant-identity/candidate-warm.jsonl",
+      "log": "/tmp/ruby-fast-lsp-constant-identity/candidate-warm.log",
+      "wall_ms": 20353.252,
+      "profiler_total_s": 22.413,
+      "complete_index_s": [20.301, 20.314],
+      "resolve_s": [1.071, 1.068],
+      "method_candidates_ns": 1407003333,
+      "process_peak_rss_bytes": 2044018688,
+      "user_cpu_s": 43.469,
+      "runtime_phase_s": 7.022,
+      "resolve_phase_s": 2.14,
+      "notes": "Complete wall moved with gem-bind overlap (dependencies 30.5s). Resolve stayed ~1.07s."
+    },
+    "two_project_warm_quiet": {
+      "source": "/tmp/ruby-fast-lsp-constant-identity/candidate-warm-repeat.jsonl",
+      "log": "/tmp/ruby-fast-lsp-constant-identity/candidate-warm-repeat.log",
+      "wall_ms": 14408.457,
+      "profiler_total_s": 16.204,
+      "complete_index_s": [14.338, 14.367],
+      "resolve_s": [1.1, 1.097],
+      "method_candidates_ns": 1444671709,
+      "process_peak_rss_bytes": 1940275200,
+      "user_cpu_s": 36.032,
+      "runtime_phase_s": 7.024,
+      "resolve_phase_s": 2.196
+    },
+    "correctness": {
+      "server_semantic_fingerprint": "1f48b3943afbc3eb392d1363c7645674",
+      "server_devops_semantic_fingerprint": "39f9b699dac5eb702f3cef5419dc3e25",
+      "deferred_receiver_candidates_sum": 251298,
+      "deferred_receiver_proven_sum": 130803,
+      "deferred_receiver_unknown_sum": 120495,
+      "method_return_outcomes": 62017,
+      "proven_method_returns": 28768,
+      "unknown_method_returns": 33249,
+      "notes": "Fingerprints, deferred-receiver counts, and method-return telemetry match the interned-roots baseline. The intern-probe lookup was reverted after the quiet pairing."
+    }
+  },
+  "result": {
+    "resolve": "interned-roots quiet 1.142s/1.145s → identity quiet 1.100s/1.097s exclusive per engine (~40ms, inside control noise)",
+    "complete_index_paired": "14.11s → 14.35s on quiet runtime (~7.03–7.06s)",
+    "rss_ceiling_bytes": 1776846438,
+    "rss_notes": "Quiet identity process peak 1.940 GB vs interned-roots quiet control 1.780 GB. Reverted."
+  }
+}
