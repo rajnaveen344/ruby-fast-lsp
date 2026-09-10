@@ -135,6 +135,25 @@ check(r#"<lens none>module Unused; end</lens>"#).await;
 
 **Important**: The `none` attribute requires a closing tag (e.g., `</err>`). The assertion only applies to the wrapped range, allowing you to have both positive and negative assertions in the same fixture.
 
+### Subprocess behavior and deadline tests
+
+`harness::with_process_clock` runs real child processes and production async
+functions with a manually advanced Tokio clock. Success assertions for command
+arguments, stdin, output, and resource admission therefore do not depend on how
+quickly the OS schedules the fixture. A blocking watchdog prevents Tokio from
+auto-advancing during real I/O and fails a hung test after 30 seconds of wall
+time. This helper is for current-thread Tokio tests and restores the clock and
+releases the watchdog on completion, panic, or cancellation.
+
+Timeout tests wait for a child-written readiness marker, assert that the
+operation is pending just before its deadline, then advance past the timer's
+millisecond tick and assert the timeout result and released resource claim.
+The deliberately hung shell fixtures use `exec sleep` so the process being
+timed out is the sleeper itself. Production deadlines stay unchanged. Do not
+use retries, ignored tests, or elapsed-time assertions to paper over scheduling
+noise. The linter, formatter, and runtime-probe tests cover different public
+contracts; retain those checks even when they share this clock helper.
+
 ### Lifecycle and publication observations
 
 `FakeEditor` initializes a real `LspService`; its `client_messages` reader consumes

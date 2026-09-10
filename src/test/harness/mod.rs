@@ -24,6 +24,7 @@ mod client_messages;
 mod fake_editor;
 mod fixture;
 mod inlay_hints;
+mod process;
 
 // Re-export unified check functions (the only API)
 pub use check::{check, check_multi_file};
@@ -35,6 +36,8 @@ pub use fixture::{
     setup_with_multi_file_fixture, InlineFixture, Tag, CURSOR_MARKER,
 };
 pub use inlay_hints::get_hint_label;
+#[cfg(unix)]
+pub(crate) use process::{wait_for_process_ready, with_process_clock};
 
 #[cfg(test)]
 mod tests {

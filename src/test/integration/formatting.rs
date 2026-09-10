@@ -1,5 +1,7 @@
 use crate::config::{FormatterKind, RubyFastLspConfig};
 use crate::server::RubyLanguageServer;
+#[cfg(unix)]
+use crate::test::harness::with_process_clock;
 use crate::test::harness::FakeEditor;
 use std::collections::HashMap;
 use std::fs;
@@ -43,88 +45,97 @@ fn fake_formatter(output: &str, exit_status: i32) -> (TempDir, String, std::path
 #[cfg(unix)]
 #[tokio::test]
 async fn formats_current_unsaved_buffer_with_utf16_full_document_edit() {
-    let (_temp, command, captured_stdin) = fake_formatter("puts 'formatted'\n", 0);
-    let mut editor = FakeEditor::new().await;
-    *editor.server().config.lock() = RubyFastLspConfig {
-        formatter: FormatterKind::Standard,
-        formatter_command: vec![command],
-        ..RubyFastLspConfig::default()
-    };
-    editor.open("sample.rb", "puts 'disk'\n").await;
-    editor.set("sample.rb", "puts '😀 unsaved'").await;
+    with_process_clock(async {
+        let (_temp, command, captured_stdin) = fake_formatter("puts 'formatted'\n", 0);
+        let mut editor = FakeEditor::new().await;
+        *editor.server().config.lock() = RubyFastLspConfig {
+            formatter: FormatterKind::Standard,
+            formatter_command: vec![command],
+            ..RubyFastLspConfig::default()
+        };
+        editor.open("sample.rb", "puts 'disk'\n").await;
+        editor.set("sample.rb", "puts '😀 unsaved'").await;
 
-    let edits = editor.format("sample.rb").await;
+        let edits = editor.format("sample.rb").await;
 
-    assert_eq!(
-        fs::read_to_string(captured_stdin).unwrap(),
-        "puts '😀 unsaved'"
-    );
-    assert_eq!(edits.len(), 1);
-    assert_eq!(
-        edits[0].range,
-        Range::new(Position::new(0, 0), Position::new(0, 17))
-    );
-    assert_eq!(edits[0].new_text, "puts 'formatted'\n");
+        assert_eq!(
+            fs::read_to_string(captured_stdin).unwrap(),
+            "puts '😀 unsaved'"
+        );
+        assert_eq!(edits.len(), 1);
+        assert_eq!(
+            edits[0].range,
+            Range::new(Position::new(0, 0), Position::new(0, 17))
+        );
+        assert_eq!(edits[0].new_text, "puts 'formatted'\n");
 
-    editor
-        .apply_edit(&WorkspaceEdit {
-            changes: Some(HashMap::from([(
-                Url::parse("file:///sample.rb").unwrap(),
-                edits,
-            )])),
-            document_changes: None,
-            change_annotations: None,
-        })
-        .await;
-    assert_eq!(editor.content("sample.rb"), "puts 'formatted'\n");
+        editor
+            .apply_edit(&WorkspaceEdit {
+                changes: Some(HashMap::from([(
+                    Url::parse("file:///sample.rb").unwrap(),
+                    edits,
+                )])),
+                document_changes: None,
+                change_annotations: None,
+            })
+            .await;
+        assert_eq!(editor.content("sample.rb"), "puts 'formatted'\n");
+    })
+    .await;
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn embedded_templates_are_never_sent_to_a_ruby_formatter() {
-    let (_temp, command, captured_stdin) = fake_formatter("corrupted", 0);
-    let mut editor = FakeEditor::new().await;
-    *editor.server().config.lock() = RubyFastLspConfig {
-        formatter: FormatterKind::Standard,
-        formatter_command: vec![command],
-        ..RubyFastLspConfig::default()
-    };
-    editor
-        .open("app/views/users/show.html.erb", "<p><%= User.name %></p>\n")
-        .await;
-    editor
-        .open("app/views/users/legacy.rhtml", "<p><%= User.name %></p>\n")
-        .await;
+    with_process_clock(async {
+        let (_temp, command, captured_stdin) = fake_formatter("corrupted", 0);
+        let mut editor = FakeEditor::new().await;
+        *editor.server().config.lock() = RubyFastLspConfig {
+            formatter: FormatterKind::Standard,
+            formatter_command: vec![command],
+            ..RubyFastLspConfig::default()
+        };
+        editor
+            .open("app/views/users/show.html.erb", "<p><%= User.name %></p>\n")
+            .await;
+        editor
+            .open("app/views/users/legacy.rhtml", "<p><%= User.name %></p>\n")
+            .await;
 
-    assert!(editor
-        .format("app/views/users/show.html.erb")
-        .await
-        .is_empty());
-    assert!(editor
-        .format("app/views/users/legacy.rhtml")
-        .await
-        .is_empty());
-    assert!(
-        !captured_stdin.exists(),
-        "embedded host documents must never be passed to a Ruby formatter"
-    );
+        assert!(editor
+            .format("app/views/users/show.html.erb")
+            .await
+            .is_empty());
+        assert!(editor
+            .format("app/views/users/legacy.rhtml")
+            .await
+            .is_empty());
+        assert!(
+            !captured_stdin.exists(),
+            "embedded host documents must never be passed to a Ruby formatter"
+        );
+    })
+    .await;
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn formatter_failure_and_unchanged_output_return_no_edits() {
-    let (_failed_temp, failed_command, _) = fake_formatter("ignored", 2);
-    let mut editor = FakeEditor::new().await;
-    *editor.server().config.lock() = RubyFastLspConfig {
-        formatter: FormatterKind::RuboCop,
-        formatter_command: vec![failed_command],
-        ..RubyFastLspConfig::default()
-    };
-    editor.open("sample.rb", "puts 1\n").await;
-    assert!(editor.format("sample.rb").await.is_empty());
+    with_process_clock(async {
+        let (_failed_temp, failed_command, _) = fake_formatter("ignored", 2);
+        let mut editor = FakeEditor::new().await;
+        *editor.server().config.lock() = RubyFastLspConfig {
+            formatter: FormatterKind::RuboCop,
+            formatter_command: vec![failed_command],
+            ..RubyFastLspConfig::default()
+        };
+        editor.open("sample.rb", "puts 1\n").await;
+        assert!(editor.format("sample.rb").await.is_empty());
 
-    let (_same_temp, same_command, _) = fake_formatter("puts 1\n", 0);
-    editor.server().config.lock().formatter_command = vec![same_command];
-    assert!(editor.format("sample.rb").await.is_empty());
-    assert_eq!(editor.content("sample.rb"), "puts 1\n");
+        let (_same_temp, same_command, _) = fake_formatter("puts 1\n", 0);
+        editor.server().config.lock().formatter_command = vec![same_command];
+        assert!(editor.format("sample.rb").await.is_empty());
+        assert_eq!(editor.content("sample.rb"), "puts 1\n");
+    })
+    .await;
 }

@@ -55,6 +55,11 @@ Report the red and green commands in the final answer.
 
 ## Style
 
+- For subprocess argv/stdin/admission checks, use `with_process_clock` from the
+  test harness so OS scheduling cannot consume a production deadline. Keep real
+  child processes and production functions. Timeout tests observe child readiness
+  before explicitly advancing the clock; the independent wall-clock watchdog is
+  only a hang guard. See `src/test/harness/process.rs` and `AGENTS.md`.
 - Prefer `assert!`/`expect` with clear invariant messages over silent defaults.
 - Keep fixtures minimal and focused on the behavior under test.
 - Use `cargo run --bin ast -- '<snippet>'` to verify Prism node names/accessors instead of guessing.

@@ -757,6 +757,8 @@ fn version_family(version: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::test::harness::{wait_for_process_ready, with_process_clock};
     use std::fs;
 
     fn parsed(output: &str) -> DiscoveredRuntime {
@@ -880,84 +882,123 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test(flavor = "current_thread")]
     async fn runtime_version_probe_waits_for_weighted_resource_admission() {
-        use std::os::unix::fs::PermissionsExt;
+        with_process_clock(async {
+            use std::os::unix::fs::PermissionsExt;
 
-        let governor = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                64 * 1024 * 1024,
-                1,
-            ),
-        );
-        let (holder_started_tx, holder_started_rx) = tokio::sync::oneshot::channel();
-        let holder_release = std::sync::Arc::new(tokio::sync::Notify::new());
-        let holder_governor = governor.clone();
-        let holder_release_task = holder_release.clone();
-        let holder = tokio::spawn(async move {
-            holder_governor
-                .run_async_with_resources(
-                    "runtime probe contention holder",
-                    crate::indexing_resources::IndexingWorkSpec::new(
-                        None,
-                        crate::indexing_resources::IndexingResourcePriority::Background,
-                        1,
-                        64 * 1024 * 1024,
-                        1,
-                    ),
-                    None,
-                    async move {
-                        holder_started_tx.send(()).unwrap();
-                        holder_release_task.notified().await;
-                    },
-                )
-                .await
-                .unwrap();
-        });
-        holder_started_rx.await.unwrap();
-
-        let fixture = tempfile::tempdir().unwrap();
-        let executable = fixture.path().join("ruby");
-        fs::write(
-            &executable,
-            "#!/bin/sh\nprintf '%s\\n' 'ruby 3.3.11 (fixture) [arm64-darwin]'\n",
-        )
-        .unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
-
-        let probe_governor = governor.clone();
-        let probe =
-            tokio::spawn(
-                async move { bounded_version_output(&executable, None, probe_governor).await },
+            let governor = crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                    1,
+                    1,
+                    64 * 1024 * 1024,
+                    1,
+                ),
             );
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
-            while governor.snapshot().queued_tasks != 1 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("runtime probe must queue behind the complete weighted claim");
+            let (holder_started_tx, holder_started_rx) = tokio::sync::oneshot::channel();
+            let holder_release = std::sync::Arc::new(tokio::sync::Notify::new());
+            let holder_governor = governor.clone();
+            let holder_release_task = holder_release.clone();
+            let holder = tokio::spawn(async move {
+                holder_governor
+                    .run_async_with_resources(
+                        "runtime probe contention holder",
+                        crate::indexing_resources::IndexingWorkSpec::new(
+                            None,
+                            crate::indexing_resources::IndexingResourcePriority::Background,
+                            1,
+                            64 * 1024 * 1024,
+                            1,
+                        ),
+                        None,
+                        async move {
+                            holder_started_tx.send(()).unwrap();
+                            holder_release_task.notified().await;
+                        },
+                    )
+                    .await
+                    .unwrap();
+            });
+            holder_started_rx.await.unwrap();
 
-        holder_release.notify_one();
-        holder.await.unwrap();
-        assert!(
-            probe
-                .await
-                .unwrap()
-                .is_some_and(|output| output.starts_with("ruby 3.3.11")),
-            "admitted runtime probe must retain its bounded version output"
-        );
-        let complete = governor.snapshot();
-        assert_eq!(complete.active_tasks, 0);
-        assert_eq!(complete.queued_tasks, 0);
-        assert_eq!(complete.completed_tasks, 2);
-        assert_eq!(complete.peak_active_cpu_lanes, 1);
-        assert_eq!(
-            complete.peak_active_transient_memory_bytes,
-            64 * 1024 * 1024
-        );
-        assert_eq!(complete.peak_active_io_slots, 1);
+            let fixture = tempfile::tempdir().unwrap();
+            let executable = fixture.path().join("ruby");
+            let started = fixture.path().join("started");
+            fs::write(
+                &executable,
+                format!(
+                    "#!/bin/sh\nprintf started > '{}'\nprintf '%s\\n' 'ruby 3.3.11 (fixture) [arm64-darwin]'\n",
+                    started.display()
+                ),
+            )
+            .unwrap();
+            let mut permissions = fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&executable, permissions).unwrap();
+
+            let probe = bounded_version_output(&executable, None, governor.clone());
+            tokio::pin!(probe);
+            assert!(futures::poll!(&mut probe).is_pending());
+            assert_eq!(governor.snapshot().queued_tasks, 1);
+            assert!(!started.exists(), "queued work must not spawn a child");
+
+            // Queue time must not consume the admitted child's execution budget.
+            tokio::time::advance(VERSION_TIMEOUT * 2).await;
+            assert!(futures::poll!(&mut probe).is_pending());
+            assert!(!started.exists(), "resource admission must still block spawn");
+
+            holder_release.notify_one();
+            holder.await.unwrap();
+            assert_eq!(
+                probe.await.as_deref(),
+                Some("ruby 3.3.11 (fixture) [arm64-darwin]\n"),
+                "admitted runtime probe must retain the exact child output"
+            );
+            let complete = governor.snapshot();
+            assert_eq!(complete.active_tasks, 0);
+            assert_eq!(complete.queued_tasks, 0);
+            assert_eq!(complete.completed_tasks, 2);
+            assert_eq!(complete.peak_active_cpu_lanes, 1);
+            assert_eq!(
+                complete.peak_active_transient_memory_bytes,
+                64 * 1024 * 1024
+            );
+            assert_eq!(complete.peak_active_io_slots, 1);
+        })
+        .await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_version_probe_times_out_after_child_starts() {
+        with_process_clock(async {
+            use std::os::unix::fs::PermissionsExt;
+
+            let fixture = tempfile::tempdir().unwrap();
+            let executable = fixture.path().join("ruby");
+            let ready = fixture.path().join("ready");
+            fs::write(
+                &executable,
+                format!(
+                    "#!/bin/sh\nprintf ready > '{}'\nexec sleep 60\n",
+                    ready.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+            let governor = IndexingResourceGovernor::default();
+            let probe = bounded_version_output(&executable, None, governor.clone());
+            tokio::pin!(probe);
+            tokio::select! {
+                output = &mut probe => panic!("hung probe finished before child readiness: {output:?}"),
+                () = wait_for_process_ready(&ready) => {}
+            }
+
+            tokio::time::advance(VERSION_TIMEOUT - Duration::from_millis(1)).await;
+            assert!(futures::poll!(&mut probe).is_pending());
+            // Tokio rounds deadlines up to the next millisecond tick.
+            tokio::time::advance(Duration::from_millis(2)).await;
+            assert!(probe.await.is_none(), "the started child must time out");
+            assert_eq!(governor.snapshot().active_tasks, 0);
+        })
+        .await;
     }
 }

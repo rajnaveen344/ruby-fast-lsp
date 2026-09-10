@@ -1619,6 +1619,17 @@ in reusable crates.
 
 ## Testing
 
+Subprocess behavior tests must not make success depend on short wall-clock
+deadlines. Use `test::harness::with_process_clock` in current-thread Tokio tests
+to exercise real production futures and child processes with manual deadline
+time and a separate 30-second wall-clock hang watchdog. The helper also prevents
+Tokio's automatic time advancement while OS I/O is pending. For timeout tests,
+observe a child-written readiness marker before advancing time; check pending
+work before the deadline and timeout after its millisecond timer tick. Queue
+admission tests must prove the child has not started and queue time does not
+consume its execution budget. Keep production timeout values unchanged; never
+replace subprocesses with canned results, add retries, or ignore flaky tests.
+
 ### Tag-Based Test Harness (`check()`)
 
 Single-file tests use `check()` with inline tags. No fixtures needed:

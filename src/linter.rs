@@ -455,6 +455,8 @@ fn linter_severity(severity: &str) -> DiagnosticSeverity {
 mod tests {
     use super::*;
     use crate::config::{FormatterKind, LinterKind, RubyFastLspConfig};
+    #[cfg(unix)]
+    use crate::test::harness::{wait_for_process_ready, with_process_clock};
     use std::fs;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -510,180 +512,262 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn runs_configured_linter_with_stdin_and_accepts_offense_exit_status() {
-        use std::os::unix::fs::PermissionsExt;
+        with_process_clock(async {
+            use std::os::unix::fs::PermissionsExt;
 
-        let temp = TempDir::new().unwrap();
-        let executable = temp.path().join("fake-rubocop");
-        let captured_stdin = temp.path().join("stdin.rb");
-        let captured_args = temp.path().join("args.txt");
-        let captured_pwd = temp.path().join("pwd.txt");
-        let script = format!(
-            "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\npwd > '{}'\ncat > '{}'\nprintf '%s' '{}'\nexit 1\n",
-            captured_args.display(),
-            captured_pwd.display(),
-            captured_stdin.display(),
-            RUBOCOP_JSON.replace('\'', "'\\''")
-        );
-        fs::write(&executable, script).unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
+            let temp = TempDir::new().unwrap();
+            let executable = temp.path().join("fake-rubocop");
+            let captured_stdin = temp.path().join("stdin.rb");
+            let captured_args = temp.path().join("args.txt");
+            let captured_pwd = temp.path().join("pwd.txt");
+            let script = format!(
+                "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\npwd > '{}'\ncat > '{}'\nprintf '%s' '{}'\nexit 1\n",
+                captured_args.display(),
+                captured_pwd.display(),
+                captured_stdin.display(),
+                RUBOCOP_JSON.replace('\'', "'\\''")
+            );
+            fs::write(&executable, script).unwrap();
+            let mut permissions = fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&executable, permissions).unwrap();
 
-        let config = RubyFastLspConfig {
-            linter: LinterKind::RuboCop,
-            linter_command: vec![executable.to_string_lossy().to_string()],
-            ..RubyFastLspConfig::default()
-        };
-        let source = "puts \"hello\"\n  example\n";
-        let indexing_resources = IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                EDITOR_TOOL_TRANSIENT_MEMORY_BYTES,
-                1,
-            ),
-        );
-        let diagnostics = lint_document(
-            &config,
-            indexing_resources.clone(),
-            temp.path(),
-            &temp.path().join("sample.rb"),
-            source,
-            Duration::from_secs(2),
-        )
-        .await
-        .unwrap();
+            let config = RubyFastLspConfig {
+                linter: LinterKind::RuboCop,
+                linter_command: vec![executable.to_string_lossy().to_string()],
+                ..RubyFastLspConfig::default()
+            };
+            let source = "puts \"hello\"\n  example\n";
+            let indexing_resources = IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                    1,
+                    1,
+                    EDITOR_TOOL_TRANSIENT_MEMORY_BYTES,
+                    1,
+                ),
+            );
+            let diagnostics = lint_document(
+                &config,
+                indexing_resources.clone(),
+                temp.path(),
+                &temp.path().join("sample.rb"),
+                source,
+                Duration::from_secs(2),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(fs::read_to_string(captured_stdin).unwrap(), source);
-        let args = fs::read_to_string(captured_args).unwrap();
-        assert!(args.contains("--format json --force-exclusion --stdin"));
-        assert!(args.ends_with("sample.rb"), "actual argv: {args}");
-        assert_eq!(
-            fs::canonicalize(fs::read_to_string(captured_pwd).unwrap().trim()).unwrap(),
-            fs::canonicalize(temp.path()).unwrap()
-        );
-        let resources = indexing_resources.snapshot();
-        assert_eq!(resources.completed_tasks, 1);
-        assert_eq!(resources.active_tasks, 0);
-        assert_eq!(resources.queued_tasks, 0);
-        assert_eq!(resources.peak_active_cpu_lanes, 1);
-        assert_eq!(
-            resources.peak_active_transient_memory_bytes,
-            EDITOR_TOOL_TRANSIENT_MEMORY_BYTES
-        );
-        assert_eq!(resources.peak_active_io_slots, 1);
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(fs::read_to_string(captured_stdin).unwrap(), source);
+            let args = fs::read_to_string(captured_args).unwrap();
+            assert!(args.contains("--format json --force-exclusion --stdin"));
+            assert!(args.ends_with("sample.rb"), "actual argv: {args}");
+            assert_eq!(
+                fs::canonicalize(fs::read_to_string(captured_pwd).unwrap().trim()).unwrap(),
+                fs::canonicalize(temp.path()).unwrap()
+            );
+            let resources = indexing_resources.snapshot();
+            assert_eq!(resources.completed_tasks, 1);
+            assert_eq!(resources.active_tasks, 0);
+            assert_eq!(resources.queued_tasks, 0);
+            assert_eq!(resources.peak_active_cpu_lanes, 1);
+            assert_eq!(
+                resources.peak_active_transient_memory_bytes,
+                EDITOR_TOOL_TRANSIENT_MEMORY_BYTES
+            );
+            assert_eq!(resources.peak_active_io_slots, 1);
+        })
+        .await;
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn times_out_a_hung_linter() {
-        use std::os::unix::fs::PermissionsExt;
+        with_process_clock(async {
+            use std::os::unix::fs::PermissionsExt;
 
-        let temp = TempDir::new().unwrap();
-        let executable = temp.path().join("hung-rubocop");
-        fs::write(&executable, "#!/bin/sh\nsleep 5\n").unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
-        let config = RubyFastLspConfig {
-            linter: LinterKind::RuboCop,
-            linter_command: vec![executable.to_string_lossy().to_string()],
-            ..RubyFastLspConfig::default()
-        };
+            let temp = TempDir::new().unwrap();
+            let executable = temp.path().join("hung-rubocop");
+            let ready = temp.path().join("ready");
+            fs::write(
+                &executable,
+                format!(
+                    "#!/bin/sh\ncat >/dev/null\nprintf ready > '{}'\nexec sleep 60\n",
+                    ready.display()
+                ),
+            )
+            .unwrap();
+            let mut permissions = fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&executable, permissions).unwrap();
+            let config = RubyFastLspConfig {
+                linter: LinterKind::RuboCop,
+                linter_command: vec![executable.to_string_lossy().to_string()],
+                ..RubyFastLspConfig::default()
+            };
 
-        let error = lint_document(
-            &config,
-            IndexingResourceGovernor::default(),
-            temp.path(),
-            &temp.path().join("sample.rb"),
-            "puts 1\n",
-            Duration::from_millis(20),
-        )
-        .await
-        .unwrap_err();
-        assert!(error.to_string().contains("timed out"), "{error:#}");
+            let resources = IndexingResourceGovernor::default();
+            let path = temp.path().join("sample.rb");
+            let timeout = Duration::from_secs(2);
+            let operation = lint_document(
+                &config,
+                resources.clone(),
+                temp.path(),
+                &path,
+                "puts 1\n",
+                timeout,
+            );
+            tokio::pin!(operation);
+            tokio::select! {
+                result = &mut operation => panic!("hung linter finished before child readiness: {result:?}"),
+                () = wait_for_process_ready(&ready) => {}
+            }
+            tokio::time::advance(timeout - Duration::from_millis(1)).await;
+            assert!(futures::poll!(&mut operation).is_pending());
+            // Tokio rounds deadlines up to the next millisecond tick.
+            tokio::time::advance(Duration::from_millis(2)).await;
+            let error = operation.await.unwrap_err();
+            assert!(error.to_string().contains("timed out"), "{error:#}");
+            assert_eq!(resources.snapshot().active_tasks, 0);
+        })
+        .await;
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn standard_safe_fix_uses_fix_flag_and_current_stdin() {
-        use std::os::unix::fs::PermissionsExt;
+        with_process_clock(async {
+            use std::os::unix::fs::PermissionsExt;
 
-        let temp = TempDir::new().unwrap();
-        let executable = temp.path().join("fake-standardrb");
-        let captured_args = temp.path().join("fix-args.txt");
-        let script = format!(
-            "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\ncat\n",
-            captured_args.display()
-        );
-        fs::write(&executable, script).unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
-        let config = RubyFastLspConfig {
-            linter: LinterKind::Standard,
-            linter_command: vec![executable.to_string_lossy().to_string()],
-            ..RubyFastLspConfig::default()
-        };
+            let temp = TempDir::new().unwrap();
+            let executable = temp.path().join("fake-standardrb");
+            let captured_args = temp.path().join("fix-args.txt");
+            let script = format!(
+                "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\ncat\n",
+                captured_args.display()
+            );
+            fs::write(&executable, script).unwrap();
+            let mut permissions = fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&executable, permissions).unwrap();
+            let config = RubyFastLspConfig {
+                linter: LinterKind::Standard,
+                linter_command: vec![executable.to_string_lossy().to_string()],
+                ..RubyFastLspConfig::default()
+            };
 
-        let source = "puts 'already safe'\n";
-        let fixed = fix_document(
-            &config,
-            IndexingResourceGovernor::default(),
-            temp.path(),
-            &temp.path().join("sample.rb"),
-            source,
-            Duration::from_secs(2),
-        )
-        .await
-        .unwrap();
+            let source = "puts 'already safe'\n";
+            let fixed = fix_document(
+                &config,
+                IndexingResourceGovernor::default(),
+                temp.path(),
+                &temp.path().join("sample.rb"),
+                source,
+                Duration::from_secs(2),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(fixed, source);
-        let args = fs::read_to_string(captured_args).unwrap();
-        assert!(args.contains("--fix --stderr --force-exclusion --stdin"));
-        assert!(!args.contains("--fix-unsafely"));
+            assert_eq!(fixed, source);
+            let args = fs::read_to_string(captured_args).unwrap();
+            assert!(args.contains("--fix --stderr --force-exclusion --stdin"));
+            assert!(!args.contains("--fix-unsafely"));
+        })
+        .await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn safe_fix_times_out_after_child_consumes_stdin() {
+        with_process_clock(async {
+            use std::os::unix::fs::PermissionsExt;
+
+            let fixture = TempDir::new().unwrap();
+            let executable = fixture.path().join("hung-standardrb");
+            let ready = fixture.path().join("ready");
+            fs::write(
+                &executable,
+                format!(
+                    "#!/bin/sh\ncat >/dev/null\nprintf ready > '{}'\nexec sleep 60\n",
+                    ready.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+            let config = RubyFastLspConfig {
+                linter: LinterKind::Standard,
+                linter_command: vec![executable.to_string_lossy().into_owned()],
+                ..RubyFastLspConfig::default()
+            };
+            let resources = IndexingResourceGovernor::default();
+            let path = fixture.path().join("sample.rb");
+            let timeout = Duration::from_secs(2);
+            let operation = fix_document(
+                &config,
+                resources.clone(),
+                fixture.path(),
+                &path,
+                "puts 1\n",
+                timeout,
+            );
+            tokio::pin!(operation);
+            tokio::select! {
+                result = &mut operation => panic!("hung fix finished before child readiness: {result:?}"),
+                () = wait_for_process_ready(&ready) => {}
+            }
+            tokio::time::advance(timeout - Duration::from_millis(1)).await;
+            assert!(futures::poll!(&mut operation).is_pending());
+            // Tokio rounds deadlines up to the next millisecond tick.
+            tokio::time::advance(Duration::from_millis(2)).await;
+            let error = operation.await.unwrap_err();
+            assert!(error.to_string().contains("timed out"), "{error:#}");
+            assert_eq!(resources.snapshot().active_tasks, 0);
+        })
+        .await;
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn rubocop_formatter_uses_safe_autocorrect_and_current_stdin() {
-        use std::os::unix::fs::PermissionsExt;
+        with_process_clock(async {
+            use std::os::unix::fs::PermissionsExt;
 
-        let temp = TempDir::new().unwrap();
-        let executable = temp.path().join("fake-rubocop");
-        let captured_args = temp.path().join("format-args.txt");
-        let script = format!(
-            "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\ncat\n",
-            captured_args.display()
-        );
-        fs::write(&executable, script).unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
-        let config = RubyFastLspConfig {
-            formatter: FormatterKind::RuboCop,
-            formatter_command: vec![executable.to_string_lossy().to_string()],
-            ..RubyFastLspConfig::default()
-        };
+            let temp = TempDir::new().unwrap();
+            let executable = temp.path().join("fake-rubocop");
+            let captured_args = temp.path().join("format-args.txt");
+            let script = format!(
+                "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\ncat\n",
+                captured_args.display()
+            );
+            fs::write(&executable, script).unwrap();
+            let mut permissions = fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&executable, permissions).unwrap();
+            let config = RubyFastLspConfig {
+                formatter: FormatterKind::RuboCop,
+                formatter_command: vec![executable.to_string_lossy().to_string()],
+                ..RubyFastLspConfig::default()
+            };
 
-        let source = "puts \"current buffer\"\n";
-        let formatted = format_document(
-            &config,
-            IndexingResourceGovernor::default(),
-            temp.path(),
-            &temp.path().join("sample.rb"),
-            source,
-            Duration::from_secs(2),
-        )
-        .await
-        .unwrap();
+            let source = "puts \"current buffer\"\n";
+            let formatted = format_document(
+                &config,
+                IndexingResourceGovernor::default(),
+                temp.path(),
+                &temp.path().join("sample.rb"),
+                source,
+                Duration::from_secs(2),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(formatted, source);
-        let args = fs::read_to_string(captured_args).unwrap();
-        assert!(args.contains("--autocorrect --stderr --force-exclusion --stdin"));
-        assert!(!args.contains("--autocorrect-all"));
-        assert!(args.ends_with("sample.rb"));
+            assert_eq!(formatted, source);
+            let args = fs::read_to_string(captured_args).unwrap();
+            assert!(args.contains("--autocorrect --stderr --force-exclusion --stdin"));
+            assert!(!args.contains("--autocorrect-all"));
+            assert!(args.ends_with("sample.rb"));
+        })
+        .await;
     }
 
     #[test]
