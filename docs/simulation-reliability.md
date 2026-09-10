@@ -9,7 +9,7 @@ Every completed criterion requires evidence, not only a passing test count.
 
 | Requirement | Current evidence | Outstanding work |
 | --- | --- | --- |
-| Read-only observations | Seven publication/observation/isolation controls pass. Both `FakeEditor` and inline diagnostic tags read actual publication output. Missing publication differs from an empty clear. | Final workspace acceptance and side-effect controls for other observations. |
+| Read-only observations | Seven publication/observation/isolation controls pass. `FakeEditor::diagnostics()` now reads real outbound client messages; inline tags and synchronous race assertions read submissions. Missing publication differs from an empty clear. | Installed-editor acceptance and side-effect controls for other observations. |
 | Complete expected results | Fresh comparisons retain full hover responses and definition links; location arrays retain duplicates. Exact method navigation/reference and rename lifecycle contracts pass, alongside seven corrupt-result comparator controls. | Generated graph oracle checks still use subset and line-only assertions in several paths; replace them with independently generated exact spans. |
 | Independent semantics | Separate project-model oracle plus fresh-analysis comparisons; retained lexical-scope regression. Six shared reviewed dispatch contracts pass in the model and actual MRI 3.3.11 execution. | Broaden language forms and exact generated output expectations. A single executed path is not proof of static-inference completeness. |
 | Production lifecycle orderings | Five direct source-snapshot schedules, nine coordinator controls, and seven dependency-refresh schedules: edits, root addition/removal, project replacement, close, and a newly opened project target. Separate tests preserve syntax and linter output; a cold-coordinator fixture-runtime test covers stdlib/default-gem refresh. | Server-process restart, installed-runtime acceptance, and overlapping isolated project passes through actual lifecycle boundaries. |
@@ -59,6 +59,14 @@ fact-collection/replacement path was removed. Initial local evidence:
 `/tmp/ruby-fast-lsp-sim-observation-green.log`. These are development checkpoints;
 the final acceptance report must retain durable evidence for the final source.
 
+The server ownership refactor also connects `FakeEditor` to an initialized
+`LspService` and the real outbound client socket. Async diagnostic observations
+wait for delivered messages without substituting the submitted expectation.
+A positive lifecycle control checks delivery and clearing; a negative control
+requires an absent empty notification to leave the observer pending. Inline tags
+and paused-race checks retain their synchronous submission boundary. These controls
+do not claim installed-editor or full inbound transport coverage.
+
 ## Defects exposed by observation changes
 
 These are concrete discoveries, not a claim about future defect-detection rates.
@@ -87,7 +95,8 @@ delivery or cancellation behavior.
    every target URI and range, or every edit and replacement text. Include an
    unrelated symbol with the same name when identity matters.
 2. For an editor lifecycle bug, use `FakeEditor` to send open/edit/save/close
-   operations. Observe queries or submitted diagnostic publications directly.
+   operations. Observe queries or await delivered diagnostics; use synchronous
+   submitted publications when asserting a deliberately paused intermediate state.
    Never rebuild facts or resolve the engine inside an assertion helper.
 3. Run the smallest test before changing production code. Retain the specific
    assertion failure; a build error, setup panic, or timeout is not useful red

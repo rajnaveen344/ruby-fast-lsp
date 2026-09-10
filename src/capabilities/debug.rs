@@ -25,7 +25,7 @@ fn project_engine(server: &RubyLanguageServer, uri: Option<&str>) -> Arc<RwLock<
             let projects = server.list_workspaces();
             (projects.len() == 1).then(|| projects[0].analysis_engine.clone())
         })
-        .unwrap_or_else(|| server.analysis_engine.clone())
+        .unwrap_or_else(|| server.orphan_engine().clone())
 }
 
 // ============================================================================

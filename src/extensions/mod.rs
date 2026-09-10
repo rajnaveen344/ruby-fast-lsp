@@ -6307,7 +6307,7 @@ globs = ["config/routes.rb"]
             .await
             .expect("test server initialization must succeed");
 
-        let reports = server.extension_registry.status_reports();
+        let reports = server.extensions.registry().status_reports();
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].id, "rspec-ruby");
         assert_eq!(reports[0].version.as_deref(), Some("0.1.0-project"));
@@ -6348,7 +6348,7 @@ globs = ["config/routes.rb"]
             })
             .await;
         assert_eq!(
-            server.extension_registry.status_reports()[0]
+            server.extensions.registry().status_reports()[0]
                 .version
                 .as_deref(),
             Some("0.1.0-dynamic-lsp")
@@ -6362,7 +6362,7 @@ globs = ["config/routes.rb"]
                 },
             })
             .await;
-        assert!(server.extension_registry.status_reports().is_empty());
+        assert!(server.extensions.registry().status_reports().is_empty());
     }
 
     #[test]
@@ -6517,9 +6517,9 @@ globs = ["config/routes.rb"]
         };
         let server = RubyLanguageServer::default();
         server.add_workspace(root_uri);
-        server.extension_registry.configure_from_config(&config);
+        server.extensions.registry().configure_from_config(&config);
         assert_eq!(
-            server.extension_registry.status_reports()[0].status,
+            server.extensions.registry().status_reports()[0].status,
             "loaded"
         );
 
@@ -6535,7 +6535,7 @@ globs = ["config/routes.rb"]
         )
         .await;
         assert_eq!(
-            server.extension_registry.status_reports()[0].status,
+            server.extensions.registry().status_reports()[0].status,
             "loaded"
         );
 
@@ -6551,7 +6551,7 @@ globs = ["config/routes.rb"]
         )
         .await;
 
-        let report = &server.extension_registry.status_reports()[0];
+        let report = &server.extensions.registry().status_reports()[0];
         assert_eq!(report.status, "failed");
         assert!(
             report

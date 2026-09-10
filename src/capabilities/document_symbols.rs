@@ -54,9 +54,10 @@ pub async fn handle_document_symbols(
         .analysis_workspace_for_uri(&uri)
         .map(|workspace| workspace.root_path);
     match server
-        .extension_registry
+        .extensions
+        .registry()
         .document_symbols_governed(
-            server.indexing_resources.clone(),
+            server.indexing.resources().clone(),
             project_root,
             uri.as_str().to_string(),
             document.content.clone(),
@@ -328,16 +329,19 @@ mod tests {
         let uri =
             Url::parse("file:///tmp/governed_document_symbols.rb").expect("test URI must parse");
         let mut server = RubyLanguageServer::default();
-        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        );
         server
-            .extension_registry
+            .indexing
+            .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                    1,
+                    1,
+                    256 * 1024 * 1024,
+                    1,
+                ),
+            ));
+        server
+            .extensions
+            .registry()
             .configure_from_config(&crate::config::RubyFastLspConfig {
                 extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("extensions/rspec-ruby")
@@ -360,7 +364,7 @@ mod tests {
 
         let holder_release = Arc::new(tokio::sync::Notify::new());
         let holder_release_task = holder_release.clone();
-        let holder_governor = server.indexing_resources.clone();
+        let holder_governor = server.indexing.resources().clone();
         let holder = tokio::spawn(async move {
             holder_governor
                 .run_async_with_resources(
@@ -381,7 +385,7 @@ mod tests {
                 .unwrap();
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().active_tasks != 1 {
+            while server.indexing.resources().snapshot().active_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -402,7 +406,7 @@ mod tests {
             .await
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().queued_tasks != 1 {
+            while server.indexing.resources().snapshot().queued_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -433,7 +437,7 @@ mod tests {
         assert!(symbols
             .iter()
             .any(|symbol| symbol.name == "GovernedDocumentSymbol"));
-        let complete = server.indexing_resources.snapshot();
+        let complete = server.indexing.resources().snapshot();
         assert_eq!(complete.active_tasks, 0);
         assert_eq!(complete.queued_tasks, 0);
         assert_eq!(complete.completed_tasks, 3);

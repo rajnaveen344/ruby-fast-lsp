@@ -148,10 +148,9 @@ async fn cold_coordinator_diagnostics_preserve_current_linter_output() {
     fs::write(&path, source).unwrap();
     let root_uri = tower_lsp::lsp_types::Url::from_directory_path(&root).unwrap();
     let filename = path.to_str().unwrap().trim_start_matches('/');
-    let mut editor = FakeEditor::new().await;
+    let mut editor = FakeEditor::with_cache_root(temp.path().join("cache")).await;
     let server = editor.server().clone();
     server.set_discovered_runtimes_for_tests(Vec::new());
-    server.set_user_cache_root_for_tests(temp.path().join("cache"));
     *server.config.lock() = RubyFastLspConfig {
         linter: LinterKind::Standard,
         linter_command: vec![command],

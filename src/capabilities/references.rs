@@ -15,7 +15,7 @@ pub async fn find_references_at_position(
 ) -> Option<Vec<Location>> {
     // Get document content and Arc (no lock held after this block)
     let (content, doc_arc) = {
-        let docs_guard = server.docs.lock();
+        let docs_guard = server.documents.read();
         let doc_arc = docs_guard.get(uri)?.clone();
         let doc = doc_arc.read();
         (doc.content.clone(), doc_arc.clone())

@@ -100,7 +100,7 @@ async fn removing_workspace_rehomes_open_documents_in_orphan_engine() {
         .unwrap();
     assert!(editor
         .server()
-        .analysis_engine
+        .orphan_engine()
         .read()
         .file_id(path)
         .is_some());
@@ -117,7 +117,7 @@ async fn adding_workspace_rehomes_open_orphan_document_in_project_engine() {
         .await;
     assert!(editor
         .server()
-        .analysis_engine
+        .orphan_engine()
         .read()
         .file_id(&file)
         .is_some());

@@ -158,7 +158,7 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
     let server = RubyLanguageServer::default();
     server.add_workspace(workspace_uri.clone());
 
-    let config = server.config.lock().clone();
+    let config = server.configuration_snapshot();
     let mut coordinator = IndexingCoordinator::new(workspace_path.clone(), config);
 
     let wall_start = Instant::now();

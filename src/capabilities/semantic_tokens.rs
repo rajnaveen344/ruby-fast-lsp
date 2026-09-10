@@ -35,7 +35,7 @@ pub fn get_semantic_tokens_full(server: &RubyLanguageServer, uri: Url) -> Semant
 
     // Get the document from server cache
     let doc_lookup_start = Instant::now();
-    let document = match server.docs.lock().get(&uri) {
+    let document = match server.documents.read().get(&uri) {
         Some(doc) => doc.clone(), // Clone the document to avoid holding the lock
         None => {
             info!("Document not found in cache for URI: {}", uri);

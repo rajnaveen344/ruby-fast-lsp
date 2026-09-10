@@ -77,6 +77,7 @@ use super::check::{run_checks_on_fixture, strip_all_markers};
 /// with their content and version numbers for assertion verification.
 pub struct FakeEditor {
     server: RubyLanguageServer,
+    client_messages: super::client_messages::ClientMessages,
     /// Tracks open files: filename -> (clean_content, version)
     buffers: HashMap<String, (String, i32)>,
 }
@@ -84,15 +85,49 @@ pub struct FakeEditor {
 impl FakeEditor {
     /// Create a new FakeEditor with a fresh, initialized server.
     pub async fn new() -> Self {
-        let server = RubyLanguageServer::default();
-        observe_response(
-            "initialize",
-            server.initialize(InitializeParams::default()).await,
+        Self::with_cache_root(
+            crate::utils::ruby_fast_lsp_user_cache_root().expect("resolve editor cache root"),
+        )
+        .await
+    }
+
+    pub async fn with_cache_root(root: std::path::PathBuf) -> Self {
+        use tower::{Service, ServiceExt};
+        let (mut service, socket) = tower_lsp::LspService::new(|client| {
+            RubyLanguageServer::with_cache_root(Some(client), root)
+                .expect("construct editor server")
+        });
+        let client_messages = super::client_messages::ClientMessages::listen(socket);
+        let initialized = service
+            .ready()
+            .await
+            .expect("LSP service ready")
+            .call(
+                tower_lsp::jsonrpc::Request::build("initialize")
+                    .params(
+                        serde_json::to_value(InitializeParams::default())
+                            .expect("serialize initialize"),
+                    )
+                    .id(1)
+                    .finish(),
+            )
+            .await
+            .expect("initialize request succeeds")
+            .expect("initialize returns a response");
+        assert!(
+            initialized.error().is_none(),
+            "initialize failed: {initialized:?}"
         );
-        FakeEditor {
-            server,
+        Self {
+            server: service.inner().clone(),
+            client_messages,
             buffers: HashMap::new(),
         }
+    }
+
+    /// Count actual serialized diagnostic notifications observed from the client.
+    pub fn delivered_diagnostic_notifications(&self) -> u64 {
+        self.client_messages.notification_count()
     }
 
     /// Register a workspace folder with the underlying server.
@@ -712,14 +747,15 @@ impl FakeEditor {
         }
     }
 
-    /// Observe the latest diagnostics submitted by the real publication path.
-    /// Never reparse, replace facts, or resolve here: doing so can repair stale
-    /// state and hide the lifecycle defect that a test is trying to detect.
+    /// Observe diagnostics delivered by the production queue, sender, and client.
+    /// The submission boundary supplies the expected latest value only; it can
+    /// never substitute for a missing notification or repair semantic state.
     pub async fn diagnostics(&self, filename: &str) -> Vec<Diagnostic> {
         self.assert_open(filename, "diagnostics");
-        self.server
-            .last_diagnostic_publication(&Self::filename_to_uri(filename))
-            .expect("INVARIANT VIOLATED: open document has no diagnostic publication. This is a bug because a missing notification must not count as an empty diagnostic result. Fix: inspect the document publication lifecycle; do not recompute diagnostics in the observer.")
+        let uri = Self::filename_to_uri(filename);
+        let submitted = self.server.last_diagnostic_publication(&uri)
+            .expect("INVARIANT VIOLATED: open document has no diagnostic publication. This is a bug because a missing notification must not count as an empty diagnostic result. Fix: inspect the document publication lifecycle; do not recompute diagnostics in the observer.");
+        self.client_messages.diagnostics(&uri, &submitted).await
     }
 
     /// Assert the file has zero ERROR-severity diagnostics.

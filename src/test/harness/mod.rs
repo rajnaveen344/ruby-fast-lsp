@@ -20,6 +20,7 @@
 //! ```
 
 mod check;
+mod client_messages;
 mod fake_editor;
 mod fixture;
 mod inlay_hints;
@@ -79,7 +80,7 @@ mod tests {
     async fn harness_setup_works() {
         let content = "class Foo\nend";
         let (server, uri) = setup_with_fixture(content).await;
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         assert!(docs.contains_key(&uri));
     }
 }

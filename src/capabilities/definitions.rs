@@ -25,7 +25,7 @@ pub(crate) fn navigation_demand_keys_at_position(
     position: Position,
 ) -> Option<crate::query::definition::DefinitionNavigationDemandKeys> {
     let content = {
-        let documents = server.docs.lock();
+        let documents = server.documents.read();
         let content = documents.get(uri)?.read().content.clone();
         content
     };
@@ -39,7 +39,7 @@ pub async fn find_definition_at_position(
     position: Position,
 ) -> Option<GotoDefinitionResponse> {
     let (content, doc_arc, document, byte_offset) = {
-        let doc_guard = server.docs.lock();
+        let doc_guard = server.documents.read();
         let doc_arc = doc_guard.get(&uri)?.clone();
         let doc = doc_arc.read();
         let byte_offset = doc.position_to_analysis_offset(source_position(position));

@@ -39,7 +39,7 @@ pub async fn handle_inlay_hints(
 
     // Get document content and Arc
     let (content, doc_arc) = {
-        let doc_guard = server.docs.lock();
+        let doc_guard = server.documents.read();
         match doc_guard.get(&uri) {
             Some(doc_arc) => {
                 let doc = doc_arc.read();
@@ -193,14 +193,16 @@ mod tests {
         std::fs::write(&path, source).unwrap();
 
         let mut server = RubyLanguageServer::default();
-        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        );
+        server
+            .indexing
+            .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                    1,
+                    1,
+                    256 * 1024 * 1024,
+                    1,
+                ),
+            ));
         server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
         indexing::handle_did_open(
             &server,
@@ -217,7 +219,7 @@ mod tests {
 
         let release = Arc::new(tokio::sync::Notify::new());
         let holder_release = release.clone();
-        let holder_resources = server.indexing_resources.clone();
+        let holder_resources = server.indexing.resources().clone();
         let holder_root = workspace.path().to_path_buf();
         let holder = tokio::spawn(async move {
             holder_resources
@@ -239,7 +241,7 @@ mod tests {
                 .unwrap();
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().active_tasks != 1 {
+            while server.indexing.resources().snapshot().active_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -267,7 +269,7 @@ mod tests {
             .await;
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().queued_tasks != 1 {
+            while server.indexing.resources().snapshot().queued_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })

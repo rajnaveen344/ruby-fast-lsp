@@ -605,8 +605,8 @@ impl IndexerGem {
         );
         let key = manifest.key().clone();
         let producer_manifest = manifest.clone();
-        let indexing_resources = server.indexing_resources.clone();
-        let persistent_cache = server.persistent_derived_product_cache.clone();
+        let indexing_resources = server.indexing.resources().clone();
+        let persistent_cache = server.products.persistent().clone();
         let lookup_spec = IndexingWorkSpec::new(
             Some(project_root.clone()),
             IndexingResourcePriority::Background,
@@ -625,7 +625,7 @@ impl IndexerGem {
         .as_project_parallel();
         let producer_uses_shared_pool = producer_lanes == indexing_resources.policy().cpu_lanes();
         let product = server
-            .gem_dependency_cache
+            .products.gem_dependencies()
             .get_or_try_init(key, move || async move {
                 let lookup_manifest = producer_manifest.clone();
                 let lookup = indexing_resources
@@ -730,7 +730,8 @@ impl IndexerGem {
             0,
         );
         let binding = match server
-            .indexing_resources
+            .indexing
+            .resources()
             .run_with_resources(
                 "gem dependency product binding",
                 binding_spec,
@@ -743,13 +744,11 @@ impl IndexerGem {
         {
             Ok(binding) => binding,
             Err(error) => {
-                server.gem_dependency_binding_counters.record_failure();
+                server.products.gem_bindings().record_failure();
                 return Err(error);
             }
         };
-        server
-            .gem_dependency_binding_counters
-            .record_success(&binding);
+        server.products.gem_bindings().record_success(&binding);
         Ok(binding.uris)
     }
 
@@ -771,7 +770,8 @@ impl IndexerGem {
             0,
         );
         server
-            .indexing_resources
+            .indexing
+            .resources()
             .run_with_resources(
                 "gem dependency semantic resolution",
                 resolution_spec,
@@ -2957,8 +2957,8 @@ mod tests {
 
         let first_indexer = shared_dependency_indexer(&first_project, &first_gem);
         let second_indexer = shared_dependency_indexer(&second_project, &second_gem);
-        let server = RubyLanguageServer::default();
-        server.set_user_cache_root_for_tests(fixture.path().join("user-cache"));
+        let server = RubyLanguageServer::with_user_cache_root(fixture.path().join("user-cache"))
+            .expect("construct isolated cache server");
         let first_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
         let second_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
 
@@ -2968,7 +2968,7 @@ mod tests {
         );
         assert_eq!(first_result.unwrap().len(), 1);
         assert_eq!(second_result.unwrap().len(), 1);
-        let cache = server.gem_dependency_cache.snapshot();
+        let cache = server.products.gem_dependencies().snapshot();
         assert_eq!(cache.lookups, 2);
         assert_eq!(cache.producers, 1);
         assert_eq!(cache.hits + cache.joined_flights, 1);
@@ -3014,13 +3014,11 @@ mod tests {
                 .len(),
             1
         );
-        let after_sequential_consumer = server.gem_dependency_cache.snapshot();
+        let after_sequential_consumer = server.products.gem_dependencies().snapshot();
         assert_eq!(after_sequential_consumer.lookups, 3);
         assert_eq!(after_sequential_consumer.producers, 2);
         assert_eq!(after_sequential_consumer.entries, 0);
-        let persistent = server
-            .persistent_derived_product_cache
-            .gem_product_snapshot();
+        let persistent = server.products.persistent().gem_product_snapshot();
         assert_eq!(persistent.producers, 1);
         assert_eq!(persistent.publications, 1);
         assert_eq!(persistent.hits, 1);
@@ -3044,19 +3042,23 @@ mod tests {
         .unwrap();
 
         let indexer = shared_dependency_indexer(&project_root, &gem_root);
-        let mut server = RubyLanguageServer::default();
-        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
-                6,
-                2,
-                512 * 1024 * 1024,
-                2,
-            ),
-        );
+        let mut server =
+            RubyLanguageServer::with_user_cache_root(fixture.path().join("user-cache"))
+                .expect("construct isolated cache server");
         server
-            .indexing_resources
+            .indexing
+            .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                    6,
+                    2,
+                    512 * 1024 * 1024,
+                    2,
+                ),
+            ));
+        server
+            .indexing
+            .resources()
             .prioritize_active_project_with_navigation_pending(&project_root, true);
-        server.set_user_cache_root_for_tests(fixture.path().join("user-cache"));
         let server = Arc::new(server);
 
         let (runtime_started_tx, runtime_started_rx) = tokio::sync::oneshot::channel();
@@ -3065,7 +3067,8 @@ mod tests {
         let runtime_root = project_root.clone();
         let runtime = tokio::spawn(async move {
             runtime_server
-                .indexing_resources
+                .indexing
+                .resources()
                 .run_partitioned_parallel_with_resources(
                     "simulated JRuby runtime companion",
                     IndexingWorkSpec::new(
@@ -3103,7 +3106,7 @@ mod tests {
              maintenance path"
         );
         assert_eq!(result.unwrap().unwrap().len(), 1);
-        let resources = server.indexing_resources.snapshot();
+        let resources = server.indexing.resources().snapshot();
         assert_eq!(resources.peak_active_cpu_lanes, 6);
         assert_eq!(
             resources.peak_active_transient_memory_bytes,

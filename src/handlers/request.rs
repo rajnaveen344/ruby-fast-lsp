@@ -471,7 +471,7 @@ pub async fn handle_extension_status(
 ) -> LspResult<ExtensionStatusResponse> {
     info!("Extension status request received");
     Ok(ExtensionStatusResponse {
-        extensions: lang_server.extension_registry.status_reports(),
+        extensions: lang_server.extensions.registry().status_reports(),
     })
 }
 
@@ -682,7 +682,7 @@ mod navigation_demand_tests {
         let target_path = project.join("user_pmm.rb");
         let target_uri = Url::from_file_path(&target_path).unwrap();
         std::fs::write(&target_path, "class UserPmm\nend\n").unwrap();
-        FileProcessor::with_extension_registry(server.extension_registry.clone())
+        FileProcessor::with_extension_registry(server.extensions.registry().clone())
             .process_file(&target_uri, "class UserPmm\nend\n", &server)
             .unwrap();
         workspace.navigation_demands.complete_keys(
@@ -773,7 +773,7 @@ mod navigation_demand_tests {
         let target_uri = Url::from_file_path(&target_path).unwrap();
         let target = "module BSON\n  class ObjectId\n  end\nend\n";
         std::fs::write(&target_path, target).unwrap();
-        FileProcessor::with_extension_registry(server.extension_registry.clone())
+        FileProcessor::with_extension_registry(server.extensions.registry().clone())
             .collect_file_facts_as_deferred_resolution_in_engine(
                 &target_uri,
                 target,

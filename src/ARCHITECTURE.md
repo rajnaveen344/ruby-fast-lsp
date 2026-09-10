@@ -14,7 +14,8 @@ src/
 ├── indexer/        - Workspace discovery and fact collection orchestration
 ├── query/          - LSP protocol adapters over ruby-analysis::engine::AnalysisQuery
 ├── handlers/       - LSP request/notification routing
-├── server.rs       - LSP server coordination
+├── server.rs       - LSP protocol facade and common construction
+├── server/         - Documents, project routing, services, and publication owners
 └── main.rs         - Application entry point
 src/test/           - Test harnesses and integration tests
 editors/
@@ -431,10 +432,13 @@ provenance, and engine facts.
 
 ### 5. Server (`src/server.rs`)
 
-The Server coordinates between LSP clients and the internal components.
-
-- **Primary Responsibility**: Route LSP requests to appropriate components
-- **Secondary Responsibility**: Manage server state (document cache, etc.)
+The server has ten production fields: client, configuration, open documents,
+project registry, indexing services, runtime products, extension services,
+diagnostic publisher, watched-file changes, and namespace-tree cache. Focused
+modules under `src/server/` keep state with its operations; `server.rs` retains
+common construction and the LSP protocol facade. See
+[server state ownership](../docs/server-state-ownership.md) for field counts,
+responsibilities, shared lifetimes, and test boundaries.
 
 #### Design Decisions:
 
@@ -443,7 +447,20 @@ The Server coordinates between LSP clients and the internal components.
   positions, ranges, symbols, tokens, and source identities; no reusable
   analysis module imports or depends on `tower-lsp`.
 - The server delegates actual implementation to capability modules
-- The server maintains minimal state (mostly for coordination)
+- Server clones share owner handles and preserve existing lock identities.
+  Each project still owns a separate `AnalysisEngine`; unowned documents use
+  the registry's orphan engine. Open buffers are distinct from indexed facts.
+- No `RubyLanguageServer` field is publicly accessible outside the library.
+  Six use `pub(crate)` for sibling-module callers; routing, diagnostics, watched
+  changes, and namespace-tree state stay private to `server`. Executables use
+  explicit setup/admission methods and detached telemetry/configuration views.
+  Product snapshots contain counters and weights, never mutable cache handles.
+- Cache location is an ordinary immutable construction input. Client-backed
+  construction defers extension discovery to initialization; embedded
+  construction retains eager environment loading.
+- Narrow test scheduling/progress hooks live with indexing; synchronous
+  diagnostic submission observations live with their publisher. `FakeEditor`
+  also consumes the real outbound client channel for async diagnostic assertions.
 
 ### 6. Inference (`crates/ruby-analysis/src/inference/`)
 

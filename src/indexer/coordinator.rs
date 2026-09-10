@@ -148,7 +148,12 @@ fn open_project_constant_priority_keys(
     server: &RubyLanguageServer,
     workspace_root: &Path,
 ) -> ActiveDocumentPriorityKeys {
-    let mut documents = server.docs.lock().values().cloned().collect::<Vec<_>>();
+    let mut documents = server
+        .documents
+        .read()
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
     documents.sort_by(|left, right| left.read().uri.cmp(&right.read().uri));
     let mut priority_keys = ActiveDocumentPriorityKeys::default();
     for document in documents {
@@ -219,7 +224,7 @@ where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    let policy = server.indexing_resources.policy();
+    let policy = server.indexing.resources().policy();
     let (cpu_lanes, transient_memory_bytes, io_slots, parallel, partitioned) = match work_class {
         IndexingWorkClass::LightCpu => (1, 16 * MIB, 0, false, false),
         IndexingWorkClass::Io => (1, 64 * MIB, 1, false, false),
@@ -238,7 +243,8 @@ where
                  for every project-parallel phase.",
             );
             let cpu_lanes = server
-                .indexing_resources
+                .indexing
+                .resources()
                 .project_parallel_cpu_lanes(project_root);
             (
                 cpu_lanes,
@@ -268,17 +274,20 @@ where
     };
     if partitioned {
         server
-            .indexing_resources
+            .indexing
+            .resources()
             .run_partitioned_parallel_with_resources(label, spec, cancellation, task)
             .await
     } else if parallel {
         server
-            .indexing_resources
+            .indexing
+            .resources()
             .run_parallel_with_resources(label, spec, cancellation, task)
             .await
     } else {
         server
-            .indexing_resources
+            .indexing
+            .resources()
             .run_with_resources(label, spec, cancellation, task)
             .await
     }
@@ -293,7 +302,8 @@ async fn runtime_stdlib_paths_for_project(
     let producer_server = server.clone();
     let started = Instant::now();
     let product = server
-        .runtime_stdlib_path_cache
+        .products
+        .stdlib_paths()
         .get_or_try_init(key, move || async move {
             run_cpu_indexing_task(
                 &producer_server,
@@ -758,9 +768,9 @@ async fn build_jruby_import_provider_off_reactor(
     cancellation: Option<CancellationToken>,
     work_class: IndexingWorkClass,
 ) -> Result<(Option<Arc<JrubyImportProvider>>, Option<ClasspathArtifact>)> {
-    let persistent_cache = server.persistent_derived_product_cache.clone();
-    let classpath_file_product_cache = server.classpath_file_product_cache.clone();
-    let java_artifact_product_cache = server.java_artifact_product_cache.clone();
+    let persistent_cache = server.products.persistent().clone();
+    let classpath_file_product_cache = server.products.classpath_files().clone();
+    let java_artifact_product_cache = server.products.java_artifacts().clone();
     run_cpu_indexing_task(
         server,
         Some(workspace_root.clone()),
@@ -859,7 +869,7 @@ pub struct IndexingCoordinator {
     effective_runtime: Option<SelectedRuntimeDescriptor>,
     jruby_import_provider: Option<Arc<JrubyImportProvider>>,
     jruby_runtime_archive: Option<ClasspathArtifact>,
-    user_cache_root_override: Option<PathBuf>,
+    cache_root: Option<PathBuf>,
 
     // The main indexing engine
     file_processor: Option<FileProcessor>,
@@ -908,7 +918,7 @@ impl IndexingCoordinator {
             effective_runtime: None,
             jruby_import_provider: None,
             jruby_runtime_archive: None,
-            user_cache_root_override: None,
+            cache_root: None,
             file_processor: None,
             dependency_seed_engine: None,
             project_indexer: None,
@@ -948,9 +958,9 @@ impl IndexingCoordinator {
         self.analysis_engine_override = Some(analysis_engine);
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_user_cache_root_for_tests(&mut self, root: PathBuf) {
-        self.user_cache_root_override = Some(root);
+    pub(crate) fn set_cache_root(&mut self, root: PathBuf) {
+        assert!(root.is_absolute(), "INVARIANT VIOLATED: coordinator cache root is relative. This is a bug because runtime products require stable paths. Fix: supply the owning server's absolute cache root.");
+        self.cache_root = Some(root);
     }
 
     /// Runs the complete indexing process from start to finish.
@@ -963,16 +973,21 @@ impl IndexingCoordinator {
     /// 6. Publish diagnostics
     pub async fn run_complete_indexing(&mut self, server: &RubyLanguageServer) -> Result<()> {
         info!("Starting complete indexing process");
+        if self.cache_root.is_none() {
+            self.set_cache_root(server.products.cache_root());
+        }
         server
-            .indexing_resources
+            .indexing
+            .resources()
             .mark_project_navigation_pending_if_active(&self.workspace_root);
         let mut project_navigation_reservation = Some(
             server
-                .indexing_resources
+                .indexing
+                .resources()
                 .project_navigation_reservation(self.workspace_root.clone()),
         );
         self.extension_registry
-            .get_or_insert_with(|| server.extension_registry.clone());
+            .get_or_insert_with(|| server.extensions.registry().clone());
         let start_time = Instant::now();
         let runtime_start = Instant::now();
         self.indexing_checkpoint(server)?;
@@ -1039,7 +1054,7 @@ impl IndexingCoordinator {
         let runtime_workspace_root = self.workspace_root.clone();
         let runtime_config = self.config.clone();
         let runtime_selection = self.effective_runtime.clone();
-        let runtime_cache_root = self.user_cache_root_override.clone();
+        let runtime_cache_root = self.cache_root.clone();
         let runtime_cancellation = self.resource_cancellation();
         let is_jruby = runtime_selection
             .as_ref()
@@ -1136,7 +1151,8 @@ impl IndexingCoordinator {
                 )
             })?;
             server
-                .indexing_resources
+                .indexing
+                .resources()
                 .mark_project_navigation_complete_if_active(&self.workspace_root);
             Ok::<Duration, anyhow::Error>(project_start.elapsed())
         };
@@ -1587,7 +1603,7 @@ impl IndexingCoordinator {
     fn setup_file_processor(&mut self, server: &RubyLanguageServer) {
         let extension_registry = self
             .extension_registry
-            .get_or_insert_with(|| server.extension_registry.clone())
+            .get_or_insert_with(|| server.extensions.registry().clone())
             .clone();
         let processor = FileProcessor::with_extension_registry(extension_registry);
         let processor = self
@@ -1631,7 +1647,7 @@ impl IndexingCoordinator {
             self.workspace_root.clone(),
             self.config.clone(),
             self.effective_runtime.clone(),
-            self.user_cache_root_override.clone(),
+            self.cache_root.clone(),
             None,
             None,
             None,
@@ -1660,7 +1676,7 @@ impl IndexingCoordinator {
              Fix: keep FileProcessor setup before JRuby runtime source materialization.",
         );
         let workspace_root = self.workspace_root.clone();
-        let user_cache_root_override = self.user_cache_root_override.clone();
+        let user_cache_root_override = self.cache_root.clone();
         let analysis_engine = self.analysis_engine(server);
         run_cpu_indexing_task(
             server,
@@ -2193,9 +2209,8 @@ impl IndexingCoordinator {
     async fn publish_open_project_diagnostics(&self, server: &RubyLanguageServer) -> Result<()> {
         self.indexing_checkpoint(server)?;
         let analysis_engine = self.analysis_engine(server);
-        let mut open_uris = server.docs.lock().keys().cloned().collect::<Vec<_>>();
-        open_uris
-            .retain(|uri| Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(uri)));
+        let mut open_uris = server.documents.read().keys().cloned().collect::<Vec<_>>();
+        open_uris.retain(|uri| Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(uri)));
         open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
 
         for uri in open_uris {
@@ -2206,7 +2221,8 @@ impl IndexingCoordinator {
                 .expect("coordinator diagnostics must target a file URI");
             #[cfg(test)]
             server
-                .test_schedule
+                .indexing
+                .schedule
                 .checkpoint(
                     crate::indexer::test_schedule::Point::ColdDiagnosticsPending,
                     &publication_path,
@@ -2261,7 +2277,8 @@ impl IndexingCoordinator {
             }
             #[cfg(test)]
             server
-                .test_schedule
+                .indexing
+                .schedule
                 .checkpoint(
                     crate::indexer::test_schedule::Point::ColdDiagnosticsAttempted,
                     &publication_path,
@@ -2330,7 +2347,7 @@ impl IndexingCoordinator {
             env!("CARGO_PKG_VERSION"),
             extension_path.as_deref().unwrap_or("<development>")
         );
-        let indexing_resources = server.indexing_resources.clone();
+        let indexing_resources = server.indexing.resources().clone();
         let resource_policy = indexing_resources.policy();
         let resource_spec = IndexingWorkSpec::new(
             Some(self.workspace_root.clone()),
@@ -2340,7 +2357,8 @@ impl IndexingCoordinator {
             1,
         );
         let template = server
-            .core_engine_cache
+            .products
+            .core_templates()
             .get_or_try_init(key, move || async move {
                 indexing_resources
                     .run_parallel_with_resources(
@@ -3421,7 +3439,7 @@ mod coordinator_integration_tests {
             1,
             "concurrent projects selecting the same immutable runtime must execute one probe"
         );
-        let cache = server.runtime_stdlib_path_cache.snapshot();
+        let cache = server.products.stdlib_paths().snapshot();
         assert_eq!(cache.lookups, 2);
         assert_eq!(cache.producers, 1);
         assert_eq!(cache.joined_flights, 1);
@@ -3466,11 +3484,14 @@ mod coordinator_integration_tests {
     async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource_claims() {
         let root = PathBuf::from("/workspace/server");
         let mut server = RubyLanguageServer::default();
-        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
-        );
         server
-            .indexing_resources
+            .indexing
+            .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
+            ));
+        server
+            .indexing
+            .resources()
             .prioritize_active_project_with_navigation_pending(&root, true);
         let server = Arc::new(server);
         let (started_tx, mut started_rx) = tokio::sync::mpsc::channel(2);
@@ -3526,7 +3547,7 @@ mod coordinator_integration_tests {
             .expect("the companion and project pass must overlap")
             .expect("start channel must remain open");
         assert_ne!(first, second);
-        let snapshot = server.indexing_resources.snapshot();
+        let snapshot = server.indexing.resources().snapshot();
         assert_eq!(snapshot.active_tasks, 2);
         assert_eq!(snapshot.active_cpu_lanes, 6);
         assert_eq!(snapshot.active_transient_memory_bytes, 512 * MIB);
@@ -3543,11 +3564,14 @@ mod coordinator_integration_tests {
         let active_root = PathBuf::from("/workspace/server");
         let sibling_root = PathBuf::from("/workspace/admin");
         let mut server = RubyLanguageServer::default();
-        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
-        );
         server
-            .indexing_resources
+            .indexing
+            .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
+            ));
+        server
+            .indexing
+            .resources()
             .prioritize_active_project_with_navigation_pending(&active_root, true);
         let server = Arc::new(server);
         let (active_started_tx, active_started_rx) = tokio::sync::oneshot::channel();
@@ -3600,7 +3624,8 @@ mod coordinator_integration_tests {
         );
 
         server
-            .indexing_resources
+            .indexing
+            .resources()
             .prioritize_active_project_with_navigation_pending(&active_root, false);
         tokio::time::timeout(Duration::from_secs(1), sibling_started_rx)
             .await
@@ -3808,7 +3833,7 @@ mod coordinator_integration_tests {
 
         let selected = coordinator.analysis_engine(&server);
         assert!(Arc::ptr_eq(&selected, &workspace.analysis_engine));
-        assert!(!Arc::ptr_eq(&selected, &server.analysis_engine));
+        assert!(!Arc::ptr_eq(&selected, &server.orphan_engine()));
     }
 
     #[test]
@@ -3942,7 +3967,7 @@ mod coordinator_integration_tests {
         server.add_workspace(Url::from_directory_path(&root).unwrap());
         let mut coordinator = IndexingCoordinator::new(root.clone(), config);
         let cache = fixture.path().join("user-cache");
-        coordinator.set_user_cache_root_for_tests(cache.clone());
+        coordinator.set_cache_root(cache.clone());
         coordinator.detect_ruby_version();
         coordinator.setup_jruby_import_provider().unwrap();
         coordinator.setup_file_processor(&server);
@@ -4072,7 +4097,7 @@ mod coordinator_integration_tests {
         let server = RubyLanguageServer::default();
         server.add_workspace(Url::from_directory_path(&root).unwrap());
         let mut coordinator = IndexingCoordinator::new(root.clone(), config);
-        coordinator.set_user_cache_root_for_tests(fixture.path().join("user-cache"));
+        coordinator.set_cache_root(fixture.path().join("user-cache"));
         assert_eq!(
             coordinator.detect_ruby_version(),
             Some(RubyVersion::new_with_implementation(
@@ -4290,8 +4315,8 @@ mod coordinator_integration_tests {
             );
         }
         let document = server
-            .docs
-            .lock()
+            .documents
+            .read()
             .get(&uri)
             .cloned()
             .expect("processed JRuby document must exist");
@@ -4436,7 +4461,7 @@ mod coordinator_integration_tests {
         let server = RubyLanguageServer::default();
         server.add_workspace(Url::from_directory_path(&root).unwrap());
         let mut coordinator = IndexingCoordinator::new(root.clone(), config);
-        coordinator.set_user_cache_root_for_tests(fixture.path().join("user-cache"));
+        coordinator.set_cache_root(fixture.path().join("user-cache"));
         coordinator.detect_ruby_version();
         coordinator.setup_jruby_import_provider().unwrap();
         let signature_cache = coordinator
@@ -4546,7 +4571,7 @@ mod coordinator_integration_tests {
                 .is_empty(),
             "removing the newly added import and constructor call must clear their reference facts"
         );
-        let resources = server.indexing_resources.snapshot();
+        let resources = server.indexing.resources().snapshot();
         assert_eq!(
             resources.completed_tasks, 3,
             "didOpen plus two didChange passes must each own exactly one outer resource lease; \
@@ -4995,7 +5020,7 @@ end
             "Indexing should complete successfully: {result:?}"
         );
 
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         for path in [
             fixture.project_root().join("Thorfile"),
@@ -5042,7 +5067,7 @@ end
         }
 
         assert_eq!(
-            server.core_engine_cache.len(),
+            server.products.core_templates().len(),
             1,
             "the same compatibility core must have one prepared template"
         );
@@ -5391,7 +5416,7 @@ end
             .await
             .expect("workspace indexing must succeed");
 
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         assert!(
             query.file_id(&signature_path).is_some(),
@@ -5421,14 +5446,14 @@ end
         )
         .await;
         let document = server
-            .docs
-            .lock()
+            .documents
+            .read()
             .get(&usage_uri)
             .cloned()
             .expect("opened usage document must exist");
         let query = crate::query::EngineQuery::with_doc_and_engine(
             document,
-            server.analysis_engine.clone(),
+            server.orphan_engine().clone(),
         );
         let definitions = query
             .find_definitions_at_position(

@@ -32,7 +32,7 @@ pub async fn handle_namespace_tree(
             let workspaces = lang_server.list_workspaces();
             (workspaces.len() == 1).then(|| workspaces[0].analysis_engine.clone())
         })
-        .unwrap_or_else(|| lang_server.analysis_engine.clone());
+        .unwrap_or_else(|| lang_server.orphan_engine().clone());
     let query = EngineQuery::with_engine(analysis_engine);
     let engine_hash = query.compute_namespace_tree_hash(params.show_external_types);
     let mut cache_hasher = std::collections::hash_map::DefaultHasher::new();
@@ -43,25 +43,15 @@ pub async fn handle_namespace_tree(
     engine_hash.hash(&mut cache_hasher);
     let combined_hash = cache_hasher.finish();
 
-    // Check cache
-    {
-        let cache = lang_server.namespace_tree_cache.lock();
-        if let Some((cached_hash, cached_response)) = cache.as_ref() {
-            if *cached_hash == combined_hash {
-                debug!("[NAMESPACE_TREE] Cache hit in {:?}", start_time.elapsed());
-                return cached_response.clone();
-            }
-        }
+    if let Some(response) = lang_server.cached_namespace_tree(combined_hash) {
+        debug!("[NAMESPACE_TREE] Cache hit in {:?}", start_time.elapsed());
+        return response;
     }
 
     debug!("[NAMESPACE_TREE] Cache miss, computing namespace tree");
     let response = query.compute_namespace_tree(params.show_external_types);
 
-    // Store in cache
-    {
-        let mut cache = lang_server.namespace_tree_cache.lock();
-        *cache = Some((combined_hash, response.clone()));
-    }
+    lang_server.cache_namespace_tree(combined_hash, response.clone());
 
     debug!("[NAMESPACE_TREE] Completed in {:?}", start_time.elapsed());
     response

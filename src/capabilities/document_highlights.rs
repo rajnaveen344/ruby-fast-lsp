@@ -11,7 +11,7 @@ pub async fn find_document_highlights(
     position: Position,
 ) -> Option<Vec<DocumentHighlight>> {
     let (content, doc_arc) = {
-        let docs_guard = server.docs.lock();
+        let docs_guard = server.documents.read();
         let doc_arc = docs_guard.get(uri)?.clone();
         let doc = doc_arc.read();
         (doc.content.clone(), doc_arc.clone())

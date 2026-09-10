@@ -2,7 +2,7 @@ use crate::dependency_product::{GemDependencyManifest, GemDependencyProduct};
 use crate::runtime::jruby::java_catalog::{JavaArtifactProduct, JavaArtifactProductKey};
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
@@ -40,7 +40,7 @@ pub struct PersistentDerivedProductCache {
 }
 
 struct PersistentDerivedProductCacheInner {
-    root: RwLock<PathBuf>,
+    root: PathBuf,
     max_entries: usize,
     max_bytes: u64,
     counters: PersistentProductCounters,
@@ -210,7 +210,7 @@ impl PersistentDerivedProductCache {
         );
         Self {
             inner: Arc::new(PersistentDerivedProductCacheInner {
-                root: RwLock::new(root),
+                root,
                 max_entries,
                 max_bytes,
                 counters: PersistentProductCounters::default(),
@@ -219,13 +219,6 @@ impl PersistentDerivedProductCache {
                 accounting: Mutex::new(CacheAccounting::default()),
             }),
         }
-    }
-
-    #[cfg(test)]
-    pub fn set_root_for_tests(&self, root: PathBuf) {
-        assert!(root.is_absolute(), "test cache root must be absolute");
-        *self.inner.root.write() = root;
-        *self.inner.accounting.lock() = CacheAccounting::default();
     }
 
     pub fn lookup_or_reserve(
@@ -642,8 +635,8 @@ impl PersistentDerivedProductCache {
         Ok(())
     }
 
-    fn cache_root(&self) -> PathBuf {
-        self.inner.root.read().clone()
+    pub(crate) fn cache_root(&self) -> PathBuf {
+        self.inner.root.clone()
     }
 
     fn namespace_root(&self) -> PathBuf {

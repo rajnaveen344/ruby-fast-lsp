@@ -25,7 +25,8 @@ pub async fn handle_initialize(
         .and_then(|watched_files| watched_files.dynamic_registration)
         .unwrap_or(false);
     lang_server
-        .extension_watch_dynamic_registration
+        .extensions
+        .dynamic_registration()
         .store(extension_watch_dynamic_registration, Ordering::Release);
     let workspace_folders = params.workspace_folders;
     let root_uri = params.root_uri;
@@ -110,11 +111,12 @@ pub async fn handle_initialize(
         warn!("No workspace folder or root URI provided. Files opened ad-hoc will use the orphan index.");
     }
     if let Err(error) = lang_server
-        .extension_registry
+        .extensions
+        .registry()
         .configure_from_config_and_workspace_roots_governed(
             &config,
             &lang_server.workspace_root_paths(),
-            lang_server.indexing_resources.clone(),
+            lang_server.indexing.resources().clone(),
         )
         .await
     {
@@ -256,7 +258,7 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
         .into_iter()
         .map(|ws| {
             let run = ws.begin_indexing_run();
-            let admission = server.indexing_scheduler.register_cancellable(
+            let admission = server.indexing.scheduler().register_cancellable(
                 ws.root_path.clone(),
                 crate::indexing_scheduler::IndexingPriority::Background,
                 run.cancellation(),
@@ -410,11 +412,12 @@ pub async fn handle_did_change_watched_files(
         });
     if extension_inputs_changed {
         if let Err(error) = server
-            .extension_registry
+            .extensions
+            .registry()
             .configure_from_config_and_workspace_roots_governed(
                 &config,
                 &server.workspace_root_paths(),
-                server.indexing_resources.clone(),
+                server.indexing.resources().clone(),
             )
             .await
         {
@@ -423,12 +426,13 @@ pub async fn handle_did_change_watched_files(
     }
     let workspace_trusted = server.config.lock().workspace_trusted;
     let reindex_uris = server
-        .extension_registry
+        .extensions
+        .registry()
         .handle_watched_file_changes(
             workspace_trusted,
             &server.workspace_root_paths(),
             &params.changes,
-            server.indexing_resources.clone(),
+            server.indexing.resources().clone(),
         )
         .await;
     params
@@ -524,7 +528,8 @@ async fn rebuild_runtime_owned_project_state(
     let run = workspace.begin_indexing_run();
     server.publish_indexing_status().await;
     let Some(_permit) = server
-        .indexing_scheduler
+        .indexing
+        .scheduler()
         .acquire_cancellable(
             workspace.root_path.clone(),
             crate::indexing_scheduler::IndexingPriority::OpenDocument,
@@ -552,8 +557,8 @@ async fn rebuild_runtime_owned_project_state(
     // superseded coordinator has released its permit may the replacement clear
     // and rebuild that project's semantic state.
     let open_documents = server
-        .docs
-        .lock()
+        .documents
+        .read()
         .values()
         .filter_map(|document| {
             let document = document.read();
@@ -636,8 +641,8 @@ pub async fn handle_did_change_workspace_folders(
         .filter_map(|folder| folder.uri.to_file_path().ok())
         .collect::<Vec<_>>();
     let open_documents_to_rehome = server
-        .docs
-        .lock()
+        .documents
+        .read()
         .values()
         .filter_map(|document| {
             let document = document.read();
@@ -674,11 +679,12 @@ pub async fn handle_did_change_workspace_folders(
 
     let config = server.config.lock().clone();
     if let Err(error) = server
-        .extension_registry
+        .extensions
+        .registry()
         .configure_from_config_and_workspace_roots_governed(
             &config,
             &server.workspace_root_paths(),
-            server.indexing_resources.clone(),
+            server.indexing.resources().clone(),
         )
         .await
     {
@@ -704,7 +710,8 @@ pub async fn handle_did_change_workspace_folders(
         tokio::spawn(async move {
             server_clone.publish_indexing_status().await;
             let Some(_permit) = server_clone
-                .indexing_scheduler
+                .indexing
+                .scheduler()
                 .acquire_cancellable(
                     project_root,
                     crate::indexing_scheduler::IndexingPriority::Background,
@@ -826,11 +833,12 @@ pub async fn handle_did_change_configuration(
                 // Apply log level immediately (works without restart)
                 config.apply_log_level();
                 if let Err(error) = server
-                    .extension_registry
+                    .extensions
+                    .registry()
                     .configure_from_config_and_workspace_roots_governed(
                         &config,
                         &server.workspace_root_paths(),
-                        server.indexing_resources.clone(),
+                        server.indexing.resources().clone(),
                     )
                     .await
                 {
@@ -861,7 +869,8 @@ pub async fn handle_did_change_configuration(
 
 async fn refresh_extension_watch_registration(server: &RubyLanguageServer) {
     if !server
-        .extension_watch_dynamic_registration
+        .extensions
+        .dynamic_registration()
         .load(Ordering::Acquire)
     {
         return;
@@ -870,8 +879,8 @@ async fn refresh_extension_watch_registration(server: &RubyLanguageServer) {
         return;
     };
 
-    let desired = server.extension_registry.watcher_globs();
-    let mut current = server.extension_watch_registration.lock().await;
+    let desired = server.extensions.registry().watcher_globs();
+    let mut current = server.extensions.registration().lock().await;
     if *current == desired {
         return;
     }
@@ -961,7 +970,7 @@ pub async fn handle_shutdown(server: &RubyLanguageServer) -> LspResult<()> {
     info!("Shutting down Ruby LSP server");
     server.cancel_watched_file_changes();
     server.cancel_all_indexing();
-    server.extension_registry.shutdown();
+    server.extensions.registry().shutdown();
     Ok(())
 }
 
@@ -1401,9 +1410,9 @@ mod tests {
             additional_sources: Vec::new(),
         }];
 
-        let server = RubyLanguageServer::default();
+        let server = RubyLanguageServer::with_user_cache_root(fixture.path().join("cache"))
+            .expect("construct isolated cache server");
         *server.config.lock() = config;
-        server.set_user_cache_root_for_tests(fixture.path().join("cache"));
         let project_uri = Url::from_directory_path(&project).unwrap();
         let workspace = server.add_workspace(project_uri.clone());
         indexing::init_workspace(&server, project_uri)

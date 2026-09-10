@@ -2559,7 +2559,7 @@ async fn corpus_smoke_helpers_preserve_owning_engine() {
 
     let server = RubyLanguageServer::default();
     let orphan_sources = server
-        .analysis_engine
+        .orphan_engine()
         .read()
         .files()
         .map(|file| (file.path.clone(), file.kind))
@@ -2607,7 +2607,7 @@ async fn corpus_smoke_helpers_preserve_owning_engine() {
     }
     assert_eq!(
         server
-            .analysis_engine
+            .orphan_engine()
             .read()
             .files()
             .map(|file| (file.path.clone(), file.kind))
@@ -2631,7 +2631,7 @@ async fn corpus_smoke_helpers_preserve_owning_engine() {
     );
     assert_eq!(
         server
-            .analysis_engine
+            .orphan_engine()
             .read()
             .files()
             .map(|file| (file.path.clone(), file.kind))
@@ -3160,7 +3160,7 @@ fn index_files_for_smoke(
     files: &[PathBuf],
     source_kind: SourceKind,
 ) {
-    let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
     for file in files {
         let content = std::fs::read_to_string(file).unwrap_or_else(|err| {
             panic!(
@@ -3297,7 +3297,7 @@ async fn open_real_document(server: &RubyLanguageServer, path: &Path) {
             path.display()
         )
     });
-    if server.docs.lock().contains_key(&uri) {
+    if server.documents.read().contains_key(&uri) {
         return;
     }
     let content = std::fs::read_to_string(path).unwrap_or_else(|err| {

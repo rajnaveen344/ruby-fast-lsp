@@ -34,7 +34,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
     let position = params.text_document_position_params.position;
 
     let (content, doc_arc, document, byte_offset) = {
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         let doc_arc = docs.get(&uri)?.clone();
         let doc = doc_arc.read();
         let byte_offset = doc.position_to_analysis_offset(source_position(position));

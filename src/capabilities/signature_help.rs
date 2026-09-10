@@ -13,7 +13,7 @@ pub async fn handle_signature_help(
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
     let (content, document) = {
-        let documents = server.docs.lock();
+        let documents = server.documents.read();
         let document = documents.get(&uri)?.clone();
         let content = document.read().content.clone();
         (content, document)

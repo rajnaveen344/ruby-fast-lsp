@@ -681,7 +681,7 @@ impl SimulationRunner {
     }
 
     fn assert_index_shape(&self) {
-        let stats = self.editor.server().analysis_engine.read().stats();
+        let stats = self.editor.server().orphan_engine().read().stats();
         assert!(
             stats.files >= self.open_files.len(),
             "INVARIANT VIOLATED: simulation index has too few files. Expected at least {}, got {}. This is a bug because every indexed generated file was opened through FakeEditor. Fix: inspect didOpen indexing.",

@@ -34,7 +34,7 @@ pub async fn handle_document_formatting(
         .unwrap_or_else(|| Path::new(".").to_path_buf());
     let formatted = match format_document(
         &config,
-        server.indexing_resources.clone(),
+        server.indexing.resources().clone(),
         &workspace_root,
         &file_path,
         &content,
@@ -179,7 +179,7 @@ pub async fn handle_document_on_type_formatting(
         return None;
     }
 
-    let docs = lang_server.docs.lock();
+    let docs = lang_server.documents.read();
     let doc_arc = docs.get(uri)?;
     let doc = doc_arc.read();
     let content = &doc.content;

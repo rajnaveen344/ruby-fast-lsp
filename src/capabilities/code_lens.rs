@@ -27,7 +27,7 @@ pub async fn handle_code_lens(
 
     // 2. Get document content and Arc.
     let (content, doc_arc) = {
-        let docs = lang_server.docs.lock();
+        let docs = lang_server.documents.read();
         let doc_arc = match docs.get(uri) {
             Some(arc) => arc.clone(),
             None => {
@@ -55,9 +55,10 @@ pub async fn handle_code_lens(
         .analysis_workspace_for_uri(uri)
         .map(|workspace| workspace.root_path);
     match lang_server
-        .extension_registry
+        .extensions
+        .registry()
         .code_lenses_governed(
-            lang_server.indexing_resources.clone(),
+            lang_server.indexing.resources().clone(),
             project_root,
             uri.as_str().to_string(),
             content,
@@ -100,16 +101,19 @@ mod tests {
     async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_reactor() {
         let uri = Url::parse("file:///tmp/governed_code_lenses.rb").expect("test URI must parse");
         let mut server = RubyLanguageServer::default();
-        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        );
         server
-            .extension_registry
+            .indexing
+            .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                    1,
+                    1,
+                    256 * 1024 * 1024,
+                    1,
+                ),
+            ));
+        server
+            .extensions
+            .registry()
             .configure_from_config(&crate::config::RubyFastLspConfig {
                 extension_packages: vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("extensions/rspec-ruby")
@@ -132,7 +136,7 @@ mod tests {
 
         let holder_release = Arc::new(tokio::sync::Notify::new());
         let holder_release_task = holder_release.clone();
-        let holder_governor = server.indexing_resources.clone();
+        let holder_governor = server.indexing.resources().clone();
         let holder = tokio::spawn(async move {
             holder_governor
                 .run_async_with_resources(
@@ -153,7 +157,7 @@ mod tests {
                 .unwrap();
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().active_tasks != 1 {
+            while server.indexing.resources().snapshot().active_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -174,7 +178,7 @@ mod tests {
             .await
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().queued_tasks != 1 {
+            while server.indexing.resources().snapshot().queued_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -197,7 +201,7 @@ mod tests {
             .await
             .unwrap()
             .expect("open document must return a code-lens response");
-        let complete = server.indexing_resources.snapshot();
+        let complete = server.indexing.resources().snapshot();
         assert_eq!(complete.active_tasks, 0);
         assert_eq!(complete.queued_tasks, 0);
         assert_eq!(complete.completed_tasks, 3);

@@ -135,6 +135,24 @@ check(r#"<lens none>module Unused; end</lens>"#).await;
 
 **Important**: The `none` attribute requires a closing tag (e.g., `</err>`). The assertion only applies to the wrapped range, allowing you to have both positive and negative assertions in the same fixture.
 
-### Internal Functions
+### Lifecycle and publication observations
 
-The harness has been simplified. Only `check.rs` and `fixture.rs` remain as core modules.
+`FakeEditor` initializes a real `LspService`; its `client_messages` reader consumes
+the ordinary outbound `ClientSocket`. Document operations and queries call the
+production handlers directly. `diagnostics().await` waits for the submitted
+diagnostics to arrive through `textDocument/publishDiagnostics`, including empty
+clears. The observer never parses, collects facts, replaces sources, or resolves
+the engine to repair an assertion.
+
+`published_diagnostics()` and inline diagnostic tags observe synchronous
+submission, which allows race tests to assert intermediate state before releasing
+paused production work. Submission and delivered notifications are separate
+evidence; a missing publication is not an empty clear. `with_cache_root` supplies
+a fixture cache directory through ordinary server construction.
+
+Deterministic gates remain at real indexing/commit/publication boundaries, with
+worker progress observations owned by indexing. Ownership and publisher controls
+live in `src/server/tests.rs`; simulation schedules live in `simulation/`.
+The external `crates/lsp-test-harness` remains separate because it depends on the
+root crate. Installed editor, process restart, and full inbound transport behavior
+require their corresponding external or black-box tests.

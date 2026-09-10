@@ -16,7 +16,7 @@ pub async fn find_implementation_at_position(
     position: Position,
 ) -> Option<Vec<Location>> {
     let (content, doc_arc) = {
-        let doc_guard = server.docs.lock();
+        let doc_guard = server.documents.read();
         let doc_arc = doc_guard.get(&uri)?.clone();
         let doc = doc_arc.read();
         (doc.content.clone(), doc_arc.clone())

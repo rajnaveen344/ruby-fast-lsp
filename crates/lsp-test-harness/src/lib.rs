@@ -246,8 +246,7 @@ impl FakeEditor {
                     Err(error) => {
                         let indexing_snapshots = self
                             .server
-                            .workspaces
-                            .read()
+                            .list_workspaces()
                             .iter()
                             .map(|workspace| workspace.indexing_status.snapshot())
                             .collect::<Vec<_>>();

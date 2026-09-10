@@ -26,17 +26,17 @@ async fn edit_between_real_collection_and_commit(open_before_start: bool, comple
     let uri = Url::from_file_path(&path).unwrap();
     let root_uri = Url::from_directory_path(&root).unwrap();
     let filename = path.to_str().unwrap().trim_start_matches('/').to_string();
-    let mut editor = FakeEditor::new().await;
+    let mut editor = FakeEditor::with_cache_root(fixture.path().join("cache")).await;
     let server = editor.server().clone();
     server.set_discovered_runtimes_for_tests(Vec::new());
-    server.set_user_cache_root_for_tests(fixture.path().join("cache"));
     let workspace = server.add_workspace(root_uri.clone());
     if open_before_start {
         editor.open(&filename, OLD).await;
     }
 
     let mut collected = server
-        .test_schedule
+        .indexing
+        .schedule
         .arm(Point::ProjectFactsCollected, path.clone());
     let run = workspace.begin_indexing_run();
     let cold_server = server.clone();
@@ -50,7 +50,8 @@ async fn edit_between_real_collection_and_commit(open_before_start: bool, comple
         .source_snapshot_for_path(&path)
         .expect("cold collection must register its input before reaching the commit boundary");
     let mut updated = server
-        .test_schedule
+        .indexing
+        .schedule
         .arm(Point::DocumentSourceUpdated, path.clone());
     let operation_file = filename.clone();
     let editing = tokio::spawn(async move {
@@ -82,7 +83,8 @@ async fn edit_between_real_collection_and_commit(open_before_start: bool, comple
         .expect("interactive editing must finish independently of paused cold work")
         .expect("real document handler must not panic");
     let mut attempted = server
-        .test_schedule
+        .indexing
+        .schedule
         .arm(Point::ProjectCommitAttempted, path.clone());
     collected.release();
     attempted.wait().await;
@@ -152,7 +154,7 @@ async fn edit_between_real_collection_and_commit(open_before_start: bool, comple
         "the coordinator must publish current diagnostic output after the interleaving"
     );
     assert_eq!(
-        server.test_schedule.trace(),
+        server.indexing.schedule.trace(),
         vec![
             (Point::ProjectFactsCollected, path.clone()),
             (Point::DocumentSourceUpdated, path.clone()),
@@ -211,10 +213,9 @@ async fn delayed_coordinator_diagnostics_after_change(change: PublicationChange)
     std::fs::write(&path, broken).unwrap();
     let root_uri = Url::from_directory_path(&root).unwrap();
     let filename = path.to_str().unwrap().trim_start_matches('/').to_string();
-    let mut editor = FakeEditor::new().await;
+    let mut editor = FakeEditor::with_cache_root(fixture.path().join("cache")).await;
     let server = editor.server().clone();
     server.set_discovered_runtimes_for_tests(Vec::new());
-    server.set_user_cache_root_for_tests(fixture.path().join("cache"));
     let workspace = server.add_workspace(root_uri.clone());
     editor.open(&filename, broken).await;
     let initial = editor.diagnostics(&filename).await;
@@ -231,7 +232,8 @@ async fn delayed_coordinator_diagnostics_after_change(change: PublicationChange)
     );
 
     let mut pending = server
-        .test_schedule
+        .indexing
+        .schedule
         .arm(Point::ColdDiagnosticsPending, path.clone());
     let run = workspace.begin_indexing_run();
     let cold_server = server.clone();
@@ -292,7 +294,8 @@ async fn delayed_coordinator_diagnostics_after_change(change: PublicationChange)
         return;
     }
     let mut attempted = server
-        .test_schedule
+        .indexing
+        .schedule
         .arm(Point::ColdDiagnosticsAttempted, path.clone());
     pending.release();
     attempted.wait().await;
@@ -309,7 +312,7 @@ async fn delayed_coordinator_diagnostics_after_change(change: PublicationChange)
         .expect("uncancelled coordinator must finish");
     assert_eq!(editor.diagnostics(&filename).await, Vec::new());
     assert_eq!(
-        server.test_schedule.trace(),
+        server.indexing.schedule.trace(),
         vec![
             (Point::ColdDiagnosticsPending, path.clone()),
             (Point::ColdDiagnosticsAttempted, path),
@@ -347,10 +350,9 @@ async fn cold_coordinator_diagnostics_preserve_current_syntax_warnings() {
     std::fs::write(&path, source).unwrap();
     let root_uri = Url::from_directory_path(&root).unwrap();
     let filename = path.to_str().unwrap().trim_start_matches('/');
-    let mut editor = FakeEditor::new().await;
+    let mut editor = FakeEditor::with_cache_root(fixture.path().join("cache")).await;
     let server = editor.server().clone();
     server.set_discovered_runtimes_for_tests(Vec::new());
-    server.set_user_cache_root_for_tests(fixture.path().join("cache"));
     let workspace = server.add_workspace(root_uri.clone());
     editor.open(filename, source).await;
     let initial = editor.diagnostics(filename).await;

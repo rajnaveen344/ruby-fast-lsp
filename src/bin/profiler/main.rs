@@ -495,16 +495,13 @@ fn main() -> anyhow::Result<()> {
 
     let benchmark_result = rt.block_on(async {
         let mut server = RubyLanguageServer::default();
-        server.indexing_scheduler =
-            ruby_fast_lsp::indexing_scheduler::IndexingScheduler::new(
-                config.scheduler_concurrency,
-            );
+        server.set_indexing_concurrency(config.scheduler_concurrency);
         if config.resource_cpu_lanes.is_some()
             || config.resource_task_limit.is_some()
             || config.resource_memory_mib.is_some()
             || config.resource_io_slots.is_some()
         {
-            let default_policy = server.indexing_resources.policy();
+            let default_policy = server.indexing_resource_policy();
             let transient_memory_limit_bytes = config
                 .resource_memory_mib
                 .map(|memory_mib| {
@@ -513,8 +510,7 @@ fn main() -> anyhow::Result<()> {
                     )
                 })
                 .unwrap_or_else(|| default_policy.transient_memory_limit_bytes());
-            server.indexing_resources =
-                ruby_fast_lsp::indexing_resources::IndexingResourceGovernor::new(
+            server.set_indexing_resource_policy(
                     ruby_fast_lsp::indexing_resources::IndexingResourcePolicy::with_limits(
                         config
                             .resource_cpu_lanes
@@ -530,19 +526,17 @@ fn main() -> anyhow::Result<()> {
                 );
         }
         let extension_load = configure_server(
-            &server,
+            &mut server,
             config.config_path.as_ref(),
             config.extension_path.as_ref(),
         );
-        let extension_cache = server
-            .persistent_derived_product_cache
-            .compiled_wasm_snapshot();
+        let extension_cache = server.compiled_wasm_cache_snapshot();
         println!(
             "{}",
             serde_json::json!({
                 "extension_load_timing": {
                     "elapsed_ms": duration_ms(extension_load),
-                    "loaded": server.extension_registry.status_reports().len(),
+                    "loaded": server.extension_status_reports().len(),
                     "persistent_products": {
                         "lookups": extension_cache.lookups,
                         "hits": extension_cache.hits,
@@ -561,13 +555,7 @@ fn main() -> anyhow::Result<()> {
             "workspace container discovered no Ruby projects: {}",
             workspace_path.display()
         );
-        let lsp_config = server.config.lock().clone();
-        server
-            .extension_registry
-            .configure_from_config_and_workspace_roots(
-                &lsp_config,
-                &server.workspace_root_paths(),
-            );
+        server.refresh_embedded_extensions();
         info!(
             "Discovered {} isolated Ruby project(s): {:?}",
             discovered.len(),
@@ -625,7 +613,7 @@ fn main() -> anyhow::Result<()> {
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
-                "extension_status": server.extension_registry.status_reports(),
+                "extension_status": server.extension_status_reports(),
             }))?
         );
 
@@ -1161,7 +1149,7 @@ async fn sample_open_file_diagnostics(
 }
 
 fn configure_server(
-    server: &RubyLanguageServer,
+    server: &mut RubyLanguageServer,
     config_path: Option<&PathBuf>,
     extension_path: Option<&PathBuf>,
 ) -> Duration {
@@ -1189,11 +1177,7 @@ fn configure_server(
             .extension_dirs
             .push(bundled_extensions.to_string_lossy().to_string());
     }
-    let extension_load_started = Instant::now();
-    server.extension_registry.configure_from_config(&lsp_config);
-    let extension_load = extension_load_started.elapsed();
-    *server.config.lock() = lsp_config;
-    extension_load
+    server.configure_embedded(lsp_config)
 }
 
 fn load_profiler_config(path: &PathBuf) -> RubyFastLspConfig {
@@ -1293,10 +1277,10 @@ async fn run_registered_workspace_indexing(
         .into_iter()
         .map(|workspace| {
             let run = workspace.begin_indexing_run();
-            let admission = server.indexing_scheduler.register_cancellable(
+            let admission = server.register_indexing_run(
                 workspace.root_path.clone(),
                 ruby_fast_lsp::indexing_scheduler::IndexingPriority::Background,
-                run.cancellation(),
+                &run,
             );
             (workspace, run, admission)
         })
@@ -1725,9 +1709,9 @@ fn indexing_summary_json(
             stable_fingerprint_hex(engine.semantic_result_fingerprint().stable_bytes());
         project_evidence.push(serde_json::json!({
             "root": workspace.root_path,
-            "runtime": workspace.effective_runtime.read().clone(),
-            "detected_ruby_version": workspace.detected_ruby_version.read().clone(),
-            "runtime_classpath_fingerprint_sha256": workspace.runtime_classpath_fingerprint_sha256.read().clone(),
+            "runtime": workspace.runtime.selected().read().clone(),
+            "detected_ruby_version": workspace.runtime.ruby_version().read().clone(),
+            "runtime_classpath_fingerprint_sha256": workspace.runtime.classpath_fingerprint().read().clone(),
             "project_files": project_sources.len(),
             "project_source_bytes": project_source_bytes,
             "project_source_fingerprint_sha256": format!("{:x}", source_fingerprint.finalize()),
@@ -1739,32 +1723,24 @@ fn indexing_summary_json(
     }
     project_evidence.sort_by(|left, right| left["root"].as_str().cmp(&right["root"].as_str()));
     let dataset_fingerprint_sha256 = dataset_fingerprint_sha256(&project_evidence);
-    let scheduler = server.indexing_scheduler.snapshot();
-    let resources = server.indexing_resources.snapshot();
+    let scheduler = server.indexing_scheduler_snapshot();
+    let resources = server.indexing_resource_snapshot();
     let resource_delta = ProcessResourceUsage::delta(resources_started, resources_finished);
-    let core_cache = server.core_engine_cache.snapshot();
-    let core_cache_retained_weight = server.core_engine_cache.retained_weight();
-    let runtime_stdlib_path_cache = server.runtime_stdlib_path_cache_snapshot();
-    let runtime_stdlib_path_cache_retained_weight =
-        server.runtime_stdlib_path_cache_retained_weight();
-    let gem_cache = server.gem_dependency_cache.snapshot();
-    let gem_cache_retained_weight = server.gem_dependency_cache.retained_weight();
-    let classpath_file_cache = server.classpath_file_product_cache.snapshot();
-    let classpath_file_cache_retained_weight =
-        server.classpath_file_product_cache.retained_weight_bytes();
-    let java_artifact_product_cache = server.java_artifact_product_cache_snapshot();
-    let java_artifact_product_cache_retained_weight =
-        server.java_artifact_product_cache_retained_weight();
-    let persistent_gem_cache = server
-        .persistent_derived_product_cache
-        .gem_product_snapshot();
-    let persistent_java_artifact_cache = server
-        .persistent_derived_product_cache
-        .java_artifact_snapshot();
-    let persistent_compiled_wasm_cache = server
-        .persistent_derived_product_cache
-        .compiled_wasm_snapshot();
-    let gem_binding = server.gem_dependency_binding_counters.snapshot();
+    let products = server.runtime_product_snapshot();
+    let core_cache = products.core_templates.reuse;
+    let core_cache_retained_weight = products.core_templates.retained_weight_bytes;
+    let runtime_stdlib_path_cache = products.stdlib_paths.reuse;
+    let runtime_stdlib_path_cache_retained_weight = products.stdlib_paths.retained_weight_bytes;
+    let gem_cache = products.gem_dependencies.reuse;
+    let gem_cache_retained_weight = products.gem_dependencies.retained_weight_bytes;
+    let classpath_file_cache = products.classpath_files.reuse;
+    let classpath_file_cache_retained_weight = products.classpath_files.retained_weight_bytes;
+    let java_artifact_product_cache = products.java_artifacts.reuse;
+    let java_artifact_product_cache_retained_weight = products.java_artifacts.retained_weight_bytes;
+    let persistent_gem_cache = products.persistent_gems;
+    let persistent_java_artifact_cache = products.persistent_java;
+    let persistent_compiled_wasm_cache = products.compiled_wasm;
+    let gem_binding = products.gem_bindings;
 
     serde_json::json!({
         "schema_version": 15,

@@ -7,10 +7,8 @@ use crate::server::RubyLanguageServer;
 use crate::utils::ProjectFilePolicy;
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
-use ruby_analysis::indexer::RubyDocument;
 
 use log::{debug, info};
-use parking_lot::RwLock;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -26,7 +24,7 @@ enum DocumentSemanticMode {
 }
 
 fn interactive_file_processor(server: &RubyLanguageServer, uri: &Url) -> FileProcessor {
-    let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
     server
         .jruby_import_provider_for_uri(uri)
         .map(|provider| processor.clone().with_jruby_import_provider(provider))
@@ -68,7 +66,8 @@ async fn process_interactive_file(
         1,
     );
     server
-        .indexing_resources
+        .indexing
+        .resources()
         .clone()
         .run_with_resources(
             "interactive document semantic analysis",
@@ -129,11 +128,8 @@ async fn init_workspace_inner(
     {
         coordinator.set_analysis_engine(workspace.analysis_engine);
     }
-    #[cfg(test)]
-    if let Some(root) = server.user_cache_root_for_tests() {
-        coordinator.set_user_cache_root_for_tests(root);
-    }
-    coordinator.set_extension_registry(server.extension_registry.clone());
+    coordinator.set_cache_root(server.products.cache_root());
+    coordinator.set_extension_registry(server.extensions.registry().clone());
     if let Some(run) = run {
         coordinator.set_indexing_run(run);
     }
@@ -163,7 +159,8 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     #[cfg(test)]
     if let Ok(path) = uri.to_file_path() {
         server
-            .test_schedule
+            .indexing
+            .schedule
             .checkpoint(
                 crate::indexer::test_schedule::Point::DocumentSourceUpdated,
                 &path,
@@ -172,24 +169,14 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     }
 
     let doc_start = Instant::now();
-    {
-        let mut docs = server.docs.lock();
-        if let Some(existing_doc) = docs.get(&uri) {
-            let mut doc_guard = existing_doc.write();
-            doc_guard.set_analysis_file_id(analysis_file_id);
-            doc_guard.update(content.clone(), params.text_document.version);
-        } else {
-            let document = RubyDocument::with_analysis_file_id(
-                uri.clone(),
-                content.clone(),
-                params.text_document.version,
-                analysis_file_id,
-            );
-            docs.insert(uri.clone(), Arc::new(RwLock::new(document)));
-        }
-    }
+    server.documents.update(
+        &uri,
+        analysis_file_id,
+        content.clone(),
+        params.text_document.version,
+    );
     let doc_elapsed = doc_start.elapsed();
-    debug!("Doc cache size: {}", server.docs.lock().len());
+    debug!("Doc cache size: {}", server.documents.read().len());
 
     // Process file with unified FileProcessor::process_file. Route analysis state
     // by URI so the file lands in its workspace's own index.
@@ -199,8 +186,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let (affected_uris, mut diagnostics) = if skip_processing {
         let diagnostics = if source_kind.is_editable() {
             let document = server
-                .docs
-                .lock()
+                .documents.read()
                 .get(&uri)
                 .expect("INVARIANT VIOLATED: didOpen syntax-only path lost the document inserted into the cache. This is a bug because unchanged indexed files still require an open RubyDocument. Fix: keep cache insertion before skip processing.")
                 .read()
@@ -213,8 +199,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         };
         if indexed_content_matches {
             server
-                .docs
-                .lock()
+                .documents.read()
                 .get(&uri)
                 .expect("INVARIANT VIOLATED: unchanged didOpen document disappeared before indexed-version update. This is a bug because semantic facts were intentionally reused. Fix: keep the open document cached through didOpen.")
                 .write()
@@ -321,7 +306,7 @@ async fn refresh_open_project_files_after_dependency_open(
 ) {
     let owning_engine = server.analysis_engine_for_uri(opened_uri);
     let mut open_docs = {
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         docs.iter()
             .filter_map(|(uri, doc)| {
                 if uri == opened_uri {
@@ -415,7 +400,8 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     #[cfg(test)]
     if let Ok(path) = uri.to_file_path() {
         server
-            .test_schedule
+            .indexing
+            .schedule
             .checkpoint(
                 crate::indexer::test_schedule::Point::DocumentSourceUpdated,
                 &path,
@@ -425,22 +411,9 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
 
     let doc_start = Instant::now();
     // Update or create the document atomically
-    {
-        let mut docs = server.docs.lock();
-        if let Some(existing_doc) = docs.get(&uri) {
-            let mut doc_guard = existing_doc.write();
-            doc_guard.set_analysis_file_id(analysis_file_id);
-            doc_guard.update(final_content.clone(), version);
-        } else {
-            let new_doc = RubyDocument::with_analysis_file_id(
-                uri.clone(),
-                final_content.clone(),
-                version,
-                analysis_file_id,
-            );
-            docs.insert(uri.clone(), Arc::new(RwLock::new(new_doc)));
-        }
-    }
+    server
+        .documents
+        .update(&uri, analysis_file_id, final_content.clone(), version);
     let doc_elapsed = doc_start.elapsed();
 
     // Process current file without forcing a project-wide reference/diagnostic
@@ -563,7 +536,7 @@ fn bounded_open_diagnostic_refresh_targets(
     changed_uri: &Url,
 ) -> Vec<(Url, String)> {
     let mut open_documents = {
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         docs.iter()
             .filter_map(|(uri, document)| {
                 if uri == changed_uri {
@@ -593,7 +566,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
 
     // Get the current document content
     let content = {
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         match docs.get(&uri) {
             Some(doc_arc) => doc_arc.read().content.clone(),
             None => return,
@@ -676,7 +649,7 @@ async fn append_external_linter_diagnostics(
 
     match lint_document(
         &config,
-        server.indexing_resources.clone(),
+        server.indexing.resources().clone(),
         &workspace_root,
         &file_path,
         content,
@@ -704,9 +677,9 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     server.clear_external_linter_diagnostics(&uri);
 
     // Remove the document from in-memory cache but keep analysis facts.
-    server.docs.lock().remove(&uri);
+    server.documents.remove(&uri);
     server.release_external_document_project(&uri);
-    debug!("Doc cache size: {}", server.docs.lock().len());
+    debug!("Doc cache size: {}", server.documents.read().len());
 
     if clear_file_facts_if_kind(server, &uri, SourceKind::Excluded) {
         server.publish_diagnostics(uri, Vec::new()).await;
@@ -738,7 +711,7 @@ pub async fn handle_watched_files_changed(
             return;
         }
     };
-    let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
     let mut analysis_changed = false;
     let mut changed_dependency_uris = Vec::new();
 
@@ -749,7 +722,7 @@ pub async fn handle_watched_files_changed(
         let Ok(path) = change.uri.to_file_path() else {
             continue;
         };
-        if server.docs.lock().contains_key(&change.uri) {
+        if server.documents.read().contains_key(&change.uri) {
             continue;
         }
         changed_dependency_uris.push(change.uri.clone());
@@ -849,7 +822,7 @@ fn refresh_open_project_files_for_dependency_engines(
     }
 
     let mut open_project_files = {
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         docs.iter()
             .filter_map(|(uri, document)| {
                 if analysis_file_kind(server, uri) != Some(SourceKind::Project) {
@@ -1431,7 +1404,7 @@ mod tests {
         .await;
 
         let path = uri.to_file_path().expect("file URI must convert to path");
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let file_id = engine
             .file_id(path)
             .expect("did_open must register file in analysis engine");
@@ -1452,19 +1425,21 @@ mod tests {
         let path = workspace.path().join("opened.rb");
         let uri = Url::from_file_path(&path).unwrap();
         let mut server = RubyLanguageServer::default();
-        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        );
+        server
+            .indexing
+            .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                    1,
+                    1,
+                    256 * 1024 * 1024,
+                    1,
+                ),
+            ));
         server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
 
         let release = Arc::new(tokio::sync::Notify::new());
         let holder_release = release.clone();
-        let holder_resources = server.indexing_resources.clone();
+        let holder_resources = server.indexing.resources().clone();
         let holder_root = workspace_root.clone();
         let holder = tokio::spawn(async move {
             holder_resources
@@ -1486,7 +1461,7 @@ mod tests {
                 .unwrap();
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().active_tasks != 1 {
+            while server.indexing.resources().snapshot().active_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -1510,7 +1485,7 @@ mod tests {
             .await;
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().queued_tasks != 1 {
+            while server.indexing.resources().snapshot().queued_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -1531,7 +1506,7 @@ mod tests {
         holder.await.unwrap();
         open.await.unwrap();
         assert!(has_namespace(&server, &uri, "OpenedUnderPressure"));
-        let complete = server.indexing_resources.snapshot();
+        let complete = server.indexing.resources().snapshot();
         assert_eq!(complete.active_tasks, 0);
         assert_eq!(complete.queued_tasks, 0);
         assert_eq!(complete.completed_tasks, 2);
@@ -1548,14 +1523,16 @@ mod tests {
         let path = workspace.path().join("changing.rb");
         let uri = Url::from_file_path(&path).unwrap();
         let mut server = RubyLanguageServer::default();
-        server.indexing_resources = crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
-                1,
-                1,
-                256 * 1024 * 1024,
-                1,
-            ),
-        );
+        server
+            .indexing
+            .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
+                crate::indexing_resources::IndexingResourcePolicy::with_limits(
+                    1,
+                    1,
+                    256 * 1024 * 1024,
+                    1,
+                ),
+            ));
         server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
         handle_did_open(
             &server,
@@ -1572,7 +1549,7 @@ mod tests {
 
         let release = Arc::new(tokio::sync::Notify::new());
         let holder_release = release.clone();
-        let holder_resources = server.indexing_resources.clone();
+        let holder_resources = server.indexing.resources().clone();
         let holder_root = workspace.path().to_path_buf();
         let holder = tokio::spawn(async move {
             holder_resources
@@ -1594,7 +1571,7 @@ mod tests {
                 .unwrap();
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().active_tasks != 1 {
+            while server.indexing.resources().snapshot().active_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -1621,7 +1598,7 @@ mod tests {
             .await;
         });
         tokio::time::timeout(Duration::from_secs(1), async {
-            while server.indexing_resources.snapshot().queued_tasks != 1 {
+            while server.indexing.resources().snapshot().queued_tasks != 1 {
                 tokio::task::yield_now().await;
             }
         })
@@ -1680,7 +1657,7 @@ mod tests {
         let kernel = RubyConstant::new("Kernel").expect("test constant must be valid");
         let puts = RubyMethod::new("puts").expect("test method must be valid");
         let puts_fqn = FullyQualifiedName::method(vec![kernel], puts);
-        server.analysis_engine.write().replace_facts(
+        server.orphan_engine().write().replace_facts(
             file_id,
             FileFacts {
                 methods: vec![MethodFact::new(
@@ -1707,7 +1684,7 @@ mod tests {
         .await;
 
         let path = uri.to_file_path().expect("file URI must convert to path");
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let file_id = engine
             .file_id(path)
             .expect("known external file must remain registered");
@@ -1808,7 +1785,7 @@ mod tests {
         .await;
 
         let path = uri.to_file_path().expect("file URI must convert to path");
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let file_id = engine
             .file_id(path)
             .expect("did_change must register file in analysis engine");
@@ -1853,7 +1830,7 @@ mod tests {
         let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
         let account_fqn =
             FullyQualifiedName::namespace(vec![RubyConstant::new("Account").unwrap()]);
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         assert!(
             engine.symbol_facts_for(&user_fqn).is_empty(),
             "stale User symbol facts must be removed after reindex"
@@ -2034,7 +2011,7 @@ mod tests {
         .await;
 
         let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let query = AnalysisQuery::new(&engine);
         assert_eq!(query.references_for_fqn(&user_fqn).len(), 2);
     }
@@ -2059,7 +2036,7 @@ mod tests {
 
         let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
         let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let query = AnalysisQuery::new(&engine);
         let edges = query.graph_edges_from(&user_fqn);
         assert_eq!(edges.len(), 1);
@@ -2100,7 +2077,7 @@ mod tests {
 
         let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
         let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let query = AnalysisQuery::new(&engine);
         let edges = query.graph_edges_from(&user_fqn);
         assert!(
@@ -2132,7 +2109,7 @@ mod tests {
         let user_singleton =
             FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
         let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let query = AnalysisQuery::new(&engine);
         let edges = query.graph_edges_from(&user_singleton);
         assert!(
@@ -2171,7 +2148,7 @@ mod tests {
             RubyMethod::new("find").expect("test method must be valid"),
         );
 
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let query = AnalysisQuery::new(&engine);
         let name_facts = query.methods_for_fqn(&name_fqn);
         assert_eq!(name_facts.len(), 1);

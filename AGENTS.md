@@ -86,7 +86,8 @@ cargo build --release         # Release build
 ## Key Entry Points
 
 - `src/main.rs` - Application entry
-- `src/server.rs` - LSP server core
+- `src/server.rs` - LSP protocol facade and common server construction
+- `src/server/` - Document, project, service, cache, and publication owners
 - `src/handlers/` - Request/notification routing
 - `src/capabilities/` - Feature implementations
 - `src/indexer/` - LSP/workspace indexing orchestration
@@ -1591,8 +1592,26 @@ Multi-file tests use `check_multi_file(&[("main.rb", "..."), ("other.rb", "...")
 
 ### FakeEditor (Lifecycle/Re-indexing Tests)
 
-FakeEditor routes all operations through the **real LSP handlers** (`handle_did_open`,
-`handle_did_change`, etc.), ensuring tests exercise the exact same code paths as a real editor.
+FakeEditor initializes a real `LspService`, then invokes production document and
+query handlers directly. Its async `diagnostics()` observes serialized outbound
+`ClientSocket` messages, including empty clears. Synchronous
+`published_diagnostics()` and inline diagnostic tags observe submission for
+intermediate-state assertions; do not confuse submission with client delivery.
+Neither observation may rebuild or resolve semantic state. Cache paths are
+ordinary constructor inputs. Narrow scheduling/progress hooks belong to indexing,
+and the synchronous submission recorder belongs to the diagnostic publisher.
+
+The server facade has ten production fields and no test-only fields. Keep
+state and behavior in the owners under `src/server/`, preserve shared clone/lock
+identity and isolated project engines, and consult
+[server state ownership](docs/server-state-ownership.md) before moving lifecycle
+state. Do not add a generic test-state bag or mutable test-only cache-root override.
+No server field is public outside the library: use `pub(crate)` only for sibling
+handler/coordinator access and keep the remaining fields private. Executable
+callers use explicit setup/admission operations and detached configuration/product
+snapshots; do not expose owner, cache, or lock handles to satisfy profiler access.
+Low-level file-open instrumentation stays in `src/perf/file_open.rs`, inside the
+library, with the allocator and CLI entry point in the profiler binary.
 
 #### Tag-based assertions (simple cases)
 

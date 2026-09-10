@@ -90,10 +90,9 @@ async fn cold_editor(
     std::fs::write(&declaration_path, &declaration).unwrap();
     std::fs::write(&consumer_path, &consumer).unwrap();
     let root_uri = Url::from_directory_path(&root).unwrap();
-    let mut editor = FakeEditor::new().await;
+    let mut editor = FakeEditor::with_cache_root(fixture.path().join("cache")).await;
     let server = editor.server().clone();
     server.set_discovered_runtimes_for_tests(Vec::new());
-    server.set_user_cache_root_for_tests(fixture.path().join("cache"));
     let workspace = server.add_workspace(root_uri.clone());
     tokio::time::timeout(
         Duration::from_secs(30),

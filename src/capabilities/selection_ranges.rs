@@ -9,7 +9,7 @@ pub async fn handle_selection_ranges(
     params: SelectionRangeParams,
 ) -> Option<Vec<SelectionRange>> {
     let document = {
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         docs.get(&params.text_document.uri)?.clone()
     };
     let document = document.read();

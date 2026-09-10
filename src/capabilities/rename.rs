@@ -25,7 +25,7 @@ pub async fn handle_prepare_rename(
     let uri = params.text_document.uri;
     let position = params.position;
     let (content, version, analysis_file_id, analysis_offset) = {
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         let document = docs.get(&uri)?.read();
         (
             document.content.clone(),
@@ -95,7 +95,7 @@ pub async fn handle_rename(
 
     // Get document content
     let (content, analysis_file_id, analysis_offset) = {
-        let docs = server.docs.lock();
+        let docs = server.documents.read();
         let document = docs.get(&uri)?.read();
         (
             document.content.clone(),

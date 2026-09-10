@@ -383,7 +383,7 @@ impl FileProcessor {
     ) -> Result<ProcessResult> {
         // Check if this version was already indexed - skip expensive re-indexing if unchanged
         let already_indexed = !force_reindex && {
-            let docs = server.docs.lock();
+            let docs = server.documents.read();
             if let Some(doc_arc) = docs.get(uri) {
                 let doc = doc_arc.read();
                 doc.indexed_version == Some(doc.version)
@@ -432,8 +432,8 @@ impl FileProcessor {
         let analysis_file_id =
             server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
         let document_version = server
-            .docs
-            .lock()
+            .documents
+            .read()
             .get(uri)
             .map(|document| document.read().version)
             .unwrap_or(0);
@@ -611,16 +611,13 @@ impl FileProcessor {
         let semantic_change =
             SemanticChange::classify(previous_export_fingerprint, current_export_fingerprint);
 
-        {
-            let mut docs = server.docs.lock();
-            docs.insert(
-                uri.clone(),
-                Arc::new(parking_lot::RwLock::new(updated_document.clone())),
-            );
-        }
+        server.documents.insert(
+            uri.clone(),
+            Arc::new(parking_lot::RwLock::new(updated_document.clone())),
+        );
 
         // Mark as indexed
-        if let Some(doc_arc) = server.docs.lock().get(uri) {
+        if let Some(doc_arc) = server.documents.read().get(uri) {
             let mut doc = doc_arc.write();
             doc.indexed_version = Some(doc.version);
         }
@@ -2182,7 +2179,8 @@ mod tests {
     #[test]
     fn file_processor_reports_body_only_and_exported_api_changes() {
         let server = RubyLanguageServer::default();
-        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let processor =
+            FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let uri = Url::parse("file:///app/user.rb").unwrap();
 
         let initial = processor
@@ -2518,7 +2516,8 @@ mod tests {
     #[test]
     fn file_processor_handles_shebang_source_without_crashing() {
         let server = RubyLanguageServer::default();
-        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let processor =
+            FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let uri = Url::parse("file:///project/Rakefile").unwrap();
         let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nrequire File.expand_path('../config/application', __FILE__)\nDiscourse::Application.load_tasks\n";
 
@@ -2532,7 +2531,8 @@ mod tests {
     #[test]
     fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
         let server = RubyLanguageServer::default();
-        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let processor =
+            FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let helpers_uri = Url::parse("file:///project/helpers.rb").unwrap();
         let app_uri = Url::parse("file:///project/app.rb").unwrap();
         let helpers = "module API\n  module Consignments\n    def get_images\n    end\n  end\n\n  include Consignments\nend\n";
@@ -2553,7 +2553,7 @@ mod tests {
         let platform_app =
             FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
         let method = RubyMethod::new("get_images").unwrap();
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         assert!(
             query.namespace_exists(&platform_app),
@@ -2574,7 +2574,8 @@ mod tests {
     #[test]
     fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
         let server = RubyLanguageServer::default();
-        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let processor =
+            FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let declaration_uri = Url::parse("file:///project/types.rb").unwrap();
         let reopening_uri = Url::parse("file:///project/reopening.rb").unwrap();
 
@@ -2607,7 +2608,7 @@ mod tests {
             ],
             RubyMethod::new("from_other_file").unwrap(),
         );
-        let engine = server.analysis_engine.read();
+        let engine = server.orphan_engine().read();
         assert_eq!(engine.method_facts_for(&expected).len(), 1);
         assert!(engine.method_facts_for(&shadow).is_empty());
     }
@@ -2619,7 +2620,8 @@ mod tests {
         let project = server.add_workspace(project_uri);
         let dependency_uri =
             Url::parse("file:///workspace/server/vendor/cache/pbkdf2/lib/pbkdf2.rb").unwrap();
-        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let processor =
+            FileProcessor::with_extension_registry(server.extensions.registry().clone());
 
         processor
             .collect_file_facts_as_deferred_resolution_in_engine(
@@ -2636,12 +2638,13 @@ mod tests {
             .file_id(&path)
             .expect("gem source must be registered");
         assert_eq!(engine.file(file_id).unwrap().kind, SourceKind::Gem);
-        assert!(server.analysis_engine.read().file_id(&path).is_none());
+        assert!(server.orphan_engine().read().file_id(&path).is_none());
     }
 
     fn collect_gem_template_facts(source: &str) -> FileFacts {
         let server = RubyLanguageServer::default();
-        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let processor =
+            FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
         let dependency_uri = Url::parse("file:///shared/gems/widget/lib/widget.rb").unwrap();
         let template = processor
@@ -2701,7 +2704,8 @@ mod tests {
     #[test]
     fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
         let server = RubyLanguageServer::default();
-        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let processor =
+            FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
         let dependency_uri = Url::parse("file:///shared/gems/widget/lib/widget.rb").unwrap();
         let source = "class SharedWidget\n  def value\n    'cached'\n  end\nend\n";

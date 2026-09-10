@@ -670,7 +670,11 @@ async fn run_type_check(
         {
             match &identifier {
                 ruby_analysis::indexer::Identifier::RubyLocalVariable { name, .. } => {
-                    let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
+                    let doc_snapshot = server
+                        .documents
+                        .read()
+                        .get(uri)
+                        .map(|doc| doc.read().clone());
                     let variable_type = if let Some(doc) = doc_snapshot {
                         let scope_id = doc
                             .find_scope_for_variable_at(
@@ -686,7 +690,7 @@ async fn run_type_check(
                                  This is a bug because ruby-analysis::core TypeSubject::Local stores u32 scope ids. \
                                  Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
                             );
-                            let type_store = server.analysis_engine.read().type_store().clone();
+                            let type_store = server.orphan_engine().read().type_store().clone();
                             let byte_offset = doc.position_to_analysis_offset(
                                 crate::utils::lsp::source_position(position),
                             );
@@ -705,9 +709,13 @@ async fn run_type_check(
                         ruby_analysis::core::FullyQualifiedName::constant(iden.clone());
                     let namespace_fqn =
                         ruby_analysis::core::FullyQualifiedName::namespace(iden.clone());
-                    let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
+                    let doc_snapshot = server
+                        .documents
+                        .read()
+                        .get(uri)
+                        .map(|doc| doc.read().clone());
                     let constant_type = if let Some(doc) = doc_snapshot {
-                        let type_store = server.analysis_engine.read().type_store().clone();
+                        let type_store = server.orphan_engine().read().type_store().clone();
                         let byte_offset = doc.position_to_analysis_offset(
                             crate::utils::lsp::source_position(position),
                         );
@@ -743,7 +751,7 @@ async fn run_type_check(
                             });
 
                         if let Some(fqn) = method_fqn {
-                            let engine = server.analysis_engine.read();
+                            let engine = server.orphan_engine().read();
                             let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
                             let return_types = query
                                 .methods_for_fqn(&fqn)
@@ -869,7 +877,7 @@ fn method_call_return_type_from_analysis(
     };
     let namespace =
         FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
-    let engine = server.analysis_engine.read();
+    let engine = server.orphan_engine().read();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     query.method_return_type_for_receiver(&namespace, &method)
 }
@@ -881,7 +889,7 @@ fn variable_type_from_analysis(
 ) -> Option<ruby_analysis::inference::RubyType> {
     use ruby_analysis::core::{RubyType, TypeSubject};
 
-    let type_store = server.analysis_engine.read().type_store().clone();
+    let type_store = server.orphan_engine().read().type_store().clone();
     type_store
         .all_facts()
         .into_iter()

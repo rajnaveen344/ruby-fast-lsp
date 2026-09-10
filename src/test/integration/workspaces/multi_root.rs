@@ -75,7 +75,7 @@ async fn ready_project_definition_stays_responsive_while_sibling_workers_are_sat
     let started = Arc::new(AtomicUsize::new(0));
     let mut workers = Vec::new();
     for index in 0..2 {
-        let scheduler = editor.server().indexing_scheduler.clone();
+        let scheduler = editor.server().indexing.scheduler().clone();
         let started = started.clone();
         workers.push(tokio::spawn(async move {
             let _permit = scheduler
@@ -243,7 +243,7 @@ async fn navigation_into_external_dependency_retains_originating_project_context
         .workspace_for("workspace_a/app.rb")
         .expect("workspace_a must own its project files");
     let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
-        editor.server().extension_registry.clone(),
+        editor.server().extensions.registry().clone(),
     );
     let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/demo-gem/lib/entry.rb")
         .expect("dependency URI must parse");
@@ -286,7 +286,7 @@ async fn navigation_into_external_dependency_retains_originating_project_context
     assert!(
         editor
             .server()
-            .analysis_engine
+            .orphan_engine()
             .read()
             .file_id(
                 entry_uri
@@ -306,7 +306,7 @@ async fn directly_opened_dependency_uses_its_unique_indexed_project_owner() {
         .workspace_for("workspace_a/app.rb")
         .expect("workspace_a must own its project files");
     let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
-        editor.server().extension_registry.clone(),
+        editor.server().extensions.registry().clone(),
     );
     let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/unique-gem/lib/entry.rb")
         .expect("dependency URI must parse");
@@ -352,7 +352,7 @@ async fn unbound_external_document_is_not_promoted_to_project_source() {
     let path = external_uri
         .to_file_path()
         .expect("external URI must be a file path");
-    let orphan = editor.server().analysis_engine.read();
+    let orphan = editor.server().orphan_engine().read();
     let file_id = orphan
         .file_id(&path)
         .expect("unbound open document must retain local interactive facts");
@@ -376,7 +376,7 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
     editor.add_workspace("workspace_a");
     editor.add_workspace("workspace_b");
     let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
-        editor.server().extension_registry.clone(),
+        editor.server().extensions.registry().clone(),
     );
     let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/shared-gem/lib/entry.rb")
         .expect("dependency URI must parse");

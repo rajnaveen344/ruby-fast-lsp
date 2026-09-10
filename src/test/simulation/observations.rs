@@ -63,8 +63,8 @@ async fn diagnostic_observation_cannot_repair_missing_semantic_facts() {
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let document = editor
         .server()
-        .docs
-        .lock()
+        .documents
+        .read()
         .get(&uri)
         .unwrap()
         .read()
@@ -117,8 +117,8 @@ async fn tagged_diagnostic_observation_cannot_repair_missing_semantic_facts() {
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let document = editor
         .server()
-        .docs
-        .lock()
+        .documents
+        .read()
         .get(&uri)
         .unwrap()
         .read()
@@ -191,8 +191,8 @@ async fn opening_another_project_cannot_rebuild_or_publish_this_projects_state()
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let document = editor
         .server()
-        .docs
-        .lock()
+        .documents
+        .read()
         .get(&uri)
         .unwrap()
         .read()

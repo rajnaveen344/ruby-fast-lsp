@@ -1019,8 +1019,8 @@ impl IndexerProject {
         // Before body inference, publish the same direct declaration skeleton
         // for every worker. Value-constant receiver and block types must not
         // depend on file traversal, editor-open order, or enabled extensions.
-        let requires_direct_semantic_seed = !uses_immutable_semantic_context
-            && !registered_inputs.is_empty();
+        let requires_direct_semantic_seed =
+            !uses_immutable_semantic_context && !registered_inputs.is_empty();
         let semantic_seed_started = Instant::now();
         if requires_direct_semantic_seed {
             let semantic_seed_outcomes = registered_inputs
@@ -1156,7 +1156,7 @@ impl IndexerProject {
             let (path, source_snapshot, file_facts, plan, hint, read, dependency_scan, file_timing) =
                 outcome?;
             #[cfg(test)]
-            server.test_schedule.checkpoint_blocking(
+            server.indexing.schedule.checkpoint_blocking(
                 crate::indexer::test_schedule::Point::ProjectFactsCollected,
                 &path,
             );
@@ -1169,7 +1169,7 @@ impl IndexerProject {
                     file_facts,
                 );
             #[cfg(test)]
-            server.test_schedule.checkpoint_blocking(
+            server.indexing.schedule.checkpoint_blocking(
                 crate::indexer::test_schedule::Point::ProjectCommitAttempted,
                 &path,
             );
@@ -1447,8 +1447,8 @@ impl IndexerProject {
     ) {
         let resolve_start = Instant::now();
         let mut open_project_paths = server
-            .docs
-            .lock()
+            .documents
+            .read()
             .keys()
             .filter_map(|uri| {
                 let workspace = server.workspace_for_uri(uri)?;
