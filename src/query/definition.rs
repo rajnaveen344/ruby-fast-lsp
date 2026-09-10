@@ -45,9 +45,11 @@ impl EngineQuery {
             return self.find_yard_type_definitions(&yard_type.type_name, &ancestors);
         }
 
-        if let Some(locations) = self.resolved_reference_definition_locations(position) {
-            return Some(locations);
-        }
+        let dispatch_blocked = match self.resolved_reference_definition_locations(position) {
+            Some(locations) if !locations.is_empty() => return Some(locations),
+            Some(_) => true,
+            None => false,
+        };
 
         let analyzer = self.analyzer_at_position(uri, content, position);
         let byte_offset = u32::try_from(position_to_offset(content, position)).expect(
@@ -64,6 +66,13 @@ impl EngineQuery {
             }
         };
 
+        // Unknown values prevent speculative method dispatch, but do not erase
+        // lexical bindings. Classify the cursor before applying that barrier so
+        // local reads still reach the scope-based assignment lookup below.
+        if dispatch_blocked && !matches!(identifier, Identifier::RubyLocalVariable { .. }) {
+            return Some(Vec::new());
+        }
+
         info!(
             "Looking for definition of: {}->{}",
             FullyQualifiedName::from(ancestors.clone()),
@@ -79,6 +88,8 @@ impl EngineQuery {
         )
     }
 
+    /// An empty result records an engine dispatch barrier; lexical local-variable
+    /// lookup remains valid even when the binding's value type is unknown.
     fn resolved_reference_definition_locations(&self, position: Position) -> Option<Vec<Location>> {
         let document = self.doc.as_ref()?.read();
         let file_id = document.analysis_file_id();

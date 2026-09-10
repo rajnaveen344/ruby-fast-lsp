@@ -197,6 +197,12 @@ shapes. Attribute writer facts (`attr_writer`, `attr_accessor`, and
 syntax satisfy a positional options-hash parameter when the method declares no
 keyword parameters; keep these Ruby call-shape rules in engine diagnostics.
 
+Local-variable definition navigation follows lexical bindings independently of
+the inferred value type, including reads in string interpolation and rescue
+bodies. An engine Unknown dispatch barrier must not suppress the local
+assignment lookup. Preserve that barrier when the cursor selects a method on
+an unknown receiver, including after edits or reopening an unchanged file.
+
 Safe linter code actions are implemented as preferred `quickfix` actions for
 correctable RuboCop/Standard diagnostics. They run against the current buffer,
 use RuboCop `--autocorrect` or Standard `--fix`, and return a full-document
