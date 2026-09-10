@@ -27,6 +27,7 @@ use crate::runtime::jruby::source_navigation::java_source_navigation_facts_with_
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info, warn};
+use ruby_analysis::core::MethodVisibility as AnalysisMethodVisibility;
 use ruby_analysis::core::{
     FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
     GraphNodeKind, MethodFact, MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
@@ -41,7 +42,6 @@ use ruby_analysis::engine::{
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{is_erb_path, mask_erb, AnalysisIndexer};
-use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
 use ruby_fast_lsp_extension_api::{
     IndexPatch, MixinKind, NamespaceDeclarationKind, ProjectContext, ResolvedCall, SourceRange,
 };
@@ -161,7 +161,7 @@ impl FactCollectorExtensionHost for ProjectFactCollectorHost {
                 .process_call_node_with_applicability(
                     visitor,
                     node,
-                    self.extension_applicability(visitor.extension_project_context.as_ref()),
+                    self.extension_applicability(visitor.extension_project_context()),
                 );
         }
         false
@@ -175,7 +175,7 @@ impl FactCollectorExtensionHost for ProjectFactCollectorHost {
                 .should_track_enclosing_call_with_applicability(
                     visitor,
                     node,
-                    self.extension_applicability(visitor.extension_project_context.as_ref()),
+                    self.extension_applicability(visitor.extension_project_context()),
                 )
     }
 
@@ -192,7 +192,7 @@ impl FactCollectorExtensionHost for ProjectFactCollectorHost {
             .resolved_call_for_stack_with_applicability(
                 visitor,
                 node,
-                self.extension_applicability(visitor.extension_project_context.as_ref()),
+                self.extension_applicability(visitor.extension_project_context()),
             )
     }
 }
@@ -512,21 +512,22 @@ impl FileProcessor {
         if source_kind.is_dependency_source() {
             visitor = visitor.without_body_inference();
         }
-        visitor.extension_project_context = extension_project_context.clone();
+        visitor.set_extension_project_context(extension_project_context.clone());
         visitor.visit(&node);
         let visitor_elapsed = visitor_start.elapsed();
 
-        let extension_index_patches = visitor.extension_index_patches.clone();
-        let updated_document = visitor.document.clone();
-        let local_read_types = visitor.local_read_type_evidence();
-        let mut inference = visitor.inference_evidence();
+        let collected = visitor.finish();
+        let extension_index_patches = collected.extension_patches;
+        let updated_document = collected.document;
+        let local_read_types = collected.local_read_types;
+        let mut inference = collected.inference;
         if !source_kind.contributes_project_diagnostics() {
             inference.method_return_outcomes.clear();
             inference.method_return_equations.clear();
         }
         let mut direct_facts = direct_facts_seed;
-        merge_execution_context_direct_facts(&visitor.direct_facts, &mut direct_facts);
-        merge_runtime_direct_facts(&visitor.direct_facts, &mut direct_facts);
+        merge_execution_context_direct_facts(&collected.direct_facts, &mut direct_facts);
+        merge_runtime_direct_facts(&collected.direct_facts, &mut direct_facts);
         add_extension_analysis_facts(
             &analysis_engine,
             &updated_document,
@@ -537,10 +538,10 @@ impl FileProcessor {
         let symbol_facts = direct_facts.symbols;
         let method_facts = direct_facts.methods;
         let mut type_facts = direct_facts.types;
-        merge_collected_visitor_type_facts(&visitor, &mut type_facts);
+        merge_collected_type_facts(collected.type_facts, &mut type_facts);
         let replace_start = Instant::now();
         let mut file_diagnostics = if source_kind.contributes_project_diagnostics() {
-            visitor.analysis_diagnostics
+            collected.diagnostics
         } else {
             Vec::new()
         };
@@ -585,17 +586,17 @@ impl FileProcessor {
                 graph_edges: direct_facts.graph_edges,
                 unresolved_graph_edges: direct_facts.unresolved_graph_edges,
                 reference_candidates: if source_kind.contributes_references() {
-                    visitor.reference_candidates
+                    collected.reference_candidates
                 } else {
                     Vec::new()
                 },
                 diagnostic_candidates: if source_kind.contributes_project_diagnostics() {
-                    visitor.diagnostic_candidates
+                    collected.diagnostic_candidates
                 } else {
                     Vec::new()
                 },
                 diagnostics: file_diagnostics,
-                execution_contexts: visitor.extension_execution_context_facts,
+                execution_contexts: collected.execution_contexts,
                 inference,
                 local_read_types,
             },
@@ -1515,7 +1516,7 @@ impl FileProcessor {
         if source_kind.is_dependency_source() {
             fact_collector = fact_collector.without_body_inference();
         }
-        fact_collector.extension_project_context = extension_project_context.clone();
+        fact_collector.set_extension_project_context(extension_project_context.clone());
         let shared_direct_known_namespaces = known_namespaces
             .unwrap_or_else(|| Arc::new(collect_known_namespaces(&analysis_engine)));
         fact_collector =
@@ -1530,8 +1531,9 @@ impl FileProcessor {
         let visitor_started = Instant::now();
         fact_collector.visit(&node);
         let visitor_elapsed = visitor_started.elapsed();
-        let local_read_types = fact_collector.local_read_type_evidence();
-        let mut inference = fact_collector.inference_evidence();
+        let collected = fact_collector.finish();
+        let local_read_types = collected.local_read_types;
+        let mut inference = collected.inference;
         if !source_kind.contributes_project_diagnostics() {
             inference.method_return_outcomes.clear();
             inference.method_return_equations.clear();
@@ -1541,28 +1543,28 @@ impl FileProcessor {
         let mut direct_facts = if resolve_references {
             direct_facts_seed
         } else {
-            fact_collector.direct_facts.clone()
+            collected.direct_facts.clone()
         };
         if resolve_references {
-            merge_execution_context_direct_facts(&fact_collector.direct_facts, &mut direct_facts);
-            merge_runtime_direct_facts(&fact_collector.direct_facts, &mut direct_facts);
+            merge_execution_context_direct_facts(&collected.direct_facts, &mut direct_facts);
+            merge_runtime_direct_facts(&collected.direct_facts, &mut direct_facts);
         }
         add_extension_analysis_facts(
             &analysis_engine,
             &document,
-            &fact_collector.extension_index_patches,
+            &collected.extension_patches,
             extension_project_context.as_ref(),
             &mut direct_facts,
         );
-        merge_collected_visitor_type_facts(&fact_collector, &mut direct_facts.types);
+        merge_collected_type_facts(collected.type_facts, &mut direct_facts.types);
         let reference_candidates = if source_kind.contributes_references() {
-            fact_collector.reference_candidates
+            collected.reference_candidates
         } else {
             Vec::new()
         };
         let (diagnostic_candidates, diagnostics) = if source_kind.contributes_project_diagnostics()
         {
-            let mut diagnostics = fact_collector.analysis_diagnostics;
+            let mut diagnostics = collected.diagnostics;
             if let Some(project_root) = self.require_project_root.as_ref() {
                 let engine = analysis_engine.read();
                 diagnostics.extend(unresolved_require_diagnostics(
@@ -1575,7 +1577,7 @@ impl FileProcessor {
                     Some(&engine),
                 ));
             }
-            (fact_collector.diagnostic_candidates, diagnostics)
+            (collected.diagnostic_candidates, diagnostics)
         } else {
             (Vec::new(), Vec::new())
         };
@@ -1590,7 +1592,7 @@ impl FileProcessor {
             reference_candidates,
             diagnostic_candidates,
             diagnostics,
-            execution_contexts: fact_collector.extension_execution_context_facts,
+            execution_contexts: collected.execution_contexts,
             inference,
             local_read_types,
         };
@@ -1902,8 +1904,7 @@ fn rehome_execution_context_type_facts(extension_aware: &[TypeFact], merged: &mu
     }
 }
 
-fn merge_collected_visitor_type_facts(visitor: &FactCollector, merged: &mut Vec<TypeFact>) {
-    let visitor_facts = visitor.type_store.all_facts();
+fn merge_collected_type_facts(visitor_facts: Vec<TypeFact>, merged: &mut Vec<TypeFact>) {
     rehome_execution_context_type_facts(&visitor_facts, merged);
     merge_precise_visitor_type_facts(visitor_facts, merged);
 }
@@ -2762,8 +2763,8 @@ fn collect_known_constant_types(
     let engine = analysis_engine.read();
     let mut candidates = HashMap::<FullyQualifiedName, Option<RubyType>>::new();
     for fact in engine
-        .type_store()
-        .all_facts()
+        .query()
+        .all_type_facts()
         .into_iter()
         .filter(|fact| fact.range.file_id != current_file)
     {

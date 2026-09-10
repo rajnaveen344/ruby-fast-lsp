@@ -1,8 +1,8 @@
 use log::error;
 use ruby_prism::ParametersNode;
 
+use crate::core::RubyType;
 use crate::core::{TypeResolution, TypeSubject};
-use crate::inference::RubyType;
 
 use super::FactCollector;
 
@@ -15,7 +15,7 @@ impl FactCollector {
     /// 5. Keyword parameters
     /// 6. Keyword rest parameters
     /// 7. Block parameter
-    pub fn process_parameters_node_entry(&mut self, node: &ParametersNode) {
+    pub(super) fn process_parameters_node_entry(&mut self, node: &ParametersNode) {
         let mut positional_index = 0usize;
 
         // Process required parameters
@@ -117,7 +117,7 @@ impl FactCollector {
                 name: param_name.to_string(),
             })
             .map(|subject| {
-                self.type_store.type_at(
+                self.facts.types.type_at(
                     &subject,
                     self.document.analysis_file_id(),
                     text_range.start_byte,
@@ -145,7 +145,7 @@ impl FactCollector {
         }
     }
 
-    pub fn process_parameters_node_exit(&mut self, _node: &ParametersNode) {
+    pub(super) fn process_parameters_node_exit(&mut self, _node: &ParametersNode) {
         // No-op for now
     }
 }

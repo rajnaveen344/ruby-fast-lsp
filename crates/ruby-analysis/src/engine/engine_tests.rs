@@ -13,7 +13,7 @@ use crate::engine::resolution::{
     MethodLookupChainCache,
 };
 use crate::engine::AnalysisQueryCache;
-use crate::ConstantLookupRequest;
+use crate::engine::ConstantLookupRequest;
 
 fn constant_subject(name: &str) -> TypeSubject {
     TypeSubject::Constant(FullyQualifiedName::constant(vec![
@@ -1565,7 +1565,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
                 user.clone(),
                 method_range,
             )
-            .with_visibility(crate::method_store::MethodVisibility::Private)],
+            .with_visibility(crate::core::MethodVisibility::Private)],
             ..Default::default()
         },
         ResolveMode::Immediate,
@@ -2394,7 +2394,7 @@ fn public_lookup_of_a_private_method_is_receiver_only() {
                 owner.clone(),
                 definition_range,
             )
-            .with_visibility(crate::method_store::MethodVisibility::Private)],
+            .with_visibility(crate::core::MethodVisibility::Private)],
             ..Default::default()
         },
         ResolveMode::Immediate,
@@ -2803,7 +2803,7 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
             methods: vec![
                 MethodFact::new(parent_method.clone(), parent.clone(), parent_range),
                 MethodFact::new(child_method.clone(), child.clone(), child_range)
-                    .with_visibility(crate::method_store::MethodVisibility::Protected),
+                    .with_visibility(crate::core::MethodVisibility::Protected),
             ],
             types: vec![
                 TypeFact::new(
@@ -4179,7 +4179,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
     assert!(completion_names.contains(&"second_only".to_string()));
     assert!(matches!(
         query.resolve_method_reference(&template, &consumer),
-        crate::MethodLookupResult::Ambiguous { .. }
+        crate::engine::MethodLookupResult::Ambiguous { .. }
     ));
     drop(query);
 

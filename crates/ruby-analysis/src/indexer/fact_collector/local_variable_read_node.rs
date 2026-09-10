@@ -1,16 +1,12 @@
+use crate::core::RubyType;
 use crate::core::UnknownReason;
-use crate::inference::RubyType;
 use ruby_prism::LocalVariableReadNode;
 
 use super::FactCollector;
 
 impl FactCollector {
-    pub fn process_local_variable_read_node_entry(&mut self, node: &LocalVariableReadNode) {
-        if !self.include_local_vars {
-            return;
-        }
-
-        let variable_name = crate::utf8_str(node.name().as_slice());
+    pub(super) fn process_local_variable_read_node_entry(&mut self, node: &LocalVariableReadNode) {
+        let variable_name = crate::indexer::utf8_str(node.name().as_slice());
         let range = self.document.prism_location_to_text_range(&node.location());
 
         let owner_scope_id = self
@@ -18,7 +14,7 @@ impl FactCollector {
             .variable_scopes_mut()
             .reference_variable(variable_name, range)
             .map(|(scope_id, _variable_index, _captured)| scope_id);
-        if !self.record_local_read_unknown_reasons {
+        if !self.options.record_local_read_unknown_reasons {
             return;
         }
         let (flow_type, assignment_type) = owner_scope_id
@@ -42,13 +38,15 @@ impl FactCollector {
         // content preserves parameter types without guessing lexical scope.
         let block_owned = owner_scope_id.is_some_and(|scope_id| {
             self.document.variable_scopes().scope_kind(scope_id)
-                == Some(crate::LocalScopeKind::Block)
+                == Some(crate::indexer::LocalScopeKind::Block)
         });
         if let Some(ruby_type) = reaching_type
             .as_ref()
             .filter(|ruby_type| **ruby_type != RubyType::Unknown && (block_owned || flow_delta))
         {
-            self.local_read_types.push((range, ruby_type.clone()));
+            self.expressions
+                .local_reads
+                .push((range, ruby_type.clone()));
         }
         let unknown_reason = match reaching_type {
             None => Some(UnknownReason::NoReachingAssignment),
@@ -71,11 +69,12 @@ impl FactCollector {
             // ordinary visitor reaches this exact read. Keep that proof
             // barrier instead of adding the generic Unknown projection as a
             // conflicting second result.
-            self.expression_unknown_reasons
+            self.expressions
+                .unknown_reasons
                 .entry(range)
                 .or_insert(reason);
         }
     }
 
-    pub fn process_local_variable_read_node_exit(&mut self, _node: &LocalVariableReadNode) {}
+    pub(super) fn process_local_variable_read_node_exit(&mut self, _node: &LocalVariableReadNode) {}
 }

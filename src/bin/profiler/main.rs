@@ -42,9 +42,8 @@ mod sample_project;
 use log::info;
 use ruby_analysis::core::{
     DiagnosticCandidate, DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
-    InferenceTelemetry, MethodFact, ReferenceCandidate, ReferenceFact, SourceKind,
-    StoredConstantReferenceCandidate, StoredMethodReferenceCandidate, StoredReferenceCandidate,
-    StoredResolvedReferenceCandidate, SymbolFact, TypeFact, TypeSubject,
+    InferenceTelemetry, MethodFact, ReferenceCandidate, ReferenceFact, SourceKind, SymbolFact,
+    TypeFact, TypeSubject,
 };
 use ruby_fast_lsp::capabilities::indexing;
 use ruby_fast_lsp::capabilities::{completion, definitions, hover, references};
@@ -2228,8 +2227,8 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
             workspace
                 .analysis_engine
                 .read()
-                .type_store()
-                .all_facts()
+                .query()
+                .all_type_facts()
                 .into_iter()
                 .filter(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))
                 .count()
@@ -2508,22 +2507,9 @@ fn print_stats(server: &RubyLanguageServer) {
         "ReferenceCandidate: {} bytes",
         std::mem::size_of::<ReferenceCandidate>()
     );
-    info!(
-        "StoredReferenceCandidate: {} bytes",
-        std::mem::size_of::<StoredReferenceCandidate>()
-    );
-    info!(
-        "StoredConstantReferenceCandidate: {} bytes",
-        std::mem::size_of::<StoredConstantReferenceCandidate>()
-    );
-    info!(
-        "StoredMethodReferenceCandidate: {} bytes",
-        std::mem::size_of::<StoredMethodReferenceCandidate>()
-    );
-    info!(
-        "StoredResolvedReferenceCandidate: {} bytes",
-        std::mem::size_of::<StoredResolvedReferenceCandidate>()
-    );
+    for (name, bytes) in ruby_analysis::engine::reference_storage_sizes() {
+        info!("{name}: {bytes} bytes");
+    }
     info!(
         "ReferenceFact: {} bytes",
         std::mem::size_of::<ReferenceFact>()

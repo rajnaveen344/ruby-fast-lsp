@@ -10,7 +10,7 @@ use crate::engine::namespace_tree_types::{
     MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
 use crate::engine::query::AnalysisQuery;
-use crate::AnalysisEngine;
+use crate::engine::AnalysisEngine;
 
 struct NamespaceTreeResult {
     modules: Vec<NamespaceNode>,
@@ -603,7 +603,7 @@ mod tests {
         GraphNodeKind, LibraryPackageId, RubyConstant, SourceKind, TextRange,
     };
     use crate::engine::namespace_tree_types::LibrarySectionId;
-    use crate::{FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::{FileFacts, ResolveMode, SourceFileInput};
 
     fn constant(name: &str) -> RubyConstant {
         RubyConstant::new(name).unwrap()

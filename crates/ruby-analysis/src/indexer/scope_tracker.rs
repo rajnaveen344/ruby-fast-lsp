@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::core::method_store::MethodVisibility;
+use crate::core::MethodVisibility;
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant};
 use ruby_prism::{ConstantPathNode, Node};
 

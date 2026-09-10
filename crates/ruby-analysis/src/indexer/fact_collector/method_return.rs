@@ -1,18 +1,34 @@
-use std::collections::HashSet;
-
+use super::FactCollector;
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, RubyConstant, RubyMethod, TypeInferenceOutcome,
-    TypeResolution, TypeSubject, UnknownReason,
+    FullyQualifiedName, GraphEdgeKind, InferenceTelemetry, MethodReturnEquation, RubyConstant,
+    RubyMethod, RubyType, TextRange, TypeInferenceOutcome, TypeProvenance, TypeResolution,
+    TypeSubject, UnknownReason,
 };
 use crate::engine::AnalysisQuery;
-
+use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
 use crate::inference::r#type::shape as shape_reads;
 use crate::inference::rbs::{
     get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
 };
-use crate::inference::RubyType;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use super::FactCollector;
+#[derive(Default)]
+pub(super) struct MethodReturnEvidence {
+    /// Compact method-return equations collected during the ordinary semantic
+    /// traversal and solved once when the program traversal completes.
+    pub(super) equations: BTreeMap<Vec<RubyConstant>, Vec<MethodReturnEquation>>,
+    pub(super) finalized_counts: HashMap<Vec<RubyConstant>, usize>,
+    pub(super) telemetry: BTreeMap<Vec<RubyConstant>, InferenceTelemetry>,
+    pub(super) outcomes: BTreeMap<FullyQualifiedName, TypeInferenceOutcome>,
+}
+
+pub(super) struct InferredMethodContext {
+    pub(super) fqn: FullyQualifiedName,
+    pub(super) namespace_parts: Vec<RubyConstant>,
+    pub(super) instance_owner_fqn: FullyQualifiedName,
+    pub(super) param_types: Vec<(String, RubyType, TextRange, TypeProvenance)>,
+    pub(super) definition_range: TextRange,
+}
 
 impl FactCollector {
     pub(super) fn resolve_method_return_type_outcome_with_private(
@@ -80,7 +96,7 @@ impl FactCollector {
 
         let return_type = if matches!(receiver_type, RubyType::Array(_) | RubyType::Hash(_, _)) {
             resolve_rbs_method_return_type(receiver_type, method_name)
-        } else if self.resolve_analysis_method_returns {
+        } else if self.options.resolve_analysis_method_returns {
             self.resolve_method_return_type_from_analysis(receiver_type, method_name, allow_private)
                 .or_else(|| resolve_rbs_method_return_type(receiver_type, method_name))
         } else {
@@ -123,26 +139,26 @@ impl FactCollector {
         // Same-file facts are not in the engine yet. Engine lookup is the
         // TypeTracker path: one cached receiver return, not a fresh callee
         // vector plus per-callee type_at on every expression.
-        let engine = self.analysis_engine.read();
+        let engine = self.semantics.engine.read();
         let query = AnalysisQuery::new(&engine);
         if allow_private {
             query.method_return_type_for_receiver_cached(
                 &namespace,
                 &method,
-                &self.analysis_query_cache,
+                &self.semantics.query_cache,
             )
         } else {
             query.method_return_type_for_protected_receiver_cached(
                 &namespace,
                 &method,
                 &caller_namespace,
-                &self.analysis_query_cache,
+                &self.semantics.query_cache,
             )
         }
     }
 
     fn local_method_return_type(&self, method_fqn: &FullyQualifiedName) -> Option<RubyType> {
-        match self.type_store.type_at(
+        match self.facts.types.type_at(
             &TypeSubject::MethodReturn(method_fqn.clone()),
             self.document.analysis_file_id(),
             u32::MAX,
@@ -167,7 +183,8 @@ impl FactCollector {
         let mut visited = HashSet::new();
         while visited.insert(current.clone()) {
             let mut parents = self
-                .direct_facts
+                .facts
+                .direct
                 .graph_edges
                 .iter()
                 .filter(|edge| edge.source == current && edge.kind == GraphEdgeKind::Superclass)
@@ -214,7 +231,7 @@ impl FactCollector {
         allow_private: bool,
         caller_namespace: &FullyQualifiedName,
     ) -> bool {
-        self.direct_facts.methods.iter().any(|fact| {
+        self.facts.direct.methods.iter().any(|fact| {
             &fact.fqn == method_fqn
                 && fact.owner.namespace_parts() == owner.namespace_parts()
                 && fact.owner.namespace_kind() == owner.namespace_kind()
@@ -224,9 +241,9 @@ impl FactCollector {
                     receiver_namespace,
                     caller_namespace,
                 ) {
-                    crate::core::method_store::MethodVisibility::Public => true,
-                    crate::core::method_store::MethodVisibility::Private => allow_private,
-                    crate::core::method_store::MethodVisibility::Protected => {
+                    crate::core::MethodVisibility::Public => true,
+                    crate::core::MethodVisibility::Private => allow_private,
+                    crate::core::MethodVisibility::Protected => {
                         allow_private
                             || fact.owner.namespace_parts() == caller_namespace.namespace_parts()
                     }
@@ -240,12 +257,13 @@ impl FactCollector {
         owner: &FullyQualifiedName,
         receiver_namespace: &FullyQualifiedName,
         caller_namespace: &FullyQualifiedName,
-    ) -> crate::core::method_store::MethodVisibility {
+    ) -> crate::core::MethodVisibility {
         let FullyQualifiedName::Method(_, method) = &fact.fqn else {
             return fact.visibility;
         };
         let mut overrides = self
-            .direct_facts
+            .facts
+            .direct
             .method_visibility_overrides
             .iter()
             .filter(|override_fact| {
@@ -350,5 +368,68 @@ fn type_args_for_receiver(receiver_type: &RubyType) -> Vec<RubyType> {
         | RubyType::ModuleReference(_)
         | RubyType::Union(_)
         | RubyType::Unknown => Vec::new(),
+    }
+}
+
+impl FactCollector {
+    pub(super) fn finalize_method_return_equations_for_namespace(
+        &mut self,
+        namespace: &[RubyConstant],
+    ) {
+        let Some(equations) = self.method_returns.equations.get(namespace) else {
+            return;
+        };
+        let equation_count = equations.len();
+        if self
+            .method_returns
+            .finalized_counts
+            .get(namespace)
+            .is_some_and(|finalized| *finalized == equation_count)
+        {
+            return;
+        }
+        let solve_result = solve_method_return_equations_with_telemetry(equations);
+        let solved = solve_result.outcomes;
+        let file_id = self.document.analysis_file_id();
+        self.facts
+            .types
+            .update_inferred_method_return_types_in_file(
+                file_id,
+                solved
+                    .iter()
+                    .map(|(method, outcome)| (method, outcome.clone().into_ruby_type())),
+            );
+        self.method_returns.outcomes.extend(solved);
+        self.method_returns
+            .telemetry
+            .insert(namespace.to_vec(), solve_result.telemetry);
+        self.method_returns
+            .finalized_counts
+            .insert(namespace.to_vec(), equation_count);
+    }
+
+    pub(super) fn finalize_all_method_return_equations(&mut self) {
+        let namespaces = self
+            .method_returns
+            .equations
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for namespace in namespaces {
+            self.finalize_method_return_equations_for_namespace(&namespace);
+        }
+    }
+
+    pub fn method_return_outcomes(&self) -> &BTreeMap<FullyQualifiedName, TypeInferenceOutcome> {
+        &self.method_returns.outcomes
+    }
+
+    pub fn inference_telemetry(&self) -> InferenceTelemetry {
+        let mut aggregate = InferenceTelemetry::default();
+        for telemetry in self.method_returns.telemetry.values() {
+            aggregate.merge(telemetry);
+        }
+        aggregate.observe_max_live_shape_aliases(self.expressions.max_live_shape_aliases);
+        aggregate
     }
 }

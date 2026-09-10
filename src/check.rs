@@ -430,7 +430,7 @@ fn solved_types_in_file(
     }
 
     for fact in query.type_facts_in_file(file_id) {
-        if fact.ruby_type == ruby_analysis::inference::RubyType::Unknown {
+        if fact.ruby_type == ruby_analysis::core::RubyType::Unknown {
             let TypeSubject::Expression(range) = fact.subject else {
                 continue;
             };

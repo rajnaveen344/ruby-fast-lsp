@@ -7,7 +7,7 @@ use super::file_owned_index::place_appended_file_facts;
 use super::memory_estimate::{
     map_table_bytes, ruby_type_heap_bytes, type_subject_heap_bytes, vec_payload_bytes,
 };
-use crate::{FullyQualifiedName, RubyType};
+use crate::core::{FullyQualifiedName, RubyType};
 
 /// Stable file identifier owned by the analysis layer.
 ///
@@ -252,10 +252,6 @@ impl RubyTypeId {
 }
 
 impl TypeStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn add(&mut self, fact: TypeFact) {
         // Append-only collectors preserve insertion order, not the file order
         // required by the replacement splice fast path. Once both APIs are
@@ -367,13 +363,6 @@ impl TypeStore {
                 None => None,
             }
         })
-    }
-
-    pub fn known_method_return_types(
-        &self,
-    ) -> impl Iterator<Item = (&FullyQualifiedName, &RubyType)> {
-        self.method_return_types()
-            .filter(|(_, ruby_type)| **ruby_type != RubyType::Unknown)
     }
 
     /// Borrow each value-constant type in fact-arena order, including Unknown.
@@ -1032,7 +1021,7 @@ fn provenance_rank(provenance: TypeProvenance) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use crate::{FullyQualifiedName, RubyConstant, RubyMethod};
+    use crate::core::{FullyQualifiedName, RubyConstant, RubyMethod};
 
     use super::*;
 
@@ -1056,7 +1045,7 @@ mod tests {
     #[test]
     fn resolves_latest_fact_before_position() {
         let subject = constant_subject("VALUE");
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             subject.clone(),
             RubyType::integer(),
@@ -1086,7 +1075,7 @@ mod tests {
 
     #[test]
     fn unresolved_when_no_fact_exists() {
-        let store = TypeStore::new();
+        let store = TypeStore::default();
         assert_eq!(
             store.type_at(&constant_subject("MISSING"), file(), 0),
             TypeResolution::Unresolved
@@ -1096,7 +1085,7 @@ mod tests {
     #[test]
     fn latest_non_unknown_type_with_range_returns_only_the_winning_fact() {
         let subject = constant_subject("VALUE");
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             subject.clone(),
             RubyType::string(),
@@ -1127,11 +1116,11 @@ mod tests {
     }
 
     #[test]
-    fn method_return_type_views_retain_unknown_locally_and_filter_known_returns() {
+    fn method_return_type_view_retains_unknown_in_arena_order() {
         let first = method_return_subject("First", "call");
         let unknown = method_return_subject("Unknown", "call");
         let second = method_return_subject("Second", "call");
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             first.clone(),
             RubyType::string(),
@@ -1158,7 +1147,6 @@ mod tests {
         ));
 
         let all_returns = store.method_return_types().collect::<Vec<_>>();
-        let returns = store.known_method_return_types().collect::<Vec<_>>();
         let TypeSubject::MethodReturn(first_fqn) = first else {
             panic!("test method subject must be a method return")
         };
@@ -1177,13 +1165,6 @@ mod tests {
             ],
             "the local collector view must retain an Unknown proof kill in arena order"
         );
-        assert_eq!(
-            returns,
-            vec![
-                (&first_fqn, &RubyType::string()),
-                (&second_fqn, &RubyType::integer()),
-            ]
-        );
     }
 
     #[test]
@@ -1193,7 +1174,7 @@ mod tests {
         let unknown = constant_subject("UNKNOWN");
         let expression_range = TextRange::new(file(), 30, 36);
         let second = constant_subject("SECOND");
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             first.clone(),
             RubyType::string(),
@@ -1272,7 +1253,7 @@ mod tests {
 
     #[test]
     fn identical_ruby_types_share_one_internal_value() {
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             constant_subject("FIRST"),
             RubyType::string(),
@@ -1303,7 +1284,7 @@ mod tests {
     fn expression_facts_use_file_local_range_identity_without_subject_buckets() {
         let old_range = TextRange::new(file(), 0, 5);
         let new_range = TextRange::new(file(), 10, 15);
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             TypeSubject::Expression(old_range),
             RubyType::string(),
@@ -1351,7 +1332,7 @@ mod tests {
         let inferred = method_return_subject("Target", "call");
         let contracted = method_return_subject("Contracted", "call");
         let other_file = method_return_subject("Other", "call");
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             inferred.clone(),
             RubyType::Unknown,
@@ -1402,7 +1383,7 @@ mod tests {
     fn replace_file_removes_stale_facts_for_same_file_only() {
         let subject = constant_subject("VALUE");
         let other_subject = constant_subject("OTHER");
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             subject.clone(),
             RubyType::integer(),
@@ -1443,7 +1424,7 @@ mod tests {
     #[test]
     fn replace_file_restores_order_after_append_only_additions() {
         let subject = constant_subject("VALUE");
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             subject.clone(),
             RubyType::string(),
@@ -1480,7 +1461,7 @@ mod tests {
     #[test]
     fn ambiguous_when_same_position_has_multiple_types() {
         let subject = constant_subject("VALUE");
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             subject.clone(),
             RubyType::integer(),
@@ -1504,7 +1485,7 @@ mod tests {
     fn named_file_query_selects_without_materializing_unrelated_expression_facts() {
         let wanted = constant_subject("WANTED");
         let excluded = TextRange::new(file(), 20, 26);
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             wanted.clone(),
             RubyType::integer(),
@@ -1542,7 +1523,7 @@ mod tests {
     fn named_file_query_preserves_same_position_type_ambiguity() {
         let wanted = constant_subject("WANTED");
         let range = TextRange::new(file(), 10, 16);
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             wanted.clone(),
             RubyType::integer(),
@@ -1590,7 +1571,7 @@ mod tests {
             TypeProvenance::Assignment,
         ));
 
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.replace_file(file(), facts);
 
         let target = TextRange::new(file(), 320, 325);
@@ -1616,7 +1597,7 @@ mod tests {
     fn expression_type_at_distinguishes_shared_start_bytes() {
         let short_range = TextRange::new(file(), 0, 5);
         let long_range = TextRange::new(file(), 0, 10);
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.replace_file(
             file(),
             [
@@ -1649,7 +1630,7 @@ mod tests {
     fn append_only_expression_lookup_survives_unsorted_file_index() {
         let later_range = TextRange::new(file(), 40, 45);
         let earlier_range = TextRange::new(file(), 0, 5);
-        let mut store = TypeStore::new();
+        let mut store = TypeStore::default();
         store.add(TypeFact::new(
             TypeSubject::Expression(later_range),
             RubyType::integer(),

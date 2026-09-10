@@ -5,7 +5,7 @@ use ruby_prism::{
     InstanceVariableTargetNode, InstanceVariableWriteNode, Node,
 };
 
-use crate::inference::RubyType;
+use crate::core::RubyType;
 
 use super::FactCollector;
 
@@ -71,7 +71,7 @@ impl FactCollector {
         let range = self.document.prism_location_to_text_range(&name_loc);
         self.direct_push_assignment_type(subject.clone(), inferred_type.clone(), &name_loc);
 
-        self.type_store.add(TypeFact::new(
+        self.facts.types.add(TypeFact::new(
             subject,
             inferred_type,
             range,
@@ -80,11 +80,17 @@ impl FactCollector {
     }
 
     // InstanceVariableWriteNode
-    pub fn process_instance_variable_write_node_entry(&mut self, node: &InstanceVariableWriteNode) {
+    pub(super) fn process_instance_variable_write_node_entry(
+        &mut self,
+        node: &InstanceVariableWriteNode,
+    ) {
         self.declare_instance_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_instance_variable_write_node_exit(&mut self, node: &InstanceVariableWriteNode) {
+    pub(super) fn process_instance_variable_write_node_exit(
+        &mut self,
+        node: &InstanceVariableWriteNode,
+    ) {
         self.bind_instance_variable_write(
             node.name().as_slice(),
             node.name_loc(),
@@ -94,7 +100,7 @@ impl FactCollector {
     }
 
     // InstanceVariableTargetNode
-    pub fn process_instance_variable_target_node_entry(
+    pub(super) fn process_instance_variable_target_node_entry(
         &mut self,
         node: &InstanceVariableTargetNode,
     ) {
@@ -102,7 +108,7 @@ impl FactCollector {
         self.bind_instance_variable_write(node.name().as_slice(), node.location(), None);
     }
 
-    pub fn process_instance_variable_target_node_exit(
+    pub(super) fn process_instance_variable_target_node_exit(
         &mut self,
         _node: &InstanceVariableTargetNode,
     ) {
@@ -110,14 +116,14 @@ impl FactCollector {
     }
 
     // InstanceVariableOrWriteNode
-    pub fn process_instance_variable_or_write_node_entry(
+    pub(super) fn process_instance_variable_or_write_node_entry(
         &mut self,
         node: &InstanceVariableOrWriteNode,
     ) {
         self.declare_instance_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_instance_variable_or_write_node_exit(
+    pub(super) fn process_instance_variable_or_write_node_exit(
         &mut self,
         node: &InstanceVariableOrWriteNode,
     ) {
@@ -130,14 +136,14 @@ impl FactCollector {
     }
 
     // InstanceVariableAndWriteNode
-    pub fn process_instance_variable_and_write_node_entry(
+    pub(super) fn process_instance_variable_and_write_node_entry(
         &mut self,
         node: &InstanceVariableAndWriteNode,
     ) {
         self.declare_instance_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_instance_variable_and_write_node_exit(
+    pub(super) fn process_instance_variable_and_write_node_exit(
         &mut self,
         node: &InstanceVariableAndWriteNode,
     ) {
@@ -150,14 +156,14 @@ impl FactCollector {
     }
 
     // InstanceVariableOperatorWriteNode
-    pub fn process_instance_variable_operator_write_node_entry(
+    pub(super) fn process_instance_variable_operator_write_node_entry(
         &mut self,
         node: &InstanceVariableOperatorWriteNode,
     ) {
         self.declare_instance_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_instance_variable_operator_write_node_exit(
+    pub(super) fn process_instance_variable_operator_write_node_exit(
         &mut self,
         node: &InstanceVariableOperatorWriteNode,
     ) {

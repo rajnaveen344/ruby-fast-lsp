@@ -3,15 +3,15 @@ use crate::core::{
     MethodAvailability, MethodParamFact, MethodParamKind, MethodReturnEquation, NamespaceKind,
     RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
 };
-use crate::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
+use crate::indexer::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use log::warn;
 use ruby_prism::*;
 
+use crate::core::RubyType;
 use crate::inference::r#type::literal::LiteralAnalyzer;
 use crate::inference::type_tracker::{LocalReadType, TypeTracker};
-use crate::inference::RubyType;
 
-use crate::yard::{YardMethodDoc, YardParser, YardTypeConverter};
+use crate::indexer::yard::{YardMethodDoc, YardParser, YardTypeConverter};
 
 use super::FactCollector;
 use std::collections::{HashMap, HashSet};
@@ -30,7 +30,7 @@ impl MethodParamInfo {
 }
 
 impl FactCollector {
-    pub fn process_def_node_entry(&mut self, node: &DefNode) -> bool {
+    pub(super) fn process_def_node_entry(&mut self, node: &DefNode) -> bool {
         let method_name_id = node.name();
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
@@ -78,14 +78,15 @@ impl FactCollector {
         let mut actual_namespace_kind = namespace_kind;
         let definition_fqn = FullyQualifiedName::namespace(definition_namespace.clone());
         let direct_definition_kinds = self
-            .direct_facts
+            .facts
+            .direct
             .graph_nodes
             .iter()
             .filter(|fact| fact.fqn == definition_fqn)
             .map(|fact| fact.kind)
             .collect::<Vec<_>>();
         let definition_is_proven_class = if direct_definition_kinds.is_empty() {
-            crate::engine::AnalysisQuery::new(&self.analysis_engine.read())
+            crate::engine::AnalysisQuery::new(&self.semantics.engine.read())
                 .namespace_node_kind(&definition_fqn)
                 == Some(GraphNodeKind::Class)
         } else {
@@ -220,7 +221,8 @@ impl FactCollector {
         {
             let definition_range = self.direct_range(&full_location);
             for fact in self
-                .direct_facts
+                .facts
+                .direct
                 .methods
                 .iter_mut()
                 .filter(|fact| fact.fqn == fqn && fact.range == definition_range)
@@ -231,7 +233,8 @@ impl FactCollector {
         if let Some(direct_yield_call) = crate::indexer::forwarded_block::direct_yield_call(node) {
             let definition_range = self.direct_range(&full_location);
             for fact in self
-                .direct_facts
+                .facts
+                .direct
                 .methods
                 .iter_mut()
                 .filter(|fact| fact.fqn == fqn && fact.range == definition_range)
@@ -294,7 +297,7 @@ impl FactCollector {
             (None, Vec::new())
         };
         let rbs_param_types = {
-            let engine = self.analysis_engine.read();
+            let engine = self.semantics.engine.read();
             let query = crate::engine::AnalysisQuery::new(&engine);
             params
                 .iter()
@@ -339,7 +342,7 @@ impl FactCollector {
         // outrank the process-wide bundled core signatures. Owner identity is
         // required so instance/singleton homonyms cannot exchange contracts.
         let project_rbs_return_type = {
-            let engine = self.analysis_engine.read();
+            let engine = self.semantics.engine.read();
             crate::engine::AnalysisQuery::new(&engine).rbs_return_contract_type(&fqn, &owner_fqn)
         };
         let rbs_return_type = project_rbs_return_type.or_else(|| {
@@ -406,7 +409,7 @@ impl FactCollector {
                     UnknownReason::UnresolvedMethodReturn,
                 )),
             )
-        } else if !self.resolve_analysis_method_returns {
+        } else if !self.options.resolve_analysis_method_returns {
             (None, TypeProvenance::Inferred, None)
         } else {
             // Install exhaustive flow evidence before the ordinary visitor
@@ -427,14 +430,15 @@ impl FactCollector {
         };
 
         if let Some(return_equation) = return_equation {
-            self.method_return_equations
+            self.method_returns
+                .equations
                 .entry(namespace_parts.clone())
                 .or_default()
                 .push(return_equation);
         }
 
         if let Some(return_type) = &return_type {
-            self.type_store.add(TypeFact::new(
+            self.facts.types.add(TypeFact::new(
                 TypeSubject::MethodReturn(fqn.clone()),
                 return_type.clone(),
                 self.document.prism_location_to_text_range(&full_location),
@@ -445,7 +449,7 @@ impl FactCollector {
             if *param_type == RubyType::Unknown {
                 continue;
             }
-            self.type_store.add(TypeFact::new(
+            self.facts.types.add(TypeFact::new(
                 TypeSubject::Parameter {
                     method: fqn.clone(),
                     name: param_name.clone(),
@@ -479,7 +483,8 @@ impl FactCollector {
         for read in reads {
             let range = self.text_range_from_offsets(read.start_offset, read.end_offset);
             if !read.constant_dependencies.is_empty() {
-                self.constant_type_equations
+                self.constants
+                    .equations
                     .push(ConstantTypeEquation::from_dependencies(
                         ConstantTypeTarget::LocalRead(range),
                         read.constant_dependencies,
@@ -511,9 +516,9 @@ impl FactCollector {
         }
         if !replace_reasons.is_empty() || !remove_reasons.is_empty() {
             for range in remove_reasons {
-                self.expression_unknown_reasons.remove(&range);
+                self.expressions.unknown_reasons.remove(&range);
             }
-            self.expression_unknown_reasons.extend(replace_reasons);
+            self.expressions.unknown_reasons.extend(replace_reasons);
         }
         self.document
             .variable_scopes_mut()
@@ -551,7 +556,7 @@ impl FactCollector {
         }
     }
 
-    pub fn process_def_node_exit(&mut self, _node: &DefNode) {
+    pub(super) fn process_def_node_exit(&mut self, _node: &DefNode) {
         self.scope_tracker.pop_execution_context();
         self.scope_tracker.pop_method_fqn();
         self.scope_tracker.pop_scope_kind();
@@ -564,13 +569,13 @@ impl FactCollector {
         pending: super::InferredMethodContext,
     ) {
         let mut tracker = TypeTracker::new(self.document.content.as_bytes());
-        tracker = tracker.with_analysis_engine(self.analysis_engine.clone());
-        tracker = tracker.with_analysis_query_cache(self.analysis_query_cache.clone());
+        tracker = tracker.with_analysis_engine(self.semantics.engine.clone());
+        tracker = tracker.with_analysis_query_cache(self.semantics.query_cache.clone());
         tracker = tracker.with_local_method_returns(self.local_method_returns_for_tracker());
         tracker = tracker
             .with_local_public_method_candidates(self.local_public_method_candidates_for_tracker());
         tracker = tracker.with_local_superclasses(self.local_superclasses_for_tracker());
-        tracker = tracker.with_yield_param_types(self.yield_param_types_by_method.clone());
+        tracker = tracker.with_yield_param_types(self.flow.method_yields.clone());
         tracker = tracker.with_parameter_types(
             pending
                 .param_types
@@ -578,7 +583,7 @@ impl FactCollector {
                 .map(|(name, ruby_type, _range, _provenance)| (name.clone(), ruby_type.clone()))
                 .collect(),
         );
-        if self.record_local_read_unknown_reasons {
+        if self.options.record_local_read_unknown_reasons {
             tracker = tracker.with_local_read_types();
         }
         if !pending.namespace_parts.is_empty() {
@@ -589,19 +594,21 @@ impl FactCollector {
             pending.fqn.clone(),
             self.local_method_candidates_for_tracker(),
         );
-        self.max_live_shape_aliases = self
+        self.expressions.max_live_shape_aliases = self
+            .expressions
             .max_live_shape_aliases
             .max(tracker.max_live_shape_aliases());
-        if self.record_local_read_unknown_reasons {
+        if self.options.record_local_read_unknown_reasons {
             let reads = tracker.take_local_read_types();
             self.install_local_read_types(reads);
         }
         let immediate = equation.immediate_outcome();
-        self.method_return_equations
+        self.method_returns
+            .equations
             .entry(pending.namespace_parts)
             .or_default()
             .push(equation);
-        self.type_store.add(TypeFact::new(
+        self.facts.types.add(TypeFact::new(
             TypeSubject::MethodReturn(pending.fqn),
             immediate.into_ruby_type(),
             pending.definition_range,
@@ -798,7 +805,8 @@ impl FactCollector {
     fn local_method_returns_for_tracker(
         &self,
     ) -> std::collections::HashMap<FullyQualifiedName, RubyType> {
-        self.type_store
+        self.facts
+            .types
             .method_return_types()
             .map(|(fqn, ruby_type)| (fqn.clone(), ruby_type.clone()))
             .collect()
@@ -807,19 +815,20 @@ impl FactCollector {
     fn local_method_candidates_for_tracker(
         &self,
     ) -> std::sync::Arc<std::collections::HashSet<FullyQualifiedName>> {
-        std::sync::Arc::clone(&self.local_method_candidates)
+        std::sync::Arc::clone(&self.semantics.method_candidates)
     }
 
     fn local_public_method_candidates_for_tracker(
         &self,
     ) -> std::sync::Arc<std::collections::HashSet<FullyQualifiedName>> {
-        std::sync::Arc::clone(&self.local_public_method_candidates)
+        std::sync::Arc::clone(&self.semantics.public_method_candidates)
     }
 
     fn local_superclasses_for_tracker(
         &self,
     ) -> std::collections::HashMap<FullyQualifiedName, FullyQualifiedName> {
-        self.direct_facts
+        self.facts
+            .direct
             .graph_edges
             .iter()
             .filter(|edge| edge.kind == GraphEdgeKind::Superclass)

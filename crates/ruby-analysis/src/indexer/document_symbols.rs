@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::{NamespaceKind, RubyConstant, SourceRange};
-use crate::{LVScopeKind, RubyDocument, ScopeTracker};
+use crate::indexer::{LVScopeKind, RubyDocument, ScopeTracker};
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_write_node, visit_def_node,
     visit_module_node, visit_singleton_class_node, CallNode, ClassNode, ConstantWriteNode, DefNode,

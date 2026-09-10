@@ -3,7 +3,7 @@ use crate::check::{
 };
 use crate::indexer::file_processor::FileProcessor;
 use crate::test::harness::FakeEditor;
-use ruby_analysis::{RubyType, UnknownReason};
+use ruby_analysis::core::{RubyType, UnknownReason};
 use tower_lsp::lsp_types::{InlayHintLabel, NumberOrString, Url};
 
 fn hover_text(hover: tower_lsp::lsp_types::Hover) -> String {

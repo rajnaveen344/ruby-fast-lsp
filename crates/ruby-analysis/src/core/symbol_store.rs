@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::file_owned_index::place_appended_file_facts;
 use super::memory_estimate::{map_table_bytes, vec_payload_bytes};
-use crate::{FqnId, FullyQualifiedName, SourceFileId, TextRange};
+use crate::core::{FqnId, FullyQualifiedName, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SymbolKind {
@@ -108,20 +108,6 @@ impl SymbolFactId {
 }
 
 impl SymbolStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add(&mut self, fact: StoredSymbolFact) {
-        let file_id = fact.range.file_id;
-        let fqn = fact.fqn;
-        let id = self.insert_fact(fact);
-        self.facts_by_fqn.entry(fqn).or_default().push(id);
-        sort_symbol_ids(&self.facts, self.facts_by_fqn.get_mut(&fqn).unwrap());
-        self.facts_by_file.entry(file_id).or_default().push(id);
-        sort_symbol_ids_by_file(&self.facts, self.facts_by_file.get_mut(&file_id).unwrap());
-    }
-
     pub fn facts_for(&self, fqn: FqnId) -> Vec<StoredSymbolFact> {
         self.facts_by_fqn
             .get(&fqn)
@@ -152,14 +138,14 @@ impl SymbolStore {
             .collect()
     }
 
-    pub fn facts_in_file(&self, file_id: crate::SourceFileId) -> Vec<StoredSymbolFact> {
+    pub fn facts_in_file(&self, file_id: crate::core::SourceFileId) -> Vec<StoredSymbolFact> {
         self.facts_by_file
             .get(&file_id)
             .map(|ids| self.clone_facts(ids))
             .unwrap_or_default()
     }
 
-    pub fn remove_file(&mut self, file_id: crate::SourceFileId) {
+    pub fn remove_file(&mut self, file_id: crate::core::SourceFileId) {
         let Some(stale_ids) = self.facts_by_file.remove(&file_id) else {
             return;
         };
@@ -179,7 +165,7 @@ impl SymbolStore {
 
     pub fn replace_file(
         &mut self,
-        file_id: crate::SourceFileId,
+        file_id: crate::core::SourceFileId,
         facts: impl IntoIterator<Item = StoredSymbolFact>,
     ) {
         self.remove_file(file_id);
@@ -324,7 +310,7 @@ fn sort_symbol_ids_by_file(facts: &[Option<StoredSymbolFact>], ids: &mut [Symbol
 
 #[cfg(test)]
 mod tests {
-    use crate::{FqnId, SourceFileId, TextRange};
+    use crate::core::{FqnId, SourceFileId, TextRange};
 
     use super::*;
 
@@ -336,17 +322,23 @@ mod tests {
     fn replace_file_removes_stale_symbol_facts_for_same_file_only() {
         let fqn = FqnId(1);
         let other_fqn = FqnId(2);
-        let mut store = SymbolStore::new();
-        store.add(StoredSymbolFact::new(
-            fqn,
-            SymbolKind::Constant,
-            TextRange::new(file(), 0, 8),
-        ));
-        store.add(StoredSymbolFact::new(
-            other_fqn,
-            SymbolKind::Constant,
-            TextRange::new(SourceFileId(2), 0, 8),
-        ));
+        let mut store = SymbolStore::default();
+        store.replace_file(
+            file(),
+            [StoredSymbolFact::new(
+                fqn,
+                SymbolKind::Constant,
+                TextRange::new(file(), 0, 8),
+            )],
+        );
+        store.replace_file(
+            SourceFileId(2),
+            [StoredSymbolFact::new(
+                other_fqn,
+                SymbolKind::Constant,
+                TextRange::new(SourceFileId(2), 0, 8),
+            )],
+        );
 
         store.replace_file(
             file(),

@@ -1,9 +1,14 @@
 //! Editor-agnostic Ruby analysis engine.
 //!
-//! This crate owns analysis state that should be shared by editor adapters and
-//! agent-facing tools. It intentionally has no LSP, parser, or indexer
-//! dependency; those layers feed facts into this engine and query deterministic
-//! results back out.
+//! [`AnalysisEngine`] owns one project's semantic state. Callers register source,
+//! replace [`FileFacts`], and read domain results through [`AnalysisQuery`].
+//! [`TypeQuery`] provides a file-scoped view of existing type facts.
+//!
+//! Resolution coordinates the constant and method-return equation solvers in
+//! [`crate::inference`], then stores their outcomes through the same file-owned
+//! lifecycle. The engine owns lookup policy and solved state; inference owns
+//! type rules. Parsing, scheduling, and editor protocol conversion stay outside
+//! this module. Stores and their compact representations are internal.
 
 mod debug;
 mod debug_types;
@@ -20,10 +25,12 @@ mod namespace_tree_types;
 mod query;
 mod resolution;
 mod state;
+mod type_query;
 mod types;
 mod workspace_symbol_types;
 mod workspace_symbols;
 
+pub use debug::reference_storage_sizes;
 pub use debug_types::{
     AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
     InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
@@ -53,5 +60,6 @@ pub use state::{
     SemanticExportFingerprint, SemanticResultFingerprint, SourceFile, SourceFileInput,
     SourceFileSnapshot,
 };
+pub use type_query::TypeQuery;
 pub use types::AnalysisQueryCache;
 pub use workspace_symbol_types::WorkspaceSymbolMatch;

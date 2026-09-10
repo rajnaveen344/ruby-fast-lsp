@@ -1,14 +1,7 @@
 use crate::core::NamespaceKind;
 use ruby_prism::{ConstantPathNode, Location as PrismLocation, Node};
 
-use crate::constant_path_is_absolute;
-use crate::core::{FullyQualifiedName, RubyConstant};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MixinRef {
-    pub parts: Vec<RubyConstant>,
-    pub absolute: bool,
-}
+use crate::core::RubyConstant;
 
 /// Recursively collect all namespaces from a ConstantPathNode
 /// Eg: `Core::Platform::API::Users` will return
@@ -38,62 +31,6 @@ pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) 
     }
 }
 
-/// Create a MixinRef from a ConstantReadNode or ConstantPathNode.
-/// This captures the textual representation of the constant without trying to resolve it,
-/// which is deferred until a capability requests the ancestor chain.
-///
-pub fn mixin_ref_from_node(node: &Node) -> Option<MixinRef> {
-    if let Some(n) = node.as_constant_read_node() {
-        let name = utf8_str(n.name().as_slice());
-        if let Ok(constant) = RubyConstant::new(name) {
-            Some(MixinRef {
-                parts: vec![constant],
-                absolute: false,
-            })
-        } else {
-            None
-        }
-    } else if let Some(n) = node.as_constant_path_node() {
-        let mut parts = vec![];
-        collect_namespaces(&n, &mut parts);
-        let absolute = constant_path_is_absolute(&n);
-        Some(MixinRef { parts, absolute })
-    } else {
-        None
-    }
-}
-
-pub fn fqn_from_node(
-    node: &Node,
-    current_namespace: &[RubyConstant],
-) -> Option<FullyQualifiedName> {
-    if let Some(n) = node.as_constant_read_node() {
-        let name = utf8_str(n.name().as_slice());
-        let mut fqn_parts = current_namespace.to_vec();
-        if let Ok(constant) = RubyConstant::new(name) {
-            fqn_parts.push(constant);
-            Some(FullyQualifiedName::constant(fqn_parts))
-        } else {
-            None
-        }
-    } else if let Some(n) = node.as_constant_path_node() {
-        let mut collected_parts = vec![];
-        collect_namespaces(&n, &mut collected_parts);
-
-        let absolute = n.parent().is_none();
-        let final_parts = if absolute {
-            collected_parts
-        } else {
-            let mut parts = current_namespace.to_vec();
-            parts.extend(collected_parts);
-            parts
-        };
-        Some(FullyQualifiedName::constant(final_parts))
-    } else {
-        None
-    }
-}
-
 /// Get the body location for a node that has an optional body.
 /// If the body exists, returns the body's location; otherwise returns the node's location.
 /// This pattern is used consistently across ClassNode, ModuleNode, and DefNode visitors.
@@ -111,58 +48,8 @@ pub fn get_body_offsets(
     }
 }
 
-/// Determine the NamespaceKind for a method based on its receiver.
-/// Returns (NamespaceKind, should_skip_method) where:
-/// - NamespaceKind::Instance for instance methods (no receiver or in singleton context)
-/// - NamespaceKind::Singleton for class methods (self receiver or matching constant receiver)
-/// - should_skip_method is true if the receiver type is unsupported
-///
-/// # Arguments
-/// * `receiver` - Optional receiver node from DefNode.receiver()
-/// * `current_namespace` - The current namespace stack for validating constant receivers
-/// * `in_singleton` - Whether we're currently in a singleton context (class << self)
-pub fn get_method_namespace_kind(
-    receiver: Option<Node>,
-    current_namespace: &[RubyConstant],
-    in_singleton: bool,
-) -> (NamespaceKind, bool) {
-    let mut namespace_kind = NamespaceKind::Instance;
-    let mut skip_method = false;
-
-    if let Some(receiver) = receiver {
-        if receiver.as_self_node().is_some() {
-            namespace_kind = NamespaceKind::Singleton;
-        } else if let Some(read_node) = receiver.as_constant_read_node() {
-            let recv_name = utf8_str(read_node.name().as_slice());
-            // Current namespace last element (if any) should match receiver constant
-            let last_ns = current_namespace.last();
-            if let Some(last) = last_ns {
-                if last.as_str() == recv_name {
-                    namespace_kind = NamespaceKind::Singleton;
-                } else {
-                    skip_method = true;
-                }
-            } else {
-                // No enclosing namespace -> unsupported
-                skip_method = true;
-            }
-        } else if receiver.as_constant_path_node().is_some() {
-            // For reference/identifier visitors, any constant receiver = Singleton
-            namespace_kind = NamespaceKind::Singleton;
-        } else {
-            // Other receiver types not supported
-            skip_method = true;
-        }
-    } else if in_singleton {
-        namespace_kind = NamespaceKind::Singleton;
-    }
-
-    (namespace_kind, skip_method)
-}
-
-/// Simplified version of get_method_namespace_kind for visitors that don't need
-/// to validate constant receivers (fact_collector, identifier_visitor).
-/// Returns NamespaceKind based on presence of receiver.
+/// Classify a method receiver for cursor-target discovery.
+/// Constant receivers and `self` select the singleton namespace.
 pub fn get_method_namespace_kind_simple(receiver: Option<&Node>) -> NamespaceKind {
     if let Some(receiver) = receiver {
         if receiver.as_self_node().is_some()

@@ -793,7 +793,7 @@ impl JrubyImportProvider {
         for argument in arguments.arguments().iter() {
             collect_static_imports(visitor, &argument, &mut interfaces);
         }
-        let source = FullyQualifiedName::namespace(visitor.scope_tracker.get_ns_stack());
+        let source = FullyQualifiedName::namespace(visitor.scope_tracker().get_ns_stack());
         for interface in interfaces {
             if !is_java_class_name(&interface.name) {
                 continue;
@@ -833,7 +833,7 @@ impl JrubyImportProvider {
                     })
                     .collect::<Vec<_>>(),
             );
-            visitor.direct_facts.graph_edges.push(GraphEdgeFact::new(
+            visitor.add_graph_edge_fact(GraphEdgeFact::new(
                 source.clone(),
                 target,
                 GraphEdgeKind::Include,
@@ -921,7 +921,8 @@ impl JrubyImportProvider {
             None
         };
 
-        let current_namespace = FullyQualifiedName::namespace(visitor.scope_tracker.get_ns_stack());
+        let current_namespace =
+            FullyQualifiedName::namespace(visitor.scope_tracker().get_ns_stack());
         let Some(proxy) = current_runtime_proxy(visitor).or_else(|| {
             self.proxy_to_internal
                 .contains_key(&current_namespace.to_string())
@@ -1171,35 +1172,33 @@ impl JrubyImportProvider {
             method_name_node.location().start_offset(),
             method_name_node.location().end_offset(),
         );
-        visitor
-            .reference_candidates
-            .push(ReferenceCandidate::method(
-                method_range,
-                MethodReferenceCandidate {
-                    owner: owner_parts,
-                    owner_kind: if selected.method.is_static() {
-                        NamespaceKind::Singleton
-                    } else {
-                        NamespaceKind::Instance
-                    },
-                    method: ruby_method,
-                    is_super: false,
-                    access: MethodReferenceAccess::VisibilityBypass,
-                    caller: visitor.scope_tracker.current_method_fqn().cloned(),
-                    call_expression_range: None,
-                    preferred_definition_range: self
-                        .preferred_method_definition_range(&selected.owner, &selected.method),
-                    diagnostics: MethodReferenceDiagnostics {
-                        diagnostic_range: method_range,
-                        receiver_label: Some(proxy.to_string()),
-                        receiver_expression_range: None,
-                        receiver_type: None,
-                        diagnose_unresolved: false,
-                        allow_unindexed_owner: false,
-                        signature: None,
-                    },
+        visitor.add_reference_candidate(ReferenceCandidate::method(
+            method_range,
+            MethodReferenceCandidate {
+                owner: owner_parts,
+                owner_kind: if selected.method.is_static() {
+                    NamespaceKind::Singleton
+                } else {
+                    NamespaceKind::Instance
                 },
-            ));
+                method: ruby_method,
+                is_super: false,
+                access: MethodReferenceAccess::VisibilityBypass,
+                caller: visitor.scope_tracker().current_method_fqn().cloned(),
+                call_expression_range: None,
+                preferred_definition_range: self
+                    .preferred_method_definition_range(&selected.owner, &selected.method),
+                diagnostics: MethodReferenceDiagnostics {
+                    diagnostic_range: method_range,
+                    receiver_label: Some(proxy.to_string()),
+                    receiver_expression_range: None,
+                    receiver_type: None,
+                    diagnose_unresolved: false,
+                    allow_unindexed_owner: false,
+                    signature: None,
+                },
+            },
+        ));
 
         let return_type = if dispatch_name == "java_send" {
             ruby_type_for_jvm(&selected.descriptor.returns)
@@ -1508,30 +1507,28 @@ impl JrubyImportProvider {
                 &descriptor.returns,
             )),
         );
-        visitor
-            .reference_candidates
-            .push(ReferenceCandidate::method(
-                old_name_range,
-                MethodReferenceCandidate {
-                    owner: proxy.namespace_parts().to_vec(),
-                    owner_kind: NamespaceKind::Instance,
-                    method: old_method,
-                    is_super: false,
-                    access: MethodReferenceAccess::Normal,
-                    caller: visitor.scope_tracker.current_method_fqn().cloned(),
-                    call_expression_range: None,
-                    preferred_definition_range: None,
-                    diagnostics: MethodReferenceDiagnostics {
-                        diagnostic_range: old_name_range,
-                        receiver_label: None,
-                        receiver_expression_range: None,
-                        receiver_type: None,
-                        diagnose_unresolved: false,
-                        allow_unindexed_owner: false,
-                        signature: None,
-                    },
+        visitor.add_reference_candidate(ReferenceCandidate::method(
+            old_name_range,
+            MethodReferenceCandidate {
+                owner: proxy.namespace_parts().to_vec(),
+                owner_kind: NamespaceKind::Instance,
+                method: old_method,
+                is_super: false,
+                access: MethodReferenceAccess::Normal,
+                caller: visitor.scope_tracker().current_method_fqn().cloned(),
+                call_expression_range: None,
+                preferred_definition_range: None,
+                diagnostics: MethodReferenceDiagnostics {
+                    diagnostic_range: old_name_range,
+                    receiver_label: None,
+                    receiver_expression_range: None,
+                    receiver_type: None,
+                    diagnose_unresolved: false,
+                    allow_unindexed_owner: false,
+                    signature: None,
                 },
-            ));
+            },
+        ));
         let alias_fqn = FullyQualifiedName::method(proxy.namespace_parts().to_vec(), new_method);
         let return_type = ruby_type_for_jvm(&descriptor.returns);
         let fact = TypeFact::new(
@@ -1540,8 +1537,8 @@ impl JrubyImportProvider {
             range,
             TypeProvenance::Runtime,
         );
-        visitor.type_store.add(fact.clone());
-        visitor.direct_facts.types.push(fact);
+        visitor.add_type_fact(fact.clone());
+        visitor.add_direct_type_fact(fact);
     }
 
     fn add_package(&self, visitor: &mut FactCollector, package: StaticJavaImport) {
@@ -1619,7 +1616,7 @@ impl JrubyImportProvider {
              Fix: preserve the parsed internal name as the catalog key."
         );
 
-        let mut alias_parts = visitor.scope_tracker.get_ns_stack();
+        let mut alias_parts = visitor.scope_tracker().get_ns_stack();
         let alias_name = alias
             .as_deref()
             .unwrap_or_else(|| java_name.imported_constant());
@@ -1638,7 +1635,7 @@ impl JrubyImportProvider {
         let alias_fqn = FullyQualifiedName::constant(alias_parts);
         let declaration_range = import.range;
         if emit_symbol {
-            visitor.direct_facts.symbols.push(
+            visitor.add_symbol_fact(
                 SymbolFact::new(alias_fqn.clone(), SymbolKind::Constant, declaration_range)
                     .with_name_range(import.name_range),
             );
@@ -1656,21 +1653,19 @@ impl JrubyImportProvider {
             })
             .collect();
         let proxy_fqn = FullyQualifiedName::constant(proxy_parts);
-        visitor
-            .reference_candidates
-            .push(ReferenceCandidate::resolved(
-                import.name_range,
-                proxy_fqn.clone(),
-                visitor.scope_tracker.current_method_fqn().cloned(),
-            ));
+        visitor.add_reference_candidate(ReferenceCandidate::resolved(
+            import.name_range,
+            proxy_fqn.clone(),
+            visitor.scope_tracker().current_method_fqn().cloned(),
+        ));
         let type_fact = TypeFact::new(
             TypeSubject::Constant(alias_fqn),
             RubyType::ClassReference(proxy_fqn),
             declaration_range,
             TypeProvenance::Runtime,
         );
-        visitor.type_store.add(type_fact.clone());
-        visitor.direct_facts.types.push(type_fact);
+        visitor.add_type_fact(type_fact.clone());
+        visitor.add_direct_type_fact(type_fact);
     }
 }
 
@@ -2015,10 +2010,10 @@ fn ruby_type_for_to_java_scalar(ty: &JvmType) -> RubyType {
 
 fn current_runtime_proxy(visitor: &FactCollector) -> Option<FullyQualifiedName> {
     let subject = TypeSubject::Constant(FullyQualifiedName::constant(
-        visitor.scope_tracker.get_ns_stack(),
+        visitor.scope_tracker().get_ns_stack(),
     ));
     let direct = visitor
-        .direct_facts
+        .direct_facts()
         .types
         .iter()
         .rev()
@@ -2026,8 +2021,7 @@ fn current_runtime_proxy(visitor: &FactCollector) -> Option<FullyQualifiedName> 
         .map(|fact| fact.ruby_type.clone());
     let local = direct.or_else(|| {
         visitor
-            .type_store
-            .facts_for(&subject)
+            .type_facts_for(&subject)
             .into_iter()
             .rev()
             .find(|fact| fact.provenance == TypeProvenance::Runtime)
@@ -2035,7 +2029,7 @@ fn current_runtime_proxy(visitor: &FactCollector) -> Option<FullyQualifiedName> 
     });
     let ruby_type = local.or_else(|| {
         visitor
-            .analysis_engine
+            .analysis_engine()
             .read()
             .type_facts_for(&subject)
             .into_iter()
@@ -2503,11 +2497,11 @@ mod tests {
         let alias =
             FullyQualifiedName::try_from("Admin::String").expect("fixture alias FQN must be valid");
         assert!(collector
-            .direct_facts
+            .direct_facts()
             .symbols
             .iter()
             .any(|fact| fact.fqn == alias && fact.kind == SymbolKind::Constant));
-        assert!(collector.direct_facts.types.iter().any(|fact| {
+        assert!(collector.direct_facts().types.iter().any(|fact| {
             fact.subject == TypeSubject::Constant(alias.clone())
                 && fact.ruby_type
                     == RubyType::ClassReference(
@@ -2516,14 +2510,14 @@ mod tests {
                     )
                 && fact.provenance == TypeProvenance::Runtime
         }));
-        assert!(collector.reference_candidates.iter().any(|candidate| {
+        assert!(collector.reference_candidates().iter().any(|candidate| {
             matches!(
                 &candidate.kind,
                 ReferenceCandidateKind::Resolved { target, .. }
                     if *target == FullyQualifiedName::try_from("Java::JavaLang::String").unwrap()
             )
         }));
-        assert!(collector.analysis_diagnostics.is_empty());
+        assert!(collector.diagnostics().is_empty());
     }
 
     #[test]
@@ -2531,7 +2525,7 @@ mod tests {
         let collector = collect("INSTANCE = java.lang.String.new\n", &["java/lang/String"]);
         let instance =
             FullyQualifiedName::try_from("INSTANCE").expect("fixture constant must be valid");
-        assert!(collector.direct_facts.types.iter().any(|fact| {
+        assert!(collector.direct_facts().types.iter().any(|fact| {
             fact.subject == TypeSubject::Constant(instance.clone())
                 && fact.ruby_type
                     == RubyType::Class(
@@ -2559,7 +2553,7 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
         assert!(collector
-            .direct_facts
+            .direct_facts()
             .symbols
             .iter()
             .any(|fact| fact.fqn == proxy && fact.kind == SymbolKind::Class));
@@ -2609,18 +2603,18 @@ mod tests {
             ruby_analysis::core::RubyMethod::new("simple_add").unwrap(),
         );
         let method = collector
-            .direct_facts
+            .direct_facts()
             .methods
             .iter()
             .find(|fact| fact.fqn == alias)
             .expect("java_alias must define the alias on the Java proxy");
         assert_eq!(method.params, vec!["index", "value"]);
-        assert!(collector.direct_facts.types.iter().any(|fact| {
+        assert!(collector.direct_facts().types.iter().any(|fact| {
             fact.subject == TypeSubject::MethodReturn(alias.clone())
                 && fact.ruby_type == RubyType::boolean()
                 && fact.provenance == TypeProvenance::Runtime
         }));
-        assert!(collector.analysis_diagnostics.is_empty());
+        assert!(collector.diagnostics().is_empty());
     }
 
     #[test]
@@ -2698,7 +2692,7 @@ mod tests {
         );
         let result =
             FullyQualifiedName::try_from("RESULT").expect("fixture result constant must be valid");
-        assert!(collector.direct_facts.types.iter().any(|fact| {
+        assert!(collector.direct_facts().types.iter().any(|fact| {
             fact.subject == TypeSubject::Constant(result.clone())
                 && fact.ruby_type
                     == RubyType::Class(
@@ -2707,7 +2701,7 @@ mod tests {
                 && fact.provenance == TypeProvenance::Runtime
         }));
         let (selected, selected_range) = collector
-            .reference_candidates
+            .reference_candidates()
             .iter()
             .find_map(|candidate| match &candidate.kind {
                 ReferenceCandidateKind::Method {
@@ -2737,7 +2731,7 @@ mod tests {
             Some(preferred_range),
             "java_send must retain the exact source/decompiled range for the selected JVM descriptor"
         );
-        assert!(collector.analysis_diagnostics.is_empty());
+        assert!(collector.diagnostics().is_empty());
     }
 
     #[test]
@@ -2846,7 +2840,7 @@ mod tests {
             let constant = FullyQualifiedName::try_from(constant).unwrap();
             let expected = RubyType::Class(FullyQualifiedName::try_from(expected).unwrap());
             assert!(
-                collector.direct_facts.types.iter().any(|fact| {
+                collector.direct_facts().types.iter().any(|fact| {
                     fact.subject == TypeSubject::Constant(constant.clone())
                         && fact.ruby_type == expected
                         && fact.provenance == TypeProvenance::Runtime
@@ -2856,7 +2850,7 @@ mod tests {
         }
         assert_eq!(
             collector
-                .reference_candidates
+                .reference_candidates()
                 .iter()
                 .filter(|candidate| matches!(
                     &candidate.kind,
@@ -2866,7 +2860,7 @@ mod tests {
                 .count(),
             3
         );
-        assert!(collector.analysis_diagnostics.is_empty());
+        assert!(collector.diagnostics().is_empty());
     }
 
     #[test]
@@ -2892,7 +2886,7 @@ mod tests {
         ] {
             let constant = FullyQualifiedName::try_from(constant).unwrap();
             assert!(
-                collector.direct_facts.types.iter().any(|fact| {
+                collector.direct_facts().types.iter().any(|fact| {
                     fact.subject == TypeSubject::Constant(constant.clone())
                         && fact.ruby_type == expected
                         && fact.provenance == TypeProvenance::Runtime
@@ -2900,7 +2894,7 @@ mod tests {
                 "{constant} must have type {expected}"
             );
         }
-        assert!(collector.analysis_diagnostics.is_empty());
+        assert!(collector.diagnostics().is_empty());
     }
 
     #[test]
@@ -2929,13 +2923,13 @@ mod tests {
         );
         for source in ["Worker", "IncludedWorker"] {
             let source = FullyQualifiedName::namespace(vec![RubyConstant::new(source).unwrap()]);
-            assert!(collector.direct_facts.graph_edges.iter().any(|edge| {
+            assert!(collector.direct_facts().graph_edges.iter().any(|edge| {
                 edge.source == source
                     && edge.target == target
                     && edge.kind == ruby_analysis::core::GraphEdgeKind::Include
             }));
         }
-        assert!(collector.analysis_diagnostics.is_empty());
+        assert!(collector.diagnostics().is_empty());
     }
 
     #[test]
@@ -2944,7 +2938,7 @@ mod tests {
 
         assert!(
             collector
-                .analysis_diagnostics
+                .diagnostics()
                 .iter()
                 .all(|diagnostic| diagnostic.code != "unresolved-java-interface"),
             "ordinary Ruby include arguments must not be interpreted as JRuby interface names"
@@ -2959,9 +2953,9 @@ mod tests {
              java_package dynamic_package\n",
             &[],
         );
-        assert_eq!(collector.analysis_diagnostics.len(), 1);
+        assert_eq!(collector.diagnostics().len(), 1);
         assert_eq!(
-            collector.analysis_diagnostics[0].code,
+            collector.diagnostics()[0].code,
             "unsupported-jruby-java-package"
         );
     }
@@ -2973,16 +2967,16 @@ mod tests {
             &["java/lang/String", "java/util/Map$Entry"],
         );
         assert!(collector
-            .direct_facts
+            .direct_facts()
             .symbols
             .iter()
             .any(|fact| fact.fqn == FullyQualifiedName::try_from("String").unwrap()));
         assert!(collector
-            .direct_facts
+            .direct_facts()
             .symbols
             .iter()
             .any(|fact| fact.fqn == FullyQualifiedName::try_from("Entry").unwrap()));
-        assert!(collector.direct_facts.types.iter().any(|fact| {
+        assert!(collector.direct_facts().types.iter().any(|fact| {
             fact.ruby_type
                 == RubyType::ClassReference(
                     FullyQualifiedName::try_from("Java::JavaUtil::Map::Entry").unwrap(),
@@ -3001,18 +2995,18 @@ mod tests {
         let alias =
             FullyQualifiedName::try_from("Types::JString").expect("fixture alias must be valid");
         assert!(collector
-            .direct_facts
+            .direct_facts()
             .symbols
             .iter()
             .any(|fact| fact.fqn == alias && fact.kind == SymbolKind::Constant));
-        assert!(collector.direct_facts.types.iter().any(|fact| {
+        assert!(collector.direct_facts().types.iter().any(|fact| {
             fact.subject == TypeSubject::Constant(alias.clone())
                 && fact.ruby_type
                     == RubyType::ClassReference(
                         FullyQualifiedName::try_from("Java::JavaLang::String").unwrap(),
                     )
         }));
-        assert!(collector.analysis_diagnostics.is_empty());
+        assert!(collector.diagnostics().is_empty());
     }
 
     #[test]
@@ -3023,7 +3017,7 @@ mod tests {
             &["java/lang/String"],
         );
         let codes = collector
-            .analysis_diagnostics
+            .diagnostics()
             .iter()
             .map(|diagnostic| diagnostic.code.as_str())
             .collect::<Vec<_>>();
@@ -3031,7 +3025,7 @@ mod tests {
             codes,
             vec!["unresolved-java-import", "unsupported-jruby-import-alias"]
         );
-        assert!(collector.direct_facts.symbols.is_empty());
+        assert!(collector.direct_facts().symbols.is_empty());
     }
 
     #[test]
@@ -3050,7 +3044,7 @@ mod tests {
             ("Util::Map", "Java::JavaUtil::Map"),
             ("Util::String", "Java::JavaLang::String"),
         ] {
-            assert!(collector.direct_facts.types.iter().any(|fact| {
+            assert!(collector.direct_facts().types.iter().any(|fact| {
                 fact.subject == TypeSubject::Constant(FullyQualifiedName::try_from(alias).unwrap())
                     && fact.ruby_type
                         == RubyType::ClassReference(FullyQualifiedName::try_from(proxy).unwrap())
@@ -3058,13 +3052,13 @@ mod tests {
         }
         assert!(
             collector
-                .direct_facts
+                .direct_facts()
                 .symbols
                 .iter()
                 .all(|fact| fact.kind != SymbolKind::Constant),
             "include_package constants are runtime const_missing results, not source declarations"
         );
-        assert!(collector.analysis_diagnostics.is_empty());
+        assert!(collector.diagnostics().is_empty());
     }
 
     #[test]
@@ -3197,7 +3191,7 @@ mod tests {
         );
         assert!(
             collector
-                .direct_facts
+                .direct_facts()
                 .types
                 .iter()
                 .all(|fact| match &fact.ruby_type {
@@ -3214,7 +3208,7 @@ mod tests {
                     | RubyType::Unknown => true,
                 }),
             "ordinary Ruby call chains must not receive JRuby proxy expression types: {:?}",
-            collector.direct_facts.types
+            collector.direct_facts().types
         );
     }
 

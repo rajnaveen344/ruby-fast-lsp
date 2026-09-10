@@ -5,7 +5,7 @@ use ruby_prism::{
     GlobalVariableTargetNode, GlobalVariableWriteNode, Node,
 };
 
-use crate::inference::RubyType;
+use crate::core::RubyType;
 
 use super::FactCollector;
 
@@ -57,7 +57,7 @@ impl FactCollector {
         let range = self.document.prism_location_to_text_range(&name_loc);
         self.direct_push_assignment_type(subject.clone(), inferred_type.clone(), &name_loc);
 
-        self.type_store.add(TypeFact::new(
+        self.facts.types.add(TypeFact::new(
             subject,
             inferred_type,
             range,
@@ -66,11 +66,17 @@ impl FactCollector {
     }
 
     // GlobalVariableWriteNode
-    pub fn process_global_variable_write_node_entry(&mut self, node: &GlobalVariableWriteNode) {
+    pub(super) fn process_global_variable_write_node_entry(
+        &mut self,
+        node: &GlobalVariableWriteNode,
+    ) {
         self.declare_global_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_global_variable_write_node_exit(&mut self, node: &GlobalVariableWriteNode) {
+    pub(super) fn process_global_variable_write_node_exit(
+        &mut self,
+        node: &GlobalVariableWriteNode,
+    ) {
         self.bind_global_variable_write(
             node.name().as_slice(),
             node.name_loc(),
@@ -80,24 +86,33 @@ impl FactCollector {
     }
 
     // GlobalVariableTargetNode
-    pub fn process_global_variable_target_node_entry(&mut self, node: &GlobalVariableTargetNode) {
+    pub(super) fn process_global_variable_target_node_entry(
+        &mut self,
+        node: &GlobalVariableTargetNode,
+    ) {
         self.declare_global_variable_write(node.name().as_slice(), node.location());
         self.bind_global_variable_write(node.name().as_slice(), node.location(), None);
     }
 
-    pub fn process_global_variable_target_node_exit(&mut self, _node: &GlobalVariableTargetNode) {
+    pub(super) fn process_global_variable_target_node_exit(
+        &mut self,
+        _node: &GlobalVariableTargetNode,
+    ) {
         self.finish_nonlocal_write();
     }
 
     // GlobalVariableOrWriteNode
-    pub fn process_global_variable_or_write_node_entry(
+    pub(super) fn process_global_variable_or_write_node_entry(
         &mut self,
         node: &GlobalVariableOrWriteNode,
     ) {
         self.declare_global_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_global_variable_or_write_node_exit(&mut self, node: &GlobalVariableOrWriteNode) {
+    pub(super) fn process_global_variable_or_write_node_exit(
+        &mut self,
+        node: &GlobalVariableOrWriteNode,
+    ) {
         self.bind_global_variable_write(
             node.name().as_slice(),
             node.name_loc(),
@@ -107,14 +122,14 @@ impl FactCollector {
     }
 
     // GlobalVariableAndWriteNode
-    pub fn process_global_variable_and_write_node_entry(
+    pub(super) fn process_global_variable_and_write_node_entry(
         &mut self,
         node: &GlobalVariableAndWriteNode,
     ) {
         self.declare_global_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_global_variable_and_write_node_exit(
+    pub(super) fn process_global_variable_and_write_node_exit(
         &mut self,
         node: &GlobalVariableAndWriteNode,
     ) {
@@ -127,14 +142,14 @@ impl FactCollector {
     }
 
     // GlobalVariableOperatorWriteNode
-    pub fn process_global_variable_operator_write_node_entry(
+    pub(super) fn process_global_variable_operator_write_node_entry(
         &mut self,
         node: &GlobalVariableOperatorWriteNode,
     ) {
         self.declare_global_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_global_variable_operator_write_node_exit(
+    pub(super) fn process_global_variable_operator_write_node_exit(
         &mut self,
         node: &GlobalVariableOperatorWriteNode,
     ) {

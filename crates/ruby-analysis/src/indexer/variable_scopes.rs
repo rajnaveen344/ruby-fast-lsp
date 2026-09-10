@@ -19,7 +19,7 @@ use crate::core::{RubyType, TextRange};
 use std::cell::Cell;
 
 pub type LVScopeId = usize;
-pub use crate::LocalScopeKind as LVScopeKind;
+pub use crate::indexer::LocalScopeKind as LVScopeKind;
 
 /// A tree structure representing the nesting of local variable scopes.
 /// Each node represents a scope with its variables and relationships.

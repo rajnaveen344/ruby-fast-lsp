@@ -3,6 +3,7 @@
 //! Wraps constant and method completion logic behind `EngineQuery`,
 //! keeping lock management in one place.
 
+use ruby_analysis::core::RubyType;
 use tower_lsp::lsp_types::{CompletionItem, Position};
 use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
@@ -10,7 +11,7 @@ use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
 use ruby_analysis::engine::{ConstantLookupRequest, ConstantMatch, MethodMatch};
 use ruby_analysis::indexer::RubyPrismAnalyzer;
-use ruby_analysis::inference::{completion::rbs_method_matches_for_type, RubyType};
+use ruby_analysis::inference::completion::rbs_method_matches_for_type;
 
 use super::EngineQuery;
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::memory_estimate::{map_table_bytes, string_heap_bytes, vec_payload_bytes};
-use crate::{SourceFileId, TextRange};
+use crate::core::{SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiagnosticSeverity {
@@ -55,16 +55,6 @@ pub struct DiagnosticStore {
 }
 
 impl DiagnosticStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add(&mut self, fact: DiagnosticFact) {
-        let file_id = fact.range.file_id;
-        self.facts_by_file.entry(file_id).or_default().push(fact);
-        self.sort_file(file_id);
-    }
-
     pub fn facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
         self.facts_by_file
             .get(&file_id)
@@ -72,22 +62,11 @@ impl DiagnosticStore {
             .unwrap_or_default()
     }
 
-    pub fn facts_for_file(&self, file_id: SourceFileId) -> &[DiagnosticFact] {
-        self.facts_by_file
-            .get(&file_id)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
-    }
-
     pub fn all_facts(&self) -> Vec<DiagnosticFact> {
         self.facts_by_file
             .values()
             .flat_map(|facts| facts.iter().cloned())
             .collect()
-    }
-
-    pub fn file_ids(&self) -> Vec<SourceFileId> {
-        self.facts_by_file.keys().copied().collect()
     }
 
     pub fn fact_count(&self) -> usize {
@@ -178,13 +157,16 @@ mod tests {
     #[test]
     fn replace_file_drops_stale_diagnostics() {
         let file = SourceFileId(1);
-        let mut store = DiagnosticStore::new();
-        store.add(DiagnosticFact::new(
-            TextRange::new(file, 0, 1),
-            DiagnosticSeverity::Warning,
-            "old",
-            "old message",
-        ));
+        let mut store = DiagnosticStore::default();
+        store.replace_file(
+            file,
+            [DiagnosticFact::new(
+                TextRange::new(file, 0, 1),
+                DiagnosticSeverity::Warning,
+                "old",
+                "old message",
+            )],
+        );
 
         store.replace_file(
             file,

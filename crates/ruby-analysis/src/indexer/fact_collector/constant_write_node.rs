@@ -8,7 +8,7 @@ use ruby_prism::{
 };
 
 use super::FactCollector;
-use crate::inference::RubyType;
+use crate::core::RubyType;
 
 impl FactCollector {
     fn constant_fqn_from_name(&self, constant_name: &str) -> Option<FullyQualifiedName> {
@@ -30,7 +30,7 @@ impl FactCollector {
         full_location: &Location<'_>,
         name_location: &Location<'_>,
     ) {
-        self.direct_facts.symbols.push(
+        self.facts.direct.symbols.push(
             SymbolFact::new(fqn, SymbolKind::Constant, self.direct_range(full_location))
                 .with_name_range(self.direct_range(name_location)),
         );
@@ -53,7 +53,7 @@ impl FactCollector {
             name_location,
             provenance,
         );
-        self.type_store.add(TypeFact::new(
+        self.facts.types.add(TypeFact::new(
             TypeSubject::Constant(fqn.clone()),
             inferred_type,
             full_range,
@@ -78,7 +78,7 @@ impl FactCollector {
             name_location,
             provenance,
         );
-        self.type_store.add(TypeFact::new(
+        self.facts.types.add(TypeFact::new(
             TypeSubject::Constant(fqn),
             inferred_type,
             self.document.prism_location_to_text_range(full_location),
@@ -86,7 +86,7 @@ impl FactCollector {
         ));
     }
 
-    pub fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {
+    pub(super) fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         trace!("Visiting constant write node: {}", constant_name);
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
@@ -95,7 +95,7 @@ impl FactCollector {
         self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
     }
 
-    pub fn process_constant_write_node_exit(&mut self, node: &ConstantWriteNode) {
+    pub(super) fn process_constant_write_node_exit(&mut self, node: &ConstantWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -103,7 +103,7 @@ impl FactCollector {
         self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
         if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
             if summary.is_capture_free() {
-                self.constant_callable_bodies
+                self.constants.callable_bodies
                     .push(crate::core::ConstantCallableBodyFact {
                         constant: self
                             .constant_fqn_from_name(&constant_name)
@@ -115,7 +115,7 @@ impl FactCollector {
         }
     }
 
-    pub fn process_constant_or_write_node_entry(&mut self, node: &ConstantOrWriteNode) {
+    pub(super) fn process_constant_or_write_node_entry(&mut self, node: &ConstantOrWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -123,7 +123,7 @@ impl FactCollector {
         self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
     }
 
-    pub fn process_constant_or_write_node_exit(&mut self, node: &ConstantOrWriteNode) {
+    pub(super) fn process_constant_or_write_node_exit(&mut self, node: &ConstantOrWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -131,7 +131,7 @@ impl FactCollector {
         self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
     }
 
-    pub fn process_constant_and_write_node_entry(&mut self, node: &ConstantAndWriteNode) {
+    pub(super) fn process_constant_and_write_node_entry(&mut self, node: &ConstantAndWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -139,7 +139,7 @@ impl FactCollector {
         self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
     }
 
-    pub fn process_constant_and_write_node_exit(&mut self, node: &ConstantAndWriteNode) {
+    pub(super) fn process_constant_and_write_node_exit(&mut self, node: &ConstantAndWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -147,7 +147,10 @@ impl FactCollector {
         self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
     }
 
-    pub fn process_constant_operator_write_node_entry(&mut self, node: &ConstantOperatorWriteNode) {
+    pub(super) fn process_constant_operator_write_node_entry(
+        &mut self,
+        node: &ConstantOperatorWriteNode,
+    ) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -155,7 +158,10 @@ impl FactCollector {
         self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
     }
 
-    pub fn process_constant_operator_write_node_exit(&mut self, node: &ConstantOperatorWriteNode) {
+    pub(super) fn process_constant_operator_write_node_exit(
+        &mut self,
+        node: &ConstantOperatorWriteNode,
+    ) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -163,7 +169,7 @@ impl FactCollector {
         self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
     }
 
-    pub fn process_constant_target_node_entry(&mut self, node: &ConstantTargetNode) {
+    pub(super) fn process_constant_target_node_entry(&mut self, node: &ConstantTargetNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
             return;
@@ -171,7 +177,8 @@ impl FactCollector {
         self.record_constant_symbol(fqn.clone(), &node.location(), &node.location());
 
         let inferred_type = self
-            .multi_write_lhs_types
+            .flow
+            .assignment_elements
             .last_mut()
             .and_then(|types| {
                 if types.is_empty() {
@@ -189,5 +196,5 @@ impl FactCollector {
         );
     }
 
-    pub fn process_constant_target_node_exit(&mut self, _node: &ConstantTargetNode) {}
+    pub(super) fn process_constant_target_node_exit(&mut self, _node: &ConstantTargetNode) {}
 }

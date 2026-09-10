@@ -7,7 +7,7 @@ use ruby_prism::{AliasMethodNode, Node};
 use super::FactCollector;
 
 impl FactCollector {
-    pub fn process_alias_method_node_entry(&mut self, node: &AliasMethodNode) {
+    pub(super) fn process_alias_method_node_entry(&mut self, node: &AliasMethodNode) {
         let Some((new_name, old_name)) = alias_method_names(node) else {
             return;
         };
@@ -26,7 +26,7 @@ impl FactCollector {
             .value_loc()
             .unwrap_or_else(|| old_symbol.location());
         let old_range = self.direct_range(&old_location);
-        self.reference_candidates.push(ReferenceCandidate::method(
+        self.facts.references.push(ReferenceCandidate::method(
             old_range,
             MethodReferenceCandidate {
                 owner: self.scope_tracker.get_ns_stack(),
@@ -53,11 +53,11 @@ impl FactCollector {
         let old_fqn = FullyQualifiedName::method(namespace_parts.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(namespace_parts, new_method);
         let old_subject = TypeSubject::MethodReturn(old_fqn);
-        let Some(old_type) = self.type_store.facts_for(&old_subject).into_iter().next() else {
+        let Some(old_type) = self.facts.types.facts_for(&old_subject).into_iter().next() else {
             return;
         };
 
-        self.type_store.add(TypeFact::new(
+        self.facts.types.add(TypeFact::new(
             TypeSubject::MethodReturn(new_fqn),
             old_type.ruby_type,
             self.direct_range(&node.location()),

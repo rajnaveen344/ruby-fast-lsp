@@ -1,6 +1,6 @@
 use ruby_prism::NumberedReferenceReadNode;
 
-use crate::Identifier;
+use crate::indexer::Identifier;
 
 use super::{IdentifierType, IdentifierVisitor};
 

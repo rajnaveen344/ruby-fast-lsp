@@ -1,8 +1,8 @@
 use ruby_prism::{CallNode, Node};
 
+use crate::core::RubyType;
 use crate::core::TextRange;
-use crate::inference::RubyType;
-use crate::{utf8_str, RubyDocument};
+use crate::indexer::{utf8_str, RubyDocument};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BadSplatCandidate {

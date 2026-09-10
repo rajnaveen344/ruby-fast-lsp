@@ -2,6 +2,7 @@ use crate::core::memory_estimate::{
     fqn_heap_bytes, ruby_type_heap_bytes, string_heap_bytes, type_subject_heap_bytes,
     vec_payload_bytes,
 };
+use crate::core::MethodVisibility;
 use crate::core::{
     CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
     ConstantCallableBodyFact, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
@@ -12,7 +13,6 @@ use crate::core::{
     UnresolvedGraphEdgeFact,
 };
 use crate::engine::FileFacts;
-use crate::method_store::MethodVisibility;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -2036,6 +2036,7 @@ mod tests {
         restore_ruby_type, snapshot_ruby_type, ProjectNeutralFileFactsSnapshot,
         SnapshotCallableTypeTemplate,
     };
+    use crate::core::MethodVisibility;
     use crate::core::{
         CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind,
         CallableBodySummary, ConstantCallableBodyFact, DiagnosticCandidate,
@@ -2050,7 +2051,6 @@ mod tests {
         AnalysisEngine, AnalysisQuery, FileFacts, ProjectNeutralFileFactsTemplate,
         ProjectNeutralTemplateRejection, ResolveMode, SourceFileInput,
     };
-    use crate::method_store::MethodVisibility;
     use std::path::PathBuf;
 
     fn namespace(name: &str) -> FullyQualifiedName {

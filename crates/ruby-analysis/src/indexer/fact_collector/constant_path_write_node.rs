@@ -1,7 +1,7 @@
-use crate::collect_namespaces;
 use crate::core::{
     FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeSubject,
 };
+use crate::indexer::collect_namespaces;
 use log::error;
 use ruby_prism::{
     ConstantPathAndWriteNode, ConstantPathNode, ConstantPathOperatorWriteNode,
@@ -54,7 +54,7 @@ impl FactCollector {
         constant_name: &str,
         full_location: &Location<'_>,
     ) {
-        self.direct_facts.symbols.push(
+        self.facts.direct.symbols.push(
             SymbolFact::new(fqn, SymbolKind::Constant, self.direct_range(full_location))
                 .with_name_range(self.direct_terminal_name_range(
                     &constant_path.location(),
@@ -77,7 +77,7 @@ impl FactCollector {
             &constant_path.location(),
             provenance,
         );
-        self.type_store.add(TypeFact::new(
+        self.facts.types.add(TypeFact::new(
             TypeSubject::Constant(fqn),
             inferred_type,
             self.document.prism_location_to_text_range(full_location),
@@ -85,7 +85,7 @@ impl FactCollector {
         ));
     }
 
-    pub fn process_constant_path_write_node_entry(&mut self, node: &ConstantPathWriteNode) {
+    pub(super) fn process_constant_path_write_node_entry(&mut self, node: &ConstantPathWriteNode) {
         let constant_path = node.target();
         let Some((constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -93,7 +93,7 @@ impl FactCollector {
         self.record_constant_path_symbol(fqn, &constant_path, &constant_name, &node.location());
     }
 
-    pub fn process_constant_path_write_node_exit(&mut self, node: &ConstantPathWriteNode) {
+    pub(super) fn process_constant_path_write_node_exit(&mut self, node: &ConstantPathWriteNode) {
         let constant_path = node.target();
         let Some((_constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -106,7 +106,8 @@ impl FactCollector {
         );
         if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
             if summary.is_capture_free() {
-                self.constant_callable_bodies
+                self.constants
+                    .callable_bodies
                     .push(crate::core::ConstantCallableBodyFact {
                         constant: fqn,
                         summary,
@@ -116,7 +117,10 @@ impl FactCollector {
         }
     }
 
-    pub fn process_constant_path_or_write_node_entry(&mut self, node: &ConstantPathOrWriteNode) {
+    pub(super) fn process_constant_path_or_write_node_entry(
+        &mut self,
+        node: &ConstantPathOrWriteNode,
+    ) {
         let constant_path = node.target();
         let Some((constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -124,7 +128,10 @@ impl FactCollector {
         self.record_constant_path_symbol(fqn, &constant_path, &constant_name, &node.location());
     }
 
-    pub fn process_constant_path_or_write_node_exit(&mut self, node: &ConstantPathOrWriteNode) {
+    pub(super) fn process_constant_path_or_write_node_exit(
+        &mut self,
+        node: &ConstantPathOrWriteNode,
+    ) {
         let constant_path = node.target();
         let Some((_constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -132,7 +139,10 @@ impl FactCollector {
         self.record_constant_path_value_type(fqn, &node.value(), &constant_path, &node.location());
     }
 
-    pub fn process_constant_path_and_write_node_entry(&mut self, node: &ConstantPathAndWriteNode) {
+    pub(super) fn process_constant_path_and_write_node_entry(
+        &mut self,
+        node: &ConstantPathAndWriteNode,
+    ) {
         let constant_path = node.target();
         let Some((constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -140,7 +150,10 @@ impl FactCollector {
         self.record_constant_path_symbol(fqn, &constant_path, &constant_name, &node.location());
     }
 
-    pub fn process_constant_path_and_write_node_exit(&mut self, node: &ConstantPathAndWriteNode) {
+    pub(super) fn process_constant_path_and_write_node_exit(
+        &mut self,
+        node: &ConstantPathAndWriteNode,
+    ) {
         let constant_path = node.target();
         let Some((_constant_name, fqn)) = self.constant_path_write_fqn(&constant_path) else {
             return;
@@ -148,7 +161,7 @@ impl FactCollector {
         self.record_constant_path_value_type(fqn, &node.value(), &constant_path, &node.location());
     }
 
-    pub fn process_constant_path_operator_write_node_entry(
+    pub(super) fn process_constant_path_operator_write_node_entry(
         &mut self,
         node: &ConstantPathOperatorWriteNode,
     ) {
@@ -159,7 +172,7 @@ impl FactCollector {
         self.record_constant_path_symbol(fqn, &constant_path, &constant_name, &node.location());
     }
 
-    pub fn process_constant_path_operator_write_node_exit(
+    pub(super) fn process_constant_path_operator_write_node_exit(
         &mut self,
         node: &ConstantPathOperatorWriteNode,
     ) {

@@ -4,19 +4,19 @@
 //! `ruby-analysis`; this module builds the protocol-facing hover text.
 
 use parking_lot::RwLock;
+use ruby_analysis::core::RubyType;
 use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, UnknownReason,
 };
 use ruby_analysis::engine::{
     AnalysisEngine, AnalysisQuery, ConstantHover, ConstantHoverKind, VariableTypeKind,
 };
+use ruby_analysis::indexer::yard::YardParser;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{
     resolve_receiver_type, HoverTarget, MethodReceiver, ReceiverResolutionContext,
 };
 use ruby_analysis::inference::method::method_call_return_type_with_visibility;
-use ruby_analysis::inference::RubyType;
-use ruby_analysis::yard::YardParser;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 

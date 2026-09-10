@@ -645,9 +645,9 @@ async fn run_type_check(
     expected_types: &[&Tag],
     _all_file_contents: &[(Url, Vec<u8>)],
 ) {
-    use crate::query::TypeQuery;
+    use ruby_analysis::core::RubyType;
+    use ruby_analysis::engine::TypeQuery;
     use ruby_analysis::indexer::RubyPrismAnalyzer;
-    use ruby_analysis::inference::RubyType;
 
     for expected in expected_types {
         let expected_type = expected
@@ -690,11 +690,11 @@ async fn run_type_check(
                                  This is a bug because ruby-analysis::core TypeSubject::Local stores u32 scope ids. \
                                  Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
                             );
-                            let type_store = server.orphan_engine().read().type_store().clone();
+                            let engine = server.orphan_engine().read();
                             let byte_offset = doc.position_to_analysis_offset(
                                 crate::utils::lsp::source_position(position),
                             );
-                            TypeQuery::with_type_store_for_file(&type_store, doc.analysis_file_id())
+                            TypeQuery::new(&engine, doc.analysis_file_id())
                                 .get_local_variable_type_at(name, scope_id, byte_offset)
                         } else {
                             None
@@ -715,11 +715,11 @@ async fn run_type_check(
                         .get(uri)
                         .map(|doc| doc.read().clone());
                     let constant_type = if let Some(doc) = doc_snapshot {
-                        let type_store = server.orphan_engine().read().type_store().clone();
+                        let engine = server.orphan_engine().read();
                         let byte_offset = doc.position_to_analysis_offset(
                             crate::utils::lsp::source_position(position),
                         );
-                        TypeQuery::with_type_store_for_file(&type_store, doc.analysis_file_id())
+                        TypeQuery::new(&engine, doc.analysis_file_id())
                             .get_constant_type_at(&constant_fqn, byte_offset)
                     } else {
                         None
@@ -851,12 +851,12 @@ async fn run_type_check(
 
 fn method_call_return_type_from_analysis(
     server: &crate::server::RubyLanguageServer,
-    receiver_type: &ruby_analysis::inference::RubyType,
+    receiver_type: &ruby_analysis::core::RubyType,
     method_name: &str,
-) -> Option<ruby_analysis::inference::RubyType> {
+) -> Option<ruby_analysis::core::RubyType> {
     use ruby_analysis::core::FullyQualifiedName;
     use ruby_analysis::core::RubyMethod;
-    use ruby_analysis::inference::RubyType;
+    use ruby_analysis::core::RubyType;
 
     let method = RubyMethod::new(method_name).ok()?;
     let (receiver_fqn, namespace_kind) = match receiver_type {
@@ -886,12 +886,12 @@ fn variable_type_from_analysis(
     server: &crate::server::RubyLanguageServer,
     name: &str,
     kind: &str,
-) -> Option<ruby_analysis::inference::RubyType> {
+) -> Option<ruby_analysis::core::RubyType> {
     use ruby_analysis::core::{RubyType, TypeSubject};
 
-    let type_store = server.orphan_engine().read().type_store().clone();
-    type_store
-        .all_facts()
+    let engine = server.orphan_engine().read();
+    engine.query()
+        .all_type_facts()
         .into_iter()
         .filter(|fact| fact.ruby_type != RubyType::Unknown)
         .filter(|fact| match &fact.subject {

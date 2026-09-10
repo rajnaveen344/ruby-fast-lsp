@@ -1,13 +1,10 @@
-//! Type analysis and representation.
+//! Type derivation for literals, collections, and structural shapes.
 //!
-//! This module contains the core RubyType representation and analyzers
-//! for inferring types from literals and collections.
+//! The resulting representation is [`crate::core::RubyType`].
 
 pub mod collection;
 pub mod literal;
-pub mod ruby;
 pub(crate) mod shape;
 
 pub use collection::{ArrayTypeInfo, CollectionAnalyzer, HashTypeInfo};
 pub use literal::LiteralAnalyzer;
-pub use ruby::*;

@@ -22,6 +22,7 @@ Supporting docs:
 | [docs/structural-hash-shapes.md](docs/structural-hash-shapes.md)                       | Structural Hash behavior and limits             |
 | [docs/higher-order-call-inference.md](docs/higher-order-call-inference.md)             | Higher-order inference behavior and limits      |
 | [NEXT.md](NEXT.md)                                                                     | Forward-looking engineering roadmap             |
+| [crates/ruby-analysis/README.md](crates/ruby-analysis/README.md) | Analysis library API, ownership, and executable usage example |
 | [src/ARCHITECTURE.md](src/ARCHITECTURE.md)                                             | Current implementation architecture             |
 | [crates/ruby-analysis/src/inference/mod.rs](crates/ruby-analysis/src/inference/mod.rs) | Type-inference proof model and design rationale |
 | [src/query/README.md](src/query/README.md)                                             | LSP query adapter boundaries                    |
@@ -878,7 +879,7 @@ When moving code, classify it by what it owns:
 
 | Layer                      | Owns                                                                                                                                  | Must Not Own                                                            |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `ruby-analysis::core`      | Immutable contracts: FQNs, Ruby names, ranges, source IDs, facts, stores, Ruby types                                                  | AST traversal, query policy, LSP/editor protocol                        |
+| `ruby-analysis::core`      | Public contracts: FQNs, Ruby names, ranges, source IDs, facts, Ruby types; private storage primitives                                                  | AST traversal, query policy, LSP/editor protocol                        |
 | `ruby-analysis::engine`    | Long-lived workspace semantic state, fact ingestion, cross-file graph/reference/diagnostic resolution, deterministic semantic queries | `tower_lsp` types, editor triggers, snippets, protocol response shaping |
 | `ruby-analysis::indexer`   | Ruby source parsing and AST traversal that emits facts/candidates                                                                     | Global semantic truth, LSP protocol, workspace lifecycle                |
 | `ruby-analysis::inference` | Type derivation rules, flow/local type tracking, RBS lookup/substitution                                                              | LSP protocol, editor UX, persistent workspace ownership                 |
@@ -1159,7 +1160,8 @@ ruby-analysis::engine
   Owns indexed facts and deterministic graph/fact queries:
   symbols, methods, refs, graph, diagnostics, workspace symbols,
   definitions/references, ancestors, implementors, namespace tree, debug views.
-  It stores type facts already computed, but should not do heavy expression inference.
+  It coordinates cross-file equation solvers in inference and owns their solved
+  outcomes. Expression traversal and type derivation rules remain in inference.
 
 ruby-analysis::inference
   Owns type algorithms:
@@ -1168,8 +1170,9 @@ ruby-analysis::inference
   It depends on core/engine contracts, not on LSP.
 
 ruby-analysis::indexer
-  Owns parsing/fact collection from Ruby source. FactCollector should eventually
-  live here, emitting facts/candidates into ruby-analysis::engine.
+  Owns parsing/fact collection from Ruby source. AnalysisIndexer collects
+  declarations; FactCollector adds body, reference, diagnostic, and extension
+  evidence for composition into engine FileFacts.
 
 ruby-fast-lsp
   Thin wrapper:
@@ -1177,37 +1180,43 @@ ruby-fast-lsp
   adapter behavior, and mapping TextRange/domain results to LSP protocol types.
 ```
 
-### Dependency Direction
+### Library API and Dependency Direction
 
-Preferred:
+The crate root exposes only `core`, `engine`, `indexer`, and `inference`.
+Use the owning module's explicit exports; do not restore flattened crate-root
+aliases or inference aliases for `core::RubyType`. Core's implementation modules,
+stores, interned IDs, and stored fact representations are crate-private.
+
+Consumers write domain `FileFacts` and read `engine::AnalysisQuery` results.
+`engine::TypeQuery::new(&engine, file_id)` borrows a real engine for file-scoped
+type reads; there is no empty/default query or public store constructor.
+Extensions use explicit `FactCollector` fact operations and read-only context
+views. Its ten fields and their state owners are private to the collector
+module. Prism traversal and node callbacks remain the ordinary production
+path; `FactCollector::finish()` returns an owned `CollectedFile` for both the
+file processor and simulation runner to compose before engine replacement.
+Scope-only rebuilding consumes `into_document()` without proof snapshots.
+Keep traversal order in `traversal.rs` and state beside its responsibility;
+see the [collector guide](crates/ruby-analysis/src/indexer/fact_collector/README.md).
+Profiler storage-layout evidence is returned as named byte counts through
+`engine::reference_storage_sizes`, never as exposed representation types.
+See [the library guide](crates/ruby-analysis/README.md) for a compiled example.
+
+The four areas are modules within one crate, with these responsibilities:
 
 ```text
-ruby-analysis::engine -> ruby-analysis::core
-ruby-analysis::inference -> ruby-analysis::core
-ruby-fast-lsp -> ruby-analysis::{engine, inference, indexer}
+indexer -> core facts + inference rules + engine queries
+inference -> core facts + engine queries
+engine -> core storage + inference equation solvers
+ruby-fast-lsp -> core contracts + indexer/inference/engine APIs
 ```
 
-Avoid:
-
-```text
-ruby-analysis::engine -> ruby-analysis::inference
-```
-
-Engine should remain stable fact DB + graph/query layer. Inference should be
-smart/pluggable and ask engine questions through a trait.
-
-Sketch:
-
-```rust
-pub trait InferenceQuery {
-    fn method_candidates(&self, receiver: &RubyType, method: RubyMethod) -> Vec<MethodFact>;
-    fn type_fact(&self, subject: &TypeSubject, at: TextRange) -> TypeResolution;
-    fn ancestors(&self, fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName>;
-}
-```
-
-`ruby_analysis::engine::AnalysisQuery` should implement this trait when the
-inference/query seam is formalized.
+The engine invokes the AST-free constant and method-return equation solvers
+while resolving a project, and inference consults the engine's domain queries.
+This cooperation does not transfer lookup policy or persistent state ownership
+to inference. Do not move AST traversal into engine or duplicate semantic lookup
+in adapters. A future query-trait seam must describe these actual interactions
+before any further split into separate crates.
 
 ### Migration Backlog
 

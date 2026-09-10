@@ -312,11 +312,13 @@ impl EngineSimulationRunner {
                 self.engine.clone(),
             );
             visitor.visit(&parse.node());
-            let local_read_types = visitor.local_read_type_evidence();
-            let inference = visitor.inference_evidence();
+            let collected = visitor.finish();
+            let local_read_types = collected.local_read_types;
+            let inference = collected.inference;
+            let collected_types = collected.type_facts;
             let mut types = direct_facts.types;
-            types.extend(visitor.direct_facts.types);
-            types.extend(visitor.type_store.all_facts());
+            types.extend(collected.direct_facts.types);
+            types.extend(collected_types);
 
             let facts = FileFacts {
                 symbols: direct_facts.symbols,
@@ -326,10 +328,10 @@ impl EngineSimulationRunner {
                 graph_nodes: direct_facts.graph_nodes,
                 graph_edges: direct_facts.graph_edges,
                 unresolved_graph_edges: direct_facts.unresolved_graph_edges,
-                reference_candidates: visitor.reference_candidates,
-                diagnostic_candidates: visitor.diagnostic_candidates,
-                diagnostics: visitor.analysis_diagnostics,
-                execution_contexts: visitor.extension_execution_context_facts,
+                reference_candidates: collected.reference_candidates,
+                diagnostic_candidates: collected.diagnostic_candidates,
+                diagnostics: collected.diagnostics,
+                execution_contexts: collected.execution_contexts,
                 inference,
                 local_read_types,
             };

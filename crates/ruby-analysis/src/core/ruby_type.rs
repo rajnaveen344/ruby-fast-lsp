@@ -1,5 +1,5 @@
-use crate::fully_qualified_name::FullyQualifiedName;
-use crate::shape_type::{LiteralValue, ShapeType, MAX_SHAPE_UNION_VARIANTS};
+use crate::core::fully_qualified_name::FullyQualifiedName;
+use crate::core::shape_type::{LiteralValue, ShapeType, MAX_SHAPE_UNION_VARIANTS};
 use std::fmt::{self, Display, Formatter};
 
 /// Represents Ruby types in the type inference system
@@ -690,15 +690,18 @@ mod tests {
             RubyType::Shape(Box::new(
                 ShapeType::try_new(
                     [
-                        crate::ShapeField::required(
-                            crate::LiteralKey::symbol("kind"),
+                        crate::core::ShapeField::required(
+                            crate::core::LiteralKey::symbol("kind"),
                             RubyType::Literal(Box::new(LiteralValue::symbol(kind))),
                         ),
-                        crate::ShapeField::required(crate::LiteralKey::symbol("value"), value),
+                        crate::core::ShapeField::required(
+                            crate::core::LiteralKey::symbol("value"),
+                            value,
+                        ),
                     ],
                     None,
-                    crate::ShapeExactness::Exact,
-                    crate::ShapeStability::TrackedMutable,
+                    crate::core::ShapeExactness::Exact,
+                    crate::core::ShapeStability::TrackedMutable,
                 )
                 .unwrap(),
             ))
@@ -740,12 +743,12 @@ mod tests {
         );
         assert_eq!(std::mem::size_of::<ShapeType>(), 32);
         assert_eq!(
-            std::mem::size_of::<crate::ShapeField>(),
+            std::mem::size_of::<crate::core::ShapeField>(),
             ruby_type_size + 40,
             "one field owns exactly one RubyType plus the fixed literal-key, presence, and alignment overhead"
         );
         assert_eq!(
-            std::mem::size_of::<crate::ShapeRest>(),
+            std::mem::size_of::<crate::core::ShapeRest>(),
             ruby_type_size * 2,
             "one rest contract owns exactly its key and value RubyType payloads"
         );

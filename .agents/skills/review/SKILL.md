@@ -21,7 +21,8 @@ Use this skill for code review, PR review, or pre-merge checks. Findings come fi
 
 - `src/query/*` should adapt LSP/document context to `AnalysisQuery` and map domain ranges to protocol locations.
 - Reusable graph/type/fact logic belongs in `crates/ruby-analysis`.
-- `ruby-analysis::engine` should not depend on `ruby-analysis::inference`; inference may ask engine questions through query contracts.
+- Engine resolution may coordinate inference equation solvers, and inference may consult engine queries. Preserve engine ownership of lookup policy and solved state; keep AST traversal and type derivation rules out of engine.
+- The crate root exposes only the four ownership modules; import domain contracts from their owner and keep store/representation types internal.
 - Public APIs should expose domain views, not arena/store internals.
 - Snippets, trigger routing, and completion item shaping stay in `src/capabilities/completion`.
 

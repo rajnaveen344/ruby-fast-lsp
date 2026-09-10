@@ -1,8 +1,8 @@
+use crate::core::RubyType;
 use crate::core::{
     FullyQualifiedName, LiteralKey, LiteralValue, ShapeConstructionError, ShapeExactness,
     ShapeField, ShapeStability, ShapeType, UnknownReason,
 };
-use crate::r#type::ruby::RubyType;
 use ruby_prism::*;
 use std::collections::BTreeMap;
 

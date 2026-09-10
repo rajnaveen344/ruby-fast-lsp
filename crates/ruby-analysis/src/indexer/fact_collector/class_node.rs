@@ -1,15 +1,15 @@
 use crate::core::{
     FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, RubyConstant, RubyType,
 };
-use crate::mixin_ref_from_node;
-use crate::LocalScopeKind as LVScopeKind;
+use crate::indexer::mixin_ref_from_node;
+use crate::indexer::LocalScopeKind as LVScopeKind;
 use log::error;
 use ruby_prism::ClassNode;
 
 use super::FactCollector;
 
 impl FactCollector {
-    pub fn process_class_node_entry(&mut self, node: &ClassNode) -> bool {
+    pub(super) fn process_class_node_entry(&mut self, node: &ClassNode) -> bool {
         let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
         let lexical_context = self.scope_tracker.get_ns_stack();
         let mut syntactic_scope = self.scope_tracker.clone();
@@ -113,7 +113,7 @@ impl FactCollector {
                     );
                 }
             } else {
-                self.direct_facts.unresolved_graph_edges.push(
+                self.facts.direct.unresolved_graph_edges.push(
                     crate::core::UnresolvedGraphEdgeFact::new(
                         fqn.clone(),
                         superclass_ref.parts,
@@ -156,7 +156,7 @@ impl FactCollector {
         true
     }
 
-    pub fn process_class_node_exit(&mut self, _node: &ClassNode) {
+    pub(super) fn process_class_node_exit(&mut self, _node: &ClassNode) {
         self.scope_tracker.pop_ns_scope();
         self.scope_tracker.pop_scope_kind();
         self.document.variable_scopes_mut().exit_scope();

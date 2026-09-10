@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::core::method_store::MethodVisibilityOverrideFact;
+use crate::core::MethodVisibilityOverrideFact;
 use crate::core::{
     DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
     GraphNodeKind, MethodCalleeResolution, MethodFact, ReferenceFact, RubyType, SourceFileId,
@@ -8,7 +8,7 @@ use crate::core::{
     TypeResolution, TypeSubject, UnknownReason,
 };
 
-use crate::{AnalysisEngine, SourceFile};
+use crate::engine::{AnalysisEngine, SourceFile};
 
 pub struct AnalysisQuery<'a> {
     pub(crate) engine: &'a AnalysisEngine,
@@ -53,6 +53,15 @@ impl<'a> AnalysisQuery<'a> {
         byte_offset: u32,
     ) -> TypeResolution {
         self.engine.type_at(subject, file_id, byte_offset)
+    }
+
+    pub fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
+        self.engine.type_facts_for(subject)
+    }
+
+    /// All stored type facts, detached from the engine's internal indexes.
+    pub fn all_type_facts(&self) -> Vec<TypeFact> {
+        self.engine.type_store().all_facts()
     }
 
     pub fn type_facts_in_file(&self, file_id: SourceFileId) -> Vec<TypeFact> {

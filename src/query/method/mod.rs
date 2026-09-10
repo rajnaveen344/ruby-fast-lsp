@@ -19,10 +19,10 @@ pub use ruby_analysis::core::MethodCalleeResolution;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
+use ruby_analysis::core::RubyType;
 use ruby_analysis::indexer::{
     resolve_receiver_to_namespace, resolve_receiver_type, MethodReceiver, ReceiverResolutionContext,
 };
-use ruby_analysis::inference::RubyType;
 use tower_lsp::lsp_types::{Location, Position};
 
 use super::EngineQuery;

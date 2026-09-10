@@ -1,6 +1,6 @@
 use crate::core::{ExecutionContextFact, ExecutionScopeMode, NamespaceKind, RubyConstant};
 
-use crate::{Identifier, LVScopeId, RubyDocument, ScopeTracker};
+use crate::indexer::{Identifier, LVScopeId, RubyDocument, ScopeTracker};
 
 use ruby_prism::*;
 
@@ -181,7 +181,7 @@ fn static_receiver_namespace(
         return (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty())
             .then_some(namespace);
     }
-    if let Some(receiver) = crate::mixin_ref_from_node(node) {
+    if let Some(receiver) = crate::indexer::mixin_ref_from_node(node) {
         return Some(receiver.parts);
     }
     let call = node.as_call_node()?;
@@ -515,7 +515,7 @@ impl Visit<'_> for IdentifierVisitor {
                 self.visit(&block);
                 self.scope_tracker.pop_ns_scope();
             }
-        } else if crate::is_framework_instance_block_call_name(node.name().as_slice())
+        } else if crate::indexer::is_framework_instance_block_call_name(node.name().as_slice())
             && node.receiver().is_none()
             && node.block().is_some()
         {
@@ -524,7 +524,7 @@ impl Visit<'_> for IdentifierVisitor {
             }
             if let Some(block) = node.block() {
                 self.scope_tracker
-                    .push_scope_kind(crate::LocalScopeKind::FrameworkInstanceBlock);
+                    .push_scope_kind(crate::indexer::LocalScopeKind::FrameworkInstanceBlock);
                 self.visit(&block);
                 self.scope_tracker.pop_scope_kind();
             }
@@ -620,7 +620,7 @@ impl Visit<'_> for IdentifierVisitor {
 #[cfg(test)]
 mod tests {
     use crate::core::SourcePosition as Position;
-    use crate::MethodReceiver;
+    use crate::indexer::MethodReceiver;
 
     use super::*;
     use url::Url;

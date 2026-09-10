@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use crate::core::method_store::MethodVisibility;
+use crate::core::MethodVisibility;
 use crate::core::{
     FqnId, FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution, MethodFact,
     MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId,
@@ -2131,7 +2131,7 @@ impl<'a> AnalysisQuery<'a> {
 }
 
 fn non_core_fact_requires_ancestry_proof(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     requested_owner: &FullyQualifiedName,
     fact: &MethodFact,
     crossed_universal_root: bool,
@@ -2171,7 +2171,7 @@ fn is_universal_open_root(owner: &FullyQualifiedName) -> bool {
 const UNIVERSAL_OPEN_ROOT_NAMES: [&str; 5] = ["BasicObject", "Object", "Kernel", "Module", "Class"];
 
 fn interned_universal_open_root_ids(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     cache: &mut MethodLookupChainCache,
 ) -> Vec<FqnId> {
     if cache.universal_open_root_ids.is_none() {
@@ -2186,7 +2186,7 @@ fn interned_universal_open_root_ids(
         .clone()
 }
 
-fn collect_interned_universal_open_root_ids(engine: &crate::AnalysisEngine) -> Vec<FqnId> {
+fn collect_interned_universal_open_root_ids(engine: &crate::engine::AnalysisEngine) -> Vec<FqnId> {
     let mut ids = Vec::with_capacity(12);
     for kind in [
         crate::core::NamespaceKind::Instance,
@@ -2244,7 +2244,7 @@ fn method_name_is_refactorable(method: RubyMethod) -> bool {
 }
 
 fn constant_reference_name_range(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     range: TextRange,
     name: RubyConstant,
 ) -> Option<TextRange> {
@@ -2276,7 +2276,7 @@ fn constant_reference_name_range(
 }
 
 fn constant_name_collides(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     target: &FullyQualifiedName,
     new_name: RubyConstant,
 ) -> bool {
@@ -2308,7 +2308,7 @@ fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
 }
 
 pub(super) fn namespace_target_exists(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> bool {
     let parts = fqn.namespace_parts_slice();
@@ -2343,7 +2343,10 @@ pub(super) fn namespace_target_exists(
     engine.has_symbol_facts(&FullyQualifiedName::constant(parts.to_vec()))
 }
 
-fn is_module_instance_namespace(engine: &crate::AnalysisEngine, fqn: &FullyQualifiedName) -> bool {
+fn is_module_instance_namespace(
+    engine: &crate::engine::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+) -> bool {
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Instance) {
         return false;
     }
@@ -2351,7 +2354,7 @@ fn is_module_instance_namespace(engine: &crate::AnalysisEngine, fqn: &FullyQuali
 }
 
 fn module_includers(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut result = Vec::new();
@@ -2488,7 +2491,7 @@ fn thread_method_lookup_chain_insert(
 }
 
 pub(super) fn method_lookup_chain(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let identity = engine.query_cache_identity();
@@ -2502,7 +2505,7 @@ pub(super) fn method_lookup_chain(
 }
 
 fn method_lookup_chain_uncached(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut chain = method_lookup_chain_without_metaclass(engine, fqn);
@@ -2518,7 +2521,7 @@ fn method_lookup_chain_uncached(
 }
 
 fn method_lookup_chain_without_metaclass(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let allow_top_level_fallback =
@@ -2527,7 +2530,7 @@ fn method_lookup_chain_without_metaclass(
 }
 
 fn method_lookup_chain_without_metaclass_with_fallback(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
     allow_top_level_fallback: bool,
 ) -> Vec<FullyQualifiedName> {
@@ -2583,7 +2586,7 @@ fn method_lookup_chain_without_metaclass_with_fallback(
 }
 
 fn method_lookup_chain_has_unresolved_dependency_cached(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     owner: &FullyQualifiedName,
     cache: &mut MethodLookupChainCache,
 ) -> bool {
@@ -2602,7 +2605,7 @@ fn method_lookup_chain_has_unresolved_dependency_cached(
 }
 
 fn method_lookup_chain_has_unresolved_dependency_from_graph(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     owner: &FullyQualifiedName,
 ) -> bool {
     let mut pending = vec![owner.clone()];
@@ -2645,7 +2648,7 @@ fn method_lookup_chain_has_unresolved_dependency_from_graph(
 }
 
 fn metaclass_namespace_for_object(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Option<FullyQualifiedName> {
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Singleton) {
@@ -2668,7 +2671,7 @@ fn metaclass_namespace_for_object(
 }
 
 pub(super) fn method_lookup_chain_for_reference_cached<'cache>(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
     chain_cache: &'cache mut MethodLookupChainCache,
 ) -> &'cache [FqnId] {
@@ -2702,7 +2705,7 @@ pub(super) fn method_lookup_chain_for_reference_cached<'cache>(
 }
 
 fn append_top_level_instance_fallback(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
 ) {
@@ -2723,7 +2726,7 @@ fn append_top_level_instance_fallback(
 }
 
 fn append_universal_object_fallback(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
 ) {
@@ -2734,7 +2737,9 @@ fn append_universal_object_fallback(
     }
 }
 
-fn compute_universal_object_fallback(engine: &crate::AnalysisEngine) -> Vec<FullyQualifiedName> {
+fn compute_universal_object_fallback(
+    engine: &crate::engine::AnalysisEngine,
+) -> Vec<FullyQualifiedName> {
     if let Some(cached) = engine.cached_universal_object_method_lookup_chain() {
         return cached;
     }
@@ -2749,7 +2754,7 @@ fn compute_universal_object_fallback(engine: &crate::AnalysisEngine) -> Vec<Full
 }
 
 fn unproven_universal_method_exists(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     universal_roots: &[FqnId],
     method: &RubyMethod,
     cache: &mut MethodLookupChainCache,
@@ -2796,7 +2801,7 @@ fn unproven_universal_method_exists(
 }
 
 fn compute_top_level_instance_fallback(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
 ) {
@@ -2822,7 +2827,7 @@ fn top_level_object_instance_fqn() -> FullyQualifiedName {
 }
 
 fn build_mro(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
@@ -2902,7 +2907,7 @@ fn build_mro(
 }
 
 fn method_lookup_edge_is_language_owned(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     edge: &StoredGraphEdgeFact,
 ) -> bool {
     matches!(
@@ -2920,7 +2925,7 @@ fn method_lookup_edge_is_language_owned(
 }
 
 fn included_hook_extend_edges(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
     language_owned_only: bool,
 ) -> Vec<StoredGraphEdgeFact> {
@@ -2952,7 +2957,7 @@ fn included_hook_extend_edges(
 }
 
 pub(super) fn execution_context_application_targets(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     template: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut targets = engine
@@ -2966,7 +2971,7 @@ pub(super) fn execution_context_application_targets(
 }
 
 fn method_callee_in_chain(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
     resolution: MethodCalleeResolution,
@@ -2989,7 +2994,7 @@ fn method_callee_in_chain(
 }
 
 pub(super) fn method_facts_in_chain(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
     allow_private: bool,
@@ -3059,7 +3064,7 @@ pub(super) fn method_facts_in_chain(
 }
 
 fn private_method_in_chain(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
 ) -> bool {
@@ -3078,7 +3083,7 @@ fn private_method_in_chain(
 }
 
 pub(super) fn effective_method_visibility_for_chain(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     ancestor_chain: &[FullyQualifiedName],
     fact: &crate::core::MethodFact,
     method: &RubyMethod,
@@ -3092,7 +3097,7 @@ pub(super) fn effective_method_visibility_for_chain(
 }
 
 fn method_visibility_override_for_chain(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     ancestor_chain: &[FullyQualifiedName],
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
@@ -3120,7 +3125,7 @@ fn method_visibility_override_for_chain(
 }
 
 fn global_visibility_override_for_method_owner(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
@@ -3160,7 +3165,7 @@ fn global_visibility_override_for_method_owner(
 }
 
 fn global_visibility_override_for_method_owner_matching(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
     visibility: MethodVisibility,
@@ -3190,7 +3195,7 @@ fn global_visibility_override_for_method_owner_matching(
 }
 
 fn method_visibility_allowed(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     visibility: MethodVisibility,
     owner: &FullyQualifiedName,
     allow_private: bool,
@@ -3208,7 +3213,7 @@ fn method_visibility_allowed(
 }
 
 pub(super) fn protected_method_visible_from(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     protected_owner: &FullyQualifiedName,
     caller_namespace: &FullyQualifiedName,
 ) -> bool {
@@ -3230,7 +3235,7 @@ fn receiver_only_callee(owner: FullyQualifiedName, method: &RubyMethod) -> Resol
 }
 
 fn method_missing_callee_in_chain(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     ancestor_chain: &[FullyQualifiedName],
 ) -> Option<ResolvedMethodCallee> {
     let method_missing = method_missing_method();
@@ -3249,7 +3254,7 @@ fn method_missing_callee_in_chain(
 }
 
 fn default_basic_object_method_missing_fact(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fact: &MethodFact,
 ) -> bool {
     fact.owner == basic_object_instance_fqn()
@@ -3263,7 +3268,7 @@ fn default_basic_object_method_missing_fact(
 }
 
 fn default_basic_object_method_missing_callee(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     callee: &ResolvedMethodCallee,
 ) -> bool {
     callee.owner == basic_object_instance_fqn()
@@ -3290,7 +3295,7 @@ fn basic_object_instance_fqn() -> FullyQualifiedName {
 }
 
 fn method_callee_after_owner(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     ancestor_chain: &[FullyQualifiedName],
     owner: &FullyQualifiedName,
     method: &RubyMethod,
@@ -3327,7 +3332,7 @@ pub(super) fn method_missing_method() -> RubyMethod {
 }
 
 pub(super) fn chain_has_custom_method_missing(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     ancestor_chain: &[FullyQualifiedName],
 ) -> bool {
     let method = method_missing_method();
@@ -3342,7 +3347,7 @@ pub(super) fn chain_has_custom_method_missing(
 }
 
 fn resolve_constant_fqn(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     parts: &[RubyConstant],
     absolute: bool,
     context_fqn: &FullyQualifiedName,
@@ -3356,7 +3361,7 @@ fn resolve_constant_fqn(
 }
 
 pub(super) fn node_kind(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> Option<GraphNodeKind> {
     engine.first_graph_node_kind(fqn)

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::memory_estimate::{
     map_table_bytes, ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
 };
-use crate::{RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange};
+use crate::core::{RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticCandidate {
@@ -58,10 +58,6 @@ pub struct DiagnosticCandidateStore {
 }
 
 impl DiagnosticCandidateStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn replace_file(
         &mut self,
         file_id: SourceFileId,
@@ -89,13 +85,6 @@ impl DiagnosticCandidateStore {
                 )
             });
         }
-    }
-
-    pub fn all_candidates(&self) -> Vec<DiagnosticCandidate> {
-        self.candidates_by_file
-            .values()
-            .flat_map(|candidates| candidates.iter().cloned())
-            .collect()
     }
 
     pub fn candidates_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticCandidate> {

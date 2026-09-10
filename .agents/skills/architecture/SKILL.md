@@ -32,6 +32,23 @@ Read `AGENTS.md` first. It contains the detailed current architecture direction.
 - Method lookup semantics must stay single-sourced in engine resolution. Use `AnalysisQuery::resolve_method_callees*` for navigation and `AnalysisQuery::resolve_method_reference*` for reference/diagnostic policy.
 - Do not reintroduce public store getters or public `HashMap<FullyQualifiedName, Vec<Fact>>` data access.
 
+## Library API
+
+The crate root exposes only `core`, `engine`, `indexer`, and `inference`.
+Import `RubyType` from `core`; use `engine::AnalysisQuery` or file-scoped
+`engine::TypeQuery` for reads. Core implementation modules, stores, and interned
+representations stay crate-private. Extension collectors expose fact operations,
+not a mutable store handle. `FactCollector` keeps traversal state private and
+returns `CollectedFile` through `finish()` for production and simulation file
+composition. Keep new state and helpers beside their collector responsibility;
+see `crates/ruby-analysis/src/indexer/fact_collector/README.md` and the library
+guide at `crates/ruby-analysis/README.md`.
+
+Engine resolution coordinates inference's AST-free constant and method-return
+equation solvers. Inference may consult engine queries; engine retains ownership
+of lookup policy, file replacement, and solved state. These are cooperating
+modules in one crate, not a strictly acyclic set of crate dependencies.
+
 ## Engine Write Path
 
 Use one write path:

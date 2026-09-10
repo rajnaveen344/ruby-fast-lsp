@@ -5,8 +5,8 @@ use ruby_prism::ConstantReadNode;
 use super::FactCollector;
 
 impl FactCollector {
-    pub fn process_constant_read_node_entry(&mut self, node: &ConstantReadNode) {
-        let name = crate::utf8_str(node.name().as_slice());
+    pub(super) fn process_constant_read_node_entry(&mut self, node: &ConstantReadNode) {
+        let name = crate::indexer::utf8_str(node.name().as_slice());
         let constant = match RubyConstant::new(name) {
             Ok(c) => c,
             Err(_) => {
@@ -16,14 +16,14 @@ impl FactCollector {
         };
 
         let range = self.text_range_from_prism_location(&node.location(), "constant reference");
-        self.reference_candidates.push(ReferenceCandidate::constant(
+        self.facts.references.push(ReferenceCandidate::constant(
             range,
             vec![constant],
             self.scope_tracker.get_ns_stack(),
         ));
     }
 
-    pub fn process_constant_read_node_exit(&mut self, _node: &ConstantReadNode) {}
+    pub(super) fn process_constant_read_node_exit(&mut self, _node: &ConstantReadNode) {}
 
     pub(super) fn text_range_from_prism_location(
         &self,

@@ -921,11 +921,11 @@ fn jruby_series_for_compatibility(version: (u8, u8)) -> Option<&'static str> {
 mod tests {
     use super::*;
     use parking_lot::RwLock;
+    use ruby_analysis::core::MethodVisibility;
     use ruby_analysis::core::{
         FullyQualifiedName, MethodParamKind, NamespaceKind, RubyConstant, RubyMethod, RubyType,
     };
     use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
-    use ruby_analysis::method_store::MethodVisibility;
     use std::fs;
     use std::sync::Arc;
     use tempfile::TempDir;

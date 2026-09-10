@@ -1,10 +1,10 @@
+use crate::core::RubyType;
 use crate::core::{FullyQualifiedName, LiteralKey, NamespaceKind, RubyConstant, RubyMethod};
 use crate::indexer::{
     CompletionReceiverTarget, Identifier, MethodReceiver, RubyDocument, ShapeKeyCompletionTarget,
     ShapeKeySyntax,
 };
 use crate::inference::r#type::shape as shape_reads;
-use crate::inference::RubyType;
 use std::collections::BTreeSet;
 
 pub trait CompletionSemanticQuery {

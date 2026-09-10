@@ -1,4 +1,4 @@
-use crate::{FullyQualifiedName, RubyMethod, TextRange};
+use crate::core::{FullyQualifiedName, RubyMethod, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodCalleeResolution {

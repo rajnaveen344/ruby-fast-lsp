@@ -4,13 +4,13 @@ use super::{
     java_catalog::JavaClassDeclaration,
 };
 use parking_lot::{Mutex, MutexGuard};
+use ruby_analysis::core::MethodVisibility;
 use ruby_analysis::core::{
     FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind, NamespaceKind, RubyConstant,
     RubyMethod, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance,
     TypeSubject,
 };
 use ruby_analysis::engine::FileFacts;
-use ruby_analysis::method_store::MethodVisibility;
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_fast_lsp_jvm_metadata::{
     locate_java_source_declarations, parse_field_descriptor, parse_method_descriptor, ClassFile,

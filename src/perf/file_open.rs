@@ -255,8 +255,8 @@ fn analysis_fact_count(server: &RubyLanguageServer) -> usize {
             let engine = analysis_engine.read();
             engine.all_symbol_facts().len()
                 + engine.all_method_facts().len()
-                + engine.reference_store().all_facts().len()
-                + engine.type_store().all_facts().len()
+                + engine.stats().references
+                + engine.query().all_type_facts().len()
         })
         .sum()
 }

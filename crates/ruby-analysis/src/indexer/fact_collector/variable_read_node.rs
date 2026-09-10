@@ -11,7 +11,7 @@ impl FactCollector {
         name: &[u8],
         location: ruby_prism::Location,
     ) {
-        let name = crate::utf8_str(name);
+        let name = crate::indexer::utf8_str(name);
         let range = self.document.prism_location_to_text_range(&location);
         let owner = FullyQualifiedName::namespace_with_kind(
             self.scope_tracker.get_ns_stack(),
@@ -20,11 +20,11 @@ impl FactCollector {
         let outcome =
             self.collected_nonlocal_variable_outcome_before(kind, name, &owner, range.start_byte);
         if let Some(reason) = outcome.unknown_reason() {
-            self.expression_unknown_reasons.insert(range, reason);
+            self.expressions.unknown_reasons.insert(range, reason);
         }
         let ruby_type = outcome.into_ruby_type();
 
-        self.type_store.add(TypeFact::new(
+        self.facts.types.add(TypeFact::new(
             TypeSubject::Expression(range),
             ruby_type,
             range,
@@ -32,7 +32,10 @@ impl FactCollector {
         ));
     }
 
-    pub fn process_instance_variable_read_node_entry(&mut self, node: &InstanceVariableReadNode) {
+    pub(super) fn process_instance_variable_read_node_entry(
+        &mut self,
+        node: &InstanceVariableReadNode,
+    ) {
         self.record_nonlocal_variable_read(
             VariableTypeKind::Instance,
             node.name().as_slice(),
@@ -40,7 +43,7 @@ impl FactCollector {
         );
     }
 
-    pub fn process_class_variable_read_node_entry(&mut self, node: &ClassVariableReadNode) {
+    pub(super) fn process_class_variable_read_node_entry(&mut self, node: &ClassVariableReadNode) {
         self.record_nonlocal_variable_read(
             VariableTypeKind::Class,
             node.name().as_slice(),
@@ -48,7 +51,10 @@ impl FactCollector {
         );
     }
 
-    pub fn process_global_variable_read_node_entry(&mut self, node: &GlobalVariableReadNode) {
+    pub(super) fn process_global_variable_read_node_entry(
+        &mut self,
+        node: &GlobalVariableReadNode,
+    ) {
         self.record_nonlocal_variable_read(
             VariableTypeKind::Global,
             node.name().as_slice(),

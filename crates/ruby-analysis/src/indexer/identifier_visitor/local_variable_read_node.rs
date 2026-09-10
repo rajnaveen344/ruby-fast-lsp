@@ -4,7 +4,7 @@ use ruby_prism::{
     LocalVariableTargetNode, LocalVariableWriteNode,
 };
 
-use crate::Identifier;
+use crate::indexer::Identifier;
 
 use super::{IdentifierType, IdentifierVisitor};
 

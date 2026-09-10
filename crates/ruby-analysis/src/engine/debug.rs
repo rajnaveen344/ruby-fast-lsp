@@ -12,7 +12,34 @@ use crate::engine::debug_types::{
 use crate::engine::namespace_tree::analysis_location_info;
 use crate::engine::query::AnalysisQuery;
 use crate::engine::resolution::{method_lookup_chain, node_kind};
-use crate::AnalysisEngine;
+use crate::engine::AnalysisEngine;
+
+/// Native sizes for profiler output without exposing stored representations.
+pub fn reference_storage_sizes() -> [(&'static str, usize); 4] {
+    use crate::core::reference_store::{
+        StoredConstantReferenceCandidate, StoredMethodReferenceCandidate, StoredReferenceCandidate,
+        StoredResolvedReferenceCandidate,
+    };
+
+    [
+        (
+            "StoredReferenceCandidate",
+            size_of::<StoredReferenceCandidate>(),
+        ),
+        (
+            "StoredConstantReferenceCandidate",
+            size_of::<StoredConstantReferenceCandidate>(),
+        ),
+        (
+            "StoredMethodReferenceCandidate",
+            size_of::<StoredMethodReferenceCandidate>(),
+        ),
+        (
+            "StoredResolvedReferenceCandidate",
+            size_of::<StoredResolvedReferenceCandidate>(),
+        ),
+    ]
+}
 
 impl<'a> AnalysisQuery<'a> {
     pub fn debug_lookup(&self, fqn: &str) -> LookupResponse {

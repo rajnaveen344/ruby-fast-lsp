@@ -2,7 +2,9 @@ use crate::core::{RubyType, SourceFileId, SourcePosition, SourceRange, TextRange
 use ruby_prism::Location as PrismLocation;
 use url::Url;
 
-use crate::{is_erb_path, mask_erb, EmbeddedRuby, LVScopeId, SourceDocument, VariableScopes};
+use crate::indexer::{
+    is_erb_path, mask_erb, EmbeddedRuby, LVScopeId, SourceDocument, VariableScopes,
+};
 
 /// A document representation that handles conversions between byte offsets and LSP positions
 #[derive(Clone)]

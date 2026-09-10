@@ -46,7 +46,6 @@ pub use code_lens::CodeLensData;
 pub use hover::HoverInfo;
 pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
-pub use ruby_analysis::inference::TypeQuery;
 pub use signature_help::{SignatureData, SignatureHelpData, SignatureParameterData};
 
 use crate::utils::lsp::source_position;

@@ -4,9 +4,9 @@
 //! This enables type inference to use YARD documentation for type checking.
 //!
 //! Type existence validation belongs in the analysis engine, not in this parser.
+use crate::core::RubyType;
 use crate::core::SourceRange as Range;
 use crate::core::{FullyQualifiedName, RubyConstant};
-use crate::inference::RubyType;
 
 /// Result of converting a YARD type, including any unresolved type references
 #[derive(Debug, Clone)]

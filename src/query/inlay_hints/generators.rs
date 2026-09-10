@@ -5,13 +5,13 @@
 
 use crate::utils::lsp::lsp_position;
 use parking_lot::RwLock;
+use ruby_analysis::core::RubyType;
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
 use ruby_analysis::indexer::{
     inlay_hints::{InlayNode, VariableKind},
     RubyDocument,
 };
-use ruby_analysis::inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 

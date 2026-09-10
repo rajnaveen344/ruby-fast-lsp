@@ -1,30 +1,33 @@
 //! Ruby AST to analysis facts.
 //!
-//! This crate is editor-agnostic. It parses Ruby source with Prism and emits
-//! facts consumed by `ruby-analysis::engine`.
+//! This module parses Ruby source with Prism and emits facts consumed by
+//! [`crate::engine`]. Declaration collection starts at [`AnalysisIndexer`];
+//! [`fact_collector::FactCollector`] adds body, reference, diagnostic, and
+//! extension evidence. The caller composes the resulting file facts and owns
+//! scheduling and publication. This module does not own project truth.
 
 mod analysis_indexer;
-pub mod analyzer;
+pub(crate) mod analyzer;
 #[cfg(test)]
 mod analyzer_tests;
-pub mod analyzer_utils;
+pub(crate) mod analyzer_utils;
 mod callable_body;
-pub mod code_lens;
-pub mod document_symbols;
+pub(crate) mod code_lens;
+pub(crate) mod document_symbols;
 mod erb;
 pub mod fact_collector;
 mod forwarded_block;
-pub mod hover;
-pub mod identifier;
-pub mod identifier_visitor;
+pub(crate) mod hover;
+pub(crate) mod identifier;
+pub(crate) mod identifier_visitor;
 pub mod inlay_hints;
 mod rbs_indexer;
-pub mod receiver_resolution;
-pub mod rename;
+pub(crate) mod receiver_resolution;
+pub(crate) mod rename;
 mod ruby_document;
 mod scope_tracker;
 mod selection_ranges;
-pub mod semantic_tokens;
+pub(crate) mod semantic_tokens;
 mod source_document;
 mod variable_scopes;
 pub mod yard;

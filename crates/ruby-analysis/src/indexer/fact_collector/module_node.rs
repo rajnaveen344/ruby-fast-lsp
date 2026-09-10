@@ -1,12 +1,12 @@
 use crate::core::{FullyQualifiedName, GraphNodeKind};
-use crate::LocalScopeKind as LVScopeKind;
+use crate::indexer::LocalScopeKind as LVScopeKind;
 use log::error;
 use ruby_prism::ModuleNode;
 
 use super::FactCollector;
 
 impl FactCollector {
-    pub fn process_module_node_entry(&mut self, node: &ModuleNode) -> bool {
+    pub(super) fn process_module_node_entry(&mut self, node: &ModuleNode) -> bool {
         let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 
         if self
@@ -35,7 +35,7 @@ impl FactCollector {
         true
     }
 
-    pub fn process_module_node_exit(&mut self, _node: &ModuleNode) {
+    pub(super) fn process_module_node_exit(&mut self, _node: &ModuleNode) {
         self.scope_tracker.pop_ns_scope();
         self.scope_tracker.pop_scope_kind();
         self.document.variable_scopes_mut().exit_scope();

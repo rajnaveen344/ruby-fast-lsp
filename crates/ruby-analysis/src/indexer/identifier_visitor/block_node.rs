@@ -1,6 +1,6 @@
 use ruby_prism::BlockNode;
 
-use crate::LVScopeKind;
+use crate::indexer::LVScopeKind;
 
 use super::IdentifierVisitor;
 

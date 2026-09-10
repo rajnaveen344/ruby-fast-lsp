@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::panic::AssertUnwindSafe;
 
 use futures::FutureExt;
-use ruby_analysis::UnknownReason;
+use ruby_analysis::core::UnknownReason;
 use serde::{Deserialize, Serialize};
 
 use crate::test::harness::{check, check_multi_file, FakeEditor};

@@ -7,7 +7,7 @@ use ruby_prism::{ForwardingSuperNode, SuperNode};
 use super::FactCollector;
 
 impl FactCollector {
-    pub fn process_forwarding_super_node_entry(&mut self, node: &ForwardingSuperNode) {
+    pub(super) fn process_forwarding_super_node_entry(&mut self, node: &ForwardingSuperNode) {
         self.push_super_reference_candidate(
             &node.location(),
             MethodCallSignatureCandidate {
@@ -18,7 +18,7 @@ impl FactCollector {
         );
     }
 
-    pub fn process_super_node_entry(&mut self, node: &SuperNode) {
+    pub(super) fn process_super_node_entry(&mut self, node: &SuperNode) {
         let signature = node
             .arguments()
             .map(|arguments| {
@@ -43,7 +43,7 @@ impl FactCollector {
              Fix: keep current_method_fqn populated only from RubyMethod values.",
         );
         let range = self.text_range_from_prism_location(location, "super method reference");
-        self.reference_candidates.push(ReferenceCandidate::method(
+        self.facts.references.push(ReferenceCandidate::method(
             range,
             MethodReferenceCandidate {
                 owner: self.scope_tracker.get_ns_stack(),
@@ -59,7 +59,7 @@ impl FactCollector {
                     receiver_label: Some("super".to_string()),
                     receiver_expression_range: None,
                     receiver_type: None,
-                    diagnose_unresolved: self.diagnostics_enabled,
+                    diagnose_unresolved: self.options.diagnostics_enabled,
                     allow_unindexed_owner: false,
                     signature: Some(signature),
                 },

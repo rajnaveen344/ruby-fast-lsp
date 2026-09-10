@@ -243,10 +243,10 @@ impl EngineQuery {
                 return false;
             };
             *fact_method == *method
-                && fact.visibility == ruby_analysis::core::method_store::MethodVisibility::Private
+                && fact.visibility == ruby_analysis::core::MethodVisibility::Private
         }) || engine.all_method_visibility_overrides().iter().any(|fact| {
             fact.method == *method
-                && fact.visibility == ruby_analysis::core::method_store::MethodVisibility::Private
+                && fact.visibility == ruby_analysis::core::MethodVisibility::Private
         })
     }
 
@@ -813,7 +813,7 @@ impl EngineQuery {
         .without_expression_receiver_inference()
         .without_diagnostics();
         collector.visit(&node);
-        doc_arc.write().variable_scopes = collector.document.variable_scopes;
+        doc_arc.write().variable_scopes = collector.into_document().variable_scopes;
         Some(())
     }
 }

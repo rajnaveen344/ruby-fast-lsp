@@ -1,70 +1,58 @@
-//! Core Ruby analysis data types.
+//! Shared Ruby names, source coordinates, types, and semantic fact contracts.
 //!
-//! This crate intentionally contains no LSP, parser, indexer, or editor
-//! dependencies. It is the shared contract for future editor and agent
-//! consumers.
+//! Import domain records directly from this module. Implementation modules,
+//! stores, interned IDs, and stored representations stay inside the crate.
+//! These primitives do not traverse source or own semantic query policy.
 
 pub(crate) mod callable_body;
 pub(crate) mod callable_signature;
-pub mod constant_type_equation;
-pub mod diagnostic_candidate_store;
-pub mod diagnostic_store;
-pub mod execution_context;
+pub(crate) mod constant_type_equation;
+pub(crate) mod diagnostic_candidate_store;
+pub(crate) mod diagnostic_store;
+pub(crate) mod execution_context;
 mod file_owned_index;
-pub mod fqn_id;
-pub mod fully_qualified_name;
-pub mod graph_store;
-pub mod memory_estimate;
-pub mod method_resolution;
-pub mod method_return_equation;
-pub mod method_store;
-pub mod reference_store;
-pub mod ruby_method;
-pub mod ruby_namespace;
-pub mod ruby_type;
-pub mod shape_type;
-pub mod source_file;
-pub mod source_position;
-pub mod symbol_store;
-pub mod type_inference_outcome;
-pub mod type_store;
+pub(crate) mod fqn_id;
+pub(crate) mod fully_qualified_name;
+pub(crate) mod graph_store;
+pub(crate) mod memory_estimate;
+pub(crate) mod method_resolution;
+pub(crate) mod method_return_equation;
+pub(crate) mod method_store;
+pub(crate) mod reference_store;
+pub(crate) mod ruby_method;
+pub(crate) mod ruby_namespace;
+pub(crate) mod ruby_type;
+pub(crate) mod shape_type;
+pub(crate) mod source_file;
+pub(crate) mod source_position;
+pub(crate) mod symbol_store;
+pub(crate) mod type_inference_outcome;
+pub(crate) mod type_store;
 
-pub(crate) use callable_body::{
-    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
-    ConstantCallableBodyFact,
-};
-pub(crate) use callable_signature::{
-    CallableBlockTemplate, CallableParameterTemplate, CallableSignature, CallableTypeTemplate,
-    DirectYieldCall, ForwardedBlockCall,
-};
+// Public domain contracts.
 pub use constant_type_equation::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
 };
 pub use diagnostic_candidate_store::{
-    DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticCandidateStore, RaiseArgCandidate,
+    DiagnosticCandidate, DiagnosticCandidateKind, RaiseArgCandidate,
 };
-pub use diagnostic_store::{DiagnosticFact, DiagnosticSeverity, DiagnosticStore};
+pub use diagnostic_store::{DiagnosticFact, DiagnosticSeverity};
 pub use execution_context::{ExecutionContextFact, ExecutionScopeMode};
-pub use fqn_id::{ConstLookupId, FqnId};
-pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
+pub use fully_qualified_name::{FqnParts, FullyQualifiedName, NamespaceKind};
 pub use graph_store::{
-    GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind, SemanticGraph,
-    StoredGraphEdgeFact, StoredGraphNodeFact, StoredSuperclassResolution,
-    StoredUnresolvedGraphEdgeFact, UnresolvedGraphEdgeFact,
+    GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind,
+    UnresolvedGraphEdgeFact,
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use method_return_equation::MethodReturnEquation;
 pub use method_store::{
-    MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, MethodStore,
-    MethodVisibilityOverrideFact, StoredMethodFact,
+    MethodAvailability, MethodFact, MethodParamFact, MethodParamKind, MethodVisibility,
+    MethodVisibilityOverrideFact,
 };
 pub use reference_store::{
-    ConstLookup, ConstantPath, KeywordArgCandidate, MethodCallSignatureCandidate,
-    MethodReferenceAccess, MethodReferenceCandidate, MethodReferenceDiagnostics,
-    ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact,
-    ReferenceStore, StoredConstantReferenceCandidate, StoredMethodReferenceCandidate,
-    StoredReferenceCandidate, StoredReferenceCandidateKind, StoredReferenceCandidateRef,
-    StoredResolvedReferenceCandidate,
+    ConstantPath, KeywordArgCandidate, MethodCallSignatureCandidate, MethodReferenceAccess,
+    MethodReferenceCandidate, MethodReferenceDiagnostics, ReferenceCandidate,
+    ReferenceCandidateKind, ReferenceFact,
 };
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::{GeneratedOwnerId, RubyConstant};
@@ -76,10 +64,34 @@ pub use shape_type::{
 };
 pub use source_file::{LibraryPackageId, SourceKind};
 pub use source_position::{SourcePosition, SourceRange};
-pub use symbol_store::{StoredSymbolFact, SymbolFact, SymbolKind, SymbolStore};
+pub use symbol_store::{SymbolFact, SymbolKind};
 pub use type_inference_outcome::{
     InferenceEvidence, InferenceTelemetry, TypeInferenceOutcome, UnknownReason,
 };
 pub use type_store::{
-    SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeStore, TypeSubject,
+    SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeSubject,
 };
+
+// Shared implementation primitives; never part of the consumer API.
+pub(crate) use callable_body::{
+    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
+    ConstantCallableBodyFact,
+};
+pub(crate) use callable_signature::{
+    CallableBlockTemplate, CallableParameterTemplate, CallableSignature, CallableTypeTemplate,
+    DirectYieldCall, ForwardedBlockCall,
+};
+pub(crate) use diagnostic_candidate_store::DiagnosticCandidateStore;
+pub(crate) use diagnostic_store::DiagnosticStore;
+pub(crate) use fqn_id::{ConstLookupId, FqnId};
+pub(crate) use graph_store::{
+    SemanticGraph, StoredGraphEdgeFact, StoredGraphNodeFact, StoredSuperclassResolution,
+    StoredUnresolvedGraphEdgeFact,
+};
+pub(crate) use method_store::{MethodStore, StoredMethodFact};
+pub(crate) use reference_store::{
+    ConstLookup, ReferenceCandidateStore, ReferenceStore, StoredMethodReferenceCandidate,
+    StoredReferenceCandidate, StoredReferenceCandidateKind, StoredReferenceCandidateRef,
+};
+pub(crate) use symbol_store::{StoredSymbolFact, SymbolStore};
+pub(crate) use type_store::TypeStore;

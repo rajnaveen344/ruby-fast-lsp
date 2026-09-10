@@ -7,7 +7,7 @@
 
 use crate::indexer::file_processor::FileProcessor;
 use crate::test::harness::{check, FakeEditor};
-use ruby_analysis::{DiagnosticFact, SourceKind, TextRange};
+use ruby_analysis::core::{DiagnosticFact, SourceKind, TextRange};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
 fn expected_nil_call() -> Diagnostic {
@@ -126,7 +126,7 @@ async fn cold_nil_call_facts_survive_byte_identical_open_and_save() {
             diagnostics,
             vec![DiagnosticFact::new(
                 TextRange::new(file_id, 10, 16),
-                ruby_analysis::DiagnosticSeverity::Warning,
+                ruby_analysis::core::DiagnosticSeverity::Warning,
                 "nil-call",
                 "Calling `upcase` on `x` which is `nil` here.",
             )]

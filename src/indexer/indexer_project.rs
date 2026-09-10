@@ -2533,7 +2533,7 @@ end
                     assignment_start,
                     assignment_start + u32::try_from("code".len()).unwrap(),
                 ),
-                Some(ruby_analysis::inference::RubyType::Unknown),
+                Some(ruby_analysis::core::RubyType::Unknown),
                 "an unresolved value constant must remain Unknown; Class<...> is only sound after a class declaration is proven"
             );
         }
@@ -2564,7 +2564,7 @@ end
             );
             assert_eq!(
                 query.constant_value_type(&constant),
-                Some(ruby_analysis::inference::RubyType::string()),
+                Some(ruby_analysis::core::RubyType::string()),
                 "transitive constant equations must solve each alias before consumers"
             );
         }
@@ -2573,7 +2573,7 @@ end
             u32::try_from(first_consumer.rfind("        code\n").unwrap() + 8).unwrap();
         assert_eq!(
             query.local_read_type_at(first_file_id, final_read_offset),
-            Some(ruby_analysis::inference::RubyType::string()),
+            Some(ruby_analysis::core::RubyType::string()),
             "flow reads after a branch must consume the joined constant equation"
         );
         for (path, source, name) in [
@@ -2592,7 +2592,7 @@ end
                     assignment_start,
                     assignment_end,
                 ),
-                Some(ruby_analysis::inference::RubyType::string()),
+                Some(ruby_analysis::core::RubyType::string()),
                 "one equation solve must update every consumer of a transitive value-constant alias"
             );
         }
@@ -2604,7 +2604,7 @@ end
             let method_offset = u32::try_from(source.find(method).unwrap()).unwrap();
             assert_eq!(
                 query.method_return_type_at(method, file_id, method_offset),
-                Some(ruby_analysis::inference::RubyType::string()),
+                Some(ruby_analysis::core::RubyType::string()),
                 "method-return equations must retain the same constant dependency as assignment facts"
             );
         }
@@ -2617,7 +2617,7 @@ end
                 fallback_start,
                 fallback_start + u32::try_from("fallback".len()).unwrap(),
             ),
-            Some(ruby_analysis::inference::RubyType::string()),
+            Some(ruby_analysis::core::RubyType::string()),
             "a late-resolved value constant must update the stable source assignment for ||= writes"
         );
         let cycle_file_id = engine.file_id(&cycle_consumer_path).unwrap();
@@ -2629,7 +2629,7 @@ end
                 0,
                 u32::try_from("cycle".len()).unwrap(),
             ),
-            Some(ruby_analysis::inference::RubyType::Unknown),
+            Some(ruby_analysis::core::RubyType::Unknown),
             "a base-free constant cycle must stay Unknown instead of becoming a class-object guess"
         );
         drop(engine);
@@ -2709,7 +2709,7 @@ end
                     assignment_start,
                     assignment_end,
                 ),
-                Some(ruby_analysis::inference::RubyType::Unknown),
+                Some(ruby_analysis::core::RubyType::Unknown),
                 "an unresolved constructor must remain Unknown instead of fabricating a class in the current lexical namespace"
             );
         }
@@ -2727,10 +2727,9 @@ end
 
         let engine = workspace_state.analysis_engine.read();
         let file_id = engine.file_id(&consumer_path).unwrap();
-        let expected =
-            ruby_analysis::inference::RubyType::Class(FullyQualifiedName::constant(vec![
-                ruby_analysis::core::RubyConstant::new("Registry").unwrap(),
-            ]));
+        let expected = ruby_analysis::core::RubyType::Class(FullyQualifiedName::constant(vec![
+            ruby_analysis::core::RubyConstant::new("Registry").unwrap(),
+        ]));
         assert_eq!(
             AnalysisQuery::new(&engine).variable_assignment_type_at(
                 ruby_analysis::engine::VariableTypeKind::Local,
@@ -2745,7 +2744,7 @@ end
         let method_offset = u32::try_from(consumer.find("build").unwrap()).unwrap();
         assert_eq!(
             AnalysisQuery::new(&engine).method_return_type_at("build", file_id, method_offset),
-            Some(ruby_analysis::inference::RubyType::Class(
+            Some(ruby_analysis::core::RubyType::Class(
                 FullyQualifiedName::constant(vec![ruby_analysis::core::RubyConstant::new(
                     "Registry"
                 )

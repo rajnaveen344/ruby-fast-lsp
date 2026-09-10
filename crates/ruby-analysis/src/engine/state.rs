@@ -27,13 +27,13 @@ use crate::core::{
     TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
 };
 
+use crate::core::MethodVisibility;
 use crate::engine::AnalysisQuery;
+use crate::engine::FileIdMap;
 use crate::inference::constant::{
     solve_constant_type_equations, ConstantFactInput, ResolvedConstantDependency,
 };
 use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
-use crate::method_store::MethodVisibility;
-use crate::FileIdMap;
 use indexmap::IndexSet;
 use parking_lot::Mutex;
 
@@ -3097,7 +3097,7 @@ impl AnalysisEngine {
         self.facts.references.resolved.facts_for(target_id)
     }
 
-    pub fn fqn_for_id(&self, id: FqnId) -> Option<&FullyQualifiedName> {
+    pub(crate) fn fqn_for_id(&self, id: FqnId) -> Option<&FullyQualifiedName> {
         self.names.fqn(id)
     }
 
@@ -3567,27 +3567,19 @@ impl AnalysisEngine {
             .collect()
     }
 
-    pub fn reference_store(&self) -> &ReferenceStore {
+    pub(crate) fn reference_store(&self) -> &ReferenceStore {
         &self.facts.references.resolved
     }
 
-    pub fn method_store(&self) -> &MethodStore {
-        &self.facts.definitions.methods
-    }
-
-    pub fn symbol_store(&self) -> &SymbolStore {
+    pub(crate) fn symbol_store(&self) -> &SymbolStore {
         &self.facts.definitions.symbols
     }
 
-    pub fn type_store(&self) -> &TypeStore {
+    pub(crate) fn type_store(&self) -> &TypeStore {
         &self.facts.types
     }
 
-    pub fn diagnostic_store(&self) -> &DiagnosticStore {
-        &self.facts.diagnostics.resolved
-    }
-
-    pub fn reference_candidate_store(&self) -> &ReferenceCandidateStore {
+    pub(crate) fn reference_candidate_store(&self) -> &ReferenceCandidateStore {
         &self.facts.references.candidates
     }
 

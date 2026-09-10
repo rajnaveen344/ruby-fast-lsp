@@ -42,6 +42,7 @@ use crate::indexing_resources::{
 use crate::persistent_cache::{
     CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
 };
+use ruby_analysis::core::MethodVisibility as AnalysisMethodVisibility;
 use ruby_analysis::core::{
     ExecutionContextFact, ExecutionScopeMode, FullyQualifiedName, GeneratedOwnerId, GraphEdgeKind,
     GraphNodeFact, GraphNodeKind, MethodCalleeResolution, MethodFact, NamespaceKind,
@@ -54,7 +55,6 @@ use ruby_analysis::indexer::fact_collector::{
     BlockExecutionContext, FactCollector, FactCollectorExtensionHost,
 };
 use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
-use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
 
 static EXTENSION_REGISTRY: Lazy<ExtensionRegistryHandle> =
     Lazy::new(ExtensionRegistryHandle::from_environment);
@@ -1268,7 +1268,7 @@ impl ExtensionRegistry {
                     && self.extension_applies_to_source(
                         index,
                         extension,
-                        visitor.extension_project_context.as_ref(),
+                        visitor.extension_project_context(),
                         applicability,
                     )
                     && extension
@@ -1290,7 +1290,7 @@ impl ExtensionRegistry {
                     && self.extension_applies_to_source(
                         index,
                         extension,
-                        visitor.extension_project_context.as_ref(),
+                        visitor.extension_project_context(),
                         applicability,
                     )
                     && extension.frame_call_names.contains(method_name)
@@ -1299,7 +1299,7 @@ impl ExtensionRegistry {
             return true;
         }
 
-        if !visitor.extension_call_stack.is_empty()
+        if !visitor.enclosing_extension_calls().is_empty()
             && self
                 .extensions
                 .iter()
@@ -1309,7 +1309,7 @@ impl ExtensionRegistry {
                         && self.extension_applies_to_source(
                             index,
                             extension,
-                            visitor.extension_project_context.as_ref(),
+                            visitor.extension_project_context(),
                             applicability,
                         )
                         && extension.can_run_inside_extension_frame(visitor, node)
@@ -1332,7 +1332,7 @@ impl ExtensionRegistry {
     ) -> Vec<String> {
         let method_name = utils::utf8_str(node.name().as_slice());
         let active_frame_ids = visitor
-            .extension_call_stack
+            .enclosing_extension_calls()
             .iter()
             .flat_map(|call| call.frame_extension_ids.iter())
             .collect::<BTreeSet<_>>();
@@ -1347,13 +1347,13 @@ impl ExtensionRegistry {
                     || !self.extension_applies_to_source(
                         *index,
                         extension,
-                        visitor.extension_project_context.as_ref(),
+                        visitor.extension_project_context(),
                         applicability,
                     )
                 {
                     return false;
                 }
-                let inherits_frame = visitor.extension_call_stack.iter().any(|call| {
+                let inherits_frame = visitor.enclosing_extension_calls().iter().any(|call| {
                     call.frame_extension_ids
                         .iter()
                         .any(|id| id == &extension.metadata.id)
@@ -1897,7 +1897,7 @@ impl LoadedWasmExtension {
 
     fn can_run_inside_extension_frame(&self, visitor: &FactCollector, node: &CallNode) -> bool {
         self.handles_call(utils::utf8_str(node.name().as_slice()))
-            && visitor.extension_call_stack.iter().any(|call| {
+            && visitor.enclosing_extension_calls().iter().any(|call| {
                 call.frame_extension_ids
                     .iter()
                     .any(|id| id == &self.metadata.id)
@@ -1920,7 +1920,7 @@ fn tracked_call_names(extensions: &[Arc<LoadedWasmExtension>]) -> Arc<HashSet<St
 
 fn extension_target_owner_exists(visitor: &FactCollector, target: &ExtensionMethodTarget) -> bool {
     let required_owner = FullyQualifiedName::namespace(target.owner.clone());
-    let engine = visitor.analysis_engine.read();
+    let engine = visitor.analysis_engine().read();
     ruby_analysis::engine::AnalysisQuery::new(&engine).namespace_exists(&required_owner)
 }
 
@@ -2681,13 +2681,13 @@ fn process_wasm_call_node(
     applicability: Option<&ExtensionApplicabilitySnapshot>,
 ) -> bool {
     let method_name = utils::utf8_str(node.name().as_slice());
-    let project = visitor.extension_project_context.as_ref();
+    let project = visitor.extension_project_context();
     let extensions = registry.extensions_with_applicability(project, applicability);
     let mut emitted = Vec::new();
     let mut emitted_contexts = Vec::new();
     let mut emitters = BTreeMap::new();
     let active_frame_ids = visitor
-        .extension_call_stack
+        .enclosing_extension_calls()
         .iter()
         .flat_map(|call| call.frame_extension_ids.iter())
         .collect::<BTreeSet<_>>();
@@ -2839,13 +2839,12 @@ fn process_wasm_call_node(
 }
 
 fn apply_execution_context(visitor: &mut FactCollector, context: BlockExecutionContextPatch) {
-    let source_identity = visitor.document.uri.as_str();
+    let source_identity = visitor.document().uri.as_str();
     let project_identity = visitor
-        .extension_project_context
-        .as_ref()
+        .extension_project_context()
         .map(|project| project.project_uri.as_str());
     let range =
-        crate::utils::lsp::text_range(&visitor.document, range_from_abi(context.block_range));
+        crate::utils::lsp::text_range(visitor.document(), range_from_abi(context.block_range));
     let mut owners = BTreeMap::new();
 
     for owner in &context.generated_owners {
@@ -2890,8 +2889,8 @@ fn apply_execution_context(visitor: &mut FactCollector, context: BlockExecutionC
             GraphNodeFact::new(instance_fqn.clone(), graph_kind, range),
             GraphNodeFact::new(singleton_fqn, graph_kind, range),
         ] {
-            if !visitor.direct_facts.graph_nodes.contains(&node) {
-                visitor.direct_facts.graph_nodes.push(node);
+            if !visitor.direct_facts().graph_nodes.contains(&node) {
+                visitor.add_graph_node_fact(node);
             }
         }
         if let Some(parent) = &owner.parent {
@@ -2912,17 +2911,15 @@ fn apply_execution_context(visitor: &mut FactCollector, context: BlockExecutionC
         method_definition_owner.clone(),
         method_definition_kind,
     );
-    visitor
-        .extension_execution_context_facts
-        .push(ExecutionContextFact {
-            range,
-            lexical_namespace: FullyQualifiedName::namespace(visitor.scope_tracker.get_ns_stack()),
-            implicit_receiver: implicit_receiver_fqn,
-            method_definition_owner: method_definition_owner_fqn,
-            lexical_scope: ExecutionScopeMode::Preserve,
-            local_scope: ExecutionScopeMode::Preserve,
-            extension_id: context.source.extension_id,
-        });
+    visitor.add_execution_context_fact(ExecutionContextFact {
+        range,
+        lexical_namespace: FullyQualifiedName::namespace(visitor.scope_tracker().get_ns_stack()),
+        implicit_receiver: implicit_receiver_fqn,
+        method_definition_owner: method_definition_owner_fqn,
+        lexical_scope: ExecutionScopeMode::Preserve,
+        local_scope: ExecutionScopeMode::Preserve,
+        extension_id: context.source.extension_id,
+    });
     visitor.set_pending_block_execution_context(BlockExecutionContext {
         block_range: range,
         implicit_receiver,
@@ -4903,7 +4900,7 @@ fn call_context(visitor: &FactCollector, node: &CallNode, include_project: bool)
         .unwrap_or(Receiver::None);
     CallContext {
         project: include_project
-            .then(|| visitor.extension_project_context.clone())
+            .then(|| visitor.extension_project_context().cloned())
             .flatten(),
         method_name: utils::utf8_str(node.name().as_slice()).to_string(),
         receiver: receiver.clone(),
@@ -4917,12 +4914,12 @@ fn call_context(visitor: &FactCollector, node: &CallNode, include_project: bool)
             })
             .unwrap_or_default(),
         current_namespace: visitor
-            .scope_tracker
+            .scope_tracker()
             .get_ns_stack()
             .iter()
             .map(ToString::to_string)
             .collect(),
-        namespace_kind: namespace_kind_to_abi(visitor.scope_tracker.current_method_context()),
+        namespace_kind: namespace_kind_to_abi(visitor.scope_tracker().current_method_context()),
         call_range: source_range(visitor, &node.location()),
         block_range: node
             .block()
@@ -4932,7 +4929,7 @@ fn call_context(visitor: &FactCollector, node: &CallNode, include_project: bool)
             .map(|loc| source_range(visitor, &loc))
             .unwrap_or_else(|| source_range(visitor, &node.location())),
         resolved_callees: resolved_callees_for_call(visitor, node),
-        enclosing_calls: visitor.extension_call_stack.clone(),
+        enclosing_calls: visitor.enclosing_extension_calls().to_vec(),
     }
 }
 
@@ -4986,12 +4983,12 @@ fn resolved_core_callees_for_call(
         .unwrap_or(CoreMethodReceiver::None);
 
     resolved_core_callees_for_call_analysis(
-        &visitor.analysis_engine,
+        visitor.analysis_engine(),
         visitor.analysis_query_cache(),
         &core_receiver,
         &method,
-        &visitor.scope_tracker.get_ns_stack(),
-        visitor.scope_tracker.current_method_context(),
+        &visitor.scope_tracker().get_ns_stack(),
+        visitor.scope_tracker().current_method_context(),
     )
 }
 
@@ -5083,7 +5080,9 @@ fn core_method_receiver_from_node(visitor: &FactCollector, node: &Node) -> CoreM
             ),
             method_name: utils::utf8_str(call.name().as_slice()).to_string(),
         }
-    } else if let Some(ruby_type) = visitor.literal_analyzer.analyze_literal(node) {
+    } else if let Some(ruby_type) =
+        ruby_analysis::inference::LiteralAnalyzer::new().analyze_literal(node)
+    {
         CoreMethodReceiver::Literal(ruby_type)
     } else {
         CoreMethodReceiver::Expression
@@ -5209,7 +5208,7 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                 ))
                 .collect::<Vec<_>>();
             let range = crate::utils::lsp::text_range(
-                &visitor.document,
+                visitor.document(),
                 range_from_abi(namespace.location),
             );
             visitor.direct_push_namespace_facts(
@@ -5238,9 +5237,11 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                 "INVARIANT VIOLATED: extension constant name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
             ));
             let fqn = FullyQualifiedName::constant(parts);
-            let range =
-                crate::utils::lsp::text_range(&visitor.document, range_from_abi(constant.location));
-            visitor.direct_facts.symbols.push(SymbolFact::new(
+            let range = crate::utils::lsp::text_range(
+                visitor.document(),
+                range_from_abi(constant.location),
+            );
+            visitor.add_symbol_fact(SymbolFact::new(
                 fqn.clone(),
                 AnalysisSymbolKind::Constant,
                 range,
@@ -5256,13 +5257,13 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                     range,
                     TypeProvenance::Extension,
                 );
-                visitor.type_store.add(fact.clone());
-                visitor.direct_facts.types.push(fact);
+                visitor.add_type_fact(fact.clone());
+                visitor.add_direct_type_fact(fact);
             }
         }
         IndexPatch::AddReference(reference) => {
             let range = crate::utils::lsp::text_range(
-                &visitor.document,
+                visitor.document(),
                 range_from_abi(reference.location),
             );
             let target = match &reference.target {
@@ -5306,7 +5307,7 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                         AbiNamespaceKind::Instance => NamespaceKind::Instance,
                         AbiNamespaceKind::Singleton => NamespaceKind::Singleton,
                     };
-                    visitor.reference_candidates.push(ReferenceCandidate::method_target(
+                    visitor.add_reference_candidate(ReferenceCandidate::method_target(
                         range,
                         owner,
                         owner_kind,
@@ -5316,9 +5317,7 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                     return;
                 }
             };
-            visitor
-                .reference_candidates
-                .push(ReferenceCandidate::resolved(range, target, None));
+            visitor.add_reference_candidate(ReferenceCandidate::resolved(range, target, None));
         }
         IndexPatch::DefineMethod(method) => {
             let declared_return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
@@ -5335,10 +5334,9 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                 &method.namespace,
                 method.owner_kind,
                 &method.source.extension_id,
-                visitor.document.uri.as_str(),
+                visitor.document().uri.as_str(),
                 visitor
-                    .extension_project_context
-                    .as_ref()
+                    .extension_project_context()
                     .map(|project| project.project_uri.as_str()),
                 "method owner",
             );
@@ -5347,7 +5345,7 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
             );
             let fqn = FullyQualifiedName::method(namespace, ruby_method);
             let range =
-                crate::utils::lsp::text_range(&visitor.document, range_from_abi(method.location));
+                crate::utils::lsp::text_range(visitor.document(), range_from_abi(method.location));
             visitor.direct_push_method_fact_with_visibility(
                 fqn.namespace_parts(),
                 owner_kind,
@@ -5372,11 +5370,11 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
                     range,
                     TypeProvenance::Extension,
                 );
-                visitor.type_store.add(type_fact.clone());
+                visitor.add_type_fact(type_fact.clone());
                 if inferred_return_type.is_some()
-                    && !visitor.direct_facts.types.contains(&type_fact)
+                    && !visitor.direct_facts().types.contains(&type_fact)
                 {
-                    visitor.direct_facts.types.push(type_fact);
+                    visitor.add_direct_type_fact(type_fact);
                 }
             }
         }
@@ -5384,7 +5382,7 @@ fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: IndexPatch) 
         IndexPatch::ApplyMixin(_) => {}
         IndexPatch::ConnectExecutionContext(_) => {}
     }
-    visitor.extension_index_patches.push(patch);
+    visitor.record_extension_patch(patch);
 }
 
 fn resolved_patch_owner(
@@ -5527,7 +5525,7 @@ fn symbol_kind_from_extension(kind: &str) -> Result<SymbolKind, String> {
 }
 
 fn source_range(visitor: &FactCollector, location: &ruby_prism::Location) -> SourceRange {
-    let range = visitor.document.prism_location_to_source_range(location);
+    let range = visitor.document().prism_location_to_source_range(location);
     SourceRange {
         start: SourcePosition {
             line: range.start.line,

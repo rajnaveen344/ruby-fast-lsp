@@ -3426,7 +3426,7 @@ async fn assert_real_type_inlay_samples(
     let candidates = {
         let engine = analysis_engine.read();
         let mut counts = BTreeMap::new();
-        for fact in engine.type_store().all_facts() {
+        for fact in engine.query().all_type_facts() {
             *counts.entry(fact.range.file_id).or_insert(0usize) += 1;
         }
         let mut candidates = counts

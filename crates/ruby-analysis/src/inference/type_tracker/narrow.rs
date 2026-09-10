@@ -15,7 +15,7 @@
 
 use crate::core::FullyQualifiedName;
 use crate::core::RubyConstant;
-use crate::r#type::ruby::RubyType;
+use crate::core::RubyType;
 use ruby_prism::Node;
 use std::collections::HashMap;
 

@@ -1,5 +1,5 @@
 use crate::core::{ExecutionContextFact, RubyConstant, SourceFileId, SourcePosition};
-use crate::{
+use crate::indexer::{
     analyzer_utils as utils, is_erb_path, mask_erb, Identifier, IdentifierType, IdentifierVisitor,
     LVScopeId,
 };
@@ -18,7 +18,7 @@ pub struct RubyPrismAnalyzer {
 pub struct SignatureHelpTarget {
     pub namespace: Vec<RubyConstant>,
     pub namespace_kind: crate::core::NamespaceKind,
-    pub receiver: crate::MethodReceiver,
+    pub receiver: crate::indexer::MethodReceiver,
     pub receiver_range: Option<(u32, u32)>,
     pub method: crate::core::RubyMethod,
     pub active_parameter: u32,
@@ -148,7 +148,7 @@ impl RubyPrismAnalyzer {
         LVScopeId,
         crate::core::NamespaceKind,
     ) {
-        let source = crate::SourceDocument::new(&self.code, SourceFileId(0));
+        let source = crate::indexer::SourceDocument::new(&self.code, SourceFileId(0));
         let byte_offset = u32::try_from(source.line_character_to_offset(
             &self.code,
             position.line,
@@ -171,7 +171,7 @@ impl RubyPrismAnalyzer {
             "INVARIANT VIOLATED: signature-help message offset exceeded u32. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
         );
         let (identifier, _, _, _, namespace_kind) = self.get_identifier(message_offset);
-        let crate::Identifier::RubyMethod {
+        let crate::indexer::Identifier::RubyMethod {
             namespace,
             receiver,
             iden: method,

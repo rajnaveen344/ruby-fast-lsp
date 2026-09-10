@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::mem::size_of;
 
 use super::memory_estimate::{map_table_bytes, ruby_type_heap_bytes, vec_payload_bytes};
-use crate::{
+use crate::core::{
     ConstLookupId, FqnId, FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType,
     SourceFileId, TextRange,
 };
@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 pub type ConstantPath = SmallVec<[RubyConstant; 4]>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ConstLookup {
+pub(crate) struct ConstLookup {
     pub path: ConstantPath,
     pub absolute: bool,
     pub context: FqnId,
@@ -30,12 +30,12 @@ impl ConstLookup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferenceFact {
     pub range: TextRange,
-    pub caller: Option<FqnId>,
+    pub(crate) caller: Option<FqnId>,
     pub access: MethodReferenceAccess,
 }
 
 impl ReferenceFact {
-    pub fn new(range: TextRange, caller: Option<FqnId>) -> Self {
+    pub(crate) fn new(range: TextRange, caller: Option<FqnId>) -> Self {
         Self {
             range,
             caller,
@@ -43,7 +43,11 @@ impl ReferenceFact {
         }
     }
 
-    pub fn method(range: TextRange, caller: Option<FqnId>, access: MethodReferenceAccess) -> Self {
+    pub(crate) fn method(
+        range: TextRange,
+        caller: Option<FqnId>,
+        access: MethodReferenceAccess,
+    ) -> Self {
         Self {
             range,
             caller,
@@ -197,16 +201,6 @@ pub enum StoredReferenceCandidateRef<'a> {
     Constant(&'a StoredConstantReferenceCandidate),
     Method(&'a StoredMethodReferenceCandidate),
     Resolved(&'a StoredResolvedReferenceCandidate),
-}
-
-impl StoredReferenceCandidateRef<'_> {
-    pub fn range(&self) -> TextRange {
-        match self {
-            StoredReferenceCandidateRef::Constant(candidate) => candidate.range,
-            StoredReferenceCandidateRef::Method(candidate) => candidate.range,
-            StoredReferenceCandidateRef::Resolved(candidate) => candidate.range,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -377,10 +371,6 @@ pub struct ReferenceCandidateStats {
 }
 
 impl ReferenceCandidateStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn replace_file(
         &mut self,
         file_id: SourceFileId,
@@ -456,40 +446,6 @@ impl ReferenceCandidateStore {
             resolved.shrink_to_fit();
             self.resolved_by_file.insert(file_id, resolved);
         }
-    }
-
-    pub fn all_candidates(&self) -> Vec<StoredReferenceCandidate> {
-        self.iter_candidates()
-            .map(|candidate| match candidate {
-                StoredReferenceCandidateRef::Constant(candidate) => StoredReferenceCandidate {
-                    range: candidate.range,
-                    kind: StoredReferenceCandidateKind::Constant {
-                        lookup: candidate.lookup,
-                    },
-                },
-                StoredReferenceCandidateRef::Method(candidate) => StoredReferenceCandidate {
-                    range: candidate.range,
-                    kind: StoredReferenceCandidateKind::Method {
-                        owner: candidate.owner,
-                        owner_kind: candidate.owner_kind,
-                        method: candidate.method,
-                        is_super: candidate.is_super,
-                        access: candidate.access,
-                        caller: candidate.caller,
-                        call_expression_range: candidate.call_expression_range,
-                        preferred_definition_range: candidate.preferred_definition_range,
-                        diagnostics: candidate.diagnostics.clone(),
-                    },
-                },
-                StoredReferenceCandidateRef::Resolved(candidate) => StoredReferenceCandidate {
-                    range: candidate.range,
-                    kind: StoredReferenceCandidateKind::Resolved {
-                        target: candidate.target,
-                        caller: candidate.caller,
-                    },
-                },
-            })
-            .collect()
     }
 
     pub fn method_candidates_named(
@@ -649,10 +605,6 @@ pub struct ReferenceStore {
 }
 
 impl ReferenceStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn add(&mut self, target: FqnId, fact: ReferenceFact) {
         let file_id = fact.range.file_id;
         let facts = self.facts.entry(target).or_default();
@@ -661,11 +613,6 @@ impl ReferenceStore {
             .entry(file_id)
             .or_default()
             .push(target);
-    }
-
-    pub fn add_sorted(&mut self, target: FqnId, fact: ReferenceFact) {
-        self.add(target, fact);
-        self.sort_all();
     }
 
     pub fn sort_all(&mut self) {
@@ -682,13 +629,6 @@ impl ReferenceStore {
 
     pub fn facts_for(&self, target: FqnId) -> &[ReferenceFact] {
         self.facts.get(&target).map(Vec::as_slice).unwrap_or(&[])
-    }
-
-    pub fn all_facts(&self) -> Vec<ReferenceFact> {
-        self.facts
-            .values()
-            .flat_map(|facts| facts.iter().cloned())
-            .collect()
     }
 
     pub fn iter_facts_with_targets(&self) -> impl Iterator<Item = (FqnId, &ReferenceFact)> {
@@ -733,15 +673,6 @@ impl ReferenceStore {
                     .get(target)
                     .is_some_and(|facts| facts.iter().any(|fact| fact.range == range))
             })
-            .collect()
-    }
-
-    pub fn facts_for_caller(&self, caller: FqnId) -> Vec<ReferenceFact> {
-        self.facts
-            .values()
-            .flat_map(|facts| facts.iter())
-            .filter(|fact| fact.caller == Some(caller))
-            .cloned()
             .collect()
     }
 
@@ -850,7 +781,7 @@ fn method_reference_diagnostics_heap_bytes(diagnostics: &MethodReferenceDiagnost
 
 #[cfg(test)]
 mod tests {
-    use crate::{FqnId, SourceFileId, TextRange};
+    use crate::core::{FqnId, SourceFileId, TextRange};
 
     use super::*;
 
@@ -861,7 +792,7 @@ mod tests {
     #[test]
     fn replace_file_removes_stale_reference_facts_for_same_file_only() {
         let target = FqnId(1);
-        let mut store = ReferenceStore::new();
+        let mut store = ReferenceStore::default();
         store.add(
             target,
             ReferenceFact::new(TextRange::new(file(), 0, 4), None),

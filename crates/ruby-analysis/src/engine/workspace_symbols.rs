@@ -276,7 +276,7 @@ mod tests {
         SymbolFact, SymbolKind, TextRange,
     };
     use crate::engine::AnalysisQuery;
-    use crate::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
 
     use super::*;
 

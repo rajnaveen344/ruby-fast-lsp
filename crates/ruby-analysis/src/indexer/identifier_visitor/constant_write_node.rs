@@ -4,7 +4,7 @@ use ruby_prism::{
 };
 
 use crate::core::RubyConstant;
-use crate::Identifier;
+use crate::indexer::Identifier;
 
 use super::{IdentifierType, IdentifierVisitor};
 

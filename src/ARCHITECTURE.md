@@ -24,6 +24,23 @@ editors/
 └── npm/            - npm package manifests and platform package directories
 ```
 
+### Analysis Library
+
+`ruby-analysis` exposes four ownership modules: `core` for domain contracts,
+`indexer` for parsing/fact collection, `inference` for type rules, and `engine`
+for persistent project state and queries. Its root does not flatten their
+exports. `RubyType` is always imported from `core`; stores and interned
+representations remain internal.
+
+Engine resolution invokes inference's AST-free constant and method-return
+solvers and stores their outcomes. Inference may consult engine queries, but
+lookup policy and file replacement remain engine-owned. `AnalysisQuery` and
+file-scoped `TypeQuery` borrow engine state; callers never clone or obtain a
+store to read it. Profiler representation sizes are detached numeric evidence.
+
+See the [analysis library guide](../crates/ruby-analysis/README.md) for public
+entry points and an executable collection/replacement example.
+
 ### Core Philosophy
 
 1. **Separation of Concerns**: Each module has a clear, focused responsibility
@@ -50,7 +67,8 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 #### Design Decisions:
 
 - Storage is owned by `ruby-analysis::engine`
-- `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass
+- `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass. Its ten private owners separate source/scope context, options, extensions, facts, flow, lookup inputs, and method/expression/constant evidence.
+- `FactCollector::finish()` returns an owned `CollectedFile`; production and simulation composers apply source policy before engine replacement. `traversal.rs` owns visit order, node modules own syntax handling, and responsibility modules own the shared helpers. See the [collector guide](../crates/ruby-analysis/src/indexer/fact_collector/README.md).
 - File discovery and parsing stay separate from engine query logic
 
 ### 2. Analyzer (`crates/ruby-analysis/src/indexer/`)
@@ -62,9 +80,11 @@ The Analyzer is responsible for understanding Ruby code structure using the Pris
 
 #### Key Files:
 
-- `mod.rs`: Central module file and Identifier resolution
+- `mod.rs`: Explicit analysis entry points
 - `scope_tracker.rs`: Tracks current namespace and scope during traversal
-- `visitors/`: A collection of specialized visitors for different LSP features
+- `analysis_indexer.rs`: Declaration and graph fact collection
+- `fact_collector/`: Body, reference, diagnostic, and extension evidence
+- `identifier_visitor/`: Cursor-target discovery
 
 #### Design Decisions:
 

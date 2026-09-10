@@ -1,3 +1,4 @@
+use ruby_analysis::core::RubyType;
 pub mod snippets;
 pub mod variable;
 
@@ -10,10 +11,7 @@ use tower_lsp::lsp_types::{
 };
 
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
-use ruby_analysis::inference::{
-    completion::{CompletionSemanticQuery, CompletionVariableKind},
-    RubyType,
-};
+use ruby_analysis::inference::completion::{CompletionSemanticQuery, CompletionVariableKind};
 
 use crate::{
     query::{analyzer_for_document, EngineQuery},
@@ -301,8 +299,8 @@ pub async fn find_completion_at_position(
             // singleton-vs-instance completion decision.
             let kind = if matches!(
                 receiver_type,
-                ruby_analysis::inference::RubyType::ClassReference(_)
-                    | ruby_analysis::inference::RubyType::ModuleReference(_)
+                ruby_analysis::core::RubyType::ClassReference(_)
+                    | ruby_analysis::core::RubyType::ModuleReference(_)
             ) {
                 NamespaceKind::Singleton
             } else {

@@ -12,22 +12,22 @@
 
 mod narrow;
 
-use crate::control_flow;
 use crate::core::method_return_equation::MethodReturnBase;
+use crate::core::RubyType;
 use crate::core::{
     ConstantTypeDependency, FullyQualifiedName, LiteralKey, LiteralValue, MethodReturnEquation,
     NamespaceKind, RubyConstant, RubyMethod, ShapeConstructionError, ShapeExactness, ShapeField,
     ShapeStability, ShapeType, TypeInferenceOutcome, UnknownReason, MAX_SHAPE_ALIASES,
 };
 use crate::engine::{AnalysisEngine, AnalysisQuery, AnalysisQueryCache};
+use crate::inference::control_flow;
 use crate::inference::method::recursive::MAX_RECURSIVE_RETURN_ITERATIONS;
-use crate::r#type::literal::{
+use crate::inference::r#type::literal::{
     infer_array_literal_type_fallible, infer_hash_literal_type_fallible, literal_key,
     literal_shape_construction_unknown_reason, project_immediate_hash_receiver_type,
     LiteralAnalyzer,
 };
-use crate::r#type::ruby::RubyType;
-use crate::r#type::shape as shape_reads;
+use crate::inference::r#type::shape as shape_reads;
 use parking_lot::RwLock;
 use ruby_prism::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -3957,7 +3957,11 @@ impl<'a> TypeTracker<'a> {
             }
             RubyType::Union(_) | RubyType::Unknown => None,
         }?;
-        crate::rbs::get_rbs_method_return_type_as_ruby_type(&class_name, method_name, is_singleton)
+        crate::inference::rbs::get_rbs_method_return_type_as_ruby_type(
+            &class_name,
+            method_name,
+            is_singleton,
+        )
     }
 
     fn resolve_method_return_type_from_analysis(

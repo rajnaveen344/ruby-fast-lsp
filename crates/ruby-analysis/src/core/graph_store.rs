@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::memory_estimate::{map_table_bytes, set_table_bytes, vec_payload_bytes};
-use crate::{ConstLookupId, FqnId, FullyQualifiedName, SourceFileId, TextRange};
+use crate::core::{ConstLookupId, FqnId, FullyQualifiedName, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum GraphNodeKind {
@@ -81,7 +81,7 @@ impl GraphEdgeFact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnresolvedGraphEdgeFact {
     pub source: FullyQualifiedName,
-    pub target_parts: Vec<crate::RubyConstant>,
+    pub target_parts: Vec<crate::core::RubyConstant>,
     pub absolute: bool,
     pub context: FullyQualifiedName,
     pub kind: GraphEdgeKind,
@@ -92,7 +92,7 @@ pub struct UnresolvedGraphEdgeFact {
 impl UnresolvedGraphEdgeFact {
     pub fn new(
         source: FullyQualifiedName,
-        target_parts: Vec<crate::RubyConstant>,
+        target_parts: Vec<crate::core::RubyConstant>,
         absolute: bool,
         context: FullyQualifiedName,
         kind: GraphEdgeKind,
@@ -250,10 +250,6 @@ pub struct SemanticGraph {
 }
 
 impl SemanticGraph {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn add_node(&mut self, fact: StoredGraphNodeFact) {
         self.node_definition_files.insert(fact.range.file_id);
         let node = self.nodes.entry(fact.fqn).or_default();
@@ -542,16 +538,6 @@ impl SemanticGraph {
             .values()
             .flat_map(|edges| edges.iter().copied())
             .collect()
-    }
-
-    pub fn unresolved_edges_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Vec<StoredUnresolvedGraphEdgeFact> {
-        self.unresolved_by_file
-            .get(&file_id)
-            .cloned()
-            .unwrap_or_default()
     }
 
     pub fn take_unresolved_edges(&mut self) -> Vec<StoredUnresolvedGraphEdgeFact> {
@@ -891,7 +877,7 @@ fn release_unresolved_source_count(
 
 #[cfg(test)]
 mod tests {
-    use crate::{FqnId, SourceFileId, TextRange};
+    use crate::core::{FqnId, SourceFileId, TextRange};
 
     use super::*;
 
@@ -903,7 +889,7 @@ mod tests {
     fn replace_file_removes_stale_graph_facts_for_same_file_only() {
         let source = FqnId(1);
         let target = FqnId(2);
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
         store.add_node(StoredGraphNodeFact::new(
             source,
             GraphNodeKind::Class,
@@ -939,7 +925,7 @@ mod tests {
         let source = FqnId(1);
         let first_target = FqnId(2);
         let second_target = FqnId(3);
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
         store.add_edge(StoredGraphEdgeFact::new(
             source,
             first_target,
@@ -976,7 +962,7 @@ mod tests {
         let object = FqnId(2);
         let parent = FqnId(3);
         let alternative = FqnId(4);
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
         store.add_edge(
             StoredGraphEdgeFact::new(
                 source,
@@ -1020,7 +1006,7 @@ mod tests {
             GraphEdgeKind::Superclass,
             TextRange::new(file_id, 0, 10),
         );
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
         store.add_unresolved_edge(unresolved);
         assert!(store.has_unresolved_explicit_superclass(source));
 
@@ -1049,7 +1035,7 @@ mod tests {
             TextRange::new(file_id, 10, 20),
         )
         .with_provenance(GraphEdgeProvenance::ImplicitObject);
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
         store.add_unresolved_edge(include_edge);
         store.add_unresolved_edge(implicit_superclass);
 
@@ -1067,7 +1053,7 @@ mod tests {
         let edge_only_file = SourceFileId(2);
         let source = FqnId(1);
         let target = FqnId(2);
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
 
         store.add_node(StoredGraphNodeFact::new(
             source,
@@ -1110,10 +1096,10 @@ mod tests {
             TextRange::new(SourceFileId(1), 12, 16),
         );
 
-        let mut forward = SemanticGraph::new();
+        let mut forward = SemanticGraph::default();
         forward.add_edge(first);
         forward.add_edge(second);
-        let mut reverse = SemanticGraph::new();
+        let mut reverse = SemanticGraph::default();
         reverse.add_edge(second);
         reverse.add_edge(first);
 
@@ -1132,7 +1118,7 @@ mod tests {
     fn node_definition_queries_do_not_treat_edge_only_entries_as_namespaces() {
         let source = FqnId(1);
         let target = FqnId(2);
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
         store.add_node(StoredGraphNodeFact::new(
             source,
             GraphNodeKind::Class,
@@ -1168,7 +1154,7 @@ mod tests {
         let early = FqnId(3);
         let late = FqnId(4);
         let template = FqnId(5);
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
         store.add_node(StoredGraphNodeFact::new(
             source,
             GraphNodeKind::Class,
@@ -1258,7 +1244,7 @@ mod tests {
         let fqn = FqnId(1);
         let earlier = SourceFileId(1);
         let later = SourceFileId(2);
-        let mut store = SemanticGraph::new();
+        let mut store = SemanticGraph::default();
         store.add_node(StoredGraphNodeFact::new(
             fqn,
             GraphNodeKind::Module,

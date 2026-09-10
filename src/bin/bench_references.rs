@@ -180,7 +180,7 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
         "analysis after pass: {} symbols, {} methods, {} refs",
         engine.all_symbol_facts().len(),
         engine.all_method_facts().len(),
-        engine.reference_store().all_facts().len()
+        engine.stats().references
     );
 
     Ok(t)

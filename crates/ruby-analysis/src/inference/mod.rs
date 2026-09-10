@@ -147,7 +147,7 @@
 //!
 //! # Higher-order calls
 //!
-//! [`higher_order`] is the single callable-constraint model for block-bearing
+//! The internal `higher_order` module is the single callable-constraint model for block-bearing
 //! core and project RBS methods, bounded direct Ruby `yield`, proven block
 //! forwarding, statically known proc/lambda bodies, and static `&:method`.
 //! It separates receiver type parameters from method-local type parameters,
@@ -166,7 +166,7 @@
 //! block-result union variants. The solver never truncates a candidate set or
 //! union and never widens an incomplete result to `Object`.
 //!
-//! [`callable_body`] evaluates the one AST-free summary emitted during the
+//! The internal `callable_body` module evaluates the one AST-free summary emitted during the
 //! indexer's ordinary Prism traversal. Direct `.call` and `&callable` bind
 //! their proven inputs through that same evaluator. Local identities and
 //! aliases remain bounded flow state; only capture-free constant summaries
@@ -220,14 +220,11 @@ pub(crate) mod higher_order;
 pub mod method;
 pub mod rbs;
 pub mod r#type;
-pub mod type_query;
 pub mod type_tracker;
 
-pub use crate::core::RubyType;
 pub use method::{MethodSignature, MethodSignatureContext, MethodVisibility, Parameter};
-pub use r#type::*;
+pub use r#type::{ArrayTypeInfo, CollectionAnalyzer, HashTypeInfo, LiteralAnalyzer};
 pub use rbs::{get_rbs_method_return_type, has_rbs_class, rbs_declaration_count, rbs_method_count};
-pub use type_query::TypeQuery;
 
 #[cfg(test)]
 mod architecture_tests {

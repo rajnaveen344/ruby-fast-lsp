@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use log::debug;
 
-use crate::core::method_store::MethodVisibility;
+use crate::core::MethodVisibility;
 use crate::core::{
     ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateKind,
     DiagnosticFact, FqnId, FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodAvailability,
@@ -21,7 +21,7 @@ use crate::engine::resolution::{
     MethodLookupChainCache, MethodLookupResult,
 };
 use crate::engine::state::{elapsed_ns, ResolvePassStats, TypeInferenceOutcomeRef};
-use crate::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{AnalysisEngine, AnalysisQuery};
 
 type MethodReferenceCacheKey = (ConstLookupId, NamespaceKind, RubyMethod, bool);
 

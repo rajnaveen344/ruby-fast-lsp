@@ -1,7 +1,7 @@
 use ruby_prism::{ForwardingSuperNode, SuperNode};
 
 use crate::core::{FullyQualifiedName, RubyMethod};
-use crate::{Identifier, MethodReceiver};
+use crate::indexer::{Identifier, MethodReceiver};
 
 use super::{IdentifierType, IdentifierVisitor};
 

@@ -1,4 +1,4 @@
-use crate::{FullyQualifiedName, TextRange};
+use crate::core::{FullyQualifiedName, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExecutionScopeMode {

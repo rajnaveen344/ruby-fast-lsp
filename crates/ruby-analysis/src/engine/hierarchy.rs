@@ -299,7 +299,7 @@ fn push_grouped_text_range(
 }
 
 fn push_subtype_entries(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     edges: &mut [GraphEdgeFact],
     relation: TypeHierarchyRelation,
     entries: &mut Vec<TypeHierarchyEntry>,
@@ -313,7 +313,7 @@ fn push_subtype_entries(
 }
 
 fn push_supertype_entries(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     edges: &[GraphEdgeFact],
     kind: GraphEdgeKind,
     relation: TypeHierarchyRelation,
@@ -336,7 +336,7 @@ fn push_supertype_entries(
 }
 
 fn push_unresolved_supertype_entries(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
     entries: &mut Vec<TypeHierarchyEntry>,
 ) {
@@ -363,7 +363,7 @@ fn push_unresolved_supertype_entries(
 }
 
 fn hierarchy_entry_for_node(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
     relation: TypeHierarchyRelation,
     edge_file_id: Option<SourceFileId>,
@@ -381,7 +381,7 @@ fn hierarchy_entry_for_node(
 }
 
 fn collect_all_implementors(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut result = Vec::new();
@@ -410,7 +410,7 @@ fn collect_all_implementors(
 }
 
 fn mixers(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut mixers = engine
@@ -431,7 +431,7 @@ fn mixers(
 }
 
 fn descendants(
-    engine: &crate::AnalysisEngine,
+    engine: &crate::engine::AnalysisEngine,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut result = Vec::new();
@@ -459,7 +459,7 @@ mod tests {
         SymbolKind, TextRange,
     };
     use crate::engine::AnalysisQuery;
-    use crate::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
 
     fn query_with_symbols() -> (AnalysisEngine, SourceFileId) {
         let source = "class User\n  def name\n  end\nend";

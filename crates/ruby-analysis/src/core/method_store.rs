@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::memory_estimate::{
     map_table_bytes, ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
 };
-use crate::{
+use crate::core::{
     CallableSignature, CallableTypeTemplate, DirectYieldCall, ForwardedBlockCall, FqnId,
     FullyQualifiedName, RubyMethod, SourceFileId, TextRange,
 };
@@ -391,53 +391,6 @@ pub(crate) enum StoredMethodFactMatch<'a> {
     Ambiguous,
 }
 
-impl StoredMethodFact {
-    pub fn new(fqn: FqnId, owner: FqnId, method: Option<RubyMethod>, range: TextRange) -> Self {
-        Self {
-            fqn,
-            owner,
-            method,
-            range,
-            name_range: range,
-            params: Vec::new(),
-            param_facts: Vec::new(),
-            parameter_shape_complete: false,
-            delegate_receiver: None,
-            visibility: MethodVisibility::Public,
-            availability: MethodAvailability::Available,
-            documentation: None,
-            return_type_label: None,
-            higher_order: None,
-        }
-    }
-
-    pub fn with_param_facts(
-        fqn: FqnId,
-        owner: FqnId,
-        method: Option<RubyMethod>,
-        range: TextRange,
-        param_facts: Vec<MethodParamFact>,
-    ) -> Self {
-        let params = param_facts.iter().map(|param| param.name.clone()).collect();
-        Self {
-            fqn,
-            owner,
-            method,
-            range,
-            name_range: range,
-            params,
-            param_facts,
-            parameter_shape_complete: true,
-            delegate_receiver: None,
-            visibility: MethodVisibility::Public,
-            availability: MethodAvailability::Available,
-            documentation: None,
-            return_type_label: None,
-            higher_order: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct MethodStore {
     facts: Vec<Option<StoredMethodFact>>,
@@ -466,29 +419,6 @@ impl MethodFactId {
 }
 
 impl MethodStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add(&mut self, fact: StoredMethodFact) {
-        let method_name = fact.method;
-        let file_id = fact.range.file_id;
-        let fqn = fact.fqn;
-        let owner = fact.owner;
-        let id = self.insert_fact(fact);
-        self.facts_by_fqn.entry(fqn).or_default().push(id);
-        sort_method_ids_by_fqn(&self.facts, self.facts_by_fqn.get_mut(&fqn).unwrap());
-        self.facts_by_owner.entry(owner).or_default().push(id);
-        sort_method_ids_by_owner(&self.facts, self.facts_by_owner.get_mut(&owner).unwrap());
-        if let Some(method_name) = method_name {
-            let key = (owner, method_name);
-            self.facts_by_owner_name.entry(key).or_default().push(id);
-            sort_method_ids_by_owner(&self.facts, self.facts_by_owner_name.get_mut(&key).unwrap());
-        }
-        self.facts_by_file.entry(file_id).or_default().push(id);
-        sort_method_ids_by_file(&self.facts, self.facts_by_file.get_mut(&file_id).unwrap());
-    }
-
     pub fn facts_for(&self, fqn: FqnId) -> Vec<StoredMethodFact> {
         self.facts_by_fqn
             .get(&fqn)
@@ -577,24 +507,6 @@ impl MethodStore {
         StoredMethodFactMatch::Unique(first)
     }
 
-    pub fn method_names_for_owner(&self, owner: FqnId) -> Vec<&'static str> {
-        let mut names = Vec::new();
-        let mut seen = HashSet::new();
-        let Some(facts) = self.facts_by_owner.get(&owner) else {
-            return names;
-        };
-        for fact in facts.iter().filter_map(|id| self.fact(*id)) {
-            let Some(method) = fact.method else {
-                continue;
-            };
-            let name = method.as_str();
-            if seen.insert(name) {
-                names.push(name);
-            }
-        }
-        names
-    }
-
     pub(crate) fn ruby_method_names_for_owner(&self, owner: FqnId) -> Vec<RubyMethod> {
         let mut names = Vec::new();
         let mut seen = HashSet::new();
@@ -612,14 +524,14 @@ impl MethodStore {
         names
     }
 
-    pub fn facts_in_file(&self, file_id: crate::SourceFileId) -> Vec<StoredMethodFact> {
+    pub fn facts_in_file(&self, file_id: crate::core::SourceFileId) -> Vec<StoredMethodFact> {
         self.facts_by_file
             .get(&file_id)
             .map(|ids| self.clone_facts(ids))
             .unwrap_or_default()
     }
 
-    pub fn remove_file(&mut self, file_id: crate::SourceFileId) {
+    pub fn remove_file(&mut self, file_id: crate::core::SourceFileId) {
         let Some(stale_facts) = self.facts_by_file.remove(&file_id) else {
             return;
         };
@@ -654,7 +566,7 @@ impl MethodStore {
 
     pub fn replace_file(
         &mut self,
-        file_id: crate::SourceFileId,
+        file_id: crate::core::SourceFileId,
         facts: impl IntoIterator<Item = StoredMethodFact>,
     ) {
         self.remove_file(file_id);
@@ -964,9 +876,33 @@ fn sort_method_ids_by_file(facts: &[Option<StoredMethodFact>], ids: &mut [Method
 
 #[cfg(test)]
 mod tests {
-    use crate::{FqnId, FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
+    use crate::core::{FqnId, FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
 
     use super::*;
+
+    fn stored_method(
+        fqn: FqnId,
+        owner: FqnId,
+        method: Option<RubyMethod>,
+        range: TextRange,
+    ) -> StoredMethodFact {
+        StoredMethodFact {
+            fqn,
+            owner,
+            method,
+            range,
+            name_range: range,
+            params: Vec::new(),
+            param_facts: Vec::new(),
+            parameter_shape_complete: false,
+            delegate_receiver: None,
+            visibility: MethodVisibility::Public,
+            availability: MethodAvailability::Available,
+            documentation: None,
+            return_type_label: None,
+            higher_order: None,
+        }
+    }
 
     fn file() -> SourceFileId {
         SourceFileId(1)
@@ -986,7 +922,7 @@ mod tests {
             receiver_type_parameters: Vec::new(),
             type_parameters: Vec::new(),
             parameters: Vec::new(),
-            block: crate::CallableBlockTemplate {
+            block: crate::core::CallableBlockTemplate {
                 parameters: Vec::new(),
                 return_type: CallableTypeTemplate::Unconstrained,
                 required: true,
@@ -1009,23 +945,29 @@ mod tests {
         let owner = FqnId(3);
         let name = RubyMethod::new("name").unwrap();
         let email = RubyMethod::new("email").unwrap();
-        let mut store = MethodStore::new();
-        store.add(StoredMethodFact::new(
-            fqn,
-            owner,
-            Some(name),
-            TextRange::new(file(), 0, 8),
-        ));
-        store.add(StoredMethodFact::new(
-            other_fqn,
-            owner,
-            Some(email),
-            TextRange::new(SourceFileId(2), 0, 8),
-        ));
+        let mut store = MethodStore::default();
+        store.replace_file(
+            file(),
+            [stored_method(
+                fqn,
+                owner,
+                Some(name),
+                TextRange::new(file(), 0, 8),
+            )],
+        );
+        store.replace_file(
+            SourceFileId(2),
+            [stored_method(
+                other_fqn,
+                owner,
+                Some(email),
+                TextRange::new(SourceFileId(2), 0, 8),
+            )],
+        );
 
         store.replace_file(
             file(),
-            [StoredMethodFact::new(
+            [stored_method(
                 fqn,
                 owner,
                 Some(name),
@@ -1043,15 +985,14 @@ mod tests {
         let fqn = FqnId(1);
         let owner = FqnId(2);
         let method = RubyMethod::new("call").unwrap();
-        let fact = StoredMethodFact::new(
+        let fact = stored_method(
             fqn,
             owner,
             Some(method),
             TextRange::new(SourceFileId(3), 4, 12),
         );
-        let mut store = MethodStore::new();
-        store.add(fact.clone());
-        store.add(fact);
+        let mut store = MethodStore::default();
+        store.replace_file(fact.range.file_id, [fact.clone(), fact]);
 
         let match_result = store.effective_fact_matching_owner_name(owner, &method);
         let StoredMethodFactMatch::Unique(selected) = match_result else {
@@ -1071,13 +1012,13 @@ mod tests {
         let fqn = FqnId(1);
         let owner = FqnId(2);
         let method = RubyMethod::new("call").unwrap();
-        let mut available = StoredMethodFact::new(
+        let mut available = stored_method(
             fqn,
             owner,
             Some(method),
             TextRange::new(SourceFileId(1), 0, 8),
         );
-        let mut unavailable = StoredMethodFact::new(
+        let mut unavailable = stored_method(
             fqn,
             owner,
             Some(method),
@@ -1087,9 +1028,9 @@ mod tests {
             reason: "JRuby runtime API".to_string(),
         };
 
-        let mut store = MethodStore::new();
-        store.add(available.clone());
-        store.add(unavailable);
+        let mut store = MethodStore::default();
+        store.replace_file(available.range.file_id, [available.clone()]);
+        store.replace_file(unavailable.range.file_id, [unavailable]);
         assert!(matches!(
             store.effective_fact_matching_owner_name(owner, &method),
             StoredMethodFactMatch::Unique(fact)
@@ -1100,25 +1041,31 @@ mod tests {
         available.availability = MethodAvailability::Absent {
             reason: "not defined by this runtime".to_string(),
         };
-        store.add(available);
+        store.replace_file(available.range.file_id, [available]);
         assert!(matches!(
             store.effective_fact_matching_owner_name(owner, &method),
             StoredMethodFactMatch::Missing
         ));
 
-        let mut ambiguous = MethodStore::new();
-        ambiguous.add(StoredMethodFact::new(
-            fqn,
-            owner,
-            Some(method),
-            TextRange::new(SourceFileId(1), 0, 8),
-        ));
-        ambiguous.add(StoredMethodFact::new(
-            fqn,
-            owner,
-            Some(method),
-            TextRange::new(SourceFileId(2), 0, 8),
-        ));
+        let mut ambiguous = MethodStore::default();
+        ambiguous.replace_file(
+            SourceFileId(1),
+            [stored_method(
+                fqn,
+                owner,
+                Some(method),
+                TextRange::new(SourceFileId(1), 0, 8),
+            )],
+        );
+        ambiguous.replace_file(
+            SourceFileId(2),
+            [stored_method(
+                fqn,
+                owner,
+                Some(method),
+                TextRange::new(SourceFileId(2), 0, 8),
+            )],
+        );
         assert!(matches!(
             ambiguous.effective_fact_matching_owner_name(owner, &method),
             StoredMethodFactMatch::Ambiguous

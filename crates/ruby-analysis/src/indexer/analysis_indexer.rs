@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::core::method_store::MethodVisibility;
+use crate::core::MethodVisibility;
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact,
     GraphNodeKind, MethodAvailability, MethodFact, MethodParamFact, MethodParamKind,
@@ -2578,20 +2578,23 @@ mod tests {
     #[test]
     fn unresolved_constant_alias_keeps_an_unknown_equation_target() {
         let index = AnalysisIndexer::new(file()).index_source("CHOICE = RemoteValues::ITEM\n");
-        let subject = TypeSubject::Constant(FullyQualifiedName::constant(vec![
-            RubyConstant::new("CHOICE").unwrap(),
-        ]));
+        let subject = TypeSubject::Constant(FullyQualifiedName::constant(vec![RubyConstant::new(
+            "CHOICE",
+        )
+        .unwrap()]));
         let facts = index
             .types
             .iter()
             .filter(|fact| fact.subject == subject)
             .collect::<Vec<_>>();
         assert_eq!(
-            facts.len(), 1,
+            facts.len(),
+            1,
             "a deferred constant needs exactly one declaration target"
         );
         assert_eq!(
-            facts[0].ruby_type, RubyType::Unknown,
+            facts[0].ruby_type,
+            RubyType::Unknown,
             "unresolved constant syntax is not proof of a class object"
         );
         assert_eq!(facts[0].range, TextRange::new(file(), 0, 6));

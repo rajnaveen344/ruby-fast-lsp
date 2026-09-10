@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use std::mem::size_of;
 
-use crate::{FullyQualifiedName, LiteralValue, RubyType, ShapeRest, ShapeType, TypeSubject};
+use crate::core::{FullyQualifiedName, LiteralValue, RubyType, ShapeRest, ShapeType, TypeSubject};
 
 pub fn map_table_bytes<K, V, S>(map: &HashMap<K, V, S>) -> usize
 where
@@ -35,7 +35,7 @@ pub fn fqn_heap_bytes(fqn: &FullyQualifiedName) -> usize {
         | FullyQualifiedName::Constant(parts)
         | FullyQualifiedName::Method(parts, _) => {
             if parts.spilled() {
-                parts.capacity() * size_of::<crate::RubyConstant>()
+                parts.capacity() * size_of::<crate::core::RubyConstant>()
             } else {
                 0
             }
@@ -107,7 +107,7 @@ pub fn type_subject_heap_bytes(subject: &TypeSubject) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LiteralKey, ShapeExactness, ShapeField, ShapeStability};
+    use crate::core::{LiteralKey, ShapeExactness, ShapeField, ShapeStability};
 
     #[test]
     fn shape_deep_weight_counts_box_fields_keys_and_nested_literal_payloads() {
