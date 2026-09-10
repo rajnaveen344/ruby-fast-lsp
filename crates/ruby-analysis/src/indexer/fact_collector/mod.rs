@@ -47,6 +47,7 @@ mod local_variable_read_node;
 mod local_variable_write_node;
 mod method_return;
 mod module_node;
+mod nil_call;
 mod parameters_node;
 mod singleton_class_node;
 mod super_node;
@@ -3469,6 +3470,7 @@ impl Visit<'_> for FactCollector {
     }
 
     fn visit_call_node(&mut self, node: &CallNode) {
+        self.collect_nil_call_candidate(node);
         self.invalidate_escaped_callables_in_call(node);
         self.process_call_node_entry(node);
         let mut prepared_higher_order = None;

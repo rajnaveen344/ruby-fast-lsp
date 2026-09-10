@@ -555,6 +555,23 @@ impl ReferenceCandidateStore {
             }))
     }
 
+    pub(crate) fn method_candidates_at_exact_range(
+        &self,
+        range: TextRange,
+    ) -> &[StoredMethodReferenceCandidate] {
+        let Some(candidates) = self.methods_by_file.get(&range.file_id) else {
+            return &[];
+        };
+        let key = (range.start_byte, range.end_byte);
+        let start = candidates.partition_point(|candidate| {
+            (candidate.range.start_byte, candidate.range.end_byte) < key
+        });
+        let end = candidates.partition_point(|candidate| {
+            (candidate.range.start_byte, candidate.range.end_byte) <= key
+        });
+        &candidates[start..end]
+    }
+
     pub fn candidate_count(&self) -> usize {
         self.constants_by_file.values().map(Vec::len).sum::<usize>()
             + self.methods_by_file.values().map(Vec::len).sum::<usize>()

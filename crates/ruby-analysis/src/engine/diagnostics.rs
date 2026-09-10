@@ -69,10 +69,10 @@ impl AnalysisEngine {
             }
         }
 
-        let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
         let diagnostic_seed_started = Instant::now();
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
         stats.diagnostic_seed_ns = elapsed_ns(diagnostic_seed_started);
+        let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
         let mut method_fact_cache: HashMap<MethodReferenceCacheKey, MethodLookupResult> =
             HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
@@ -533,6 +533,7 @@ impl AnalysisEngine {
                 .filter(|fact| fact.code != "missing-kwarg")
                 .filter(|fact| fact.code != "raise-non-exception")
                 .filter(|fact| fact.code != "bad-splat")
+                .filter(|fact| fact.code != "nil-call")
                 .collect::<Vec<_>>();
             diagnostics.extend(unresolved_constants.remove(&file_id).unwrap_or_default());
             self.facts
@@ -900,6 +901,7 @@ impl AnalysisEngine {
             .filter(|fact| fact.code != "missing-kwarg")
             .filter(|fact| fact.code != "raise-non-exception")
             .filter(|fact| fact.code != "bad-splat")
+            .filter(|fact| fact.code != "nil-call")
             .collect::<Vec<_>>();
         diagnostics.extend(unresolved.remove(&file_id).unwrap_or_default());
         self.facts
@@ -1847,6 +1849,23 @@ impl AnalysisEngine {
         candidate: &DiagnosticCandidate,
     ) -> Option<DiagnosticFact> {
         match &candidate.kind {
+            DiagnosticCandidateKind::NilCall {
+                local_read,
+                variable,
+                method,
+            } => {
+                let ruby_type = AnalysisQuery::new(self)
+                    .exact_call_receiver_type(candidate.range, *local_read)?;
+                if ruby_type != RubyType::nil_class() {
+                    return None;
+                }
+                Some(DiagnosticFact::new(
+                    candidate.range,
+                    crate::core::DiagnosticSeverity::Warning,
+                    "nil-call",
+                    format!("Calling `{method}` on `{variable}` which is `nil` here."),
+                ))
+            }
             DiagnosticCandidateKind::BadSplat {
                 operator,
                 arg_repr,

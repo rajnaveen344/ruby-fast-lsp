@@ -28,6 +28,12 @@ pub enum DiagnosticCandidateKind {
         arg_repr: String,
         expected: String,
     },
+    /// A local receiver whose exact read proof is checked after flow resolution.
+    NilCall {
+        local_read: TextRange,
+        variable: String,
+        method: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +146,7 @@ fn diagnostic_candidate_rank(kind: &DiagnosticCandidateKind) -> u8 {
     match kind {
         DiagnosticCandidateKind::RaiseNonException { .. } => 0,
         DiagnosticCandidateKind::BadSplat { .. } => 1,
+        DiagnosticCandidateKind::NilCall { .. } => 2,
     }
 }
 
@@ -155,6 +162,9 @@ fn diagnostic_candidate_heap_bytes(candidate: &DiagnosticCandidate) -> usize {
         } => {
             string_heap_bytes(operator) + string_heap_bytes(arg_repr) + string_heap_bytes(expected)
         }
+        DiagnosticCandidateKind::NilCall {
+            variable, method, ..
+        } => string_heap_bytes(variable) + string_heap_bytes(method),
     }
 }
 

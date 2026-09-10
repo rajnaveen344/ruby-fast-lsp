@@ -7,7 +7,6 @@ use crate::utils::lsp::lsp_position;
 use log::debug;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::inference::control_flow;
-use ruby_analysis::inference::RubyType;
 use ruby_prism::Visit;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
@@ -31,84 +30,7 @@ pub fn generate_diagnostics(
         parse_result,
         document,
     ));
-    diagnostics.extend(extract_nil_call_diagnostics(parse_result, document));
     diagnostics
-}
-
-/// `nil-call`: method invocation on a local variable whose tracked type at
-/// the call position is `NilClass`. V1 fires only on definitive nil — nilable
-/// unions stay silent (see module note in tests/diagnostics/nil_call.rs).
-fn extract_nil_call_diagnostics(
-    parse_result: &ruby_prism::ParseResult<'_>,
-    document: &RubyDocument,
-) -> Vec<Diagnostic> {
-    // VariableScopes are populated by FactCollector at file_processor time. Bail
-    // when no scopes exist (e.g. tests using bare `generate_diagnostics` before
-    // indexing has run).
-    if document.variable_scopes().scope_count() == 0 {
-        return Vec::new();
-    }
-    let mut visitor = NilCallVisitor {
-        document,
-        diagnostics: Vec::new(),
-    };
-    visitor.visit(&parse_result.node());
-    visitor.diagnostics
-}
-
-struct NilCallVisitor<'a> {
-    document: &'a RubyDocument,
-    diagnostics: Vec<Diagnostic>,
-}
-
-impl<'a, 'pr> Visit<'pr> for NilCallVisitor<'a> {
-    fn visit_call_node(&mut self, node: &ruby_prism::CallNode<'pr>) {
-        if let Some(receiver) = node.receiver() {
-            if let Some(local) = receiver.as_local_variable_read_node() {
-                let var_name = String::from_utf8_lossy(local.name().as_slice()).to_string();
-                let recv_loc = receiver.location();
-                let recv_pos = self.document.offset_to_position(recv_loc.start_offset());
-                let scope_id = self
-                    .document
-                    .find_scope_for_variable_at(&var_name, recv_pos)
-                    .or_else(|| self.document.scope_at_position(recv_pos));
-                if let Some(sid) = scope_id {
-                    if let Some(ty) = self
-                        .document
-                        .variable_type_at_position(&var_name, sid, recv_pos)
-                    {
-                        if matches!(ty, RubyType::Class(fqn) if fqn.to_string() == "NilClass") {
-                            // Flag the method-name location only, mirroring how
-                            // other call diagnostics underline the message.
-                            let msg_loc = node.message_loc().unwrap_or(node.location());
-                            let start = self.document.offset_to_position(msg_loc.start_offset());
-                            let end = self.document.offset_to_position(msg_loc.end_offset());
-                            self.diagnostics.push(Diagnostic {
-                                range: Range::new(lsp_position(start), lsp_position(end)),
-                                severity: Some(DiagnosticSeverity::WARNING),
-                                code: Some(NumberOrString::String("nil-call".to_string())),
-                                code_description: None,
-                                source: Some("ruby-fast-lsp".to_string()),
-                                message: format!(
-                                    "Calling `{}` on `{}` which is `nil` here.",
-                                    String::from_utf8_lossy(node.name().as_slice()),
-                                    var_name
-                                ),
-                                related_information: None,
-                                tags: None,
-                                data: None,
-                            });
-                            // Suppress downstream chain noise — don't recurse into
-                            // this node's children. The chained `.something` after
-                            // this call would have an unknown receiver type.
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-        ruby_prism::visit_call_node(self, node);
-    }
 }
 
 /// `inconsistent-return`: method body falls through, has at least one explicit
