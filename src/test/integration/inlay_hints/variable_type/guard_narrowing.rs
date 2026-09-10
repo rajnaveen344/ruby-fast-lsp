@@ -9,7 +9,7 @@
 //! contribute `NilClass` to the method even though the surviving tail is
 //! narrowed more precisely.
 //!
-//! Implemented in `inferrer/type_tracker/narrow.rs`.
+//! Implemented in `crates/ruby-analysis/src/inference/type_tracker/flow/narrow.rs`.
 
 use crate::test::harness::check;
 

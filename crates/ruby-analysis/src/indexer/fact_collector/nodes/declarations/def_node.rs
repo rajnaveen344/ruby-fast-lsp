@@ -571,7 +571,7 @@ impl FactCollector {
     }
 
     fn collect_inferred_method_return(&mut self, node: &DefNode, pending: InferredMethodContext) {
-        let mut tracker = TypeTracker::new(self.document.content.as_bytes());
+        let mut tracker = TypeTracker::new();
         tracker = tracker.with_analysis_engine(self.semantics.engine.clone());
         tracker = tracker.with_analysis_query_cache(self.semantics.query_cache.clone());
         tracker = tracker.with_local_method_returns(self.local_method_returns_for_tracker());

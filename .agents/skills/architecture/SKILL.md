@@ -48,6 +48,12 @@ composition. Keep new state and helpers beside their collector responsibility;
 see `crates/ruby-analysis/src/indexer/fact_collector/README.md` and the library
 guide at `crates/ruby-analysis/README.md`.
 
+`TypeTracker` similarly keeps seven private state owners and uses existing
+Prism nodes without retaining source bytes. Keep branch-cloned flow metadata
+together and its identity allocator outside those clones. Follow
+`crates/ruby-analysis/src/inference/type_tracker/README.md` for traversal,
+expression, flow, return-solving, and observation responsibilities.
+
 Engine resolution coordinates inference's AST-free constant and method-return
 equation solvers. Inference may consult engine queries; engine retains ownership
 of lookup policy, file replacement, and solved state. These are cooperating

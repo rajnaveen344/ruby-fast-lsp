@@ -113,7 +113,7 @@ impl Visit<'_> for FactCollector {
         // a top-level alias mutation or escape would be analyzed through the
         // older assignment-only view and could publish stale shape fields.
         if self.options.record_local_read_unknown_reasons {
-            let mut tracker = TypeTracker::new(self.document.content.as_bytes())
+            let mut tracker = TypeTracker::new()
                 .with_analysis_engine(self.semantics.engine.clone())
                 .with_analysis_query_cache(self.semantics.query_cache.clone())
                 .with_local_read_types();

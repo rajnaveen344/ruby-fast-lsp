@@ -552,6 +552,11 @@ shape variants, eight live aliases, and 16 solve iterations. A limit breach is
 the explicit `shape_bound_exceeded` Unknown reason; fields or variants are
 never truncated.
 
+`TypeTracker` separates flow, method context, analysis inputs, return evidence,
+observations, control flow, and identity allocation into seven private fields.
+Its [reading guide](../crates/ruby-analysis/src/inference/type_tracker/README.md)
+maps those owners to traversal, expression, flow, and return-solving modules.
+
 `TypeTracker` owns mutable Hash identity only for one flow pass. Known writes,
 delete, clear, merge, containment, and aliases update that bounded identity;
 unsupported mutation or escape changes every affected alias to explained

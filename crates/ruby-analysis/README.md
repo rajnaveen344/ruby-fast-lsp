@@ -22,6 +22,11 @@ constant and method-return equation solvers in `inference`; those solvers may
 consult engine queries. These are cooperating modules in one crate. The engine
 owns the solved state and Ruby lookup policy; inference owns the type rules.
 
+For local inference, start with `TypeTracker::new()` and follow its existing
+Prism tree through traversal, expressions, flow, and method return solving. The
+[tracker guide](src/inference/type_tracker/README.md) maps its private state
+owners and explains how observations return to the collector.
+
 The server selects projects, schedules work, supplies extension/runtime facts,
 and converts domain byte ranges to editor positions outside this library.
 

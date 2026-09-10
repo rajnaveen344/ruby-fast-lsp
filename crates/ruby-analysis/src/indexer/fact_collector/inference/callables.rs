@@ -251,7 +251,7 @@ impl FactCollector {
                     )
                 })
                 .collect::<Vec<_>>();
-            let mut tracker = TypeTracker::new(self.document.content.as_bytes())
+            let mut tracker = TypeTracker::new()
                 .with_analysis_engine(self.semantics.engine.clone())
                 .with_analysis_query_cache(self.semantics.query_cache.clone());
             let namespace = self.scope_tracker.get_ns_stack();

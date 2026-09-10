@@ -1218,6 +1218,15 @@ file processor and simulation runner to compose before engine replacement.
 Scope-only rebuilding consumes `into_document()` without proof snapshots.
 Keep traversal order in `traversal.rs` and state beside its responsibility;
 see the [collector guide](crates/ruby-analysis/src/indexer/fact_collector/README.md).
+
+Construct `TypeTracker` with `new()`; its tracking methods consume existing Prism
+nodes without retaining source bytes or a source lifetime. Its seven private fields
+separate flow, method context, analysis inputs, return evidence, observations,
+control flow, and shape identity allocation. Keep the identity allocator outside
+cloned branch environments, and keep correlated flow metadata in one clone unit.
+Tests exercise ordinary tracking evidence; do not restore a test-only loop
+counter. See the [tracker guide](crates/ruby-analysis/src/inference/type_tracker/README.md).
+
 Profiler storage-layout evidence is returned as named byte counts through
 `engine::reference_storage_sizes`, never as exposed representation types.
 See [the library guide](crates/ruby-analysis/README.md) for a compiled example.
