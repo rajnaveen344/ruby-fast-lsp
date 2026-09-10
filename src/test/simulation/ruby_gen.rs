@@ -41,6 +41,8 @@ pub struct CallSite {
 #[derive(Debug, Clone)]
 pub struct ConstantRefSite {
     pub caller: MethodTarget,
+    /// Ruby lexical nesting is independent of a dynamically selected method owner.
+    pub lexical_scope: String,
     pub target: String,
     pub text: String,
     pub shape: ConstantRefShape,
@@ -813,7 +815,7 @@ impl FileRenderer {
             kind: method.kind,
         };
         for constant in &method.constant_refs {
-            self.render_constant_ref(namespace, &caller, constant, depth + 1);
+            self.render_constant_ref(&namespace.fqn, &caller, constant, depth + 1);
         }
         for call in &method.calls {
             self.render_call(&caller, &call.target, &call.shape, depth + 1);
@@ -865,7 +867,7 @@ impl FileRenderer {
             kind: method.kind,
         };
         for constant in &method.constant_refs {
-            self.render_constant_ref(namespace, &caller, constant, 1);
+            self.render_constant_ref("", &caller, constant, 1);
         }
         for call in &method.calls {
             self.render_call(&caller, &call.target, &call.shape, 1);
@@ -924,8 +926,17 @@ impl FileRenderer {
         }
         self.push_line(depth, &def_line);
 
+        // The eval form is emitted after all namespace bodies have closed.
+        // Changing self with class_eval does not change Ruby's lexical nesting.
+        let lexical_scope = match method.def_form {
+            MethodDefForm::ClassEvalBlock | MethodDefForm::ConstGetDefineMethod => "",
+            MethodDefForm::Regular
+            | MethodDefForm::SingletonClassBlock
+            | MethodDefForm::DefineMethod
+            | MethodDefForm::ModuleFunctionMode => &namespace.fqn,
+        };
         for constant in &method.constant_refs {
-            self.render_constant_ref(namespace, &caller, constant, depth + 1);
+            self.render_constant_ref(lexical_scope, &caller, constant, depth + 1);
         }
         for call in &method.calls {
             self.render_call(&caller, &call.target, &call.shape, depth + 1);
@@ -1388,14 +1399,15 @@ impl FileRenderer {
 
     fn render_constant_ref(
         &mut self,
-        namespace: &NamespaceSpec,
+        lexical_scope: &str,
         caller: &MethodTarget,
         constant: &super::graph::ConstantRefSpec,
         depth: usize,
     ) {
-        let text = constant_ref_text(namespace, constant);
+        let text = constant_ref_text(lexical_scope, constant);
         self.map.constant_refs.push(ConstantRefSite {
             caller: caller.clone(),
+            lexical_scope: lexical_scope.to_string(),
             target: constant.fqn.clone(),
             text: text.clone(),
             shape: constant.shape.clone(),
@@ -1589,13 +1601,10 @@ impl FileRenderer {
     }
 }
 
-fn constant_ref_text(
-    namespace: &NamespaceSpec,
-    constant: &super::graph::ConstantRefSpec,
-) -> String {
+fn constant_ref_text(lexical_scope: &str, constant: &super::graph::ConstantRefSpec) -> String {
     match &constant.shape {
         ConstantRefShape::Auto => {
-            let prefix = format!("{}::", namespace.fqn);
+            let prefix = format!("{lexical_scope}::");
             if let Some(local) = constant.fqn.strip_prefix(&prefix) {
                 return local.to_string();
             }

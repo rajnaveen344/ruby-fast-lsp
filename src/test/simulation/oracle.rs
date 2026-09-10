@@ -401,7 +401,7 @@ impl<'a> OracleState<'a> {
     }
 
     pub fn resolve_constant_ref(&self, constant_ref: &ConstantRefSite) -> Option<String> {
-        self.resolve_constant_text(&constant_ref.caller.owner, &constant_ref.text)
+        self.resolve_constant_text(&constant_ref.lexical_scope, &constant_ref.text)
     }
 
     pub fn resolve_constant_text(&self, context: &str, text: &str) -> Option<String> {

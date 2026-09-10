@@ -7,17 +7,16 @@
 //!
 //! ## Known gaps / follow-ups
 //!
-//! - **Stdlib / default-gem requires** are not integration-tested. Gem
-//!   `require_paths` FakeEditor coverage exists; `require "json"` / `"uri"`
-//!   through published runtime stdlib roots (and Ruby default gems that live
-//!   outside Bundler) still need a regression that proves they clear after
-//!   dependency indexing. Real workspaces can still show false
-//!   `unresolved-require` on those until verified.
-//! - **Cold-index coordinator path**: sticky-diagnostic clear is covered by
-//!   calling `refresh_unresolved_require_diagnostics_for_workspace` directly,
-//!   not by a full gem/stdlib indexing run that publishes roots then refreshes.
-//! - **Precedence**: project `loadPaths` vs `lib` is tested; project-local
-//!   hit winning over a same-named gem/stdlib feature is not.
+//! - **Cold runtime roots**: the full coordinator regression
+//!   `cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_project_precedence`
+//!   uses an exact fixture runtime probe with stdlib and separate default-gem
+//!   load paths. It verifies `json` / `uri` resolution and diagnostic refresh
+//!   without edits, a retained true miss, and project-local precedence over a
+//!   same-named runtime feature. This does not substitute for installed-runtime
+//!   acceptance: default gems absent from that runtime's reported load path
+//!   are not discovered by this mechanism.
+//! - **Precedence**: project `loadPaths` vs `lib` and project-local vs stdlib
+//!   are tested; the equivalent collision with a locked gem needs coverage.
 //! - **True miss stays after refresh**: covered by
 //!   `unresolved_require_stays_after_refresh_when_still_missing` and the
 //!   stored-fact reresolve tests in this module.
@@ -309,25 +308,43 @@ pub fn unresolved_require_diagnostics(
         {
             continue;
         }
-        let (content_start, content_end) = target.content_byte_range(content);
-        let start_byte = u32::try_from(content_start).expect(
-            "INVARIANT VIOLATED: require diagnostic start offset exceeded u32. \
-             This is a bug because TextRange stores u32 offsets. \
-             Fix: widen TextRange before indexing files larger than u32::MAX bytes.",
-        );
-        let end_byte = u32::try_from(content_end).expect(
-            "INVARIANT VIOLATED: require diagnostic end offset exceeded u32. \
-             This is a bug because TextRange stores u32 offsets. \
-             Fix: widen TextRange before indexing files larger than u32::MAX bytes.",
-        );
-        diagnostics.push(DiagnosticFact::new(
-            TextRange::new(file_id, start_byte, end_byte),
-            DiagnosticSeverity::Error,
-            UNRESOLVED_REQUIRE_CODE,
-            unresolved_require_message(target.kind, &target.argument),
-        ));
+        diagnostics.push(require_diagnostic_for_target(content, file_id, &target));
     }
     diagnostics
+}
+
+/// Complete static require candidates for delayed open-document refresh.
+/// Resolve these against the current engine at commit time, including targets
+/// that existed during collection but may have been removed before commit.
+pub fn require_diagnostic_candidates(content: &str, file_id: SourceFileId) -> Vec<DiagnosticFact> {
+    find_all_require_strings(content)
+        .iter()
+        .map(|target| require_diagnostic_for_target(content, file_id, target))
+        .collect()
+}
+
+fn require_diagnostic_for_target(
+    content: &str,
+    file_id: SourceFileId,
+    target: &RequireStringTarget,
+) -> DiagnosticFact {
+    let (content_start, content_end) = target.content_byte_range(content);
+    let start_byte = u32::try_from(content_start).expect(
+        "INVARIANT VIOLATED: require diagnostic start offset exceeded u32. \
+         This is a bug because TextRange stores u32 offsets. \
+         Fix: widen TextRange before indexing files larger than u32::MAX bytes.",
+    );
+    let end_byte = u32::try_from(content_end).expect(
+        "INVARIANT VIOLATED: require diagnostic end offset exceeded u32. \
+         This is a bug because TextRange stores u32 offsets. \
+         Fix: widen TextRange before indexing files larger than u32::MAX bytes.",
+    );
+    DiagnosticFact::new(
+        TextRange::new(file_id, start_byte, end_byte),
+        DiagnosticSeverity::Error,
+        UNRESOLVED_REQUIRE_CODE,
+        unresolved_require_message(target.kind, &target.argument),
+    )
 }
 
 /// Re-check stored `unresolved-require` facts after dependency roots change.

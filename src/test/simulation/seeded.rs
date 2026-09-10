@@ -1,10 +1,12 @@
+use super::build_identity::write_build_identity;
 use super::graph::CallShape;
 use super::project::{EditStep, SyntheticProject};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SIM_GENERATOR_VERSION: u32 = 37;
+const SIM_GENERATOR_VERSION: u32 = 38;
 const FIXED_SEEDS: &[u64] = &[1, 42, 20_260_524];
 const REGRESSION_SEEDS_TEXT: &str = include_str!("regression_seeds.txt");
 pub const LARGE_SCALE_RUBY_FILES: usize = 2_284;
@@ -32,19 +34,28 @@ pub enum SeededStep {
 }
 
 pub fn write_seed_artifact(script: &SeededScript) -> PathBuf {
-    let root = std::env::temp_dir()
-        .join("ruby-fast-lsp-sim")
-        .join(format!("seed-{}", script.seed));
-    if root.exists() {
-        fs::remove_dir_all(&root).unwrap_or_else(|err| {
-            panic!(
-                "INVARIANT VIOLATED: failed to remove stale simulation artifact `{}`: {}. This is a bug because seed artifacts must be replaceable. Fix: inspect temp dir permissions.",
-                root.display(),
-                err
-            )
-        });
-    }
-    fs::create_dir_all(root.join("files")).unwrap_or_else(|err| {
+    static NEXT_ARTIFACT: AtomicU64 = AtomicU64::new(0);
+    let artifact_id = NEXT_ARTIFACT.fetch_add(1, Ordering::Relaxed);
+    let parent = std::env::temp_dir().join("ruby-fast-lsp-sim");
+    fs::create_dir_all(&parent).unwrap_or_else(|err| {
+        panic!(
+            "INVARIANT VIOLATED: failed to create simulation artifact parent `{}`: {}. This is a bug because replay evidence needs a writable temp directory. Fix: inspect temp dir permissions.",
+            parent.display(), err
+        )
+    });
+    let root = parent.join(format!(
+        "seed-{}-process-{}-run-{artifact_id}",
+        script.seed,
+        std::process::id()
+    ));
+    fs::create_dir(&root).unwrap_or_else(|err| {
+        panic!(
+            "INVARIANT VIOLATED: failed to reserve unique simulation artifact `{}`: {}. This is a bug because one run must never replace another run's replay evidence. Fix: inspect artifact identity or temp dir permissions.",
+            root.display(), err
+        )
+    });
+    write_build_identity(&root);
+    fs::create_dir(root.join("files")).unwrap_or_else(|err| {
         panic!(
             "INVARIANT VIOLATED: failed to create simulation artifact dir `{}`: {}. This is a bug because seed artifacts need a writable temp dir. Fix: inspect temp dir permissions.",
             root.display(),
@@ -83,7 +94,7 @@ pub fn write_seed_artifact(script: &SeededScript) -> PathBuf {
     fs::write(
         root.join("README.txt"),
         format!(
-            "Replay:\nSIM_SEED={} cargo test generated_project_runs_seeded_edit_sequence -- --nocapture\n\nPersist regression:\nAdd `{}` to src/test/simulation/regression_seeds.txt after reducing the failure.\n",
+            "Replay all seeded lifecycle and incremental/fresh checks:\nSIM_SEED={} cargo test test::simulation -- --nocapture\n\nBuild identity:\nbuild.json retains the compiled Rust workspace source manifest, Cargo build metadata, and SHA-256 of the running test executable. Compare these identities before interpreting a replay from another build. The source scope excludes external runtime assets and editor/platform evidence.\n\nPersist regression:\nAdd `{}` to src/test/simulation/regression_seeds.txt after reducing the failure.\n",
             script.seed,
             script.seed
         ),

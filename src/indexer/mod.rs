@@ -26,4 +26,7 @@ pub mod interner;
 pub mod project_roots;
 pub mod require_paths;
 
+#[cfg(test)]
+pub(crate) mod test_schedule;
+
 pub mod version;

@@ -17,6 +17,105 @@ fn assert_hits_file(locs: &[Location], expected_filename: &str) {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_project_precedence() {
+    use crate::config::runtime::{
+        ProjectRuntimeSelection, RuntimeMode, RuntimeSelection, RuntimeSelectionConfig,
+        SelectedRuntimeDescriptor,
+    };
+    use crate::config::RubyFastLspConfig;
+    use crate::indexer::coordinator::IndexingCoordinator;
+    use crate::runtime::catalog::{RuntimeDiscoverySource, RuntimeImplementation};
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let base = fixture.path().canonicalize().unwrap();
+    let root = base.join("project");
+    let runtime = base.join("runtime");
+    let stdlib = runtime.join("lib/ruby/stdlib");
+    let default_gem = runtime.join("lib/ruby/gems/uri/lib");
+    for directory in [
+        &root.join("lib"),
+        &runtime.join("bin"),
+        &stdlib,
+        &default_gem,
+    ] {
+        std::fs::create_dir_all(directory).unwrap();
+    }
+    let json = stdlib.join("json.rb");
+    let uri = default_gem.join("uri.rb");
+    let local = root.join("lib/shared.rb");
+    for file in [&json, &uri, &local, &stdlib.join("shared.rb")] {
+        std::fs::write(file, "# require target\n").unwrap();
+    }
+    let executable = runtime.join("bin/ruby");
+    std::fs::write(&executable, concat!(
+        "#!/bin/sh\n",
+        "runtime_root=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\n",
+        "printf 'probe\\n' >> \"$runtime_root/probe-count\"\n",
+        "printf '%s\\0' \"$runtime_root/lib/ruby/stdlib\" \"$runtime_root/lib/ruby/gems/uri/lib\"\n",
+    )).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let config = RubyFastLspConfig {
+        runtime: RuntimeSelectionConfig {
+            mode: RuntimeMode::Auto,
+            projects: vec![ProjectRuntimeSelection {
+                root: root.to_str().unwrap().to_string(),
+                selection: RuntimeSelection::Explicit(SelectedRuntimeDescriptor {
+                    implementation: RuntimeImplementation::Mri,
+                    family: "3.3".to_string(),
+                    engine_version: "3.3.11".to_string(),
+                    compatibility_version: "3.3".to_string(),
+                    executable,
+                    discovery_source: RuntimeDiscoverySource::Path,
+                    java_home: None,
+                }),
+            }],
+        },
+        ..RubyFastLspConfig::default()
+    };
+    let source = "require 'json'\nrequire 'uri'\nrequire 'still_missing'\nrequire 'shared'\nclass Service\n  def value; 'ready'; end\nend\nService.new.value\n";
+    let main = root.join("main.rb");
+    std::fs::write(&main, source).unwrap();
+    let filename = main.to_str().unwrap().trim_start_matches('/');
+    let mut editor = FakeEditor::new().await;
+    editor.add_workspace(root.to_str().unwrap().trim_start_matches('/'));
+    *editor.server().config.lock() = config.clone();
+    editor.open(filename, source).await;
+    let unresolved_lines = |diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>| {
+        diagnostics.into_iter().filter(|diagnostic| {
+            matches!(&diagnostic.code, Some(NumberOrString::String(code)) if code == "unresolved-require")
+        }).map(|diagnostic| diagnostic.range.start.line).collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(
+        unresolved_lines(editor.published_diagnostics(filename)),
+        [0, 1, 2].into_iter().collect()
+    );
+
+    IndexingCoordinator::new(root, config)
+        .run_complete_indexing(editor.server())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        unresolved_lines(editor.published_diagnostics(filename)),
+        [2].into_iter().collect(),
+        "cold indexing must clear resolved imports without an edit and retain a true miss"
+    );
+    for (line, target) in [(0, &json), (1, &uri), (3, &local)] {
+        let locations = editor.goto_def_at(filename, line, 10).await;
+        assert_eq!(
+            locations.len(),
+            1,
+            "one deterministic require target: {locations:?}"
+        );
+        assert_eq!(locations[0].uri.to_file_path().unwrap(), *target);
+    }
+    assert_eq!(std::fs::read_to_string(runtime.join("probe-count")).unwrap().lines().count(), 1,
+        "standalone projects must use one exact runtime load-path probe and no global gem discovery");
+}
+
 #[tokio::test]
 async fn goto_require_relative_sibling() {
     let mut editor = FakeEditor::new().await;

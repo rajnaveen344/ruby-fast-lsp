@@ -1155,6 +1155,11 @@ impl IndexerProject {
         for outcome in outcomes {
             let (path, source_snapshot, file_facts, plan, hint, read, dependency_scan, file_timing) =
                 outcome?;
+            #[cfg(test)]
+            server.test_schedule.checkpoint_blocking(
+                crate::indexer::test_schedule::Point::ProjectFactsCollected,
+                &path,
+            );
             let replacement_started = Instant::now();
             let committed = file_processor_ref
                 .replace_collected_project_file_facts_if_source_snapshot_as_deferred_resolution(
@@ -1163,6 +1168,11 @@ impl IndexerProject {
                     source_snapshot,
                     file_facts,
                 );
+            #[cfg(test)]
+            server.test_schedule.checkpoint_blocking(
+                crate::indexer::test_schedule::Point::ProjectCommitAttempted,
+                &path,
+            );
             if !committed {
                 info!(
                     "Discarded project facts collected from a superseded source snapshot: {}",

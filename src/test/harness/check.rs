@@ -39,7 +39,6 @@
 //! "#).await;
 //! ```
 
-use std::path::PathBuf;
 use tower_lsp::lsp_types::{
     CodeLensParams, CompletionParams, CompletionResponse, Diagnostic, DiagnosticSeverity,
     GotoDefinitionParams, InlayHintParams, NumberOrString, PartialResultParams, Position, Range,
@@ -52,7 +51,6 @@ use super::fake_editor::FakeEditor;
 use super::fixture::{extract_cursor, extract_tags, extract_tags_with_attributes, Tag};
 use super::inlay_hints::get_hint_label;
 use crate::capabilities::code_lens::handle_code_lens;
-use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::capabilities::inlay_hints::handle_inlay_hints;
 use crate::capabilities::type_hierarchy;
 use crate::handlers::request;
@@ -209,7 +207,6 @@ pub(super) async fn run_checks_on_fixture(
         run_diagnostics_check(
             server,
             uri,
-            content,
             &positive_err_tags,
             &positive_warn_tags,
             &none_err_tags,
@@ -1006,97 +1003,14 @@ async fn run_inlay_hints_check(
 async fn run_diagnostics_check(
     server: &crate::server::RubyLanguageServer,
     uri: &Url,
-    content: &str,
     err_tags: &[&Tag],
     warn_tags: &[&Tag],
     none_err_tags: &[&Tag],
     none_warn_tags: &[&Tag],
 ) {
-    let document = server.docs.lock().get(uri).unwrap().read().clone();
-    let parse_result = ruby_prism::parse(content.as_bytes());
-
-    let mut diagnostics = generate_diagnostics(&parse_result, &document);
-    // Run FactCollector directly on the parsed AST to collect indexing-time diagnostics
-    // (e.g., YARD checks and return type mismatches).
-    {
-        use ruby_analysis::indexer::fact_collector::FactCollector;
-        use ruby_prism::Visit;
-        use std::sync::Arc;
-        let analysis_engine = server.analysis_engine_for_uri(uri);
-        let mut visitor = FactCollector::analysis_only(
-            document.clone(),
-            Arc::new(server.extension_registry.clone()),
-            analysis_engine.clone(),
-        );
-        visitor.visit(&parse_result.node());
-        let file_id = visitor.document.analysis_file_id();
-        let local_read_types = visitor.local_read_type_evidence();
-        let inference = visitor.inference_evidence();
-        let mut engine = analysis_engine.write();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let facts = ruby_analysis::engine::FileFacts {
-            symbols: query.symbol_facts_in_file(file_id),
-            methods: query.method_facts_in_file(file_id),
-            method_visibility_overrides: query.method_visibility_overrides_in_file(file_id),
-            types: query.type_facts_in_file(file_id),
-            graph_nodes: query.graph_nodes_in_file(file_id),
-            graph_edges: query.graph_edges_in_file(file_id),
-            unresolved_graph_edges: engine
-                .unresolved_graph_edges()
-                .iter()
-                .filter(|edge| edge.range.file_id == file_id)
-                .cloned()
-                .collect(),
-            reference_candidates: visitor.reference_candidates,
-            diagnostic_candidates: visitor.diagnostic_candidates,
-            diagnostics: {
-                let mut diagnostics = visitor.analysis_diagnostics;
-                let current_path = uri
-                    .to_file_path()
-                    .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-                if let Some(project_root) = server
-                    .workspace_for_uri(uri)
-                    .map(|workspace| workspace.root_path)
-                {
-                    let load_paths = server
-                        .config
-                        .lock()
-                        .indexing
-                        .load_paths
-                        .paths_for_project(&project_root)
-                        .to_vec();
-                    let feature_index = server.require_feature_index_for_uri(uri);
-                    diagnostics.extend(
-                        crate::indexer::require_paths::unresolved_require_diagnostics(
-                            content,
-                            file_id,
-                            &current_path,
-                            &project_root,
-                            &load_paths,
-                            &feature_index,
-                            Some(&engine),
-                        ),
-                    );
-                }
-                diagnostics
-            },
-            execution_contexts: visitor.extension_execution_context_facts,
-            inference,
-            local_read_types,
-        };
-        engine.replace_facts(
-            file_id,
-            facts,
-            ruby_analysis::engine::ResolveMode::Immediate,
-        );
-    }
-
-    // Add unresolved-entry diagnostics (unresolved-constant, unresolved-method, etc.)
-    // populated by indexing.
-    {
-        let query = crate::query::EngineQuery::with_engine(server.analysis_engine_for_uri(uri));
-        diagnostics.extend(query.get_unresolved_diagnostics(uri));
-    }
+    let diagnostics = server.last_diagnostic_publication(uri).expect(
+        "INVARIANT VIOLATED: tagged diagnostic assertion has no published result. This is a bug because observing an open document must not fabricate an empty clear. Fix: inspect the publication lifecycle; never collect or replace facts in an assertion."
+    );
 
     let errors: Vec<_> = diagnostics
         .iter()

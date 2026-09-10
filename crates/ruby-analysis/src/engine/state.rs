@@ -3500,15 +3500,25 @@ impl AnalysisEngine {
     /// Keeps every other resolved diagnostic fact, candidates, and semantic
     /// stores intact. Used when dependency require roots become available after
     /// project files were already indexed with incomplete load-path context.
-    pub fn replace_unresolved_require_diagnostics(
+    /// A removed or replaced source rejects the update, including empty clears.
+    pub fn replace_unresolved_require_diagnostics_if_source_snapshot(
         &mut self,
-        file_id: SourceFileId,
+        expected_snapshot: SourceFileSnapshot,
         require_diagnostics: Vec<DiagnosticFact>,
-    ) {
-        self.assert_known_file_id(
-            file_id,
-            "unresolved-require refresh references unknown source file id",
+    ) -> bool {
+        assert_eq!(
+            expected_snapshot.engine_instance_id,
+            self.instance_id,
+            "INVARIANT VIOLATED: require diagnostic replacement received another engine's source snapshot. This is a bug because isolated projects cannot share mutable diagnostic ownership. Fix: commit through the engine that issued the snapshot."
         );
+        if self
+            .file(expected_snapshot.file_id)
+            .map(|file| file.revision)
+            != Some(expected_snapshot.revision)
+        {
+            return false;
+        }
+        let file_id = expected_snapshot.file_id;
         for fact in &require_diagnostics {
             assert_eq!(
                 fact.range.file_id, file_id,
@@ -3542,6 +3552,7 @@ impl AnalysisEngine {
             .diagnostics
             .resolved
             .replace_file(file_id, diagnostics);
+        true
     }
 
     pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {

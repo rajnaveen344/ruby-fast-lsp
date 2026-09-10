@@ -3,3 +3,4 @@
 # Normal `cargo test test::simulation` always replays these seeds.
 9177262849732973560 # chained refs missed after late intermediate file open + caller reopen
 559323752246194677 # chained refs missed after late return-owner file open
+16965852601332833004 # eval block lexical constant scope differs from method owner

@@ -162,6 +162,11 @@ struct DiagnosticPublicationState {
     /// tower-lsp's capacity-1 client channel and stall request dispatch.
     pending: BTreeMap<String, (Url, Vec<Diagnostic>)>,
     sender_scheduled: bool,
+    /// Presentation-only results for currently open documents. A semantic
+    /// dependency refresh can reuse lint output only for the exact source
+    /// snapshot that was linted; edits and close remove the retained result.
+    external_linter_results:
+        HashMap<Url, (ruby_analysis::engine::SourceFileSnapshot, Vec<Diagnostic>)>,
 }
 
 impl DiagnosticPublicationState {
@@ -465,12 +470,80 @@ pub struct RubyLanguageServer {
     #[cfg(test)]
     published_diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
     #[cfg(test)]
+    pub(crate) test_schedule: Arc<crate::indexer::test_schedule::TestSchedule>,
+    #[cfg(test)]
     user_cache_root_override: Arc<Mutex<Option<PathBuf>>>,
     #[cfg(test)]
     indexing_progress_reports: Arc<Mutex<Vec<(PathBuf, u64, u64)>>>,
 }
 
 impl RubyLanguageServer {
+    pub(crate) fn diagnostic_source_snapshot(
+        &self,
+        uri: &Url,
+    ) -> Option<ruby_analysis::engine::SourceFileSnapshot> {
+        let path = uri.to_file_path().ok()?;
+        self.analysis_engine_for_uri(uri)
+            .read()
+            .source_snapshot_for_path(path)
+    }
+
+    pub(crate) fn retain_external_linter_diagnostics(
+        &self,
+        uri: &Url,
+        snapshot: ruby_analysis::engine::SourceFileSnapshot,
+        diagnostics: &[Diagnostic],
+    ) -> bool {
+        if !self.docs.lock().contains_key(uri)
+            || self.diagnostic_source_snapshot(uri) != Some(snapshot)
+        {
+            return false;
+        }
+        let mut publication = self.diagnostic_publication.lock();
+        if diagnostics.is_empty() {
+            publication.external_linter_results.remove(uri);
+        } else {
+            publication
+                .external_linter_results
+                .insert(uri.clone(), (snapshot, diagnostics.to_vec()));
+        }
+        true
+    }
+
+    pub(crate) fn append_current_external_linter_diagnostics(
+        &self,
+        uri: &Url,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        let snapshot = self.diagnostic_source_snapshot(uri);
+        self.append_external_linter_diagnostics_for_snapshot(uri, snapshot, diagnostics);
+    }
+
+    /// Reuse presentation output while the caller holds the source engine read
+    /// lock, without recursively acquiring that lock to capture its snapshot.
+    pub(crate) fn append_external_linter_diagnostics_for_snapshot(
+        &self,
+        uri: &Url,
+        snapshot: Option<ruby_analysis::engine::SourceFileSnapshot>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        let mut publication = self.diagnostic_publication.lock();
+        if let Some((retained_snapshot, retained)) = publication.external_linter_results.get(uri) {
+            if Some(*retained_snapshot) == snapshot {
+                diagnostics.extend(retained.iter().cloned());
+            } else {
+                publication.external_linter_results.remove(uri);
+            }
+        }
+    }
+
+    pub(crate) fn clear_external_linter_diagnostics(&self, uri: &Url) {
+        self.diagnostic_publication
+            .lock()
+            .external_linter_results
+            .remove(uri);
+    }
+
     #[doc(hidden)]
     pub fn runtime_stdlib_path_cache_snapshot(&self) -> crate::single_flight::SingleFlightSnapshot {
         self.runtime_stdlib_path_cache.snapshot()
@@ -541,6 +614,8 @@ impl RubyLanguageServer {
             parent_process_id: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            test_schedule: Arc::default(),
             #[cfg(test)]
             user_cache_root_override: Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -918,19 +993,14 @@ impl RubyLanguageServer {
     /// belong to any registered workspace.
     pub fn workspace_for_uri(&self, uri: &Url) -> Option<Workspace> {
         let file_path = uri.to_file_path().ok()?;
-        let workspaces = self.workspaces.read();
-        let mut best: Option<&Workspace> = None;
-        let mut best_len = 0usize;
-        for ws in workspaces.iter() {
-            if file_path.starts_with(&ws.root_path) {
-                let len = ws.root_path.as_os_str().len();
-                if len >= best_len {
-                    best_len = len;
-                    best = Some(ws);
-                }
-            }
-        }
-        best.cloned()
+        Self::workspace_for_path(&self.workspaces.read(), &file_path).cloned()
+    }
+
+    fn workspace_for_path<'a>(workspaces: &'a [Workspace], path: &Path) -> Option<&'a Workspace> {
+        workspaces
+            .iter()
+            .filter(|workspace| path.starts_with(&workspace.root_path))
+            .max_by_key(|workspace| workspace.root_path.as_os_str().len())
     }
 
     /// Return the isolated semantic engine that owns a document URI. Files
@@ -971,12 +1041,14 @@ impl RubyLanguageServer {
         workspace: &Workspace,
     ) {
         use crate::indexer::require_paths::{
-            reresolve_unresolved_require_diagnostics, unresolved_require_diagnostics,
+            require_diagnostic_candidates, reresolve_unresolved_require_diagnostics,
             UNRESOLVED_REQUIRE_CODE,
         };
+        use crate::indexing_status::IndexingPhase;
         use crate::query::EngineQuery;
 
         let feature_index = workspace.require_feature_index();
+        let generation = workspace.indexing_status.snapshot().generation;
         let load_paths = self
             .config
             .lock()
@@ -984,107 +1056,164 @@ impl RubyLanguageServer {
             .load_paths
             .paths_for_project(&workspace.root_path)
             .to_vec();
-        let project_root = workspace.root_path.clone();
+        let project_root = &workspace.root_path;
 
-        let open_content_by_path: HashMap<PathBuf, (Url, String)> = {
-            let docs = self.docs.lock();
-            docs.iter()
-                .filter_map(|(uri, doc)| {
-                    let path = uri.to_file_path().ok()?;
-                    if !path.starts_with(&project_root) {
-                        return None;
-                    }
-                    Some((path, (uri.clone(), doc.read().content.clone())))
-                })
-                .collect()
-        };
+        let open_paths = self
+            .docs
+            .lock()
+            .keys()
+            .filter_map(|uri| uri.to_file_path().ok())
+            .collect::<std::collections::HashSet<_>>();
 
         let refresh_started = Instant::now();
         let mut open_files = 0usize;
         let mut closed_files = 0usize;
-        let updates = {
+        let mut updates = {
             let engine = workspace.analysis_engine.read();
             engine
                 .files()
                 .filter(|file| file.kind.contributes_project_diagnostics())
                 .filter_map(|file| {
-                    let open_uri = open_content_by_path
-                        .get(&file.path)
-                        .map(|(uri, _)| uri.clone());
-                    let existing_requires = engine
-                        .diagnostic_facts_in_file(file.id)
-                        .into_iter()
+                    let candidates = engine.diagnostic_facts_in_file(file.id).into_iter()
                         .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
                         .collect::<Vec<_>>();
-                    if open_uri.is_none() && existing_requires.is_empty() {
-                        return None;
-                    }
-                    let diagnostics = if let Some((_, content)) =
-                        open_content_by_path.get(&file.path)
-                    {
-                        open_files = open_files
-                            .checked_add(1)
-                            .expect(
-                                "INVARIANT VIOLATED: unresolved-require open-file refresh counter overflowed usize. \
-                                 This is a bug because one workspace cannot contain more open documents than addressable memory. \
-                                 Fix: inspect corrupt document-cache iteration.",
-                            );
-                        unresolved_require_diagnostics(
-                            content,
-                            file.id,
-                            &file.path,
-                            &project_root,
-                            &load_paths,
-                            &feature_index,
-                            Some(&engine),
-                        )
+                    if open_paths.contains(&file.path) {
+                        open_files = open_files.checked_add(1).expect(
+                            "INVARIANT VIOLATED: unresolved-require open-file refresh counter overflowed usize. This is a bug because the document cache must fit addressable memory. Fix: inspect corrupt document-cache iteration.",
+                        );
                     } else {
-                        closed_files = closed_files
-                            .checked_add(1)
-                            .expect(
-                                "INVARIANT VIOLATED: unresolved-require closed-file refresh counter overflowed usize. \
-                                 This is a bug because one workspace cannot contain more project files than addressable memory. \
-                                 Fix: inspect corrupt file-store iteration.",
-                            );
-                        reresolve_unresolved_require_diagnostics(
-                            &file.path,
-                            &project_root,
-                            &load_paths,
-                            &feature_index,
-                            Some(&engine),
-                            &existing_requires,
-                        )
-                    };
-                    Some((file.id, open_uri, diagnostics))
+                        if candidates.is_empty() {
+                            return None;
+                        }
+                        closed_files = closed_files.checked_add(1).expect(
+                            "INVARIANT VIOLATED: unresolved-require closed-file refresh counter overflowed usize. This is a bug because project files must fit addressable memory. Fix: inspect corrupt file-store iteration.",
+                        );
+                    }
+                    let snapshot = engine.source_snapshot_for_path(&file.path).expect(
+                        "INVARIANT VIOLATED: a registered project file has no source snapshot. This is a bug because delayed facts require exact source identity. Fix: keep file registration and snapshot lookup aligned.",
+                    );
+                    let uri = Url::from_file_path(&file.path).expect(
+                        "INVARIANT VIOLATED: a project source cannot form a file URI. This is a bug because registered project paths must be absolute. Fix: normalize paths before file registration.",
+                    );
+                    Some((file.path.clone(), uri, file.id, snapshot, candidates))
                 })
                 .collect::<Vec<_>>()
         };
-        info!(
-            "[PERF][unresolved-require refresh] project={} open_files={} closed_files={} elapsed={:?}",
-            workspace.root_path.display(),
-            open_files,
-            closed_files,
-            refresh_started.elapsed()
-        );
+        updates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
 
-        let mut refreshed_open = Vec::new();
-        {
-            let mut engine = workspace.analysis_engine.write();
-            for (file_id, open_uri, diagnostics) in updates {
-                engine.replace_unresolved_require_diagnostics(file_id, diagnostics);
-                if let Some(uri) = open_uri {
-                    refreshed_open.push(uri);
+        for (path, uri, file_id, snapshot, candidates) in updates {
+            #[cfg(test)]
+            self.test_schedule
+                .checkpoint(
+                    crate::indexer::test_schedule::Point::RequireRefreshCollected,
+                    &path,
+                )
+                .await;
+
+            'commit: {
+                let semantic_lock = self.document_semantic_lock(&uri);
+                let _semantic_guard = semantic_lock.lock().await;
+                let document = self.get_doc(&uri);
+                let mut diagnostics = document.as_ref().map(|document| {
+                    let parse = document.parse();
+                    crate::capabilities::diagnostics::generate_diagnostics(&parse, document)
+                });
+                // An initially closed file may have opened while collection
+                // waited. Open documents provide all static requires, including
+                // previously resolved targets. Closed files reuse stored misses
+                // without rereading or parsing disk sources.
+                let candidates = if let Some(document) = &document {
+                    require_diagnostic_candidates(document.analysis_content(), file_id)
+                } else {
+                    candidates
+                };
+                let workspaces = self.workspaces.read();
+                let Some(owner) = Self::workspace_for_path(&workspaces, &path) else {
+                    break 'commit;
+                };
+                if !Arc::ptr_eq(&workspace.analysis_engine, &owner.analysis_engine) {
+                    break 'commit;
+                }
+                // Retain the immutable root identity through commit/publication:
+                // a newer dependency refresh must never be overwritten by this one.
+                let current_features = workspace.require_feature_index.read();
+                if !Arc::ptr_eq(&current_features, &feature_index)
+                    || self
+                        .config
+                        .lock()
+                        .indexing
+                        .load_paths
+                        .paths_for_project(project_root)
+                        != load_paths
+                {
+                    break 'commit;
+                }
+                let mut engine = workspace.analysis_engine.write();
+                let status = workspace.indexing_status.snapshot();
+                if status.generation != generation
+                    || matches!(
+                        status.phase,
+                        IndexingPhase::Cancelled | IndexingPhase::Failed
+                    )
+                    || engine.source_snapshot_for_path(&path) != Some(snapshot)
+                {
+                    break 'commit;
+                }
+                let Some(file) = engine.file_id(&path).and_then(|id| engine.file(id)) else {
+                    break 'commit;
+                };
+                if !file.kind.contributes_project_diagnostics()
+                    || document
+                        .as_ref()
+                        .is_some_and(|doc| !engine.file_content_matches(file.id, &doc.content))
+                {
+                    break 'commit;
+                }
+                // Project targets can change without changing the consumer's
+                // source or dependency roots. Resolve candidates against the
+                // current engine only after acquiring the commit guard.
+                let requires = reresolve_unresolved_require_diagnostics(
+                    &path,
+                    project_root,
+                    &load_paths,
+                    &feature_index,
+                    Some(&engine),
+                    &candidates,
+                );
+                if !engine
+                    .replace_unresolved_require_diagnostics_if_source_snapshot(snapshot, requires)
+                {
+                    break 'commit;
+                }
+                if let Some(diagnostics) = diagnostics.as_mut() {
+                    diagnostics.extend(EngineQuery::unresolved_diagnostics_from_engine(
+                        &engine, &uri,
+                    ));
+                    self.append_external_linter_diagnostics_for_snapshot(
+                        &uri,
+                        Some(snapshot),
+                        diagnostics,
+                    );
+                }
+                if let Some(diagnostics) = diagnostics {
+                    // Closed files retain engine facts but receive no publication.
+                    // Synchronous enqueue keeps edits and resolution outside the
+                    // projection-to-publication interval.
+                    self.queue_diagnostics(uri, diagnostics);
                 }
             }
+            #[cfg(test)]
+            self.test_schedule
+                .checkpoint(
+                    crate::indexer::test_schedule::Point::RequireRefreshAttempted,
+                    &path,
+                )
+                .await;
         }
-
-        refreshed_open.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-        refreshed_open.dedup();
-        for uri in refreshed_open {
-            let diagnostics = EngineQuery::with_engine(workspace.analysis_engine.clone())
-                .get_unresolved_diagnostics(&uri);
-            self.publish_diagnostics(uri, diagnostics).await;
-        }
+        info!(
+            "[PERF][unresolved-require refresh] project={} open_files={} closed_files={} elapsed={:?}",
+            project_root.display(), open_files, closed_files, refresh_started.elapsed()
+        );
     }
 
     pub(crate) fn extension_project_context_for_uri(
@@ -1444,6 +1573,12 @@ impl RubyLanguageServer {
     /// `publishDiagnostics` on tower-lsp's capacity-1 outbound channel can
     /// backpressure stdout and stall request dispatch (including goto).
     pub async fn publish_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
+        self.queue_diagnostics(uri, diagnostics);
+    }
+
+    /// Enqueue without yielding so a producer can retain its document/source
+    /// guards through publication. Only the dedicated sender performs client IO.
+    pub(crate) fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
         #[cfg(test)]
         self.published_diagnostics
             .lock()
@@ -1492,11 +1627,14 @@ impl RubyLanguageServer {
 
     #[cfg(test)]
     pub fn last_published_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
-        self.published_diagnostics
-            .lock()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default()
+        self.last_diagnostic_publication(uri).unwrap_or_default()
+    }
+
+    /// Test observation of the publication boundary. None means no publication,
+    /// which must not be mistaken for an explicitly published empty clear.
+    #[cfg(test)]
+    pub fn last_diagnostic_publication(&self, uri: &Url) -> Option<Vec<Diagnostic>> {
+        self.published_diagnostics.lock().get(uri).cloned()
     }
 
     #[cfg(test)]
@@ -1812,6 +1950,8 @@ impl Default for RubyLanguageServer {
             parent_process_id: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            test_schedule: Arc::default(),
             #[cfg(test)]
             user_cache_root_override: Arc::new(Mutex::new(None)),
             #[cfg(test)]

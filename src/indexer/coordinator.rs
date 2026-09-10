@@ -1268,7 +1268,7 @@ impl IndexingCoordinator {
         // Runtime stdlib still enters the same isolated engine before the
         // dependency-ready milestone and complete semantic diagnostics.
         self.index_standard_library(server, &ruby_version).await?;
-        self.publish_dependency_require_paths(server);
+        self.publish_dependency_require_paths(server)?;
         if let Some(workspace) = server
             .list_workspaces()
             .into_iter()
@@ -1278,6 +1278,7 @@ impl IndexingCoordinator {
                 .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
                 .await;
         }
+        self.indexing_checkpoint(server)?;
         let dependencies_dur = dependencies_start.elapsed();
 
         let facts_dur = facts_start.elapsed();
@@ -1344,7 +1345,7 @@ impl IndexingCoordinator {
         )
         .await?;
         let publish_start = Instant::now();
-        self.publish_unresolved_diagnostics(server).await?;
+        self.publish_open_project_diagnostics(server).await?;
         let publish_dur = publish_start.elapsed();
 
         // Open consumers may have been analyzed before a closed definition
@@ -2188,79 +2189,91 @@ impl IndexingCoordinator {
         Ok(())
     }
 
-    /// Publish diagnostics for unresolved entries in currently open files.
-    async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) -> Result<()> {
+    /// Publish a current, complete diagnostic projection for open project files.
+    async fn publish_open_project_diagnostics(&self, server: &RubyLanguageServer) -> Result<()> {
         self.indexing_checkpoint(server)?;
-        let open_uris = server.docs.lock().keys().cloned().collect::<HashSet<_>>();
-        let file_ids = {
-            let analysis_engine = self.analysis_engine(server);
-            let engine = analysis_engine.read();
-            let mut file_ids = engine.diagnostic_store().file_ids();
-            file_ids.retain(|file_id| {
-                engine
-                    .file(*file_id)
-                    .and_then(|file| Url::from_file_path(&file.path).ok())
-                    .is_some_and(|uri| open_uris.contains(&uri))
-            });
-            file_ids.sort_by(|left, right| {
-                let left_path = engine
-                    .file(*left)
-                    .map(|file| file.path.as_path())
-                    .unwrap_or_else(|| Path::new(""));
-                let right_path = engine
-                    .file(*right)
-                    .map(|file| file.path.as_path())
-                    .unwrap_or_else(|| Path::new(""));
-                left_path.cmp(right_path)
-            });
-            info!(
-                "Publishing diagnostics for {} open files with analysis diagnostics ({} open documents)",
-                file_ids.len(),
-                open_uris.len()
-            );
-            file_ids
-        };
+        let analysis_engine = self.analysis_engine(server);
+        let mut open_uris = server.docs.lock().keys().cloned().collect::<Vec<_>>();
+        open_uris
+            .retain(|uri| Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(uri)));
+        open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
 
-        for file_id in file_ids {
+        for uri in open_uris {
             self.indexing_checkpoint(server)?;
-            let Some((uri, diagnostics)) = ({
-                let analysis_engine = self.analysis_engine(server);
-                let engine = analysis_engine.read();
-                match engine.file(file_id) {
-                    Some(file) => match Url::from_file_path(&file.path) {
-                        Ok(uri) => {
-                            let diagnostics = engine
-                                .diagnostic_store()
-                                .facts_for_file(file_id)
-                                .iter()
-                                .filter_map(|fact| diagnostic_from_fact_fast(file, fact))
-                                .collect::<Vec<_>>();
-                            if diagnostics.is_empty() {
-                                None
-                            } else {
-                                Some((uri, diagnostics))
-                            }
-                        }
-                        Err(()) => None,
-                    },
-                    None => None,
+            #[cfg(test)]
+            let publication_path = uri
+                .to_file_path()
+                .expect("coordinator diagnostics must target a file URI");
+            #[cfg(test)]
+            server
+                .test_schedule
+                .checkpoint(
+                    crate::indexer::test_schedule::Point::ColdDiagnosticsPending,
+                    &publication_path,
+                )
+                .await;
+
+            {
+                // Edits and close may complete while this producer waits. Read
+                // diagnostics only after acquiring the same document lock used
+                // by those handlers, and recheck the indexing generation then.
+                let semantic_lock = server.document_semantic_lock(&uri);
+                let _semantic_guard = semantic_lock.lock().await;
+                self.indexing_checkpoint(server)?;
+                if !Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(&uri)) {
+                    continue;
                 }
-            }) else {
-                continue;
-            };
-            debug!(
-                "Publishing {} unresolved diagnostics for {}",
-                diagnostics.len(),
-                uri.path()
-            );
-            self.indexing_checkpoint(server)?;
-            server.publish_diagnostics(uri, diagnostics).await;
+                let Some(document) = server.get_doc(&uri) else {
+                    continue;
+                };
+                let Ok(path) = uri.to_file_path() else {
+                    continue;
+                };
+                let mut diagnostics = {
+                    let parse = document.parse();
+                    crate::capabilities::diagnostics::generate_diagnostics(&parse, &document)
+                };
+                let engine = analysis_engine.read();
+                let Some(file) = engine.file_id(&path).and_then(|id| engine.file(id)) else {
+                    continue;
+                };
+                if !file.kind.contributes_project_diagnostics()
+                    || !engine.file_content_matches(file.id, &document.content)
+                {
+                    continue;
+                }
+                diagnostics.extend(
+                    engine
+                        .diagnostic_facts_in_file(file.id)
+                        .iter()
+                        .filter_map(|fact| diagnostic_from_fact_fast(file, fact)),
+                );
+                server.append_external_linter_diagnostics_for_snapshot(
+                    &uri,
+                    engine.source_snapshot_for_path(&path),
+                    &mut diagnostics,
+                );
+                self.indexing_checkpoint(server)?;
+                // Keep the engine read lock through the synchronous enqueue:
+                // cross-file resolution cannot invalidate this projection in
+                // between. Empty results must clear errors resolved at startup.
+                server.queue_diagnostics(uri, diagnostics);
+            }
+            #[cfg(test)]
+            server
+                .test_schedule
+                .checkpoint(
+                    crate::indexer::test_schedule::Point::ColdDiagnosticsAttempted,
+                    &publication_path,
+                )
+                .await;
         }
         Ok(())
     }
 
     /// Retain Bundler/RubyGems require roots for goto and unresolved-require diagnostics.
-    fn publish_dependency_require_paths(&mut self, server: &RubyLanguageServer) {
+    fn publish_dependency_require_paths(&mut self, server: &RubyLanguageServer) -> Result<()> {
+        self.indexing_checkpoint(server)?;
         let mut paths = Vec::new();
         if let Some(gem_indexer) = self.gem_indexer.as_ref() {
             paths.extend(gem_indexer.get_gem_lib_paths());
@@ -2287,17 +2300,21 @@ impl IndexingCoordinator {
             features,
             index_started.elapsed()
         );
+        self.indexing_checkpoint(server)?;
         if let Some(workspace) = server
             .list_workspaces()
             .into_iter()
             .find(|workspace| workspace.root_path == self.workspace_root)
         {
-            workspace.set_dependency_require_resolution(paths.clone(), index.clone());
+            if Arc::ptr_eq(&workspace.analysis_engine, &self.analysis_engine(server)) {
+                workspace.set_dependency_require_resolution(paths.clone(), index.clone());
+            }
         }
         if let Some(processor) = self.file_processor.as_mut() {
             processor.set_require_dependency_roots(paths);
             processor.set_require_feature_index(index);
         }
+        Ok(())
     }
 
     /// Step 5: Index the Ruby standard library
@@ -5798,7 +5815,7 @@ end
             "cold indexing must retain workspace diagnostics in the engine"
         );
         assert!(
-            server.last_published_diagnostics(&uri).is_empty(),
+            server.last_diagnostic_publication(&uri).is_none(),
             "closed-file engine diagnostics must not flood the LSP client"
         );
 

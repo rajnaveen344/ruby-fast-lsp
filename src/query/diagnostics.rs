@@ -20,6 +20,14 @@ impl EngineQuery {
              Fix: construct EngineQuery with EngineQuery::with_engine or with_doc_and_engine.",
         );
         let engine = analysis_engine.read();
+        Self::unresolved_diagnostics_from_engine(&engine, uri)
+    }
+
+    /// Project while the caller retains an engine guard through publication.
+    pub(crate) fn unresolved_diagnostics_from_engine(
+        engine: &ruby_analysis::engine::AnalysisEngine,
+        uri: &Url,
+    ) -> Vec<Diagnostic> {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
@@ -30,7 +38,7 @@ impl EngineQuery {
         engine
             .diagnostic_facts_in_file(file_id)
             .into_iter()
-            .filter_map(|fact| diagnostic_from_fact(&engine, &fact))
+            .filter_map(|fact| diagnostic_from_fact(engine, &fact))
             .collect()
     }
 }

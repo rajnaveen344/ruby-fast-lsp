@@ -1,0 +1,57 @@
+[
+  {
+    "id": "instance-inheritance",
+    "receiver": "Child", "method": "label", "kind": "instance", "expected": "Base#label",
+    "namespaces": [
+      {"name": "Base", "kind": "class", "methods": [{"name": "label", "kind": "instance"}]},
+      {"name": "Child", "kind": "class", "superclass": "Base"}
+    ],
+    "ruby": "class Base; def label; 'base'; end; end\nclass Child < Base; end\nbound = Child.new.public_method(:label)\nraise 'wrong executed implementation' unless bound.call == 'base'\nbound.owner.name + '#label'"
+  },
+  {
+    "id": "prepend-before-class",
+    "receiver": "Parcel", "method": "label", "kind": "instance", "expected": "Stamp#label",
+    "namespaces": [
+      {"name": "Stamp", "kind": "module", "methods": [{"name": "label", "kind": "instance"}]},
+      {"name": "Parcel", "kind": "class", "prepends": ["Stamp"], "methods": [{"name": "label", "kind": "instance"}]}
+    ],
+    "ruby": "module Stamp; def label; 'stamp'; end; end\nclass Parcel; prepend Stamp; def label; 'parcel'; end; end\nbound = Parcel.new.public_method(:label)\nraise 'wrong executed implementation' unless bound.call == 'stamp'\nbound.owner.name + '#label'"
+  },
+  {
+    "id": "include-before-superclass",
+    "receiver": "Child", "method": "label", "kind": "instance", "expected": "Stamp#label",
+    "namespaces": [
+      {"name": "Stamp", "kind": "module", "methods": [{"name": "label", "kind": "instance"}]},
+      {"name": "Base", "kind": "class", "methods": [{"name": "label", "kind": "instance"}]},
+      {"name": "Child", "kind": "class", "superclass": "Base", "includes": ["Stamp"]}
+    ],
+    "ruby": "module Stamp; def label; 'stamp'; end; end\nclass Base; def label; 'base'; end; end\nclass Child < Base; include Stamp; end\nbound = Child.new.public_method(:label)\nraise 'wrong executed implementation' unless bound.call == 'stamp'\nbound.owner.name + '#label'"
+  },
+  {
+    "id": "last-include-wins",
+    "receiver": "Parcel", "method": "label", "kind": "instance", "expected": "Last#label",
+    "namespaces": [
+      {"name": "First", "kind": "module", "methods": [{"name": "label", "kind": "instance"}]},
+      {"name": "Last", "kind": "module", "methods": [{"name": "label", "kind": "instance"}]},
+      {"name": "Parcel", "kind": "class", "includes": ["First", "Last"]}
+    ],
+    "ruby": "module First; def label; 'first'; end; end\nmodule Last; def label; 'last'; end; end\nclass Parcel; include First; include Last; end\nbound = Parcel.new.public_method(:label)\nraise 'wrong executed implementation' unless bound.call == 'last'\nbound.owner.name + '#label'"
+  },
+  {
+    "id": "class-method-inheritance",
+    "receiver": "Child", "method": "label", "kind": "class", "expected": "Base.label",
+    "namespaces": [
+      {"name": "Base", "kind": "class", "methods": [{"name": "label", "kind": "class"}]},
+      {"name": "Child", "kind": "class", "superclass": "Base"}
+    ],
+    "ruby": "class Base; def self.label; 'base'; end; end\nclass Child < Base; end\nbound = Child.public_method(:label)\nraise 'wrong executed implementation' unless bound.call == 'base'\nbound.owner.to_s.sub(/\\A#<Class:(.*)>\\z/, '\\1') + '.label'"
+  },
+  {
+    "id": "explicit-private-call-rejected",
+    "receiver": "Parcel", "method": "label", "kind": "instance", "expected": null,
+    "namespaces": [
+      {"name": "Parcel", "kind": "class", "methods": [{"name": "label", "kind": "instance", "private": true}]}
+    ],
+    "ruby": "class Parcel; private; def label; 'private'; end; end\nbegin\n  Parcel.new.label\n  'unexpected public call'\nrescue NoMethodError => error\n  raise unless error.name == :label\n  nil\nend"
+  }
+]

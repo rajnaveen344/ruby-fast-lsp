@@ -160,6 +160,16 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let analysis_file_id =
         server.open_or_update_analysis_file_with_kind(&uri, content.clone(), source_kind);
     let register_elapsed = register_start.elapsed();
+    #[cfg(test)]
+    if let Ok(path) = uri.to_file_path() {
+        server
+            .test_schedule
+            .checkpoint(
+                crate::indexer::test_schedule::Point::DocumentSourceUpdated,
+                &path,
+            )
+            .await;
+    }
 
     let doc_start = Instant::now();
     {
@@ -237,7 +247,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         }
     };
     if !skip_processing {
-        refresh_open_project_files_after_dependency_open(&indexer, server, &uri);
+        refresh_open_project_files_after_dependency_open(&indexer, server, &uri).await;
     }
     let process_elapsed = process_start.elapsed();
 
@@ -304,16 +314,20 @@ fn indexed_disk_content_matches(server: &RubyLanguageServer, uri: &Url, content:
         .is_some_and(|file_id| engine.file_content_matches(file_id, content))
 }
 
-fn refresh_open_project_files_after_dependency_open(
+async fn refresh_open_project_files_after_dependency_open(
     indexer: &FileProcessor,
     server: &RubyLanguageServer,
     opened_uri: &Url,
 ) {
-    let open_docs = {
+    let owning_engine = server.analysis_engine_for_uri(opened_uri);
+    let mut open_docs = {
         let docs = server.docs.lock();
         docs.iter()
             .filter_map(|(uri, doc)| {
                 if uri == opened_uri {
+                    return None;
+                }
+                if !Arc::ptr_eq(&owning_engine, &server.analysis_engine_for_uri(uri)) {
                     return None;
                 }
                 if analysis_file_kind(server, uri).is_some_and(|kind| kind.is_external()) {
@@ -324,15 +338,23 @@ fn refresh_open_project_files_after_dependency_open(
             })
             .collect::<Vec<_>>()
     };
+    open_docs.sort_unstable_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
 
     for (uri, content) in open_docs {
-        if let Err(err) =
-            indexer.process_file_current_file_resolution_forced(&uri, &content, server)
-        {
-            log::warn!(
+        match indexer.process_file_current_file_resolution_forced(&uri, &content, server) {
+            Ok(result) => {
+                let mut diagnostics = result.diagnostics;
+                diagnostics.extend(
+                    EngineQuery::with_engine(owning_engine.clone())
+                        .get_unresolved_diagnostics(&uri),
+                );
+                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
+                server.publish_diagnostics(uri, diagnostics).await;
+            }
+            Err(err) => log::warn!(
                 "Failed to refresh open file after dependency open: {}: {err}",
                 uri.path()
-            );
+            ),
         }
     }
 }
@@ -383,12 +405,23 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         Some(change) => change.text.clone(),
         None => return,
     };
+    server.clear_external_linter_diagnostics(&uri);
     let register_start = Instant::now();
     let source_kind = analysis_file_kind(server, &uri)
         .unwrap_or_else(|| source_kind_for_new_open_file(server, &uri));
     let analysis_file_id =
         server.open_or_update_analysis_file_with_kind(&uri, final_content.clone(), source_kind);
     let register_elapsed = register_start.elapsed();
+    #[cfg(test)]
+    if let Ok(path) = uri.to_file_path() {
+        server
+            .test_schedule
+            .checkpoint(
+                crate::indexer::test_schedule::Point::DocumentSourceUpdated,
+                &path,
+            )
+            .await;
+    }
 
     let doc_start = Instant::now();
     // Update or create the document atomically
@@ -518,6 +551,7 @@ async fn refresh_bounded_open_diagnostics(
         let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
         let mut diagnostics = result.diagnostics;
         diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+        server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
         server.publish_diagnostics(uri, diagnostics).await;
         refreshed += 1;
     }
@@ -612,6 +646,7 @@ async fn append_external_linter_diagnostics(
     content: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    server.clear_external_linter_diagnostics(uri);
     if !analysis_file_kind(server, uri).is_some_and(SourceKind::is_editable) {
         return;
     }
@@ -635,6 +670,9 @@ async fn append_external_linter_diagnostics(
         .map(|workspace| workspace.root_path)
         .or_else(|| file_path.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| Path::new(".").to_path_buf());
+    let Some(snapshot) = server.diagnostic_source_snapshot(uri) else {
+        return;
+    };
 
     match lint_document(
         &config,
@@ -646,7 +684,11 @@ async fn append_external_linter_diagnostics(
     )
     .await
     {
-        Ok(linter_diagnostics) => diagnostics.extend(linter_diagnostics),
+        Ok(linter_diagnostics) => {
+            if server.retain_external_linter_diagnostics(uri, snapshot, &linter_diagnostics) {
+                diagnostics.extend(linter_diagnostics);
+            }
+        }
         Err(error) => log::warn!(
             "External linter diagnostics unavailable for {}: {error:#}. \
              Ensure the selected linter is available through the owning project's bundle.",
@@ -659,6 +701,7 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     let uri = params.text_document.uri.clone();
     let semantic_lock = server.document_semantic_lock(&uri);
     let _semantic_guard = semantic_lock.lock().await;
+    server.clear_external_linter_diagnostics(&uri);
 
     // Remove the document from in-memory cache but keep analysis facts.
     server.docs.lock().remove(&uri);

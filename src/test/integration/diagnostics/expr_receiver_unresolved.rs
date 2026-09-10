@@ -312,6 +312,9 @@ end
             SourceKind::Stub,
         )
         .expect("replacing the runtime stub must use the ordinary file lifecycle");
+    // Direct stub injection bypasses the runtime coordinator's document refresh.
+    // Deliver that refresh explicitly; observing diagnostics must never perform it.
+    editor.set("jruby_unavailable.rb", "Process.fork\n").await;
     let diagnostics_after_replacement = editor.diagnostics("jruby_unavailable.rb").await;
     assert!(
         diagnostics_after_replacement.iter().all(|diagnostic| {
@@ -376,6 +379,9 @@ end
     FileProcessor::new()
         .collect_file_facts_as(&overlay_uri, "", editor.server(), SourceKind::Stub)
         .expect("clearing the overlay file must replace its facts");
+    editor
+        .set("jruby_absent.rb", "ObjectSpace.dump(nil)\n")
+        .await;
     let restored_diagnostics = editor.diagnostics("jruby_absent.rb").await;
     assert!(
         restored_diagnostics.iter().all(|diagnostic| {

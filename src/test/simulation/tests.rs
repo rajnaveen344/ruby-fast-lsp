@@ -9,9 +9,12 @@ use crate::capabilities::indexing;
 use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use crate::test::harness::FakeEditor;
+use parking_lot::RwLock;
 use ruby_analysis::core::{FullyQualifiedName, SourceKind, TextRange};
+use ruby_analysis::engine::AnalysisEngine;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{
     DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, HoverParams,
@@ -23,7 +26,7 @@ use tower_lsp::LanguageServer;
 
 use super::ruby_gen::{CallSite, SourcePos, UNPROVEN_BLOCK_RECEIVER_GAP};
 
-fn phase1_project() -> SyntheticProject {
+pub(super) fn phase1_project() -> SyntheticProject {
     let mut project = SyntheticProject::new("synthetic_phase1");
 
     project
@@ -226,7 +229,7 @@ fn mro_prepend_project() -> SyntheticProject {
     project
 }
 
-fn superclass_switch_project() -> SyntheticProject {
+pub(super) fn superclass_switch_project() -> SyntheticProject {
     let mut project = SyntheticProject::new("synthetic_superclass_switch");
 
     project
@@ -370,6 +373,89 @@ fn class_eval_project() -> SyntheticProject {
         });
 
     project
+}
+
+fn eval_constant_scope_project(relative: bool) -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_eval_constant_scope");
+    project.class("LexicalScope::Target", |class| {
+        class.constant("VALUE", "\"token\"");
+        for name in ["ordinary", "defined", "evaluated", "reflected"] {
+            let method = class.method(name);
+            if relative {
+                method.ref_const_relative("LexicalScope::Target::VALUE", "VALUE");
+            } else {
+                method.ref_const("LexicalScope::Target::VALUE");
+            }
+            match name {
+                "ordinary" => {}
+                "defined" => {
+                    method.as_define_method();
+                }
+                "evaluated" => {
+                    method.in_class_eval_block();
+                }
+                "reflected" => {
+                    method.as_const_get_define_method();
+                }
+                unexpected => panic!("Unexpected test method {unexpected}"),
+            }
+        }
+    });
+    project
+}
+
+#[tokio::test]
+async fn generated_eval_constant_auto_refs_respect_lexical_scope() {
+    let project = eval_constant_scope_project(false);
+    let render = project.render();
+    for reference in &render.map.constant_refs {
+        let expected = match reference.caller.name.as_str() {
+            "ordinary" | "defined" => "VALUE",
+            "evaluated" | "reflected" => "LexicalScope::Target::VALUE",
+            unexpected => panic!("Unexpected test method {unexpected}"),
+        };
+        assert_eq!(reference.text, expected);
+    }
+    let runner = SimulationRunner::start(project).await;
+    runner.check_initial().await;
+    runner.check_fresh_equivalence().await;
+}
+
+#[tokio::test]
+async fn generated_eval_relative_constants_do_not_inherit_target_scope() {
+    let project = eval_constant_scope_project(true);
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+    let mut editor = FakeEditor::new().await;
+    for (file, content) in &render.files {
+        editor.open(file, content).await;
+    }
+    for reference in &render.map.constant_refs {
+        let expected = match reference.caller.name.as_str() {
+            "ordinary" | "defined" => Some("LexicalScope::Target::VALUE".to_string()),
+            "evaluated" | "reflected" => None,
+            unexpected => panic!("Unexpected test method {unexpected}"),
+        };
+        assert_eq!(oracle.resolve_constant_ref(reference), expected);
+        let locations = editor
+            .goto_def_at(
+                &reference.pos.file,
+                reference.pos.line,
+                reference.pos.character,
+            )
+            .await;
+        if expected.is_some() {
+            assert!(locations.iter().any(|location| location_matches_pos(
+                location,
+                &render.map.constants["LexicalScope::Target::VALUE"]
+            )));
+        } else {
+            assert!(
+                locations.is_empty(),
+                "top-level eval must not introduce a lexical class scope: {locations:?}"
+            );
+        }
+    }
 }
 
 fn define_method_project() -> SyntheticProject {
@@ -1606,7 +1692,7 @@ fn generated_project_seeded_generation_has_stable_fingerprint() {
 
     assert_eq!(
         seeded_script_fingerprint(&script),
-        "fnv1a64:2b7aab09bbb01f75"
+        "fnv1a64:21169022ecc93237"
     );
 }
 
@@ -2237,14 +2323,8 @@ async fn generated_project_runs_seeded_edit_sequence() {
 }
 
 #[tokio::test]
+#[ignore = "release gate: explicitly run the large-scale sampled LSP simulation"]
 async fn generated_project_large_scale_smoke() {
-    if std::env::var("SIM_LARGE_SCALE").ok().as_deref() != Some("1") {
-        eprintln!(
-            "skipping large-scale smoke; run with SIM_LARGE_SCALE=1 cargo test generated_project_large_scale_smoke -- --nocapture"
-        );
-        return;
-    }
-
     let seed = std::env::var("SIM_LARGE_SCALE_SEED")
         .ok()
         .map(|value| {
@@ -2402,14 +2482,8 @@ async fn generated_project_large_scale_smoke() {
 }
 
 #[test]
+#[ignore = "release gate: explicitly run the large-scale all-edge engine simulation"]
 fn generated_project_large_scale_engine_checks_all_edges() {
-    if std::env::var("SIM_LARGE_SCALE_ALL_EDGES").ok().as_deref() != Some("1") {
-        eprintln!(
-            "skipping large-scale all-edge engine smoke; run with SIM_LARGE_SCALE_ALL_EDGES=1 cargo test generated_project_large_scale_engine_checks_all_edges -- --nocapture"
-        );
-        return;
-    }
-
     let seed = std::env::var("SIM_LARGE_SCALE_SEED")
         .ok()
         .map(|value| {
@@ -2467,22 +2541,117 @@ fn generated_project_large_scale_engine_checks_all_edges() {
 }
 
 #[tokio::test]
-async fn generated_project_real_corpus_smoke() {
-    if std::env::var("SIM_REAL_CORPUS").ok().as_deref() != Some("1") {
-        eprintln!(
-            "skipping real corpus smoke; run with SIM_REAL_CORPUS=1 SIM_REAL_CORPUS_ROOT=/path/to/app cargo test generated_project_real_corpus_smoke -- --nocapture"
-        );
-        return;
-    }
+async fn corpus_smoke_helpers_preserve_owning_engine() {
+    let directory = tempfile::tempdir().expect("synthetic corpus temp directory must be writable");
+    let base = directory
+        .path()
+        .canonicalize()
+        .expect("synthetic corpus directory must have a canonical path");
+    let root = base.join("project");
+    std::fs::create_dir(&root).expect("synthetic project directory must be writable");
+    let stub = base.join("core.rb");
+    let service = root.join("service.rb");
+    let caller = root.join("call.rb");
+    std::fs::write(&stub, "class Object; end\n").expect("synthetic stub must be writable");
+    std::fs::write(&service, "class Service\n  def value\n    1\n  end\nend\n")
+        .expect("synthetic service must be writable");
+    std::fs::write(&caller, "Service.new.value\n").expect("synthetic caller must be writable");
 
-    let Some(root) = real_corpus_root() else {
-        eprintln!("skipping real corpus smoke; set SIM_REAL_CORPUS_ROOT=/path/to/app");
-        return;
-    };
-    if !root.is_dir() {
-        eprintln!("skipping real corpus smoke; missing {}", root.display());
-        return;
+    let server = RubyLanguageServer::default();
+    let orphan_sources = server
+        .analysis_engine
+        .read()
+        .files()
+        .map(|file| (file.path.clone(), file.kind))
+        .collect::<BTreeMap<_, _>>();
+    let workspace = server.add_workspace(
+        tower_lsp::lsp_types::Url::from_file_path(&root)
+            .expect("synthetic project must have a file URI"),
+    );
+    index_files_for_smoke(
+        &server,
+        workspace.analysis_engine.clone(),
+        &[stub.clone()],
+        SourceKind::Stub,
+    );
+    index_project_files_for_smoke(
+        &server,
+        workspace.analysis_engine.clone(),
+        &[service.clone(), caller.clone()],
+    );
+    {
+        let engine = workspace.analysis_engine.read();
+        for (path, kind) in [
+            (&stub, SourceKind::Stub),
+            (&service, SourceKind::Project),
+            (&caller, SourceKind::Project),
+        ] {
+            let file_id = engine.file_id(path).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: corpus smoke owning engine is missing {kind:?} file `{}`. This is a bug because corpus inputs must share one isolated engine. Fix: pass the owning engine through collection and observation helpers.",
+                    path.display()
+                )
+            });
+            assert_eq!(
+                engine
+                    .file(file_id)
+                    .expect("registered file must exist")
+                    .kind,
+                kind
+            );
+        }
+        assert!(
+            engine.stats().references > 0,
+            "owning engine must resolve project references"
+        );
     }
+    assert_eq!(
+        server
+            .analysis_engine
+            .read()
+            .files()
+            .map(|file| (file.path.clone(), file.kind))
+            .collect::<BTreeMap<_, _>>(),
+        orphan_sources,
+        "corpus collection must preserve the orphan engine's original source inventory"
+    );
+
+    open_real_document(&server, &caller).await;
+    let point = LspPoint {
+        path: caller,
+        position: Position::new(0, 12),
+    };
+    let locations = goto_def_locations(&server, &point).await;
+    assert!(
+        locations.iter().any(|location| {
+            location.uri.to_file_path().ok().as_ref() == Some(&service)
+                && location.range.start.line == 1
+        }),
+        "public goto must route to the owning engine's service method: {locations:?}"
+    );
+    assert_eq!(
+        server
+            .analysis_engine
+            .read()
+            .files()
+            .map(|file| (file.path.clone(), file.kind))
+            .collect::<BTreeMap<_, _>>(),
+        orphan_sources,
+        "public project queries must preserve the orphan engine's original source inventory"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires an explicitly selected read-only real corpus via SIM_REAL_CORPUS_ROOT"]
+async fn generated_project_real_corpus_smoke() {
+    let root = real_corpus_root().expect(
+        "Real corpus acceptance was explicitly requested without SIM_REAL_CORPUS_ROOT. Fix: select an existing read-only Ruby corpus; missing inputs must not count as passed validation."
+    );
+    assert!(
+        root.is_dir(),
+        "Real corpus acceptance root does not exist: {}",
+        root.display()
+    );
 
     let files = collect_real_corpus_ruby_files(&root);
     let shape = CorpusShape::from_files(&files);
@@ -2518,13 +2687,13 @@ async fn generated_project_real_corpus_smoke() {
             root.display()
         )
     });
-    server.add_workspace(workspace_uri);
+    let workspace = server.add_workspace(workspace_uri);
 
     let index_start = Instant::now();
-    index_core_stubs_for_smoke(&server);
-    index_project_files_for_smoke(&server, &files);
+    index_core_stubs_for_smoke(&server, workspace.analysis_engine.clone());
+    index_project_files_for_smoke(&server, workspace.analysis_engine.clone(), &files);
     let index_elapsed = index_start.elapsed();
-    let stats = server.analysis_engine.read().stats();
+    let stats = workspace.analysis_engine.read().stats();
     eprintln!(
         "real corpus index: elapsed={:?} files={} methods={} refs={} types={} graph_edges={} diagnostics={}",
         index_elapsed,
@@ -2535,7 +2704,7 @@ async fn generated_project_real_corpus_smoke() {
         stats.graph_edges,
         stats.diagnostics
     );
-    print_real_corpus_diagnostic_sample(&server);
+    print_real_corpus_diagnostic_sample(workspace.analysis_engine.clone());
     assert_elapsed_under_env_budget(
         "SIM_REAL_CORPUS_INDEX_MAX_MS",
         Duration::from_secs(1_200),
@@ -2567,7 +2736,7 @@ async fn generated_project_real_corpus_smoke() {
         stats
     );
 
-    let samples = select_real_method_reference_samples(&server, 12);
+    let samples = select_real_method_reference_samples(workspace.analysis_engine.clone(), 12);
     assert!(
         samples.len() >= 8,
         "expected at least 8 real method reference samples after indexing {}, got {} samples, stats={:?}",
@@ -2625,7 +2794,8 @@ async fn generated_project_real_corpus_smoke() {
         );
     }
 
-    let hinted = assert_real_type_inlay_samples(&server, 3).await;
+    let hinted =
+        assert_real_type_inlay_samples(&server, workspace.analysis_engine.clone(), 3).await;
     eprintln!(
         "real corpus semantic samples: goto/refs/hover={} type_hint_files={}",
         samples.len(),
@@ -2637,7 +2807,7 @@ async fn generated_project_real_corpus_smoke() {
     );
 }
 
-fn print_real_corpus_diagnostic_sample(server: &RubyLanguageServer) {
+fn print_real_corpus_diagnostic_sample(analysis_engine: Arc<RwLock<AnalysisEngine>>) {
     if std::env::var("SIM_REAL_CORPUS_DIAGNOSTIC_SAMPLE")
         .ok()
         .as_deref()
@@ -2646,7 +2816,7 @@ fn print_real_corpus_diagnostic_sample(server: &RubyLanguageServer) {
         return;
     }
 
-    let engine = server.analysis_engine.read();
+    let engine = analysis_engine.read();
     let query = engine.query();
     let mut grouped = BTreeMap::<(String, String), (usize, Vec<String>)>::new();
     for diagnostic in query.all_diagnostic_facts() {
@@ -2938,22 +3108,32 @@ fn collect_real_corpus_ruby_files_into(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn index_project_files_for_smoke(server: &RubyLanguageServer, files: &[PathBuf]) {
-    index_files_for_smoke(server, files, SourceKind::Project);
+fn index_project_files_for_smoke(
+    server: &RubyLanguageServer,
+    analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    files: &[PathBuf],
+) {
+    index_files_for_smoke(server, analysis_engine, files, SourceKind::Project);
 }
 
-fn index_core_stubs_for_smoke(server: &RubyLanguageServer) {
-    let Some(stubs_dir) = core_stubs_dir_for_smoke() else {
-        eprintln!("real corpus smoke: core stubs unavailable");
-        return;
-    };
+fn index_core_stubs_for_smoke(
+    server: &RubyLanguageServer,
+    analysis_engine: Arc<RwLock<AnalysisEngine>>,
+) {
+    let stubs_dir = core_stubs_dir_for_smoke().expect(
+        "INVARIANT VIOLATED: core stubs are unavailable for real corpus acceptance. This is a bug because the semantic smoke requires its language inputs. Fix: build or restore the packaged core stubs before running corpus validation."
+    );
     let files = collect_real_corpus_ruby_files(&stubs_dir);
+    assert!(
+        !files.is_empty(),
+        "INVARIANT VIOLATED: real corpus core stub directory is empty. This is a bug because corpus validation requires indexed language inputs. Fix: build or restore the packaged core stubs before running corpus validation."
+    );
     eprintln!(
         "real corpus smoke: indexing {} core stub files from {}",
         files.len(),
         stubs_dir.display()
     );
-    index_files_for_smoke(server, &files, SourceKind::Stub);
+    index_files_for_smoke(server, analysis_engine, &files, SourceKind::Stub);
 }
 
 fn core_stubs_dir_for_smoke() -> Option<PathBuf> {
@@ -2974,7 +3154,12 @@ fn core_stubs_dir_for_smoke() -> Option<PathBuf> {
     .find(|path| path.is_dir())
 }
 
-fn index_files_for_smoke(server: &RubyLanguageServer, files: &[PathBuf], source_kind: SourceKind) {
+fn index_files_for_smoke(
+    server: &RubyLanguageServer,
+    analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    files: &[PathBuf],
+    source_kind: SourceKind,
+) {
     let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
     for file in files {
         let content = std::fs::read_to_string(file).unwrap_or_else(|err| {
@@ -2991,7 +3176,9 @@ fn index_files_for_smoke(server: &RubyLanguageServer, files: &[PathBuf], source_
             )
         });
         processor
-            .collect_file_facts_as_deferred_resolution(&uri, &content, server, source_kind)
+            .collect_file_facts_as_deferred_resolution_in_engine(
+                &uri, &content, analysis_engine.clone(), source_kind,
+            )
             .unwrap_or_else(|err| {
                 panic!(
                     "INVARIANT VIOLATED: failed to index real corpus file `{}`: {}. This is a bug because smoke indexing should tolerate valid Ruby project files. Fix: inspect parser/fact collector failure.",
@@ -3000,16 +3187,18 @@ fn index_files_for_smoke(server: &RubyLanguageServer, files: &[PathBuf], source_
                 )
             });
     }
-    server.analysis_engine.write().resolve();
+    analysis_engine.write().resolve();
 }
 
 fn select_real_method_reference_samples(
-    server: &RubyLanguageServer,
+    analysis_engine: Arc<RwLock<AnalysisEngine>>,
     limit: usize,
 ) -> Vec<RealMethodSample> {
-    let engine = server.analysis_engine.read();
+    let selection_start = Instant::now();
+    let engine = analysis_engine.read();
     let query = engine.query();
     let mut methods = engine.all_method_facts();
+    let method_candidates = methods.len();
     methods.sort_by_key(|method| {
         (
             method.range.file_id,
@@ -3021,8 +3210,10 @@ fn select_real_method_reference_samples(
     let mut samples = Vec::new();
     let mut seen_labels = BTreeSet::new();
     let mut seen_reference_files = BTreeSet::new();
+    let mut skipped_definitions = 0;
+    let mut reference_queries = 0;
 
-    for method in methods {
+    'methods: for method in methods {
         let FullyQualifiedName::Method(_, ruby_method) = &method.fqn else {
             continue;
         };
@@ -3033,6 +3224,15 @@ fn select_real_method_reference_samples(
         if seen_labels.contains(&label) {
             continue;
         }
+        let Some(definition) = lsp_point_for_range(&engine, method.range) else {
+            skipped_definitions += 1;
+            continue;
+        };
+        if !is_preferred_real_sample_path(&definition.path) {
+            skipped_definitions += 1;
+            continue;
+        }
+        reference_queries += 1;
         let mut refs = query.method_reference_ranges(&method.owner, ruby_method);
         refs.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
         let reference_count = refs.len();
@@ -3040,15 +3240,10 @@ fn select_real_method_reference_samples(
             if reference_range == method.range {
                 continue;
             }
-            let Some(definition) = lsp_point_for_range(&engine, method.range) else {
-                continue;
-            };
             let Some(reference) = lsp_point_for_range(&engine, reference_range) else {
                 continue;
             };
-            if !is_preferred_real_sample_path(&definition.path)
-                || !is_preferred_real_sample_path(&reference.path)
-            {
+            if !is_preferred_real_sample_path(&reference.path) {
                 continue;
             }
             let reference_file = reference.path.clone();
@@ -3058,17 +3253,21 @@ fn select_real_method_reference_samples(
             seen_labels.insert(label.clone());
             samples.push(RealMethodSample {
                 label: label.clone(),
-                definition,
+                definition: definition.clone(),
                 reference,
                 reference_count,
             });
             if samples.len() >= limit {
-                return samples;
+                break 'methods;
             }
             break;
         }
     }
 
+    eprintln!(
+        "real corpus sample selection: elapsed={:?} candidates={} skipped_definitions={} reference_queries={} samples={}",
+        selection_start.elapsed(), method_candidates, skipped_definitions, reference_queries, samples.len()
+    );
     samples
 }
 
@@ -3219,9 +3418,13 @@ async fn hover_at(
     })
 }
 
-async fn assert_real_type_inlay_samples(server: &RubyLanguageServer, limit: usize) -> Vec<PathBuf> {
+async fn assert_real_type_inlay_samples(
+    server: &RubyLanguageServer,
+    analysis_engine: Arc<RwLock<AnalysisEngine>>,
+    limit: usize,
+) -> Vec<PathBuf> {
     let candidates = {
-        let engine = server.analysis_engine.read();
+        let engine = analysis_engine.read();
         let mut counts = BTreeMap::new();
         for fact in engine.type_store().all_facts() {
             *counts.entry(fact.range.file_id).or_insert(0usize) += 1;

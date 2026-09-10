@@ -5,7 +5,7 @@ use super::ruby_gen::{
     CallSite, NamespaceDefSite, NamespaceRefSite, ProjectRender, SourcePos, TypeAssertKind,
 };
 use crate::test::harness::{get_hint_label, FakeEditor};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, Hover, HoverContents, Location, MarkedString, NumberOrString,
     Position,
@@ -17,6 +17,9 @@ pub struct SimulationRunner {
     render: ProjectRender,
     open_files: BTreeSet<String>,
     indexed_files: BTreeSet<String>,
+    /// Last contents actually delivered to LSP, including retained closed files.
+    /// Rendering an edit to a closed file does not update this snapshot.
+    indexed_contents: BTreeMap<String, String>,
     method_def_history: HashMap<MethodTarget, SourcePos>,
     constant_def_history: HashMap<String, SourcePos>,
 }
@@ -31,6 +34,7 @@ impl SimulationRunner {
         }
         let open_files = render.files.keys().cloned().collect::<BTreeSet<_>>();
         let indexed_files = open_files.clone();
+        let indexed_contents = render.files.clone();
         let method_def_history = render.map.defs.clone();
         let constant_def_history = render.map.constants.clone();
 
@@ -40,6 +44,7 @@ impl SimulationRunner {
             render,
             open_files,
             indexed_files,
+            indexed_contents,
             method_def_history,
             constant_def_history,
         }
@@ -50,6 +55,7 @@ impl SimulationRunner {
         let mut editor = FakeEditor::new().await;
         let mut open_files = BTreeSet::new();
         let mut indexed_files = BTreeSet::new();
+        let mut indexed_contents = BTreeMap::new();
 
         for file in files {
             let content = render.files.get(*file).unwrap_or_else(|| {
@@ -61,6 +67,7 @@ impl SimulationRunner {
             editor.open(file, content).await;
             open_files.insert((*file).to_string());
             indexed_files.insert((*file).to_string());
+            indexed_contents.insert((*file).to_string(), content.clone());
         }
         let method_def_history = render.map.defs.clone();
         let constant_def_history = render.map.constants.clone();
@@ -71,6 +78,7 @@ impl SimulationRunner {
             render,
             open_files,
             indexed_files,
+            indexed_contents,
             method_def_history,
             constant_def_history,
         }
@@ -163,6 +171,130 @@ impl SimulationRunner {
         self.check_hover().await;
         self.check_types().await;
         self.assert_direct_macro_calls_do_not_warn().await;
+    }
+
+    /// Compare externally visible results with a clean analysis of the exact
+    /// content delivered so far, then check the independent project oracle.
+    /// No file identities, engine fingerprints, or result subsets participate.
+    pub async fn check_fresh_equivalence(&self) {
+        self.compare_fresh_observations().await;
+        self.check_all_semantics().await;
+    }
+
+    async fn compare_fresh_observations(&self) {
+        let mut fresh = FakeEditor::new().await;
+        for (file, content) in &self.indexed_contents {
+            fresh.open(file, content).await;
+        }
+        for file in self.indexed_contents.keys() {
+            if !self.open_files.contains(file) {
+                fresh.close(file).await;
+            }
+        }
+
+        // Observe both engines without rebuilding facts. Diagnostic results
+        // come from the actual publication path, including stale output.
+        let incremental = self.public_observations(&self.editor).await;
+        let rebuilt = self.public_observations(&fresh).await;
+        for (query, actual) in &incremental {
+            assert_eq!(
+                Some(actual),
+                rebuilt.get(query),
+                "fresh-equivalence mismatch in project `{}` at {query}",
+                self.project.name
+            );
+        }
+        assert_eq!(
+            incremental.len(),
+            rebuilt.len(),
+            "INVARIANT VIOLATED: fresh-equivalence queries differ in project `{}`. This is a bug because both editors must receive the exact same query sites. Fix: inspect observation generation.",
+            self.project.name
+        );
+        for file in &self.open_files {
+            assert_eq!(
+                sorted_lsp_values(self.editor.diagnostics(file).await),
+                sorted_lsp_values(fresh.diagnostics(file).await),
+                "fresh-equivalence diagnostics mismatch in project `{}` at {file}",
+                self.project.name
+            );
+        }
+    }
+
+    async fn public_observations(&self, editor: &FakeEditor) -> BTreeMap<String, Vec<String>> {
+        let mut observations = BTreeMap::new();
+        for file in &self.open_files {
+            observations.insert(
+                format!("inlay hints {file}"),
+                sorted_lsp_values(editor.inlay_hints(file).await),
+            );
+        }
+
+        // Support belongs to each requested feature, not to the returned
+        // locations. Unexpected targets and duplicate results remain visible.
+        let mut sites = BTreeMap::<(String, u32, u32), [bool; 3]>::new();
+        let mut add_site = |pos: &SourcePos, support: [bool; 3]| {
+            if self.open_files.contains(&pos.file) {
+                let enabled = sites
+                    .entry((pos.file.clone(), pos.line, pos.character))
+                    .or_default();
+                for (enabled, supported) in enabled.iter_mut().zip(support) {
+                    *enabled |= supported;
+                }
+            }
+        };
+        for call in &self.render.map.calls {
+            add_site(
+                &call.pos,
+                [
+                    call.definition_support.is_supported(),
+                    call.reference_support.is_supported(),
+                    call.hover_support.is_supported(),
+                ],
+            );
+        }
+        for constant_ref in &self.render.map.constant_refs {
+            add_site(&constant_ref.pos, [true; 3]);
+        }
+        for namespace_ref in self.namespace_refs() {
+            add_site(
+                &namespace_ref.pos,
+                [namespace_ref.support.is_supported(); 3],
+            );
+        }
+        for pos in self
+            .render
+            .map
+            .defs
+            .values()
+            .chain(self.render.map.constants.values())
+            .chain(self.render.map.namespaces.values().map(|site| &site.pos))
+        {
+            add_site(pos, [true; 3]);
+        }
+
+        for ((file, line, character), [definition, references, hover]) in sites {
+            if definition {
+                observations.insert(
+                    format!("definition {file}:{line}:{character}"),
+                    sorted_lsp_values(vec![
+                        editor.goto_def_response_at(&file, line, character).await,
+                    ]),
+                );
+            }
+            if references {
+                observations.insert(
+                    format!("references {file}:{line}:{character}"),
+                    sorted_lsp_values(editor.references_at(&file, line, character).await),
+                );
+            }
+            if hover {
+                observations.insert(
+                    format!("hover {file}:{line}:{character}"),
+                    sorted_lsp_values(vec![editor.hover_at(&file, line, character).await]),
+                );
+            }
+        }
+        observations
     }
 
     pub async fn assert_semantic_false_positive_budget(&self, maximum: usize) {
@@ -274,6 +406,8 @@ impl SimulationRunner {
             )
         });
         self.editor.open(file, content).await;
+        self.indexed_contents
+            .insert(file.to_string(), content.clone());
         self.open_files.insert(file.to_string());
         self.indexed_files.insert(file.to_string());
     }
@@ -364,6 +498,15 @@ impl SimulationRunner {
     }
 
     pub async fn apply_step(&mut self, step: &EditStep) {
+        self.apply_step_impl(step, false).await;
+    }
+
+    /// Compare the immediately edited state with fresh analysis before model checks.
+    pub async fn apply_step_with_fresh_equivalence(&mut self, step: &EditStep) {
+        self.apply_step_impl(step, true).await;
+    }
+
+    async fn apply_step_impl(&mut self, step: &EditStep, check_fresh_before_model: bool) {
         for op in &step.ops {
             self.project.apply_op(op);
         }
@@ -381,9 +524,13 @@ impl SimulationRunner {
                 if self.render.files.contains_key(file) {
                     if self.open_files.contains(file) {
                         self.editor.set(file, next_content).await;
+                        self.indexed_contents
+                            .insert(file.clone(), next_content.clone());
                     }
                 } else {
                     self.editor.open(file, next_content).await;
+                    self.indexed_contents
+                        .insert(file.clone(), next_content.clone());
                     self.open_files.insert(file.clone());
                     self.indexed_files.insert(file.clone());
                 }
@@ -391,6 +538,9 @@ impl SimulationRunner {
         }
 
         self.render = next_render;
+        if check_fresh_before_model {
+            self.compare_fresh_observations().await;
+        }
         self.assert_index_shape();
         let oracle = OracleState::with_indexed_files(
             &self.project,
@@ -460,16 +610,41 @@ impl SimulationRunner {
     }
 
     pub async fn close_and_reopen(&mut self, file: &str) {
+        self.close_and_reopen_impl(file, false).await;
+    }
+
+    async fn close_and_reopen_impl(&mut self, file: &str, check_fresh_before_model: bool) {
         let content = self.editor.content(file).to_string();
         self.editor.close(file).await;
         self.open_files.remove(file);
         self.editor.open(file, &content).await;
+        self.indexed_contents.insert(file.to_string(), content);
         self.open_files.insert(file.to_string());
         self.indexed_files.insert(file.to_string());
+        if check_fresh_before_model {
+            self.compare_fresh_observations().await;
+        }
         self.check_all_semantics().await;
     }
 
     pub async fn run_edit_script_step(&mut self, step: &super::seeded::SeededStep) {
+        self.run_edit_script_step_impl(step, false).await;
+    }
+
+    /// Edits and open/close operations compare fresh observations and then
+    /// validate the independent expected-result and model checks.
+    pub async fn run_edit_script_step_with_fresh_equivalence(
+        &mut self,
+        step: &super::seeded::SeededStep,
+    ) {
+        self.run_edit_script_step_impl(step, true).await;
+    }
+
+    async fn run_edit_script_step_impl(
+        &mut self,
+        step: &super::seeded::SeededStep,
+        check_fresh_before_model: bool,
+    ) {
         match step {
             super::seeded::SeededStep::CheckDefinitions => self.check_definitions().await,
             super::seeded::SeededStep::CheckReferences => self.check_references().await,
@@ -482,17 +657,24 @@ impl SimulationRunner {
                         index
                     )
                 });
-                self.apply_step(&edit).await;
+                self.apply_step_impl(&edit, check_fresh_before_model).await;
             }
             super::seeded::SeededStep::CloseReopen { file } => {
-                self.close_and_reopen(file).await;
+                self.close_and_reopen_impl(file, check_fresh_before_model)
+                    .await;
             }
             super::seeded::SeededStep::OpenFile { file } => {
                 self.open_file(file).await;
+                if check_fresh_before_model {
+                    self.compare_fresh_observations().await;
+                }
                 self.check_all_semantics().await;
             }
             super::seeded::SeededStep::CloseFile { file } => {
                 self.close_file(file).await;
+                if check_fresh_before_model {
+                    self.compare_fresh_observations().await;
+                }
                 self.check_all_semantics().await;
             }
         }
@@ -1375,6 +1557,68 @@ impl SimulationRunner {
             .include_refs
             .iter()
             .chain(self.render.map.superclass_refs.iter())
+    }
+}
+
+fn sorted_lsp_values<T: serde::Serialize>(values: Vec<T>) -> Vec<String> {
+    let mut serialized = values
+        .into_iter()
+        .map(|value| {
+            serde_json::to_string(&value).expect(
+                "INVARIANT VIOLATED: a public LSP observation could not be serialized. This is a bug because simulation compares JSON-compatible protocol values. Fix: inspect the response serialization.",
+            )
+        })
+        .collect::<Vec<_>>();
+    serialized.sort();
+    serialized
+}
+
+#[cfg(test)]
+mod consistency_controls {
+    use super::*;
+
+    #[tokio::test]
+    async fn fresh_equivalence_uses_only_delivered_content_across_close_and_reopen() {
+        let mut project = SyntheticProject::new("fresh_equivalence_closed_content");
+        project
+            .raw_file("definition.rb", "VALUE = 1\n")
+            .raw_file("caller.rb", "value = VALUE\n")
+            .raw_file("unopened.rb", "UNOPENED = true\n");
+        let mut runner =
+            SimulationRunner::start_with_open_files(project, &["definition.rb", "caller.rb"]).await;
+        assert!(!runner.indexed_contents.contains_key("unopened.rb"));
+        runner.close_file("definition.rb").await;
+        runner
+            .project
+            .raw_file("definition.rb", "VALUE = \"updated\"\n");
+        runner
+            .apply_step_with_fresh_equivalence(&EditStep::new("render closed edit", |_| {}))
+            .await;
+        assert_eq!(runner.indexed_contents["definition.rb"], "VALUE = 1\n");
+        runner.check_fresh_equivalence().await;
+
+        runner.open_file("definition.rb").await;
+        assert_eq!(
+            runner.indexed_contents["definition.rb"],
+            "VALUE = \"updated\"\n"
+        );
+        runner.check_fresh_equivalence().await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "fresh-equivalence mismatch")]
+    async fn fresh_equivalence_detects_stale_editor_content() {
+        let mut project = SyntheticProject::new("fresh_equivalence_negative_control");
+        project.raw_file("value.rb", "value = 1\n");
+        let mut runner = SimulationRunner::start(project.clone()).await;
+        runner.check_fresh_equivalence().await;
+
+        // Emulate a delayed writer replacing newer content without updating the
+        // runner's authoritative delivered-content snapshot.
+        let mut stale = SimulationRunner::start(project).await;
+        stale.editor.set("value.rb", "value = \"stale\"\n").await;
+        runner.editor = stale.editor;
+        runner.check_fresh_equivalence().await;
     }
 }
 

@@ -85,7 +85,10 @@ impl FakeEditor {
     /// Create a new FakeEditor with a fresh, initialized server.
     pub async fn new() -> Self {
         let server = RubyLanguageServer::default();
-        let _ = server.initialize(InitializeParams::default()).await;
+        observe_response(
+            "initialize",
+            server.initialize(InitializeParams::default()).await,
+        );
         FakeEditor {
             server,
             buffers: HashMap::new(),
@@ -371,7 +374,7 @@ impl FakeEditor {
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
-        self.server.hover(params).await.ok().flatten()
+        observe_response("hover", self.server.hover(params).await)
     }
 
     /// Returns signature help at a 0-indexed position.
@@ -391,12 +394,17 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             context: None,
         };
-        self.server.signature_help(params).await.ok().flatten()
+        observe_response("signature_help", self.server.signature_help(params).await)
     }
 
-    /// Returns goto-definition locations at a 0-indexed position.
-    pub async fn goto_def_at(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {
-        self.assert_open(filename, "goto_def_at");
+    /// Observe the complete definition response, including link selection ranges.
+    pub async fn goto_def_response_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<GotoDefinitionResponse> {
+        self.assert_open(filename, "goto_def_response_at");
         let uri = Self::filename_to_uri(filename);
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -406,17 +414,22 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        match self.server.goto_definition(params).await {
-            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => vec![loc],
-            Ok(Some(GotoDefinitionResponse::Array(locs))) => locs,
-            Ok(Some(GotoDefinitionResponse::Link(links))) => links
+        observe_response("goto_definition", self.server.goto_definition(params).await)
+    }
+
+    /// Returns goto-definition locations at a 0-indexed position.
+    pub async fn goto_def_at(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {
+        match self.goto_def_response_at(filename, line, character).await {
+            Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
+            Some(GotoDefinitionResponse::Array(locs)) => locs,
+            Some(GotoDefinitionResponse::Link(links)) => links
                 .into_iter()
                 .map(|link| Location {
                     uri: link.target_uri,
                     range: link.target_range,
                 })
                 .collect(),
-            _ => vec![],
+            None => vec![],
         }
     }
 
@@ -427,19 +440,9 @@ impl FakeEditor {
         line: u32,
         character: u32,
     ) -> Vec<tower_lsp::lsp_types::LocationLink> {
-        self.assert_open(filename, "goto_def_links_at");
-        let uri = Self::filename_to_uri(filename);
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position::new(line, character),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-        match self.server.goto_definition(params).await {
-            Ok(Some(GotoDefinitionResponse::Link(links))) => links,
-            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
+        match self.goto_def_response_at(filename, line, character).await {
+            Some(GotoDefinitionResponse::Link(links)) => links,
+            Some(GotoDefinitionResponse::Scalar(loc)) => {
                 vec![tower_lsp::lsp_types::LocationLink {
                     origin_selection_range: None,
                     target_uri: loc.uri,
@@ -447,7 +450,7 @@ impl FakeEditor {
                     target_selection_range: loc.range,
                 }]
             }
-            Ok(Some(GotoDefinitionResponse::Array(locs))) => locs
+            Some(GotoDefinitionResponse::Array(locs)) => locs
                 .into_iter()
                 .map(|loc| tower_lsp::lsp_types::LocationLink {
                     origin_selection_range: None,
@@ -456,7 +459,7 @@ impl FakeEditor {
                     target_selection_range: loc.range,
                 })
                 .collect(),
-            _ => vec![],
+            None => vec![],
         }
     }
 
@@ -472,17 +475,20 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        match self.server.goto_implementation(params).await {
-            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => vec![loc],
-            Ok(Some(GotoDefinitionResponse::Array(locs))) => locs,
-            Ok(Some(GotoDefinitionResponse::Link(links))) => links
+        match observe_response(
+            "goto_implementation",
+            self.server.goto_implementation(params).await,
+        ) {
+            Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
+            Some(GotoDefinitionResponse::Array(locs)) => locs,
+            Some(GotoDefinitionResponse::Link(links)) => links
                 .into_iter()
                 .map(|link| Location {
                     uri: link.target_uri,
                     range: link.target_range,
                 })
                 .collect(),
-            _ => vec![],
+            None => vec![],
         }
     }
 
@@ -502,12 +508,11 @@ impl FakeEditor {
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
-        self.server
-            .prepare_call_hierarchy(params)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        observe_response(
+            "prepare_call_hierarchy",
+            self.server.prepare_call_hierarchy(params).await,
+        )
+        .unwrap_or_default()
     }
 
     /// Returns incoming calls for a CallHierarchyItem.
@@ -520,11 +525,7 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        self.server
-            .incoming_calls(params)
-            .await
-            .ok()
-            .flatten()
+        observe_response("incoming_calls", self.server.incoming_calls(params).await)
             .unwrap_or_default()
     }
 
@@ -538,16 +539,23 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        self.server
-            .outgoing_calls(params)
-            .await
-            .ok()
-            .flatten()
+        observe_response("outgoing_calls", self.server.outgoing_calls(params).await)
             .unwrap_or_default()
     }
 
     /// Returns all references at a 0-indexed position.
     pub async fn references_at(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {
+        self.references_with_declaration_at(filename, line, character, true)
+            .await
+    }
+
+    pub async fn references_with_declaration_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+        include_declaration: bool,
+    ) -> Vec<Location> {
         self.assert_open(filename, "references_at");
         let uri = Self::filename_to_uri(filename);
         let params = ReferenceParams {
@@ -558,15 +566,10 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
-                include_declaration: true,
+                include_declaration,
             },
         };
-        self.server
-            .references(params)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        observe_response("references", self.server.references(params).await).unwrap_or_default()
     }
 
     /// Returns semantic highlights in the current document at a 0-indexed position.
@@ -587,12 +590,11 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        self.server
-            .document_highlight(params)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        observe_response(
+            "document_highlight",
+            self.server.document_highlight(params).await,
+        )
+        .unwrap_or_default()
     }
 
     /// Returns one nested selection chain per requested position.
@@ -610,33 +612,30 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        self.server
-            .selection_range(params)
-            .await
-            .ok()
-            .flatten()
+        observe_response("selection_range", self.server.selection_range(params).await)
             .unwrap_or_default()
     }
 
     /// Requests full-document formatting for the current unsaved buffer.
     pub async fn format(&self, filename: &str) -> Vec<TextEdit> {
         self.assert_open(filename, "format");
-        self.server
-            .formatting(DocumentFormattingParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Self::filename_to_uri(filename),
-                },
-                options: FormattingOptions {
-                    tab_size: 2,
-                    insert_spaces: true,
-                    ..FormattingOptions::default()
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        observe_response(
+            "formatting",
+            self.server
+                .formatting(DocumentFormattingParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: Self::filename_to_uri(filename),
+                    },
+                    options: FormattingOptions {
+                        tab_size: 2,
+                        insert_spaces: true,
+                        ..FormattingOptions::default()
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await,
+        )
+        .unwrap_or_default()
     }
 
     /// Returns inlay hints for an entire file.
@@ -651,12 +650,7 @@ impl FakeEditor {
             range: Range::new(Position::new(0, 0), Position::new(line_count, 0)),
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
-        self.server
-            .inlay_hint(params)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        observe_response("inlay_hint", self.server.inlay_hint(params).await).unwrap_or_default()
     }
 
     /// Returns code lenses for a file.
@@ -668,12 +662,7 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        self.server
-            .code_lens(params)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        observe_response("code_lens", self.server.code_lens(params).await).unwrap_or_default()
     }
 
     pub async fn code_actions(
@@ -683,22 +672,23 @@ impl FakeEditor {
     ) -> Vec<CodeActionOrCommand> {
         self.assert_open(filename, "code_actions");
         let uri = Self::filename_to_uri(filename);
-        self.server
-            .code_action(CodeActionParams {
-                text_document: TextDocumentIdentifier { uri },
-                range: Range::default(),
-                context: CodeActionContext {
-                    diagnostics,
-                    only: Some(vec![tower_lsp::lsp_types::CodeActionKind::QUICKFIX]),
-                    trigger_kind: None,
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        observe_response(
+            "code_action",
+            self.server
+                .code_action(CodeActionParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    range: Range::default(),
+                    context: CodeActionContext {
+                        diagnostics,
+                        only: Some(vec![tower_lsp::lsp_types::CodeActionKind::QUICKFIX]),
+                        trigger_kind: None,
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                })
+                .await,
+        )
+        .unwrap_or_default()
     }
 
     /// Returns document symbols for a file.
@@ -711,7 +701,7 @@ impl FakeEditor {
             partial_result_params: PartialResultParams::default(),
         };
 
-        match self.server.document_symbol(params).await.ok().flatten() {
+        match observe_response("document_symbol", self.server.document_symbol(params).await) {
             Some(DocumentSymbolResponse::Nested(symbols)) => symbols,
             Some(DocumentSymbolResponse::Flat(_)) => panic!(
                 "INVARIANT VIOLATED: FakeEditor document_symbols received flat symbols. \
@@ -722,100 +712,14 @@ impl FakeEditor {
         }
     }
 
-    /// Returns diagnostics for a file by re-generating them from current state.
+    /// Observe the latest diagnostics submitted by the real publication path.
+    /// Never reparse, replace facts, or resolve here: doing so can repair stale
+    /// state and hide the lifecycle defect that a test is trying to detect.
     pub async fn diagnostics(&self, filename: &str) -> Vec<Diagnostic> {
         self.assert_open(filename, "diagnostics");
-        let uri = Self::filename_to_uri(filename);
-        let document = self.server.docs.lock().get(&uri).unwrap().read().clone();
-        let parse_result = document.parse();
-
-        let mut diagnostics =
-            crate::capabilities::diagnostics::generate_diagnostics(&parse_result, &document);
-
-        {
-            use ruby_analysis::indexer::fact_collector::FactCollector;
-            use ruby_prism::Visit;
-            use std::sync::Arc;
-
-            let analysis_engine = self.server.analysis_engine_for_uri(&uri);
-            let mut visitor = FactCollector::analysis_only(
-                document.clone(),
-                Arc::new(self.server.extension_registry.clone()),
-                analysis_engine.clone(),
-            );
-            visitor.visit(&parse_result.node());
-            let file_id = visitor.document.analysis_file_id();
-            let local_read_types = visitor.local_read_type_evidence();
-            let inference = visitor.inference_evidence();
-            let mut engine = analysis_engine.write();
-            let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-            let facts = ruby_analysis::engine::FileFacts {
-                symbols: query.symbol_facts_in_file(file_id),
-                methods: query.method_facts_in_file(file_id),
-                method_visibility_overrides: query.method_visibility_overrides_in_file(file_id),
-                types: query.type_facts_in_file(file_id),
-                graph_nodes: query.graph_nodes_in_file(file_id),
-                graph_edges: query.graph_edges_in_file(file_id),
-                unresolved_graph_edges: engine
-                    .unresolved_graph_edges()
-                    .iter()
-                    .filter(|edge| edge.range.file_id == file_id)
-                    .cloned()
-                    .collect(),
-                reference_candidates: visitor.reference_candidates,
-                diagnostic_candidates: visitor.diagnostic_candidates,
-                diagnostics: {
-                    let mut diagnostics = visitor.analysis_diagnostics;
-                    let current_path = uri
-                        .to_file_path()
-                        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-                    if let Some(project_root) = self
-                        .server
-                        .workspace_for_uri(&uri)
-                        .map(|workspace| workspace.root_path)
-                    {
-                        let load_paths = self
-                            .server
-                            .config
-                            .lock()
-                            .indexing
-                            .load_paths
-                            .paths_for_project(&project_root)
-                            .to_vec();
-                        let feature_index = self.server.require_feature_index_for_uri(&uri);
-                        diagnostics.extend(
-                            crate::indexer::require_paths::unresolved_require_diagnostics(
-                                &document.content,
-                                file_id,
-                                &current_path,
-                                &project_root,
-                                &load_paths,
-                                &feature_index,
-                                Some(&engine),
-                            ),
-                        );
-                    }
-                    diagnostics
-                },
-                execution_contexts: visitor.extension_execution_context_facts,
-                inference,
-                local_read_types,
-            };
-            engine.replace_facts(
-                file_id,
-                facts,
-                ruby_analysis::engine::ResolveMode::Immediate,
-            );
-        }
-
-        // Add unresolved entry diagnostics
-        {
-            let query =
-                crate::query::EngineQuery::with_engine(self.server.analysis_engine_for_uri(&uri));
-            diagnostics.extend(query.get_unresolved_diagnostics(&uri));
-        }
-
-        diagnostics
+        self.server
+            .last_diagnostic_publication(&Self::filename_to_uri(filename))
+            .expect("INVARIANT VIOLATED: open document has no diagnostic publication. This is a bug because a missing notification must not count as an empty diagnostic result. Fix: inspect the document publication lifecycle; do not recompute diagnostics in the observer.")
     }
 
     /// Assert the file has zero ERROR-severity diagnostics.
@@ -888,7 +792,7 @@ impl FakeEditor {
             new_name: new_name.to_string(),
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
-        self.server.rename(params).await.ok().flatten()
+        observe_response("rename", self.server.rename(params).await)
     }
 
     /// Checks whether rename is valid at a 0-indexed position.
@@ -905,7 +809,7 @@ impl FakeEditor {
             },
             position: Position::new(line, character),
         };
-        self.server.prepare_rename(params).await.ok().flatten()
+        observe_response("prepare_rename", self.server.prepare_rename(params).await)
     }
 
     /// Applies a `WorkspaceEdit` to the editor's buffers.
@@ -1037,10 +941,10 @@ impl FakeEditor {
             partial_result_params: PartialResultParams::default(),
             context,
         };
-        match self.server.completion(params).await {
-            Ok(Some(CompletionResponse::Array(items))) => items,
-            Ok(Some(CompletionResponse::List(list))) => list.items,
-            _ => vec![],
+        match observe_response("completion", self.server.completion(params).await) {
+            Some(CompletionResponse::Array(items)) => items,
+            Some(CompletionResponse::List(list)) => list.items,
+            None => vec![],
         }
     }
 }
@@ -1069,4 +973,45 @@ fn describe(d: &Diagnostic) -> String {
         code,
         d.message
     )
+}
+
+/// A valid empty response is observable; a failed request must never masquerade
+/// as an empty result that could satisfy a negative assertion.
+fn observe_response<T>(method: &str, response: tower_lsp::jsonrpc::Result<T>) -> T {
+    response.unwrap_or_else(|error| {
+        panic!(
+            "INVARIANT VIOLATED: FakeEditor request `{method}` failed: {error:?}. This is a bug because a failed request cannot satisfy an observation. Fix: repair the request or explicitly test its error result through the server API."
+        )
+    })
+}
+
+#[cfg(test)]
+mod response_controls {
+    use super::observe_response;
+
+    #[test]
+    fn empty_query_output_remains_distinct_from_a_failed_request() {
+        let empty: Option<Vec<String>> = observe_response("references", Ok(None));
+        assert_eq!(empty, None);
+        let clear: Option<Vec<String>> = observe_response("references", Ok(Some(Vec::new())));
+        assert_eq!(clear, Some(Vec::new()));
+        let failure = std::panic::catch_unwind(|| {
+            observe_response::<Option<Vec<String>>>(
+                "references",
+                Err(tower_lsp::jsonrpc::Error::internal_error()),
+            )
+        })
+        .expect_err("a failed request must fail the observation");
+        let message = failure
+            .downcast_ref::<String>()
+            .expect("control panic must be a string");
+        assert!(
+            message.contains("FakeEditor request `references` failed"),
+            "unexpected failure class: {message}"
+        );
+        assert!(
+            message.contains("InternalError"),
+            "the original error must remain visible: {message}"
+        );
+    }
 }
