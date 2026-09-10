@@ -1,11 +1,10 @@
 //! Versioned M0 type-inference scorecard validation and reporting.
 //!
-//! The normal test validates the checked-in scoring contract. The ignored
-//! reporter executes the relatively expensive LSP fixtures and compares their
-//! outcomes with the recorded M0 baseline:
+//! Both manifest validation and every self-contained LSP acceptance fixture run
+//! in the normal test suite. Run the reporter explicitly to retain its JSON:
 //!
 //! ```text
-//! cargo test inference_scorecard::report_m0_scorecard -- --ignored --nocapture
+//! cargo test inference_scorecard::report_m0_scorecard -- --nocapture
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -361,7 +360,6 @@ fn scorecard_manifest_is_valid() {
 }
 
 #[tokio::test]
-#[ignore = "M0 scorecard starts a fresh language server per fixture; run explicitly for baseline reporting"]
 async fn report_m0_scorecard() {
     let scorecard = parse_scorecard();
     validate_scorecard(&scorecard);

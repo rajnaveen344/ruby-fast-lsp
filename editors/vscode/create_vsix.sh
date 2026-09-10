@@ -17,7 +17,7 @@ node "$ROOT_DIR/editors/check_package_versions.js"
 
 # Define target platforms and architectures as arrays
 ALL_PLATFORMS=("macos-x64" "macos-arm64" "linux-x64" "win32-x64")
-ALL_TARGETS=("x86_64-apple-darwin" "aarch64-apple-darwin" "x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu")
+ALL_TARGETS=("x86_64-apple-darwin" "aarch64-apple-darwin" "x86_64-unknown-linux-gnu" "x86_64-pc-windows-msvc")
 
 # Determine current platform
 CURRENT_PLATFORM=""
@@ -263,97 +263,16 @@ else
     echo "Stubs will not be included in the VSIX package"
 fi
 
-# Stage the embedded core-RBS proof source as a real navigation target. The
-# server also embeds these bytes for standalone checking, but packaged LSP
-# definition locations must resolve to an actual immutable file.
-echo "Bundling core runtime RBS..."
-CORE_RBS_SOURCE="$ROOT_DIR/crates/rbs-parser/rbs_types/core/constants.rbs"
-CORE_RBS_TARGET="$EXTENSION_DIR/core-rbs"
-if [ ! -f "$CORE_RBS_SOURCE" ]; then
-    echo "Error: missing core runtime RBS at $CORE_RBS_SOURCE"
-    exit 1
-fi
-rm -rf "$CORE_RBS_TARGET"
-mkdir -p "$CORE_RBS_TARGET"
-cp "$CORE_RBS_SOURCE" "$CORE_RBS_TARGET/constants.rbs"
-
-# Stage the runtime-owned JRuby delta assets. These remain uncompressed because
-# the server indexes only the selected series and needs stable navigation URIs
-# inside the installed extension.
-echo "Bundling JRuby runtime stubs..."
-JRUBY_STUB_SOURCE="$ROOT_DIR/support/jruby/stubs"
-JRUBY_STUB_TARGET="$EXTENSION_DIR/jruby-stubs"
-if [ ! -d "$JRUBY_STUB_SOURCE" ]; then
-    echo "Error: missing JRuby runtime stubs at $JRUBY_STUB_SOURCE"
-    exit 1
-fi
-rm -rf "$JRUBY_STUB_TARGET"
-cp -R "$JRUBY_STUB_SOURCE" "$JRUBY_STUB_TARGET"
-for jruby_stub_series in common 9.0 9.1 9.2 9.3 9.4 10.0 10.1; do
-    if [ ! -f "$JRUBY_STUB_TARGET/$jruby_stub_series/runtime.rb" ]; then
-        echo "Error: JRuby $jruby_stub_series runtime overlay was not staged"
-        exit 1
-    fi
-done
-
-# Stage the checksum-pinned implementation-navigation decompiler. The server
-# resolves this path relative to its packaged binary and verifies the SHA-256
-# again before every accepted process.
-echo "Bundling JRuby Java decompiler..."
-JRUBY_DECOMPILER_SOURCE="$ROOT_DIR/support/jruby/decompiler"
-JRUBY_DECOMPILER_TARGET="$EXTENSION_DIR/jruby-decompiler"
-if [ ! -f "$JRUBY_DECOMPILER_SOURCE/cfr-0.152.jar" ] || [ ! -f "$JRUBY_DECOMPILER_SOURCE/LICENSE-CFR" ]; then
-    echo "Error: missing pinned CFR decompiler artifact or license"
-    exit 1
-fi
-rm -rf "$JRUBY_DECOMPILER_TARGET"
-cp -R "$JRUBY_DECOMPILER_SOURCE" "$JRUBY_DECOMPILER_TARGET"
-CFR_EXPECTED_SHA256="f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2"
-CFR_ACTUAL_SHA256=$(shasum -a 256 "$JRUBY_DECOMPILER_TARGET/cfr-0.152.jar" | awk '{print $1}')
-if [ "$CFR_ACTUAL_SHA256" != "$CFR_EXPECTED_SHA256" ]; then
-    echo "Error: staged CFR checksum mismatch: expected $CFR_EXPECTED_SHA256, got $CFR_ACTUAL_SHA256"
-    exit 1
-fi
-
-# Bundle core server-loaded extension packages.
-echo "Bundling Ruby Fast LSP extensions..."
-rm -rf "$EXTENSION_DIR/extensions"
+# Build the server-loaded extensions before the shared asset validator stages
+# their exact manifest, README and checksum-matching Wasm files.
 if [ "$SKIP_BUILDS" = false ]; then
     "$ROOT_DIR/extensions/sinatra-rust/build-and-test.sh"
     "$ROOT_DIR/extensions/cucumber-rust/build-and-test.sh"
     "$ROOT_DIR/extensions/minitest-ruby/build-and-test.sh"
     "$ROOT_DIR/extensions/rails-ruby/build-and-test.sh"
 fi
-mkdir -p "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release"
-cp "$ROOT_DIR/extensions/rspec-ruby/extension.toml" "$EXTENSION_DIR/extensions/rspec-ruby/"
-cp "$ROOT_DIR/extensions/rspec-ruby/README.md" "$EXTENSION_DIR/extensions/rspec-ruby/"
-cp \
-    "$ROOT_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/rspec-ruby.wasm" \
-    "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/"
-mkdir -p "$EXTENSION_DIR/extensions/rails-ruby/target/wasm32-wasip1/release"
-cp "$ROOT_DIR/extensions/rails-ruby/extension.toml" "$EXTENSION_DIR/extensions/rails-ruby/"
-cp "$ROOT_DIR/extensions/rails-ruby/README.md" "$EXTENSION_DIR/extensions/rails-ruby/"
-cp \
-    "$ROOT_DIR/extensions/rails-ruby/target/wasm32-wasip1/release/ruby_fast_lsp_rails_extension.wasm" \
-    "$EXTENSION_DIR/extensions/rails-ruby/target/wasm32-wasip1/release/"
-mkdir -p "$EXTENSION_DIR/extensions/minitest-ruby/target/wasm32-wasip1/release"
-cp "$ROOT_DIR/extensions/minitest-ruby/extension.toml" "$EXTENSION_DIR/extensions/minitest-ruby/"
-cp "$ROOT_DIR/extensions/minitest-ruby/README.md" "$EXTENSION_DIR/extensions/minitest-ruby/"
-cp \
-    "$ROOT_DIR/extensions/minitest-ruby/target/wasm32-wasip1/release/ruby_fast_lsp_minitest_extension.wasm" \
-    "$EXTENSION_DIR/extensions/minitest-ruby/target/wasm32-wasip1/release/"
-mkdir -p "$EXTENSION_DIR/extensions/sinatra-rust/target/wasm32-wasip1/release"
-cp "$ROOT_DIR/extensions/sinatra-rust/extension.toml" "$EXTENSION_DIR/extensions/sinatra-rust/"
-cp "$ROOT_DIR/extensions/sinatra-rust/README.md" "$EXTENSION_DIR/extensions/sinatra-rust/"
-cp \
-    "$ROOT_DIR/extensions/sinatra-rust/target/wasm32-wasip1/release/ruby_fast_lsp_sinatra_extension.wasm" \
-    "$EXTENSION_DIR/extensions/sinatra-rust/target/wasm32-wasip1/release/"
-mkdir -p "$EXTENSION_DIR/extensions/cucumber-rust/target/wasm32-wasip1/release"
-cp "$ROOT_DIR/extensions/cucumber-rust/extension.toml" "$EXTENSION_DIR/extensions/cucumber-rust/"
-cp "$ROOT_DIR/extensions/cucumber-rust/README.md" "$EXTENSION_DIR/extensions/cucumber-rust/"
-cp \
-    "$ROOT_DIR/extensions/cucumber-rust/target/wasm32-wasip1/release/ruby_fast_lsp_cucumber_extension.wasm" \
-    "$EXTENSION_DIR/extensions/cucumber-rust/target/wasm32-wasip1/release/"
+echo "Bundling validated runtime assets and Ruby Fast LSP extensions..."
+node "$ROOT_DIR/editors/scripts/stage_package_assets.js" vsix "$EXTENSION_DIR"
 
 # Navigate to extension directory and package
 cd "$EXTENSION_DIR"

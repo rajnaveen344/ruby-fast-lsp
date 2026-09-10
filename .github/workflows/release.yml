@@ -13,8 +13,16 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ruby-fast-lsp-release
+  cancel-in-progress: false
+
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+
   build:
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
@@ -25,7 +33,7 @@ jobs:
             vsix-platform: darwin-arm64
             bin: ruby-fast-lsp
 
-          - os: macos-latest
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             npm-pkg: darwin-x64
             vsix-platform: darwin-x64
@@ -48,6 +56,24 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Validate source versions and release tag
+        shell: bash
+        run: |
+          node editors/check_package_versions.js
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            EXPECTED="v$(node -p 'require("./editors/npm/ruby-fast-lsp/package.json").version')"
+            test "$GITHUB_REF_NAME" = "$EXPECTED"
+          fi
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -56,10 +82,10 @@ jobs:
         run: rustup target add ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER: clang
-          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+        run: cargo build --locked --release --bin ruby-fast-lsp --target ${{ matrix.target }}
+
+      - name: Test on native target
+        run: cargo test --locked --workspace --target ${{ matrix.target }}
 
       - name: Copy binary to npm package
         shell: bash
@@ -67,6 +93,10 @@ jobs:
           mkdir -p editors/npm/${{ matrix.npm-pkg }}/bin
           cp target/${{ matrix.target }}/release/${{ matrix.bin }} editors/npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
           chmod +x editors/npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
+          node editors/scripts/stage_package_assets.js npm editors/npm/${{ matrix.npm-pkg }}
+
+      - name: Verify installed npm artifact
+        run: node editors/scripts/smoke_npm_install.js
 
       - name: Copy binary to VSIX
         shell: bash
@@ -88,7 +118,7 @@ jobs:
 
   publish-npm:
     if: github.event_name == 'push'
-    needs: build
+    needs: [build, verify-vsix]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -137,13 +167,13 @@ jobs:
         run: |
           for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
             echo "Publishing @ruby-fast/lsp-${pkg}@${VERSION}..."
-            (cd editors/npm/${pkg} && npm publish --access public) || echo "Already published, skipping"
+            (cd editors/npm/${pkg} && npm publish --access public)
           done
 
       - name: Publish main CLI package
         run: |
           echo "Publishing @ruby-fast/lsp@${VERSION}..."
-          (cd editors/npm/ruby-fast-lsp && npm publish --access public) || echo "Already published, skipping"
+          (cd editors/npm/ruby-fast-lsp && npm publish --access public)
 
   package-vsix:
     needs: build
@@ -153,6 +183,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Add Wasm target to the pinned project toolchain
+        run: rustup target add wasm32-wasip1
 
       - uses: actions/setup-node@v6
         with:
@@ -180,8 +217,8 @@ jobs:
                 const patches = matches.map(x=>parseInt(x.split('.')[2]));
                 console.log(Math.max(...patches)+1);
               } else { console.log(0); }
-            } catch(e) { console.log(0); }
-          " || echo "0")
+            } catch(e) { console.error(e.message); process.exit(1); }
+          ")
           VSIX_VERSION="${YEAR}.${WEEK}.${EXISTING}"
           echo "VSIX_VERSION=${VSIX_VERSION}" >> $GITHUB_ENV
           echo "version=${VSIX_VERSION}" >> $GITHUB_OUTPUT
@@ -194,16 +231,34 @@ jobs:
           done
           rm -rf editors/vscode/vsix/bin-artifacts
 
-          # Sync version in VSIX package.json
-          sed -i "s/\"version\": \".*\"/\"version\": \"${VSIX_VERSION}\"/" editors/vscode/vsix/package.json
+          # Keep the CalVer package and lock metadata consistent before npm ci.
+          VSIX_VERSION="$VSIX_VERSION" node <<'NODE'
+          const fs = require('node:fs');
+          const version = process.env.VSIX_VERSION;
+          for (const name of ['package.json', 'package-lock.json']) {
+            const file = `editors/vscode/vsix/${name}`;
+            const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+            data.version = version;
+            if (data.packages) data.packages[''].version = version;
+            fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+          }
+          NODE
 
           # Pre-zip stubs if script exists
           ./editors/scripts/zip_vscode_stubs.sh
 
+      - name: Build and stage validated VSIX assets
+        run: |
+          extensions/sinatra-rust/build-and-test.sh
+          extensions/cucumber-rust/build-and-test.sh
+          extensions/minitest-ruby/build-and-test.sh
+          extensions/rails-ruby/build-and-test.sh
+          node editors/scripts/stage_package_assets.js vsix editors/vscode/vsix
+
       - name: Install VSIX dependencies
         run: |
           cd editors/vscode/vsix
-          npm install
+          npm ci
 
       - name: Package VSIX
         run: |
@@ -216,8 +271,38 @@ jobs:
           name: vsix-package
           path: editors/vscode/vsix/ruby-fast-lsp-${{ steps.prepare.outputs.version }}.vsix
 
-  publish-marketplace:
+  verify-vsix:
     needs: package-vsix
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v5
+        with:
+          name: vsix-package
+          path: artifacts
+      - run: npm ci --prefix editors/vscode/vsix
+      - name: Exercise the actual release archive
+        shell: bash
+        run: node editors/scripts/smoke_vsix.js "artifacts/ruby-fast-lsp-${{ needs.package-vsix.outputs.vsix-version }}.vsix"
+      - name: Required bundled-extension stress
+        if: runner.os == 'Linux'
+        run: editors/scripts/stress_bundled_extensions.sh "artifacts/ruby-fast-lsp-${{ needs.package-vsix.outputs.vsix-version }}.vsix"
+
+  publish-marketplace:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [package-vsix, verify-vsix]
     runs-on: ubuntu-latest
 
     steps:
@@ -248,7 +333,8 @@ jobs:
           VSIX_VERSION: ${{ needs.package-vsix.outputs.vsix-version }}
 
   publish-open-vsx:
-    needs: package-vsix
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [package-vsix, verify-vsix]
     runs-on: ubuntu-latest
 
     steps:
@@ -281,8 +367,8 @@ jobs:
           done
 
   create-release:
-    needs: [publish-npm, package-vsix]
-    if: always() && !cancelled() && github.event_name == 'push'
+    needs: [publish-npm, publish-marketplace, publish-open-vsx]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
     steps:

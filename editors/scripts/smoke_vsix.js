@@ -41,7 +41,10 @@ try {
 
 const extensionRoot = path.join(temp, 'extension');
 const binaryName = process.platform === 'win32' ? 'ruby-fast-lsp.exe' : 'ruby-fast-lsp';
-const binary = path.join(extensionRoot, 'bin', platform, binaryName);
+const binary = [platformKey, platform]
+    .map(name => path.join(extensionRoot, 'bin', name, binaryName))
+    .find(filename => fs.existsSync(filename));
+if (!binary) throw new Error(`Packaged VSIX is missing a ${platformKey} binary`);
 const rspecPackage = path.join(extensionRoot, 'extensions', 'rspec-ruby');
 const railsPackage = path.join(extensionRoot, 'extensions', 'rails-ruby');
 const minitestPackage = path.join(extensionRoot, 'extensions', 'minitest-ruby');

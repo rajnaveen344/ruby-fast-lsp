@@ -11,9 +11,18 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
-//! let query = EngineQuery::with_engine(server.analysis_engine.clone());
-//! let definitions = query.find_definitions(&uri, position, &content, None);
+//! ```no_run
+//! use std::sync::Arc;
+//! use parking_lot::RwLock;
+//! use ruby_analysis::engine::AnalysisEngine;
+//! use ruby_fast_lsp::query::EngineQuery;
+//! use tower_lsp::lsp_types::{Position, Url};
+//!
+//! // Supply the owning project's populated engine when querying real sources.
+//! let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+//! let query = EngineQuery::with_engine(engine);
+//! let uri = Url::parse("file:///example.rb").unwrap();
+//! let definitions = query.find_definitions_at_position(&uri, Position::new(0, 0), "");
 //! ```
 
 pub(crate) mod analysis_location;

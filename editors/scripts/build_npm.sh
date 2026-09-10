@@ -19,7 +19,7 @@ get_target() {
     darwin-arm64) echo "aarch64-apple-darwin" ;;
     darwin-x64)   echo "x86_64-apple-darwin" ;;
     linux-x64)    echo "x86_64-unknown-linux-gnu" ;;
-    win32-x64)    echo "x86_64-pc-windows-gnu" ;;
+    win32-x64)    echo "x86_64-pc-windows-msvc" ;;
   esac
 }
 
@@ -48,17 +48,7 @@ for PLATFORM in $PLATFORMS; do
   # Copy binary into npm package
   mkdir -p "$NPM_DIR/$PLATFORM/bin"
   cp "$ROOT_DIR/target/$TARGET/release/$BIN_NAME" "$NPM_DIR/$PLATFORM/bin/$BIN_NAME"
-  rm -rf "$NPM_DIR/$PLATFORM/jruby-decompiler"
-  cp -R "$ROOT_DIR/support/jruby/decompiler" "$NPM_DIR/$PLATFORM/jruby-decompiler"
-  rm -rf "$NPM_DIR/$PLATFORM/core-rbs"
-  mkdir -p "$NPM_DIR/$PLATFORM/core-rbs"
-  cp "$ROOT_DIR/crates/rbs-parser/rbs_types/core/constants.rbs" \
-    "$NPM_DIR/$PLATFORM/core-rbs/constants.rbs"
-  CFR_SHA256=$(shasum -a 256 "$NPM_DIR/$PLATFORM/jruby-decompiler/cfr-0.152.jar" | awk '{print $1}')
-  if [ "$CFR_SHA256" != "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2" ]; then
-    echo "Bundled CFR checksum mismatch for $PLATFORM: $CFR_SHA256"
-    exit 1
-  fi
+  node "$SCRIPT_DIR/stage_package_assets.js" npm "$NPM_DIR/$PLATFORM"
 
   echo "    -> $NPM_DIR/$PLATFORM/bin/$BIN_NAME"
 done

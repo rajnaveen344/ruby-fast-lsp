@@ -232,7 +232,6 @@ fn real_project_precision_manifest_is_valid() {
 }
 
 #[tokio::test]
-#[ignore = "reviewed real-project reductions start a fresh language server per case; run explicitly for release precision reporting"]
 async fn report_real_project_precision() {
     let corpus = parse_corpus();
     validate_corpus(&corpus);

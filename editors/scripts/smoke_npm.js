@@ -28,7 +28,7 @@ let wrapper;
 let moduleRoot;
 if (wrapperArgument) {
     wrapper = path.resolve(wrapperArgument);
-    moduleRoot = path.resolve(path.dirname(wrapper), '..');
+    moduleRoot = process.argv[3] ? path.resolve(process.argv[3]) : path.resolve(path.dirname(wrapper), '..');
 } else {
     const scope = path.join(temp, 'node_modules', '@ruby-fast');
     fs.mkdirSync(scope, { recursive: true });

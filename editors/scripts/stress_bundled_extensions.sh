@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-VSIX_PATH="${1:-$ROOT_DIR/target/ruby-fast-lsp-0.2.6.vsix}"
+VSIX_VERSION="$(node -p 'require(process.argv[1]).version' "$ROOT_DIR/editors/vscode/vsix/package.json")"
+VSIX_PATH="${1:-$ROOT_DIR/target/ruby-fast-lsp-$VSIX_VERSION.vsix}"
 
 if [[ ! -f "$VSIX_PATH" ]]; then
   echo "Bundled-extension stress requires an assembled VSIX: $VSIX_PATH" >&2
