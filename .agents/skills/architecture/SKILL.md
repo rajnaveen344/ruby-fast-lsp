@@ -31,6 +31,10 @@ Read `AGENTS.md` first. It contains the detailed current architecture direction.
 - `src/query/*` is an adapter over `ruby-analysis::engine::AnalysisQuery`; it may map cursor/document context to domain queries and map `TextRange` back to LSP `Location`.
 - Method lookup semantics must stay single-sourced in engine resolution. Use `AnalysisQuery::resolve_method_callees*` for navigation and `AnalysisQuery::resolve_method_reference*` for reference/diagnostic policy.
 - Do not reintroduce public store getters or public `HashMap<FullyQualifiedName, Vec<Fact>>` data access.
+- Follow `AGENTS.md`'s source-directory limit: at most 10 immediate files and
+  subfolders for new or reorganized folders. Group by semantic responsibility;
+  cohesive node families without a useful split require a documented local
+  exception. Keep Rust module ownership and visibility aligned with the layout.
 
 ## Library API
 

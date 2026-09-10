@@ -9,56 +9,28 @@ use crate::indexer::{RubyDocument, ScopeTracker};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-mod alias_method_node;
-mod bad_splat;
-mod block_node;
-mod call_node;
-mod callables;
-mod class_node;
-mod class_variable_write_node;
-mod constant_path_node;
-mod constant_path_write_node;
-mod constant_read_node;
-mod constant_write_node;
-mod constants;
-mod declarations;
-mod def_node;
-mod expressions;
-mod extensions;
-mod facts;
-mod flow;
-mod global_variable_write_node;
-mod instance_variable_write_node;
-mod local_variable_read_node;
-mod local_variable_write_node;
-mod method_return;
-mod module_node;
-mod nil_call;
-mod options;
-mod parameters_node;
-mod semantic_context;
-mod singleton_class_node;
-mod source;
-mod super_node;
+mod collection;
+mod context;
+mod inference;
+mod nodes;
 mod traversal;
-mod variable_read_node;
 
 #[cfg(test)]
 mod tests;
 
-pub use extensions::{
+pub use collection::facts::CollectedFile;
+pub use context::extensions::{
     BlockExecutionContext, FactCollectorExtensionHost, NullFactCollectorExtensionHost,
 };
-pub use facts::CollectedFile;
 
-use constants::ConstantEvidence;
-use expressions::ExpressionEvidence;
-use extensions::ExtensionState;
-use facts::CollectedFacts;
-use flow::FlowState;
-use method_return::{InferredMethodContext, MethodReturnEvidence};
-use options::CollectionOptions;
-use semantic_context::SemanticContext;
+use collection::facts::CollectedFacts;
+use context::{
+    extensions::ExtensionState, options::CollectionOptions, semantic_context::SemanticContext,
+};
+use inference::{
+    constants::ConstantEvidence, expressions::ExpressionEvidence, flow::FlowState,
+    method_return::MethodReturnEvidence,
+};
 
 /// A single file pass. Temporary proof and traversal state never outlives it.
 pub struct FactCollector {

@@ -54,6 +54,26 @@ cargo build --release         # Release build
 3. **FQN-based indexing** - All symbols use fully qualified names (e.g., `MyModule::MyClass`)
 4. **AST Traversal** - Use recursive traversal (visitor pattern) over ad-hoc matching for type inference to handle nesting/chaining correctly
 
+## Source Directory Organization (MANDATORY)
+
+- **Hard limit: 10 immediate entries per source folder.** Count files and
+  subfolders, including `mod.rs` and `README.md`. Apply this to new folders and
+  directory-layout refactors; do not add entries to an existing oversized
+  folder without first grouping it or documenting the exception below.
+- Group by semantic responsibility using names that explain what the code
+  does. Keep cohesive node-handler families together; split them into meaningful
+  families such as calls, constants, declarations, and variables when appropriate.
+- **Narrow exception:** a cohesive collection, such as one handler per AST node
+  type, may exceed 10 only when there is no useful semantic split. Its local
+  `README.md` must identify the family and explain why subdividing it would make
+  navigation harder. Convenience or an arbitrary count is not a justification.
+- Never meet the limit by merging unrelated code into large files, inventing
+  `misc`/`utils` buckets, adding numbered folders, or introducing unnecessary
+  nesting. Preserve real module ownership and visibility when moving files.
+- Check the immediate-entry counts recursively within the reorganized subtree
+  and update its reading guide and executable source-path references. Historical
+  measurement reports retain the paths of the source revision they measured.
+
 ## TigerBeetle Principles (MANDATORY)
 
 **CRITICAL**: This project follows TigerBeetle's philosophy of correctness over convenience:

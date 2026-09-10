@@ -83,7 +83,7 @@ The Analyzer is responsible for understanding Ruby code structure using the Pris
 - `mod.rs`: Explicit analysis entry points
 - `scope_tracker.rs`: Tracks current namespace and scope during traversal
 - `analysis_indexer.rs`: Declaration and graph fact collection
-- `fact_collector/`: Body, reference, diagnostic, and extension evidence
+- `fact_collector/`: Body, reference, diagnostic, and extension evidence, grouped into `context/`, `collection/`, `inference/`, and semantic node families under `nodes/`
 - `identifier_visitor/`: Cursor-target discovery
 
 #### Design Decisions:

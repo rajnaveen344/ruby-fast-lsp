@@ -1,0 +1,225 @@
+use crate::core::{
+    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
+};
+use log::{error, trace};
+use ruby_prism::{
+    ConstantAndWriteNode, ConstantOperatorWriteNode, ConstantOrWriteNode, ConstantTargetNode,
+    ConstantWriteNode, Location, Node,
+};
+
+use crate::core::RubyType;
+use crate::indexer::fact_collector::FactCollector;
+
+impl FactCollector {
+    fn constant_fqn_from_name(&self, constant_name: &str) -> Option<FullyQualifiedName> {
+        let constant = match RubyConstant::new(constant_name) {
+            Ok(constant) => constant,
+            Err(e) => {
+                error!("Error creating constant: {}", e);
+                return None;
+            }
+        };
+        let mut namespace = self.scope_tracker.get_ns_stack();
+        namespace.push(constant);
+        Some(FullyQualifiedName::constant(namespace))
+    }
+
+    fn record_constant_symbol(
+        &mut self,
+        fqn: FullyQualifiedName,
+        full_location: &Location<'_>,
+        name_location: &Location<'_>,
+    ) {
+        self.facts.direct.symbols.push(
+            SymbolFact::new(fqn, SymbolKind::Constant, self.direct_range(full_location))
+                .with_name_range(self.direct_range(name_location)),
+        );
+    }
+
+    fn record_constant_value_type(
+        &mut self,
+        fqn: FullyQualifiedName,
+        value: &Node<'_>,
+        name_location: &Location<'_>,
+        full_location: &Location<'_>,
+    ) {
+        let (inferred_type, provenance) = self.assignment_type_and_provenance(value);
+        let dependency = self.constant_type_dependency(value);
+        let name_range = self.document.prism_location_to_text_range(name_location);
+        let full_range = self.document.prism_location_to_text_range(full_location);
+        self.direct_push_type(
+            TypeSubject::Constant(fqn.clone()),
+            inferred_type.clone(),
+            name_location,
+            provenance,
+        );
+        self.facts.types.add(TypeFact::new(
+            TypeSubject::Constant(fqn.clone()),
+            inferred_type,
+            full_range,
+            provenance,
+        ));
+        if let Some(dependency) = dependency {
+            self.push_constant_type_equation(TypeSubject::Constant(fqn), name_range, dependency);
+        }
+    }
+
+    fn record_constant_value_type_explicit(
+        &mut self,
+        fqn: FullyQualifiedName,
+        inferred_type: RubyType,
+        name_location: &Location<'_>,
+        full_location: &Location<'_>,
+    ) {
+        let provenance = TypeProvenance::Assignment;
+        self.direct_push_type(
+            TypeSubject::Constant(fqn.clone()),
+            inferred_type.clone(),
+            name_location,
+            provenance,
+        );
+        self.facts.types.add(TypeFact::new(
+            TypeSubject::Constant(fqn),
+            inferred_type,
+            self.document.prism_location_to_text_range(full_location),
+            provenance,
+        ));
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_write_node_entry(
+        &mut self,
+        node: &ConstantWriteNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        trace!("Visiting constant write node: {}", constant_name);
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_write_node_exit(
+        &mut self,
+        node: &ConstantWriteNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
+        if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
+            if summary.is_capture_free() {
+                self.constants.callable_bodies
+                    .push(crate::core::ConstantCallableBodyFact {
+                        constant: self
+                            .constant_fqn_from_name(&constant_name)
+                            .expect("INVARIANT VIOLATED: a validated constant name stopped producing its FQN. This is a bug because callable and type facts use the same declaration identity. Fix: construct both facts from one retained FQN."),
+                        summary,
+                        range: self.direct_range(&node.location()),
+                    });
+            }
+        }
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_or_write_node_entry(
+        &mut self,
+        node: &ConstantOrWriteNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_or_write_node_exit(
+        &mut self,
+        node: &ConstantOrWriteNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_and_write_node_entry(
+        &mut self,
+        node: &ConstantAndWriteNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_and_write_node_exit(
+        &mut self,
+        node: &ConstantAndWriteNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_operator_write_node_entry(
+        &mut self,
+        node: &ConstantOperatorWriteNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_symbol(fqn, &node.location(), &node.name_loc());
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_operator_write_node_exit(
+        &mut self,
+        node: &ConstantOperatorWriteNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_target_node_entry(
+        &mut self,
+        node: &ConstantTargetNode,
+    ) {
+        let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let Some(fqn) = self.constant_fqn_from_name(&constant_name) else {
+            return;
+        };
+        self.record_constant_symbol(fqn.clone(), &node.location(), &node.location());
+
+        let inferred_type = self
+            .flow
+            .assignment_elements
+            .last_mut()
+            .and_then(|types| {
+                if types.is_empty() {
+                    None
+                } else {
+                    Some(types.remove(0))
+                }
+            })
+            .unwrap_or(RubyType::Unknown);
+        self.record_constant_value_type_explicit(
+            fqn,
+            inferred_type,
+            &node.location(),
+            &node.location(),
+        );
+    }
+
+    pub(in crate::indexer::fact_collector) fn process_constant_target_node_exit(
+        &mut self,
+        _node: &ConstantTargetNode,
+    ) {
+    }
+}

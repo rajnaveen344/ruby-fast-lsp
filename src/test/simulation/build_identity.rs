@@ -276,7 +276,7 @@ mod tests {
         for required in [
             "src/test/simulation/seeded.rs",
             "src/server.rs",
-            "crates/ruby-analysis/src/indexer/fact_collector/nil_call.rs",
+            "crates/ruby-analysis/src/indexer/fact_collector/nodes/calls/nil_call.rs",
             "Cargo.lock",
             "build.rs",
         ] {

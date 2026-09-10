@@ -43,6 +43,10 @@ IDENTITY_TEST = "test::simulation::build_identity::tests::seed_artifact_retains_
 DEFINITION_ANCHOR = """    let locations = query.find_definitions_at_position(&uri, position, &content)?;
     Some(GotoDefinitionResponse::Array(locations))"""
 RENAME_ANCHOR = "    let result = rename::handle_rename(lang_server, params).await;"
+NIL_CALL_ANCHOR = """    pub(in crate::indexer::fact_collector) fn collect_nil_call_candidate(
+        &mut self,
+        node: &CallNode<'_>,
+    ) {"""
 GUARD_ANCHOR = """        let mut engine = analysis_engine.write();
         if engine.source_snapshot_for_path(path) != Some(source_snapshot) {
             return false;
@@ -117,9 +121,9 @@ FAULTS = (
     ),
     Fault(
         "nil-warning-missing", "Return before collecting any nil-call diagnostic candidate.",
-        "crates/ruby-analysis/src/indexer/fact_collector/nil_call.rs",
-        "    pub(super) fn collect_nil_call_candidate(&mut self, node: &CallNode<'_>) {",
-        "    pub(super) fn collect_nil_call_candidate(&mut self, node: &CallNode<'_>) {\n        return;",
+        "crates/ruby-analysis/src/indexer/fact_collector/nodes/calls/nil_call.rs",
+        NIL_CALL_ANCHOR,
+        NIL_CALL_ANCHOR + "\n        return;",
         "test::integration::diagnostics::nil_call::nil_call_publication_survives_save_edit_and_reopen",
         "nil-call publication must match the complete expected warning",
     ),
