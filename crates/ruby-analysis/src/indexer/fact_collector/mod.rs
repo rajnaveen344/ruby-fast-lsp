@@ -3062,9 +3062,9 @@ impl FactCollector {
         }
     }
 
-    /// Return sparse concrete local-read flow evidence separately from the
-    /// per-file method inference record. Most files have no flow delta, so the
-    /// engine stores this only for files that prove one.
+    /// Return concrete block-owned reads and flow deltas separately from the
+    /// per-file method inference record. Block types survive cold indexing
+    /// without retaining the collector's scope tree in the editor cache.
     pub fn local_read_type_evidence(&self) -> Box<[(TextRange, RubyType)]> {
         let mut local_read_types = self.local_read_types.clone();
         local_read_types.sort_unstable_by_key(|(range, _)| *range);

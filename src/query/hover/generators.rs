@@ -108,23 +108,9 @@ pub fn generate_local_variable_hover(
         return Some(HoverInfo::text(format_unknown_type(reason)));
     }
 
-    // Check if the variable exists in the tree at all (even with Unknown type)
-    let has_variable = context.document.and_then(|doc_arc| {
-        let doc = doc_arc.read();
-        let position = doc.offset_to_position(*byte_offset as usize);
-        let scope_id = doc
-            .find_scope_for_variable_at(name, position)
-            .or_else(|| doc.scope_at_position(position))?;
-        doc.variable_scopes()
-            .find_variable(name, scope_id)
-            .map(|_| ())
-    });
-
-    if has_variable.is_some() {
-        Some(HoverInfo::text("?".to_string()))
-    } else {
-        Some(HoverInfo::text(name.to_string()))
-    }
+    // Prism already identified a local. Its unknown type must not depend on
+    // whether an unchanged cold-indexed document retained editor scope data.
+    Some(HoverInfo::text("?".to_string()))
 }
 
 fn local_read_type_from_analysis(context: &HoverContext, byte_offset: u32) -> Option<RubyType> {
@@ -145,10 +131,7 @@ fn get_type_from_type_query(
     let doc = context.document?.read();
     let file_id = doc.analysis_file_id();
     let position = doc.offset_to_position(byte_offset as usize);
-    let scope_id = doc
-        .find_scope_for_variable_at(name, position)
-        .or_else(|| doc.scope_at_position(position))
-        .unwrap_or(0);
+    let scope_id = doc.find_scope_for_variable_at(name, position)?;
     let scope_id = u32::try_from(scope_id).expect(
         "INVARIANT VIOLATED: local variable scope id exceeded u32. \
          This is a bug because analysis TypeSubject stores scope ids as u32. \

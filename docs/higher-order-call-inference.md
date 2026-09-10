@@ -96,3 +96,24 @@ Hover, inlay hints, completion, chained dispatch, diagnostics, navigation, and
 failures, watcher deletion, close/reopen, cold indexing, and reindexing replace
 the same file-owned evidence; no consumer cache or indexing-order retry is part
 of inference.
+
+Direct value constants are available before cold project body analysis, including
+frozen collections declared in another file:
+
+```ruby
+module Toolkit
+  ENTRIES = [:title, :rank, :active].freeze
+end
+
+Toolkit::ENTRIES.each do |entry|
+  entry.id2name # entry is Symbol; the result is String
+end
+```
+
+The same receiver type drives method diagnostics and generic block inputs.
+Opening unchanged indexed content preserves block-read types for hover and
+completion. Editing the declaration replaces those types normally. An array
+with an unknown element does not prove that its block parameter is a Symbol;
+an unresolved constant alias remains Unknown until its declaration resolves.
+The neutral regressions live in
+`src/test/integration/constants/collection_receivers.rs`.

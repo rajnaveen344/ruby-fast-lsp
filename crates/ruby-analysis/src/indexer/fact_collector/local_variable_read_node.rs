@@ -33,12 +33,23 @@ impl FactCollector {
                 (flow_type.cloned(), assignment_type.cloned())
             })
             .unwrap_or((None, None));
-        if let Some(flow_type) = flow_type.as_ref().filter(|ruby_type| {
-            **ruby_type != RubyType::Unknown && assignment_type.as_ref() != Some(*ruby_type)
-        }) {
-            self.local_read_types.push((range, (*flow_type).clone()));
-        }
+        let flow_delta = flow_type
+            .as_ref()
+            .is_some_and(|ruby_type| assignment_type.as_ref() != Some(ruby_type));
         let reaching_type = flow_type.or(assignment_type);
+        // Cold-indexed documents do not retain the collector's VariableScopes.
+        // Keep block-owned reads as well as flow deltas so opening unchanged
+        // content preserves parameter types without guessing lexical scope.
+        let block_owned = owner_scope_id.is_some_and(|scope_id| {
+            self.document.variable_scopes().scope_kind(scope_id)
+                == Some(crate::LocalScopeKind::Block)
+        });
+        if let Some(ruby_type) = reaching_type
+            .as_ref()
+            .filter(|ruby_type| **ruby_type != RubyType::Unknown && (block_owned || flow_delta))
+        {
+            self.local_read_types.push((range, ruby_type.clone()));
+        }
         let unknown_reason = match reaching_type {
             None => Some(UnknownReason::NoReachingAssignment),
             Some(RubyType::Unknown) => Some(UnknownReason::UnresolvedAssignmentValue),
@@ -55,11 +66,6 @@ impl FactCollector {
             ) => None,
         };
         if let Some(reason) = unknown_reason {
-            // TypeTracker may already have installed a more precise flow
-            // reason (for example mutable_shape_invalidated) before the
-            // ordinary visitor reaches this exact read. Keep that proof
-            // barrier instead of adding the generic Unknown projection as a
-            // conflicting second result.
             // TypeTracker may already have installed a more precise flow
             // reason (for example mutable_shape_invalidated) before the
             // ordinary visitor reaches this exact read. Keep that proof

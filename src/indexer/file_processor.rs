@@ -1129,17 +1129,25 @@ impl FileProcessor {
     /// Collect the direct, extension-independent declarations that form the
     /// semantic skeleton for one deterministic project batch.
     ///
-    /// The project indexer installs every file's skeleton and resolves the
-    /// resulting namespace graph before any extension-aware traversal begins.
-    /// This gives every parallel worker the same complete class/module lookup
-    /// universe without making extension behavior depend on file order.
+    /// Every project seeds value-constant symbols and types before body
+    /// traversal. Extension-aware projects also retain their namespace and
+    /// method skeleton. This keeps generic receiver/block inference independent
+    /// of discovery order without broadening the extension lookup policy.
     pub fn collect_project_direct_semantic_seed(
         &self,
         uri: &Url,
         content: &str,
         analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
         known_namespaces: &HashSet<FullyQualifiedName>,
-    ) -> FileFacts {
+    ) -> Option<FileFacts> {
+        let extension_namespace_seed = self.requires_extension_namespace_seed(uri);
+        // The direct collector emits value-constant symbols only for Prism's
+        // constant write nodes, whose assignment token contains '='. This is
+        // a conservative parse prefilter; extension skeletons still run even
+        // when the source contains no assignment.
+        if !extension_namespace_seed && !content.contains('=') {
+            return None;
+        }
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
@@ -1154,6 +1162,11 @@ impl FileProcessor {
         });
         let source = analysis_source(uri, content);
         let parse = ruby_prism::parse(source.as_bytes());
+        if !extension_namespace_seed
+            && !AnalysisIndexer::has_value_constant_declarations(&parse.node())
+        {
+            return None;
+        }
         let direct = collect_direct_facts(
             analysis_engine,
             &parse.node(),
@@ -1161,17 +1174,39 @@ impl FileProcessor {
             file_id,
             Some(known_namespaces),
         );
-        FileFacts {
-            methods: direct.methods,
-            method_visibility_overrides: direct.method_visibility_overrides,
-            graph_nodes: direct.graph_nodes,
-            graph_edges: direct.graph_edges,
-            unresolved_graph_edges: direct.unresolved_graph_edges,
-            ..FileFacts::default()
+        let symbols = direct
+            .symbols
+            .into_iter()
+            .filter(|symbol| symbol.kind == AnalysisSymbolKind::Constant)
+            .collect::<Vec<_>>();
+        if symbols.is_empty() && !extension_namespace_seed {
+            return None;
         }
+        let constants = symbols
+            .iter()
+            .map(|symbol| &symbol.fqn)
+            .collect::<HashSet<_>>();
+        let types = direct
+            .types
+            .into_iter()
+            .filter(|fact| matches!(&fact.subject, TypeSubject::Constant(fqn) if constants.contains(fqn)))
+            .collect();
+        let mut facts = FileFacts {
+            symbols,
+            types,
+            ..FileFacts::default()
+        };
+        if extension_namespace_seed {
+            facts.methods = direct.methods;
+            facts.method_visibility_overrides = direct.method_visibility_overrides;
+            facts.graph_nodes = direct.graph_nodes;
+            facts.graph_edges = direct.graph_edges;
+            facts.unresolved_graph_edges = direct.unresolved_graph_edges;
+        }
+        Some(facts)
     }
 
-    pub fn requires_project_direct_semantic_seed(&self, uri: &Url) -> bool {
+    fn requires_extension_namespace_seed(&self, uri: &Url) -> bool {
         let project_context = self.extension_project_context_seed.as_ref().map(|seed| {
             seed.read()
                 .context_snapshot(uri.to_string(), SourceKind::Project)

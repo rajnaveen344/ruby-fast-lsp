@@ -717,17 +717,12 @@ impl IndexerProject {
             let engine = semantic_context.read();
             ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
         });
-        let requires_direct_semantic_seed = project_files.first().is_some_and(|path| {
-            Url::from_file_path(path).is_ok_and(|uri| {
-                self.file_processor
-                    .requires_project_direct_semantic_seed(&uri)
-            })
-        });
+        let requires_direct_semantic_seed = !project_files.is_empty();
         if requires_direct_semantic_seed {
             let semantic_seed_started = Instant::now();
             let outcomes = project_files
                 .par_iter()
-                .map(|path| -> Result<(PathBuf, FileFacts)> {
+                .map(|path| -> Result<(PathBuf, Option<FileFacts>)> {
                     let (content, _) = Self::read_authoritative_project_source(server, path)
                         .with_context(|| {
                             format!(
@@ -753,8 +748,10 @@ impl IndexerProject {
                 })
                 .collect::<Vec<_>>();
             let mut engine = semantic_context.write();
+            let mut seeded = false;
             for outcome in outcomes {
                 let (path, facts) = outcome?;
+                let Some(facts) = facts else { continue };
                 let file_id = engine.file_id(&path).unwrap_or_else(|| {
                     panic!(
                         "INVARIANT VIOLATED: project-wide semantic seed lost the registered identity for {}. \
@@ -765,10 +762,13 @@ impl IndexerProject {
                     )
                 });
                 engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+                seeded = true;
             }
-            engine.resolve();
+            if seeded {
+                engine.resolve();
+            }
             info!(
-                "Project-wide extension semantic skeleton completed for {} files in {:?}",
+                "Project-wide declaration skeleton completed for {} files in {:?}",
                 project_files.len(),
                 semantic_seed_started.elapsed()
             );
@@ -1001,23 +1001,17 @@ impl IndexerProject {
                 })
             };
 
-        // Extension semantic targets are resolved through the same engine-owned
-        // method lookup as ordinary Ruby calls. Before extension-aware workers
-        // run, publish a direct declaration skeleton for the entire batch and
-        // resolve its namespace graph once. This preserves parallel collection
-        // while making superclass and mixin visibility independent of file
-        // traversal and editor-open order.
+        // Before body inference, publish the same direct declaration skeleton
+        // for every worker. Value-constant receiver and block types must not
+        // depend on file traversal, editor-open order, or enabled extensions.
         let requires_direct_semantic_seed = !uses_immutable_semantic_context
-            && registered_inputs.first().is_some_and(|registered| {
-                Url::from_file_path(&registered.input.path)
-                    .is_ok_and(|uri| file_processor_ref.requires_project_direct_semantic_seed(&uri))
-            });
+            && !registered_inputs.is_empty();
         let semantic_seed_started = Instant::now();
         if requires_direct_semantic_seed {
             let semantic_seed_outcomes = registered_inputs
                 .par_iter()
                 .map(
-                    |registered| -> Result<(PathBuf, ruby_analysis::engine::FileFacts)> {
+                    |registered| -> Result<(PathBuf, Option<ruby_analysis::engine::FileFacts>)> {
                         let uri = Url::from_file_path(&registered.input.path).map_err(|_| {
                             anyhow!(
                                 "project source path is not a valid file URI: {}",
@@ -1037,8 +1031,10 @@ impl IndexerProject {
                 )
                 .collect::<Vec<_>>();
             let mut engine = semantic_read_engine.write();
+            let mut seeded = false;
             for outcome in semantic_seed_outcomes {
                 let (path, facts) = outcome?;
+                let Some(facts) = facts else { continue };
                 let file_id = engine.file_id(&path).unwrap_or_else(|| {
                     panic!(
                         "INVARIANT VIOLATED: project semantic seed lost the registered identity for {}. \
@@ -1048,8 +1044,11 @@ impl IndexerProject {
                     )
                 });
                 engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+                seeded = true;
             }
-            engine.resolve();
+            if seeded {
+                engine.resolve();
+            }
         }
         let semantic_seed_elapsed = requires_direct_semantic_seed
             .then(|| semantic_seed_started.elapsed())

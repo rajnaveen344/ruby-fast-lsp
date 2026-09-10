@@ -68,6 +68,26 @@ pub struct AnalysisIndexer {
 }
 
 impl AnalysisIndexer {
+    /// Whether the direct declaration pass can emit a value-constant symbol.
+    /// Keep this aligned with the constant-write visitors below. Callers can
+    /// reuse an existing parse before preparing the more expensive semantic
+    /// lookup context for files with no value declarations.
+    pub fn has_value_constant_declarations(node: &Node<'_>) -> bool {
+        struct Finder(bool);
+        impl<'pr> Visit<'pr> for Finder {
+            fn visit_constant_write_node(&mut self, _node: &ConstantWriteNode<'pr>) {
+                self.0 = true;
+            }
+
+            fn visit_constant_path_write_node(&mut self, _node: &ConstantPathWriteNode<'pr>) {
+                self.0 = true;
+            }
+        }
+        let mut finder = Finder(false);
+        finder.visit(node);
+        finder.0
+    }
+
     pub fn new(file_id: SourceFileId) -> Self {
         Self::with_known_namespaces(file_id, HashSet::new())
     }
@@ -1093,9 +1113,7 @@ impl AnalysisIndexer {
         }
 
         if let Some((parts, absolute)) = constant_parts_and_absolute(node) {
-            return self
-                .resolve_constant_value_type_from(&parts, absolute, &self.namespace_stack)
-                .or_else(|| literal_type(node));
+            return self.resolve_constant_value_type_from(&parts, absolute, &self.namespace_stack);
         }
 
         literal_type(node)
@@ -1107,10 +1125,11 @@ impl AnalysisIndexer {
         ruby_type: Option<RubyType>,
         location: ruby_prism::Location<'_>,
     ) {
-        let Some(ruby_type) = ruby_type else {
-            return;
-        };
-        if ruby_type == RubyType::Unknown {
+        let ruby_type = ruby_type.unwrap_or(RubyType::Unknown);
+        // Constant equations need an exact file-owned target even before a
+        // referenced declaration becomes available. Unknown is a placeholder
+        // for that solve, never a guessed class object derived from syntax.
+        if ruby_type == RubyType::Unknown && !matches!(subject, TypeSubject::Constant(_)) {
             return;
         }
         self.facts.types.push(TypeFact::new(
@@ -2201,6 +2220,15 @@ fn literal_type(node: &Node<'_>) -> Option<RubyType> {
     if node.as_nil_node().is_some() {
         return Some(RubyType::nil_class());
     }
+    if node.as_regular_expression_node().is_some()
+        || node.as_interpolated_regular_expression_node().is_some()
+    {
+        return Some(RubyType::Class(
+            FullyQualifiedName::try_from("Regexp").expect(
+                "INVARIANT VIOLATED: Regexp is not a valid Ruby constant. This is a bug because it is a language-defined literal type. Fix: preserve the canonical constant spelling.",
+            ),
+        ));
+    }
     if let Some(array) = node.as_array_node() {
         let element_types = array
             .elements()
@@ -2471,6 +2499,28 @@ mod tests {
     }
 
     #[test]
+    fn seeds_regexp_constant_types_before_body_collection() {
+        for source in [
+            "PATTERN = /entry/\n",
+            "PATTERN = /entry#{1}/\n",
+            "PATTERN = /entry/.freeze\n",
+        ] {
+            let index = AnalysisIndexer::new(file()).index_source(source);
+            let actual = index
+                .types
+                .iter()
+                .filter(|fact| matches!(&fact.subject, TypeSubject::Constant(fqn) if fqn.to_string() == "PATTERN"))
+                .map(|fact| fact.ruby_type.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual,
+                vec![RubyType::Class(FullyQualifiedName::try_from("Regexp").unwrap())],
+                "Regexp literal declarations must seed their value type before earlier source calls are collected: {source}"
+            );
+        }
+    }
+
+    #[test]
     fn unresolved_collection_members_do_not_publish_partial_types() {
         let index = AnalysisIndexer::new(file())
             .index_source("values = [1, dynamic_value]\nmapping = {known: 1, **dynamic_hash}\n");
@@ -2513,7 +2563,7 @@ mod tests {
 
     #[test]
     fn indexes_constant_object_assignment_type_fact() {
-        let index = AnalysisIndexer::new(file()).index_source("MODEL = User\n");
+        let index = AnalysisIndexer::new(file()).index_source("class User\nend\nMODEL = User\n");
 
         let model = FullyQualifiedName::constant(vec![RubyConstant::new("MODEL").unwrap()]);
         assert!(index.types.iter().any(|fact| {
@@ -2523,6 +2573,28 @@ mod tests {
                         RubyConstant::new("User").unwrap(),
                     ]))
         }));
+    }
+
+    #[test]
+    fn unresolved_constant_alias_keeps_an_unknown_equation_target() {
+        let index = AnalysisIndexer::new(file()).index_source("CHOICE = RemoteValues::ITEM\n");
+        let subject = TypeSubject::Constant(FullyQualifiedName::constant(vec![
+            RubyConstant::new("CHOICE").unwrap(),
+        ]));
+        let facts = index
+            .types
+            .iter()
+            .filter(|fact| fact.subject == subject)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            facts.len(), 1,
+            "a deferred constant needs exactly one declaration target"
+        );
+        assert_eq!(
+            facts[0].ruby_type, RubyType::Unknown,
+            "unresolved constant syntax is not proof of a class object"
+        );
+        assert_eq!(facts[0].range, TextRange::new(file(), 0, 6));
     }
 
     #[test]
