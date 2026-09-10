@@ -15,7 +15,6 @@ use crate::yard::{YardMethodDoc, YardParser, YardTypeConverter};
 
 use super::FactCollector;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 struct MethodParamInfo {
@@ -375,7 +374,6 @@ impl FactCollector {
         // Always store the inferred type - Unknown displays as "?" in hints
         // For owner_fqn in inference, use instance namespace for proper class resolution
         let instance_owner_fqn = FullyQualifiedName::namespace(namespace_parts.clone());
-        let mut pending_inferred_return = None;
         let (return_type, return_type_provenance, return_equation) = if is_constructor {
             let return_type =
                 RubyType::Class(FullyQualifiedName::constant(namespace_parts.clone()));
@@ -411,19 +409,22 @@ impl FactCollector {
         } else if !self.resolve_analysis_method_returns {
             (None, TypeProvenance::Inferred, None)
         } else {
-            // Visit the body first so call proofs exist, then collect the
-            // equation on def exit. TypeTracker still owns flow and solving.
-            pending_inferred_return = Some(super::PendingInferredMethodReturn {
-                fqn: fqn.clone(),
-                namespace_parts: namespace_parts.clone(),
-                instance_owner_fqn: instance_owner_fqn.clone(),
-                param_types: param_types.clone(),
-                definition_range: self.document.prism_location_to_text_range(&full_location),
-            });
+            // Install exhaustive flow evidence before the ordinary visitor
+            // emits receiver candidates and call outcomes. Inferring only on
+            // def exit leaves those consumers with the last visited assignment
+            // rather than the values reaching the expression on every path.
+            self.collect_inferred_method_return(
+                node,
+                super::InferredMethodContext {
+                    fqn: fqn.clone(),
+                    namespace_parts: namespace_parts.clone(),
+                    instance_owner_fqn: instance_owner_fqn.clone(),
+                    param_types: param_types.clone(),
+                    definition_range: self.document.prism_location_to_text_range(&full_location),
+                },
+            );
             (None, TypeProvenance::Inferred, None)
         };
-        self.pending_inferred_method_returns
-            .push(pending_inferred_return);
 
         if let Some(return_equation) = return_equation {
             self.method_return_equations
@@ -550,13 +551,7 @@ impl FactCollector {
         }
     }
 
-    pub fn process_def_node_exit(&mut self, node: &DefNode) {
-        let pending = self.pending_inferred_method_returns.pop().expect(
-            "INVARIANT VIOLATED: method exit had no matching entry frame. This is a bug because process_def_node_entry pushes one pending return frame for every successful definition. Fix: keep def entry/exit pending-return accounting balanced.",
-        );
-        if let Some(pending) = pending {
-            self.collect_inferred_method_return(node, pending);
-        }
+    pub fn process_def_node_exit(&mut self, _node: &DefNode) {
         self.scope_tracker.pop_execution_context();
         self.scope_tracker.pop_method_fqn();
         self.scope_tracker.pop_scope_kind();
@@ -566,7 +561,7 @@ impl FactCollector {
     fn collect_inferred_method_return(
         &mut self,
         node: &DefNode,
-        pending: super::PendingInferredMethodReturn,
+        pending: super::InferredMethodContext,
     ) {
         let mut tracker = TypeTracker::new(self.document.content.as_bytes());
         tracker = tracker.with_analysis_engine(self.analysis_engine.clone());
@@ -583,7 +578,6 @@ impl FactCollector {
                 .map(|(name, ruby_type, _range, _provenance)| (name.clone(), ruby_type.clone()))
                 .collect(),
         );
-        tracker = tracker.with_seeded_call_outcomes(Arc::clone(&self.seeded_block_call_outcomes));
         if self.record_local_read_unknown_reasons {
             tracker = tracker.with_local_read_types();
         }
@@ -600,7 +594,6 @@ impl FactCollector {
             .max(tracker.max_live_shape_aliases());
         if self.record_local_read_unknown_reasons {
             let reads = tracker.take_local_read_types();
-            self.publish_proven_local_read_types(&reads);
             self.install_local_read_types(reads);
         }
         let immediate = equation.immediate_outcome();
@@ -614,21 +607,6 @@ impl FactCollector {
             pending.definition_range,
             TypeProvenance::Inferred,
         ));
-    }
-
-    fn publish_proven_local_read_types(&mut self, reads: &[LocalReadType]) {
-        let mut replacements = HashMap::new();
-        for read in reads {
-            if read.ruby_type == RubyType::Unknown {
-                continue;
-            }
-            let range = self.text_range_from_offsets(read.start_offset, read.end_offset);
-            replacements.insert(range, read.ruby_type.clone());
-        }
-        if replacements.is_empty() {
-            return;
-        }
-        self.local_read_types.extend(replacements);
     }
 
     /// Extract parameter information from a DefNode for inlay hints

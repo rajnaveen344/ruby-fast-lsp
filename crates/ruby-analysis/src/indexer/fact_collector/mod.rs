@@ -99,10 +99,6 @@ pub struct FactCollector {
     /// Compact method-return equations collected during the ordinary semantic
     /// traversal and solved once when the program traversal completes.
     method_return_equations: BTreeMap<Vec<RubyConstant>, Vec<MethodReturnEquation>>,
-    /// Inferred method returns are collected on def exit so TypeTracker can
-    /// reuse call proofs recorded while visiting the body. Nested defs push
-    /// one frame each.
-    pending_inferred_method_returns: Vec<Option<PendingInferredMethodReturn>>,
     finalized_method_return_equation_counts: HashMap<Vec<RubyConstant>, usize>,
     method_return_telemetry_by_namespace: BTreeMap<Vec<RubyConstant>, InferenceTelemetry>,
     max_live_shape_aliases: usize,
@@ -111,10 +107,6 @@ pub struct FactCollector {
     /// nested-receiver and assignment inference must be O(1); a Vec scan was
     /// repeating work already paid during `visit_call_node`.
     call_expression_outcomes: HashMap<TextRange, TypeInferenceOutcome>,
-    /// Proven block/proc/higher-order call results keyed by Prism start
-    /// offset. TypeTracker reuses these after the method body visit so it
-    /// does not repeat higher-order prepare. Unknown outcomes are omitted.
-    seeded_block_call_outcomes: Arc<HashMap<usize, RubyType>>,
     /// Call expressions that have a retained method candidate capable of
     /// producing a concrete outcome after complete engine resolution. This is
     /// collector-local and prevents terminal Unknown chains from becoming
@@ -134,7 +126,7 @@ pub struct FactCollector {
     shared_direct_known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
 }
 
-struct PendingInferredMethodReturn {
+struct InferredMethodContext {
     fqn: FullyQualifiedName,
     namespace_parts: Vec<RubyConstant>,
     instance_owner_fqn: FullyQualifiedName,
@@ -404,13 +396,11 @@ impl FactCollector {
             proc_return_types_by_local: HashMap::new(),
             active_nonlocal_writes: Vec::new(),
             method_return_equations: BTreeMap::new(),
-            pending_inferred_method_returns: Vec::new(),
             finalized_method_return_equation_counts: HashMap::new(),
             method_return_telemetry_by_namespace: BTreeMap::new(),
             max_live_shape_aliases: 0,
             method_return_outcomes: BTreeMap::new(),
             call_expression_outcomes: HashMap::new(),
-            seeded_block_call_outcomes: Arc::new(HashMap::new()),
             deferred_call_outcome_ranges: HashSet::new(),
             local_read_types: Vec::new(),
             expression_unknown_reasons: HashMap::new(),
@@ -2426,8 +2416,6 @@ impl FactCollector {
         };
         self.call_expression_outcomes.remove(&range);
         self.suppress_deferred_call_outcome(range, "proven special-call outcome");
-        Arc::make_mut(&mut self.seeded_block_call_outcomes)
-            .insert(range.start_byte as usize, return_type.clone());
         let fact = TypeFact::new(
             TypeSubject::Expression(range),
             return_type,
