@@ -76,6 +76,20 @@ cargo build --release         # Release build
   Application and fixture identities in published reports must be generic;
   label generalized historical paths explicitly rather than implying that a
   replacement synthetic fixture produced the original measurements.
+- Run `python3 -B support/structure/check.py` after structural edits. The same
+  check and its boundary tests run in the local/CI correctness gate. It counts
+  tracked and new non-ignored paths, including files and subfolders, and omits
+  deleted paths and local build output.
+- Audited roots and data exclusions live in `support/structure/policy.json`.
+  Bundled signature snapshots, vendored upstream code, and historical reports
+  retain their established data layout; their enclosing source folder still
+  counts the data directory as one entry. Exclusions are not source-family
+  exceptions and must not hide maintained code.
+- Existing oversized folders have an exact, temporary entry baseline. Do not
+  grow it; shrink or remove it as folders are cleaned. `ruby-analysis` is a
+  strict subtree with no legacy allowances or excluded descendants. A genuine
+  source-family exception requires a finite bound and the matching local README
+  explanation recorded separately in policy. See `support/structure/README.md`.
 
 ## TigerBeetle Principles (MANDATORY)
 
@@ -1209,6 +1223,14 @@ The crate root exposes only `core`, `engine`, `indexer`, and `inference`.
 Use the owning module's explicit exports; do not restore flattened crate-root
 aliases or inference aliases for `core::RubyType`. Core's implementation modules,
 stores, interned IDs, and stored fact representations are crate-private.
+
+The complete analysis source tree follows the directory limit. Core groups
+names, source context, callables, equations, values, and storage. Engine keeps
+state, query families, diagnostics, and debug projections beside their types.
+Indexer separates documents, fact lowering, syntax queries, and identifier node
+families. Public domain exports remain at their owning module root; do not add
+compatibility aliases for retired implementation paths. Read the local guides
+under `core/`, `engine/`, and `indexer/` before extending those areas.
 
 Consumers write domain `FileFacts` and read `engine::AnalysisQuery` results.
 `engine::TypeQuery::new(&engine, file_id)` borrows a real engine for file-scoped

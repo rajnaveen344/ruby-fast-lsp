@@ -124,7 +124,7 @@ impl TypeTracker {
                 existing_name.as_str() != name && existing.identity == callable.identity
             })
             .count();
-        if alias_count >= crate::core::callable_body::MAX_CALLABLE_BODY_ALIASES {
+        if alias_count >= crate::core::callables::callable_body::MAX_CALLABLE_BODY_ALIASES {
             callable.summary = Err(UnknownReason::CallableBodyBoundExceeded);
             for existing in self.environment.callables.values_mut() {
                 if existing.identity == callable.identity {
@@ -368,7 +368,7 @@ impl TypeTracker {
         if stack.contains(&callable.identity) {
             return TypeInferenceOutcome::unknown(UnknownReason::CallableRecursionUnsupported);
         }
-        if stack.len() >= crate::core::callable_body::MAX_CALLABLE_BODY_INSTANTIATIONS {
+        if stack.len() >= crate::core::callables::callable_body::MAX_CALLABLE_BODY_INSTANTIATIONS {
             return TypeInferenceOutcome::unknown(UnknownReason::CallableBodyBoundExceeded);
         }
         let summary = match &callable.summary {

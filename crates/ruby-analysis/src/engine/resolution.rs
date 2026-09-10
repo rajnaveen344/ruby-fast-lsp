@@ -11,9 +11,9 @@ use crate::core::{
     SourceKind, StoredGraphEdgeFact, StoredMethodReferenceCandidate, StoredReferenceCandidateRef,
     SymbolKind, TextRange, TypeSubject,
 };
-use crate::engine::query::AnalysisQuery;
+use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
+use crate::engine::queries::AnalysisQuery;
 use crate::engine::state::EffectiveMethodFactMatch;
-use crate::engine::types::{AnalysisQueryCache, MethodReturnQueryAccess};
 
 #[derive(Default)]
 pub(crate) struct MethodLookupChainCache {

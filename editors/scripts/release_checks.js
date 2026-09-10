@@ -98,6 +98,8 @@ function main() {
   fs.mkdirSync(evidence, { recursive: true });
   const summary = { schema_version: 1, mode, started_at: new Date().toISOString(), checks: [] };
   const commands = mode === 'correctness' ? [
+    ['source-layout-tests', 'python3', ['-B', '-m', 'unittest', 'discover', '-s', 'support/structure', '-p', 'test_*.py']],
+    ['source-layout', 'python3', ['-B', 'support/structure/check.py']],
     ['versions', 'node', ['editors/check_package_versions.js']],
     ['workspace', 'cargo', ['test', '--locked', '--workspace']],
     ['editor', 'node', ['--test', ...fs.readdirSync(path.join(root, 'editors/vscode/vsix/test')).filter(f => f.endsWith('.test.js')).sort().map(f => `editors/vscode/vsix/test/${f}`)]],

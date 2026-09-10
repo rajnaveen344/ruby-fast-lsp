@@ -8,7 +8,7 @@ claim measured memory savings or change the semantic database representation.
 Start with [server.rs](../src/server.rs): it constructs the owners and implements
 the LSP protocol facade. Each module under `src/server/` keeps related state and
 operations together. The semantic database remains
-[AnalysisEngine](../crates/ruby-analysis/src/engine/state.rs), isolated per Ruby
+[AnalysisEngine](../crates/ruby-analysis/src/engine/state/mod.rs), isolated per Ruby
 project, with a separate orphan engine for unowned documents.
 
 ## The ten server fields

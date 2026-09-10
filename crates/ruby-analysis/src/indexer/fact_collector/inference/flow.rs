@@ -1,4 +1,4 @@
-use crate::core::type_store::NamedTypeResolution;
+use crate::core::storage::type_store::NamedTypeResolution;
 use crate::core::{
     FullyQualifiedName, RubyType, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance,
     TypeSubject, UnknownReason,

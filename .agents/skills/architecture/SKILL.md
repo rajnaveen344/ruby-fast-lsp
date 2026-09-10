@@ -35,6 +35,9 @@ Read `AGENTS.md` first. It contains the detailed current architecture direction.
   subfolders for new or reorganized folders. Group by semantic responsibility;
   cohesive node families without a useful split require a documented local
   exception. Keep Rust module ownership and visibility aligned with the layout.
+- Run `python3 -B support/structure/check.py`. The entire analysis crate is
+  enforced without legacy allowances; other oversized source folders have an
+  exact temporary baseline. Never expand that baseline to admit new work.
 
 ## Library API
 
@@ -47,6 +50,11 @@ returns `CollectedFile` through `finish()` for production and simulation file
 composition. Keep new state and helpers beside their collector responsibility;
 see `crates/ruby-analysis/src/indexer/fact_collector/README.md` and the library
 guide at `crates/ruby-analysis/README.md`.
+
+Core, engine, and indexer each have a local reading guide. Group internal
+contracts/stores, query families, parser inputs, and visitor callbacks by those
+responsibilities while preserving public domain exports. Query result types
+belong beside their query family; AST node handlers have semantic subfamilies.
 
 `TypeTracker` similarly keeps seven private state owners and uses existing
 Prism nodes without retaining source bytes. Keep branch-cloned flow metadata

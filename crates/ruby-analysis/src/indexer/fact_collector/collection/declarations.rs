@@ -1,4 +1,4 @@
-use crate::core::method_store::{MethodVisibility, MethodVisibilityOverrideFact};
+use crate::core::storage::method_store::{MethodVisibility, MethodVisibilityOverrideFact};
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact,
     GraphNodeKind, MethodAvailability, MethodFact, MethodParamFact, NamespaceKind, RubyConstant,

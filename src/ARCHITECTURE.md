@@ -49,6 +49,14 @@ entry points and an executable collection/replacement example.
 
 ## Component Responsibilities
 
+The analysis library's implementation folders follow the same ownership split
+as its API. Core groups names, source context, types, equations, callables, and
+compact stores; engine groups state and query families; indexer groups documents,
+fact lowering, syntax queries, and identifier callbacks. Read their local guides
+from the [library guide](../crates/ruby-analysis/README.md). Every analysis folder
+meets the ten-entry limit, enforced by `support/structure/check.py` through the
+correctness gate.
+
 ### 1. Indexer (`src/indexer/`)
 
 The Indexer is responsible for discovering Ruby files, parsing them, and feeding facts into `ruby-analysis::engine`.

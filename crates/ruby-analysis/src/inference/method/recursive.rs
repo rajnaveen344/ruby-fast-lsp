@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::core::method_return_equation::MethodReturnBase;
+use crate::core::equations::method_return_equation::MethodReturnBase;
 use crate::core::{
     FullyQualifiedName, InferenceTelemetry, MethodReturnEquation, RubyType, TypeInferenceOutcome,
     UnknownReason,

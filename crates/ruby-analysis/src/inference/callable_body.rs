@@ -22,7 +22,9 @@ impl CallableEvaluationBudget {
             .solve_iterations
             .checked_add(1)
             .ok_or(UnknownReason::CallableBodyBoundExceeded)?;
-        if self.solve_iterations > crate::core::callable_body::MAX_CALLABLE_BODY_SOLVE_ITERATIONS {
+        if self.solve_iterations
+            > crate::core::callables::callable_body::MAX_CALLABLE_BODY_SOLVE_ITERATIONS
+        {
             return Err(UnknownReason::CallableBodyBoundExceeded);
         }
         Ok(())
@@ -150,7 +152,7 @@ pub(crate) fn instantiate_callable_body(
 }
 
 fn exceeds_callable_type_depth(ruby_type: &RubyType, depth: usize) -> bool {
-    if depth > crate::core::callable_body::MAX_CALLABLE_BODY_TYPE_DEPTH {
+    if depth > crate::core::callables::callable_body::MAX_CALLABLE_BODY_TYPE_DEPTH {
         return true;
     }
     match ruby_type {
@@ -183,7 +185,7 @@ fn exceeds_callable_type_depth(ruby_type: &RubyType, depth: usize) -> bool {
 fn exceeds_callable_union_bound(ruby_type: &RubyType) -> bool {
     match ruby_type {
         RubyType::Union(members) => {
-            members.len() > crate::core::callable_body::MAX_CALLABLE_BODY_UNION_VARIANTS
+            members.len() > crate::core::callables::callable_body::MAX_CALLABLE_BODY_UNION_VARIANTS
                 || members.iter().any(exceeds_callable_union_bound)
         }
         RubyType::Array(members) => members.iter().any(exceeds_callable_union_bound),
@@ -220,7 +222,7 @@ fn evaluate_expression(
     resolve_callable_capture: &mut impl FnMut(&str, &[RubyType]) -> Option<TypeInferenceOutcome>,
     resolve_method: &mut impl FnMut(&RubyType, &RubyMethod, &[RubyType]) -> TypeInferenceOutcome,
 ) -> Result<RubyType, UnknownReason> {
-    if depth > crate::core::callable_body::MAX_CALLABLE_BODY_TYPE_DEPTH {
+    if depth > crate::core::callables::callable_body::MAX_CALLABLE_BODY_TYPE_DEPTH {
         return Err(UnknownReason::CallableBodyBoundExceeded);
     }
     match expression {
@@ -288,7 +290,9 @@ fn evaluate_expression(
             .map_err(|_| UnknownReason::CallableBodyBoundExceeded)
         }
         CallableBodyExpression::ExhaustiveUnion(values) => {
-            if values.len() > crate::core::callable_body::MAX_CALLABLE_BODY_UNION_VARIANTS {
+            if values.len()
+                > crate::core::callables::callable_body::MAX_CALLABLE_BODY_UNION_VARIANTS
+            {
                 return Err(UnknownReason::CallableBodyBoundExceeded);
             }
             let mut members = Vec::with_capacity(values.len());

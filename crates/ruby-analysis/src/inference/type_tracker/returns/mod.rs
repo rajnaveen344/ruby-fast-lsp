@@ -1,6 +1,6 @@
 //! Method return evidence and bounded recursive return solving.
 
-use crate::core::method_return_equation::MethodReturnBase;
+use crate::core::equations::method_return_equation::MethodReturnBase;
 use crate::core::{
     ConstantTypeDependency, FullyQualifiedName, RubyType, TypeInferenceOutcome, UnknownReason,
 };

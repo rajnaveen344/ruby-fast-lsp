@@ -11,55 +11,41 @@
 //! this module. Stores and their compact representations are internal.
 
 mod debug;
-mod debug_types;
-mod diagnostic_helpers;
 mod diagnostics;
-mod external_facts_template;
-mod file_id_map;
-mod hierarchy;
-mod hierarchy_types;
-mod lookup;
-mod lookup_types;
-mod namespace_tree;
-mod namespace_tree_types;
-mod query;
+mod queries;
 mod resolution;
 mod state;
-mod type_query;
-mod types;
-mod workspace_symbol_types;
-mod workspace_symbols;
 
 pub use debug::reference_storage_sizes;
-pub use debug_types::{
+pub use debug::types::{
     AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
     InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
     StatsResponse,
 };
-pub use external_facts_template::{
-    ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate,
-    ProjectNeutralTemplateRejection,
-};
-pub use file_id_map::FileIdMap;
-pub use hierarchy_types::{
+pub use queries::cache::AnalysisQueryCache;
+pub use queries::hierarchy::types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
     TypeHierarchyRelation,
 };
-pub use lookup_types::{
+pub use queries::lookup::types::{
     ConstantHover, ConstantHoverKind, ConstantLookupRequest, ConstantMatch, MethodMatch,
     MixinUsage, MixinUsageKind, VariableTypeKind,
 };
-pub use namespace_tree_types::{
+pub use queries::namespace_tree::types::{
     IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
     MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
-pub use query::AnalysisQuery;
+pub use queries::type_query::TypeQuery;
+pub use queries::workspace_symbols::types::WorkspaceSymbolMatch;
+pub use queries::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
+pub use state::external_facts_template::{
+    ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate,
+    ProjectNeutralTemplateRejection,
+};
+pub use state::file_id_map::FileIdMap;
 pub use state::{
     AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, ResolvePassStats, SemanticChange,
     SemanticExportFingerprint, SemanticResultFingerprint, SourceFile, SourceFileInput,
     SourceFileSnapshot,
 };
-pub use type_query::TypeQuery;
-pub use types::AnalysisQueryCache;
-pub use workspace_symbol_types::WorkspaceSymbolMatch;

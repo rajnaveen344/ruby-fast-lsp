@@ -221,7 +221,7 @@ impl FactCollector {
         }
 
         if let Some(forwarded_block_call) =
-            crate::indexer::forwarded_block::direct_forwarded_block_call(node)
+            crate::indexer::lowering::forwarded_block::direct_forwarded_block_call(node)
         {
             let definition_range = self.direct_range(&full_location);
             for fact in self
@@ -234,7 +234,9 @@ impl FactCollector {
                 fact.set_forwarded_block_call(Some(forwarded_block_call.clone()));
             }
         }
-        if let Some(direct_yield_call) = crate::indexer::forwarded_block::direct_yield_call(node) {
+        if let Some(direct_yield_call) =
+            crate::indexer::lowering::forwarded_block::direct_yield_call(node)
+        {
             let definition_range = self.direct_range(&full_location);
             for fact in self
                 .facts

@@ -22,6 +22,12 @@ constant and method-return equation solvers in `inference`; those solvers may
 consult engine queries. These are cooperating modules in one crate. The engine
 owns the solved state and Ruby lookup policy; inference owns the type rules.
 
+Use the [core guide](src/core/README.md) for contracts and compact stores,
+the [indexer guide](src/indexer/README.md) for documents and parser queries,
+and the [engine guide](src/engine/README.md) for lifecycle, resolution, and query
+families. Every folder in this library meets the ten-entry rule; the automated
+source-layout check rejects legacy allowances inside this crate.
+
 For local inference, start with `TypeTracker::new()` and follow its existing
 Prism tree through traversal, expressions, flow, and method return solving. The
 [tracker guide](src/inference/type_tracker/README.md) maps its private state

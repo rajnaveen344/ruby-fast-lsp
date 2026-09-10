@@ -1,0 +1,417 @@
+pub(in crate::engine) mod cache;
+pub(in crate::engine) mod hierarchy;
+pub(in crate::engine) mod lookup;
+pub(in crate::engine) mod namespace_tree;
+pub(in crate::engine) mod type_query;
+pub(in crate::engine) mod workspace_symbols;
+
+use std::path::Path;
+
+use crate::core::MethodVisibilityOverrideFact;
+use crate::core::{
+    DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
+    GraphNodeKind, MethodCalleeResolution, MethodFact, ReferenceFact, RubyType, SourceFileId,
+    StoredMethodReferenceCandidate, StoredReferenceCandidateKind, SymbolFact, TextRange, TypeFact,
+    TypeResolution, TypeSubject, UnknownReason,
+};
+
+use crate::engine::{AnalysisEngine, SourceFile};
+
+pub struct AnalysisQuery<'a> {
+    pub(crate) engine: &'a AnalysisEngine,
+}
+
+impl<'a> AnalysisQuery<'a> {
+    pub fn new(engine: &'a AnalysisEngine) -> Self {
+        Self { engine }
+    }
+
+    pub(crate) fn query_cache_identity(&self) -> (u64, u64) {
+        self.engine.query_cache_identity()
+    }
+
+    pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
+        self.engine.file_id(path)
+    }
+
+    pub fn file(&self, file_id: SourceFileId) -> Option<&'a SourceFile> {
+        self.engine.file(file_id)
+    }
+
+    pub fn execution_context_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<&'a ExecutionContextFact> {
+        self.engine.execution_context_at(file_id, byte_offset)
+    }
+
+    pub(crate) fn constant_callable_body(
+        &self,
+        constant: &FullyQualifiedName,
+    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+        self.engine.constant_callable_body(constant)
+    }
+
+    pub fn type_at(
+        &self,
+        subject: &TypeSubject,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> TypeResolution {
+        self.engine.type_at(subject, file_id, byte_offset)
+    }
+
+    pub fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
+        self.engine.type_facts_for(subject)
+    }
+
+    /// All stored type facts, detached from the engine's internal indexes.
+    pub fn all_type_facts(&self) -> Vec<TypeFact> {
+        self.engine.type_store().all_facts()
+    }
+
+    pub fn type_facts_in_file(&self, file_id: SourceFileId) -> Vec<TypeFact> {
+        self.engine.type_store().facts_in_file(file_id)
+    }
+
+    pub fn symbol_facts_in_file(&self, file_id: SourceFileId) -> Vec<SymbolFact> {
+        self.engine.symbol_facts_in_file(file_id)
+    }
+
+    pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
+        self.engine.all_symbol_facts()
+    }
+
+    pub fn has_symbols(&self) -> bool {
+        !self.engine.all_symbol_facts().is_empty()
+    }
+
+    pub fn symbols_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<SymbolFact> {
+        self.engine.symbol_facts_for(fqn)
+    }
+
+    pub fn references_for_fqn(&self, fqn: &FullyQualifiedName) -> &'a [ReferenceFact] {
+        self.engine.reference_facts_for(fqn)
+    }
+
+    pub fn methods_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<MethodFact> {
+        self.engine.method_facts_for(fqn)
+    }
+
+    pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
+        self.engine.method_facts_in_file(file_id)
+    }
+
+    pub fn method_visibility_overrides_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Vec<MethodVisibilityOverrideFact> {
+        self.engine.method_visibility_overrides_in_file(file_id)
+    }
+
+    pub fn all_method_facts(&self) -> Vec<MethodFact> {
+        self.engine.all_method_facts()
+    }
+
+    pub fn references_in_file(&self, file_id: SourceFileId) -> Vec<ReferenceFact> {
+        self.engine.reference_store().facts_in_file(file_id)
+    }
+
+    pub fn resolved_reference_definition_ranges_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Vec<TextRange> {
+        let mut candidates = Vec::new();
+        for candidate in self
+            .engine
+            .reference_candidate_store()
+            .candidates_in_file(file_id)
+            .into_iter()
+            .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))
+        {
+            // Extension patches enter both direct and merged collection paths.
+            // Identical candidates represent one semantic target, not an
+            // ambiguity. Distinct overlapping candidates remain separate and
+            // continue through the fail-closed target checks below.
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+        if let [candidate] = candidates.as_slice() {
+            if let StoredReferenceCandidateKind::Method {
+                owner,
+                owner_kind,
+                method,
+                is_super,
+                access,
+                caller,
+                call_expression_range,
+                preferred_definition_range,
+                diagnostics,
+            } = &candidate.kind
+            {
+                let candidate = StoredMethodReferenceCandidate {
+                    range: candidate.range,
+                    owner: *owner,
+                    owner_kind: *owner_kind,
+                    method: *method,
+                    is_super: *is_super,
+                    access: *access,
+                    caller: *caller,
+                    call_expression_range: *call_expression_range,
+                    preferred_definition_range: *preferred_definition_range,
+                    diagnostics: diagnostics.clone(),
+                };
+                let mut all_ranges = Vec::new();
+                let candidate_callees = self.method_candidate_callees(&candidate);
+                for callee in candidate_callees.into_iter().filter(|callee| {
+                    callee.resolution == MethodCalleeResolution::Exact
+                        && callee.method == candidate.method
+                }) {
+                    let mut ranges = callee.definition_ranges;
+                    if let Some(preferred) = candidate.preferred_definition_range {
+                        if ranges.contains(&preferred) {
+                            ranges = vec![preferred];
+                        }
+                    }
+                    let winning_precedence = ranges
+                        .iter()
+                        .map(|range| {
+                            self.engine
+                                .file(range.file_id)
+                                .expect(
+                                    "INVARIANT VIOLATED: method-callee definition range references an unregistered source file. This is a bug because navigation resolution must retain file ownership. Fix: register sources before publishing method facts.",
+                                )
+                                .kind
+                                .definition_precedence()
+                        })
+                        .min();
+                    if let Some(winning_precedence) = winning_precedence {
+                        ranges.retain(|range| {
+                            self.engine
+                                .file(range.file_id)
+                                .expect(
+                                    "INVARIANT VIOLATED: method-callee definition range disappeared during precedence filtering. This is a bug because definition queries hold an immutable engine borrow. Fix: keep file registration stable for the duration of an analysis query.",
+                                )
+                                .kind
+                                .definition_precedence()
+                                == winning_precedence
+                        });
+                    }
+                    all_ranges.extend(ranges);
+                }
+                all_ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+                all_ranges.dedup();
+                return all_ranges;
+            }
+        }
+        let mut targets = candidates
+            .into_iter()
+            .flat_map(|candidate| match candidate.kind {
+                StoredReferenceCandidateKind::Resolved { target, .. } => vec![self
+                    .engine
+                    .fqn_for_id(target)
+                    .expect(
+                        "INVARIANT VIOLATED: exact resolved reference points to a missing target FQN. This is a bug because resolved candidates contain only interned target ids. Fix: intern the target before storing the reference candidate and keep the name arena append-only.",
+                    )
+                    .clone()],
+                StoredReferenceCandidateKind::Method { .. } => Vec::new(),
+                StoredReferenceCandidateKind::Constant { lookup } => {
+                    let lookup = self.engine.names.const_lookup(lookup).expect(
+                        "INVARIANT VIOLATED: exact constant reference points to a missing lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern constant lookups before storing reference candidates.",
+                    );
+                    let context = self.engine.names.fqn(lookup.context).expect(
+                        "INVARIANT VIOLATED: exact constant reference lookup points to a missing context FQN. This is a bug because constant lookups must retain their interned lexical context. Fix: intern the context before storing the lookup.",
+                    );
+                    self.resolve_constant_in_context(
+                        lookup.path.as_slice(),
+                        &if lookup.absolute {
+                            Vec::new()
+                        } else {
+                            context.namespace_parts()
+                        },
+                    )
+                    .map(|target| vec![target])
+                    .unwrap_or_default()
+                }
+            })
+            .collect::<Vec<_>>();
+        targets.sort_by_key(ToString::to_string);
+        targets.dedup();
+        if targets.len() > 1 {
+            return Vec::new();
+        }
+        let mut all_ranges = Vec::new();
+        for target in targets {
+            let mut ranges = match &target {
+                FullyQualifiedName::Method(_, _) => {
+                    let facts = self.engine.method_facts_for(&target);
+                    facts.into_iter().map(|fact| fact.range).collect::<Vec<_>>()
+                }
+                FullyQualifiedName::Namespace(_, _)
+                | FullyQualifiedName::Constant(_)
+                | FullyQualifiedName::LocalVariable(_)
+                | FullyQualifiedName::InstanceVariable(_)
+                | FullyQualifiedName::ClassVariable(_)
+                | FullyQualifiedName::GlobalVariable(_) => self
+                    .engine
+                    .symbol_facts_for(&target)
+                    .into_iter()
+                    .map(|fact| fact.range)
+                    .collect::<Vec<_>>(),
+            };
+            let winning_precedence = ranges
+                .iter()
+                .map(|range| {
+                    self.engine
+                        .file(range.file_id)
+                        .expect(
+                            "INVARIANT VIOLATED: definition range references an unregistered source file. \
+                             This is a bug because definition precedence requires stable source metadata. \
+                             Fix: register sources before inserting symbol or method facts.",
+                        )
+                        .kind
+                        .definition_precedence()
+                })
+                .min();
+            if let Some(winning_precedence) = winning_precedence {
+                ranges.retain(|range| {
+                    self.engine
+                        .file(range.file_id)
+                        .expect(
+                            "INVARIANT VIOLATED: definition range disappeared during precedence filtering. \
+                             This is a bug because definition queries hold an immutable engine borrow. \
+                             Fix: keep file registration stable for the duration of an analysis query.",
+                        )
+                        .kind
+                        .definition_precedence()
+                        == winning_precedence
+                });
+            }
+            all_ranges.extend(ranges);
+        }
+        all_ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+        all_ranges.dedup();
+        all_ranges
+    }
+
+    pub fn navigation_must_fail_closed_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+        exact_target_proven: bool,
+    ) -> bool {
+        let candidates = self
+            .engine
+            .reference_candidate_store()
+            .candidates_in_file(file_id);
+        let exact_non_method_reference = exact_target_proven
+            && candidates.iter().any(|candidate| {
+                candidate.range.contains_offset(file_id, byte_offset)
+                    && matches!(
+                        candidate.kind,
+                        StoredReferenceCandidateKind::Resolved { .. }
+                            | StoredReferenceCandidateKind::Constant { .. }
+                    )
+            });
+        if exact_non_method_reference {
+            return false;
+        }
+        let unknown_reason_blocks_dispatch = |reason| {
+            matches!(
+                reason,
+                UnknownReason::NoReachingAssignment
+                    | UnknownReason::UnresolvedAssignmentValue
+                    | UnknownReason::AmbiguousReachingAssignment
+                    | UnknownReason::UnknownReceiver
+                    | UnknownReason::InvalidMethodName
+                    | UnknownReason::IncompleteUnionMember
+            )
+        };
+        let candidate_barrier = self
+            .engine
+            .reference_candidate_store()
+            .candidates_in_file(file_id)
+            .iter()
+            .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))
+            .any(|candidate| {
+                let StoredReferenceCandidateKind::Method {
+                    method,
+                    call_expression_range: _,
+                    diagnostics,
+                    ..
+                } = &candidate.kind
+                else {
+                    return false;
+                };
+                let receiver_unknown = diagnostics.as_deref().is_some_and(|diagnostics| {
+                    diagnostics.receiver_expression_range.is_some_and(|range| {
+                        self.local_read_type_at(range.file_id, range.start_byte)
+                            == Some(RubyType::Unknown)
+                            || self.exact_expression_unknown_reason(range).is_some()
+                    })
+                });
+                let resolved_to_fallback = self
+                    .engine
+                    .reference_store()
+                    .targets_for_exact_range(candidate.range)
+                    .into_iter()
+                    .filter_map(|target| self.engine.fqn_for_id(target))
+                    .any(|target| {
+                        matches!(
+                            target,
+                            FullyQualifiedName::Method(_, resolved_method)
+                                if resolved_method != method
+                        )
+                    });
+                receiver_unknown || resolved_to_fallback
+            });
+        candidate_barrier
+            || (!exact_target_proven
+                && self
+                    .expression_unknown_reason_at(file_id, byte_offset)
+                    .is_some_and(unknown_reason_blocks_dispatch))
+    }
+
+    pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {
+        self.engine.graph_nodes_for(fqn)
+    }
+
+    pub fn has_graph_node(&self, fqn: &FullyQualifiedName) -> bool {
+        self.engine.has_graph_node(fqn)
+    }
+
+    pub fn first_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        self.engine.first_graph_node_kind(fqn)
+    }
+
+    pub fn latest_graph_node_kind(&self, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        self.engine.latest_graph_node_kind(fqn)
+    }
+
+    pub fn graph_edges_from(&self, fqn: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
+        self.engine.graph_edges_from(fqn)
+    }
+
+    pub fn all_graph_edges(&self) -> Vec<GraphEdgeFact> {
+        self.engine.all_graph_edges()
+    }
+
+    pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
+        self.engine.diagnostic_facts_in_file(file_id)
+    }
+
+    pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {
+        self.engine.all_diagnostic_facts()
+    }
+
+    pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {
+        self.engine.graph_nodes_in_file(file_id)
+    }
+
+    pub fn graph_edges_in_file(&self, file_id: SourceFileId) -> Vec<GraphEdgeFact> {
+        self.engine.graph_edges_in_file(file_id)
+    }
+}
