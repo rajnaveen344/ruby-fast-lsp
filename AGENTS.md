@@ -131,6 +131,14 @@ but publishes only documents currently open in the client. Opening/changing a
 file publishes its syntax and semantic diagnostics normally. Do not flood the
 LSP client with closed-file diagnostics or weaken the engine's reusable
 diagnostic store to implement this projection policy.
+Cold diagnostic publication acquires the document's existing semantic lock,
+rechecks the indexing generation and current engine ownership, and only then
+reads the current buffer and resolved facts. Keep the engine read lock through
+the synchronous publication enqueue; the separate sender owns client I/O.
+Never retain a prepared diagnostic array across an await: another file's edit
+may invalidate it even when the consumer's source snapshot is unchanged.
+Publish empty clears as well as errors, and retain current syntax diagnostics
+and exact-source linter output without relaunching the linter.
 Open editor buffers are authoritative over disk during cold project collection
 and JRuby replay. Delayed file-fact producers must capture the engine's opaque
 source snapshot and commit only while that exact engine/file/revision identity
@@ -194,8 +202,20 @@ Static `require` / `require_relative` goto and `unresolved-require` diagnostics
 are implemented (project `loadPaths`, `lib`, project root, then gem/stdlib
 require roots; content-only underlines; refresh after dependency roots
 publish). Known gaps and intentional non-goals live in
-`src/indexer/require_paths.rs` module docs — notably missing stdlib/default-gem
-integration coverage and a full cold-index coordinator refresh regression.
+`src/indexer/require_paths.rs` module docs. A full cold-coordinator regression
+covers fixture-runtime stdlib/default-gem roots, diagnostic refresh without an
+edit, true misses, and project-local precedence. Installed-runtime acceptance
+and a locked-gem precedence collision still need coverage.
+Dependency-root diagnostic refresh captures each consumer's opaque source
+snapshot and the immutable require-index identity. After taking the document
+semantic lock, retain workspace ownership and root guards through conditional
+engine replacement and synchronous publication. Resolve current open-buffer
+require candidates against the current engine so project targets opened during
+collection participate; templates use their masked Ruby content. Closed files
+reuse stored missing-require facts without disk rereads and receive no
+publication. Preserve current syntax and exact-source linter output without
+rerunning the linter. A superseded source, dependency index, project owner, or
+indexing generation must reject the delayed update, including empty clears.
 The bottom-right runtime status follows the active document's deepest owning
 project and opens the project runtime workflow. An explicit runtime selection
 persists privately for the VS Code workspace. Saving it to `.ruby-version` is a
@@ -319,6 +339,12 @@ Universal runtime value constants are declared in the embedded core
 physical `core-rbs/constants.rbs` source and every VSIX/npm packaging manifest
 aligned so navigation has a real target. Never infer a constant's value type
 from its name or treat every constant receiver as a class object.
+
+Register bundled stub files with their actual source text, in sorted path order,
+before collecting templates without insertion. A placeholder file reservation
+has no line index and makes otherwise valid core declaration ranges disappear
+from LSP navigation. Preserve non-ASCII source positions and deterministic file
+identities alongside the immutable pre-batch semantic snapshot.
 
 Hash-backed structural inference is represented only by canonical
 `RubyType::Literal` and `RubyType::Shape` values. `TypeTracker` may use bounded
@@ -725,7 +751,7 @@ implicit receiver to the application instance. `helpers do` uses the
 application singleton as `self` and the application instance as the `def`
 owner; constant helper arguments emit ordinary instance mixin patches. Classic
 calls target `Sinatra::Application`, modular calls target the current
-`Sinatra::Base` subclass, and applicability requires locked Sinatra `>= 3, < 5`.
+`Sinatra::Base` subclass, and applicability requires locked Sinatra `>= 2, < 5`.
 Keep this policy in the guest. The host validator may accept namespace-only
 execution contexts, but generated targets must still be declared in the same
 patch.
@@ -1669,13 +1695,69 @@ Useful commands:
 cargo test test::simulation --release
 SIM_SEED=123 cargo test generated_project_runs_seeded_edit_sequence -- --nocapture
 SIM_RANDOM_SEEDS=10 cargo test generated_project_runs_seeded_edit_sequence -- --nocapture
-SIM_LARGE_SCALE=1 cargo test generated_project_large_scale_smoke -- --nocapture
+cargo test --release generated_project_large_scale_smoke -- --ignored --nocapture
+cargo test --release generated_project_large_scale_engine_checks_all_edges -- --ignored --nocapture
+SIM_REAL_CORPUS_ROOT=/path/to/app cargo test --release generated_project_real_corpus_smoke -- --ignored --nocapture
 ```
 
 Seeded simulation uses fixed seeds plus `src/test/simulation/regression_seeds.txt`.
 Failures write a replay artifact under the temp directory with the exact
-`SIM_SEED=... cargo test generated_project_runs_seeded_edit_sequence -- --nocapture`
-command. Add reduced regression seeds to `regression_seeds.txt`.
+`SIM_SEED=... cargo test test::simulation -- --nocapture` command, covering the
+original lifecycle and fresh-analysis checks. Add reduced regression seeds to
+`regression_seeds.txt`. Generated constant references carry lexical scope
+separately from method ownership: a top-level eval block does not inherit the
+target class's constant nesting.
+
+Large-scale and real-corpus tests are explicitly ignored in the default suite;
+they must never return early and count as passing because an opt-in flag is
+missing. Run the two generated large-scale scenarios as release gates. An
+explicit real-corpus run requires an existing corpus path. Self-contained
+inference acceptance and reviewed precision reports run by default; they are
+not ignored. The shared release validator allows only the three named
+scale/corpus deferrals and rejects any other ignored test or unaccounted skip.
+Documentation examples must compile or be explicitly labeled as plain text,
+not hidden behind ignored doctests. All test diagnostic
+observations, including inline tags, read actual publications without parsing,
+collecting, replacing, or resolving facts. A missing publication is distinct
+from an explicit empty clear. Fresh-analysis simulation comparisons include
+published diagnostics alongside navigation, references, hover, and hints.
+Controlled collection/commit
+schedules use channels, preserve replay artifacts, and exercise cancellation,
+engine replacement, and project isolation through the production snapshot guard.
+Actual-coordinator schedules must order the edit's completion before releasing
+delayed cold work, then observe immediately after the commit attempt while the
+coordinator tail is paused. Releasing both producers together or observing only
+after recovery can hide an invalid intermediate write; a production source-guard
+mutation demonstrated this gap. Keep the independently expected navigation
+assertion at that boundary in addition to later fresh-analysis comparisons.
+
+The reviewed fault inventory and isolated runner live under
+`support/simulation/`. Reserve exclusive Cargo-target use before running
+`python3 support/simulation/run_fault_campaign.py --run`. Only its disposable
+checkout receives mutations. A mutant counts as detected only when the named
+test executes and fails the specified semantic assertion; compilation, setup,
+timeouts, or unrelated failures never count. Preserve the failed campaign as
+well as corrected-run evidence when improving the harness.
+
+Six neutral Ruby dispatch controls pair handwritten Ruby programs with model
+inputs and independent expected targets in `support/simulation/oracle_cases.json`.
+The ordinary simulator test validates the model side; the explicit release gate
+runs `python3 support/simulation/run_oracle_controls.py` for actual Ruby dispatch.
+Missing Ruby fails this required execution check. Keep expected outcomes separate
+from observations and do not claim static-inference completeness from these
+selected execution paths.
+
+Newly opened definitions refresh and republish only open consumers owned by the
+same isolated engine. Retain current syntax diagnostics and exact-source linter
+output without launching the linter again for a semantic-only refresh. Cached
+linter output is editor presentation state keyed by the opaque source snapshot;
+edits and close invalidate it, and a different engine/source cannot reuse it.
+
+Method flow evidence must be installed before the ordinary body visitor emits
+call outcomes and receiver candidates. Def-exit return inference with previously
+recorded concrete block results was found to retain stale assignment and shape
+proofs. Never reuse a call result across flow environments merely because its
+source range matches; preserve every reachable receiver and Unknown boundary.
 
 ### Type Inference Architecture
 
@@ -1833,6 +1915,15 @@ only the semantic shape needed to exercise the same LSP/indexer/engine path.
   its declared value type through `AnalysisQuery::type_to_namespace` and use
   ordinary instance-method lookup. Zero-argument `freeze` preserves the
   receiver's literal type so frozen constant declarations seed that fact.
+  Cold project collection seeds value-constant symbols and types into the
+  generation's immutable read engine before any body inference, independently
+  of extension activation and file order. Unresolved constant aliases retain
+  exact Unknown type facts for deferred equations; syntax alone never proves
+  a class object. Keep the extension namespace skeleton under its existing
+  applicability policy. Proven block-owned local reads join flow deltas in
+  file-owned read evidence so unchanged `didOpen` can reuse cold facts without
+  losing block types. Hover must not substitute scope zero when a local's
+  lexical owner is unavailable in the editor cache.
 - A nested call may become a receiver only from the exact proven inner
   call-expression outcome after the complete graph is installed. Validate the
   resulting namespace against its graph node kind; a module must never become

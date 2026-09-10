@@ -1,0 +1,85 @@
+name: Bug report
+description: Report an installation, analysis, editor, or simulation problem.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Include a small, neutral reproduction when possible. Proprietary source is never required.
+        Remove credentials, personal data, private paths, and application-specific names from logs and examples before posting.
+  - type: input
+    id: version
+    attributes:
+      label: Server and extension versions
+      description: Include the exact server version, editor extension version if applicable, and candidate commit/build identity if known.
+      placeholder: "Server: …; extension: …; candidate commit: …"
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Installation channel
+      options:
+        - npm
+        - VS Code Marketplace
+        - Open VSX
+        - Supplied VSIX candidate
+        - Source build
+        - Other (describe below)
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS version and architecture, Ruby implementation/version, Bundler version, editor/version, and other enabled Ruby extensions. For JRuby, include JDK/version. Say unavailable where relevant.
+      placeholder: |
+        OS and architecture:
+        Ruby implementation/version:
+        Bundler:
+        JDK (JRuby only):
+        Editor/version:
+        Other Ruby extensions:
+        Channel details, if needed:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal neutral reproduction
+      description: Provide a synthetic snippet or public fixture and only the dependency details needed to reproduce. Describe the shape if you cannot yet reduce the example; do not attach proprietary code or a private repository.
+      placeholder: |
+        Workspace layout and relevant Gemfile/lock versions:
+        Files and neutral Ruby/RBS/ERB snippets:
+        Runtime selection (Auto or exact selection):
+    validations:
+      required: true
+  - type: textarea
+    id: lifecycle
+    attributes:
+      label: Lifecycle steps
+      description: Include startup/indexing state, which files were open, exact edit/save/close/reopen or restart order, and dependency/workspace changes. For simulations, include the seed and replay command.
+      placeholder: |
+        1. Open …
+        2. Wait for indexing / edit while indexing …
+        3. Invoke …
+        Does the problem remain after restarting?
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected and actual behavior
+      description: Include exact diagnostic text, expected navigation destinations or edits, and whether this worked in a previous version. For slow operations, include timing and project size if known.
+      placeholder: |
+        Expected:
+        Actual:
+        Last working version, if known:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant sanitized logs or failure artifact
+      description: Paste only relevant Ruby Fast LSP output. In VS Code, reproduce briefly with rubyFastLsp.logLevel set to debug, then restore info. Review and remove secrets and private data first. If logs are unavailable, say so; they are not required to submit a report.
+      render: text

@@ -56,6 +56,10 @@ See [Next Engineering Goals](NEXT.md) for the forward-looking inference and anal
 
 ## Installation
 
+For the upcoming public beta, see the [support boundaries and validation plan](docs/public-beta.md)
+and the [release-readiness checklist](docs/release-readiness.md). The candidate is
+unreleased; platform validation remains pending until recorded in the checklist.
+
 ### npm (recommended)
 
 Install the language server binary globally:
