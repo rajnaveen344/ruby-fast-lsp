@@ -254,6 +254,43 @@ impl ProjectIndexingStatus {
         }
     }
 
+    /// Accept coalescible worker counters under the same lock that updates
+    /// them. Workers finish out of order; a stale report is not a coordinator
+    /// phase transition and must never rewind progress or a completed phase.
+    pub fn report_project_progress(
+        &self,
+        generation: u64,
+        completed: u64,
+        total: u64,
+    ) -> Option<ProjectIndexingSnapshot> {
+        let mut state = self.state.lock();
+        if generation != state.generation || state.phase != IndexingPhase::IndexingProject {
+            return None;
+        }
+        assert!(
+            completed <= total,
+            "INVARIANT VIOLATED: completed project files exceed total files. This is a bug because every collected file belongs to the discovered set. Fix: correct project collection accounting."
+        );
+        if let Some(previous_total) = state.total {
+            assert_eq!(
+                total, previous_total,
+                "INVARIANT VIOLATED: project file total changed within one indexing phase. This is a bug because worker counters must share a fixed discovered set. Fix: begin a new generation when project inputs change."
+            );
+        }
+        if state
+            .completed
+            .is_some_and(|previous| completed <= previous)
+        {
+            return None;
+        }
+        state.sequence = state.sequence.checked_add(1).expect(
+            "INVARIANT VIOLATED: indexing sequence overflowed. This is a bug because worker progress must stay ordered. Fix: inspect the progress loop that exhausted the sequence counter."
+        );
+        state.completed = Some(completed);
+        state.total = Some(total);
+        Some(self.snapshot_locked(&state))
+    }
+
     pub fn transition(
         &self,
         generation: u64,
@@ -480,6 +517,58 @@ mod tests {
         assert!(second.sequence > first.sequence);
         assert_eq!(second.completed, Some(2));
         assert_eq!(second.total, Some(3));
+    }
+
+    #[test]
+    fn out_of_order_worker_reports_preserve_progress_and_phase() {
+        let status = ProjectIndexingStatus::new(PathBuf::from("/workspace/simulation"));
+        let generation = status.begin_run().generation();
+        status
+            .transition(generation, IndexingPhase::IndexingProject, None, None)
+            .unwrap();
+        let newest = status.report_project_progress(generation, 2, 3).unwrap();
+        assert!(status.report_project_progress(generation, 1, 3).is_none());
+        assert!(status.report_project_progress(generation, 2, 3).is_none());
+        assert_eq!(status.snapshot().sequence, newest.sequence);
+        status
+            .transition(
+                generation,
+                IndexingPhase::ProjectNavigationReady,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(status.report_project_progress(generation, 3, 3).is_none());
+        assert_eq!(
+            status.snapshot().phase,
+            IndexingPhase::ProjectNavigationReady
+        );
+        let replacement = status.begin_run().generation();
+        status
+            .transition(replacement, IndexingPhase::IndexingProject, None, None)
+            .unwrap();
+        assert!(status.report_project_progress(generation, 3, 3).is_none());
+        assert_eq!(status.snapshot().completed, None);
+    }
+
+    #[test]
+    fn parallel_worker_reports_publish_the_maximum_counter() {
+        let status = ProjectIndexingStatus::new(PathBuf::from("/workspace/simulation"));
+        let generation = status.begin_run().generation();
+        status
+            .transition(generation, IndexingPhase::IndexingProject, None, None)
+            .unwrap();
+        std::thread::scope(|scope| {
+            for lane in 0..4 {
+                let status = &status;
+                scope.spawn(move || {
+                    for index in (1..=64).rev() {
+                        status.report_project_progress(generation, index * 4 - lane, 256);
+                    }
+                });
+            }
+        });
+        assert_eq!(status.snapshot().completed, Some(256));
     }
 
     #[test]

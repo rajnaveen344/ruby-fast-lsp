@@ -8,6 +8,7 @@ use crate::indexer::indexer_stdlib::{IndexerStdlib, RuntimeStdlibPathKey, Runtim
 use crate::indexer::require_paths::RequireFeatureIndex;
 
 use crate::indexer::version::ruby_version::{RubyImplementation, RubyVersion};
+#[cfg(test)]
 use crate::indexer::version::version_detector::RubyVersionDetector;
 use crate::indexing_resources::{IndexingResourcePriority, IndexingWorkSpec};
 use crate::persistent_cache::{PersistentDerivedProductCache, PersistentJavaArtifactLookup};
@@ -1544,7 +1545,7 @@ impl IndexingCoordinator {
 
     async fn detect_ruby_version_off_reactor(
         &mut self,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<Option<RubyVersion>> {
         if let Some(runtime) = &self.effective_runtime {
             let version = ruby_version_for_runtime(runtime);
@@ -1555,18 +1556,13 @@ impl IndexingCoordinator {
             self.detected_ruby_version = Some(version);
             return Ok(Some(version));
         }
-        let workspace_root = self.workspace_root.clone();
-        let version = run_cpu_indexing_task(
-            server,
-            Some(self.workspace_root.clone()),
-            self.resource_cancellation(),
-            IndexingWorkClass::Io,
-            "Ruby version detection",
-            move || RubyVersionDetector::from_path(workspace_root).detect_version(),
-        )
-        .await?;
-        self.detected_ruby_version = version;
-        Ok(version)
+        // Auto was already resolved against the exact runtime catalog. A
+        // marker with no installed match is an unfulfilled runtime request,
+        // not permission to reconstruct compatibility through another probe.
+        // None selects the bundled Ruby 3.0 core fallback; explicit legacy
+        // compatibility above remains authoritative without an executable.
+        self.detected_ruby_version = None;
+        Ok(None)
     }
 
     async fn resolve_effective_runtime(&mut self, server: &RubyLanguageServer) -> Result<()> {
@@ -1712,6 +1708,8 @@ impl IndexingCoordinator {
                 self.config.indexing.clone(),
             )
         });
+        project_indexer
+            .set_progress_generation(self.indexing_run.as_ref().map(|run| run.generation()));
         let frontier_demands = if let Some(run) = self.indexing_run.as_ref() {
             let workspace = server
                 .list_workspaces()
@@ -2508,7 +2506,11 @@ impl IndexingCoordinator {
         navigation_demands: Option<(crate::navigation_demand::NavigationDemandController, u64)>,
         project_frontier_release: tokio::sync::oneshot::Sender<()>,
     ) -> Result<(IndexerGem, Duration)> {
-        if priority_keys.is_empty() {
+        // An active constant may suggest a dependency name even in a plain
+        // Ruby folder. Navigation discovery requires locked Bundler identity;
+        // standalone roots use the complete path, which skips automatic gems.
+        // Explicit includedGems is selected later, after project collection.
+        if priority_keys.is_empty() || !workspace_root.join("Gemfile").is_file() {
             let (gem_indexer, discovery, discovery_dur) = run_cpu_indexing_task(
                 server,
                 Some(workspace_root),
@@ -4879,6 +4881,32 @@ end
             coordinator.detect_ruby_version(),
             Some(RubyVersion::new(2, 5)),
             "an explicit Ruby version must select its matching core stubs"
+        );
+    }
+
+    #[tokio::test]
+    async fn unavailable_auto_runtime_uses_conservative_core_fallback() {
+        let fixture = TestProjectFixture::new();
+        std::fs::write(fixture.project_root().join(".ruby-version"), "3.2.999\n").unwrap();
+        let server = create_test_server();
+        server.set_discovered_runtimes_for_tests(Vec::new());
+        let mut coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), RubyFastLspConfig::default());
+        coordinator
+            .resolve_effective_runtime(&server)
+            .await
+            .unwrap();
+        assert!(coordinator.effective_runtime.is_none());
+        assert_eq!(coordinator.detect_ruby_version_off_reactor(&server).await.unwrap(), None,
+            "an unavailable automatic runtime must use the bundled Ruby 3.0 fallback, not derive compatibility from an unfulfilled marker");
+        coordinator.config.ruby_version = "2.5".to_string();
+        assert_eq!(
+            coordinator
+                .detect_ruby_version_off_reactor(&server)
+                .await
+                .unwrap(),
+            Some(RubyVersion::new(2, 5)),
+            "explicit compatibility configuration must still win over automatic fallback"
         );
     }
 

@@ -719,11 +719,20 @@ impl RubyLanguageServer {
         snapshot
     }
 
-    pub fn report_project_indexing_progress(&self, root: &Path, completed: u64, total: u64) {
+    pub fn report_project_indexing_progress(
+        &self,
+        root: &Path,
+        generation: Option<u64>,
+        completed: u64,
+        total: u64,
+    ) {
         #[cfg(test)]
         self.indexing_progress_reports
             .lock()
             .push((root.to_path_buf(), completed, total));
+        let Some(generation) = generation else {
+            return;
+        };
         let workspace = self
             .workspaces
             .read()
@@ -733,27 +742,9 @@ impl RubyLanguageServer {
         let Some(workspace) = workspace else {
             return;
         };
-        let snapshot = workspace.indexing_status.snapshot();
-        if snapshot.phase != IndexingPhase::IndexingProject {
-            return;
-        }
-        if snapshot.completed == Some(completed) && snapshot.total == Some(total) {
-            return;
-        }
-        if snapshot
-            .completed
-            .is_some_and(|previous| completed < previous)
-        {
-            return;
-        }
         if workspace
             .indexing_status
-            .transition(
-                snapshot.generation,
-                IndexingPhase::IndexingProject,
-                Some(completed),
-                Some(total),
-            )
+            .report_project_progress(generation, completed, total)
             .is_none()
         {
             return;

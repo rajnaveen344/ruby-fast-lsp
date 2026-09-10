@@ -92,6 +92,7 @@ pub struct IndexerProject {
     jruby_replay_analysis_engine: Option<Arc<parking_lot::RwLock<AnalysisEngine>>>,
     project_navigation_started_at: Option<Instant>,
     project_file_total: Option<u64>,
+    project_progress_generation: Option<u64>,
     project_file_completed: AtomicU64,
 }
 
@@ -139,6 +140,7 @@ impl IndexerProject {
             jruby_replay_analysis_engine: None,
             project_navigation_started_at: None,
             project_file_total: None,
+            project_progress_generation: None,
             project_file_completed: AtomicU64::new(0),
         }
     }
@@ -150,6 +152,13 @@ impl IndexerProject {
     ) {
         self.project_navigation_priority_keys = project_priority_keys;
         self.dependency_navigation_priority_keys = dependency_priority_keys;
+    }
+
+    /// Bind progress to the owning coordinator before admitting its work.
+    /// Reading the current workspace generation after discovery can mislabel
+    /// a cancelled worker's report as belonging to its replacement.
+    pub(crate) fn set_progress_generation(&mut self, generation: Option<u64>) {
+        self.project_progress_generation = generation;
     }
 
     pub(crate) fn dependency_navigation_priority_keys(&self) -> HashSet<String> {
@@ -504,8 +513,14 @@ impl IndexerProject {
         let completed = u64::try_from(self.processed_project_files.len()).expect(
             "INVARIANT VIOLATED: processed project file count exceeds u64. This is a bug because processed files are a subset of the discovered set. Fix: inspect record_processed_project_files.",
         );
-        self.project_file_completed.store(completed, Ordering::Relaxed);
-        server.report_project_indexing_progress(&self.workspace_root, completed, total);
+        self.project_file_completed
+            .store(completed, Ordering::Relaxed);
+        server.report_project_indexing_progress(
+            &self.workspace_root,
+            self.project_progress_generation,
+            completed,
+            total,
+        );
     }
 
     fn record_processed_project_files(&mut self, files: &[PathBuf], server: &RubyLanguageServer) {
@@ -1064,6 +1079,7 @@ impl IndexerProject {
 
         let project_file_completed = &self.project_file_completed;
         let project_file_total = self.project_file_total;
+        let project_progress_generation = self.project_progress_generation;
         let workspace_root = &self.workspace_root;
         let collect_file = |registered: RegisteredProjectFileInput| -> Result<(
             PathBuf,
@@ -1104,7 +1120,12 @@ impl IndexerProject {
                 })?;
             if let Some(total) = project_file_total {
                 let completed = project_file_completed.fetch_add(1, Ordering::Relaxed) + 1;
-                server.report_project_indexing_progress(workspace_root, completed, total);
+                server.report_project_indexing_progress(
+                    workspace_root,
+                    project_progress_generation,
+                    completed,
+                    total,
+                );
             }
             Ok((
                 file_path.clone(),
@@ -1885,6 +1906,38 @@ mod tests {
     }
 
     #[test]
+    fn delayed_project_discovery_cannot_borrow_a_replacement_generation() {
+        let fixture = TempDir::new().unwrap();
+        let server = RubyLanguageServer::default();
+        let workspace = server.add_workspace(Url::from_directory_path(fixture.path()).unwrap());
+        let old_run = workspace.begin_indexing_run();
+        let mut indexer = IndexerProject::new(
+            fixture.path().to_path_buf(),
+            FileProcessor::new(),
+            IndexingConfig::default(),
+        );
+        indexer.set_progress_generation(Some(old_run.generation()));
+        let new_run = workspace.begin_indexing_run();
+        workspace
+            .indexing_status
+            .transition(
+                new_run.generation(),
+                crate::indexing_status::IndexingPhase::IndexingProject,
+                None,
+                None,
+            )
+            .unwrap();
+        indexer.begin_project_file_progress(3, &server);
+        let snapshot = workspace.indexing_status.snapshot();
+        assert_eq!(snapshot.generation, new_run.generation());
+        assert_eq!(
+            snapshot.completed, None,
+            "old work must retain its own generation even when discovery finishes after a restart"
+        );
+        assert_eq!(snapshot.total, None);
+    }
+
+    #[test]
     fn project_indexing_status_reports_completed_files_against_a_stable_total() {
         let workspace = TempDir::new().unwrap();
         let root = workspace.path();
@@ -1910,6 +1963,7 @@ mod tests {
             FileProcessor::new(),
             IndexingConfig::default(),
         );
+        indexer.set_progress_generation(Some(run.generation()));
         indexer.set_navigation_priority_keys(HashSet::from(["alpha".to_string()]), HashSet::new());
 
         indexer

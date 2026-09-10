@@ -504,6 +504,20 @@ impl IndexerStdlib {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        // Reserve stable file identities with the actual source before
+        // template-only collection. Its fallback reservation has no content;
+        // that would leave valid declaration ranges without an LSP position.
+        {
+            let mut engine = analysis_engine.write();
+            for (path, _, content) in &sources {
+                engine.register_file_borrowed(
+                    path.clone(),
+                    content,
+                    ruby_analysis::core::SourceKind::Stub,
+                );
+            }
+        }
+
         // Every collector observes the same immutable pre-batch engine and
         // namespace snapshot. Core-stub files are independent declaration
         // inputs: allowing one sibling's inferred types or declarations to
@@ -1149,6 +1163,45 @@ mod tests {
                 series.label()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn bundled_stub_navigation_retains_source_positions() {
+        let extension = TempDir::new().unwrap();
+        let stubs = extension.path().join("stubs/rubystubs30");
+        fs::create_dir_all(&stubs).unwrap();
+        let path = stubs.join("thread.rb");
+        fs::write(&path, "# 😀\nclass Thread\nend\n").unwrap();
+        let mut indexer = IndexerStdlib::new(FileProcessor::new(), None);
+        indexer.set_extension_path(extension.path().to_path_buf());
+        let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
+        indexer.index_core_stubs(engine.clone()).await.unwrap();
+        let engine = engine.read();
+        let ranges = AnalysisQuery::new(&engine)
+            .constant_definition_ranges(&[RubyConstant::new("Thread").unwrap()], &[]);
+        assert_eq!(ranges.len(), 1);
+        let range = ranges[0];
+        let file = engine.file(range.file_id).unwrap();
+        assert_eq!(file.path, path);
+        assert_eq!(
+            file.byte_offset_to_line_character(range.start_byte),
+            Some((1, 0)),
+            "bundled declarations need their original source index for public navigation"
+        );
+        assert_eq!(
+            file.byte_offset_to_line_character(range.end_byte),
+            Some((2, 3)),
+            "the complete declaration range must convert even after non-ASCII comments"
+        );
+        let locations = crate::query::analysis_location::locations_for_ranges(&engine, ranges);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(
+            locations[0].range,
+            tower_lsp::lsp_types::Range::new(
+                tower_lsp::lsp_types::Position::new(1, 0),
+                tower_lsp::lsp_types::Position::new(2, 3),
+            )
+        );
     }
 
     #[tokio::test]
