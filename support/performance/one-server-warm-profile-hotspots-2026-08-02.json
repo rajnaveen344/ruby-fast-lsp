@@ -3,9 +3,9 @@
   "recorded_at": "2026-08-02",
   "purpose": "Profile-first warm indexing hotspot attachment on a smaller corpus than the two-project umbrella, before proposing another optimization.",
   "scope": {
-    "workspace": "/Users/naveenraj/goshposh",
+    "workspace": "/workspace/example-app",
     "config": "/tmp/ruby-fast-lsp-one-server-jruby-9.2.21.json",
-    "projects": ["/Users/naveenraj/goshposh/server"],
+    "projects": ["/workspace/example-app/server"],
     "why_not_two_project": "Two-project warm wall is ~12–15s plus samply overhead; one-server warm wall is ~10.7s and still exercises JRuby, gems, Java catalog, fact collection, and resolve.",
     "why_not_built_in_sample": "Built-in sample indexes in ~0.6s / 39 files and does not represent production hotspots."
   },
@@ -15,7 +15,7 @@
     "release_build": "CARGO_PROFILE_RELEASE_DEBUG=1 CARGO_PROFILE_RELEASE_STRIP=none cargo build --release --bin profiler",
     "presymbolicate": true,
     "cache": "RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731",
-    "command": "samply record -r 100 -s --unstable-presymbolicate -o /tmp/ruby-fast-lsp-one-server-warm-v285-symbolized-profile.json.gz ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-one-server-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37"
+    "command": "samply record -r 100 -s --unstable-presymbolicate -o /tmp/ruby-fast-lsp-one-server-warm-v285-symbolized-profile.json.gz ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-one-server-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37"
   },
   "timings_watched": {
     "tiny_sample_wall_ms": 579,
@@ -100,5 +100,6 @@
       }
     ]
   },
-  "decision": "No code change yet. Next change must attach to rank-1 (project/JRuby fact-collection call path) or a measured sub-hotspot inside it after a tighter flame inspection, not another dependency-overlap experiment."
+  "decision": "No code change yet. Next change must attach to rank-1 (project/JRuby fact-collection call path) or a measured sub-hotspot inside it after a tighter flame inspection, not another dependency-overlap experiment.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

@@ -20,10 +20,10 @@
     "result": "passed"
   },
   "controlled_ab": {
-    "dataset": "/Users/naveenraj/goshposh",
+    "dataset": "/workspace/example-app",
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
     "runtime": "jruby-9.2.21.0",
     "scheduler_concurrency": 2,
@@ -142,5 +142,6 @@
     }
   },
   "rejection_reason": "Resolve-phase median improved 6.6%, but warm active semantic completion, dependency navigation, project navigation, and terminal wall all regressed by 7–16%. Exact semantics were preserved and RSS stayed under the fixed ceiling, yet the slice does not move the five-second semantic frontier and therefore is not accepted. The fast-path mutation was reverted; schema-14 ResolvePassStats instrumentation remains.",
-  "follow_up": "Resolve is only ~2.5 s of the ~12 s warm semantic gap and is already hit-dominated. Prefer the next measured non-resolve target (dependency rebinding / phase overlap / fact collection) rather than another hit-path micro-optimization inside resolve_reference_candidates. Do not restore incremental resolve_files without a red cross-file invalidation proof."
+  "follow_up": "Resolve is only ~2.5 s of the ~12 s warm semantic gap and is already hit-dominated. Prefer the next measured non-resolve target (dependency rebinding / phase overlap / fact collection) rather than another hit-path micro-optimization inside resolve_reference_candidates. Do not restore incremental resolve_files without a red cross-file invalidation proof.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

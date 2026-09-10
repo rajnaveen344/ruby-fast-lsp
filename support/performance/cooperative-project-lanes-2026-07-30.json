@@ -2,10 +2,10 @@
   "schema": 1,
   "recorded_at": "2026-07-30",
   "purpose": "Evaluate cooperative project-source lane partitions after the full six-lane project pass serialized sibling projects in the preceding two-project JRuby profile.",
-  "command": "RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --scheduler-concurrency 2 --definition-at server/lib/api_app.rb:8:35 --definition-at server/tasks/rake_helpers.rb:9:18",
+  "command": "RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --scheduler-concurrency 2 --definition-at server/lib/api_app.rb:8:35 --definition-at server/tasks/rake_helpers.rb:9:18",
   "raw_local_evidence": {
-    "jsonl": "/tmp/ruby-fast-lsp-goshposh-cooperative-project-lanes-20260730.jsonl",
-    "log": "/tmp/ruby-fast-lsp-goshposh-cooperative-project-lanes-20260730.log"
+    "jsonl": "/tmp/ruby-fast-lsp-example-workspace-cooperative-project-lanes-20260730.jsonl",
+    "log": "/tmp/ruby-fast-lsp-example-workspace-cooperative-project-lanes-20260730.log"
   },
   "machine": {
     "cpu_model": "Apple M4 Pro",
@@ -21,10 +21,10 @@
   },
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server-devops-5441/",
-      "/Users/naveenraj/goshposh/server/"
+      "/workspace/example-app/service-b/",
+      "/workspace/example-app/server/"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server/",
+    "active_project": "/workspace/example-app/server/",
     "runtime": "jruby-9.2.21.0",
     "cpu_lanes": 6,
     "cooperative_project_lanes_each": 3,
@@ -116,5 +116,6 @@
     "performance_goal": "not_met",
     "reason": "Both large project passes overlapped under the exact six-lane, two-task, 512 MiB and two-I/O-slot resource ceiling. Active-project and total readiness improved materially, exact semantic probes remained correct, and external peak RSS stayed within the goal's ten-percent comparison ceiling. The five- and fifteen-second product targets remain unmet.",
     "next_bottleneck": "The aligned projects still produced 604 ephemeral exact-gem products independently with zero joined flights or completed reuse. Implement bounded demand-loaded persistent products rather than retaining them in process memory or further tuning project lane counts."
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

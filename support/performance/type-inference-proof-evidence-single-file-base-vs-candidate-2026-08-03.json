@@ -6,7 +6,7 @@
   "source": {
     "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
     "candidate_worktree_has_changes": true,
-    "fixture": "src/test/fixtures/goshposh_helpers_goto/api_app.rb",
+    "fixture": "retired-fixtures/route-helper-corpus/api_app.rb",
     "fixture_bytes": 242
   },
   "host": {
@@ -18,7 +18,7 @@
   },
   "method": {
     "binary": "target/release/profile_single_file",
-    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/api_app.rb src/test/fixtures/goshposh_helpers_goto",
+    "command": "profile_single_file retired-fixtures/route-helper-corpus/api_app.rb retired-fixtures/route-helper-corpus",
     "release_compilation_excluded": true,
     "warmup_runs_per_revision": 1,
     "alternating_pairs": 7,
@@ -63,12 +63,13 @@
     "full_performance_matrix_still_required": true
   },
   "limitations": [
-    "This focused fixture measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual hover/completion queries, allocations, or the goshposh RSS ceiling.",
+    "This focused fixture measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual hover/completion queries, allocations, or the example-workspace RSS ceiling.",
     "Seven pairs characterize the median but are insufficient for a stable p95 claim.",
     "Candidate ran before base in every pair; filesystem cache ordering was held constant rather than randomized.",
     "One candidate RSS sample reached 85,164,032 bytes, above the 80,183,296-byte base maximum; the candidate median remained 1.49 percent lower, but the full memory matrix must investigate tail behavior.",
     "The candidate includes the broader proof-first inference worktree, not only the proof-evidence map, so this is a cumulative base comparison rather than a microbenchmark of one data structure.",
     "Exact method-return outcomes are retained only for project files; dependency inputs retain counters but clear the outcome map before engine replacement.",
     "Correctness, deterministic output, scorecard, edit-lifecycle, and CLI/LSP parity tests are required separately."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

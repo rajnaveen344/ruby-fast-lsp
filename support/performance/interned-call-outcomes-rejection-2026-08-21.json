@@ -24,7 +24,7 @@
     "two_project": {
       "binary": "profiler",
       "profiler_sha256": "e7a728b9deb1802ad46e4ac0d62238c3d0220833b7121d2df1af944b2022d4e0",
-      "workspace": "/Users/naveenraj/goshposh",
+      "workspace": "/workspace/example-app",
       "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
       "scheduler_concurrency": 2,
       "runtime": "jruby-9.2.21.0",
@@ -32,8 +32,8 @@
       "extension_path": "./editors/vscode/vsix",
       "cache_dir": "/tmp/ruby-fast-lsp-10s-remeasure-cache-20260819",
       "definition_probes": [
-        "server/lib/workers/batch_worker.rb:1173:55",
-        "server/lib/workers/batch_worker.rb:2798:37"
+        "server/lib/workers/queue_worker.rb:1173:55",
+        "server/lib/workers/queue_worker.rb:2798:37"
       ]
     }
   },
@@ -114,5 +114,6 @@
     "complete_index_paired": "14.96s → 19.07s/16.66s moved with runtime-phase overlap",
     "rss_ceiling_bytes": 1776846438,
     "rss_notes": "Quiet intern-at-insert process peak 1.763 GB vs interned-roots quiet control 1.822 GB. Resolve did not improve outside noise. Reverted. Further resolve micro-cuts stopped."
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

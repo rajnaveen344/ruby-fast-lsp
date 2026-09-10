@@ -20,12 +20,12 @@
     "weight_accounting": "The bound counts allocation capacities for product identities, archive vectors and entry names, Arc control blocks, and the complete nested ClassFile heap. Overflow is an invariant failure rather than a saturating estimate."
   },
   "dataset": {
-    "workspace": "/Users/naveenraj/goshposh",
+    "workspace": "/workspace/example-app",
     "projects": [
-      "/Users/naveenraj/goshposh/server/",
-      "/Users/naveenraj/goshposh/server-devops-5441/"
+      "/workspace/example-app/server/",
+      "/workspace/example-app/service-b/"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server/",
+    "active_project": "/workspace/example-app/server/",
     "runtime": "JRuby 9.2.21.0",
     "jdk": "/opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home",
     "scheduler_concurrency": 2,
@@ -38,7 +38,7 @@
       "physical_memory_bytes": 25769803776,
       "os_release": "Darwin 25.2.0"
     },
-    "command_shape": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=<cache> /usr/bin/time -l <binary> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest"
+    "command_shape": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=<cache> /usr/bin/time -l <binary> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest"
   },
   "binaries": {
     "baseline_path": "/private/tmp/ruby-fast-lsp-java-artifact-flight-baseline-v244",
@@ -201,8 +201,8 @@
     "semantic_manifest_sha256_all_six_runs": "54268a7cd555eb82ffe9ea3a233378113c2dd5da5a8d576c15fb4de1fe717513",
     "definition_results_sha256_all_six_runs": "4ee5059ca3edfc5ce42bb53fcb87fbbed00c8d374c6e410def6dff8c057c2e42",
     "project_semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server-devops-5441/": "a4e95dab56b27139b21e2252d6092ee7",
-      "/Users/naveenraj/goshposh/server/": "ebd291845022823615ba4d53306938da"
+      "/workspace/example-app/service-b/": "a4e95dab56b27139b21e2252d6092ee7",
+      "/workspace/example-app/server/": "ebd291845022823615ba4d53306938da"
     },
     "dataset_fingerprint_sha256_all_six_runs": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657"
   },
@@ -235,14 +235,14 @@
     "ready_sequence": 21,
     "projects": [
       {
-        "root": "/Users/naveenraj/goshposh/server/",
+        "root": "/workspace/example-app/server/",
         "phase": "ready",
         "project_navigation_ready_ms": 7374,
         "dependency_navigation_ready_ms": 12804,
         "semantic_complete_ms": 12873
       },
       {
-        "root": "/Users/naveenraj/goshposh/server-devops-5441/",
+        "root": "/workspace/example-app/service-b/",
         "phase": "ready",
         "project_navigation_ready_ms": 8196,
         "dependency_navigation_ready_ms": 13959,
@@ -263,11 +263,12 @@
       "corruptions": 0
     },
     "definitions": {
-      "GoshPosh::Platform::Users::UserPmm": "file:///Users/naveenraj/goshposh/server/lib/platform/users/user.rb",
+      "ExampleApp::Platform::Users::AccountRecord": "file:///workspace/example-app/server/lib/platform/users/user.rb",
       "BSON::ObjectId": "file:///tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731/gems/6061421fa2e255ddcf7f5311abb50b81a8b972e3ea18b2af5291e35c6fc31fb2/71d6e518b87df8945c3966913d67e3a629246a3a1807ca2341efa925a68babd5/bson-4.14.101-java/lib/bson/object_id.rb"
     },
     "packaged_smoke": "RSpec, Rails, Minitest, Sinatra, Cucumber, ERB host features, and JRuby implementation navigation passed from the extracted VSIX",
     "note": "A preceding installed-client schedule reported 22 completed hits plus 168 joined flights for the same 190 eliminated duplicates. The repeat reported 190 completed hits and zero joins. Both shapes used exactly 168 producers and prove the cache handles overlap and sequential reuse without changing ownership."
   },
-  "conclusion": "Accept the 256-entry/256-MiB process-owned exact Java artifact cache. It eliminates every measured sequential duplicate decode, reduces persistent physical reads by about half, improves median readiness, CPU, and RSS, preserves exact semantics and isolated ownership, and remains explicitly bounded. Keep the rejected zero-retention wrapper and undersized 128-MiB cyclic-thrashing variant rejected."
+  "conclusion": "Accept the 256-entry/256-MiB process-owned exact Java artifact cache. It eliminates every measured sequential duplicate decode, reduces persistent physical reads by about half, improves median readiness, CPU, and RSS, preserves exact semantics and isolated ownership, and remains explicitly bounded. Keep the rejected zero-retention wrapper and undersized 128-MiB cyclic-thrashing variant rejected.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

@@ -1809,11 +1809,11 @@ mod tests {
     fn active_constant_keys_prioritize_matching_project_file_stems() {
         let files = vec![
             PathBuf::from("/project/a.rb"),
-            PathBuf::from("/project/user.rb"),
-            PathBuf::from("/project/user_pmm.rb"),
+            PathBuf::from("/project/account.rb"),
+            PathBuf::from("/project/account_record.rb"),
             PathBuf::from("/project/z.rb"),
         ];
-        let priority_keys = HashSet::from(["userpmm".to_string()]);
+        let priority_keys = HashSet::from(["accountrecord".to_string()]);
 
         let (files, priority_count) = prioritize_project_files(files, &priority_keys);
 
@@ -1821,8 +1821,8 @@ mod tests {
         assert_eq!(
             files,
             vec![
-                PathBuf::from("/project/user.rb"),
-                PathBuf::from("/project/user_pmm.rb"),
+                PathBuf::from("/project/account.rb"),
+                PathBuf::from("/project/account_record.rb"),
                 PathBuf::from("/project/a.rb"),
                 PathBuf::from("/project/z.rb"),
             ],
@@ -1835,27 +1835,27 @@ mod tests {
     fn exact_navigation_demand_promotes_a_late_project_file_before_the_next_batch() {
         let mut pending_files = (0..20)
             .map(|index| PathBuf::from(format!("/project/ordinary_{index:02}.rb")))
-            .chain([PathBuf::from("/project/user_pmm.rb")])
+            .chain([PathBuf::from("/project/account_record.rb")])
             .collect::<Vec<_>>();
 
         let selection = select_navigation_demand_files(
             &mut pending_files,
             &HashSet::new(),
-            &["userpmm".to_string()],
+            &["accountrecord".to_string()],
         );
 
         assert_eq!(
             selection.files,
-            vec![PathBuf::from("/project/user_pmm.rb")],
+            vec![PathBuf::from("/project/account_record.rb")],
             "a bounded exact request must remove its conventional definition candidate from the \
              exhaustive tail before unrelated files are selected"
         );
-        assert_eq!(selection.completed_keys, vec!["userpmm".to_string()]);
+        assert_eq!(selection.completed_keys, vec!["accountrecord".to_string()]);
         assert!(selection.deferred_keys.is_empty());
         assert!(
             pending_files
                 .iter()
-                .all(|path| path != Path::new("/project/user_pmm.rb")),
+                .all(|path| path != Path::new("/project/account_record.rb")),
             "the demanded file must not be parsed again by exhaustive collection"
         );
     }
@@ -2298,7 +2298,7 @@ mod tests {
     fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
         let workspace = TempDir::new().unwrap();
         let root = workspace.path();
-        std::fs::write(root.join("user_pmm.rb"), "class UserPmm\nend\n").unwrap();
+        std::fs::write(root.join("account_record.rb"), "class AccountRecord\nend\n").unwrap();
         std::fs::write(root.join("report.rb"), "class Report\nend\n").unwrap();
 
         let server = RubyLanguageServer::default();
@@ -2311,12 +2311,15 @@ mod tests {
         indexer.set_navigation_priority_keys(HashSet::from(["report".to_string()]), HashSet::new());
 
         let selection = indexer
-            .collect_initial_project_navigation_demand_facts(&["userpmm".to_string()], &server)
+            .collect_initial_project_navigation_demand_facts(
+                &["accountrecord".to_string()],
+                &server,
+            )
             .unwrap();
 
-        assert_eq!(selection.completed_keys, vec!["userpmm".to_string()]);
+        assert_eq!(selection.completed_keys, vec!["accountrecord".to_string()]);
         assert!(selection.deferred_keys.is_empty());
-        let user = ruby_analysis::core::RubyConstant::new("UserPmm").unwrap();
+        let user = ruby_analysis::core::RubyConstant::new("AccountRecord").unwrap();
         let report = ruby_analysis::core::RubyConstant::new("Report").unwrap();
         {
             let engine = workspace_state.analysis_engine.read();
@@ -2349,7 +2352,7 @@ mod tests {
     fn navigation_demand_completes_when_the_frontier_already_processed_its_file() {
         let workspace = TempDir::new().unwrap();
         let root = workspace.path();
-        std::fs::write(root.join("user.rb"), "class UserPmm\nend\n").unwrap();
+        std::fs::write(root.join("account.rb"), "class AccountRecord\nend\n").unwrap();
         std::fs::write(root.join("report.rb"), "class Report\nend\n").unwrap();
 
         let server = RubyLanguageServer::default();
@@ -2359,17 +2362,19 @@ mod tests {
             FileProcessor::new(),
             IndexingConfig::default(),
         );
-        indexer
-            .set_navigation_priority_keys(HashSet::from(["userpmm".to_string()]), HashSet::new());
+        indexer.set_navigation_priority_keys(
+            HashSet::from(["accountrecord".to_string()]),
+            HashSet::new(),
+        );
 
         indexer.collect_project_navigation_facts(&server).unwrap();
-        let selection = indexer.take_navigation_demand_files(&["userpmm".to_string()]);
+        let selection = indexer.take_navigation_demand_files(&["accountrecord".to_string()]);
 
         assert!(
             selection.files.is_empty(),
             "an already indexed frontier file must never be parsed a second time"
         );
-        assert_eq!(selection.completed_keys, vec!["userpmm".to_string()]);
+        assert_eq!(selection.completed_keys, vec!["accountrecord".to_string()]);
         assert!(
             selection.deferred_keys.is_empty(),
             "a request whose matching frontier file is queryable must wake immediately"

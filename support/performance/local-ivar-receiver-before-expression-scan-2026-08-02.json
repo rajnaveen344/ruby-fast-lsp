@@ -27,7 +27,7 @@
     "profiler_candidate_sha256": "e1b650a273a6753fd880ed4c92eaf2068c4b2396694b1fe92f52aab8f8b27850"
   },
   "sync_project_collection_ab": {
-    "corpus": "/Users/naveenraj/goshposh/server",
+    "corpus": "/workspace/example-app/server",
     "files": 2619,
     "methods_unchanged": 26135,
     "n_pairs": 3,
@@ -91,5 +91,6 @@
     "fact-collector-source-ordered-local-receivers text-fallback",
     "borrowed-method-return-context-rejection-2026-08-01.json"
   ],
-  "next_cut_if_still_needed": "process_call_node_entry / nested CallNode resolve_method_return_type / Expression-subject index for non-variable receivers; or lazy extension resolved_callees"
+  "next_cut_if_still_needed": "process_call_node_entry / nested CallNode resolve_method_return_type / Expression-subject index for non-variable receivers; or lazy extension resolved_callees",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

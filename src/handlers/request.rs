@@ -624,7 +624,7 @@ mod navigation_demand_tests {
         std::fs::write(project.join("Gemfile"), "source 'https://rubygems.org'\n").unwrap();
         let caller_path = project.join("caller.rb");
         let caller_uri = Url::from_file_path(&caller_path).unwrap();
-        let caller = "UserPmm.lookup\n";
+        let caller = "AccountRecord.lookup\n";
         std::fs::write(&caller_path, caller).unwrap();
 
         let server = Arc::new(RubyLanguageServer::default());
@@ -677,13 +677,13 @@ mod navigation_demand_tests {
         })
         .await
         .expect("the early definition request must enqueue a bounded project demand");
-        assert_eq!(demanded_keys, vec!["userpmm".to_string()]);
+        assert_eq!(demanded_keys, vec!["accountrecord".to_string()]);
 
-        let target_path = project.join("user_pmm.rb");
+        let target_path = project.join("account_record.rb");
         let target_uri = Url::from_file_path(&target_path).unwrap();
-        std::fs::write(&target_path, "class UserPmm\nend\n").unwrap();
+        std::fs::write(&target_path, "class AccountRecord\nend\n").unwrap();
         FileProcessor::with_extension_registry(server.extensions.registry().clone())
-            .process_file(&target_uri, "class UserPmm\nend\n", &server)
+            .process_file(&target_uri, "class AccountRecord\nend\n", &server)
             .unwrap();
         workspace.navigation_demands.complete_keys(
             run.generation(),

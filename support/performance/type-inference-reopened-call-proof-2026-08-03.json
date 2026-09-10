@@ -6,7 +6,7 @@
   "source": {
     "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
     "candidate_worktree_has_changes": true,
-    "large_file_fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file_fixture": "retired-fixtures/route-helper-corpus/catalog.rb",
     "large_file_bytes": 225569,
     "large_file_lines": 5095,
     "query_fixture": "tests/fixtures/type_inference_query_benchmark"
@@ -17,7 +17,7 @@
     "memory_bytes": 25769803776
   },
   "large_file": {
-    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "command": "profile_single_file retired-fixtures/route-helper-corpus/catalog.rb retired-fixtures/route-helper-corpus",
     "release_compilation_excluded": true,
     "alternating_process_pairs": 15,
     "baseline_binary_sha256": "edcdb309fdfb135ef6f67600e8b7511e4ece2c95a4a371fafdc1c5b91ed11c03",
@@ -614,5 +614,6 @@
     "The broader call-expression artifact still records edit and references comparisons above three percent relative to its predecessor, so full performance acceptance remains open.",
     "The scorecard remains diagnostic and score_eligible=false until remaining query-surface parity, representative real-project precision, and complete performance gates are satisfied."
   ],
-  "decision": "Semantically accepted and incrementally performance-safe. The full type-inference goal remains open."
+  "decision": "Semantically accepted and incrementally performance-safe. The full type-inference goal remains open.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

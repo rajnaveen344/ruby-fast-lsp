@@ -25,7 +25,7 @@
     "two_project": {
       "binary": "profiler",
       "profiler_sha256": "7c8f15e8a1fc6301e7dc4b94a2a5e5152176462b3cfbe3115b36acc5670c6a59",
-      "workspace": "/Users/naveenraj/goshposh",
+      "workspace": "/workspace/example-app",
       "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
       "scheduler_concurrency": 2,
       "runtime": "jruby-9.2.21.0",
@@ -33,8 +33,8 @@
       "extension_path": "./editors/vscode/vsix",
       "cache_dir": "/tmp/ruby-fast-lsp-10s-remeasure-cache-20260819",
       "definition_probes": [
-        "server/lib/workers/batch_worker.rb:1173:55",
-        "server/lib/workers/batch_worker.rb:2798:37"
+        "server/lib/workers/queue_worker.rb:1173:55",
+        "server/lib/workers/queue_worker.rb:2798:37"
       ]
     }
   },
@@ -114,5 +114,6 @@
     "exclusive_tail_now": "engine.resolve() ~1.27s",
     "rss_ceiling_bytes": 1776846438,
     "rss_notes": "Quiet intern process peak 2.083 GB vs constant-view quiet 2.062 GB. This cut removed a HashMap rather than adding one. Session RSS remains above the 1.777 GB ceiling for recent binaries; the quiet pairing does not justify reverting the cut."
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

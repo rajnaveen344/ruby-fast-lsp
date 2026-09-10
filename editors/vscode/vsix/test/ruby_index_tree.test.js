@@ -16,8 +16,8 @@ const {
 } = require('../ruby_index_tree');
 
 test('project root label uses the final path component', () => {
-    assert.equal(projectRootLabel('/Users/naveenraj/goshposh/server'), 'server');
-    assert.equal(projectRootLabel('/Users/naveenraj/goshposh/server/'), 'server');
+    assert.equal(projectRootLabel('/workspace/example-app/server'), 'server');
+    assert.equal(projectRootLabel('/workspace/example-app/server/'), 'server');
     assert.equal(projectRootLabel('C:\\repo\\admin'), 'admin');
 });
 
@@ -41,26 +41,26 @@ test('project roots stay in stable path order', () => {
 test('single workspace nests projects at tree root without folder wrapper', () => {
     const forest = buildWorkspaceProjectForest(
         [
-            { root: '/Users/naveenraj/goshposh/admin', phase: 'ready' },
-            { root: '/Users/naveenraj/goshposh/server', phase: 'ready' },
-            { root: '/Users/naveenraj/goshposh/devops/tools/capistrano', phase: 'ready' },
-            { root: '/Users/naveenraj/goshposh/devops/tools/service-flags', phase: 'ready' },
-            { root: '/Users/naveenraj/goshposh/pm-loggers-pm_logger', phase: 'ready' }
+            { root: '/workspace/example-app/admin', phase: 'ready' },
+            { root: '/workspace/example-app/server', phase: 'ready' },
+            { root: '/workspace/example-app/devops/tools/release', phase: 'ready' },
+            { root: '/workspace/example-app/devops/tools/feature-flags', phase: 'ready' },
+            { root: '/workspace/example-app/shared-logging', phase: 'ready' }
         ],
-        ['/Users/naveenraj/goshposh']
+        ['/workspace/example-app']
     );
 
     assert.deepEqual(forest.map((node) => `${node.kind}:${node.label}`), [
         'project:admin',
         'pathFolder:devops',
-        'project:pm-loggers-pm_logger',
-        'project:server'
+        'project:server',
+        'project:shared-logging'
     ]);
     const devops = forest.find((node) => node.label === 'devops');
     assert.equal(devops.children[0].label, 'tools');
     assert.deepEqual(
         devops.children[0].children.map((node) => node.label),
-        ['capistrano', 'service-flags']
+        ['feature-flags', 'release']
     );
 });
 
@@ -126,23 +126,23 @@ test('namespace search QuickPick is Ctrl+P style with active project first', () 
     const items = namespaceSearchQuickPickItems([
         { fqn: 'Admin::User', name: 'User', kind: 'Class', projectRoot: '/repo/admin' },
         {
-            fqn: 'GoshPosh::Platform::API::ProspectPosts',
-            name: 'ProspectPosts',
+            fqn: 'ExampleApp::Platform::API::CatalogEntries',
+            name: 'CatalogEntries',
             kind: 'Class',
             projectRoot: '/repo/server'
         },
-        { fqn: 'GoshPosh::App', name: 'App', kind: 'Module', projectRoot: '/repo/server' }
+        { fqn: 'ExampleApp::App', name: 'App', kind: 'Module', projectRoot: '/repo/server' }
     ], { activeProjectRoot: '/repo/server' });
 
-    assert.equal(items[0].label, 'GoshPosh::App');
-    assert.equal(items[1].label, 'GoshPosh::Platform::API::ProspectPosts');
+    assert.equal(items[0].label, 'ExampleApp::App');
+    assert.equal(items[1].label, 'ExampleApp::Platform::API::CatalogEntries');
     assert.equal(items[2].label, 'Admin::User');
     assert.equal(items[0].description, 'Module · server');
 });
 
 test('project browse sections split runtime and gems like JRE vs Maven', () => {
     const sections = projectBrowseSections({
-        modules: [{ fqn: 'GoshPosh', modules: [{ fqn: 'GoshPosh::Platform' }] }],
+        modules: [{ fqn: 'ExampleApp', modules: [{ fqn: 'ExampleApp::Platform' }] }],
         classes: [{ fqn: 'User' }],
         libraries: [
             {
@@ -176,7 +176,7 @@ test('project browse sections split runtime and gems like JRE vs Maven', () => {
     }, true);
 
     assert.deepEqual(sections.projectNamespaces.map((ns) => ns.fqn), [
-        'GoshPosh',
+        'ExampleApp',
         'User'
     ]);
     assert.deepEqual(sections.librarySections.map((section) => section.label), [
@@ -195,7 +195,7 @@ test('project browse sections split runtime and gems like JRE vs Maven', () => {
     assert.equal(sections.hasLibraries, true);
 
     const hidden = projectBrowseSections({
-        modules: [{ fqn: 'GoshPosh' }],
+        modules: [{ fqn: 'ExampleApp' }],
         classes: [],
         libraries: [
             {
@@ -223,13 +223,13 @@ test('legacy flat external payload becomes one libraries section', () => {
 
 test('namespace children list nested types before mixin chrome', () => {
     const children = namespaceChildDescriptors({
-        fqn: 'GoshPosh',
-        modules: [{ fqn: 'GoshPosh::Platform', name: 'Platform' }],
-        classes: [{ fqn: 'GoshPosh::App', name: 'App' }],
+        fqn: 'ExampleApp',
+        modules: [{ fqn: 'ExampleApp::Platform', name: 'Platform' }],
+        classes: [{ fqn: 'ExampleApp::App', name: 'App' }],
         superclass: { name: 'Object', locations: [] },
         includes: [{ name: 'Kernel', locations: [] }],
         prepends: [{ name: 'Pre', locations: [] }],
-        singleton_class: { name: '#<Class:GoshPosh>', includes: [] },
+        singleton_class: { name: '#<Class:ExampleApp>', includes: [] },
         included_by: [{ name: 'Host', locations: [], via_modules: [] }]
     });
 
@@ -242,8 +242,8 @@ test('namespace children list nested types before mixin chrome', () => {
         'singleton',
         'includedBySection'
     ]);
-    assert.equal(children[0].namespace.fqn, 'GoshPosh::Platform');
-    assert.equal(children[1].namespace.fqn, 'GoshPosh::App');
+    assert.equal(children[0].namespace.fqn, 'ExampleApp::Platform');
+    assert.equal(children[1].namespace.fqn, 'ExampleApp::App');
     assert.equal(children[2].label, 'Superclass');
     assert.equal(children[3].label, 'Includes');
     assert.equal(children[6].label, 'Included By');

@@ -5,10 +5,10 @@
   "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "scheduler_concurrency": 2,
@@ -89,7 +89,7 @@
     "baseline_executable_sha256": "a3add79eaa1353bb996d4def8d70b2e8335cd8cee5e5471a4cbda5f9c5ed76db",
     "candidate_executable": "/tmp/ruby-fast-lsp-profiler-applicability-snapshot",
     "candidate_executable_sha256": "43f082153309c753efb31842d37746e292b5e3e6b16207c5b6743d807bc6182b",
-    "command": "RUST_LOG=warn RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+    "command": "RUST_LOG=warn RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37",
     "excluded_run": {
       "path": "/tmp/ruby-fast-lsp-applicability-baseline-1.log",
       "reason": "The bounded persistent cache evicted and rebuilt 512 of 597 gem products during this run, so it was not a fully warm comparison.",
@@ -204,8 +204,8 @@
   },
   "correctness": {
     "semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
-      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+      "/workspace/example-app/server": "317d721b898519ec8f70cc4e903085d4",
+      "/workspace/example-app/service-b": "da83054abb868876fc801768d643f79a"
     },
     "sorted_semantic_export_manifest_sha256": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
     "manifest_project_records": 2,
@@ -220,5 +220,6 @@
     "panicked_resource_tasks": 0,
     "resource_leaks_at_end": 0
   },
-  "decision": "Accepted. A file-lifetime applicability bit vector removes repeated locked-gem scans and semver parsing without retaining registry or engine ownership. Three valid fully warm pairs preserve the exact complete semantic fingerprints, sorted semantic export manifest, Project/Gem navigation, persistent cache hits, and resource cleanup. Median user CPU improves 3.191%, wall improves 0.693%, and active semantic completion improves 0.534%. Median RSS moves 3.518% amid wide allocator variance, but every candidate remains below the fixed ceiling with at least 72.8 MB headroom. Active semantic completion remains 11.539 seconds versus the five-second goal."
+  "decision": "Accepted. A file-lifetime applicability bit vector removes repeated locked-gem scans and semver parsing without retaining registry or engine ownership. Three valid fully warm pairs preserve the exact complete semantic fingerprints, sorted semantic export manifest, Project/Gem navigation, persistent cache hits, and resource cleanup. Median user CPU improves 3.191%, wall improves 0.693%, and active semantic completion improves 0.534%. Median RSS moves 3.518% amid wide allocator variance, but every candidate remains below the fixed ceiling with at least 72.8 MB headroom. Active semantic completion remains 11.539 seconds versus the five-second goal.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

@@ -658,10 +658,10 @@ items = [1, 2, 3]
 async fn visibility_modifier_does_not_warn_as_unresolved_method() {
     check(
         r#"
-class BulkAccountActionForm
+class InputCheck
   <warn none code="unresolved-method">private</warn>
 
-  def bulk_account_action_validation_helper
+  def verify
   end
 end
 "#,
@@ -673,11 +673,11 @@ end
 async fn bare_raise_does_not_warn_as_unresolved_method() {
     check_multi_file(&[
         (
-            "bulk_account_action_form.rb",
+            "input_check.rb",
             r#"
-class BulkAccountActionForm
-  def bulk_account_action_validation_helper
-    return <warn none code="unresolved-method">raise GosPosh::Platform::Errors::InvalidInputError.new("Action")</warn>
+class InputCheck
+  def verify
+    return <warn none code="unresolved-method">raise ExampleApp::Errors::InvalidArgument.new("request")</warn>
   end
 end
 "#,

@@ -235,13 +235,21 @@ mod navigation_demand_tests {
 
     #[test]
     fn constant_definition_request_exposes_exact_project_and_dependency_keys() {
-        let source = "GoshPosh::Platform::Users::UserPmm.by_username(name)\n";
+        let source = "ExampleApp::Platform::Users::AccountRecord.find_by_key(key)\n";
         let uri = Url::parse("file:///project/caller.rb").unwrap();
 
-        let demand = definition_navigation_demand_keys(&uri, Position::new(0, 35), source).unwrap();
+        let demand = definition_navigation_demand_keys(
+            &uri,
+            Position::new(
+                0,
+                u32::try_from(source.find("AccountRecord").unwrap() + 2).unwrap(),
+            ),
+            source,
+        )
+        .unwrap();
 
-        assert_eq!(demand.project_key.as_deref(), Some("userpmm"));
-        assert_eq!(demand.dependency_key.as_deref(), Some("goshposh"));
+        assert_eq!(demand.project_key.as_deref(), Some("accountrecord"));
+        assert_eq!(demand.dependency_key.as_deref(), Some("exampleapp"));
     }
 
     #[test]

@@ -25,7 +25,7 @@
     "two_project": {
       "binary": "profiler",
       "profiler_sha256": "acb743ec41b023f6f8b38c2e04128324969ad4f83e04a79f0fbf6d86f60454b1",
-      "workspace": "/Users/naveenraj/goshposh",
+      "workspace": "/workspace/example-app",
       "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
       "scheduler_concurrency": 2,
       "runtime": "jruby-9.2.21.0",
@@ -33,8 +33,8 @@
       "extension_path": "./editors/vscode/vsix",
       "cache_dir": "/tmp/ruby-fast-lsp-10s-remeasure-cache-20260819",
       "definition_probes": [
-        "server/lib/workers/batch_worker.rb:1173:55",
-        "server/lib/workers/batch_worker.rb:2798:37"
+        "server/lib/workers/queue_worker.rb:1173:55",
+        "server/lib/workers/queue_worker.rb:2798:37"
       ]
     }
   },
@@ -117,5 +117,6 @@
     "exclusive_tail_now": "engine.resolve() ~1.54s",
     "rss_ceiling_bytes": 1776846438,
     "rss_notes": "This cut did not raise RSS. Same-session exact-expression control SHA 67438d1d peaked at 2.126 GB; the cut peaked at 2.103–2.108 GB. Yesterday the same control SHA measured 1.75–1.77 GB. Session RSS is above the 1.777 GB ceiling for both binaries; do not attribute that gap to this cut."
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

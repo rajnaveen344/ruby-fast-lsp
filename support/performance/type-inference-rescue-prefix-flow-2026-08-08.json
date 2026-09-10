@@ -23,7 +23,7 @@
     }
   },
   "inputs": {
-    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file": "retired-fixtures/route-helper-corpus/catalog.rb",
     "large_file_bytes": 225569,
     "large_file_pairs": 15,
     "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
@@ -144,5 +144,6 @@
     "The legacy stored method-reference candidate still has one owner. Definition and signature queries now handle complete union receivers, but indexing one union call as references to every proven member requires a grouped receiver-target representation in a later slice.",
     "A complete method whose return type is itself unresolved still needs a union-aware diagnostic target representation; this slice suppresses the contradictory unresolved-method diagnostic only when the complete union return proof is concrete.",
     "The goal-wide real-project diagnostic review and cold/warm/allocation/scheduling/two-project RSS matrix remain open."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

@@ -16,7 +16,7 @@
   "measurement": {
     "executable": "/tmp/ruby-fast-lsp-profiler-resolve-pass-v14",
     "executable_sha256": "1b222e9730fdb63a65ee915bf7014e621540fc7bb0e3318e200f62a53f0a6d63",
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 /tmp/ruby-fast-lsp-profiler-resolve-pass-v14 --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 /tmp/ruby-fast-lsp-profiler-resolve-pass-v14 --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "raw_jsonl": "/tmp/ruby-fast-lsp-resolve-pass-v14.jsonl",
     "note": "This single run is cardinality/subphase evidence only. Persistent gem products were partially cold (512 misses), so wall timing is not an accepted warm A/B sample.",
     "reference_candidates": 1495905,
@@ -45,12 +45,13 @@
     "method_hit_rate": 0.8657974454216196,
     "semantic_fingerprints": {
       "server": "317d721b898519ec8f70cc4e903085d4",
-      "server-devops-5441": "da83054abb868876fc801768d643f79a"
+      "service-b": "da83054abb868876fc801768d643f79a"
     }
   },
   "gate": {
     "resolve_material": true,
     "hit_dominated": true,
     "next_slice": "Tried cache-hit fast path; see resolve-cache-hit-fast-path-rejection-2026-08-01.json"
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

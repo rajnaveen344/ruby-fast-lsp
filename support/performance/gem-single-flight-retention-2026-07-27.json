@@ -2,10 +2,10 @@
   "schema_version": 1,
   "evidence_kind": "configured-jruby-gem-single-flight-retention-decision",
   "recorded_at": "2026-07-27",
-  "workspace": "/Users/naveenraj/goshposh",
+  "workspace": "/workspace/example-app",
   "projects": [
     "server",
-    "server-devops-5441"
+    "service-b"
   ],
   "runtime": {
     "implementation": "jruby",
@@ -103,5 +103,6 @@
     "macOS RSS and peak-footprint counters varied materially between runs; both raw counters are retained and the decision does not rely on one peak measurement.",
     "The aggregate dataset fingerprint changed even though both per-project source fingerprints and engine file/source totals were identical; semantic probe equality and exact project evidence were checked separately.",
     "This decision accepts the in-process concurrent single-flight lifecycle only. Persistent serialization, corruption recovery, disk bounds, and fresh-process reuse remain unimplemented."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

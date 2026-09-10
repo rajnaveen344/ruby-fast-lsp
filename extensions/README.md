@@ -277,10 +277,10 @@ Ruby analysis must keep these contexts independent:
 
 Ordinary blocks usually preserve all four contexts. Evaluation APIs and DSLs
 can separate them. For example, an RSpec example-group block written inside
-`GoshPosh::Platform` keeps that lexical constant scope, while RSpec evaluates
+`ExampleApp::Platform` keeps that lexical constant scope, while RSpec evaluates
 the block against an anonymous `RSpec::Core::ExampleGroup` subclass. Methods
 declared by `def`, `let`, and `subject`, mixins, and implicit calls therefore
-belong to that generated group, not to `GoshPosh::Platform`.
+belong to that generated group, not to `ExampleApp::Platform`.
 
 The existing `current_namespace` and `namespace_kind` call context is not a
 substitute for this model. It describes the parser's current lexical owner and
@@ -340,7 +340,7 @@ user-visible Ruby constant.
 RSpec is the acceptance implementation for the contract:
 
 ```text
-lexical source namespace: GoshPosh::Platform
+lexical source namespace: ExampleApp::Platform
 
 RSpec.describe PlatformApp        -> generated ExampleGroup A
   def platform                    -> A#platform

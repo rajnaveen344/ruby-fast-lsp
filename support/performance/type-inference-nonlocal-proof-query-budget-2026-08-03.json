@@ -65,5 +65,6 @@
       "The candidate hover median p95 is lower than base, while the other comparable median p95 values are higher but remain far below their fixed production budgets. This evidence proves budget compliance, not a zero-percent relative regression against the much smaller base semantic universe."
     ]
   },
-  "decision": "Accepted as a bounded interactive-query safety slice. All seven candidate processes stay below every fixed production latency and engine-heap budget, and an independent --check-budgets run passes. This does not make the overall 9/10 claim eligible: a like-for-like full semantic-universe base comparison, warm workspace and edit matrix, allocations, real-project diagnostic review, and fixed goshposh peak-RSS gate remain open."
+  "decision": "Accepted as a bounded interactive-query safety slice. All seven candidate processes stay below every fixed production latency and engine-heap budget, and an independent --check-budgets run passes. This does not make the overall 9/10 claim eligible: a like-for-like full semantic-universe base comparison, warm workspace and edit matrix, allocations, real-project diagnostic review, and fixed example-workspace peak-RSS gate remain open.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

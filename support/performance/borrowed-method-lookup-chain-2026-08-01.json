@@ -2,15 +2,15 @@
   "schema": 1,
   "recorded_at": "2026-08-01",
   "purpose": "Remove the final per-reference clone of an already cached method lookup chain, then store its members as interned owner IDs, while preserving engine-owned MRO, execution-context, method_missing, ambiguity, and diagnostic policy.",
-  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
   "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
   "profiler_executable_sha256": "575b7415be91691e96bec2283d338f3abc5dff885d3a5e79d851860f717ce0b4",
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "cpu_lanes": 6,
@@ -115,8 +115,8 @@
       "java_producers": 0
     },
     "semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
-      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+      "/workspace/example-app/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/workspace/example-app/service-b": "80714a67726f4dd61e80eb2170d011d0"
     },
     "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
     "resource_leaks_at_end": 0,
@@ -202,8 +202,8 @@
         "java_producers": 0
       },
       "semantic_result_fingerprints": {
-        "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
-        "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+        "/workspace/example-app/server": "379a1aed9e52fcd189668987e0444ae6",
+        "/workspace/example-app/service-b": "80714a67726f4dd61e80eb2170d011d0"
       },
       "resource_leaks_at_end": 0,
       "panicked_resource_tasks": 0,
@@ -330,5 +330,6 @@
     "highest_internal_run_peak_rss_bytes": 1698332672,
     "highest_internal_run_below_fixed_ceiling": true
   },
-  "decision": "Accepted through the compact interned-owner-ID follow-up. The borrowed-chain slice first removed the per-reference Vec/FQN clone; the compact follow-up then reduced repeated FQN-to-ID lookup without adding long-lived cache state, improved every three-run median, and preserved both complete semantic fingerprints. The broader direct-ID MRO traversal was rejected and reverted after the fingerprint gate caught an edge-only namespace semantic regression and corrected repeats failed the performance gate. Active semantic completion remains 11.815 seconds versus the five-second goal."
+  "decision": "Accepted through the compact interned-owner-ID follow-up. The borrowed-chain slice first removed the per-reference Vec/FQN clone; the compact follow-up then reduced repeated FQN-to-ID lookup without adding long-lived cache state, improved every three-run median, and preserved both complete semantic fingerprints. The broader direct-ID MRO traversal was rejected and reverted after the fingerprint gate caught an edge-only namespace semantic regression and corrected repeats failed the performance gate. Active semantic completion remains 11.815 seconds versus the five-second goal.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

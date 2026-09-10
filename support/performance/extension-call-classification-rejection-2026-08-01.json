@@ -21,12 +21,12 @@
     "final_state": "The production change and temporary probe were removed after both candidates failed the controlled memory/CPU acceptance gate."
   },
   "configuration": {
-    "workspace": "/Users/naveenraj/goshposh",
+    "workspace": "/workspace/example-app",
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
@@ -236,8 +236,8 @@
   "shared_correctness": {
     "semantic_export_manifest_sha256_all_twelve_runs": "6bdb1000c83120b1f2a3a62b54f54a40a0a6529e1acce764b586fb5fcc498b32",
     "semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "c3d9ee7694347372cda26b762ea383c0",
-      "/Users/naveenraj/goshposh/server-devops-5441": "d7776e8174da7ee439ceb9706a5c694b"
+      "/workspace/example-app/server": "c3d9ee7694347372cda26b762ea383c0",
+      "/workspace/example-app/service-b": "d7776e8174da7ee439ceb9706a5c694b"
     },
     "gem_hits_per_run": 607,
     "java_hits_per_run": 358,
@@ -245,5 +245,6 @@
     "panicked_resource_tasks": 0
   },
   "decision": "rejected_and_reverted",
-  "next_step": "Do not merge extension patch dispatch and frame classification merely to share tracked_call_names lookup. Select a different v195 hot path with a design that improves CPU and preserves the fixed multi-root RSS ceiling."
+  "next_step": "Do not merge extension patch dispatch and frame classification merely to share tracked_call_names lookup. Select a different v195 hot path with a design that improves CPU and preserves the fixed multi-root RSS ceiling.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

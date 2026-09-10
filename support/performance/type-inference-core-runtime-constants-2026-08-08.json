@@ -24,9 +24,9 @@
     }
   },
   "inputs": {
-    "real_project": "/Users/naveenraj/goshposh/server",
+    "real_project": "/workspace/example-app/server",
     "real_project_files": 2619,
-    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file": "retired-fixtures/route-helper-corpus/catalog.rb",
     "large_file_bytes": 225569,
     "large_file_pairs": 15,
     "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
@@ -130,5 +130,6 @@
     "Real-project transition counts are not a precision score until representative sites have reviewed ground-truth labels.",
     "The goal-wide warm-cache, allocation, worker-scheduling, and two-project RSS matrix remain open.",
     "Unsupported Ruby and unresolved dependency forms must remain explained Unknown until a complete shared proof rule is implemented."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

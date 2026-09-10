@@ -6,7 +6,7 @@
   "cut": {
     "rank": 1,
     "path": "FileProcessor::merge_precise_visitor_type_facts",
-    "why": "Symbolized sequential samply on goshposh/server after 10e23c1 put merge_collected_visitor_type_facts at 10.1% of all samples. Exclusive TypeSubject PartialEq was the hottest project leaf (3.6%). The merge scanned every merged fact for every visitor fact.",
+    "why": "Symbolized sequential samply on example-workspace/server after 10e23c1 put merge_collected_visitor_type_facts at 10.1% of all samples. Exclusive TypeSubject PartialEq was the hottest project leaf (3.6%). The merge scanned every merged fact for every visitor fact.",
     "changes": [
       "Index live merge slots by TypeSubject for the assembly step only.",
       "Tombstone replaced slots instead of Vec::remove so later subject indexes stay valid.",
@@ -22,7 +22,7 @@
   "harness": {
     "sequential": {
       "binary": "profile_project_collection",
-      "corpus": "/Users/naveenraj/goshposh/server",
+      "corpus": "/workspace/example-app/server",
       "files": 2619,
       "notes": [
         "Sequential collect+replace; RAYON_NUM_THREADS=1",
@@ -31,7 +31,7 @@
     },
     "two_project": {
       "binary": "profiler",
-      "workspace": "/Users/naveenraj/goshposh",
+      "workspace": "/workspace/example-app",
       "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
       "scheduler_concurrency": 2,
       "runtime": "jruby-9.2.21.0",
@@ -106,5 +106,6 @@
     "devops_project_batch_s": -0.30,
     "inference_telemetry_unchanged": true
   },
-  "rss_note": "Official two-project peak RSS remains above the fixed 1,776,846,438-byte ceiling. Engine heap is unchanged. Process RSS on the warm repeat moved +48 MiB, inside prior run-to-run scatter on this corpus; the merge index is per-file and dropped after assembly."
+  "rss_note": "Official two-project peak RSS remains above the fixed 1,776,846,438-byte ceiling. Engine heap is unchanged. Process RSS on the warm repeat moved +48 MiB, inside prior run-to-run scatter on this corpus; the merge index is per-file and dropped after assembly.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

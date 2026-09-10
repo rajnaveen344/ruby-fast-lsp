@@ -815,14 +815,14 @@ mod tests {
         let mut engine = AnalysisEngine::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/project/platform.rb".into(),
-            content: "module GoshPosh; module Platform; module API; end; end; end".into(),
+            content: "module ExampleApp; module Platform; module API; end; end; end".into(),
             kind: SourceKind::Project,
         });
-        let gosh = FullyQualifiedName::namespace(vec![constant("GoshPosh")]);
+        let root_namespace = FullyQualifiedName::namespace(vec![constant("ExampleApp")]);
         let platform =
-            FullyQualifiedName::namespace(vec![constant("GoshPosh"), constant("Platform")]);
+            FullyQualifiedName::namespace(vec![constant("ExampleApp"), constant("Platform")]);
         let api = FullyQualifiedName::namespace(vec![
-            constant("GoshPosh"),
+            constant("ExampleApp"),
             constant("Platform"),
             constant("API"),
         ]);
@@ -830,7 +830,11 @@ mod tests {
             file_id,
             FileFacts {
                 graph_nodes: vec![
-                    GraphNodeFact::new(gosh, GraphNodeKind::Module, TextRange::new(file_id, 0, 8)),
+                    GraphNodeFact::new(
+                        root_namespace,
+                        GraphNodeKind::Module,
+                        TextRange::new(file_id, 0, 8),
+                    ),
                     GraphNodeFact::new(
                         platform,
                         GraphNodeKind::Module,
@@ -845,13 +849,13 @@ mod tests {
 
         let tree = AnalysisQuery::new(&engine).namespace_tree(false);
         assert_eq!(tree.modules.len(), 1);
-        assert_eq!(tree.modules[0].fqn, "GoshPosh");
+        assert_eq!(tree.modules[0].fqn, "ExampleApp");
         assert_eq!(tree.modules[0].modules.len(), 1);
-        assert_eq!(tree.modules[0].modules[0].fqn, "GoshPosh::Platform");
+        assert_eq!(tree.modules[0].modules[0].fqn, "ExampleApp::Platform");
         assert_eq!(tree.modules[0].modules[0].modules.len(), 1);
         assert_eq!(
             tree.modules[0].modules[0].modules[0].fqn,
-            "GoshPosh::Platform::API"
+            "ExampleApp::Platform::API"
         );
     }
 

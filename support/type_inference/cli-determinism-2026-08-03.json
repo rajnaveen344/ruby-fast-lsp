@@ -5,12 +5,12 @@
   "claim_eligible": false,
   "source": {
     "candidate_worktree_has_changes": true,
-    "fixture": "src/test/fixtures/goshposh_helpers_goto/api_app.rb",
+    "fixture": "retired-fixtures/route-helper-corpus/api_app.rb",
     "fixture_bytes": 242
   },
   "method": {
     "binary": "target/release/ruby-fast-lsp",
-    "command": "ruby-fast-lsp check src/test/fixtures/goshposh_helpers_goto/api_app.rb --format json",
+    "command": "ruby-fast-lsp check retired-fixtures/route-helper-corpus/api_app.rb --format json",
     "release_compilation_excluded": true,
     "fresh_process_runs": 5,
     "json_parse_required": true,
@@ -52,5 +52,6 @@
     "These exact-output checks cover three focused project fixtures and one host path; the JSON root field intentionally contains the canonical absolute project path.",
     "The conformance scorecard separately exercises repeatable concrete types, canonical union order, edit lifecycle, Unknown explanations, deferred complete-graph call finalization, exhaustive reopened-call unions, visibility-complete dispatch, and differential CLI/LSP parity for method returns, parameters, value constants, variables, and proven or unresolved call expressions.",
     "Full claim eligibility still requires normalized parity across the remaining query surfaces, worker-schedule coverage, and real-project deterministic reductions."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

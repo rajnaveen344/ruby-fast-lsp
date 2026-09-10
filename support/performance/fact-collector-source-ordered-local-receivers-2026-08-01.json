@@ -2,14 +2,14 @@
   "schema": 1,
   "recorded_at": "2026-08-01",
   "purpose": "Remove the whole-file textual assignment fallback from AST-time local receiver inference. Receiver types must come only from exact lexical, source-ordered VariableScopes facts; an unknown receiver must remain unknown rather than borrow a same-named assignment from another Ruby method.",
-  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
   "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "cpu_lanes": 6,
@@ -148,12 +148,12 @@
   "semantic_correction": {
     "semantic_export_manifest_sha256_all_six_runs": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
     "baseline_semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
-      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+      "/workspace/example-app/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/workspace/example-app/service-b": "80714a67726f4dd61e80eb2170d011d0"
     },
     "corrected_semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "c3d9ee7694347372cda26b762ea383c0",
-      "/Users/naveenraj/goshposh/server-devops-5441": "d7776e8174da7ee439ceb9706a5c694b"
+      "/workspace/example-app/server": "c3d9ee7694347372cda26b762ea383c0",
+      "/workspace/example-app/service-b": "d7776e8174da7ee439ceb9706a5c694b"
     },
     "representative_v189_to_v190": {
       "server_method_reference_candidates": {
@@ -237,5 +237,6 @@
     "note": "Debug-profile wall and RSS are not production acceptance measurements. The production A/B medians above are authoritative."
   },
   "decision": "accepted",
-  "next_step": "Use the v195 symbolized profile to select a distinct, narrow fact-pass or engine target. Do not restore whole-file local inference, repeat the measured-regressing shared local type-subject index, or weaken unknown-receiver absence semantics."
+  "next_step": "Use the v195 symbolized profile to select a distinct, narrow fact-pass or engine target. Do not restore whole-file local inference, repeat the measured-regressing shared local type-subject index, or weaken unknown-receiver absence semantics.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

@@ -23,7 +23,7 @@
     }
   },
   "inputs": {
-    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file": "retired-fixtures/route-helper-corpus/catalog.rb",
     "large_file_bytes": 225569,
     "large_file_pairs": 15,
     "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
@@ -155,5 +155,6 @@
     "The scorecard remains deliberately claim-ineligible despite its seed-corpus score.",
     "The goal-wide real-project diagnostic review and cold/warm/allocation/scheduling/two-project RSS matrix remain open.",
     "Other unsupported Ruby expression and flow forms must continue to report explained Unknown until a complete static proof is implemented."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

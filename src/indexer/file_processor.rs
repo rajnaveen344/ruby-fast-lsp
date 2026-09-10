@@ -2520,7 +2520,7 @@ mod tests {
         let processor =
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let uri = Url::parse("file:///project/Rakefile").unwrap();
-        let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nrequire File.expand_path('../config/application', __FILE__)\nDiscourse::Application.load_tasks\n";
+        let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nrequire File.expand_path('../config/application', __FILE__)\nExampleApp::Application.load_tasks\n";
 
         let result = processor
             .process_file_current_file_resolution_forced(&uri, source, &server)
@@ -2536,7 +2536,7 @@ mod tests {
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let helpers_uri = Url::parse("file:///project/helpers.rb").unwrap();
         let app_uri = Url::parse("file:///project/app.rb").unwrap();
-        let helpers = "module API\n  module Consignments\n    def get_images\n    end\n  end\n\n  include Consignments\nend\n";
+        let helpers = "module API\n  module Catalog\n    def get_images\n    end\n  end\n\n  include Catalog\nend\n";
         let app = "class Base\n  include API\nend\n\nclass PlatformApp < Base\n  def route\n    get_images\n  end\nend\n";
 
         processor
@@ -2565,7 +2565,7 @@ mod tests {
             .expect("PlatformApp must remain a resolvable method owner after reindex");
         assert!(
             callees.iter().any(|callee| {
-                callee.owner.to_string().contains("Consignments")
+                callee.owner.to_string().contains("Catalog")
                     && !callee.definition_ranges.is_empty()
             }),
             "helper method must remain reachable through Base/API includes after reindex, got {callees:?}"

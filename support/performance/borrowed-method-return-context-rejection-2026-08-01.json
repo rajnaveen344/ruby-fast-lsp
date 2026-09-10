@@ -10,13 +10,13 @@
     "observation": "FactCollector rebuilt a map of all preceding known method-return facts before every inferred method."
   },
   "controlled_workload": {
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
     "baseline_executable_sha256": "3b722509dc189ec15c7fccc5d84a9be7cd5e875c81e98a41e0c00390c79fd975",
     "allowed_peak_rss_ceiling_bytes": 1776846438,
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
@@ -220,8 +220,8 @@
   "correctness_shared_by_all_runs": {
     "semantic_export_manifest_sha256": "7153b725b0faba8e63dac2cb5163e4b9d322f646b054a88b6f3bf9fae4aa760b",
     "semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "3e0e3171f5b845346c4f09422fafc265",
-      "/Users/naveenraj/goshposh/server-devops-5441": "8930cb6fce670e611b2bb8240339938e"
+      "/workspace/example-app/server": "3e0e3171f5b845346c4f09422fafc265",
+      "/workspace/example-app/service-b": "8930cb6fce670e611b2bb8240339938e"
     },
     "project_definition_source_kind": "Project",
     "dependency_definition_source_kind": "Gem",
@@ -238,5 +238,6 @@
     "resource_leaks_at_end": 0,
     "panicked_resource_tasks": 0
   },
-  "final_decision": "Reject and remove both retained per-file method-return context variants. Do not repeat this lifetime shape; pursue allocation reductions that do not keep per-file inference products alive across the full collector traversal."
+  "final_decision": "Reject and remove both retained per-file method-return context variants. Do not repeat this lifetime shape; pursue allocation reductions that do not keep per-file inference products alive across the full collector traversal.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

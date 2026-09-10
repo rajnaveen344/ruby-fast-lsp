@@ -848,7 +848,7 @@ impl TypeStore {
     ///
     /// Production `replace_file` keeps that order. Scanning every fact in the
     /// file for `TypeSubject::Expression` is the deferred-receiver resolve
-    /// hotspot: `exact_expression_type` → `type_at` on goshposh. Named subjects
+    /// hotspot: `exact_expression_type` → `type_at` on example-workspace. Named subjects
     /// keep their interned buckets; expressions are range-owned and must not
     /// borrow that file-wide scan. `TypeStore::add` may unsort the bucket, so
     /// callers fall back to a linear scan when `file_owned_indexes_ordered` is

@@ -21,16 +21,16 @@
     ]
   },
   "dataset": {
-    "workspace": "/Users/naveenraj/goshposh",
+    "workspace": "/workspace/example-app",
     "projects": [
-      "/Users/naveenraj/goshposh/server/",
-      "/Users/naveenraj/goshposh/server-devops-5441/"
+      "/workspace/example-app/server/",
+      "/workspace/example-app/service-b/"
     ],
     "runtime": "JRuby 9.2.21.0",
     "scheduler_concurrency": 2,
     "persistent_cache": "/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731",
     "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
-    "command_shape": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=<cache> <binary> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest"
+    "command_shape": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=<cache> <binary> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest"
   },
   "binaries": {
     "baseline_sha256": "0313a894936c0f53771d08a259218681d76d50789cc519bb3d87811634b99abb",
@@ -178,13 +178,14 @@
     "manifest_sha256_all_six_runs": "54268a7cd555eb82ffe9ea3a233378113c2dd5da5a8d576c15fb4de1fe717513",
     "definition_results_sha256_all_six_runs": "a2fa41c527077805e96d92d402d50ebc681c1f8f3a14f2df5774b9c7e93034e9",
     "project_semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server-devops-5441/": "a4e95dab56b27139b21e2252d6092ee7",
-      "/Users/naveenraj/goshposh/server/": "ebd291845022823615ba4d53306938da"
+      "/workspace/example-app/service-b/": "a4e95dab56b27139b21e2252d6092ee7",
+      "/workspace/example-app/server/": "ebd291845022823615ba4d53306938da"
     },
     "persistent_java_hits_per_run": 358,
     "persistent_java_lookups_per_run": 358,
     "resource_leaks_or_panics": 0
   },
   "reason": "The actual two-project schedule never overlapped an identical JavaArtifactProductKey: every candidate lookup became its own producer and no read/decode/build was eliminated. The small median wall decrease was contradicted by worse user CPU, system CPU, every readiness milestone, both RSS measures, and one severe candidate outlier. Retaining an unconditional hash/mutex/Arc layer without observed reuse is not production evidence.",
-  "next_direction": "Do not restore this unconditional ephemeral wrapper. Measure exact repeated Java product identities and sequential decode/composition ownership first. A future flight is justified only on a path that demonstrates concurrent identical keys, or as part of a bounded design that also removes the measured sequential cost without retaining a monolithic project catalog."
+  "next_direction": "Do not restore this unconditional ephemeral wrapper. Measure exact repeated Java product identities and sequential decode/composition ownership first. A future flight is justified only on a path that demonstrates concurrent identical keys, or as part of a bounded design that also removes the measured sequential cost without retaining a monolithic project catalog.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

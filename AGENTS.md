@@ -72,7 +72,10 @@ cargo build --release         # Release build
   nesting. Preserve real module ownership and visibility when moving files.
 - Check the immediate-entry counts recursively within the reorganized subtree
   and update its reading guide and executable source-path references. Historical
-  measurement reports retain the paths of the source revision they measured.
+  measurement reports retain producer paths from the revision they measured.
+  Application and fixture identities in published reports must be generic;
+  label generalized historical paths explicitly rather than implying that a
+  replacement synthetic fixture produced the original measurements.
 
 ## TigerBeetle Principles (MANDATORY)
 
@@ -438,7 +441,7 @@ and duplicate provenance remains deterministic. Never parallelize the
 classpath-precedence write itself or admit artifact work outside the owning
 CPU, memory, I/O, and task lease.
 An unconditional zero-retention single-flight around every persistent Java
-artifact lookup was measured and rejected on the two-project JRuby `goshposh`
+artifact lookup was measured and rejected on the two-project JRuby `example-workspace`
 corpus: 1,074 lookups produced 1,074 independent flights and zero joins, while
 median CPU, readiness, and RSS regressed. Do not restore that wrapper merely
 because the keys are immutable. First prove concurrent identical product keys,
@@ -448,7 +451,7 @@ The accepted sequential-reuse design keeps a server-owned cache of at most 256
 exact Java artifact products and 256 MiB of estimated deep metadata. Archive
 products and project declarations share immutable `Arc<ClassFile>` values;
 project-specific paths, classpath ordering, duplicate winners, providers,
-facts, and engines remain separate. On the two-project JRuby `goshposh` corpus
+facts, and engines remain separate. On the two-project JRuby `example-workspace` corpus
 it retained 168 identities, reused all 190 repeated lookups, halved persistent
 reads, and improved median wall, CPU, readiness, and RSS with exact semantics.
 Keep capacity and deep-weight eviction tests, report reuse as a process-wide
@@ -1310,7 +1313,7 @@ These are safety ceilings, not claims that every project or machine has the
 same latency. A material inference expansion additionally requires like-for-
 like alternating release measurements: median wall/CPU and affected edit/query
 p95 must remain within 3% outside measured noise, and the fully warm two-project
-goshposh workload must remain at or below 1,776,846,438 bytes peak RSS. Preserve
+example-workspace workload must remain at or below 1,776,846,438 bytes peak RSS. Preserve
 the exact inputs, binaries, cache state, semantic fingerprints, raw samples,
 and accepted/rejected decision under `support/performance/`. Never weaken a
 budget to accept a candidate or trade semantic correctness for timing.
@@ -1362,7 +1365,7 @@ budget to accept a candidate or trade semantic correctness for timing.
   large JRuby apps (~5600 files; server project batch ~8.7s warm) and cloning
   gem declaration facts into isolated engines (server product_binding ~8.9s
   warm). Evidence:
-  `support/performance/all-goshposh-10s-index-leftover-2026-08-19.json`.
+  `support/performance/workspace-index-tail-2026-08-19.json`.
   Do not skip project-file body inference or merge isolated engines to hit
   a wall-clock target.
 - First-walk `infer_type` engine returns use the same cached
@@ -1382,7 +1385,7 @@ budget to accept a candidate or trade semantic correctness for timing.
   the hot key. Do not raise the cap further without an RSS measurement.
 - Accepted August 19 2026: first-walk `method_lookup_chain` rebuilt MRO and
   cloned every unresolved graph edge on each inference probe (43% of sequential
-  `goshposh/server` samples). The graph now keeps an explicit unresolved-source
+  `example-workspace/server` samples). The graph now keeps an explicit unresolved-source
   count index (`has_explicit_unresolved_edge_from`). Constructed chains reuse a
   thread-local 8192-entry FIFO keyed by the same engine identity as method
   returns. Hits are O(1). Do not restore `unresolved_edges().collect()` per
@@ -1433,7 +1436,7 @@ budget to accept a candidate or trade semantic correctness for timing.
   Constant-equation resolve uses the borrowed `TypeStore::constant_type_facts`
   domain view for the same reason: do not restore `all_facts` expansion there.
 - Accepted August 19 2026: after method-lookup-chain caching, sequential
-  `goshposh/server` assembly was `TypeSubject` PartialEq while merging visitor
+  `example-workspace/server` assembly was `TypeSubject` PartialEq while merging visitor
   type facts into the syntax seed (10% of samples, ~800 ms). Index live merge
   slots by subject for that assembly step only, then drop the map. Do not keep
   it for the collector traversal (August 1 TypeStore HashMap RSS rejection).
@@ -1444,7 +1447,7 @@ budget to accept a candidate or trade semantic correctness for timing.
 - Disabling `TypeTracker`'s discarded per-statement variable snapshots only for
   `FactCollector` return inference was also measured and removed. It preserved
   the exact semantic manifest and fingerprints, but the profiled target was
-  only 0.41% inclusive and the controlled three-pair `goshposh` A/B produced no
+  only 0.41% inclusive and the controlled three-pair `example-workspace` A/B produced no
   measurable gain: median wall, user CPU, active semantic readiness, and
   dependency navigation all regressed slightly. Do not add a special
   return-only snapshot mode without a new profile showing a materially larger
@@ -1462,7 +1465,7 @@ budget to accept a candidate or trade semantic correctness for timing.
   defensible type, keep the receiver unknown. Never restore the removed
   whole-file text scan or nested Prism parse fallback: it crossed hard method
   boundaries, borrowed later same-named assignments, and created tens of
-  thousands of false method-reference candidates on `goshposh`. The corrected
+  thousands of false method-reference candidates on `example-workspace`. The corrected
   semantic-result fingerprints and controlled A/B are recorded in
   `support/performance/fact-collector-source-ordered-local-receivers-2026-08-01.json`.
 - Rejected August 1 2026 extension-call experiment: sharing the
@@ -1577,7 +1580,7 @@ budget to accept a candidate or trade semantic correctness for timing.
   edge-only endpoint entries were mistaken for declared namespaces. The focused
   `edge_only_graph_entries_do_not_promote_missing_namespaces` regression now
   preserves that boundary. The corrected ID traversal still regressed the exact
-  warm `goshposh` wall, CPU, and readiness medians, so it was removed. Do not
+  warm `example-workspace` wall, CPU, and readiness medians, so it was removed. Do not
   restore that shape without a new symbolized profile, explicit graph-node
   definition semantics, and a three-run production improvement.
 

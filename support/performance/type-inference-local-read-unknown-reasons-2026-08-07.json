@@ -25,7 +25,7 @@
     }
   },
   "inputs": {
-    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file": "retired-fixtures/route-helper-corpus/catalog.rb",
     "large_file_bytes": 225569,
     "large_file_pairs": 15,
     "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
@@ -120,5 +120,6 @@
     },
     "noise_note": "The first 15-pair repeat put completion at +4.04% (1.083 microseconds) while the second put it at -0.76%; this slice is not on the completion query path. Both repeats passed all fixed production budgets, every affected path stayed within 3%, and heap was byte-identical. The full goal-wide performance matrix remains open.",
     "decision": "accepted as a bounded local-read explanation slice"
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

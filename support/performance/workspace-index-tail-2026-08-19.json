@@ -4,7 +4,7 @@
   "decision": "stop",
   "purpose": "Record the 28-root complete-index campaign after the legal cuts (dependency body-inference skip, bounded gem-load prefetch with serial bind, Arc name-only tracked-call prefilter). The 10s warm-and-cold gate was not met. Leftover bars are contract-required project TypeTracker and per-engine gem-fact clone. Do not skip project-file body inference or merge isolated engines.",
   "gate": {
-    "workspace": "/Users/naveenraj/goshposh",
+    "workspace": "/workspace/example-app",
     "discovered_gemfile_roots": 28,
     "target_complete_index_ms": 10000,
     "includes_background": "gem bind and engine.resolve()",
@@ -28,7 +28,7 @@
     }
   },
   "configuration": {
-    "runtime": "jruby-9.2.21.0 for server, server-devops-5441, admin, charts, show-notifier; remaining roots MRI/auto",
+    "runtime": "jruby-9.2.21.0 for server, service-b, admin, charts, show-notifier; remaining roots MRI/auto",
     "jdk": "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home",
     "scheduler_concurrency": 2,
     "extension_path": "./editors/vscode/vsix",
@@ -58,9 +58,9 @@
     "tracked_diff_sha256": "d8dc2fb66fa3170b115f06beb22dea881716967d0026170140eb684ecc015e17"
   },
   "commands": {
-    "cold_28": "JAVA_HOME=<jdk17> RUBY_FAST_LSP_CACHE_DIR=<empty-cache> RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --phase all --config /tmp/ruby-fast-lsp-goshposh-all-gemfiles.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2",
+    "cold_28": "JAVA_HOME=<jdk17> RUBY_FAST_LSP_CACHE_DIR=<empty-cache> RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /workspace/example-app --phase all --config /tmp/ruby-fast-lsp-example-workspace-all-gemfiles.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2",
     "warm_28": "same command against the populated cache directory",
-    "warm_two_project": "same cache; --config /tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json with indexing.projectRoots [server, server-devops-5441] --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest"
+    "warm_two_project": "same cache; --config /tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json with indexing.projectRoots [server, service-b] --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest"
   },
   "cold_28_empty_cache": {
     "note": "Empty RUBY_FAST_LSP_CACHE_DIR. This binary still had the later-reverted 256-entry decoded-gem RAM cache; in-process hits were 70/1064. Persistent gem misses 899. Java artifacts were also cold (209 misses).",
@@ -174,8 +174,8 @@
   },
   "warm_two_project_ephemeral_gem_cache": {
     "projects": [
-      "/Users/naveenraj/goshposh/server/",
-      "/Users/naveenraj/goshposh/server-devops-5441/"
+      "/workspace/example-app/server/",
+      "/workspace/example-app/service-b/"
     ],
     "log": "/tmp/ruby-fast-lsp-10s-remeasure/warm-2p-ephemeral.log",
     "jsonl": "/tmp/ruby-fast-lsp-10s-remeasure/warm-2p-ephemeral.jsonl",
@@ -190,8 +190,8 @@
     "engine_files": 35580,
     "ceiling_excess_process_rss_bytes": 302741914,
     "project_semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "a6c4319260a4eec1a0035c5b71bff724",
-      "/Users/naveenraj/goshposh/server-devops-5441": "752cab0cbc17af1d17f0acd9e599a919"
+      "/workspace/example-app/server": "a6c4319260a4eec1a0035c5b71bff724",
+      "/workspace/example-app/service-b": "752cab0cbc17af1d17f0acd9e599a919"
     },
     "note": "Fingerprints changed versus historical two-project hashes because gem/stdlib methods without RBS/YARD no longer persist inferred returns. Do not restore gem TypeTracker to keep an old fingerprint."
   },
@@ -217,5 +217,6 @@
     "two_project_rss_ceiling_held": false,
     "project_file_inference_unchanged": true,
     "next": "Do not skip project bodies or merge engines. Further wall cuts need a cheaper project visitor or interned/Arc declaration blobs measured under the two-project RSS ceiling."
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

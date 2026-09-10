@@ -3,16 +3,16 @@
   "recorded_at": "2026-08-01",
   "purpose": "Prove that persistent gem dependency facts cannot survive a semantic analyzer implementation change while independently keyed Java and Wasm products remain reusable.",
   "real_world_failure": {
-    "workspace": "/Users/naveenraj/goshposh",
+    "workspace": "/workspace/example-app",
     "observation": "A cache populated by an older analyzer state loaded successfully under a newer analyzer build but produced semantic fingerprints different from a fresh-cache rebuild.",
     "stale_cache_semantic_export_manifest_sha256": "7153b725b0faba8e63dac2cb5163e4b9d322f646b054a88b6f3bf9fae4aa760b",
     "stale_cache_project_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "3e0e3171f5b845346c4f09422fafc265",
-      "/Users/naveenraj/goshposh/server-devops-5441": "8930cb6fce670e611b2bb8240339938e"
+      "/workspace/example-app/server": "3e0e3171f5b845346c4f09422fafc265",
+      "/workspace/example-app/service-b": "8930cb6fce670e611b2bb8240339938e"
     },
     "fresh_rebuild_project_fingerprints_before_fix": {
-      "/Users/naveenraj/goshposh/server": "1b65a68a6e4cca852d612331ea13108d",
-      "/Users/naveenraj/goshposh/server-devops-5441": "902fc33c5ca6900b16d17ca1b8210125"
+      "/workspace/example-app/server": "1b65a68a6e4cca852d612331ea13108d",
+      "/workspace/example-app/service-b": "902fc33c5ca6900b16d17ca1b8210125"
     },
     "fresh_rebuild_then_replay_before_fix": {
       "semantic_export_manifest_sha256": "2b3aa58e9787b057316ab14e5ba6401b206b7c6523d3303a75d654b047dc45e4",
@@ -61,12 +61,12 @@
     "regression_contract": "Two manifests with identical seed, runtime, closure, source path, and source bytes but different semantic producer hashes have different cache IDs; a payload encoded for the first is rejected by the second."
   },
   "controlled_workload": {
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
     "profiler_executable_sha256": "4252de1bef31984313f92e78113c79570e7f72c7a40c6f361aef15f542619ed5",
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
     "runtime": "jruby-9.2.21.0"
   },
@@ -131,12 +131,13 @@
   "correctness_shared_by_rebuild_and_replay": {
     "semantic_export_manifest_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
     "semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "d6e4c41c80b5cfe42c7857473508ad22",
-      "/Users/naveenraj/goshposh/server-devops-5441": "56f0644224a1538eeca3f6b40029f0ae"
+      "/workspace/example-app/server": "d6e4c41c80b5cfe42c7857473508ad22",
+      "/workspace/example-app/service-b": "56f0644224a1538eeca3f6b40029f0ae"
     },
     "project_definition_source_kind": "Project",
     "dependency_definition_source_kind": "Gem",
     "result": "exact match"
   },
-  "decision": "Accepted. Persisted gem facts now fail closed across semantic producer changes, rebuild once under bounded single-flight ownership, and replay with byte-for-byte equivalent semantic output in a fresh process."
+  "decision": "Accepted. Persisted gem facts now fail closed across semantic producer changes, rebuild once under bounded single-flight ownership, and replay with byte-for-byte equivalent semantic output in a fresh process.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "evidence_kind": "focused-server-dependency-symbolized-profile",
   "recorded_at": "2026-07-27",
-  "project": "/Users/naveenraj/goshposh/server",
+  "project": "/workspace/example-app/server",
   "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
   "machine": {
     "cpu_model": "Apple M4 Pro",
@@ -184,5 +184,6 @@
     "/tmp/ruby-fast-lsp-server-query-cache-20260727.json.gz",
     "/tmp/ruby-fast-lsp-server-top-level-fallback-cache-final-20260727.json.gz",
     "/tmp/ruby-fast-lsp-server-top-level-fallback-cache-final-20260727.json.syms.json"
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

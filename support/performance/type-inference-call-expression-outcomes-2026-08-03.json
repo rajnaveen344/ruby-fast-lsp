@@ -6,7 +6,7 @@
   "source": {
     "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
     "candidate_worktree_has_changes": true,
-    "fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "fixture": "retired-fixtures/route-helper-corpus/catalog.rb",
     "fixture_bytes": 225569,
     "fixture_lines": 5095
   },
@@ -16,7 +16,7 @@
     "memory_bytes": 25769803776
   },
   "method": {
-    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "command": "profile_single_file retired-fixtures/route-helper-corpus/catalog.rb retired-fixtures/route-helper-corpus",
     "release_compilation_excluded": true,
     "alternating_process_pairs": 15,
     "baseline_binary_sha256": "e7995512f9a3d4c870606b25d68f339e5cb52b6011023ab1de13416a1fa34c92",
@@ -116,5 +116,6 @@
     "The large-file evidence is one same-file semantic pass, and the query evidence is one focused project fixture. They do not replace warm workspace, allocation, worker-schedule, or fixed two-project peak-RSS measurements.",
     "The scorecard remains diagnostic and score_eligible=false until the broader parity, real-project precision, and complete performance gates are met."
   ],
-  "decision": "Semantically accepted, performance acceptance still open. The compact resolver-owned design passes the complete bounded workspace suite and the focused large-file gate, but edit and references p95 comparisons remain above the three-percent comparison threshold."
+  "decision": "Semantically accepted, performance acceptance still open. The compact resolver-owned design passes the complete bounded workspace suite and the focused large-file gate, but edit and references p95 comparisons remain above the three-percent comparison threshold.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

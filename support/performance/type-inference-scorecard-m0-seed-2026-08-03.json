@@ -41,6 +41,7 @@
     "This is the first candidate-worktree M0 seed measurement, not a base-versus-candidate comparison.",
     "The command includes Cargo and ten test-binary launches; the scorecard test itself reported 0.14 seconds after release compilation.",
     "The 15-case seed corpus is not representative enough for the 9/10 claim.",
-    "Cold workspace indexing, warm workspace indexing, didChange latency, hover/completion query latency, allocations, full-project CPU, and goshposh peak RSS remain unmeasured for this goal."
-  ]
+    "Cold workspace indexing, warm workspace indexing, didChange latency, hover/completion query latency, allocations, full-project CPU, and example-workspace peak RSS remain unmeasured for this goal."
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

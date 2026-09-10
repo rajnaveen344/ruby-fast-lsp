@@ -6,7 +6,7 @@
   "source": {
     "baseline_artifact": "support/performance/type-inference-chained-call-large-file-base-vs-candidate-2026-08-03.json",
     "query_baseline_artifact": "support/performance/type-inference-nonlocal-proof-query-budget-2026-08-03.json",
-    "large_fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_fixture": "retired-fixtures/route-helper-corpus/catalog.rb",
     "large_fixture_bytes": 225569,
     "large_fixture_lines": 5095,
     "query_fixture": "tests/fixtures/type_inference_query_benchmark/app/controllers/users_controller.rb"
@@ -17,7 +17,7 @@
     "memory_bytes": 25769803776
   },
   "large_single_file": {
-    "command": "target/release/profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "command": "target/release/profile_single_file retired-fixtures/route-helper-corpus/catalog.rb retired-fixtures/route-helper-corpus",
     "release_compilation_excluded": true,
     "candidate_processes": 15,
     "file_processor_total_ms": {
@@ -98,7 +98,8 @@
   "limitations": [
     "The immediate pre-change baselines are checked-in candidate artifacts rather than alternating binaries retained in this process. The only older hashed profiler still present indexed a much smaller semantic universe (0 MiB reported engine heap and microsecond references), so it was explicitly excluded.",
     "The candidate cold-process median is above the historical focused median, but those samples include core/runtime discovery and a changed semantic-producer fingerprint/cache generation. The same-fixture large semantic pass improved, every fixed cold budget passed, and the interactive p95 comparisons stayed within the three-percent gates.",
-    "This slice does not replace the required warm workspace, allocation, worker-schedule, real-project diagnostic, or fixed two-project goshposh peak-RSS matrix."
+    "This slice does not replace the required warm workspace, allocation, worker-schedule, real-project diagnostic, or fixed two-project example-workspace peak-RSS matrix."
   ],
-  "decision": "Accepted. Exact nonlocal-read facts close a CLI/LSP semantic gap while the relevant large-file pass improves, ready-query p95 deltas stay within three percent, and every fixed production budget passes."
+  "decision": "Accepted. Exact nonlocal-read facts close a CLI/LSP semantic gap while the relevant large-file pass improves, ready-query p95 deltas stay within three percent, and every fixed production budget passes.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

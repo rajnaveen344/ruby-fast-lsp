@@ -6,7 +6,7 @@
   "cut": {
     "rank": 1,
     "path": "method_lookup_chain used by FactCollector infer_type / call references",
-    "why": "Symbolized sequential samply on goshposh/server put method_lookup_chain at 43.3% of all samples. Each probe rebuilt MRO and cloned every unresolved graph edge into a HashSet (HashMap::insert 29.7%).",
+    "why": "Symbolized sequential samply on example-workspace/server put method_lookup_chain at 43.3% of all samples. Each probe rebuilt MRO and cloned every unresolved graph edge into a HashSet (HashMap::insert 29.7%).",
     "changes": [
       "SemanticGraph maintains an explicit unresolved-source count index; has_explicit_unresolved_edge_from is O(1) and covers Include/Prepend/Extend as well as Superclass. ImplicitObject provenance is excluded.",
       "method_lookup_chain reuses a thread-local 8192-entry FIFO keyed by engine identity, matching method-return memoization. Hits are O(1) and do not touch FIFO order. Identity changes drop the entries.",
@@ -22,7 +22,7 @@
   "harness": {
     "sequential": {
       "binary": "profile_project_collection",
-      "corpus": "/Users/naveenraj/goshposh/server",
+      "corpus": "/workspace/example-app/server",
       "files": 2619,
       "notes": [
         "Sequential collect+replace; RAYON_NUM_THREADS=1",
@@ -32,7 +32,7 @@
     },
     "two_project": {
       "binary": "profiler",
-      "workspace": "/Users/naveenraj/goshposh",
+      "workspace": "/workspace/example-app",
       "config": "/tmp/ruby-fast-lsp-two-project-roots-jruby-9.2.21.json",
       "scheduler_concurrency": 2,
       "runtime": "jruby-9.2.21.0",
@@ -102,5 +102,6 @@
     "devops_project_batch_s": -2.55,
     "inference_telemetry_unchanged": true
   },
-  "rss_note": "Official two-project peak RSS remains above the fixed 1,776,846,438-byte ceiling on this branch and its parent. This cut did not raise process RSS on the warm repeat."
+  "rss_note": "Official two-project peak RSS remains above the fixed 1,776,846,438-byte ceiling on this branch and its parent. This cut did not raise process RSS on the warm repeat.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

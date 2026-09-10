@@ -2,7 +2,7 @@
   "schema_version": 2,
   "evidence_kind": "multi-root-m0-sanitized-aggregate",
   "recorded_at": "2026-07-27",
-  "workspace": "/Users/naveenraj/goshposh",
+  "workspace": "/workspace/example-app",
   "projects": 67,
   "build": {
     "source_revision": "fee94ffb7f2d1b723b9b11086de72350e5d5da09",
@@ -78,7 +78,7 @@
   },
   "slowest_projects": [
     {
-      "project": "server-devops-5441",
+      "project": "service-b",
       "total_ms": 243544.818791,
       "project_ms": 8100.276042,
       "dependencies_ms": 227013.979625
@@ -102,7 +102,8 @@
     "This sanitized aggregate omits per-project paths and individual source fingerprints; the aggregate dataset fingerprint covers the complete sorted project evidence."
   ],
   "raw_evidence": {
-    "jsonl": "/tmp/ruby-fast-lsp-goshposh-m0-schema2-20260727.jsonl",
-    "log": "/tmp/ruby-fast-lsp-goshposh-m0-schema2-20260727.log"
-  }
+    "jsonl": "/tmp/ruby-fast-lsp-example-workspace-m0-schema2-20260727.jsonl",
+    "log": "/tmp/ruby-fast-lsp-example-workspace-m0-schema2-20260727.log"
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

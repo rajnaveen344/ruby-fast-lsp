@@ -2,7 +2,7 @@
   "schema": 1,
   "recorded_at": "2026-07-31",
   "purpose": "Measure whether removing redundant source-buffer copies and eager comment parsing closes the warm multi-root RSS budget without regressing terminal throughput or semantic correctness.",
-  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37",
   "raw_local_evidence": [
     {
       "id": "v29",
@@ -18,10 +18,10 @@
   "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "cpu_lanes": 6,
@@ -43,7 +43,7 @@
         "id": "v29",
         "wall_ms": 21595.889041,
         "peak_rss_bytes": 1692565504,
-        "project_user_pmm_ms": 1116,
+        "project_account_record_ms": 1116,
         "dependency_bson_object_id_ms": 1569,
         "active_project_navigation_ready_ms": 10800,
         "active_semantic_complete_ms": 18698,
@@ -53,7 +53,7 @@
         "id": "v30",
         "wall_ms": 22472.146208,
         "peak_rss_bytes": 1483046912,
-        "project_user_pmm_ms": 1101,
+        "project_account_record_ms": 1101,
         "dependency_bson_object_id_ms": 1576,
         "active_project_navigation_ready_ms": 11758,
         "active_semantic_complete_ms": 20383,
@@ -63,7 +63,7 @@
     "repeat_median": {
       "wall_ms": 22034.0176245,
       "peak_rss_bytes": 1587806208,
-      "project_user_pmm_ms": 1108.5,
+      "project_account_record_ms": 1108.5,
       "dependency_bson_object_id_ms": 1572.5,
       "active_project_navigation_ready_ms": 11279,
       "active_semantic_complete_ms": 19540.5,
@@ -99,5 +99,6 @@
     "shebang_comment_masking_is_preserved": true,
     "isolated_engine_ownership_is_unchanged": true
   },
-  "decision": "Accepted. Median peak RSS fell 18.90% relative to the immediately preceding current-code evidence and is 1.70% below the original full-ahead baseline. Median terminal time is 1.42% slower than the immediately preceding pair but only 1.49% above the original baseline, with overlapping phase-level variance and no added semantic work; the allocation path closes the explicit 10% RSS ceiling without a material throughput regression. Dependency navigation remains below three seconds. Project navigation measured 1.101-1.116 seconds, so the one-second p95 target remains open and is not claimed by this slice."
+  "decision": "Accepted. Median peak RSS fell 18.90% relative to the immediately preceding current-code evidence and is 1.70% below the original full-ahead baseline. Median terminal time is 1.42% slower than the immediately preceding pair but only 1.49% above the original baseline, with overlapping phase-level variance and no added semantic work; the allocation path closes the explicit 10% RSS ceiling without a material throughput regression. Dependency navigation remains below three seconds. Project navigation measured 1.101-1.116 seconds, so the one-second p95 target remains open and is not claimed by this slice.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

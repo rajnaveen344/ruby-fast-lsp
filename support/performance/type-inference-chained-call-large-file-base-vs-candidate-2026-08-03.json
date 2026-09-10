@@ -6,7 +6,7 @@
   "source": {
     "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
     "candidate_worktree_has_changes": true,
-    "fixture": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "fixture": "retired-fixtures/route-helper-corpus/catalog.rb",
     "fixture_bytes": 225569,
     "fixture_lines": 5095
   },
@@ -19,7 +19,7 @@
   },
   "method": {
     "binary": "target/release/profile_single_file",
-    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/consignments.rb src/test/fixtures/goshposh_helpers_goto",
+    "command": "profile_single_file retired-fixtures/route-helper-corpus/catalog.rb retired-fixtures/route-helper-corpus",
     "release_compilation_excluded": true,
     "phase_alternating_pairs": 15,
     "resource_alternating_pairs": 7,
@@ -104,10 +104,11 @@
     "full_performance_matrix_still_required": true
   },
   "limitations": [
-    "This measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual query latency, allocations, or the full goshposh RSS ceiling.",
+    "This measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual query latency, allocations, or the full example-workspace RSS ceiling.",
     "The 15 phase pairs characterize medians but do not establish stable p95 latency.",
     "The replace-and-resolve subphase increased by 0.53 ms at the median even though end-to-end file processing stayed within the three-percent gate.",
     "The candidate includes the cumulative proof-first inference worktree, so this is not a microbenchmark of chained-call expression facts alone.",
     "Correctness, deterministic output, scorecard, edit lifecycle, CLI/LSP parity, and the complete performance matrix are verified separately."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

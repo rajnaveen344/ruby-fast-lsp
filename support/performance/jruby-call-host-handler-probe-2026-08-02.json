@@ -7,7 +7,7 @@
     "mechanism": "process-wide AtomicU64 entry counts and per-handler nanosecond sums around the ten call-host steps; PERF log at project_navigation_ready and after_dependencies",
     "overhead_note": "Instant::now around every CallNode adds some probe cost; totals are still far below the project phase wall."
   },
-  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-one-server-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-one-server-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37",
   "log": "/tmp/ruby-fast-lsp-one-server-call-host-probe-20260802.log",
   "run_note": "This particular run rebuilt persistent gem products (306 misses); dependency wall is not a warm A/B sample. project_navigation_ready call-host numbers still attribute the project-file path.",
   "project_navigation_ready": {
@@ -46,5 +46,6 @@
     ],
     "do_not": "Optimize call-host scheduling or remove handlers expecting multi-second wins on the project phase.",
     "next_measure": "Profile FactCollector walk / collect_direct_facts / double AST pass / Prism visitation for the remaining ~5.7s project gap; optionally inspect gem-path java_ctor (~0.5s) as a secondary deps target."
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

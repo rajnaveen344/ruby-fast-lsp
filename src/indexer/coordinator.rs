@@ -3639,15 +3639,15 @@ mod coordinator_integration_tests {
     #[test]
     fn active_document_constant_roots_stably_prioritize_matching_locked_gems() {
         let constants = active_document_constant_priority_keys(
-            "GoshPosh::Platform::Users::UserPmm.by_username(name)\n\
-             GoshPosh::Settings.current_api_version\n\
+            "ExampleApp::Platform::Users::AccountRecord.find_by_key(key)\n\
+             ExampleApp::Settings.current_api_version\n\
              BSON::ObjectId.new\n",
         );
         assert!(
             constants
                 .project_terminals
                 .iter()
-                .any(|terminal| terminal == "userpmm"),
+                .any(|terminal| terminal == "accountrecord"),
             "the terminal constant in a qualified project type must be available for source-file priority"
         );
         assert!(
@@ -3657,7 +3657,7 @@ mod coordinator_integration_tests {
                 .any(|terminal| terminal == "objectid"),
             "terminal dependency constants must remain available alongside their root package"
         );
-        assert!(constants.dependency_roots.contains("goshposh"));
+        assert!(constants.dependency_roots.contains("exampleapp"));
         assert!(constants.dependency_roots.contains("bson"));
         assert!(!constants
             .project_terminals
@@ -5166,7 +5166,7 @@ end
             .expect("Gemfile must be written");
         let caller_path = project.join("caller.rb");
         let caller_uri = Url::from_file_path(&caller_path).unwrap();
-        fs::write(&caller_path, "UserPmm.lookup\n").unwrap();
+        fs::write(&caller_path, "AccountRecord.lookup\n").unwrap();
         for index in 0..140 {
             fs::write(
                 project.join(format!("ordinary_{index:03}.rb")),
@@ -5174,8 +5174,8 @@ end
             )
             .unwrap();
         }
-        let target_path = project.join("user_pmm.rb");
-        fs::write(&target_path, "class UserPmm\nend\n").unwrap();
+        let target_path = project.join("account_record.rb");
+        fs::write(&target_path, "class AccountRecord\nend\n").unwrap();
 
         let server = create_test_server();
         let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
@@ -5186,7 +5186,7 @@ end
                     uri: caller_uri.clone(),
                     language_id: "ruby".to_string(),
                     version: 1,
-                    text: "UserPmm.lookup\n".to_string(),
+                    text: "AccountRecord.lookup\n".to_string(),
                 },
             },
         )
@@ -5229,7 +5229,7 @@ end
         let ticket = workspace.navigation_demands.request(
             run.generation(),
             crate::navigation_demand::NavigationDemandStage::Project,
-            "userpmm",
+            "accountrecord",
         );
 
         coordinator
@@ -5264,7 +5264,7 @@ end
         fs::create_dir_all(&project).expect("project root must be created");
         fs::write(project.join("Gemfile"), "source 'https://rubygems.org'\n")
             .expect("Gemfile must be written");
-        fs::write(project.join("user.rb"), "class UserPmm\nend\n").unwrap();
+        fs::write(project.join("account.rb"), "class AccountRecord\nend\n").unwrap();
         fs::write(project.join("report.rb"), "class Report\nend\n").unwrap();
 
         let server = create_test_server();
@@ -5282,7 +5282,7 @@ end
         let ticket = workspace.navigation_demands.request(
             run.generation(),
             crate::navigation_demand::NavigationDemandStage::Project,
-            "userpmm",
+            "accountrecord",
         );
 
         let mut coordinator =

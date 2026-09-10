@@ -6,7 +6,7 @@
   "source": {
     "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
     "candidate_worktree_has_changes": true,
-    "fixture": "src/test/fixtures/goshposh_helpers_goto/api_app.rb",
+    "fixture": "retired-fixtures/route-helper-corpus/api_app.rb",
     "fixture_bytes": 242
   },
   "host": {
@@ -18,7 +18,7 @@
   },
   "method": {
     "binary": "target/release/profile_single_file",
-    "command": "profile_single_file src/test/fixtures/goshposh_helpers_goto/api_app.rb src/test/fixtures/goshposh_helpers_goto",
+    "command": "profile_single_file retired-fixtures/route-helper-corpus/api_app.rb retired-fixtures/route-helper-corpus",
     "release_compilation_excluded": true,
     "warmup_runs_per_revision": 1,
     "alternating_pairs": 7,
@@ -69,10 +69,11 @@
     "semantic_fixture_tests_required_separately": true
   },
   "limitations": [
-    "This focused fixture measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual hover/completion queries, or the goshposh RSS ceiling.",
+    "This focused fixture measures one release single-file semantic pass, not cold or warm workspace indexing, didChange, individual hover/completion queries, or the example-workspace RSS ceiling.",
     "Seven pairs characterize the median but are insufficient for a stable p95 claim.",
     "Candidate ran before base in every pair; this can favor the base through filesystem cache warmth, so the non-regressing candidate median is conservative for this ordering.",
     "One candidate RSS sample was an 84,934,656-byte outlier; the candidate median remained 2.38 percent below base, but the full memory matrix is still required.",
     "The CLI check path is not exercised by this LSP single-file profile and needs a separate base-independent budget once its runtime/dependency loader is complete."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

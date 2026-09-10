@@ -22,7 +22,7 @@
     }
   },
   "controlled_workload": {
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
     "persistent_cache_state": "valid fully warm fresh process for each executable identity",
     "discarded_warmup": "v259 rebuilt dependency products after the semantic producer identity changed and is excluded from timing evidence.",
@@ -131,9 +131,10 @@
   "semantic_equivalence": {
     "semantic_export_manifest_sha256_all_six_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
     "semantic_result_fingerprints_all_six_runs": {
-      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
-      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+      "/workspace/example-app/server": "317d721b898519ec8f70cc4e903085d4",
+      "/workspace/example-app/service-b": "da83054abb868876fc801768d643f79a"
     }
   },
-  "decision": "Rejected and reverted. The exact semantics and absolute RSS ceiling passed, but the 0.431% wall and 0.312% active-semantic improvements are not material enough to justify a public content-type migration, and median peak RSS regressed 21.105%. Keep RubyDocument source ownership unchanged and target a larger distinct visitor or resolution hotspot."
+  "decision": "Rejected and reverted. The exact semantics and absolute RSS ceiling passed, but the 0.431% wall and 0.312% active-semantic improvements are not material enough to justify a public content-type migration, and median peak RSS regressed 21.105%. Keep RubyDocument source ownership unchanged and target a larger distinct visitor or resolution hotspot.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

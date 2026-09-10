@@ -9,8 +9,8 @@
     "profiler_schema_version": 10,
     "scheduler_concurrency": 2,
     "classpath_ms": {
-      "/Users/naveenraj/goshposh/server": 1149.659042,
-      "/Users/naveenraj/goshposh/server-devops-5441": 1146.0215,
+      "/workspace/example-app/server": 1149.659042,
+      "/workspace/example-app/service-b": 1146.0215,
       "sum": 2295.680542
     },
     "wall_ms": 16532.2005,
@@ -31,15 +31,15 @@
   },
   "concurrent_project_run": {
     "id": "v132",
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "jsonl": "/tmp/ruby-fast-lsp-classpath-cache-concurrent-v132.jsonl",
     "log": "/tmp/ruby-fast-lsp-classpath-cache-concurrent-v132.log",
     "jsonl_sha256": "26dd644baaa632872e224ba2bb91bfebff20d52bf73cc2b10ab3f9f27a5f4c28",
     "profiler_executable_sha256": "70bf5ed3096ca173ca15fdee9cb8b1d9e4c68b6fa0d6d387386b91673c7e29d8",
     "profiler_schema_version": 11,
     "classpath_ms": {
-      "/Users/naveenraj/goshposh/server": 1224.2265,
-      "/Users/naveenraj/goshposh/server-devops-5441": 466.441959,
+      "/workspace/example-app/server": 1224.2265,
+      "/workspace/example-app/service-b": 466.441959,
       "sum": 1690.668459,
       "sibling_change_percent": -59.299,
       "sum_change_percent": -26.354
@@ -68,13 +68,13 @@
   },
   "sequential_admission_control": {
     "id": "v133",
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 1 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 1 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "jsonl": "/tmp/ruby-fast-lsp-classpath-cache-sequential-v133.jsonl",
     "log": "/tmp/ruby-fast-lsp-classpath-cache-sequential-v133.log",
     "jsonl_sha256": "370b3d9397061e827db3e632077fcfc05f3e01404c85b8e73983129a94e4e5be",
     "classpath_ms": {
-      "/Users/naveenraj/goshposh/server": 1241.610292,
-      "/Users/naveenraj/goshposh/server-devops-5441": 451.444792,
+      "/workspace/example-app/server": 1241.610292,
+      "/workspace/example-app/service-b": 451.444792,
       "sum": 1693.055084,
       "sibling_change_percent_against_v130": -60.608,
       "sum_change_percent_against_v130": -26.25
@@ -95,12 +95,12 @@
   "correctness": {
     "semantic_export_manifest_sha256_before_and_after": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
     "project_semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
-      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+      "/workspace/example-app/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/workspace/example-app/service-b": "80714a67726f4dd61e80eb2170d011d0"
     },
     "project_classpath_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "5c466985c2a9f45c2f3080c0a7e15cadf5a98fb04028ff9b82fcae7291cc0113",
-      "/Users/naveenraj/goshposh/server-devops-5441": "f2319102fcb5dacb0928212ab65d17fb28357badd48cdf2bb01701d8a90a8ca5"
+      "/workspace/example-app/server": "5c466985c2a9f45c2f3080c0a7e15cadf5a98fb04028ff9b82fcae7291cc0113",
+      "/workspace/example-app/service-b": "f2319102fcb5dacb0928212ab65d17fb28357badd48cdf2bb01701d8a90a8ca5"
     },
     "resource_leaks_at_end": 0,
     "panicked_resource_tasks": 0,
@@ -119,5 +119,6 @@
     "installed_binary_sha256": "054234ad952e399449687b58a0e92647e21c8c0cd7c4a9172f07fe55862e4c21",
     "smoke": "passed for Rails, RSpec, Minitest, Sinatra, Cucumber, ERB host features, and verified JRuby implementation navigation"
   },
-  "decision": "Accepted as a narrow process-local classpath file-product cache. It removes 89 duplicate full-file checksum/manifest producers in the real two-project JRuby workspace, cuts the reusable sibling classpath phase by 59-61%, reduces summed classpath time by about 26%, retains only 156158 estimated bytes, and preserves exact classpath and semantic fingerprints. It does not accept the overall 9/10 goal: active semantic completion, exhaustive workspace readiness, fixed memory, invalidation campaigns, and installed-client acceptance remain open."
+  "decision": "Accepted as a narrow process-local classpath file-product cache. It removes 89 duplicate full-file checksum/manifest producers in the real two-project JRuby workspace, cuts the reusable sibling classpath phase by 59-61%, reduces summed classpath time by about 26%, retains only 156158 estimated bytes, and preserves exact classpath and semantic fingerprints. It does not accept the overall 9/10 goal: active semantic completion, exhaustive workspace readiness, fixed memory, invalidation campaigns, and installed-client acceptance remain open.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

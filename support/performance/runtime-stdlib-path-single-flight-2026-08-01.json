@@ -39,7 +39,7 @@
       "candidate_retained_weight_bytes": 315
     }
   },
-  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
   "baseline": {
     "description": "Exact-runtime and source-ownership fix, before process-local path-product reuse; each project starts the same JRuby probe.",
     "profiler_executable": "/private/tmp/ruby-fast-lsp-exact-stdlib-v236",
@@ -177,8 +177,8 @@
   "correctness": {
     "semantic_export_blocks_sha256_all_six_runs": "54268a7cd555eb82ffe9ea3a233378113c2dd5da5a8d576c15fb4de1fe717513",
     "project_semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "ebd291845022823615ba4d53306938da",
-      "/Users/naveenraj/goshposh/server-devops-5441": "a4e95dab56b27139b21e2252d6092ee7"
+      "/workspace/example-app/server": "ebd291845022823615ba4d53306938da",
+      "/workspace/example-app/service-b": "a4e95dab56b27139b21e2252d6092ee7"
     },
     "engine": {
       "files": 35608,
@@ -198,5 +198,6 @@
     "installed_binary_sha256": "e34c67b422441d59dd252b564d3eab4296082345ce48850ab27e94e13ae682a0",
     "smoke": "passed for Rails, RSpec, Minitest, Sinatra, Cucumber, ERB host features, and verified JRuby implementation navigation"
   },
-  "decision": "Accepted. The fix removes executable-location-dependent semantics, preserves exact per-project runtime and source provenance, reduces median terminal readiness by 9.1%, retains only 315 estimated bytes, and stays below the fixed median RSS ceiling. It does not complete the 9/10 goal: active semantic completion remains 12.327 seconds versus the five-second target, and the remaining invalidation and installed-client campaigns are still required."
+  "decision": "Accepted. The fix removes executable-location-dependent semantics, preserves exact per-project runtime and source provenance, reduces median terminal readiness by 9.1%, retains only 315 estimated bytes, and stays below the fixed median RSS ceiling. It does not complete the 9/10 goal: active semantic completion remains 12.327 seconds versus the five-second target, and the remaining invalidation and installed-client campaigns are still required.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

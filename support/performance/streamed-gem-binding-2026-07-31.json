@@ -2,10 +2,10 @@
   "schema": 1,
   "recorded_at": "2026-07-31",
   "purpose": "Measure root-first, per-gem manifest preparation and binding so one exact locked dependency becomes navigable before exhaustive dependency preparation completes.",
-  "command": "RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --scheduler-concurrency 2 --definition-at server/tasks/rake_helpers.rb:4:49 --definition-at server/tasks/rake_helpers.rb:9:18",
+  "command": "RUST_LOG=info /usr/bin/time -l ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --scheduler-concurrency 2 --definition-at server/tasks/rake_helpers.rb:4:49 --definition-at server/tasks/rake_helpers.rb:9:18",
   "raw_local_evidence": {
-    "jsonl": "/tmp/ruby-fast-lsp-goshposh-streamed-gems-warm-2p-20260731.jsonl",
-    "log": "/tmp/ruby-fast-lsp-goshposh-streamed-gems-warm-2p-20260731.log"
+    "jsonl": "/tmp/ruby-fast-lsp-example-workspace-streamed-gems-warm-2p-20260731.jsonl",
+    "log": "/tmp/ruby-fast-lsp-example-workspace-streamed-gems-warm-2p-20260731.log"
   },
   "machine": {
     "cpu_model": "Apple M4 Pro",
@@ -22,10 +22,10 @@
   },
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server/",
-      "/Users/naveenraj/goshposh/server-devops-5441/"
+      "/workspace/example-app/server/",
+      "/workspace/example-app/service-b/"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server/",
+    "active_project": "/workspace/example-app/server/",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "cpu_lanes": 6,
@@ -40,7 +40,7 @@
     "external_peak_rss_bytes": 1852981248,
     "external_peak_memory_footprint_bytes": 2225817760,
     "live_navigation_ms": {
-      "project_user_pmm": 3166,
+      "project_account_record": 3166,
       "dependency_bson_object_id": 12536
     },
     "active_project_stage_ms": {
@@ -80,13 +80,13 @@
     "profiler_executable_sha256": "cdca37f5b09ef531efac5f4ac6de78441f054253389a14ec6e50a2e54fb900f7",
     "tracked_diff_sha256": "2f1cd14762ca29f294eb570334189475fb09bc464aa967578ce1782f9f21742c",
     "raw_local_evidence": {
-      "jsonl": "/tmp/ruby-fast-lsp-goshposh-no-gem-path-probe-warm-2p-20260731.jsonl",
-      "log": "/tmp/ruby-fast-lsp-goshposh-no-gem-path-probe-warm-2p-20260731.log"
+      "jsonl": "/tmp/ruby-fast-lsp-example-workspace-no-gem-path-probe-warm-2p-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-example-workspace-no-gem-path-probe-warm-2p-20260731.log"
     },
     "wall_ms": 30258.300417,
     "internal_peak_rss_bytes": 1739751424,
     "live_navigation_ms": {
-      "project_user_pmm": 3793,
+      "project_account_record": 3793,
       "dependency_bson_object_id": 10937
     },
     "active_project_stage_ms": {
@@ -115,7 +115,7 @@
         "bytes": 39293793,
         "sha256": "fa6134aa88e14c21093c5fc51f2697ee7441004da46671ccd8bffcb6f4894909"
       },
-      "server-devops-5441": {
+      "service-b": {
         "files": 2592,
         "bytes": 38863128,
         "sha256": "d9ea83809922a05b1b12d1dc435efbb55036abbdcee9c375d6ba082c58d7b64f"
@@ -124,13 +124,13 @@
     "serialized_control": {
       "profiler_executable_sha256": "d7f7192bd5173646c43b3e69c45a2dd25d57de9581adb6721596541db61f723d",
       "raw_local_evidence": {
-        "jsonl": "/tmp/ruby-fast-lsp-goshposh-controlled-serial-fixed-fingerprint-warm-2p-20260731.jsonl",
-        "log": "/tmp/ruby-fast-lsp-goshposh-controlled-serial-fixed-fingerprint-warm-2p-20260731.log"
+        "jsonl": "/tmp/ruby-fast-lsp-example-workspace-controlled-serial-fixed-fingerprint-warm-2p-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-example-workspace-controlled-serial-fixed-fingerprint-warm-2p-20260731.log"
       },
       "wall_ms": 30523.169291,
       "external_peak_rss_bytes": 1737080832,
       "live_navigation_ms": {
-        "project_user_pmm": 6231,
+        "project_account_record": 6231,
         "dependency_bson_object_id": 10819
       },
       "active_project_stage_ms": {
@@ -142,13 +142,13 @@
     "five_plus_one_overlap": {
       "profiler_executable_sha256": "38ffdc3b199a16c2e31ea63358471a02723f24cc0b26f9a27b7cdf55be18ca52",
       "raw_local_evidence": {
-        "jsonl": "/tmp/ruby-fast-lsp-goshposh-controlled-overlap-warm-2p-20260731.jsonl",
-        "log": "/tmp/ruby-fast-lsp-goshposh-controlled-overlap-warm-2p-20260731.log"
+        "jsonl": "/tmp/ruby-fast-lsp-example-workspace-controlled-overlap-warm-2p-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-example-workspace-controlled-overlap-warm-2p-20260731.log"
       },
       "wall_ms": 27851.628292,
       "external_peak_rss_bytes": 1788559360,
       "live_navigation_ms": {
-        "project_user_pmm": 3760,
+        "project_account_record": 3760,
         "dependency_bson_object_id": 8653
       },
       "active_project_stage_ms": {
@@ -183,12 +183,12 @@
     "profiler_executable_sha256": "429ac82aaea0965484f60eec121203dcbf2762ed0ccf945455b7a884e3c6f7e8",
     "raw_local_evidence": [
       {
-        "jsonl": "/tmp/ruby-fast-lsp-goshposh-single-process-auto-gems-warm-2p-20260731.jsonl",
-        "log": "/tmp/ruby-fast-lsp-goshposh-single-process-auto-gems-warm-2p-20260731.log"
+        "jsonl": "/tmp/ruby-fast-lsp-example-workspace-single-process-auto-gems-warm-2p-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-example-workspace-single-process-auto-gems-warm-2p-20260731.log"
       },
       {
-        "jsonl": "/tmp/ruby-fast-lsp-goshposh-single-process-auto-gems-warm-2p-repeat-20260731.jsonl",
-        "log": "/tmp/ruby-fast-lsp-goshposh-single-process-auto-gems-warm-2p-repeat-20260731.log"
+        "jsonl": "/tmp/ruby-fast-lsp-example-workspace-single-process-auto-gems-warm-2p-repeat-20260731.jsonl",
+        "log": "/tmp/ruby-fast-lsp-example-workspace-single-process-auto-gems-warm-2p-repeat-20260731.log"
       }
     ],
     "mechanical_comparison_ms": {
@@ -207,7 +207,7 @@
       "wall_ms": 28302.740375,
       "external_peak_rss_bytes": 1790132224,
       "live_navigation_ms": {
-        "project_user_pmm": 2991,
+        "project_account_record": 2991,
         "dependency_bson_object_id": 8272
       },
       "active_project_stage_ms": {
@@ -228,13 +228,13 @@
     "profiler_executable_sha256": "fcce41b0fa4c935dc1deae2a331fd4e555823712d7debf320510488469aa1b66",
     "dataset_fingerprint_sha256": "8864144bee838218f8ea1ac6b37b65b36b7ebd3734e3d114e6d8a8b43213bc73",
     "raw_local_evidence": {
-      "jsonl": "/tmp/ruby-fast-lsp-goshposh-navigation-priority-warm-2p-20260731.jsonl",
-      "log": "/tmp/ruby-fast-lsp-goshposh-navigation-priority-warm-2p-20260731.log"
+      "jsonl": "/tmp/ruby-fast-lsp-example-workspace-navigation-priority-warm-2p-20260731.jsonl",
+      "log": "/tmp/ruby-fast-lsp-example-workspace-navigation-priority-warm-2p-20260731.log"
     },
     "priority_files": 1982,
     "remaining_files": 636,
     "live_navigation_ms": {
-      "project_user_pmm": 3515,
+      "project_account_record": 3515,
       "dependency_bson_object_id": 8598
     },
     "wall_ms": 28807.367458,
@@ -263,5 +263,6 @@
       "passed": 1,
       "failed": 0
     }
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

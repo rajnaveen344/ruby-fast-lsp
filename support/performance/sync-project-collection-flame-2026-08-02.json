@@ -4,7 +4,7 @@
   "purpose": "Clean sync FileProcessor project-collection profile to cut inside the project fact-collection hotspot",
   "harness": {
     "binary": "profile_project_collection",
-    "corpus": "/Users/naveenraj/goshposh/server",
+    "corpus": "/workspace/example-app/server",
     "files": 2619,
     "notes": [
       "Sequential collect+replace; RAYON_NUM_THREADS=1",
@@ -58,5 +58,6 @@
     "Cheapen process_call_node_entry / handle_receiver_node_with_info / infer_expression_receiver_type on the deferred project-batch path",
     "Reduce infer_type_from_value / assignment inference work during FactCollector visit",
     "Only after call/receiver path: inspect process_def_node_entry and method-return resolution"
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

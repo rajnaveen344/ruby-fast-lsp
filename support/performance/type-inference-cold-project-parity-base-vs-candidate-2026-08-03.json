@@ -6,7 +6,7 @@
   "source": {
     "base_commit": "78690e8de3f1fb1af0818427e4aad830242fc1ea",
     "candidate_worktree_has_changes": true,
-    "fixture": "src/test/fixtures/goshposh_helpers_goto",
+    "fixture": "retired-fixtures/route-helper-corpus",
     "project_file_count": 6,
     "resolved_method_count": 133
   },
@@ -19,7 +19,7 @@
   },
   "method": {
     "binary": "target/release/profile_project_collection",
-    "command": "profile_project_collection src/test/fixtures/goshposh_helpers_goto",
+    "command": "profile_project_collection retired-fixtures/route-helper-corpus",
     "release_compilation_excluded": true,
     "warmup_runs_per_binary": 1,
     "phase_alternating_pairs": 15,
@@ -93,10 +93,11 @@
     "full_performance_matrix_still_required": true
   },
   "limitations": [
-    "This fixed six-file project fixture covers deterministic cold project fact collection and replacement, not warm persistent-cache indexing, didChange, query p95, allocations, or the full goshposh RSS ceiling.",
+    "This fixed six-file project fixture covers deterministic cold project fact collection and replacement, not warm persistent-cache indexing, didChange, query p95, allocations, or the full example-workspace RSS ceiling.",
     "The assembly and replacement subphases grew by 0.14 ms and 0.51 ms at the median because the cold batch now retains visitor-derived proof facts that interactive indexing already retained; end-to-end wall, CPU, and RSS remained within the three-percent gate.",
     "The 15 phase pairs characterize medians but do not establish stable p95 latency.",
     "The candidate includes the cumulative proof-first inference worktree, so this is not an isolated microbenchmark of parameter range retention.",
     "Correctness, scorecard, deterministic output, editor lifecycle, diagnostic precision, and the remaining performance matrix require separate evidence."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

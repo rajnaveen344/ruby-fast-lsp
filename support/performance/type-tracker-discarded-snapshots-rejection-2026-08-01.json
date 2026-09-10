@@ -10,14 +10,14 @@
   },
   "implementation": "Keep TypeTracker's current variable environment and return inference unchanged, but make statement snapshots optional and disable them only in FactCollector's return-only call site. Default TypeTracker callers continue to collect snapshots.",
   "controlled_workload": {
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
     "baseline_executable_sha256": "3b722509dc189ec15c7fccc5d84a9be7cd5e875c81e98a41e0c00390c79fd975",
     "candidate_executable_sha256": "b1d6dda0bdec41a38f2429bdf0f8236093cb98c201936ef710d8961562086a6f",
     "allowed_peak_rss_ceiling_bytes": 1776846438,
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
@@ -126,8 +126,8 @@
   "correctness_shared_by_all_runs": {
     "semantic_export_manifest_sha256": "7153b725b0faba8e63dac2cb5163e4b9d322f646b054a88b6f3bf9fae4aa760b",
     "semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "3e0e3171f5b845346c4f09422fafc265",
-      "/Users/naveenraj/goshposh/server-devops-5441": "8930cb6fce670e611b2bb8240339938e"
+      "/workspace/example-app/server": "3e0e3171f5b845346c4f09422fafc265",
+      "/workspace/example-app/service-b": "8930cb6fce670e611b2bb8240339938e"
     },
     "project_definition_source_kind": "Project",
     "dependency_definition_source_kind": "Gem",
@@ -144,5 +144,6 @@
     "resource_leaks_at_end": 0,
     "panicked_resource_tasks": 0
   },
-  "decision": "Rejected and reverted. The candidate preserved semantic output but did not produce a measurable benefit: median wall, user CPU, active semantic readiness, and dependency navigation all regressed slightly, while the small RSS reduction stayed within run-to-run variance and one candidate exceeded the fixed ceiling. The profiled target was only 0.41% inclusive, so further work should target a larger distinct hotspot."
+  "decision": "Rejected and reverted. The candidate preserved semantic output but did not produce a measurable benefit: median wall, user CPU, active semantic readiness, and dependency navigation all regressed slightly, while the small RSS reduction stayed within run-to-run variance and one candidate exceeded the fixed ceiling. The profiled target was only 0.41% inclusive, so further work should target a larger distinct hotspot.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

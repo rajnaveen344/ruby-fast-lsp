@@ -399,14 +399,18 @@ mod tests {
         let controller = NavigationDemandController::default();
         controller.begin_generation(7);
 
-        let first = controller.request(7, NavigationDemandStage::Project, "userpmm");
-        let duplicate = controller.request(7, NavigationDemandStage::Project, "userpmm");
+        let first = controller.request(7, NavigationDemandStage::Project, "accountrecord");
+        let duplicate = controller.request(7, NavigationDemandStage::Project, "accountrecord");
         assert_eq!(
             controller.drain(7, NavigationDemandStage::Project),
-            vec!["userpmm".to_string()],
+            vec!["accountrecord".to_string()],
             "duplicate requests must coalesce into one bounded coordinator input"
         );
-        controller.complete_keys(7, NavigationDemandStage::Project, &["userpmm".to_string()]);
+        controller.complete_keys(
+            7,
+            NavigationDemandStage::Project,
+            &["accountrecord".to_string()],
+        );
 
         assert_eq!(first.wait().await, NavigationDemandOutcome::TargetProcessed);
         assert_eq!(

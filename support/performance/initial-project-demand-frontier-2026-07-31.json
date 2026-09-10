@@ -2,7 +2,7 @@
   "schema": 1,
   "recorded_at": "2026-07-31",
   "purpose": "Prove that exact project navigation demands already queued when project discovery starts are collected and released before unrelated active-document candidate files.",
-  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37",
   "raw_local_evidence": [
     {
       "id": "v31",
@@ -18,10 +18,10 @@
   "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "cpu_lanes": 6,
@@ -41,7 +41,7 @@
         "id": "v31",
         "wall_ms": 22068.476917,
         "peak_rss_bytes": 1750155264,
-        "project_user_pmm_ms": 517,
+        "project_account_record_ms": 517,
         "dependency_bson_object_id_ms": 1607,
         "active_project_navigation_ready_ms": 11059,
         "active_semantic_complete_ms": 18932,
@@ -52,7 +52,7 @@
         "id": "v32",
         "wall_ms": 21710.646917,
         "peak_rss_bytes": 1653604352,
-        "project_user_pmm_ms": 631,
+        "project_account_record_ms": 631,
         "dependency_bson_object_id_ms": 1796,
         "active_project_navigation_ready_ms": 11266,
         "active_semantic_complete_ms": 19865,
@@ -63,7 +63,7 @@
     "repeat_median": {
       "wall_ms": 21889.561917,
       "peak_rss_bytes": 1701879808,
-      "project_user_pmm_ms": 574,
+      "project_account_record_ms": 574,
       "dependency_bson_object_id_ms": 1701.5,
       "active_project_navigation_ready_ms": 11162.5,
       "active_semantic_complete_ms": 19398.5,
@@ -100,5 +100,6 @@
     "isolated_engine_ownership_unchanged": true,
     "full_root_library_tests": 1313
   },
-  "decision": "Accepted. Both repeats satisfy the strict one-second project-navigation target at 517-631 ms, a 48.22% median reduction from the immediately preceding allocation-optimized evidence. Locked dependency navigation remains below three seconds, terminal wall time improves by 0.66%, all cache products are fresh-process hits, and exact definitions retain Project/Gem provenance. Median RSS varies upward from the preceding pair but remains only 5.36% above the original full-ahead baseline, inside the explicit 10% ceiling. Exhaustive throughput remains open: active semantic completion is 19.399 seconds and all-project completion is 21.890 seconds."
+  "decision": "Accepted. Both repeats satisfy the strict one-second project-navigation target at 517-631 ms, a 48.22% median reduction from the immediately preceding allocation-optimized evidence. Locked dependency navigation remains below three seconds, terminal wall time improves by 0.66%, all cache products are fresh-process hits, and exact definitions retain Project/Gem provenance. Median RSS varies upward from the preceding pair but remains only 5.36% above the original full-ahead baseline, inside the explicit 10% ceiling. Exhaustive throughput remains open: active semantic completion is 19.399 seconds and all-project completion is 21.890 seconds.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

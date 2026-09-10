@@ -22,7 +22,7 @@
     }
   },
   "inputs": {
-    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file": "retired-fixtures/route-helper-corpus/catalog.rb",
     "large_file_bytes": 225569,
     "large_file_pairs": 15,
     "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
@@ -258,5 +258,6 @@
     "noise_note": "Completion p95 was +1.292 microseconds in the first repeat and -0.333 microseconds in the confirmation repeat; definition p95 was +1.916 then -0.625 microseconds. The only above-threshold increase in repeat two was +0.292 microseconds on unaffected diagnostics. These paths show no consistent regression, every affected or millisecond-scale metric stays within the gate, exact engine heap is unchanged, and every fixed budget passes.",
     "all_fixed_budgets": "pass",
     "decision": "accepted; the proof barrier is deterministic, every concrete consumer fails closed and recovers after edit, the semantic universe is identical, retained engine heap is byte-identical, and two independent interactive repeats show no consistent material regression"
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

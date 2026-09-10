@@ -20,7 +20,7 @@
     }
   },
   "inputs": {
-    "large_file": "src/test/fixtures/goshposh_helpers_goto/consignments.rb",
+    "large_file": "retired-fixtures/route-helper-corpus/catalog.rb",
     "large_file_bytes": 225569,
     "large_file_pairs": 15,
     "interactive_workspace": "tests/fixtures/type_inference_query_benchmark",
@@ -155,5 +155,6 @@
     },
     "noise_note": "The second diagnostics p95 percentage is based on a 0.250 microsecond candidate observation on an unaffected path; the first repeat moved in the opposite direction. All affected medians and p95s stayed inside the fixed three-percent gate in both repeats, exact retained engine heap was unchanged, and every absolute production budget passed.",
     "decision": "accepted as a bounded deterministic-flow slice"
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

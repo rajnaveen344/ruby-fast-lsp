@@ -15,15 +15,15 @@
     "unchanged": "Project isolation, immutable semantic-read engines, exact JRuby provider handoff/replay, file registration, ordered fact replacement, diagnostics, and final resolution are unchanged."
   },
   "controlled_workload": {
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
     "baseline_executable_sha256": "e21b2504729dc4bd849e98ad438ee49f6511a7939a959d700b34fb2352a47b11",
     "candidate_executable_sha256": "69d41f237353b2bbcf697c6034eb4a40149601379deaa1b645f662b8ec2b2ce9",
     "allowed_peak_rss_ceiling_bytes": 1776846438,
     "persistent_cache_state": "valid fully warm fresh process",
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
     "runtime": "jruby-9.2.21.0",
     "cpu_lanes": 6,
@@ -144,11 +144,12 @@
   "semantic_equivalence": {
     "semantic_export_manifest_sha256_all_six_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
     "semantic_result_fingerprints_all_six_runs": {
-      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
-      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+      "/workspace/example-app/server": "317d721b898519ec8f70cc4e903085d4",
+      "/workspace/example-app/service-b": "da83054abb868876fc801768d643f79a"
     },
     "resource_leaks_at_end": 0,
     "panicked_resource_tasks": 0
   },
-  "decision": "Accepted. Moving the source owner through the batch boundary improves every median timing domain, keeps exact semantic output, and remains below the fixed RSS ceiling. This does not close the five-second active semantic target; the remaining RubyDocument clone and visitor cost stay open."
+  "decision": "Accepted. Moving the source owner through the batch boundary improves every median timing domain, keeps exact semantic output, and remains below the fixed RSS ceiling. This does not close the five-second active semantic target; the remaining RubyDocument clone and visitor cost stay open.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

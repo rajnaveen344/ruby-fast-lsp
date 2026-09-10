@@ -20,18 +20,18 @@
     "format_result": "cargo fmt --all -- --check passed"
   },
   "configuration": {
-    "workspace": "/Users/naveenraj/goshposh",
+    "workspace": "/workspace/example-app",
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "scheduler_concurrency": 2,
     "persistent_cache": "/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731",
     "persistent_cache_state": "Both analyzer producer identities were warmed before accepted timing. Every retained run had 607/607 gem hits and 168/168 persistent Java hits with zero producers.",
     "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "allowed_peak_rss_ceiling_bytes": 1776846438,
     "baseline_profiler_sha256": "69d41f237353b2bbcf697c6034eb4a40149601379deaa1b645f662b8ec2b2ce9",
     "candidate_profiler_sha256": "a1c9a76f97bb65407eb3a62d83a73342f900b9bd3eba0ec68985505ea5b13913"
@@ -189,8 +189,8 @@
   "correctness": {
     "semantic_export_manifest_sha256_all_six_runs": "54268a7cd555eb82ffe9ea3a233378113c2dd5da5a8d576c15fb4de1fe717513",
     "semantic_result_fingerprints_all_six_runs": {
-      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
-      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+      "/workspace/example-app/server": "317d721b898519ec8f70cc4e903085d4",
+      "/workspace/example-app/service-b": "da83054abb868876fc801768d643f79a"
     },
     "gem_hits_per_run": 607,
     "java_hits_per_run": 168,
@@ -202,5 +202,6 @@
     "rss_ceiling_headroom_bytes": 217040486
   },
   "decision": "Accepted. The change removes two eager heap allocations from every ordinary reference range conversion. Three interleaved warm-cache pairs preserve the complete semantic manifest, both project fingerprints, exact Project/Gem navigation, persistent-cache reuse, and resource cleanup while improving median project collection 3.116%, user CPU 2.866%, active semantic completion 1.806%, and terminal wall 1.537%. Median external RSS moves 1.647% but every candidate stays at least 217 MB below the fixed ceiling. Active semantic completion remains 11.853 seconds versus the five-second goal.",
-  "next_step": "Capture a new symbolized profile from the accepted binary and select the next distinct fact-collection or final-resolution target. Do not infer that this local allocation removal closes the remaining active-semantic or cold/incremental acceptance gaps."
+  "next_step": "Capture a new symbolized profile from the accepted binary and select the next distinct fact-collection or final-resolution target. Do not infer that this local allocation removal closes the remaining active-semantic or cold/incremental acceptance gaps.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

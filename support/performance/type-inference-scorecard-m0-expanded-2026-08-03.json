@@ -42,6 +42,7 @@
     "The earlier 15-case seed timing is not a performance baseline for this 50-case workload; the two medians are intentionally not compared.",
     "The command includes Cargo and ten test-binary launches; the scorecard test itself reported 0.19 seconds after release compilation.",
     "The scorecard remains non-claim-eligible because recursive returns, edit sequences, CLI/LSP parity, real-project reductions, Unknown counters, and the full performance matrix are incomplete.",
-    "Cold workspace indexing, warm workspace indexing, didChange latency, hover/completion query latency, allocations, full-project CPU, and goshposh peak RSS remain unmeasured for this goal."
-  ]
+    "Cold workspace indexing, warm workspace indexing, didChange latency, hover/completion query latency, allocations, full-project CPU, and example-workspace peak RSS remain unmeasured for this goal."
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

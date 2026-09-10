@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "recorded_at": "2026-07-31",
-  "purpose": "Measure checksum-preserving JRuby Java source navigation changes on two isolated goshposh projects pinned to JRuby 9.2.21.0.",
+  "purpose": "Measure checksum-preserving JRuby Java source navigation changes on two isolated example-workspace projects pinned to JRuby 9.2.21.0.",
   "machine": {
     "cpu": "Apple M4 Pro",
     "logical_cpus": 14,
@@ -9,10 +9,10 @@
     "target": "aarch64-macos"
   },
   "workload": {
-    "workspace": "/Users/naveenraj/goshposh",
+    "workspace": "/workspace/example-app",
     "project_roots": [
       "server",
-      "server-devops-5441"
+      "service-b"
     ],
     "runtime": "jruby-9.2.21.0",
     "persistent_gem_hits": 604,
@@ -53,17 +53,17 @@
       "external_wall_ms": 36740,
       "project_navigation_ms": {
         "server": 15152,
-        "server-devops-5441": 14931,
+        "service-b": 14931,
         "p95": 15152
       },
       "dependency_navigation_ms": {
         "server": 32246,
-        "server-devops-5441": 29954,
+        "service-b": 29954,
         "p95": 32246
       },
       "semantic_complete_ms": {
         "server": 33823,
-        "server-devops-5441": 33791,
+        "service-b": 33791,
         "p95": 33823
       },
       "phase_sum_ms": {
@@ -100,5 +100,6 @@
     "root_tests": 1264,
     "vscode_adapter_tests": 34,
     "focused_source_navigation_tests": 8
-  }
+  },
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

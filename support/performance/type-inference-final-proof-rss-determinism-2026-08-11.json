@@ -13,7 +13,7 @@
     "npm": "11.6.2"
   },
   "workload": {
-    "command": "RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-type-inference-candidate-cache-20260808 target/release/profiler --memory --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-type-inference-two-project-20260808.json --extension-path /Users/naveenraj/sources/devtools/ruby-fast-lsp/editors/vscode/vsix --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --diagnostic-manifest",
+    "command": "RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-type-inference-candidate-cache-20260808 target/release/profiler --memory --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-type-inference-two-project-20260808.json --extension-path /Users/naveenraj/sources/devtools/ruby-fast-lsp/editors/vscode/vsix --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --diagnostic-manifest",
     "dataset_fingerprint_sha256": "1972e0653d4aa0a20ff46e77aca0c1d8a667f2957615a155809de9573842d898",
     "project_file_counts": [
       2592,
@@ -122,11 +122,11 @@
   "determinism": {
     "all_seven_warm_runs_identical": true,
     "project_semantic_result_fingerprints": {
-      "server-devops-5441": "13ae4f7b0ce04d4e191905817ed6d6a5",
+      "service-b": "13ae4f7b0ce04d4e191905817ed6d6a5",
       "server": "80e267807718806abe90e0fe47a23aa9"
     },
     "diagnostic_manifests": {
-      "server-devops-5441": {
+      "service-b": {
         "sha256": "c9784ed94cdbe0b08cd5d1f752c229828a85710a86c9ed64c071e347914d09bf",
         "diagnostic_count": 15470
       },
@@ -169,7 +169,8 @@
     "installed_binary_matches_packaged_archive": true
   },
   "limitations": [
-    "Real-project precision uses reviewed, commit-pinned reductions so ground truth is explicit and redistributable; the separate 5,211-file goshposh transition audit remains an unlabeled breadth signal and is not counted as an accuracy score.",
+    "Real-project precision uses reviewed, commit-pinned reductions so ground truth is explicit and redistributable; the separate 5,211-file example-workspace transition audit remains an unlabeled breadth signal and is not counted as an accuracy score.",
     "The allocator comparison changes only allocation strategy. Type facts, proof counters, project fingerprints, diagnostic hashes, persistent-product identities, and retained engine ownership remain unchanged."
-  ]
+  ],
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

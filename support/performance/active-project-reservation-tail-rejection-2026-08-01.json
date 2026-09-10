@@ -5,9 +5,9 @@
   "experiment": {
     "baseline": "Release the active-project navigation reservation at the accepted navigation frontier.",
     "candidate": "Retain five of six indexing CPU lanes until the active project completes its exhaustive semantic tail.",
-    "method": "Three interleaved baseline/candidate runs on the same two-project goshposh configuration, immutable profiler binaries, fixed persistent cache, two scheduler workers, identical definition probes, and complete semantic export manifests."
+    "method": "Three interleaved baseline/candidate runs on the same two-project example-workspace configuration, immutable profiler binaries, fixed persistent cache, two scheduler workers, identical definition probes, and complete semantic export manifests."
   },
-  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
   "baseline": {
     "profiler_executable_sha256": "4252de1bef31984313f92e78113c79570e7f72c7a40c6f361aef15f542619ed5",
     "runs": [
@@ -105,13 +105,14 @@
   "correctness": {
     "semantic_export_manifest_sha256": "bbd411ee26e61a460f15110ebdade5722bd3b77e41108f6b60cb484c9785084a",
     "project_semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "1b65a68a6e4cca852d612331ea13108d",
-      "/Users/naveenraj/goshposh/server-devops-5441": "902fc33c5ca6900b16d17ca1b8210125"
+      "/workspace/example-app/server": "1b65a68a6e4cca852d612331ea13108d",
+      "/workspace/example-app/service-b": "902fc33c5ca6900b16d17ca1b8210125"
     },
     "resource_leaks_at_end": 0,
     "panicked_resource_tasks": 0,
     "fixed_peak_rss_ceiling_bytes": 1776846438,
     "candidate_run_c235_excess_bytes": 25934234
   },
-  "decision": "Rejected and reverted. It improved the early project-navigation frontier by 14.7%, but regressed the more important active dependency and semantic frontiers by about 5.1%, regressed terminal wall time by 8.8%, and one candidate run exceeded the fixed RSS ceiling. Do not extend the active five-lane reservation through the exhaustive tail without a materially different measured design."
+  "decision": "Rejected and reverted. It improved the early project-navigation frontier by 14.7%, but regressed the more important active dependency and semantic frontiers by about 5.1%, regressed terminal wall time by 8.8%, and one candidate run exceeded the fixed RSS ceiling. Do not extend the active five-lane reservation through the exhaustive tail without a materially different measured design.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

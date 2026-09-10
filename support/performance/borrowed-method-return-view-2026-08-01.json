@@ -2,16 +2,16 @@
   "schema": 1,
   "recorded_at": "2026-08-01",
   "purpose": "Remove repeated expansion and cloning of every unrelated TypeFact while each method collector seeds its local known-return context, without reintroducing the rejected shared mutable return map.",
-  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+  "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 ./target/release/profiler --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
   "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
   "profiler_executable_sha256": "d2746888ae8e1fabd69a081218492633da34b128c696befbf87d86f4ae0c7794",
   "tracked_diff_sha256": "8de087af418cdb0dcf122d399558eecffe135d448a5719d60a7e5a051dec4ebc",
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "cpu_lanes": 6,
@@ -106,8 +106,8 @@
       "java_producers": 0
     },
     "semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "379a1aed9e52fcd189668987e0444ae6",
-      "/Users/naveenraj/goshposh/server-devops-5441": "80714a67726f4dd61e80eb2170d011d0"
+      "/workspace/example-app/server": "379a1aed9e52fcd189668987e0444ae6",
+      "/workspace/example-app/service-b": "80714a67726f4dd61e80eb2170d011d0"
     },
     "whole_manifest_jsonl_sha256": "f205f1022cd736c9d326965e3f3500e298fd7b052f7cc2ce374179837f2c39fe",
     "resource_leaks_at_end": 0,
@@ -148,5 +148,6 @@
     "installed_binary_sha256": "f41bf9bb667465fd1fd67560a55d6ec8b9f02b1f4548e07d79f518ac38714c9f",
     "smoke": "passed for Rails, RSpec, Minitest, Sinatra, Cucumber, ERB host features, and verified JRuby implementation navigation"
   },
-  "decision": "Accepted. The exact safe checkout crosses the 15-second warm two-project workspace target with a 14.430-second median while preserving semantic identity, exact navigation, cache reuse, bounded resources, and RSS headroom. Active-project semantic completion is still 12.217 seconds versus the five-second target, so the production goal remains incomplete."
+  "decision": "Accepted. The exact safe checkout crosses the 15-second warm two-project workspace target with a 14.430-second median while preserving semantic identity, exact navigation, cache reuse, bounded resources, and RSS headroom. Active-project semantic completion is still 12.217 seconds versus the five-second target, so the production goal remains incomplete.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }

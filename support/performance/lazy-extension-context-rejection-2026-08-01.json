@@ -5,10 +5,10 @@
   "dataset_fingerprint_sha256": "3f2b6c85ea95985fc5d7d759ad93960773cbe3aa552b634bd387bf9695f18657",
   "configuration": {
     "projects": [
-      "/Users/naveenraj/goshposh/server",
-      "/Users/naveenraj/goshposh/server-devops-5441"
+      "/workspace/example-app/server",
+      "/workspace/example-app/service-b"
     ],
-    "active_project": "/Users/naveenraj/goshposh/server",
+    "active_project": "/workspace/example-app/server",
     "runtime": "jruby-9.2.21.0",
     "persistent_cache_state": "valid fully warm fresh process",
     "scheduler_concurrency": 2,
@@ -48,14 +48,14 @@
       "project_context_snapshot_percent": 0.185,
       "direct_caller": "ProjectFactCollectorHost::process_call_node"
     },
-    "interpretation": "The target fell by only 1.622 ms of sampled CPU, or 2.85% of an already 0.19% path. GoshPosh project files commonly contain tracked names such as include, extend, before, or framework DSL calls, so the lazy branch still materialized the context across almost the entire corpus."
+    "interpretation": "The target fell by only 1.622 ms of sampled CPU, or 2.85% of an already 0.19% path. ExampleApp project files commonly contain tracked names such as include, extend, before, or framework DSL calls, so the lazy branch still materialized the context across almost the entire corpus."
   },
   "controlled_ab": {
     "baseline_executable": "/tmp/ruby-fast-lsp-profiler-semantic-seed-fingerprint",
     "baseline_executable_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
     "candidate_executable": "/tmp/ruby-fast-lsp-profiler-lazy-extension-context",
     "candidate_executable_sha256": "14d40687f351d8fbdcd364adb3c43b3665fd642bbabe2046b221c56d82f9c37f",
-    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /Users/naveenraj/goshposh --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/batch_worker.rb:1173:55 --definition-at server/lib/workers/batch_worker.rb:2798:37 --semantic-export-manifest",
+    "command": "RUST_LOG=info RUBY_FAST_LSP_CACHE_DIR=/tmp/ruby-fast-lsp-postcard-gem-cold-v3-20260731 <profiler> --workspace /workspace/example-app --config /tmp/ruby-fast-lsp-two-server-projects-jruby-9.2.21.json --extension-path ./editors/vscode/vsix --scheduler-concurrency 2 --definition-at server/lib/workers/queue_worker.rb:1173:55 --definition-at server/lib/workers/queue_worker.rb:2798:37 --semantic-export-manifest",
     "excluded_runs": [
       {
         "path": "/tmp/ruby-fast-lsp-lazy-context-candidate-1.log",
@@ -186,8 +186,8 @@
   },
   "correctness": {
     "semantic_result_fingerprints": {
-      "/Users/naveenraj/goshposh/server": "317d721b898519ec8f70cc4e903085d4",
-      "/Users/naveenraj/goshposh/server-devops-5441": "da83054abb868876fc801768d643f79a"
+      "/workspace/example-app/server": "317d721b898519ec8f70cc4e903085d4",
+      "/workspace/example-app/service-b": "da83054abb868876fc801768d643f79a"
     },
     "semantic_export_manifest_sha256_all_six_valid_runs": "03661e91d3878075e52db8c78903b54a2dddec2fc9e19b50df92346724cd3fcf",
     "persistent_gem_hits_per_run": 607,
@@ -206,5 +206,6 @@
     "accepted_baseline_profiler_sha256": "bf2fa92c52eb88c789ffa1851a2f8aa821ae6738e03c797a361ae003d9853252",
     "byte_identical": true
   },
-  "decision": "Rejected and reverted. The candidate preserved exact semantics and improved median wall 0.708% and user CPU 0.692%, but those changes are below the noise threshold; active dependency readiness regressed 0.255%, active semantic completion regressed 0.359%, median RSS rose 2.167%, and one candidate exceeded the fixed RSS ceiling by 57.5 MB. The profile explains why: common tracked call names caused almost every real project file to materialize the full context anyway, reducing the target by only 1.622 ms. The ordinary release build after revert is byte-identical to the accepted baseline. Do not repeat per-file lazy context materialization without first narrowing the syntactic tracking set or replacing the full ABI context with an independently proven compact projection."
+  "decision": "Rejected and reverted. The candidate preserved exact semantics and improved median wall 0.708% and user CPU 0.692%, but those changes are below the noise threshold; active dependency readiness regressed 0.255%, active semantic completion regressed 0.359%, median RSS rose 2.167%, and one candidate exceeded the fixed RSS ceiling by 57.5 MB. The profile explains why: common tracked call names caused almost every real project file to materialize the full context anyway, reducing the target by only 1.622 ms. The ordinary release build after revert is byte-identical to the accepted baseline. Do not repeat per-file lazy context materialization without first narrowing the syntactic tracking set or replacing the full ABI context with an independently proven compact projection.",
+  "example_identity_note": "Published workspace, symbol, and fixture identities are generic historical labels. Measurements are unchanged; retired fixture labels do not refer to the current synthetic regression."
 }
