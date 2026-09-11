@@ -63,39 +63,59 @@ impl EngineSimulationRunner {
             .iter()
             .filter(|call| call.definition_support.is_supported())
         {
-            let Some(expected_target) = oracle.resolve_call(call) else {
+            let targets = oracle.resolve_call_targets(call);
+            if targets.is_empty()
+                || targets.iter().any(|target| {
+                    target.name == "method_missing" && call.target.name != "method_missing"
+                })
+            {
                 continue;
-            };
+            }
             let Some(owner) = lookup_owner_for_call(call) else {
                 continue;
             };
             let method = ruby_method(&call.target.name);
-            let callees = if matches!(call.shape, CallShape::Super) {
-                query
-                    .resolve_super_method_callee(&owner, &method)
-                    .map(|callee| vec![callee])
-            } else {
-                query.resolve_method_callees(&owner, &method)
-            }
-            .unwrap_or_else(|| {
-                panic!(
-                    "Expected engine method callees for lookup owner `{}` method `{}`",
-                    owner, call.target.name
+            let mut ranges = if matches!(call.shape, CallShape::InstanceMethodObject) {
+                let file_id = engine
+                    .file_id(Path::new(&call.pos.file))
+                    .expect("generated call source must be indexed");
+                let content = &self.render.files[&call.pos.file];
+                // Generated method call tokens are ASCII. Count the preceding
+                // lines from the rendered source, never from engine facts.
+                let offset = content
+                    .split_inclusive('\n')
+                    .take(call.pos.line as usize)
+                    .map(str::len)
+                    .sum::<usize>()
+                    + call.pos.character as usize;
+                query.resolved_reference_definition_ranges_at(
+                    file_id,
+                    offset.try_into().expect("bounded generated source"),
                 )
-            });
-            let expected_def = self.def_pos(&expected_target);
-            assert!(
-                callees.iter().any(|callee| callee
-                    .definition_ranges
-                    .iter()
-                    .any(|range| range_matches_pos(&engine, *range, expected_def))),
-                "Expected engine lookup for {} from {} to resolve to {} at {}:{}, got {:?}",
-                call.target.signature(),
-                call.caller.signature(),
-                expected_target.signature(),
-                expected_def.file,
-                expected_def.line,
+            } else {
+                let callees = if matches!(call.shape, CallShape::Super) {
+                    query
+                        .resolve_super_method_callee(&owner, &method)
+                        .map(|callee| vec![callee])
+                } else {
+                    query.resolve_method_callees(&owner, &method)
+                }
+                .unwrap_or_default();
                 callees
+                    .into_iter()
+                    .flat_map(|callee| callee.definition_ranges)
+                    .collect::<Vec<_>>()
+            };
+            // Multiple receiver records can share one declaration. The editor
+            // runner additionally rejects duplicates in the actual LSP response.
+            ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+            ranges.dedup();
+            assert!(
+                ranges.len() == targets.len() && targets.iter().all(|target| {
+                    ranges.iter().filter(|range| range_matches_pos(&engine, **range, self.def_pos(target))).count() == 1
+                }),
+                "exact engine simulation method definition targets: {} from {}; expected {:?}, got {:?}",
+                call.target.signature(), call.caller.signature(), targets, ranges
             );
         }
 
@@ -134,7 +154,7 @@ impl EngineSimulationRunner {
             .iter()
             .filter(|call| call.reference_support.is_supported())
         {
-            if let Some(target) = oracle.resolve_call(call) {
+            if let Some(target) = oracle.resolve_unique_call(call) {
                 expected_method_calls.entry(target).or_default().push(call);
             }
         }

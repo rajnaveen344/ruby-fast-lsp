@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute only the six checked-in neutral Ruby programs, with bounded children.
+"""Execute only the eleven checked-in neutral Ruby programs, with bounded children.
 
 The ordinary Rust test validates the independent model against the same reviewed
 expected targets. This runner validates those targets against actual Ruby
@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CASES = Path(__file__).with_name("oracle_cases.json")
 IDS = {
     "instance-inheritance", "prepend-before-class", "include-before-superclass",
+    "module-transitive-host-override", "module-multiple-hosts", "module-host-prepend",
+    "module-shared-default", "module-reflection-keeps-owner",
     "last-include-wins", "class-method-inheritance", "explicit-private-call-rejected",
 }
 
@@ -37,7 +39,7 @@ def main():
         "cases_sha256": hashlib.sha256(source).hexdigest(),
         "runner_sha256": hashlib.sha256(script).hexdigest(),
         "limits": {"child_seconds": 10, "output_bytes": 65536},
-        "limitations": ["Six neutral dispatch examples, not Ruby language completeness or type-inference coverage.",
+        "limitations": ["Eleven neutral dispatch examples, not Ruby language completeness or type-inference coverage.",
                         "The Rust model control must also pass against this same oracle_cases.json."],
     }
 
@@ -47,7 +49,7 @@ def main():
     try:
         cases = json.loads(source)
         if len(cases) != len(IDS) or {case["id"] for case in cases} != IDS:
-            raise ValueError("all six unique reviewed cases are required")
+            raise ValueError("all eleven unique reviewed cases are required")
         executable = shutil.which(os.environ.get("SIM_RUBY", "ruby"))
         if not executable:
             raise RuntimeError("Ruby is required for the explicit oracle gate; set SIM_RUBY to its executable")

@@ -238,7 +238,16 @@ types prove incompatibility. Incomplete evidence suppresses the diagnostic.
 
 All consumers read the same engine-owned type result:
 
-- Hover and inlay hints use the canonical shape display.
+- Hover and inlay-hint tooltips retain the complete shape.
+  Inline hints summarize key/value types, such as `Hash<Symbol, Float>` or
+  `Array<Hash<Symbol, Integer>>`. Compatible shape alternatives share this
+  generic summary; empty alternatives add no entries, while a standalone
+  empty hash shows `Hash<?, ?>`. Genuine alternatives such as nil remain unions.
+  Hover the hint to inspect every field and correlated variant in a code block
+  with one field per line, nested indentation, and separate shape alternatives.
+  Shortening the label never changes the inferred type. Cmd+click (Ctrl+click on other
+  platforms) a visible type component to navigate to its indexed declaration,
+  including shortened namespace names.
 - Chained calls dispatch from the proven selected field type.
 - Diagnostics fail closed when any relevant variant is incomplete.
 - `ruby-fast-lsp check` matches LSP results.

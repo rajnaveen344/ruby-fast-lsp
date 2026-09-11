@@ -9,6 +9,7 @@ Implementation folders are private to the engine.
 | `state/` | Source and name registries, fact ownership, file replacement, immutable templates, and lifecycle tests |
 | `resolution.rs` | Ruby lookup chains, MRO, visibility, dependency resolution, and rename policy |
 | `queries/` | Common reads, query caching, and file-scoped type queries |
+| `queries/definitions/` | Definition source selection and partial ordering from participating Ruby lookup chains |
 | `queries/lookup/` | Constant/method matching and hover lookup results |
 | `queries/hierarchy/` | Call/type hierarchy queries and result types |
 | `queries/namespace_tree/` | Namespace-tree projections and their result types |

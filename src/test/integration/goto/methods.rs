@@ -1281,15 +1281,15 @@ end
     .await;
 }
 
-/// Bare method calls resolve inside their lexical namespace before unrelated same-name methods.
+/// Bare calls inside included modules dispatch on the actual including object.
 #[tokio::test]
-async fn goto_bare_method_prefers_current_module_namespace() {
+async fn goto_bare_method_follows_includer_override() {
     check(
         r#"
 module Trackable
-  <def>def audit
+  def audit
     "module"
-  end</def>
+  end
 
   def record
     audit$0
@@ -1299,9 +1299,9 @@ end
 class Invoice
   include Trackable
 
-  def audit
+  <def>def audit
     "class"
-  end
+  end</def>
 end
 "#,
     )
@@ -1309,7 +1309,7 @@ end
 }
 
 #[tokio::test]
-async fn goto_bare_method_prefers_current_module_namespace_after_same_name_class_reopen() {
+async fn goto_bare_method_ignores_unrelated_class_after_reopen() {
     let mut editor = FakeEditor::new().await;
     let module = r#"
 module Trackable
@@ -1345,7 +1345,7 @@ end
 }
 
 #[tokio::test]
-async fn goto_bare_generated_method_prefers_current_module_over_includer() {
+async fn goto_bare_generated_method_follows_includer_override_after_reopen() {
     let mut editor = FakeEditor::new().await;
     let module = r#"
 module AtlasScaleMixins
@@ -1380,15 +1380,15 @@ end
     let defs = editor
         .goto_def_at("atlas_scale_mixins/mixin0000.rb", 8, 6)
         .await;
+    assert_eq!(
+        defs.len(),
+        1,
+        "the known includer has one effective override: {defs:?}"
+    );
     assert!(
-        defs.iter().any(|location| {
-            location
-                .uri
-                .path()
-                .ends_with("atlas_scale_mixins/mixin0000.rb")
-                && location.range.start.line == 3
-        }),
-        "expected generated bare flow call to resolve inside Mixin0000, got {defs:?}"
+        defs[0].uri.path().ends_with("atlas_domain00/model0000.rb")
+            && defs[0].range.start.line == 5,
+        "the generated bare flow call must reach the includer's override after reopen: {defs:?}"
     );
 }
 

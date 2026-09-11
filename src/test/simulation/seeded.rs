@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SIM_GENERATOR_VERSION: u32 = 38;
+const SIM_GENERATOR_VERSION: u32 = 40;
 const FIXED_SEEDS: &[u64] = &[1, 42, 20_260_524];
 const REGRESSION_SEEDS_TEXT: &str = include_str!("regression_seeds.txt");
 pub const LARGE_SCALE_RUBY_FILES: usize = 2_284;
@@ -471,6 +471,8 @@ pub fn seeded_project(seed: u64) -> SyntheticProject {
                 .calls(&names.dynamic_virtual_target(), CallShape::ConstructorSend);
         });
 
+    add_module_dispatch_scenario(&mut project, &format!("DispatchSeed{seed}"));
+
     let filler_count = 40 + rng.range_usize(5);
     seeded_filler_classes(&mut project, &mut rng, filler_count);
 
@@ -483,6 +485,63 @@ pub fn seeded_project(seed: u64) -> SyntheticProject {
     }
 
     project
+}
+
+/// Internal module sends must follow each concrete host, while reflection stays
+/// on the named module. An unrelated definition is deliberate competing noise.
+pub(super) fn add_module_dispatch_scenario(project: &mut SyntheticProject, root: &str) {
+    let defaults = format!("{root}::Defaults");
+    let feature = format!("{root}::Feature");
+    let first = format!("{root}::FirstHost");
+    let second = format!("{root}::SecondHost");
+    let wrapper = format!("{root}::Wrapper");
+    let target = format!("{defaults}#label");
+    project
+        .module(&defaults, |module| {
+            module.method("label");
+        })
+        .module(&feature, |module| {
+            module.include(&defaults);
+            module
+                .method("invoke_member")
+                .calls(&target, CallShape::Bare);
+        })
+        .module(&wrapper, |module| {
+            module.method("label");
+        })
+        .class(&first, |class| {
+            class.include(&feature);
+            class.method("label");
+        })
+        .class(&second, |class| {
+            class.include(&feature);
+            class.prepend(&wrapper);
+            class.method("label");
+        })
+        .class(&format!("{root}::Unrelated"), |class| {
+            class.method("label");
+            class
+                .method("inspect_module")
+                .calls(&target, CallShape::InstanceMethodObject);
+        })
+        .edit("remove host override", |edit| {
+            edit.delete_method(&format!("{first}#label"));
+        })
+        .edit("remove prepended override", |edit| {
+            edit.remove_prepend(&second, &wrapper);
+        })
+        .edit("detach second receiver", |edit| {
+            edit.remove_include(&second, &feature);
+        })
+        .edit("restore host override", |edit| {
+            edit.restore_method(&format!("{first}#label"));
+        })
+        .edit("restore second receiver", |edit| {
+            edit.add_include(&second, &feature);
+        })
+        .edit("restore prepend", |edit| {
+            edit.add_prepend(&second, &wrapper);
+        });
 }
 
 pub fn large_scale_project(seed: u64) -> SyntheticProject {
@@ -825,6 +884,39 @@ fn random_seeds(count: usize) -> Vec<u64> {
 fn initial_open_files(project: &SyntheticProject) -> Vec<String> {
     let render = project.render();
     let mut files = Vec::new();
+    // Exercise host changes while their callers and definitions are open. The
+    // random schedule still closes/reopens them; the final open-all pass is not
+    // the first time these interaction cases are observed.
+    let oracle = super::OracleState::all_files(project, &render.map);
+    for call in &render.map.calls {
+        if !matches!(call.shape, CallShape::Bare)
+            || oracle.instance_receivers(&call.caller.owner).len() < 2
+        {
+            continue;
+        }
+        push_unique(&mut files, call.pos.file.clone());
+        for receiver in oracle.instance_receivers(&call.caller.owner) {
+            if let Some(site) = render.map.namespaces.get(&receiver) {
+                push_unique(&mut files, site.pos.file.clone());
+            }
+        }
+        for target in oracle
+            .resolve_call_targets(call)
+            .iter()
+            .chain(std::iter::once(&call.target))
+        {
+            if let Some(pos) = render.map.defs.get(target) {
+                push_unique(&mut files, pos.file.clone());
+            }
+        }
+        for reflected in &render.map.calls {
+            if matches!(reflected.shape, CallShape::InstanceMethodObject)
+                && reflected.target == call.target
+            {
+                push_unique(&mut files, reflected.pos.file.clone());
+            }
+        }
+    }
     for step in &project.edits {
         for expected in &step.expected {
             match expected {

@@ -38,7 +38,214 @@ impl<'a> OracleState<'a> {
         }
     }
 
-    pub fn resolve_call(&self, call: &CallSite) -> Option<MethodTarget> {
+    /// A references/hover identity exists only when every known receiver agrees.
+    /// Navigation uses the complete target set instead of choosing a winner here.
+    pub fn resolve_unique_call(&self, call: &CallSite) -> Option<MethodTarget> {
+        let targets = self.resolve_call_targets(call);
+        if targets.len() == 1
+            && self.method_lookup_is_conclusive(call)
+            && (!Self::uses_implicit_instance_receiver(call)
+                || self
+                    .instance_receivers(&call.caller.owner)
+                    .iter()
+                    .all(|owner| {
+                        self.resolve_instance_method(owner, &call.target.name)
+                            .is_some()
+                    }))
+        {
+            targets.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    pub fn resolve_call_targets(&self, call: &CallSite) -> Vec<MethodTarget> {
+        if Self::uses_implicit_instance_receiver(call) {
+            self.resolve_instance_dispatch(&call.caller.owner, &call.target.name)
+        } else {
+            self.resolve_direct_call(call).into_iter().collect()
+        }
+    }
+
+    /// Independent precedence constraints over the complete navigation target
+    /// set. Generated receiver chains come only from delivered source models.
+    pub fn definition_order_constraints(
+        &self,
+        call: &CallSite,
+    ) -> Vec<(MethodTarget, MethodTarget)> {
+        let targets = self.resolve_call_targets(call);
+        if targets.len() < 2 || !Self::uses_implicit_instance_receiver(call) {
+            return Vec::new();
+        }
+        let mut precedes = vec![vec![false; targets.len()]; targets.len()];
+        for receiver in self.instance_receivers(&call.caller.owner) {
+            if !self.namespace_lookup_chain_is_complete(&receiver, &mut BTreeSet::new()) {
+                continue;
+            }
+            let mut order = Vec::new();
+            self.instance_lookup_order(&receiver, &mut BTreeSet::new(), &mut order);
+            let Some(winner) = self.resolve_instance_method(&receiver, &call.target.name) else {
+                continue;
+            };
+            let start = order
+                .iter()
+                .position(|owner| owner == &winner.owner)
+                .expect("the generated winner must belong to its source lookup order");
+            let order = &order[start..];
+            let positions = targets
+                .iter()
+                .map(|target| order.iter().position(|owner| owner == &target.owner))
+                .collect::<Vec<_>>();
+            for (left, left_pos) in positions.iter().enumerate() {
+                for (right, right_pos) in positions.iter().enumerate() {
+                    if let (Some(left_pos), Some(right_pos)) = (left_pos, right_pos) {
+                        precedes[left][right] |= left_pos < right_pos;
+                    }
+                }
+            }
+        }
+        // The tiny model uses reachability rather than production's component
+        // traversal. Mutual reachability is ambiguity, never a strict priority.
+        for through in 0..targets.len() {
+            for from in 0..targets.len() {
+                for to in 0..targets.len() {
+                    precedes[from][to] |= precedes[from][through] && precedes[through][to];
+                }
+            }
+        }
+        let mut constraints = Vec::new();
+        for left in 0..targets.len() {
+            for right in 0..targets.len() {
+                if precedes[left][right] && !precedes[right][left] {
+                    constraints.push((targets[left].clone(), targets[right].clone()));
+                }
+            }
+        }
+        constraints
+    }
+
+    fn instance_lookup_order(
+        &self,
+        owner: &str,
+        seen: &mut BTreeSet<String>,
+        order: &mut Vec<String>,
+    ) {
+        if !seen.insert(owner.to_owned()) {
+            return;
+        }
+        let namespaces = self.visible_namespaces(owner);
+        if namespaces.is_empty() {
+            return;
+        }
+        let prepends = namespaces
+            .iter()
+            .flat_map(|ns| &ns.prepends)
+            .collect::<Vec<_>>();
+        for edge in prepends.into_iter().rev().filter(|edge| edge.enabled) {
+            self.instance_lookup_order(&edge.fqn, seen, order);
+        }
+        order.push(owner.to_owned());
+        let includes = namespaces
+            .iter()
+            .flat_map(|ns| &ns.includes)
+            .collect::<Vec<_>>();
+        for edge in includes.into_iter().rev().filter(|edge| edge.enabled) {
+            self.instance_lookup_order(&edge.fqn, seen, order);
+        }
+        let hooks = namespaces
+            .iter()
+            .flat_map(|ns| ns.includes.iter().chain(&ns.prepends))
+            .collect::<Vec<_>>();
+        for edge in hooks.into_iter().rev().filter(|edge| edge.enabled) {
+            for included in self.visible_namespaces(&edge.fqn) {
+                for hook in included
+                    .included_hook_includes
+                    .iter()
+                    .chain(&included.included_hook_class_eval_includes)
+                    .rev()
+                    .filter(|hook| hook.enabled)
+                {
+                    self.instance_lookup_order(&hook.fqn, seen, order);
+                }
+            }
+        }
+        if namespaces.iter().any(|ns| ns.kind == NamespaceKind::Class) {
+            if let Some(parent) = namespaces
+                .iter()
+                .rev()
+                .find_map(|ns| ns.superclass.as_deref())
+            {
+                self.instance_lookup_order(parent, seen, order);
+            }
+        }
+    }
+
+    fn uses_implicit_instance_receiver(call: &CallSite) -> bool {
+        matches!(
+            call.shape,
+            CallShape::Bare
+                | CallShape::BareInDoBlock
+                | CallShape::BareInBraceBlock
+                | CallShape::BareInLambda
+                | CallShape::BareInProc
+                | CallShape::FrameworkRouteBlock
+        ) || (matches!(call.shape, CallShape::MethodObject)
+            && call.target.kind == MethodKind::Instance)
+    }
+
+    /// Enumerate concrete hosts from the generated source graph, independently
+    /// of the engine's reverse-edge index. Only include/prepend establishes a
+    /// module host; lexical nesting and unrelated same-name methods do not.
+    pub fn instance_receivers(&self, owner: &str) -> Vec<String> {
+        if !self
+            .visible_namespace(owner)
+            .is_some_and(|ns| ns.kind == NamespaceKind::Module)
+        {
+            return vec![owner.to_owned()];
+        }
+        let hosts = self
+            .project
+            .namespaces
+            .iter()
+            .filter(|ns| ns.kind == NamespaceKind::Class)
+            .filter(|ns| self.contains_mixin(&ns.fqn, owner, &mut BTreeSet::new()))
+            .map(|ns| ns.fqn.clone())
+            .collect::<BTreeSet<_>>();
+        if hosts.is_empty() {
+            vec![owner.to_owned()]
+        } else {
+            hosts.into_iter().collect()
+        }
+    }
+
+    fn contains_mixin(&self, owner: &str, target: &str, seen: &mut BTreeSet<String>) -> bool {
+        if !seen.insert(owner.to_owned()) {
+            return false;
+        }
+        self.visible_namespaces(owner).into_iter().any(|ns| {
+            ns.includes
+                .iter()
+                .chain(&ns.prepends)
+                .filter(|edge| edge.enabled)
+                .any(|edge| {
+                    !self.visible_namespaces(&edge.fqn).is_empty()
+                        && (edge.fqn == target || self.contains_mixin(&edge.fqn, target, seen))
+                })
+        })
+    }
+
+    pub fn resolve_instance_dispatch(&self, owner: &str, name: &str) -> Vec<MethodTarget> {
+        let mut targets = self
+            .instance_receivers(owner)
+            .iter()
+            .filter_map(|receiver| self.resolve_instance_method(receiver, name))
+            .collect::<Vec<_>>();
+        targets.sort_by_key(MethodTarget::signature);
+        targets.dedup();
+        targets
+    }
+
+    fn resolve_direct_call(&self, call: &CallSite) -> Option<MethodTarget> {
         match &call.shape {
             CallShape::Bare
             | CallShape::BareInDoBlock
@@ -95,6 +302,12 @@ impl<'a> OracleState<'a> {
     }
 
     pub fn method_lookup_is_conclusive(&self, call: &CallSite) -> bool {
+        if Self::uses_implicit_instance_receiver(call) {
+            return self
+                .instance_receivers(&call.caller.owner)
+                .iter()
+                .all(|owner| self.namespace_lookup_chain_is_complete(owner, &mut BTreeSet::new()));
+        }
         let owners = match &call.shape {
             CallShape::Bare
             | CallShape::BareInDoBlock

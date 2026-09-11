@@ -3,6 +3,7 @@
 //! This module contains the logic for generating actual hints from AST nodes.
 //! Generators are pure functions that take nodes and context, returning hints.
 
+use super::navigation::type_hint_label;
 use crate::utils::lsp::lsp_position;
 use parking_lot::RwLock;
 use ruby_analysis::core::RubyType;
@@ -13,15 +14,15 @@ use ruby_analysis::indexer::{
     RubyDocument,
 };
 use std::sync::Arc;
-use tower_lsp::lsp_types::Position;
+use tower_lsp::lsp_types::{InlayHintLabel, InlayHintTooltip, Position};
 
 /// Unified inlay hint data structure.
 #[derive(Debug, Clone)]
 pub struct InlayHintData {
     pub position: Position,
-    pub label: String,
+    pub label: InlayHintLabel,
     pub kind: InlayHintKind,
-    pub tooltip: Option<String>,
+    pub tooltip: Option<InlayHintTooltip>,
     pub padding_left: bool,
     pub padding_right: bool,
 }
@@ -46,6 +47,13 @@ pub struct HintContext<'a> {
     pub analysis_engine: Option<Arc<RwLock<AnalysisEngine>>>,
 }
 
+impl HintContext<'_> {
+    fn type_label(&self, ruby_type: &RubyType, prefix: &str) -> (InlayHintLabel, InlayHintTooltip) {
+        let engine = self.analysis_engine.as_ref().map(|engine| engine.read());
+        type_hint_label(ruby_type, prefix, engine.as_deref())
+    }
+}
+
 /// Generate structural hints (end labels, implicit returns).
 ///
 /// These hints don't require type inference.
@@ -59,7 +67,7 @@ pub fn generate_structural_hints(nodes: &[InlayNode], context: &HintContext) -> 
                 end_offset,
             } => Some(InlayHintData {
                 position: lsp_position(context.document.offset_to_position(*end_offset as usize)),
-                label: format!("{} {}", kind.keyword(), name),
+                label: InlayHintLabel::String(format!("{} {}", kind.keyword(), name)),
                 kind: InlayHintKind::EndLabel,
                 tooltip: None,
                 padding_left: true,
@@ -67,7 +75,7 @@ pub fn generate_structural_hints(nodes: &[InlayNode], context: &HintContext) -> 
             }),
             InlayNode::ImplicitReturn { offset } => Some(InlayHintData {
                 position: lsp_position(context.document.offset_to_position(*offset as usize)),
-                label: "return".to_string(),
+                label: InlayHintLabel::String("return".to_string()),
                 kind: InlayHintKind::ImplicitReturn,
                 tooltip: None,
                 padding_left: false,
@@ -81,7 +89,7 @@ pub fn generate_structural_hints(nodes: &[InlayNode], context: &HintContext) -> 
 /// Generate type hints for variables.
 ///
 /// Uses the index and type narrowing to infer types.
-/// Skips constants as they don't typically need type hints.
+/// Omits constants whose values do not have a proven type.
 pub fn generate_variable_type_hints(
     nodes: &[InlayNode],
     context: &HintContext,
@@ -101,14 +109,11 @@ pub fn generate_variable_type_hints(
 
             // Value constants are typed-only: skip Unknown so dynamic RHS stays quiet.
             // Locals/ivars keep the existing ": ?" placeholder.
-            let label = match (&ruby_type, kind) {
-                (Some(ty), VariableKind::Constant) if *ty != RubyType::Unknown => {
-                    format!(": {}", ty)
-                }
-                (_, VariableKind::Constant) => continue,
-                (Some(ty), _) if *ty != RubyType::Unknown => format!(": {}", ty),
-                (_, _) => ": ?".to_string(),
-            };
+            let ruby_type = ruby_type.unwrap_or(RubyType::Unknown);
+            if *kind == VariableKind::Constant && ruby_type == RubyType::Unknown {
+                continue;
+            }
+            let (label, tooltip) = context.type_label(&ruby_type, ": ");
 
             hints.push(InlayHintData {
                 position: lsp_position(
@@ -118,7 +123,7 @@ pub fn generate_variable_type_hints(
                 ),
                 label,
                 kind: InlayHintKind::VariableType,
-                tooltip: None,
+                tooltip: Some(tooltip),
                 padding_left: false,
                 padding_right: false,
             });
@@ -140,10 +145,9 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
             ..
         } = node
         {
-            let return_type_str =
-                method_return_type_from_analysis(name, *return_type_offset, context)
-                    .map(|rt| rt.to_string())
-                    .unwrap_or_else(|| "?".to_string());
+            let return_type = method_return_type_from_analysis(name, *return_type_offset, context)
+                .unwrap_or(RubyType::Unknown);
+            let (label, tooltip) = context.type_label(&return_type, " -> ");
 
             hints.push(InlayHintData {
                 position: lsp_position(
@@ -151,9 +155,9 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
                         .document
                         .offset_to_position(*return_type_offset as usize),
                 ),
-                label: format!(" -> {}", return_type_str),
+                label,
                 kind: InlayHintKind::MethodReturn,
-                tooltip: None,
+                tooltip: Some(tooltip),
                 padding_left: false,
                 padding_right: false,
             });
@@ -162,11 +166,8 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
                 if let Some(param_type) =
                     parameter_type_from_analysis(name, &param.name, *return_type_offset, context)
                 {
-                    let label = if param.has_colon {
-                        format!(" {}", param_type)
-                    } else {
-                        format!(": {}", param_type)
-                    };
+                    let prefix = if param.has_colon { " " } else { ": " };
+                    let (label, tooltip) = context.type_label(&param_type, prefix);
 
                     hints.push(InlayHintData {
                         position: lsp_position(
@@ -176,7 +177,7 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
                         ),
                         label,
                         kind: InlayHintKind::ParameterType,
-                        tooltip: None,
+                        tooltip: Some(tooltip),
                         padding_left: false,
                         padding_right: false,
                     });
@@ -207,15 +208,16 @@ pub fn generate_chained_call_hints(
             else {
                 continue;
             };
+            let (label, tooltip) = type_hint_label(&ruby_type, ": ", Some(&engine));
             hints.push(InlayHintData {
                 position: lsp_position(
                     context
                         .document
                         .offset_to_position(*call_end_offset as usize),
                 ),
-                label: format!(": {ruby_type}"),
+                label,
                 kind: InlayHintKind::ChainedMethodType,
-                tooltip: Some("Proven intermediate type in method chain".to_string()),
+                tooltip: Some(tooltip),
                 padding_left: true,
                 padding_right: false,
             });

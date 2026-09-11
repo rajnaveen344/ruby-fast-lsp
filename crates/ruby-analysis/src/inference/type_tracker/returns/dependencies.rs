@@ -69,16 +69,28 @@ impl TypeTracker {
                     self.returns
                         .constant_dependencies
                         .extend(constant_dependencies);
-                    if return_type == RubyType::Unknown {
-                        RecursiveReturnApproximation::Bottom
-                    } else {
-                        RecursiveReturnApproximation::from_ruby_type(return_type.clone())
-                    }
+                    self.constant_return_base(return_type.clone())
                 }
             }
         };
         self.returns.explicit_values.push(approximation);
         return_type
+    }
+
+    pub(in crate::inference::type_tracker) fn constant_return_base(
+        &self,
+        ruby_type: RubyType,
+    ) -> RecursiveReturnApproximation {
+        // A retained constant term represents this entire return alternative.
+        // During equation collection, its current value is an observation of
+        // that dependency, not an independent base. Keeping both would union a
+        // stale seed with the final value after resolution or an edit.
+        // Direct single-method inference still uses the currently proven type.
+        if self.returns.approximation.is_none() || ruby_type == RubyType::Unknown {
+            RecursiveReturnApproximation::Bottom
+        } else {
+            RecursiveReturnApproximation::from_ruby_type(ruby_type)
+        }
     }
 
     pub(in crate::inference::type_tracker) fn return_term_dependency_for_call(
@@ -175,6 +187,15 @@ impl TypeTracker {
             return self.environment.dependencies(name.as_ref());
         }
         if let Some(call) = node.as_call_node() {
+            // A modeled call result (for example generic Array.new) already
+            // owns this value. A constructor dependency would erase that proof.
+            if self
+                .returns
+                .direct_call_proofs
+                .contains(&call.location().start_offset())
+            {
+                return BTreeSet::new();
+            }
             if call.name().as_slice() == b"new" {
                 let Some(receiver) = call.receiver() else {
                     return BTreeSet::new();

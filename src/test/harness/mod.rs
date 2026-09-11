@@ -35,7 +35,7 @@ pub use fixture::{
     extract_tags, extract_tags_with_attributes, parse_fixture, setup_with_fixture,
     setup_with_multi_file_fixture, InlineFixture, Tag, CURSOR_MARKER,
 };
-pub use inlay_hints::get_hint_label;
+pub use inlay_hints::{get_hint_label, get_hint_tooltip};
 #[cfg(unix)]
 pub(crate) use process::{wait_for_process_ready, with_process_clock};
 

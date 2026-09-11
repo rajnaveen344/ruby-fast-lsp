@@ -1,4 +1,5 @@
 pub(in crate::engine) mod cache;
+pub(in crate::engine) mod definitions;
 pub(in crate::engine) mod hierarchy;
 pub(in crate::engine) mod lookup;
 pub(in crate::engine) mod namespace_tree;
@@ -11,8 +12,8 @@ use crate::core::MethodVisibilityOverrideFact;
 use crate::core::{
     DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
     GraphNodeKind, MethodCalleeResolution, MethodFact, ReferenceFact, RubyType, SourceFileId,
-    StoredMethodReferenceCandidate, StoredReferenceCandidateKind, SymbolFact, TextRange, TypeFact,
-    TypeResolution, TypeSubject, UnknownReason,
+    StoredReferenceCandidateKind, SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject,
+    UnknownReason,
 };
 
 use crate::engine::{AnalysisEngine, SourceFile};
@@ -118,183 +119,109 @@ impl<'a> AnalysisQuery<'a> {
         self.engine.reference_store().facts_in_file(file_id)
     }
 
-    pub fn resolved_reference_definition_ranges_at(
+    /// A module call's references follow its proven concrete receiver identity.
+    /// `Some([])` must not trigger a lexical fallback in the protocol adapter.
+    pub fn module_call_reference_ranges_at(
         &self,
         file_id: SourceFileId,
         byte_offset: u32,
-    ) -> Vec<TextRange> {
-        let mut candidates = Vec::new();
+    ) -> Option<Vec<TextRange>> {
+        match self.module_call_reference_lookup_at(file_id, byte_offset)? {
+            crate::engine::MethodLookupResult::Unique(fact) => {
+                let method = crate::engine::resolution::method_name_from_fact(&fact);
+                Some(self.method_reference_ranges_for_exact_target(&fact.owner, &method, &fact.fqn))
+            }
+            crate::engine::MethodLookupResult::Missing
+            | crate::engine::MethodLookupResult::Ambiguous { .. } => Some(Vec::new()),
+        }
+    }
+
+    /// Same identity as references, with candidate traversal confined to this file.
+    pub fn module_call_highlight_ranges_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<Vec<TextRange>> {
+        let crate::engine::MethodLookupResult::Unique(fact) =
+            self.module_call_reference_lookup_at(file_id, byte_offset)?
+        else {
+            return Some(Vec::new());
+        };
+        let method = crate::engine::resolution::method_name_from_fact(&fact);
+        let mut ranges = self
+            .reference_ranges_for_fqn(&fact.fqn)
+            .into_iter()
+            .filter(|range| range.file_id == file_id)
+            .collect::<Vec<_>>();
+        for candidate in self
+            .engine
+            .reference_candidate_store()
+            .method_candidates_in_file(file_id)
+            .filter(|candidate| candidate.method == method)
+        {
+            if self
+                .method_candidate_callees(candidate)
+                .iter()
+                .any(|callee| {
+                    callee.resolution == MethodCalleeResolution::Exact
+                        && callee.owner == fact.owner
+                        && callee.method == method
+                        && !callee.definition_ranges.is_empty()
+                })
+            {
+                ranges.push(candidate.range);
+            }
+        }
+        ranges.sort_by_key(|range| (range.start_byte, range.end_byte));
+        ranges.dedup();
+        Some(ranges)
+    }
+
+    // Declarations and reflective operands retain their own namespace lookup.
+    fn module_call_reference_lookup_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<crate::engine::MethodLookupResult> {
+        let mut lookups = Vec::new();
         for candidate in self
             .engine
             .reference_candidate_store()
             .candidates_in_file(file_id)
-            .into_iter()
-            .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))
         {
-            // Extension patches enter both direct and merged collection paths.
-            // Identical candidates represent one semantic target, not an
-            // ambiguity. Distinct overlapping candidates remain separate and
-            // continue through the fail-closed target checks below.
-            if !candidates.contains(&candidate) {
-                candidates.push(candidate);
+            if !candidate.range.contains_offset(file_id, byte_offset) {
+                continue;
             }
-        }
-        if let [candidate] = candidates.as_slice() {
-            if let StoredReferenceCandidateKind::Method {
+            let StoredReferenceCandidateKind::Method {
                 owner,
                 owner_kind,
                 method,
-                is_super,
-                access,
-                caller,
-                call_expression_range,
-                preferred_definition_range,
-                diagnostics,
-            } = &candidate.kind
-            {
-                let candidate = StoredMethodReferenceCandidate {
-                    range: candidate.range,
-                    owner: *owner,
-                    owner_kind: *owner_kind,
-                    method: *method,
-                    is_super: *is_super,
-                    access: *access,
-                    caller: *caller,
-                    call_expression_range: *call_expression_range,
-                    preferred_definition_range: *preferred_definition_range,
-                    diagnostics: diagnostics.clone(),
-                };
-                let mut all_ranges = Vec::new();
-                let candidate_callees = self.method_candidate_callees(&candidate);
-                for callee in candidate_callees.into_iter().filter(|callee| {
-                    callee.resolution == MethodCalleeResolution::Exact
-                        && callee.method == candidate.method
-                }) {
-                    let mut ranges = callee.definition_ranges;
-                    if let Some(preferred) = candidate.preferred_definition_range {
-                        if ranges.contains(&preferred) {
-                            ranges = vec![preferred];
-                        }
-                    }
-                    let winning_precedence = ranges
-                        .iter()
-                        .map(|range| {
-                            self.engine
-                                .file(range.file_id)
-                                .expect(
-                                    "INVARIANT VIOLATED: method-callee definition range references an unregistered source file. This is a bug because navigation resolution must retain file ownership. Fix: register sources before publishing method facts.",
-                                )
-                                .kind
-                                .definition_precedence()
-                        })
-                        .min();
-                    if let Some(winning_precedence) = winning_precedence {
-                        ranges.retain(|range| {
-                            self.engine
-                                .file(range.file_id)
-                                .expect(
-                                    "INVARIANT VIOLATED: method-callee definition range disappeared during precedence filtering. This is a bug because definition queries hold an immutable engine borrow. Fix: keep file registration stable for the duration of an analysis query.",
-                                )
-                                .kind
-                                .definition_precedence()
-                                == winning_precedence
-                        });
-                    }
-                    all_ranges.extend(ranges);
-                }
-                all_ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
-                all_ranges.dedup();
-                return all_ranges;
-            }
-        }
-        let mut targets = candidates
-            .into_iter()
-            .flat_map(|candidate| match candidate.kind {
-                StoredReferenceCandidateKind::Resolved { target, .. } => vec![self
-                    .engine
-                    .fqn_for_id(target)
-                    .expect(
-                        "INVARIANT VIOLATED: exact resolved reference points to a missing target FQN. This is a bug because resolved candidates contain only interned target ids. Fix: intern the target before storing the reference candidate and keep the name arena append-only.",
-                    )
-                    .clone()],
-                StoredReferenceCandidateKind::Method { .. } => Vec::new(),
-                StoredReferenceCandidateKind::Constant { lookup } => {
-                    let lookup = self.engine.names.const_lookup(lookup).expect(
-                        "INVARIANT VIOLATED: exact constant reference points to a missing lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern constant lookups before storing reference candidates.",
-                    );
-                    let context = self.engine.names.fqn(lookup.context).expect(
-                        "INVARIANT VIOLATED: exact constant reference lookup points to a missing context FQN. This is a bug because constant lookups must retain their interned lexical context. Fix: intern the context before storing the lookup.",
-                    );
-                    self.resolve_constant_in_context(
-                        lookup.path.as_slice(),
-                        &if lookup.absolute {
-                            Vec::new()
-                        } else {
-                            context.namespace_parts()
-                        },
-                    )
-                    .map(|target| vec![target])
-                    .unwrap_or_default()
-                }
-            })
-            .collect::<Vec<_>>();
-        targets.sort_by_key(ToString::to_string);
-        targets.dedup();
-        if targets.len() > 1 {
-            return Vec::new();
-        }
-        let mut all_ranges = Vec::new();
-        for target in targets {
-            let mut ranges = match &target {
-                FullyQualifiedName::Method(_, _) => {
-                    let facts = self.engine.method_facts_for(&target);
-                    facts.into_iter().map(|fact| fact.range).collect::<Vec<_>>()
-                }
-                FullyQualifiedName::Namespace(_, _)
-                | FullyQualifiedName::Constant(_)
-                | FullyQualifiedName::LocalVariable(_)
-                | FullyQualifiedName::InstanceVariable(_)
-                | FullyQualifiedName::ClassVariable(_)
-                | FullyQualifiedName::GlobalVariable(_) => self
-                    .engine
-                    .symbol_facts_for(&target)
-                    .into_iter()
-                    .map(|fact| fact.range)
-                    .collect::<Vec<_>>(),
+                is_super: false,
+                access: crate::core::MethodReferenceAccess::Normal,
+                ..
+            } = candidate.kind
+            else {
+                continue;
             };
-            let winning_precedence = ranges
-                .iter()
-                .map(|range| {
-                    self.engine
-                        .file(range.file_id)
-                        .expect(
-                            "INVARIANT VIOLATED: definition range references an unregistered source file. \
-                             This is a bug because definition precedence requires stable source metadata. \
-                             Fix: register sources before inserting symbol or method facts.",
-                        )
-                        .kind
-                        .definition_precedence()
-                })
-                .min();
-            if let Some(winning_precedence) = winning_precedence {
-                ranges.retain(|range| {
-                    self.engine
-                        .file(range.file_id)
-                        .expect(
-                            "INVARIANT VIOLATED: definition range disappeared during precedence filtering. \
-                             This is a bug because definition queries hold an immutable engine borrow. \
-                             Fix: keep file registration stable for the duration of an analysis query.",
-                        )
-                        .kind
-                        .definition_precedence()
-                        == winning_precedence
-                });
+            let owner = self.engine.names.const_lookup(owner).expect(
+                "INVARIANT VIOLATED: module call has no interned owner. This is a bug because candidates retain owner identity. Fix: intern the owner before storing its candidate.");
+            let owner = FullyQualifiedName::namespace_with_kind(owner.path.to_vec(), owner_kind);
+            if crate::engine::resolution::module_instance_receivers(self.engine, &owner).is_empty()
+            {
+                continue;
             }
-            all_ranges.extend(ranges);
+            let lookup = (owner, method);
+            if !lookups.contains(&lookup) {
+                lookups.push(lookup);
+            }
         }
-        all_ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
-        all_ranges.dedup();
-        all_ranges
+        if lookups.is_empty() {
+            return None;
+        }
+        let [(owner, method)] = lookups.as_slice() else {
+            return Some(crate::engine::MethodLookupResult::Missing);
+        };
+        Some(self.resolve_method_reference(owner, method))
     }
 
     pub fn navigation_must_fail_closed_at(
@@ -339,6 +266,7 @@ impl<'a> AnalysisQuery<'a> {
             .any(|candidate| {
                 let StoredReferenceCandidateKind::Method {
                     method,
+                    access,
                     call_expression_range: _,
                     diagnostics,
                     ..
@@ -346,6 +274,13 @@ impl<'a> AnalysisQuery<'a> {
                 else {
                     return false;
                 };
+                if *access == crate::core::MethodReferenceAccess::InstanceMethodReflection
+                    && !exact_target_proven
+                {
+                    // A failed namespace inspection must not fall back to
+                    // ordinary calls on possible including objects.
+                    return true;
+                }
                 let receiver_unknown = diagnostics.as_deref().is_some_and(|diagnostics| {
                     diagnostics.receiver_expression_range.is_some_and(|range| {
                         self.local_read_type_at(range.file_id, range.start_byte)

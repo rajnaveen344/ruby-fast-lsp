@@ -537,7 +537,9 @@ impl FactCollector {
         location: &ruby_prism::Location<'_>,
         provenance: TypeProvenance,
     ) {
-        if ruby_type == RubyType::Unknown {
+        // Deferred constant equations must retain their exact target even
+        // while its value is unresolved, including cycles and late imports.
+        if ruby_type == RubyType::Unknown && !matches!(subject, TypeSubject::Constant(_)) {
             return;
         }
         self.facts.direct.types.push(TypeFact::new(

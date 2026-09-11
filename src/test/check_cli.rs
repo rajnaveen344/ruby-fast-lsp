@@ -2,9 +2,9 @@ use crate::check::{
     CheckDiagnostic, CheckReport, CheckSession, CheckTypeOutcome, CheckTypeSubjectKind,
 };
 use crate::indexer::file_processor::FileProcessor;
-use crate::test::harness::FakeEditor;
+use crate::test::harness::{get_hint_label, get_hint_tooltip, FakeEditor};
 use ruby_analysis::core::{RubyType, UnknownReason};
-use tower_lsp::lsp_types::{InlayHintLabel, NumberOrString, Url};
+use tower_lsp::lsp_types::{NumberOrString, Url};
 
 fn hover_text(hover: tower_lsp::lsp_types::Hover) -> String {
     match hover.contents {
@@ -324,9 +324,7 @@ end
         .await
         .into_iter()
         .filter_map(|hint| {
-            let InlayHintLabel::String(label) = hint.label else {
-                return None;
-            };
+            let label = get_hint_label(&hint);
             label.starts_with(" -> ").then(|| {
                 (
                     hint.position.line.checked_add(1).expect(
@@ -366,9 +364,11 @@ async fn higher_order_call_types_match_headless_and_lsp_projection() {
 
     let mut editor = FakeEditor::new().await;
     editor.open("main.rb", source).await;
-    assert!(editor.inlay_hints("main.rb").await.iter().any(|hint| {
-        matches!(&hint.label, InlayHintLabel::String(label) if label == ": Array<String>")
-    }));
+    assert!(editor
+        .inlay_hints("main.rb")
+        .await
+        .iter()
+        .any(|hint| { get_hint_label(&hint) == ": Array<String>" }));
     let hover = editor
         .hover_at("main.rb", 1, 14)
         .await
@@ -402,9 +402,11 @@ async fn callable_body_types_match_headless_and_lsp_projection() {
 
     let mut editor = FakeEditor::new().await;
     editor.open("main.rb", source).await;
-    assert!(editor.inlay_hints("main.rb").await.iter().any(|hint| {
-        matches!(&hint.label, InlayHintLabel::String(label) if label == ": String")
-    }));
+    assert!(editor
+        .inlay_hints("main.rb")
+        .await
+        .iter()
+        .any(|hint| { get_hint_label(&hint) == ": String" }));
     let hover = editor
         .hover_at("main.rb", 2, 9)
         .await
@@ -607,9 +609,7 @@ async fn normalized_variable_and_expression_types_match_lsp_inlay_projection() {
         .await
         .into_iter()
         .filter_map(|hint| {
-            let InlayHintLabel::String(label) = hint.label else {
-                return None;
-            };
+            let label = get_hint_label(&hint);
             matches!(
                 (hint.position.line, hint.position.character),
                 (2, 4) | (3, 8)
@@ -671,12 +671,10 @@ async fn structural_shape_types_match_cli_hover_and_inlay_projection() {
     editor.open("main.rb", source).await;
     assert!(
         editor.inlay_hints("main.rb").await.into_iter().any(|hint| {
-            matches!(
-                hint.label,
-                InlayHintLabel::String(ref label) if label == &format!(": {expected_shape}")
-            )
+            get_hint_label(&hint).starts_with(": Hash<Symbol, ")
+                && get_hint_tooltip(&hint) == Some("```ruby\n{\n  id: Integer,\n  profile: {\n    active: TrueClass,\n    name: String\n  }\n}\n```")
         }),
-        "LSP inlay hints must render the same canonical shape as the CLI"
+        "LSP inlay tooltips must format every field of the CLI shape behind the compact Hash label"
     );
     let payload_hover = hover_text(
         editor
@@ -947,9 +945,7 @@ VALUE = 1.0
         .await
         .into_iter()
         .filter_map(|hint| {
-            let InlayHintLabel::String(label) = hint.label else {
-                return None;
-            };
+            let label = get_hint_label(&hint);
             matches!(
                 (hint.position.line, hint.position.character),
                 (2, 18) | (3, 12) | (4, 10) | (5, 11) | (8, 5)
@@ -1194,12 +1190,11 @@ end
         "LSP hover must consume the same exhaustive join as the CLI, got `{actual}`"
     );
     assert!(
-        editor.inlay_hints("main.rb").await.into_iter().any(|hint| {
-            matches!(
-                hint.label,
-                InlayHintLabel::String(ref label) if label == " -> (Integer | String)"
-            )
-        }),
+        editor
+            .inlay_hints("main.rb")
+            .await
+            .into_iter()
+            .any(|hint| { get_hint_label(&hint) == " -> (Integer | String)" }),
         "the method-return inlay must project the same joined engine type"
     );
 }
@@ -1329,12 +1324,11 @@ end
         "completion must use the same proven post-pattern receiver type"
     );
     assert!(
-        editor.inlay_hints("main.rb").await.into_iter().any(|hint| {
-            matches!(
-                hint.label,
-                InlayHintLabel::String(ref label) if label == " -> String"
-            )
-        }),
+        editor
+            .inlay_hints("main.rb")
+            .await
+            .into_iter()
+            .any(|hint| { get_hint_label(&hint) == " -> String" }),
         "the method-return inlay must publish the shared solved type"
     );
 
@@ -1513,13 +1507,11 @@ end
         "signature help must not resolve Product#label through a stale syntactic assignment"
     );
     assert!(
-        editor.inlay_hints("main.rb").await.into_iter().all(|hint| {
-            hint.position.line != 7
-                || !matches!(
-                    hint.label,
-                    InlayHintLabel::String(ref label) if label == " -> String"
-                )
-        }),
+        editor
+            .inlay_hints("main.rb")
+            .await
+            .into_iter()
+            .all(|hint| { hint.position.line != 7 || get_hint_label(&hint) != " -> String" }),
         "Picker#normalize must not publish the result of an unproven dispatch"
     );
 
@@ -1619,13 +1611,11 @@ end
         "the initial Text receiver must provide Text#upcase signature help"
     );
     assert!(
-        editor.inlay_hints("main.rb").await.into_iter().any(|hint| {
-            hint.position.line == 10
-                && matches!(
-                    hint.label,
-                    InlayHintLabel::String(ref label) if label == " -> String"
-                )
-        }),
+        editor
+            .inlay_hints("main.rb")
+            .await
+            .into_iter()
+            .any(|hint| { hint.position.line == 10 && get_hint_label(&hint) == " -> String" }),
         "the initial proven Text#upcase call must supply Picker#normalize's return inlay"
     );
 
@@ -1668,10 +1658,7 @@ end
     assert!(
         editor.inlay_hints("main.rb").await.into_iter().all(|hint| {
             hint.position.line != 10
-                || !matches!(
-                    hint.label,
-                    InlayHintLabel::String(ref label) if label == " -> String"
-                )
+                || get_hint_label(&hint) != " -> String"
         }),
         "Picker#normalize must not publish Text#upcase's String result from a partial-union dispatch"
     );
@@ -1690,13 +1677,11 @@ end
         "restoring the unconditional Text assignment must restore navigation"
     );
     assert!(
-        editor.inlay_hints("main.rb").await.into_iter().any(|hint| {
-            hint.position.line == 10
-                && matches!(
-                    hint.label,
-                    InlayHintLabel::String(ref label) if label == " -> String"
-                )
-        }),
+        editor
+            .inlay_hints("main.rb")
+            .await
+            .into_iter()
+            .any(|hint| { hint.position.line == 10 && get_hint_label(&hint) == " -> String" }),
         "restoring the unconditional Text assignment must restore the method-return inlay"
     );
 }
@@ -1922,13 +1907,11 @@ end
         "the initial Text receiver must provide Text#normalize signature help"
     );
     assert!(
-        editor.inlay_hints("main.rb").await.into_iter().any(|hint| {
-            hint.position.line == 13
-                && matches!(
-                    hint.label,
-                    InlayHintLabel::String(ref label) if label == " -> String"
-                )
-        }),
+        editor
+            .inlay_hints("main.rb")
+            .await
+            .into_iter()
+            .any(|hint| { hint.position.line == 13 && get_hint_label(&hint) == " -> String" }),
         "the initial proven Text#normalize call must supply Picker#choose's return inlay"
     );
 
@@ -1990,11 +1973,7 @@ end
     );
     assert!(
         editor.inlay_hints("main.rb").await.into_iter().any(|hint| {
-            hint.position.line == 13
-                && matches!(
-                    hint.label,
-                    InlayHintLabel::String(ref label) if label == " -> (Integer | String)"
-                )
+            hint.position.line == 13 && get_hint_label(&hint) == " -> (Integer | String)"
         }),
         "the exhaustive rescue dispatch must supply Picker#choose's union return inlay"
     );
@@ -2111,11 +2090,7 @@ end
     );
     assert!(
         editor.inlay_hints("main.rb").await.into_iter().all(|hint| {
-            hint.position.line != 13
-                || !matches!(
-                    hint.label,
-                    InlayHintLabel::String(ref label) if label == " -> (Integer | String)"
-                )
+            hint.position.line != 13 || get_hint_label(&hint) != " -> (Integer | String)"
         }),
         "an unresolved protected assignment must remove the previously proven return inlay"
     );

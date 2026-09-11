@@ -81,7 +81,7 @@ fn resolve_constant_dependency(
     }
 }
 
-fn resolve_constant_dependency_type(
+pub(in crate::engine) fn resolve_constant_dependency_type(
     query: &AnalysisQuery<'_>,
     dependency: &ConstantTypeDependency,
 ) -> Option<RubyType> {
@@ -595,6 +595,7 @@ fn stable_method_reference_access(hasher: &mut StableExportHasher, access: Metho
         MethodReferenceAccess::Normal => stable_u8(hasher, 1),
         MethodReferenceAccess::ExplicitReceiver => stable_u8(hasher, 2),
         MethodReferenceAccess::VisibilityBypass => stable_u8(hasher, 3),
+        MethodReferenceAccess::InstanceMethodReflection => stable_u8(hasher, 4),
     }
 }
 

@@ -12,12 +12,14 @@ use crate::core::{
     SymbolKind, TextRange, TypeSubject,
 };
 use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
+use crate::engine::queries::definitions::DefinitionLookupChains;
 use crate::engine::queries::AnalysisQuery;
 use crate::engine::state::EffectiveMethodFactMatch;
 
 #[derive(Default)]
 pub(crate) struct MethodLookupChainCache {
     chains: HashMap<FullyQualifiedName, Vec<FqnId>>,
+    module_receivers: HashMap<FullyQualifiedName, Arc<[FullyQualifiedName]>>,
     metaclass_methods: HashMap<(FqnId, RubyMethod), MethodLookupResult>,
     unresolved_dependencies: HashMap<FullyQualifiedName, bool>,
     unproven_universal_methods: HashMap<FqnId, HashSet<RubyMethod>>,
@@ -400,6 +402,14 @@ impl<'a> AnalysisQuery<'a> {
         &self,
         candidate: &StoredMethodReferenceCandidate,
     ) -> Vec<ResolvedMethodCallee> {
+        self.method_candidate_callees_with_navigation(candidate, None)
+    }
+
+    pub(super) fn method_candidate_callees_with_navigation(
+        &self,
+        candidate: &StoredMethodReferenceCandidate,
+        mut lookup_chains: Option<&mut DefinitionLookupChains>,
+    ) -> Vec<ResolvedMethodCallee> {
         let owner_lookup = self.engine.names.const_lookup(candidate.owner).expect(
             "INVARIANT VIOLATED: method rename candidate points to a missing owner lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern method owners before storing candidates.",
         );
@@ -418,8 +428,11 @@ impl<'a> AnalysisQuery<'a> {
         );
         let callees = if let Some(receiver_type) = grouped_receiver_type {
             match candidate.access {
+                MethodReferenceAccess::InstanceMethodReflection => panic!(
+                    "INVARIANT VIOLATED: instance-method reflection has a grouped value receiver. This is a bug because reflection names one namespace. Fix: collect reflection separately from value dispatch."
+                ),
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
-                    .resolve_method_callees_for_type(receiver_type, &candidate.method)
+                    .resolve_method_callees_for_type_inner(receiver_type, &candidate.method, true, None, lookup_chains.as_deref_mut())
                     .unwrap_or_default(),
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
@@ -441,18 +454,11 @@ impl<'a> AnalysisQuery<'a> {
                             } else {
                                 FullyQualifiedName::namespace(caller.namespace_parts())
                             };
-                            self.resolve_protected_method_callees_for_type(
-                                receiver_type,
-                                &candidate.method,
-                                &caller,
-                            )
+                            self.resolve_method_callees_for_type_inner(receiver_type, &candidate.method, false, Some(&caller), lookup_chains.as_deref_mut())
                         });
                     protected
                         .or_else(|| {
-                            self.resolve_public_method_callees_for_type(
-                                receiver_type,
-                                &candidate.method,
-                            )
+                            self.resolve_method_callees_for_type_inner(receiver_type, &candidate.method, false, None, lookup_chains.as_deref_mut())
                         })
                         .unwrap_or_default()
                 }
@@ -463,8 +469,27 @@ impl<'a> AnalysisQuery<'a> {
                 .collect::<Vec<_>>()
         } else {
             match candidate.access {
+                MethodReferenceAccess::InstanceMethodReflection => {
+                    let chain = method_lookup_chain(self.engine, &owner);
+                    method_callee_in_chain(
+                        self.engine,
+                        &chain,
+                        &candidate.method,
+                        MethodCalleeResolution::Exact,
+                        true,
+                        None,
+                    )
+                    .into_iter()
+                    .collect()
+                }
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
-                    .resolve_method_callees(&owner, &candidate.method)
+                    .resolve_method_callees_inner(
+                        &owner,
+                        &candidate.method,
+                        true,
+                        None,
+                        lookup_chains.as_deref_mut(),
+                    )
                     .unwrap_or_default(),
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
@@ -486,14 +511,18 @@ impl<'a> AnalysisQuery<'a> {
                             } else {
                                 FullyQualifiedName::namespace(caller.namespace_parts())
                             };
-                            self.resolve_protected_method_callees(
-                                &owner,
-                                &candidate.method,
-                                &caller,
-                            )
+                            self.resolve_method_callees_inner(&owner, &candidate.method, false, Some(&caller), lookup_chains.as_deref_mut())
                         });
                     protected
-                        .or_else(|| self.resolve_public_method_callees(&owner, &candidate.method))
+                        .or_else(|| {
+                            self.resolve_method_callees_inner(
+                                &owner,
+                                &candidate.method,
+                                false,
+                                None,
+                                lookup_chains.as_deref_mut(),
+                            )
+                        })
                         .unwrap_or_default()
                 }
             }
@@ -788,6 +817,7 @@ impl<'a> AnalysisQuery<'a> {
             method,
             allow_private,
             protected_caller,
+            None,
         ) else {
             return Vec::new();
         };
@@ -843,7 +873,7 @@ impl<'a> AnalysisQuery<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(namespace_fqn, method, true, None)
+        self.resolve_method_callees_inner(namespace_fqn, method, true, None, None)
     }
 
     pub fn resolve_method_callees_cached(
@@ -866,7 +896,7 @@ impl<'a> AnalysisQuery<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(namespace_fqn, method, false, None)
+        self.resolve_method_callees_inner(namespace_fqn, method, false, None, None)
     }
 
     pub fn resolve_public_method_callees_cached(
@@ -890,7 +920,13 @@ impl<'a> AnalysisQuery<'a> {
         method: &RubyMethod,
         caller_namespace_fqn: &FullyQualifiedName,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_inner(namespace_fqn, method, false, Some(caller_namespace_fqn))
+        self.resolve_method_callees_inner(
+            namespace_fqn,
+            method,
+            false,
+            Some(caller_namespace_fqn),
+            None,
+        )
     }
 
     pub fn resolve_method_callees_for_type(
@@ -898,7 +934,7 @@ impl<'a> AnalysisQuery<'a> {
         receiver_type: &RubyType,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_for_type_inner(receiver_type, method, true, None)
+        self.resolve_method_callees_for_type_inner(receiver_type, method, true, None, None)
     }
 
     pub fn resolve_public_method_callees_for_type(
@@ -906,7 +942,7 @@ impl<'a> AnalysisQuery<'a> {
         receiver_type: &RubyType,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        self.resolve_method_callees_for_type_inner(receiver_type, method, false, None)
+        self.resolve_method_callees_for_type_inner(receiver_type, method, false, None, None)
     }
 
     pub fn resolve_protected_method_callees_for_type(
@@ -920,15 +956,17 @@ impl<'a> AnalysisQuery<'a> {
             method,
             false,
             Some(caller_namespace_fqn),
+            None,
         )
     }
 
-    fn resolve_method_callees_for_type_inner(
+    pub(super) fn resolve_method_callees_for_type_inner(
         &self,
         receiver_type: &RubyType,
         method: &RubyMethod,
         allow_private: bool,
         protected_caller: Option<&FullyQualifiedName>,
+        mut lookup_chains: Option<&mut DefinitionLookupChains>,
     ) -> Option<Vec<ResolvedMethodCallee>> {
         let members = receiver_type_members(receiver_type);
         let mut all_callees = Vec::new();
@@ -945,6 +983,7 @@ impl<'a> AnalysisQuery<'a> {
                     method,
                     allow_private,
                     protected_caller,
+                    lookup_chains.as_deref_mut(),
                 )?;
                 member_callees.extend(
                     callees
@@ -985,40 +1024,25 @@ impl<'a> AnalysisQuery<'a> {
         )
     }
 
-    fn resolve_method_callees_inner(
+    pub(super) fn resolve_method_callees_inner(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
         allow_private: bool,
         protected_caller: Option<&FullyQualifiedName>,
+        mut lookup_chains: Option<&mut DefinitionLookupChains>,
     ) -> Option<Vec<ResolvedMethodCallee>> {
         if !namespace_target_exists(self.engine, namespace_fqn) {
             return None;
         }
 
-        let fqns_to_search = if is_module_instance_namespace(self.engine, namespace_fqn) {
-            let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
-            if let Some(callee) = method_callee_in_chain(
-                self.engine,
-                &ancestor_chain,
-                method,
-                MethodCalleeResolution::Exact,
-                allow_private,
-                protected_caller,
-            ) {
-                return Some(vec![callee]);
-            }
-            if !allow_private && private_method_in_chain(self.engine, &ancestor_chain, method) {
-                return Some(vec![receiver_only_callee(namespace_fqn.clone(), method)]);
-            }
-            let includers = module_includers(self.engine, namespace_fqn);
-            if includers.is_empty() {
-                vec![namespace_fqn.clone()]
-            } else {
-                includers
-            }
-        } else {
+        // Known includers may override even methods in the module's own
+        // ancestry. Resolve each receiver's full MRO before taking a winner.
+        let includers = module_instance_receivers(self.engine, namespace_fqn);
+        let fqns_to_search = if includers.is_empty() {
             vec![namespace_fqn.clone()]
+        } else {
+            includers
         };
 
         let mut callees = Vec::new();
@@ -1033,6 +1057,13 @@ impl<'a> AnalysisQuery<'a> {
                 allow_private,
                 protected_caller,
             ) {
+                retain_definition_lookup_chain(
+                    self.engine,
+                    lookup_chains.as_deref_mut(),
+                    fqn,
+                    &callee.owner,
+                    ancestor_chain,
+                );
                 callees.push(callee);
             } else if !allow_private
                 && private_method_in_chain(self.engine, &ancestor_chain, method)
@@ -1056,6 +1087,13 @@ impl<'a> AnalysisQuery<'a> {
                     allow_private,
                     protected_caller,
                 ) {
+                    retain_definition_lookup_chain(
+                        self.engine,
+                        lookup_chains.as_deref_mut(),
+                        &application,
+                        &callee.owner,
+                        ancestor_chain,
+                    );
                     callees.push(callee);
                 } else if !allow_private
                     && private_method_in_chain(self.engine, &ancestor_chain, method)
@@ -1175,8 +1213,65 @@ impl<'a> AnalysisQuery<'a> {
         method: &RubyMethod,
         chain_cache: &mut MethodLookupChainCache,
     ) -> MethodLookupResult {
+        self.resolve_method_reference_in_context(namespace_fqn, method, chain_cache, true)
+    }
+
+    pub(crate) fn resolve_instance_method_reference_with_chain_cache(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        chain_cache: &mut MethodLookupChainCache,
+    ) -> MethodLookupResult {
+        self.resolve_method_reference_in_context(namespace_fqn, method, chain_cache, false)
+    }
+
+    fn resolve_method_reference_in_context(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        chain_cache: &mut MethodLookupChainCache,
+        dispatch_to_includers: bool,
+    ) -> MethodLookupResult {
         if !namespace_target_exists(self.engine, namespace_fqn) {
             return MethodLookupResult::Missing;
+        }
+
+        if dispatch_to_includers {
+            let includers = chain_cache
+                .module_receivers
+                .entry(namespace_fqn.clone())
+                .or_insert_with(|| module_instance_receivers(self.engine, namespace_fqn).into())
+                .clone();
+            if !includers.is_empty() {
+                let mut facts = Vec::new();
+                let mut incomplete = false;
+                for includer in includers.iter() {
+                    match self.resolve_method_reference_with_chain_cache(
+                        includer,
+                        method,
+                        chain_cache,
+                    ) {
+                        MethodLookupResult::Unique(fact) => facts.push(fact),
+                        MethodLookupResult::Missing => incomplete = true,
+                        MethodLookupResult::Ambiguous { .. } => {
+                            return MethodLookupResult::Ambiguous {
+                                owner: namespace_fqn.clone(),
+                                method: *method,
+                            };
+                        }
+                    }
+                }
+                facts.sort_by_key(|fact| (fact.owner.clone(), fact.range));
+                facts.dedup();
+                return match facts.as_slice() {
+                    [] => MethodLookupResult::Missing,
+                    [fact] if !incomplete => MethodLookupResult::Unique(fact.clone()),
+                    [_] | [_, _, ..] => MethodLookupResult::Ambiguous {
+                        owner: namespace_fqn.clone(),
+                        method: *method,
+                    },
+                };
+            }
         }
 
         let universal_root_ids = interned_universal_open_root_ids(self.engine, chain_cache);
@@ -1223,59 +1318,6 @@ impl<'a> AnalysisQuery<'a> {
                         method: *method,
                     };
                 }
-            }
-        }
-
-        if is_module_instance_namespace(self.engine, namespace_fqn) {
-            let mut includer_callees = self
-                .resolve_method_callees_inner(namespace_fqn, method, true, None)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|callee| {
-                    callee.resolution == MethodCalleeResolution::Exact
-                        && !callee.definition_ranges.is_empty()
-                })
-                .collect::<Vec<_>>();
-            includer_callees
-                .sort_by_key(|callee| (callee.owner.to_string(), callee.definition_ranges.clone()));
-            includer_callees.dedup();
-            let mut includer_owners = includer_callees
-                .iter()
-                .map(|callee| callee.owner.clone())
-                .collect::<Vec<_>>();
-            includer_owners.sort_by_key(ToString::to_string);
-            includer_owners.dedup();
-            if includer_owners.len() > 1 {
-                return MethodLookupResult::Ambiguous {
-                    owner: namespace_fqn.clone(),
-                    method: *method,
-                };
-            }
-            if let Some(owner) = includer_owners.pop() {
-                let definition_ranges = includer_callees
-                    .into_iter()
-                    .flat_map(|callee| callee.definition_ranges)
-                    .collect::<HashSet<_>>();
-                let target = FullyQualifiedName::method(owner.namespace_parts(), *method);
-                let mut facts = self
-                    .engine
-                    .method_facts_for(&target)
-                    .into_iter()
-                    .filter(|fact| fact.owner == owner && definition_ranges.contains(&fact.range))
-                    .collect::<Vec<_>>();
-                facts.sort_by_key(|fact| {
-                    (
-                        fact.range.file_id,
-                        fact.range.start_byte,
-                        fact.range.end_byte,
-                    )
-                });
-                if let Some(fact) = facts.into_iter().next() {
-                    return MethodLookupResult::Unique(Arc::new(fact));
-                }
-                panic!(
-                    "INVARIANT VIOLATED: exact module-includer method resolution has no matching method fact. This is a bug because callee definition ranges originate from method facts in the same immutable engine. Fix: keep includer callee construction and reference materialization on the same fact snapshot."
-                );
             }
         }
 
@@ -1820,7 +1862,7 @@ impl<'a> AnalysisQuery<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Vec<TextRange> {
-        self.method_reference_ranges_with_private(namespace_fqn, method, true, None)
+        self.method_reference_ranges_with_private(namespace_fqn, method, true, None, None)
     }
 
     pub fn method_reference_ranges_public_receiver(
@@ -1828,7 +1870,7 @@ impl<'a> AnalysisQuery<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Vec<TextRange> {
-        self.method_reference_ranges_with_private(namespace_fqn, method, false, None)
+        self.method_reference_ranges_with_private(namespace_fqn, method, false, None, None)
     }
 
     pub fn method_reference_ranges_protected_receiver(
@@ -1842,7 +1884,17 @@ impl<'a> AnalysisQuery<'a> {
             method,
             false,
             Some(caller_namespace_fqn),
+            None,
         )
+    }
+
+    pub(super) fn method_reference_ranges_for_exact_target(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        target: &FullyQualifiedName,
+    ) -> Vec<TextRange> {
+        self.method_reference_ranges_with_private(namespace_fqn, method, true, None, Some(target))
     }
 
     fn method_reference_ranges_with_private(
@@ -1851,6 +1903,7 @@ impl<'a> AnalysisQuery<'a> {
         method: &RubyMethod,
         allow_private: bool,
         protected_caller: Option<&FullyQualifiedName>,
+        exact_target: Option<&FullyQualifiedName>,
     ) -> Vec<TextRange> {
         let mut ranges = Vec::new();
         let receiver_non_public =
@@ -1863,7 +1916,10 @@ impl<'a> AnalysisQuery<'a> {
         let same_name_non_public = self
             .method_name_has_visibility(method, MethodVisibility::Private)
             || self.method_name_has_visibility(method, MethodVisibility::Protected);
-        let targets = self.method_reference_targets(namespace_fqn, method);
+        let targets = match exact_target {
+            Some(target) => vec![target.clone()],
+            None => self.method_reference_targets(namespace_fqn, method),
+        };
         let target_set = targets.iter().cloned().collect::<HashSet<_>>();
         for target in targets {
             let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
@@ -2088,36 +2144,14 @@ impl<'a> AnalysisQuery<'a> {
         fqn: &FullyQualifiedName,
         allowed_kinds: &[SymbolKind],
     ) -> Vec<TextRange> {
-        let mut facts = self
+        let ranges = self
             .engine
             .symbol_facts_for(fqn)
             .into_iter()
             .filter(|fact| allowed_kinds.contains(&fact.kind))
-            .collect::<Vec<_>>();
-        if facts.iter().any(|fact| {
-            self.engine
-                .file(fact.range.file_id)
-                .expect(
-                    "INVARIANT VIOLATED: symbol fact references an unregistered source file. \
-                     This is a bug because definition precedence requires stable source metadata. \
-                     Fix: remove symbol facts through per-file replacement.",
-                )
-                .kind
-                != crate::core::SourceKind::Signature
-        }) {
-            facts.retain(|fact| {
-                self.engine
-                    .file(fact.range.file_id)
-                    .expect(
-                        "INVARIANT VIOLATED: symbol fact references an unregistered source file. \
-                         This is a bug because RBS overlay filtering requires valid file metadata. \
-                         Fix: register sources before inserting symbol facts.",
-                    )
-                    .kind
-                    != crate::core::SourceKind::Signature
-            });
-        }
-        facts.into_iter().map(|fact| fact.range).collect()
+            .map(|fact| fact.range)
+            .collect();
+        self.preferred_definition_ranges(ranges)
     }
 
     fn resolve_constant_reference_target(
@@ -2128,6 +2162,28 @@ impl<'a> AnalysisQuery<'a> {
         self.engine
             .resolve_constant_reference(parts, current_namespace)
     }
+}
+
+/// Retain the proven chain starting at the callable winner. Earlier namespaces
+/// rejected by visibility/availability cannot claim navigation priority.
+fn retain_definition_lookup_chain(
+    engine: &crate::engine::AnalysisEngine,
+    lookup_chains: Option<&mut DefinitionLookupChains>,
+    receiver: &FullyQualifiedName,
+    winner: &FullyQualifiedName,
+    mut chain: Vec<FullyQualifiedName>,
+) {
+    let Some(chains) = lookup_chains else {
+        return;
+    };
+    if method_lookup_chain_has_unresolved_dependency_from_graph(engine, receiver) {
+        return;
+    }
+    let start = chain.iter().position(|owner| owner == winner).expect(
+        "INVARIANT VIOLATED: a method winner is absent from its lookup chain. This is a bug because ranking must use the chain that selected the callee. Fix: retain the owning namespace returned by method lookup.",
+    );
+    chain.drain(..start);
+    chains.push(chain);
 }
 
 fn non_core_fact_requires_ancestry_proof(
@@ -2295,7 +2351,7 @@ fn constant_name_collides(
         || engine.has_symbol_facts(&constant)
 }
 
-fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
+pub(super) fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
     let FullyQualifiedName::Method(_, method) = &fact.fqn else {
         panic!(
             "INVARIANT VIOLATED: method fact has non-method FQN `{}`. \
@@ -2353,10 +2409,17 @@ fn is_module_instance_namespace(
     engine.graph_node_has_kind(fqn, GraphNodeKind::Module)
 }
 
-fn module_includers(
+/// Concrete receiver roots reachable through a module's reverse mixin edges.
+/// Share this selection across navigation, references, and return inference;
+/// selecting a method from the module first would hide receiver overrides.
+pub(super) fn module_instance_receivers(
     engine: &crate::engine::AnalysisEngine,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
+    if !is_module_instance_namespace(engine, module_fqn) {
+        return Vec::new();
+    }
+
     let mut result = Vec::new();
     let mut visited = std::collections::HashSet::new();
     let mut queue = std::collections::VecDeque::new();

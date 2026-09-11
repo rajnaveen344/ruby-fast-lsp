@@ -53,5 +53,251 @@
       {"name": "Parcel", "kind": "class", "methods": [{"name": "label", "kind": "instance", "private": true}]}
     ],
     "ruby": "class Parcel; private; def label; 'private'; end; end\nbegin\n  Parcel.new.label\n  'unexpected public call'\nrescue NoMethodError => error\n  raise unless error.name == :label\n  nil\nend"
+  },
+  {
+    "id": "module-transitive-host-override",
+    "receiver": "Feature",
+    "kind": "module_instance",
+    "expected": [
+      "Host#label"
+    ],
+    "namespaces": [
+      {
+        "name": "Defaults",
+        "kind": "module",
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      },
+      {
+        "name": "Feature",
+        "kind": "module",
+        "includes": [
+          "Defaults"
+        ]
+      },
+      {
+        "name": "Host",
+        "kind": "class",
+        "includes": [
+          "Feature"
+        ],
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      }
+    ],
+    "ruby": "module Defaults; def label; 'default'; end; end\nmodule Feature; include Defaults; def render; [label, method(:label).owner.name + '#label']; end; end\nclass Host; include Feature; def label; 'host'; end; end\nvalue, owner = Host.new.render\nraise 'wrong internal dispatch' unless value == 'host'\n[owner]",
+    "method": "label"
+  },
+  {
+    "id": "module-multiple-hosts",
+    "receiver": "Feature",
+    "kind": "module_instance",
+    "expected": [
+      "First#label",
+      "Second#label"
+    ],
+    "namespaces": [
+      {
+        "name": "Defaults",
+        "kind": "module",
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      },
+      {
+        "name": "Feature",
+        "kind": "module",
+        "includes": [
+          "Defaults"
+        ]
+      },
+      {
+        "name": "First",
+        "kind": "class",
+        "includes": [
+          "Feature"
+        ],
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      },
+      {
+        "name": "Second",
+        "kind": "class",
+        "includes": [
+          "Feature"
+        ],
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      },
+      {
+        "name": "Unrelated",
+        "kind": "class",
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      }
+    ],
+    "ruby": "module Defaults; def label; 'default'; end; end\nmodule Feature; include Defaults; def render; [label, method(:label).owner.name + '#label']; end; end\nclass First; include Feature; def label; 'first'; end; end\nclass Second; include Feature; def label; 'second'; end; end\nclass Unrelated; def label; 'unrelated'; end; end\nresults = [First.new.render, Second.new.render]\nraise 'wrong internal dispatch' unless results.map(&:first) == ['first', 'second']\nresults.map(&:last).sort",
+    "method": "label"
+  },
+  {
+    "id": "module-host-prepend",
+    "receiver": "Feature",
+    "kind": "module_instance",
+    "expected": [
+      "Wrapper#label"
+    ],
+    "namespaces": [
+      {
+        "name": "Defaults",
+        "kind": "module",
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      },
+      {
+        "name": "Feature",
+        "kind": "module",
+        "includes": [
+          "Defaults"
+        ]
+      },
+      {
+        "name": "Wrapper",
+        "kind": "module",
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      },
+      {
+        "name": "Host",
+        "kind": "class",
+        "includes": [
+          "Feature"
+        ],
+        "prepends": [
+          "Wrapper"
+        ],
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      }
+    ],
+    "ruby": "module Defaults; def label; 'default'; end; end\nmodule Feature; include Defaults; def render; [label, method(:label).owner.name + '#label']; end; end\nmodule Wrapper; def label; 'wrapper'; end; end\nclass Host; include Feature; prepend Wrapper; def label; 'host'; end; end\nvalue, owner = Host.new.render\nraise 'wrong internal dispatch' unless value == 'wrapper'\n[owner]",
+    "method": "label"
+  },
+  {
+    "id": "module-shared-default",
+    "receiver": "Feature",
+    "kind": "module_instance",
+    "expected": [
+      "Defaults#label"
+    ],
+    "namespaces": [
+      {
+        "name": "Defaults",
+        "kind": "module",
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      },
+      {
+        "name": "Feature",
+        "kind": "module",
+        "includes": [
+          "Defaults"
+        ]
+      },
+      {
+        "name": "First",
+        "kind": "class",
+        "includes": [
+          "Feature"
+        ]
+      },
+      {
+        "name": "Second",
+        "kind": "class",
+        "includes": [
+          "Feature"
+        ]
+      }
+    ],
+    "ruby": "module Defaults; def label; 'default'; end; end\nmodule Feature; include Defaults; def render; [label, method(:label).owner.name + '#label']; end; end\nclass First; include Feature; end\nclass Second; include Feature; end\nresults = [First.new.render, Second.new.render]\nraise 'wrong internal dispatch' unless results.map(&:first) == ['default', 'default']\nresults.map(&:last).uniq.sort",
+    "method": "label"
+  },
+  {
+    "id": "module-reflection-keeps-owner",
+    "receiver": "Feature",
+    "kind": "reflection",
+    "expected": "Defaults#label",
+    "namespaces": [
+      {
+        "name": "Defaults",
+        "kind": "module",
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      },
+      {
+        "name": "Feature",
+        "kind": "module",
+        "includes": [
+          "Defaults"
+        ]
+      },
+      {
+        "name": "Host",
+        "kind": "class",
+        "includes": [
+          "Feature"
+        ],
+        "methods": [
+          {
+            "name": "label",
+            "kind": "instance"
+          }
+        ]
+      }
+    ],
+    "ruby": "module Defaults; def label; 'default'; end; end\nmodule Feature; include Defaults; def render; [label, method(:label).owner.name + '#label']; end; end\nclass Host; include Feature; def label; 'host'; end; end\nreflected = Feature.instance_method(:label)\nraise 'reflection changed implementation' unless reflected.bind(Host.new).call == 'default'\nreflected.owner.name + '#label'",
+    "method": "label"
   }
 ]

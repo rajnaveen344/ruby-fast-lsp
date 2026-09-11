@@ -1786,8 +1786,8 @@ mod tests {
     use std::collections::BTreeMap;
     use tempfile::TempDir;
     use tower_lsp::lsp_types::{
-        DidOpenTextDocumentParams, InlayHintLabel, InlayHintParams, Position, Range,
-        TextDocumentIdentifier, TextDocumentItem, Url,
+        DidOpenTextDocumentParams, InlayHintParams, Position, Range, TextDocumentIdentifier,
+        TextDocumentItem, Url,
     };
 
     #[test]
@@ -2659,7 +2659,7 @@ end
             assert!(
                 hints.iter().any(|hint| {
                     hint.position.line == line
-                        && matches!(&hint.label, InlayHintLabel::String(label) if label == ": String")
+                        && crate::test::harness::get_hint_label(hint) == ": String"
                 }),
                 "the open document's inlay hints must prefer solved engine facts over its pre-index variable-scope snapshot; hints={hints:?}"
             );
@@ -2773,7 +2773,7 @@ end
         assert!(
             hints.iter().any(|hint| {
                 hint.position.line == 4
-                    && matches!(&hint.label, InlayHintLabel::String(label) if label == ": Registry")
+                    && crate::test::harness::get_hint_label(hint) == ": Registry"
             }),
             "the open consumer must display the resolved top-level constructor type; hints={hints:?}"
         );

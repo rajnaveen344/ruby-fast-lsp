@@ -26,6 +26,108 @@ use tower_lsp::LanguageServer;
 
 use super::ruby_gen::{CallSite, SourcePos, UNPROVEN_BLOCK_RECEIVER_GAP};
 
+#[tokio::test]
+async fn generated_module_dispatch_tracks_exact_targets_after_edits() {
+    let mut project = SyntheticProject::new("module_dispatch");
+    super::seeded::add_module_dispatch_scenario(&mut project, "Dispatch");
+    let steps = project.edits.clone();
+    let mut engine = EngineSimulationRunner::start(project.clone());
+    engine.check_definitions();
+    let mut runner = SimulationRunner::start(project).await;
+    runner.check_initial().await;
+    for step in &steps {
+        engine.apply_step(step);
+        engine.check_definitions();
+        runner.apply_step_with_fresh_equivalence(step).await;
+        runner.check_initial().await;
+    }
+}
+
+#[test]
+fn generated_module_dispatch_model_has_reviewed_edit_expectations() {
+    let mut project = SyntheticProject::new("dispatch_model_controls");
+    super::seeded::add_module_dispatch_scenario(&mut project, "Dispatch");
+    let steps = project.edits.clone();
+    let expected: &[&[&str]] = &[
+        &["Dispatch::FirstHost#label", "Dispatch::Wrapper#label"],
+        &["Dispatch::Defaults#label", "Dispatch::Wrapper#label"],
+        &["Dispatch::Defaults#label", "Dispatch::SecondHost#label"],
+        &["Dispatch::Defaults#label"],
+        &["Dispatch::FirstHost#label"],
+        &["Dispatch::FirstHost#label", "Dispatch::SecondHost#label"],
+        &["Dispatch::FirstHost#label", "Dispatch::Wrapper#label"],
+    ];
+    assert_eq!(
+        steps.len() + 1,
+        expected.len(),
+        "every edited state needs a reviewed expectation"
+    );
+    for (index, expected) in expected.iter().enumerate() {
+        if index > 0 {
+            for op in &steps[index - 1].ops {
+                project.apply_op(op);
+            }
+        }
+        let render = project.render();
+        let oracle = OracleState::all_files(&project, &render.map);
+        let call = render
+            .map
+            .calls
+            .iter()
+            .find(|call| matches!(call.shape, CallShape::Bare))
+            .expect("dispatch control must contain an ordinary internal call");
+        let targets = oracle.resolve_call_targets(call);
+        assert_eq!(
+            targets
+                .iter()
+                .map(MethodTarget::signature)
+                .collect::<Vec<_>>(),
+            *expected,
+            "reviewed module dispatch state {index}"
+        );
+        assert_eq!(
+            oracle.resolve_unique_call(call).is_some(),
+            expected.len() == 1,
+            "references require one agreed receiver identity at state {index}"
+        );
+        let expected_priority = match index {
+            1 => vec![(
+                "Dispatch::Wrapper#label".to_owned(),
+                "Dispatch::Defaults#label".to_owned(),
+            )],
+            2 => vec![(
+                "Dispatch::SecondHost#label".to_owned(),
+                "Dispatch::Defaults#label".to_owned(),
+            )],
+            0 | 3 | 4 | 5 | 6 => Vec::new(),
+            unexpected => panic!(
+                "dispatch priority control needs an explicit expectation for state {unexpected}"
+            ),
+        };
+        assert_eq!(
+            oracle
+                .definition_order_constraints(call)
+                .into_iter()
+                .map(|(before, after)| (before.signature(), after.signature()))
+                .collect::<Vec<_>>(),
+            expected_priority
+        );
+        let reflection = render
+            .map
+            .calls
+            .iter()
+            .find(|call| matches!(call.shape, CallShape::InstanceMethodObject))
+            .expect("dispatch control must include independent reflection");
+        assert_eq!(
+            oracle
+                .resolve_unique_call(reflection)
+                .map(|target| target.signature()),
+            Some("Dispatch::Defaults#label".to_owned()),
+            "reflection at state {index}"
+        );
+    }
+}
+
 pub(super) fn phase1_project() -> SyntheticProject {
     let mut project = SyntheticProject::new("synthetic_phase1");
 
@@ -975,6 +1077,7 @@ impl SimulationCoverage {
     }
 
     fn add_project(&mut self, project: &SyntheticProject) {
+        self.add_dispatch_interactions(project);
         for namespace in &project.namespaces {
             match namespace.kind {
                 NamespaceKind::Class => self.add("namespace:class"),
@@ -1082,6 +1185,74 @@ impl SimulationCoverage {
         }
     }
 
+    fn add_dispatch_interactions(&mut self, project: &SyntheticProject) {
+        let render = project.render();
+        let oracle = OracleState::all_files(project, &render.map);
+        for call in &render.map.calls {
+            if !call.definition_support.is_supported() {
+                continue;
+            }
+            let is_module = project
+                .namespaces
+                .iter()
+                .any(|ns| ns.fqn == call.caller.owner && ns.kind == NamespaceKind::Module);
+            if is_module && matches!(call.shape, CallShape::Bare) {
+                let receivers = oracle.instance_receivers(&call.caller.owner);
+                let targets = oracle.resolve_call_targets(call);
+                self.add_enabled("dispatch:multiple-hosts", receivers.len() > 1);
+                self.add_enabled("dispatch:distinct-targets", targets.len() > 1);
+                self.add_enabled(
+                    "dispatch:host-override",
+                    targets
+                        .iter()
+                        .any(|target| receivers.contains(&target.owner)),
+                );
+                self.add_enabled(
+                    "dispatch:host-prepend",
+                    targets.iter().any(|target| {
+                        project.namespaces.iter().any(|ns| {
+                            receivers.contains(&ns.fqn)
+                                && ns
+                                    .prepends
+                                    .iter()
+                                    .any(|edge| edge.enabled && edge.fqn == target.owner)
+                        })
+                    }),
+                );
+            }
+            if matches!(call.shape, CallShape::InstanceMethodObject) {
+                self.add_enabled(
+                    "dispatch:reflection-with-host-override",
+                    oracle.resolve_call_targets(call)
+                        != oracle.resolve_instance_dispatch(&call.target.owner, &call.target.name),
+                );
+            }
+        }
+        let mut edited = project.clone();
+        for step in &project.edits {
+            let before = edited.render();
+            let before_oracle = OracleState::all_files(&edited, &before.map);
+            let expectations = before
+                .map
+                .calls
+                .iter()
+                .map(|call| (call.clone(), before_oracle.resolve_call_targets(call)))
+                .collect::<Vec<_>>();
+            for op in &step.ops {
+                edited.apply_op(op);
+            }
+            let after = edited.render();
+            let after_oracle = OracleState::all_files(&edited, &after.map);
+            self.add_enabled(
+                "dispatch:edit-changes-targets",
+                expectations.iter().any(|(call, targets)| {
+                    matches!(call.shape, CallShape::Bare)
+                        && *targets != after_oracle.resolve_call_targets(call)
+                }),
+            );
+        }
+    }
+
     fn add(&mut self, bucket: &str) {
         *self.buckets.entry(bucket.to_string()).or_default() += 1;
     }
@@ -1182,6 +1353,11 @@ impl SimulationCoverage {
 
 fn simulation_coverage_projects() -> Vec<SyntheticProject> {
     vec![
+        {
+            let mut project = SyntheticProject::new("module_dispatch_coverage");
+            super::seeded::add_module_dispatch_scenario(&mut project, "DispatchCoverage");
+            project
+        },
         phase1_project(),
         mro_project(),
         mro_prepend_project(),
@@ -1280,6 +1456,12 @@ fn resolved_constant(
 #[test]
 fn generated_project_shape_coverage_tracks_required_buckets() {
     const REQUIRED_BUCKETS: &[&str] = &[
+        "dispatch:multiple-hosts",
+        "dispatch:distinct-targets",
+        "dispatch:host-override",
+        "dispatch:host-prepend",
+        "dispatch:reflection-with-host-override",
+        "dispatch:edit-changes-targets",
         "namespace:class",
         "namespace:module",
         "namespace:superclass",
@@ -1664,18 +1846,18 @@ fn generated_project_seeded_generation_is_replayable() {
         );
     }
     assert!(
-        (40..=60).contains(&render.files.len()),
-        "seed {seed}: expected 40-60 files, got {}",
+        (46..=66).contains(&render.files.len()),
+        "seed {seed}: expected 46-66 files, got {}",
         render.files.len()
     );
     assert!(
-        (100..=150).contains(&first.project.enabled_method_count()),
-        "seed {seed}: expected 100-150 methods, got {}",
+        (107..=157).contains(&first.project.enabled_method_count()),
+        "seed {seed}: expected 107-157 methods, got {}",
         first.project.enabled_method_count()
     );
     assert!(
-        (30..=90).contains(&first.project.meaningful_edge_count()),
-        "seed {seed}: expected 30-90 meaningful graph edges, got {}",
+        (36..=96).contains(&first.project.meaningful_edge_count()),
+        "seed {seed}: expected 36-96 meaningful graph edges, got {}",
         first.project.meaningful_edge_count()
     );
     for shape in ["method-object", "instance-method-object"] {
@@ -1692,7 +1874,7 @@ fn generated_project_seeded_generation_has_stable_fingerprint() {
 
     assert_eq!(
         seeded_script_fingerprint(&script),
-        "fnv1a64:21169022ecc93237"
+        "fnv1a64:aae15b15d8177e90"
     );
 }
 

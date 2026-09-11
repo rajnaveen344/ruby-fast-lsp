@@ -4,15 +4,18 @@ use super::project::{EditOp, EditStep, ExpectedCheck, SyntheticProject};
 use super::ruby_gen::{
     CallSite, NamespaceDefSite, NamespaceRefSite, ProjectRender, SourcePos, TypeAssertKind,
 };
-use crate::test::harness::{get_hint_label, FakeEditor};
+use crate::test::harness::{get_hint_label, get_hint_tooltip, FakeEditor};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, Hover, HoverContents, Location, MarkedString, NumberOrString,
-    Position,
+    Diagnostic, DiagnosticSeverity, GotoDefinitionResponse, Hover, HoverContents, Location,
+    MarkedString, NumberOrString, Position,
 };
 
 pub struct SimulationRunner {
+    /// Current workspace source, including edits not yet delivered to LSP.
     project: SyntheticProject,
+    /// Independent semantic model of the last delivered revision of each file.
+    observed_project: SyntheticProject,
     editor: FakeEditor,
     render: ProjectRender,
     open_files: BTreeSet<String>,
@@ -39,6 +42,7 @@ impl SimulationRunner {
         let constant_def_history = render.map.constants.clone();
 
         Self {
+            observed_project: project.clone(),
             project,
             editor,
             render,
@@ -73,6 +77,7 @@ impl SimulationRunner {
         let constant_def_history = render.map.constants.clone();
 
         Self {
+            observed_project: project.clone(),
             project,
             editor,
             render,
@@ -91,7 +96,7 @@ impl SimulationRunner {
         self.check_hover().await;
         self.check_types().await;
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -99,7 +104,7 @@ impl SimulationRunner {
             if !self.open_files.contains(&call.pos.file) {
                 continue;
             }
-            if oracle.resolve_call(call).is_some() {
+            if !oracle.resolve_call_targets(call).is_empty() {
                 self.assert_no_unresolved_method(&call.pos.file, &call.target.name)
                     .await;
             }
@@ -146,6 +151,10 @@ impl SimulationRunner {
     }
 
     pub async fn check_references(&self) {
+        self.assert_module_call_highlights_follow_reference_identity()
+            .await;
+        self.assert_ambiguous_calls_have_no_reference_identity()
+            .await;
         self.assert_reference_sets_cover_calls().await;
         self.assert_call_site_reference_sets_cover_calls().await;
         self.assert_invalid_private_method_calls_excluded_from_references()
@@ -276,9 +285,9 @@ impl SimulationRunner {
             if definition {
                 observations.insert(
                     format!("definition {file}:{line}:{character}"),
-                    sorted_lsp_values(vec![
+                    definition_observation(
                         editor.goto_def_response_at(&file, line, character).await,
-                    ]),
+                    ),
                 );
             }
             if references {
@@ -299,7 +308,7 @@ impl SimulationRunner {
 
     pub async fn assert_semantic_false_positive_budget(&self, maximum: usize) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -309,7 +318,8 @@ impl SimulationRunner {
             .calls
             .iter()
             .filter(|call| {
-                self.open_files.contains(&call.pos.file) && oracle.resolve_call(call).is_some()
+                self.open_files.contains(&call.pos.file)
+                    && !oracle.resolve_call_targets(call).is_empty()
             })
             .count()
             + self
@@ -380,7 +390,7 @@ impl SimulationRunner {
             call.pos.file == file
                 && call.pos.line == diagnostic.range.start.line
                 && call.pos.character == diagnostic.range.start.character
-                && oracle.resolve_call(call).is_some()
+                && !oracle.resolve_call_targets(call).is_empty()
         }) || self.render.map.constant_refs.iter().any(|constant_ref| {
             constant_ref.pos.file == file
                 && constant_ref.pos.line == diagnostic.range.start.line
@@ -399,7 +409,8 @@ impl SimulationRunner {
             "INVARIANT VIOLATED: simulation tried to open file `{}` twice. This is a bug because partial-open tests should have deterministic unique open order. Fix: remove the duplicate file.",
             file
         );
-        let content = self.render.files.get(file).unwrap_or_else(|| {
+        let current_render = self.project.render();
+        let content = current_render.files.get(file).unwrap_or_else(|| {
             panic!(
                 "INVARIANT VIOLATED: simulation tried to open missing file `{}`. This is a bug because partial-open tests must reference generated files. Fix: update the open order.",
                 file
@@ -410,6 +421,28 @@ impl SimulationRunner {
             .insert(file.to_string(), content.clone());
         self.open_files.insert(file.to_string());
         self.indexed_files.insert(file.to_string());
+        self.record_delivered_model(file);
+        self.render = self.observed_project.render();
+    }
+
+    fn record_delivered_model(&mut self, file: &str) {
+        assert_eq!(self.observed_project.namespaces.len(), self.project.namespaces.len(),
+            "INVARIANT VIOLATED: simulation namespace inventory changed during edits. This is a bug because edit operations toggle existing model nodes. Fix: model namespace additions before generating them.");
+        for (observed, current) in self
+            .observed_project
+            .namespaces
+            .iter_mut()
+            .zip(&self.project.namespaces)
+        {
+            if super::ruby_gen::namespace_file(current) == file {
+                *observed = current.clone();
+            }
+        }
+        if let Some(content) = self.project.raw_files.get(file) {
+            self.observed_project
+                .raw_files
+                .insert(file.to_owned(), content.clone());
+        }
     }
 
     pub async fn close_file(&mut self, file: &str) {
@@ -526,6 +559,7 @@ impl SimulationRunner {
                         self.editor.set(file, next_content).await;
                         self.indexed_contents
                             .insert(file.clone(), next_content.clone());
+                        self.record_delivered_model(file);
                     }
                 } else {
                     self.editor.open(file, next_content).await;
@@ -533,17 +567,18 @@ impl SimulationRunner {
                         .insert(file.clone(), next_content.clone());
                     self.open_files.insert(file.clone());
                     self.indexed_files.insert(file.clone());
+                    self.record_delivered_model(file);
                 }
             }
         }
 
-        self.render = next_render;
+        self.render = self.observed_project.render();
         if check_fresh_before_model {
             self.compare_fresh_observations().await;
         }
         self.assert_index_shape();
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -690,9 +725,9 @@ impl SimulationRunner {
         );
         if self.indexed_files.len() == self.render.files.len() {
             assert!(
-                stats.methods >= self.project.enabled_method_count(),
+                stats.methods >= self.observed_project.enabled_method_count(),
                 "INVARIANT VIOLATED: simulation index has too few methods. Expected at least {}, got {}. This is a bug because every enabled generated method should emit a method fact. Fix: inspect method fact collection.",
-                self.project.enabled_method_count(),
+                self.observed_project.enabled_method_count(),
                 stats.methods
             );
         }
@@ -700,7 +735,7 @@ impl SimulationRunner {
 
     async fn assert_all_supported_method_calls_resolve(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -712,35 +747,38 @@ impl SimulationRunner {
                 continue;
             }
 
-            let Some(expected_target) = oracle.resolve_call(call) else {
-                continue;
-            };
-            if expected_target.name == "method_missing" && call.target.name != "method_missing" {
+            let targets = oracle.resolve_call_targets(call);
+            if targets.is_empty()
+                || targets.iter().any(|target| {
+                    target.name == "method_missing" && call.target.name != "method_missing"
+                })
+            {
                 continue;
             }
-            let def = self.def_pos(&expected_target);
+            let expected = targets
+                .iter()
+                .map(|target| self.def_pos(target))
+                .collect::<Vec<_>>();
             let locs = self
                 .editor
                 .goto_def_at(&call.pos.file, call.pos.line, call.pos.character)
                 .await;
             assert!(
-                locs.iter().any(|loc| location_matches(loc, def)),
-                "Expected goto from {}:{}:{} to resolve to {} at {}:{}:{}, got {:?}",
-                call.pos.file,
-                call.pos.line,
-                call.pos.character,
-                expected_target.signature(),
-                def.file,
-                def.line,
-                def.character,
-                locs
+                locs.len() == expected.len()
+                    && expected.iter().all(|def| locs.iter().filter(|loc| location_matches(loc, def)).count() == 1),
+                "exact simulation method definition targets: {} from {} at {}:{}:{}; expected {:?}, got {:?}",
+                call.target.signature(), call.caller.signature(), call.pos.file,
+                call.pos.line, call.pos.character, targets, locs
             );
+            for (before, after) in oracle.definition_order_constraints(call) {
+                assert_definition_precedence(&locs, self.def_pos(&before), self.def_pos(&after));
+            }
         }
     }
 
     async fn assert_invalid_private_method_calls_do_not_resolve(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -767,7 +805,7 @@ impl SimulationRunner {
 
     async fn assert_all_enabled_constant_refs_resolve(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -814,7 +852,10 @@ impl SimulationRunner {
             if !namespace_ref.support.is_supported() {
                 continue;
             }
-            if !self.project.namespace_enabled(&namespace_ref.target) {
+            if !self
+                .observed_project
+                .namespace_enabled(&namespace_ref.target)
+            {
                 continue;
             }
 
@@ -845,9 +886,72 @@ impl SimulationRunner {
         }
     }
 
+    async fn assert_module_call_highlights_follow_reference_identity(&self) {
+        let oracle = OracleState::with_indexed_files(
+            &self.observed_project,
+            &self.render.map,
+            self.indexed_files.clone(),
+        );
+        for call in &self.render.map.calls {
+            if !self.open_files.contains(&call.pos.file)
+                || !matches!(call.shape, super::graph::CallShape::Bare)
+                || !self
+                    .observed_project
+                    .namespaces
+                    .iter()
+                    .any(|ns| ns.fqn == call.caller.owner && ns.kind == NamespaceKind::Module)
+            {
+                continue;
+            }
+            let highlights = self
+                .editor
+                .document_highlights_at(&call.pos.file, call.pos.line, call.pos.character)
+                .await;
+            if oracle
+                .resolve_unique_call(call)
+                .is_some_and(|target| target.name == call.target.name)
+            {
+                assert!(
+                    highlights.iter().any(|highlight| highlight.range.start
+                        == Position::new(call.pos.line, call.pos.character)),
+                    "module call highlights must include the current proven call: {:?}",
+                    call.pos
+                );
+            } else if oracle.resolve_call_targets(call).len() > 1 {
+                assert!(
+                    highlights.is_empty(),
+                    "ambiguous module calls have no single highlight identity"
+                );
+            }
+        }
+    }
+
+    async fn assert_ambiguous_calls_have_no_reference_identity(&self) {
+        let oracle = OracleState::with_indexed_files(
+            &self.observed_project,
+            &self.render.map,
+            self.indexed_files.clone(),
+        );
+        for call in &self.render.map.calls {
+            if !self.open_files.contains(&call.pos.file)
+                || !call.reference_support.is_supported()
+                || oracle.resolve_call_targets(call).len() < 2
+            {
+                continue;
+            }
+            let locations = self
+                .editor
+                .references_at(&call.pos.file, call.pos.line, call.pos.character)
+                .await;
+            assert!(locations.is_empty(),
+                "ambiguous module call must not borrow one receiver's reference identity: {} from {}; got {:?}",
+                call.target.signature(), call.caller.signature(), locations);
+        }
+    }
+
     async fn assert_reference_sets_cover_calls(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -855,7 +959,7 @@ impl SimulationRunner {
             if !self.open_files.contains(&def.file) {
                 continue;
             }
-            if !self.project.method_enabled(target) {
+            if !self.observed_project.method_enabled(target) {
                 continue;
             }
 
@@ -868,7 +972,7 @@ impl SimulationRunner {
                 .filter(|call| call.reference_support.is_supported())
                 .filter(|call| {
                     oracle
-                        .resolve_call(call)
+                        .resolve_unique_call(call)
                         .as_ref()
                         .is_some_and(|resolved| resolved == target)
                 })
@@ -898,7 +1002,7 @@ impl SimulationRunner {
 
     async fn assert_call_site_reference_sets_cover_calls(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -909,10 +1013,10 @@ impl SimulationRunner {
             if !call.reference_support.is_supported() {
                 continue;
             }
-            let Some(target) = oracle.resolve_call(call) else {
+            let Some(target) = oracle.resolve_unique_call(call) else {
                 continue;
             };
-            if !self.project.method_enabled(&target) {
+            if !self.observed_project.method_enabled(&target) {
                 continue;
             }
 
@@ -930,7 +1034,7 @@ impl SimulationRunner {
                 .filter(|sibling_call| sibling_call.reference_support.is_supported())
                 .filter(|sibling_call| {
                     oracle
-                        .resolve_call(sibling_call)
+                        .resolve_unique_call(sibling_call)
                         .as_ref()
                         .is_some_and(|resolved| resolved == &target)
                 })
@@ -960,7 +1064,7 @@ impl SimulationRunner {
                 .filter(|wrong_call| wrong_call.target.name == target.name)
                 .filter(|wrong_call| {
                     oracle
-                        .resolve_call(wrong_call)
+                        .resolve_unique_call(wrong_call)
                         .as_ref()
                         .is_some_and(|resolved| resolved != &target)
                 })
@@ -984,7 +1088,7 @@ impl SimulationRunner {
 
     async fn assert_invalid_private_method_calls_excluded_from_references(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -1016,7 +1120,7 @@ impl SimulationRunner {
                 .filter(|call| call.reference_support.is_supported())
                 .filter(|call| {
                     oracle
-                        .resolve_call(call)
+                        .resolve_unique_call(call)
                         .as_ref()
                         .is_some_and(|resolved| resolved == &invalid_call.target)
                 })
@@ -1048,7 +1152,7 @@ impl SimulationRunner {
 
     async fn assert_reference_sets_cover_constant_refs(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -1056,7 +1160,7 @@ impl SimulationRunner {
             if !self.open_files.contains(&def.file) {
                 continue;
             }
-            if !self.project.constant_enabled(target) {
+            if !self.observed_project.constant_enabled(target) {
                 continue;
             }
 
@@ -1101,7 +1205,7 @@ impl SimulationRunner {
             if !self.open_files.contains(&def.pos.file) {
                 continue;
             }
-            if !self.project.namespace_enabled(target) {
+            if !self.observed_project.namespace_enabled(target) {
                 continue;
             }
 
@@ -1139,7 +1243,7 @@ impl SimulationRunner {
             if !self.open_files.contains(&def.pos.file) {
                 continue;
             }
-            if !self.project.namespace_enabled(target) {
+            if !self.observed_project.namespace_enabled(target) {
                 continue;
             }
             self.assert_hover_contains(&def.pos, &namespace_hover_label(target, def.kind))
@@ -1153,7 +1257,10 @@ impl SimulationRunner {
             if !namespace_ref.support.is_supported() {
                 continue;
             }
-            if !self.project.namespace_enabled(&namespace_ref.target) {
+            if !self
+                .observed_project
+                .namespace_enabled(&namespace_ref.target)
+            {
                 continue;
             }
             let def = self.namespace_def(&namespace_ref.target);
@@ -1170,7 +1277,7 @@ impl SimulationRunner {
 
     async fn assert_method_hovers(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -1178,13 +1285,13 @@ impl SimulationRunner {
             if !self.open_files.contains(&def.file) {
                 continue;
             }
-            if !self.project.method_enabled(target) {
+            if !self.observed_project.method_enabled(target) {
                 continue;
             }
-            if self.project.delegate_enabled(target) {
+            if self.observed_project.delegate_enabled(target) {
                 continue;
             }
-            if let Some(return_type) = self.project.method_return_type(target) {
+            if let Some(return_type) = self.observed_project.method_return_type(target) {
                 self.assert_hover_contains(def, return_type).await;
             }
         }
@@ -1196,10 +1303,10 @@ impl SimulationRunner {
             if !call.hover_support.is_supported() {
                 continue;
             }
-            let Some(target) = oracle.resolve_call(call) else {
+            let Some(target) = oracle.resolve_unique_call(call) else {
                 continue;
             };
-            let Some(return_type) = self.project.method_return_type(&target) else {
+            let Some(return_type) = self.observed_project.method_return_type(&target) else {
                 continue;
             };
             let def = self.def_pos(&target);
@@ -1210,7 +1317,7 @@ impl SimulationRunner {
         }
 
         for call in self.invalid_private_method_calls(&oracle) {
-            let Some(return_type) = self.project.method_return_type(&call.target) else {
+            let Some(return_type) = self.observed_project.method_return_type(&call.target) else {
                 continue;
             };
             self.assert_hover_not_contains(&call.pos, return_type).await;
@@ -1219,7 +1326,7 @@ impl SimulationRunner {
 
     async fn assert_constant_hovers(&self) {
         let oracle = OracleState::with_indexed_files(
-            &self.project,
+            &self.observed_project,
             &self.render.map,
             self.indexed_files.clone(),
         );
@@ -1227,7 +1334,7 @@ impl SimulationRunner {
             if !self.open_files.contains(&def.file) {
                 continue;
             }
-            if self.project.constant_enabled(target) {
+            if self.observed_project.constant_enabled(target) {
                 self.assert_hover_contains(def, constant_name(target)).await;
             }
         }
@@ -1253,7 +1360,7 @@ impl SimulationRunner {
             if !self.open_files.contains(&type_assert.pos.file) {
                 continue;
             }
-            if !self.project.method_enabled(&type_assert.owner) {
+            if !self.observed_project.method_enabled(&type_assert.owner) {
                 continue;
             }
             if type_assert.kind != TypeAssertKind::LocalAssignment {
@@ -1281,7 +1388,7 @@ impl SimulationRunner {
             if !self.open_files.contains(&type_assert.pos.file) {
                 continue;
             }
-            if !self.project.method_enabled(&type_assert.owner) {
+            if !self.observed_project.method_enabled(&type_assert.owner) {
                 continue;
             }
             let hints = hints_by_file.get(&type_assert.pos.file).unwrap_or_else(|| {
@@ -1297,9 +1404,12 @@ impl SimulationRunner {
             assert!(
                 hints.iter().any(|hint| {
                     hint.position.line == type_assert.pos.line
-                        && get_hint_label(hint).contains(expected)
+                        // Labels summarize shapes and long names. The tooltip
+                        // must still carry the complete semantic type.
+                        && get_hint_tooltip(hint).is_some_and(|text| text.contains(expected))
+                        && get_hint_label(hint).encode_utf16().count() <= 40
                 }),
-                "Expected type hint containing `{}` at {}:{}:{} for {:?}, got {:?}",
+                "Expected compact type hint with tooltip containing `{}` at {}:{}:{} for {:?}, got {:?}",
                 expected,
                 type_assert.pos.file,
                 type_assert.pos.line,
@@ -1309,10 +1419,11 @@ impl SimulationRunner {
                     .iter()
                     .map(|hint| {
                         format!(
-                            "{}:{} {}",
+                            "{}:{} {} (tooltip: {:?})",
                             hint.position.line,
                             hint.position.character,
-                            get_hint_label(hint)
+                            get_hint_label(hint),
+                            get_hint_tooltip(hint)
                         )
                     })
                     .collect::<Vec<_>>()
@@ -1372,8 +1483,8 @@ impl SimulationRunner {
             .iter()
             .filter(|call| self.open_files.contains(&call.pos.file))
             .filter(|call| call.definition_support.is_supported())
-            .filter(|call| oracle.resolve_call(call).is_none())
-            .filter(|call| self.project.method_enabled(&call.target))
+            .filter(|call| oracle.resolve_call_targets(call).is_empty())
+            .filter(|call| self.observed_project.method_enabled(&call.target))
     }
 
     pub async fn assert_unresolved_method(&self, file: &str, method: &str) {
@@ -1560,6 +1671,38 @@ impl SimulationRunner {
     }
 }
 
+fn assert_definition_precedence(locations: &[Location], before: &SourcePos, after: &SourcePos) {
+    let before_index = locations
+        .iter()
+        .position(|location| location_matches(location, before))
+        .expect("precedence guard requires the independently expected higher-priority target");
+    let after_index = locations
+        .iter()
+        .position(|location| location_matches(location, after))
+        .expect("precedence guard requires the independently expected lower-priority target");
+    assert!(
+        before_index < after_index,
+        "simulation definition lookup precedence was reversed: {:?} must precede {:?}; got {:?}",
+        before,
+        after,
+        locations
+    );
+}
+
+// Compare semantic destinations independently of the lookup-precedence assertions above.
+// Preserve response kind, complete ranges (including links' origins), and duplicates.
+fn definition_observation(response: Option<GotoDefinitionResponse>) -> Vec<String> {
+    let (kind, values) = match response {
+        None => ("absent", Vec::new()),
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            ("scalar", sorted_lsp_values(vec![location]))
+        }
+        Some(GotoDefinitionResponse::Array(locations)) => ("array", sorted_lsp_values(locations)),
+        Some(GotoDefinitionResponse::Link(links)) => ("links", sorted_lsp_values(links)),
+    };
+    std::iter::once(kind.to_owned()).chain(values).collect()
+}
+
 fn sorted_lsp_values<T: serde::Serialize>(values: Vec<T>) -> Vec<String> {
     let mut serialized = values
         .into_iter()
@@ -1576,6 +1719,80 @@ fn sorted_lsp_values<T: serde::Serialize>(values: Vec<T>) -> Vec<String> {
 #[cfg(test)]
 mod consistency_controls {
     use super::*;
+    use crate::test::simulation::graph::CallShape;
+
+    #[tokio::test]
+    async fn definition_precedence_guard_rejects_filename_order() {
+        let mut project = SyntheticProject::new("definition_priority_control");
+        crate::test::simulation::seeded::add_module_dispatch_scenario(&mut project, "Dispatch");
+        for op in project.edits[0].ops.clone() {
+            project.apply_op(&op);
+        }
+        let runner = SimulationRunner::start(project).await;
+        let call = runner
+            .render
+            .map
+            .calls
+            .iter()
+            .find(|call| matches!(call.shape, CallShape::Bare))
+            .unwrap();
+        let oracle = OracleState::all_files(&runner.observed_project, &runner.render.map);
+        let constraints = oracle.definition_order_constraints(call);
+        assert_eq!(
+            constraints.len(),
+            1,
+            "the reviewed control must have one nontrivial precedence constraint"
+        );
+        let (before, after) = (&constraints[0].0, &constraints[0].1);
+        let mut locations = runner
+            .editor
+            .goto_def_at(&call.pos.file, call.pos.line, call.pos.character)
+            .await;
+        assert_definition_precedence(&locations, runner.def_pos(before), runner.def_pos(after));
+        locations.sort_by(|left, right| left.uri.cmp(&right.uri));
+        let before = runner.def_pos(before).clone();
+        let after = runner.def_pos(after).clone();
+        assert!(
+            std::panic::catch_unwind(|| assert_definition_precedence(&locations, &before, &after))
+                .is_err(),
+            "the simulator must reject the old filename order even when every destination is valid"
+        );
+    }
+
+    #[test]
+    fn definition_observation_normalizes_order_without_hiding_faults() {
+        use tower_lsp::lsp_types::{Range, Url};
+        let first = Location::new(
+            Url::parse("file:///first.rb").unwrap(),
+            Range::new(Position::new(1, 2), Position::new(3, 4)),
+        );
+        let second = Location::new(Url::parse("file:///second.rb").unwrap(), first.range);
+        let observe =
+            |locations| definition_observation(Some(GotoDefinitionResponse::Array(locations)));
+        let expected = observe(vec![first.clone(), second.clone()]);
+        assert_eq!(expected, observe(vec![second.clone(), first.clone()]));
+        assert_ne!(expected, observe(vec![first.clone()]));
+        assert_ne!(
+            expected,
+            observe(vec![first.clone(), first.clone(), second.clone()])
+        );
+        let mut wrong_range = second.clone();
+        wrong_range.range.end.character += 1;
+        assert_ne!(expected, observe(vec![first, wrong_range]));
+        assert_ne!(definition_observation(None), observe(Vec::new()));
+    }
+
+    #[tokio::test]
+    async fn module_dispatch_oracle_advances_only_when_closed_edits_are_delivered() {
+        let mut project = SyntheticProject::new("closed_dispatch");
+        crate::test::simulation::seeded::add_module_dispatch_scenario(&mut project, "Dispatch");
+        let edit = project.edits[0].clone();
+        let mut runner = SimulationRunner::start(project).await;
+        runner.close_file("dispatch/first_host.rb").await;
+        runner.apply_step_with_fresh_equivalence(&edit).await;
+        runner.open_file("dispatch/first_host.rb").await;
+        runner.check_fresh_equivalence().await;
+    }
 
     #[tokio::test]
     async fn fresh_equivalence_uses_only_delivered_content_across_close_and_reopen() {
@@ -1643,7 +1860,8 @@ impl EditStep {
 }
 
 fn location_matches(loc: &Location, pos: &SourcePos) -> bool {
-    loc.uri.path().ends_with(&pos.file) && loc.range.start.line == pos.line
+    loc.uri.path() == format!("/{}", pos.file.trim_start_matches('/'))
+        && loc.range.start.line == pos.line
 }
 
 fn diagnostic_is_unresolved_method(diagnostic: &Diagnostic) -> bool {

@@ -90,7 +90,8 @@ async fn local_lambda_reads_a_proven_same_scope_capture() {
         r#"
 prefix = "item"
 decorate = ->(row) { { tag: prefix, value: row[:value] } }
-result<hint label="{ tag: String, value: Integer }"> = decorate.call({ value: 1 })
+result<hint label="Hash"> = decorate.call({ value: 1 })
+result<hover label="{ tag: String, value: Integer }">
 "#,
     )
     .await;
@@ -777,7 +778,8 @@ async fn callable_structural_depth_boundary_is_accepted() {
     check(
         r#"
 nest = ->(value) { [[[[[[[[value]]]]]]]] }
-output<hint label="Array<Array<Array<Array<Array<Array<Array<Array<Integer>>>>>>>>"> = nest.call(1)
+output<hint label="Array<Array<Array<Array<Array<…>>>>>"> = nest.call(1)
+output<hover label="Array<Array<Array<Array<Array<Array<Array<Array<Integer>>>>>>>>">
 "#,
     )
     .await;
@@ -809,7 +811,8 @@ choose = -> {
   else /pattern/
   end
 }
-output<hint label="(FalseClass | Float | Integer | NilClass | Regexp | String | Symbol | TrueClass)"> = choose.call
+output<hint label="(FalseCl… | Float | Integer | …)"> = choose.call
+output<hover label="(FalseClass | Float | Integer | NilClass | Regexp | String | Symbol | TrueClass)">
 "#,
     )
     .await;

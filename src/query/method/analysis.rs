@@ -4,7 +4,8 @@ use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::RubyType;
 
-use super::ResolvedMethodCallee;
+use super::{MethodLookupReceiver, ResolvedMethodCallee};
+use tower_lsp::lsp_types::Location;
 
 pub(super) fn resolve_method_callees(
     query: &EngineQuery,
@@ -55,17 +56,7 @@ fn resolve_method_callees_with_private(
         analysis_query.resolve_public_method_callees(namespace_fqn, method)?
     };
 
-    Some(
-        callees
-            .into_iter()
-            .map(|callee| ResolvedMethodCallee {
-                owner: callee.owner,
-                method: callee.method,
-                resolution: callee.resolution,
-                definition_locations: locations_for_ranges(&engine, callee.definition_ranges),
-            })
-            .collect(),
-    )
+    Some(callees)
 }
 
 pub(super) fn resolve_method_callees_for_type(
@@ -86,17 +77,7 @@ pub(super) fn resolve_method_callees_for_type(
         analysis_query.resolve_public_method_callees_for_type(receiver_type, method)?
     };
 
-    Some(
-        callees
-            .into_iter()
-            .map(|callee| ResolvedMethodCallee {
-                owner: callee.owner,
-                method: callee.method,
-                resolution: callee.resolution,
-                definition_locations: locations_for_ranges(&engine, callee.definition_ranges),
-            })
-            .collect(),
-    )
+    Some(callees)
 }
 
 pub(super) fn resolve_super_method_callee(
@@ -107,12 +88,29 @@ pub(super) fn resolve_super_method_callee(
     let engine = query.analysis_engine()?;
     let engine = engine.read();
     let analysis_query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-    let callee = analysis_query.resolve_super_method_callee(namespace_fqn, method)?;
+    analysis_query.resolve_super_method_callee(namespace_fqn, method)
+}
 
-    Some(ResolvedMethodCallee {
-        owner: callee.owner,
-        method: callee.method,
-        resolution: callee.resolution,
-        definition_locations: locations_for_ranges(&engine, callee.definition_ranges),
-    })
+pub(super) fn find_method_definitions(
+    query: &EngineQuery,
+    receiver: &MethodLookupReceiver,
+    method: &RubyMethod,
+    allow_private: bool,
+    protected_caller: Option<&FullyQualifiedName>,
+) -> Option<Vec<Location>> {
+    let engine = query.analysis_engine()?.read();
+    let analysis = engine.query();
+    let ranges = match receiver {
+        MethodLookupReceiver::Namespace(owner) => {
+            analysis.method_definition_ranges(owner, method, allow_private, protected_caller)
+        }
+        MethodLookupReceiver::Type(receiver_type) => analysis.method_definition_ranges_for_type(
+            receiver_type,
+            method,
+            allow_private,
+            protected_caller,
+        ),
+        MethodLookupReceiver::Super(owner) => analysis.super_definition_ranges(owner, method),
+    }?;
+    crate::query::analysis_location::non_empty_locations(locations_for_ranges(&engine, ranges))
 }

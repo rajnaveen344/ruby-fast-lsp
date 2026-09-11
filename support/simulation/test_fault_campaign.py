@@ -16,6 +16,8 @@ MARKER = "exact observation mismatch: neutral feature"
 
 # First real definition mutant output; only the absolute executable path is
 # normalized. Preserve Cargo's footer, numeric thread ID, and both failure headers.
+DEFINITION_FAULT = next(fault for fault in FAULTS if fault.id == "definition-missing")
+
 ACTUAL_DEFINITION_FAILURE = r"""    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.43s
      Running unittests src/lib.rs (/neutral/target/debug/deps/ruby_fast_lsp-96c034002f0d757e)
 
@@ -99,19 +101,19 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(self.classify(101, failed().replace(" panicked at ", " printed ")), "invalid")
 
     def test_real_definition_failure_with_cargo_footer_is_detection(self):
-        self.assertEqual(classify_test(101, ACTUAL_DEFINITION_FAILURE, expected_test=FAULTS[0].test,
-                                      assertion=FAULTS[0].assertion)["status"], "detected")
+        self.assertEqual(classify_test(101, ACTUAL_DEFINITION_FAILURE, expected_test=DEFINITION_FAULT.test,
+                                      assertion=DEFINITION_FAULT.assertion)["status"], "detected")
 
     def test_compile_error_with_the_same_footer_is_still_invalid(self):
         output = "error[E0425]: cannot find value `missing` in this scope\n" + ACTUAL_DEFINITION_FAILURE
-        self.assertEqual(classify_test(101, output, expected_test=FAULTS[0].test,
-                                      assertion=FAULTS[0].assertion)["status"], "invalid")
+        self.assertEqual(classify_test(101, output, expected_test=DEFINITION_FAULT.test,
+                                      assertion=DEFINITION_FAULT.assertion)["status"], "invalid")
 
     def test_only_exact_libtest_failure_footer_is_exempt(self):
         for output in (ACTUAL_DEFINITION_FAILURE.replace("pass `--lib`", "pass `--bin server`"),
                        ACTUAL_DEFINITION_FAILURE + "error: another Cargo error\n"):
-            self.assertEqual(classify_test(101, output, expected_test=FAULTS[0].test,
-                                          assertion=FAULTS[0].assertion)["status"], "invalid")
+            self.assertEqual(classify_test(101, output, expected_test=DEFINITION_FAULT.test,
+                                          assertion=DEFINITION_FAULT.assertion)["status"], "invalid")
 
     def test_failure_footer_cannot_accompany_a_green_baseline(self):
         output = passed() + "\nerror: test failed, to rerun pass `--lib`\n"
@@ -119,9 +121,9 @@ class ClassifierTests(unittest.TestCase):
 
 
 class SourceBoundaryTests(unittest.TestCase):
-    def test_inventory_has_eight_unique_faults(self):
-        self.assertEqual(len(FAULTS), 8)
-        self.assertEqual(len({fault.id for fault in FAULTS}), 8)
+    def test_inventory_has_ten_unique_faults(self):
+        self.assertEqual(len(FAULTS), 10)
+        self.assertEqual(len({fault.id for fault in FAULTS}), 10)
         for fault in FAULTS:
             self.assertTrue(eligible(fault.path, tracked=True))
             self.assertNotEqual(fault.anchor, fault.replacement)

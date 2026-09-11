@@ -20,6 +20,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use super::analysis_location::{locations_for_ranges, non_empty_locations};
 use super::EngineQuery;
 use crate::utils::lsp::{lsp_text_location, source_position};
+use crate::utils::position_to_offset;
 
 impl EngineQuery {
     /// Find all references to the symbol at the given position.
@@ -29,6 +30,9 @@ impl EngineQuery {
         position: Position,
         content: &str,
     ) -> Option<Vec<Location>> {
+        if let Some(locations) = self.module_call_reference_locations(position, content, false) {
+            return Some(locations);
+        }
         let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier_at_position(source_position(position));
@@ -56,6 +60,9 @@ impl EngineQuery {
         content: &str,
     ) -> Option<Vec<Location>> {
         let file_id = self.doc.as_ref()?.read().analysis_file_id();
+        if let Some(locations) = self.module_call_reference_locations(position, content, true) {
+            return Some(locations);
+        }
         let analyzer = self.analyzer_at_position(uri, content, position);
         let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier_at_position(source_position(position));
@@ -69,6 +76,28 @@ impl EngineQuery {
             content,
             file_id,
         )
+    }
+
+    fn module_call_reference_locations(
+        &self,
+        position: Position,
+        content: &str,
+        same_file: bool,
+    ) -> Option<Vec<Location>> {
+        let file_id = self.doc.as_ref()?.read().analysis_file_id();
+        let byte_offset = u32::try_from(position_to_offset(content, position))
+            .expect("INVARIANT VIOLATED: reference position exceeded u32 offsets. This is a bug because engine ranges use u32. Fix: bound source input sizes.");
+        let engine = self.analysis_engine()?;
+        let engine = engine.read();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        let ranges = if same_file {
+            query.module_call_highlight_ranges_at(file_id, byte_offset)?
+        } else {
+            query.module_call_reference_ranges_at(file_id, byte_offset)?
+        };
+        Some(crate::utils::deduplicate_locations(locations_for_ranges(
+            &engine, ranges,
+        )))
     }
 
     /// Find references to a constant by FQN.

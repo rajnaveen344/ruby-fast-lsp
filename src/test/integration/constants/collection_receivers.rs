@@ -76,7 +76,7 @@ fn clean(fixture: &str) -> String {
     extract_tags_with_attributes(fixture, &["hint", "warn", "hover"]).1
 }
 
-async fn cold_editor(
+pub(super) async fn cold_editor(
     declaration_fixture: &str,
     consumer_fixture: &str,
 ) -> (tempfile::TempDir, FakeEditor, String, String) {

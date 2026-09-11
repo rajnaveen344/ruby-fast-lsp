@@ -34,6 +34,7 @@ use ruby_prism::{
 
 use crate::indexer::constant_path_is_absolute;
 use crate::indexer::yard::{YardMethodDoc, YardParser};
+use crate::inference::r#type::literal::{infer_array_literal_type, infer_hash_literal_type};
 
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisIndex {
@@ -1085,6 +1086,22 @@ impl AnalysisIndexer {
     }
 
     fn assignment_type(&self, node: &Node<'_>) -> Option<RubyType> {
+        // Collection elements need the same lexical value lookup as a direct
+        // assignment. Syntax alone cannot distinguish a Symbol-valued constant
+        // from a class object, including inside nested or frozen collections.
+        if let Some(array) = node.as_array_node() {
+            return Some(infer_array_literal_type(&array, |element| {
+                self.assignment_type(element).unwrap_or(RubyType::Unknown)
+            }));
+        }
+        if let Some(hash) = node.as_hash_node() {
+            return Some(
+                infer_hash_literal_type(&hash, |value| {
+                    self.assignment_type(value).unwrap_or(RubyType::Unknown)
+                })
+                .unwrap_or(RubyType::Unknown),
+            );
+        }
         if let Some(call) = node.as_call_node() {
             if call.name().as_slice() == b"freeze" && call.arguments().is_none() {
                 return call

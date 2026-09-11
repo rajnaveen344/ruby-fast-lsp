@@ -308,7 +308,7 @@ use crate::engine::queries::lookup::types::{ConstantHover, ConstantHoverKind, Va
 use crate::engine::queries::AnalysisQuery;
 use crate::engine::resolution::{
     chain_has_custom_method_missing, execution_context_application_targets, method_facts_in_chain,
-    method_lookup_chain, method_missing_method, namespace_target_exists,
+    method_lookup_chain, method_missing_method, module_instance_receivers, namespace_target_exists,
 };
 
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
@@ -1247,6 +1247,13 @@ impl<'a> AnalysisQuery<'a> {
         )))
     }
 
+    pub(crate) fn constant_dependency_type(
+        &self,
+        dependency: &crate::core::ConstantTypeDependency,
+    ) -> Option<RubyType> {
+        crate::engine::state::resolve_constant_dependency_type(self, dependency)
+    }
+
     pub fn constant_value_type(&self, constant_fqn: &FullyQualifiedName) -> Option<RubyType> {
         self.engine
             .type_store()
@@ -1538,6 +1545,21 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Option<crate::core::RubyType> {
         if !namespace_target_exists(self.engine, namespace_fqn) {
             return None;
+        }
+
+        let receivers = module_instance_receivers(self.engine, namespace_fqn);
+        if !receivers.is_empty() {
+            // Sibling receivers may reach the same inherited declaration.
+            // Only revisiting a fact within one branch is a recursion cycle.
+            return RubyType::union_from_proven(receivers, |receiver| {
+                self.method_return_type_for_receiver_inner(
+                    &receiver,
+                    method,
+                    allow_private,
+                    protected_caller,
+                    &mut seen.clone(),
+                )
+            });
         }
 
         let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);

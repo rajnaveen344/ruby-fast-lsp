@@ -63,6 +63,8 @@ impl TypeTracker {
             .with_constant_dependencies(constant_dependencies)
     }
 
+    /// `None` collects symbolic equations; `Some` evaluates one iteration of
+    /// standalone method inference against its current recursive approximation.
     pub(in crate::inference::type_tracker) fn track_method_once(
         &mut self,
         method: &DefNode,
@@ -134,11 +136,7 @@ impl TypeTracker {
                 self.returns
                     .constant_dependencies
                     .extend(fallthrough_constant_dependencies);
-                if fallthrough_type == RubyType::Unknown {
-                    RecursiveReturnApproximation::Bottom
-                } else {
-                    RecursiveReturnApproximation::from_ruby_type(fallthrough_type)
-                }
+                self.constant_return_base(fallthrough_type)
             }
             Some(_) if fallthrough_type == RubyType::Unknown => {
                 RecursiveReturnApproximation::Unknown

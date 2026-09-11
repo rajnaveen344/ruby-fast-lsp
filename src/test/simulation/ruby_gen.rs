@@ -1752,6 +1752,9 @@ fn return_expression(return_type: &str) -> String {
         "Float" => "1.0".to_string(),
         "Symbol" => ":value".to_string(),
         "NilClass" => "nil".to_string(),
+        // Model collection values directly. An unrelated navigation scenario
+        // must not depend on guessing the type of an unindexed constructor.
+        "Array" => "[]".to_string(),
         class_name => format!("{}.new", class_name),
     }
 }

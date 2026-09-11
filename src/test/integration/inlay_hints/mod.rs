@@ -5,4 +5,7 @@
 //! - method/ - Return type, parameter type, implicit return hints
 
 pub mod method;
+mod navigation;
+mod presentation;
+mod tooltip;
 pub mod variable_type;

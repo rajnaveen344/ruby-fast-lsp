@@ -197,6 +197,31 @@ shapes. Attribute writer facts (`attr_writer`, `attr_accessor`, and
 syntax satisfy a positional options-hash parameter when the method declares no
 keyword parameters; keep these Ruby call-shape rules in engine diagnostics.
 
+Implicit calls in shared modules dispatch through the known concrete includers'
+lookup chains before considering a module-local default. Navigation, reference
+identity, and return inference share the engine's `module_instance_receivers`
+selection. Preserve each receiver's include/prepend order, retain distinct
+navigation targets when receivers disagree, and require every receiver's return
+to be proven before publishing a type. Separate receiver branches may visit the
+same inherited declaration without forming a recursion cycle. File replacement
+must refresh overrides through the ordinary engine lifecycle.
+`Module#instance_method` is explicit namespace inspection, not instance dispatch:
+retain that intent on its reference candidate, distinguish it in resolution
+cache identity, and never fall back to an includer's method when inspection
+finds no declaration.
+
+Definition ranking belongs to the engine's `queries/definitions` family.
+Method queries retain participating receiver lookup chains only for navigation;
+rank their selected owners by Ruby MRO, including prepend precedence, then
+collapse conflicting receiver orders into tied components. Never infer rank
+from unrelated hosts, lexical names, registration order, or an owner's own
+ancestors alone. Ranking cannot add shadowed targets or change receiver identity.
+Apply source precedence within each declaration identity; never remove another
+receiver's only signature target. Constants/YARD/variables share that source
+policy after their own identity lookup. Equivalent reopenings and unrelated
+branches use source path and start/end position only as tie-breakers. The LSP
+adapter must preserve engine ordering. See `docs/definition-navigation.md`.
+
 Local-variable definition navigation follows lexical bindings independently of
 the inferred value type, including reads in string interpolation and rescue
 bodies. An engine Unknown dispatch barrier must not suppress the local
@@ -406,6 +431,32 @@ to this same shape model, and hover, inlay hints, completion, diagnostics,
 chained dispatch, and `ruby-fast-lsp check` must consume the same engine-owned
 outcome. Release evidence lives in
 `support/performance/type-inference-shapes-final-2026-08-12.json`.
+
+Type inlay presentation belongs in `src/query/inlay_hints/type_display.rs`.
+Summarize shapes inline as `Hash<Key, Value>`, shorten long qualified names with explicit
+ellipsis and enough suffix context to distinguish visible alternatives, and
+bound type labels to 36 UTF-16 code units while preserving collection wrappers.
+Every type hint's tooltip retains the full canonical type, including all shape
+fields and union variants. Shape tooltips use fenced Markdown code blocks with
+one field per line, nested indentation, and separate union alternatives. Walk
+the structured type rather than splitting its canonical text: quoted keys,
+literal values, optional fields, frozen markers, and open tails must survive.
+Apply the same formatting to the whole hint and each clickable label part;
+canonical engine/CLI display stays unchanged. Variable, parameter, return, and
+chained-call hints share this formatter. Never shorten engine types or ordinary hover output;
+semantic test oracles must inspect the complete tooltip rather than treating
+an abbreviated label as proof.
+Shape alternatives share one generic Hash summary; exact empty alternatives
+contribute no key/value evidence, while open unknown tails still erase precision.
+Keep correlated shape variants in the tooltip and retain genuine non-Hash
+alternatives such as nil. An empty hash alone displays `Hash<?, ?>`.
+Type labels use native LSP label parts with the full FQN retained through
+abbreviation. Resolve each visible type through engine-owned
+`type_name_definition_ranges`, using declaration-name ranges and the ordinary
+source preference. Unknown or absent declarations have no link. Retain the
+originating project for external hint locations just as ordinary navigation
+does; never resolve an abbreviated suffix globally or share project engines.
+
 Runtime stdlib discovery must invoke only the owning project's exact selected
 runtime executable, with its exact Java home and without inherited Ruby,
 RubyGems, or Bundler environment overrides. Never fall back to the server's
@@ -1820,6 +1871,12 @@ observations, including inline tags, read actual publications without parsing,
 collecting, replacing, or resolving facts. A missing publication is distinct
 from an explicit empty clear. Fresh-analysis simulation comparisons include
 published diagnostics alongside navigation, references, hover, and hints.
+For fresh-analysis semantic comparisons, normalize definition destination order
+while preserving complete ranges, response kind, duplicates, and the distinction
+between absence and an empty array.
+Check independently modeled Ruby lookup precedence on generated method
+destinations; semantic normalization must not hide reversed precedence. Do not
+restore an unconditional filename-order assertion over semantically ranked lists.
 Controlled collection/commit
 schedules use channels, preserve replay artifacts, and exercise cancellation,
 engine replacement, and project isolation through the production snapshot guard.
@@ -1838,13 +1895,36 @@ test executes and fails the specified semantic assertion; compilation, setup,
 timeouts, or unrelated failures never count. Preserve the failed campaign as
 well as corrected-run evidence when improving the harness.
 
-Six neutral Ruby dispatch controls pair handwritten Ruby programs with model
+Eleven neutral Ruby dispatch controls pair handwritten Ruby programs with model
 inputs and independent expected targets in `support/simulation/oracle_cases.json`.
 The ordinary simulator test validates the model side; the explicit release gate
 runs `python3 support/simulation/run_oracle_controls.py` for actual Ruby dispatch.
 Missing Ruby fails this required execution check. Keep expected outcomes separate
 from observations and do not claim static-inference completeness from these
 selected execution paths.
+
+Module call-site references and document highlights use the engine's proven
+receiver identity and fail closed when hosts disagree. Declaration references
+and reflective operands retain their own namespace identity. Highlights traverse
+only candidates in the requested file, never a workspace-wide method scan.
+
+Generated method navigation compares complete declaration-target sets, rejecting
+extra, missing, and duplicate LSP destinations. Module-internal sends use known
+concrete include/prepend hosts in the independent model; `instance_method`
+retains the named module's own ancestry. Multiple navigation targets do not imply
+one references identity. Seeded scenarios must cover host overrides, transitive
+includes, prepended winners, multiple hosts, unrelated same-name methods,
+reflection, and edits changing the winner. The interaction coverage gate checks
+these combinations, not just individual syntax buckets. These are navigation
+contracts; they do not measure type-inference completeness.
+The simulator's observed model advances only when that file revision is actually
+delivered through the editor lifecycle. Pending edits to closed files must not
+change expected engine facts until reopening delivers them. Keep the observed
+source model independent of production facts and aligned with the delivered
+content snapshot used for fresh-analysis comparisons.
+The fault campaign includes restoring module-first lookup and adding an unrelated
+generated destination. A passing seed alone is insufficient evidence: retain the
+named semantic failure under the old behavior as well as the clean baseline.
 
 Newly opened definitions refresh and republish only open consumers owned by the
 same isolated engine. Retain current syntax diagnostics and exact-source linter
@@ -2023,6 +2103,13 @@ only the semantic shape needed to exercise the same LSP/indexer/engine path.
   file-owned read evidence so unchanged `didOpen` can reuse cold facts without
   losing block types. Hover must not substitute scope zero when a local's
   lexical owner is unavailable in the editor cache.
+- Declaration seeding resolves nested collection elements with the same lexical
+  value lookup as standalone constant assignments; an uppercase name alone is
+  never evidence of a class object. A retained method-return constant dependency
+  owns its whole return alternative. Do not also retain its current inferred
+  value as an independent equation base: that unions stale seeds with the final
+  type. Prepare constant terms against current values for the local solve while
+  preserving the original dependencies for engine resolution after replacement.
 - A nested call may become a receiver only from the exact proven inner
   call-expression outcome after the complete graph is installed. Validate the
   resulting namespace against its graph node kind; a module must never become

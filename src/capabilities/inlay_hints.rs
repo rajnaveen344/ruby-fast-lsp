@@ -8,7 +8,7 @@
 
 use tower_lsp::lsp_types::{
     InlayHint, InlayHintKind as LspInlayHintKind, InlayHintLabel, InlayHintOptions,
-    InlayHintParams, InlayHintServerCapabilities, InlayHintTooltip, WorkDoneProgressOptions,
+    InlayHintParams, InlayHintServerCapabilities, WorkDoneProgressOptions,
 };
 
 use crate::query::{EngineQuery, InlayHintData, InlayHintKind};
@@ -60,14 +60,24 @@ pub async fn handle_inlay_hints(
     let hints = query.get_inlay_hints(&document, &range, &content);
 
     // Convert to LSP format
-    hints.into_iter().map(to_lsp_hint).collect()
+    let hints = hints.into_iter().map(to_lsp_hint).collect::<Vec<_>>();
+    if let Some(project) = server.analysis_workspace_for_uri(&uri) {
+        for hint in &hints {
+            if let InlayHintLabel::LabelParts(parts) = &hint.label {
+                for location in parts.iter().filter_map(|part| part.location.as_ref()) {
+                    server.retain_external_document_project(&location.uri, &project);
+                }
+            }
+        }
+    }
+    hints
 }
 
 /// Convert InlayHintData to LSP InlayHint.
 fn to_lsp_hint(hint: InlayHintData) -> InlayHint {
     InlayHint {
         position: hint.position,
-        label: InlayHintLabel::String(hint.label),
+        label: hint.label,
         kind: Some(match hint.kind {
             InlayHintKind::EndLabel | InlayHintKind::ImplicitReturn => LspInlayHintKind::PARAMETER,
             InlayHintKind::VariableType
@@ -76,7 +86,7 @@ fn to_lsp_hint(hint: InlayHintData) -> InlayHint {
             | InlayHintKind::ChainedMethodType => LspInlayHintKind::TYPE,
         }),
         text_edits: None,
-        tooltip: hint.tooltip.map(InlayHintTooltip::String),
+        tooltip: hint.tooltip,
         padding_left: Some(hint.padding_left),
         padding_right: Some(hint.padding_right),
         data: None,
@@ -305,8 +315,7 @@ mod tests {
         change.await.unwrap();
         let hints = hints.await.unwrap();
         assert!(hints.iter().any(|hint| {
-            hint.position.line == 5
-                && matches!(&hint.label, InlayHintLabel::String(label) if label == ": String")
+            hint.position.line == 5 && crate::test::harness::get_hint_label(hint) == ": String"
         }));
     }
 }

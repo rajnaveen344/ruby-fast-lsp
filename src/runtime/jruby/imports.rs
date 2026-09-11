@@ -619,6 +619,26 @@ impl JrubyImportProvider {
     }
 
     fn seed_static_proxy_expression(&self, visitor: &mut FactCollector, node: &Node<'_>) {
+        if let Some(path) = node.as_constant_path_node() {
+            let Some(reference) = canonical_java_constant_path(&path) else {
+                return;
+            };
+            if !self.proxy_to_internal.contains_key(&reference) {
+                return;
+            }
+            // The selected project's class catalog proves this proxy exists.
+            // Ordinary constant inference must not guess Java classes from
+            // syntax before the provider installs its runtime evidence.
+            let proxy = FullyQualifiedName::try_from(reference.as_str()).expect(
+                "INVARIANT VIOLATED: a catalog-owned Java proxy has an invalid Ruby constant path. This is a bug because proxy_to_internal contains validated proxy identities. Fix: preserve validation when constructing the catalog mapping.",
+            );
+            visitor.direct_push_expression_type(
+                node,
+                RubyType::ClassReference(proxy),
+                TypeProvenance::Runtime,
+            );
+            return;
+        }
         let Some(call) = node.as_call_node() else {
             return;
         };

@@ -67,7 +67,33 @@ class Fault:
     assertion: str
 
 
+DISPATCH_TEST = "test::simulation::tests::generated_module_dispatch_tracks_exact_targets_after_edits"
+DISPATCH_ANCHOR = "        let includers = module_instance_receivers(self.engine, namespace_fqn);"
+
 FAULTS = (
+    Fault(
+        "module-lexical-default-wins", "Restore module-first lookup before considering concrete host overrides.",
+        "crates/ruby-analysis/src/engine/resolution.rs", DISPATCH_ANCHOR,
+        """        if is_module_instance_namespace(self.engine, namespace_fqn) {
+            let chain = method_lookup_chain(self.engine, namespace_fqn);
+            if let Some(callee) = method_callee_in_chain(
+                self.engine, &chain, method, MethodCalleeResolution::Exact,
+                allow_private, protected_caller,
+            ) { return Some(vec![callee]); }
+        }
+""" + DISPATCH_ANCHOR,
+        DISPATCH_TEST, "exact engine simulation method definition targets",
+    ),
+    Fault(
+        "generated-definition-extra", "Append an unrelated destination to otherwise correct generated navigation.",
+        "src/capabilities/definitions.rs", DEFINITION_ANCHOR,
+        DEFINITION_ANCHOR.replace("let locations =", "let mut locations =").replace(
+            "    Some(GotoDefinitionResponse::Array(locations))",
+            '    let mut extra = locations.first().cloned().expect("fault requires a definition");\n'
+            '    extra.uri = Url::parse("file:///unrelated_definition.rb").expect("neutral fault URI");\n'
+            "    locations.push(extra);\n    Some(GotoDefinitionResponse::Array(locations))"),
+        DISPATCH_TEST, "exact simulation method definition targets",
+    ),
     Fault(
         "definition-missing", "Discard every returned method definition.",
         "src/capabilities/definitions.rs", DEFINITION_ANCHOR,

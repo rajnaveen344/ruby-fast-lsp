@@ -28,6 +28,9 @@
 //! ```
 
 mod generators;
+mod navigation;
+mod tooltip;
+mod type_display;
 
 pub use generators::{
     generate_chained_call_hints, generate_method_hints, generate_structural_hints,

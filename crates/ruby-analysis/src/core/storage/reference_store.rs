@@ -63,6 +63,8 @@ pub enum MethodReferenceAccess {
     Normal,
     ExplicitReceiver,
     VisibilityBypass,
+    /// `Module#instance_method` inspects this namespace's own ancestor chain.
+    InstanceMethodReflection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -448,6 +450,13 @@ impl ReferenceCandidateStore {
             resolved.shrink_to_fit();
             self.resolved_by_file.insert(file_id, resolved);
         }
+    }
+
+    pub(crate) fn method_candidates_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> impl Iterator<Item = &StoredMethodReferenceCandidate> {
+        self.methods_by_file.get(&file_id).into_iter().flatten()
     }
 
     pub fn method_candidates_named(

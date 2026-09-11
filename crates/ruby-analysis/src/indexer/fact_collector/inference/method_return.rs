@@ -1,7 +1,7 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, InferenceTelemetry, MethodReturnEquation, RubyConstant,
-    RubyMethod, RubyType, TextRange, TypeInferenceOutcome, TypeProvenance, TypeResolution,
-    TypeSubject, UnknownReason,
+    ConstantTypeProjection, FullyQualifiedName, GraphEdgeKind, InferenceTelemetry,
+    MethodReturnEquation, RubyConstant, RubyMethod, RubyType, TextRange, TypeInferenceOutcome,
+    TypeProvenance, TypeResolution, TypeSubject, UnknownReason,
 };
 use crate::engine::AnalysisQuery;
 use crate::indexer::fact_collector::FactCollector;
@@ -392,7 +392,39 @@ impl FactCollector {
         {
             return;
         }
-        let solve_result = solve_method_return_equations_with_telemetry(equations);
+        // Resolve a temporary view against current file values before the local
+        // solve. The retained equations keep their dependencies so the engine
+        // can solve them again after all files are installed or replaced.
+        let prepared = equations
+            .iter()
+            .any(|equation| !equation.constant_dependencies().is_empty())
+            .then(|| {
+                equations
+                    .iter()
+                    .map(|equation| {
+                        equation.with_resolved_constant_types(
+                            equation.constant_dependencies().iter().map(|dependency| {
+                                match dependency.projection() {
+                                    ConstantTypeProjection::Value => self
+                                        .resolve_constant_value_type_from(
+                                            &dependency.parts,
+                                            dependency.absolute,
+                                            &dependency.lexical_context,
+                                        )
+                                        .map(|(_constant, ruby_type)| ruby_type),
+                                    ConstantTypeProjection::ConstructorInstance => {
+                                        let engine = self.semantics.engine.read();
+                                        AnalysisQuery::new(&engine)
+                                            .constant_dependency_type(dependency)
+                                    }
+                                }
+                            }),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            });
+        let solve_result =
+            solve_method_return_equations_with_telemetry(prepared.as_deref().unwrap_or(equations));
         let solved = solve_result.outcomes;
         let file_id = self.document.analysis_file_id();
         self.facts

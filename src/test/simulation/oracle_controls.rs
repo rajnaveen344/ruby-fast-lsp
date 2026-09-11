@@ -14,9 +14,16 @@ struct Case {
     receiver: String,
     method: String,
     kind: String,
-    expected: Option<String>,
+    expected: ExpectedTargets,
     namespaces: Vec<Namespace>,
     ruby: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum ExpectedTargets {
+    Single(Option<String>),
+    Multiple(Vec<String>),
 }
 
 #[derive(Deserialize)]
@@ -76,8 +83,8 @@ fn independent_oracle_matches_reviewed_neutral_ruby_dispatch_contracts() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         cases.len(),
-        6,
-        "all six reviewed dispatch controls must run"
+        11,
+        "all eleven reviewed dispatch controls must run"
     );
     assert_eq!(ids.len(), cases.len(), "control identities must be unique");
     for case in cases {
@@ -96,13 +103,32 @@ fn independent_oracle_matches_reviewed_neutral_ruby_dispatch_contracts() {
         let render = project.render();
         let oracle = OracleState::all_files(&project, &render.map);
         let actual = match case.kind.as_str() {
-            "instance" => oracle.resolve_public_instance_method(&case.receiver, &case.method),
-            "class" => oracle.resolve_class_method(&case.receiver, &case.method),
+            "instance" => ExpectedTargets::Single(
+                oracle
+                    .resolve_public_instance_method(&case.receiver, &case.method)
+                    .map(|target| target.signature()),
+            ),
+            "class" => ExpectedTargets::Single(
+                oracle
+                    .resolve_class_method(&case.receiver, &case.method)
+                    .map(|target| target.signature()),
+            ),
+            "reflection" => ExpectedTargets::Single(
+                oracle
+                    .resolve_instance_method(&case.receiver, &case.method)
+                    .map(|target| target.signature()),
+            ),
+            "module_instance" => ExpectedTargets::Multiple(
+                oracle
+                    .resolve_instance_dispatch(&case.receiver, &case.method)
+                    .iter()
+                    .map(|target| target.signature())
+                    .collect(),
+            ),
             other => panic!("unsupported reviewed query kind: {other}"),
         };
         assert_eq!(
-            actual.map(|target| target.signature()),
-            case.expected,
+            actual, case.expected,
             "independent neutral Ruby oracle contract: {}",
             case.id
         );

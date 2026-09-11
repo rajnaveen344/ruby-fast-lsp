@@ -13,13 +13,12 @@
 
 mod analysis;
 
-use crate::utils::deduplicate_locations;
 use ruby_analysis::core::FullyQualifiedName;
-pub use ruby_analysis::core::MethodCalleeResolution;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::RubyType;
+pub use ruby_analysis::core::{MethodCalleeResolution, ResolvedMethodCallee};
 use ruby_analysis::indexer::{
     resolve_receiver_to_namespace, resolve_receiver_type, MethodReceiver, ReceiverResolutionContext,
 };
@@ -41,12 +40,10 @@ pub struct MethodInfo {
     pub documentation: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedMethodCallee {
-    pub owner: FullyQualifiedName,
-    pub method: RubyMethod,
-    pub resolution: MethodCalleeResolution,
-    pub definition_locations: Vec<Location>,
+enum MethodLookupReceiver {
+    Namespace(FullyQualifiedName),
+    Type(RubyType),
+    Super(FullyQualifiedName),
 }
 
 impl EngineQuery {
@@ -127,26 +124,9 @@ impl EngineQuery {
         allow_private: bool,
         protected_caller: Option<&FullyQualifiedName>,
     ) -> Option<Vec<Location>> {
-        let locations = self
-            .resolve_method_callees_with_private(
-                receiver,
-                method,
-                namespace,
-                namespace_kind,
-                position,
-                allow_private,
-                protected_caller,
-            )
-            .into_iter()
-            .filter(|callee| matches!(callee.resolution, MethodCalleeResolution::Exact))
-            .flat_map(|callee| callee.definition_locations)
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(deduplicate_locations(locations))
-        }
+        let receiver =
+            self.method_lookup_receiver(receiver, namespace, namespace_kind, position)?;
+        analysis::find_method_definitions(self, &receiver, method, allow_private, protected_caller)
     }
 
     pub fn resolve_method_callees(
@@ -178,50 +158,59 @@ impl EngineQuery {
         allow_private: bool,
         protected_caller: Option<&FullyQualifiedName>,
     ) -> Vec<ResolvedMethodCallee> {
-        if matches!(receiver, MethodReceiver::Super) {
-            let namespace_fqn =
-                FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind);
-            if let Some(callee) =
-                analysis::resolve_super_method_callee(self, &namespace_fqn, method)
-            {
-                return vec![callee];
-            }
+        let Some(receiver) =
+            self.method_lookup_receiver(receiver, namespace, namespace_kind, position)
+        else {
             return Vec::new();
-        }
-
-        let namespace_fqn =
-            match self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)
-            {
-                Some(namespace_fqn) => namespace_fqn,
-                None => {
-                    let receiver_type =
-                        self.resolve_receiver_type(receiver, namespace, namespace_kind, position);
-                    if matches!(receiver_type, RubyType::Union(_)) {
-                        return analysis::resolve_method_callees_for_type(
-                            self,
-                            &receiver_type,
-                            method,
-                            allow_private,
-                            protected_caller,
-                        )
-                        .unwrap_or_default();
-                    }
-                    return Vec::new();
-                }
-            };
-
-        let callees = if allow_private {
-            analysis::resolve_method_callees(self, &namespace_fqn, method)
-        } else if let Some(caller) = protected_caller {
-            analysis::resolve_protected_method_callees(self, &namespace_fqn, method, caller)
-        } else {
-            analysis::resolve_public_method_callees(self, &namespace_fqn, method)
         };
-        if let Some(callees) = callees {
-            return callees;
+        match receiver {
+            MethodLookupReceiver::Super(owner) => {
+                analysis::resolve_super_method_callee(self, &owner, method)
+                    .into_iter()
+                    .collect()
+            }
+            MethodLookupReceiver::Type(receiver_type) => analysis::resolve_method_callees_for_type(
+                self,
+                &receiver_type,
+                method,
+                allow_private,
+                protected_caller,
+            )
+            .unwrap_or_default(),
+            MethodLookupReceiver::Namespace(owner) => {
+                let callees = if allow_private {
+                    analysis::resolve_method_callees(self, &owner, method)
+                } else if let Some(caller) = protected_caller {
+                    analysis::resolve_protected_method_callees(self, &owner, method, caller)
+                } else {
+                    analysis::resolve_public_method_callees(self, &owner, method)
+                };
+                callees.unwrap_or_default()
+            }
         }
+    }
 
-        Vec::new()
+    fn method_lookup_receiver(
+        &self,
+        receiver: &MethodReceiver,
+        namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+    ) -> Option<MethodLookupReceiver> {
+        if matches!(receiver, MethodReceiver::Super) {
+            return Some(MethodLookupReceiver::Super(
+                FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind),
+            ));
+        }
+        if let Some(owner) =
+            self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)
+        {
+            return Some(MethodLookupReceiver::Namespace(owner));
+        }
+        let receiver_type =
+            self.resolve_receiver_type(receiver, namespace, namespace_kind, position);
+        matches!(receiver_type, RubyType::Union(_))
+            .then_some(MethodLookupReceiver::Type(receiver_type))
     }
 }
 

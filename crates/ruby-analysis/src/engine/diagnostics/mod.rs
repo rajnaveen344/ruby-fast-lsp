@@ -75,7 +75,7 @@ impl AnalysisEngine {
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
         stats.diagnostic_seed_ns = elapsed_ns(diagnostic_seed_started);
         let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
-        let mut method_fact_cache: HashMap<MethodReferenceCacheKey, MethodLookupResult> =
+        let mut method_fact_cache: HashMap<(MethodReferenceCacheKey, bool), MethodLookupResult> =
             HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
@@ -308,21 +308,28 @@ impl AnalysisEngine {
                     let owner_fqn = method_reference_owner_fqn(self, owner, owner_kind);
                     let method_cache_key =
                         (owner, owner_kind, candidate.method, candidate.is_super);
-                    let cached = method_fact_cache.contains_key(&method_cache_key);
-                    let fact = method_fact_cache
-                        .entry(method_cache_key)
-                        .or_insert_with(|| {
-                            let query = AnalysisQuery::new(self);
-                            if candidate.is_super {
-                                query.resolve_super_method_reference(&owner_fqn, &candidate.method)
-                            } else {
-                                query.resolve_method_reference_with_chain_cache(
-                                    &owner_fqn,
-                                    &candidate.method,
-                                    &mut method_lookup_chain_cache,
-                                )
-                            }
-                        });
+                    let reflects_instance =
+                        candidate.access == MethodReferenceAccess::InstanceMethodReflection;
+                    let fact_cache_key = (method_cache_key, reflects_instance);
+                    let cached = method_fact_cache.contains_key(&fact_cache_key);
+                    let fact = method_fact_cache.entry(fact_cache_key).or_insert_with(|| {
+                        let query = AnalysisQuery::new(self);
+                        if candidate.is_super {
+                            query.resolve_super_method_reference(&owner_fqn, &candidate.method)
+                        } else if reflects_instance {
+                            query.resolve_instance_method_reference_with_chain_cache(
+                                &owner_fqn,
+                                &candidate.method,
+                                &mut method_lookup_chain_cache,
+                            )
+                        } else {
+                            query.resolve_method_reference_with_chain_cache(
+                                &owner_fqn,
+                                &candidate.method,
+                                &mut method_lookup_chain_cache,
+                            )
+                        }
+                    });
                     if cached {
                         stats.method_cache_hits = stats.method_cache_hits.checked_add(1).expect(
                             "INVARIANT VIOLATED: method resolve-cache hit counter overflowed usize. \
@@ -554,7 +561,7 @@ impl AnalysisEngine {
         let mut unresolved =
             HashMap::from([(file_id, self.resolve_diagnostic_candidates_in_file(file_id))]);
         let mut method_fact_cache: HashMap<
-            (FullyQualifiedName, RubyMethod, bool),
+            (FullyQualifiedName, RubyMethod, bool, bool),
             MethodLookupResult,
         > = HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
@@ -744,12 +751,20 @@ impl AnalysisEngine {
                     );
                     let owner = owner_lookup.path.to_vec();
                     let owner_fqn = FullyQualifiedName::namespace_with_kind(owner, owner_kind);
+                    let reflects_instance =
+                        access == MethodReferenceAccess::InstanceMethodReflection;
                     let mut fact = method_fact_cache
-                        .entry((owner_fqn.clone(), method, is_super))
+                        .entry((owner_fqn.clone(), method, is_super, reflects_instance))
                         .or_insert_with(|| {
                             let query = AnalysisQuery::new(self);
                             if is_super {
                                 query.resolve_super_method_reference(&owner_fqn, &method)
+                            } else if reflects_instance {
+                                query.resolve_instance_method_reference_with_chain_cache(
+                                    &owner_fqn,
+                                    &method,
+                                    &mut method_lookup_chain_cache,
+                                )
                             } else {
                                 query.resolve_method_reference_with_chain_cache(
                                     &owner_fqn,
@@ -1062,7 +1077,7 @@ impl AnalysisEngine {
         let (owner, owner_kind, method, _is_super) = method_cache_key;
         let return_type = match (access, resolution) {
             (
-                MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass,
+                MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass | MethodReferenceAccess::InstanceMethodReflection,
                 MethodLookupResult::Unique(fact),
             ) => self.cached_method_return_type(fact, caches),
             (MethodReferenceAccess::ExplicitReceiver, MethodLookupResult::Unique(fact)) => {
@@ -1089,7 +1104,7 @@ impl AnalysisEngine {
                 }
             }
             (
-                MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass,
+                MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass | MethodReferenceAccess::InstanceMethodReflection,
                 MethodLookupResult::Ambiguous { .. },
             ) => self.cached_ambiguous_method_return_type(
                 method_cache_key,
@@ -1106,7 +1121,8 @@ impl AnalysisEngine {
             (
                 MethodReferenceAccess::Normal
                 | MethodReferenceAccess::ExplicitReceiver
-                | MethodReferenceAccess::VisibilityBypass,
+                | MethodReferenceAccess::VisibilityBypass
+                | MethodReferenceAccess::InstanceMethodReflection,
                 MethodLookupResult::Missing,
             ) => None,
         };
@@ -1311,7 +1327,9 @@ impl AnalysisEngine {
         );
         let query = AnalysisQuery::new(self);
         match access {
-            MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => {
+            MethodReferenceAccess::Normal
+            | MethodReferenceAccess::VisibilityBypass
+            | MethodReferenceAccess::InstanceMethodReflection => {
                 query.resolve_method_callees_for_type(receiver_type, &method)
             }
             MethodReferenceAccess::ExplicitReceiver => caller

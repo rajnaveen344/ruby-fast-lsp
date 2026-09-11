@@ -64,6 +64,85 @@ fn sinatra_artifact_exists() -> bool {
 }
 
 #[tokio::test]
+async fn packaged_sinatra_mixin_dispatch_follows_helper_override() {
+    assert!(sinatra_artifact_exists(), "build the Sinatra guest with extensions/sinatra-rust/build-and-test.sh before running its packaged regression");
+    let (workspace, mut editor) = sinatra_editor("2.2.4").await;
+    open_sinatra_namespaces(&mut editor, &workspace).await;
+    let feature = workspace_file(&workspace, "feature.rb");
+    editor
+        .open(
+            &feature,
+            r#"module Defaults
+  protected
+  def registry
+    :default
+  end
+end
+
+module Feature
+  include Defaults
+  def render
+    registry
+  end
+end
+
+module Components
+  include Feature
+end
+"#,
+        )
+        .await;
+    let app = workspace_file(&workspace, "app.rb");
+    let source = r#"class WebApp < Sinatra::Base
+  helpers do
+    include Components
+    def registry
+      :custom
+    end
+  end
+end
+"#;
+    editor.open(&app, source).await;
+    assert!(
+        editor
+            .extension_status()
+            .await
+            .iter()
+            .any(|status| { status.id == "sinatra-rust" && status.status == "loaded" }),
+        "the helper regression must exercise the packaged Sinatra guest"
+    );
+    let targets = editor.goto_definition(&feature, 10, 5).await;
+    assert_eq!(
+        targets.len(),
+        1,
+        "one application must have one effective target: {targets:?}"
+    );
+    assert_eq!(
+        targets[0].uri,
+        tower_lsp::lsp_types::Url::from_file_path(&app).unwrap()
+    );
+    assert_eq!(targets[0].range.start.line, 3);
+
+    editor
+        .set(
+            &app,
+            &source.replace("    def registry\n      :custom\n    end\n", ""),
+        )
+        .await;
+    let targets = editor.goto_definition(&feature, 10, 5).await;
+    assert_eq!(
+        targets.len(),
+        1,
+        "removing the override must expose the module default: {targets:?}"
+    );
+    assert_eq!(
+        targets[0].uri,
+        tower_lsp::lsp_types::Url::from_file_path(&feature).unwrap()
+    );
+    assert_eq!(targets[0].range.start.line, 2);
+}
+
+#[tokio::test]
 async fn packaged_sinatra_rust_wasm_models_modular_request_and_helper_scopes() {
     if !sinatra_artifact_exists() {
         eprintln!(

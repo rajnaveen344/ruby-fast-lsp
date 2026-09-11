@@ -97,7 +97,7 @@ impl FactCollector {
     ///
     /// This recursively walks the AST to infer types:
     /// - Literals → their type (String, Integer, etc.)
-    /// - Constants → ClassReference
+    /// - Constants → their proven value or namespace type
     /// - Local variables → look up their type
     /// - Method calls → recursively infer receiver type, then resolve method return type
     pub fn infer_type_from_value(&self, value_node: &Node) -> RubyType {
@@ -150,9 +150,8 @@ impl FactCollector {
             return literal_type;
         }
 
-        // 2. Constant read/path: resolve against the active lexical namespace before
-        // projecting the class object. This also preserves the target identity when
-        // one constant aliases another class/module object.
+        // 2. Constant reads need value or namespace evidence. An unresolved name
+        // is not proof of a class object, including within collection elements.
         if let Some(reference) = crate::indexer::mixin_ref_from_node(value_node) {
             let lexical_context = self.scope_tracker.get_ns_stack();
             if let Some((_constant, ruby_type)) = self.resolve_constant_value_type_from(
@@ -163,8 +162,12 @@ impl FactCollector {
                 return ruby_type;
             }
             if let Some(fqn) = self.constant_reference_type(value_node) {
-                return RubyType::ClassReference(fqn);
+                let engine = self.semantics.engine.read();
+                return crate::engine::AnalysisQuery::new(&engine)
+                    .constant_reference_type(fqn.namespace_parts_slice())
+                    .unwrap_or(RubyType::Unknown);
             }
+            return RubyType::Unknown;
         }
 
         if let Some(ret) = value_node.as_return_node() {
