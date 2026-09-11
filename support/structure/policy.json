@@ -250,26 +250,6 @@
       "mod.rs",
       "ownership.rs",
       "unknown.rs"
-    ],
-    "src/test/simulation": [
-      "build_identity.rs",
-      "consistency.rs",
-      "dependency_refresh.rs",
-      "engine_runner.rs",
-      "exact.rs",
-      "graph.rs",
-      "interleavings.rs",
-      "mod.rs",
-      "observations.rs",
-      "oracle.rs",
-      "oracle_controls.rs",
-      "production_schedules.rs",
-      "project.rs",
-      "regression_seeds.txt",
-      "ruby_gen.rs",
-      "runner.rs",
-      "seeded.rs",
-      "tests.rs"
     ]
   },
   "exceptions": {}

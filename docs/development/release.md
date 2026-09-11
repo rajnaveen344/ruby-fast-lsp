@@ -32,14 +32,14 @@ node editors/scripts/release_checks.js simulation
 `correctness` runs structure-policy checks, package-version consistency, workspace
 Rust tests, editor/package tests, and explicit inference/precision reports.
 `simulation` runs Ruby oracle controls, release-mode simulations, both explicit
-synthetic scale checks, and the deterministic performance budgets. Set
+synthetic campaigns through the `simulation` binary, and the deterministic performance budgets. Set
 `SIM_REAL_CORPUS_ROOT` only for a deliberately selected read-only corpus; otherwise
 that check remains recorded as not run.
 
 Logs and machine-readable summaries go to `target/release-evidence/` (override
-with `RUBY_FAST_LSP_EVIDENCE_DIR`). The runner rejects failures and unexpected
-skips; the documented scale/corpus deferrals in the ordinary workspace run are
-not silently counted as exercised scenarios.
+with `RUBY_FAST_LSP_EVIDENCE_DIR`). The runner rejects failures, every ignored Rust test, and missing or mismatched
+simulation completion reports. Explicit campaigns are separate from the ordinary
+workspace suite; an unselected real corpus is never counted as passed.
 
 The separate CI fault-detection gate proves that reviewed injected defects fail
 their intended assertions:

@@ -72,17 +72,14 @@ test('ignored counts without individual names cannot hide missing test output', 
   assert.match(result.reason, /ignored.*(names|entries|count)/i);
 });
 
-test('only explicitly deferred scale and corpus checks are allowed and explained', () => {
+test('former scale ignores are rejected after moving campaigns to an executable', () => {
   const name = 'test::simulation::tests::generated_project_large_scale_smoke';
   const result = rustResult([
     `test ${name} ... ignored, release gate: explicitly run the large-scale sampled LSP simulation`,
     'test result: ok. 12 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.20s',
   ].join('\n'), { exact: false });
-  assert.equal(result.passed, true);
-  assert.equal(result.deferred_tests.length, 1);
-  assert.equal(result.deferred_tests[0].name, name);
-  assert.equal(result.deferred_tests[0].gate, 'large-scale-lsp');
-  assert.equal(result.deferred_tests[0].status, 'deferred');
+  assert.equal(result.passed, false);
+  assert.match(result.reason, /unexpected ignored/i);
 });
 
 test('Node positive pass accepted', () => {
@@ -133,4 +130,18 @@ test('Node output missing summary counts is rejected', () => {
   });
   assert.equal(result.passed, false);
   assert.match(result.reason, /missing.*summary/i);
+});
+
+function campaignResult(output, status = 0) {
+  return validateResult({ command: 'cargo', args: ['run', '--bin', 'simulation', '--', 'scale-lsp'], result: { status, signal: null }, output });
+}
+
+test('campaign requires its own completed report', () => {
+  assert.equal(campaignResult('{"simulation_campaign":"scale-lsp","status":"passed"}').passed, true);
+  for (const output of ['', 'Usage: simulation <COMMAND>', '{"simulation_campaign":"scale-engine","status":"passed"}', '{"simulation_campaign":"scale-lsp","status":"failed"}']) {
+    assert.equal(campaignResult(output).passed, false, output);
+  }
+  const report = '{"simulation_campaign":"scale-lsp","status":"passed"}';
+  assert.equal(campaignResult(report + '\n' + report).passed, false);
+  assert.equal(campaignResult(report, 101).passed, false);
 });

@@ -8,20 +8,11 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '../..');
 
-// These are separate checks, never quarantined regressions. All other ignored
-// tests (including doctests) fail the gate until they are made executable.
-const deferredRustChecks = new Map([
-  ['test::simulation::tests::generated_project_large_scale_smoke', { gate: 'large-scale-lsp', reason: 'release gate: explicitly run the large-scale sampled LSP simulation' }],
-  ['test::simulation::tests::generated_project_large_scale_engine_checks_all_edges', { gate: 'large-scale-engine', reason: 'release gate: explicitly run the large-scale all-edge engine simulation' }],
-  ['test::simulation::tests::generated_project_real_corpus_smoke', { gate: 'real-corpus', reason: 'requires an explicitly selected read-only real corpus via SIM_REAL_CORPUS_ROOT' }],
-]);
-
 // A successful process is insufficient evidence: an exact Rust filter can
 // silently select no tests. Keep this validator independent of process and I/O.
 function validateResult({ command, args, result, output }) {
   let tests;
   let reason;
-  let deferred_tests;
   if (command === 'cargo' && args[0] === 'test') {
     const summaries = output.match(/^test result:[^\r\n]*/gm) || [];
     const counts = summaries.map(line => line.match(/^test result: (ok|FAILED)\.\s+(\d+) passed;\s+(\d+) failed;\s+(\d+) ignored;\s+(\d+) measured;\s+(\d+) filtered out;/));
@@ -46,17 +37,19 @@ function validateResult({ command, args, result, output }) {
         if (entries.length !== tests.ignored || new Set(entries.map(entry => entry[1])).size !== entries.length) {
           reason = 'Ignored test entries must match the summary count and have unique names. Fix: retain complete test output.';
         } else if (entries.length) {
-          deferred_tests = [];
-          for (const [, name, explanation] of entries) {
-            const deferred = deferredRustChecks.get(name);
-            if (!deferred || explanation !== deferred.reason) {
-              reason = `Unexpected ignored test or reason: ${name}. Fix: run the regression normally; only the documented separate scale/corpus gates may be deferred.`;
-              break;
-            }
-            deferred_tests.push({ name, ...deferred, status: 'deferred' });
-          }
+          reason = `Unexpected ignored tests: ${entries.map(entry => entry[1]).join(', ')}. Run regressions normally; use the simulation executable for scale/corpus campaigns.`;
         }
       }
+    }
+  } else if (command === 'cargo' && args[0] === 'run' && args[args.indexOf('--bin') + 1] === 'simulation') {
+    const campaign = args[args.indexOf('--') + 1];
+    const reports = output.split(/\r?\n/).filter(line => line.startsWith('{')).map(line => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(report => report && 'simulation_campaign' in report);
+    if (reports.length !== 1 || reports[0].simulation_campaign !== campaign || reports[0].status !== 'passed') {
+      reason = 'Missing or invalid simulation campaign completion report. Help output or the wrong campaign cannot pass acceptance.';
+    } else {
+      tests = { framework: 'simulation', campaign, completed: true };
     }
   } else if (command === 'node' && args.includes('--test')) {
     tests = { framework: 'node' };
@@ -86,7 +79,7 @@ function validateResult({ command, args, result, output }) {
   if (result.status !== 0 || result.error || result.signal) {
     reason = `Process did not complete successfully: exit ${result.status}, signal ${result.signal || 'none'}${result.error ? `, ${result.error.message}` : ''}.`;
   }
-  return { passed: !reason, reason, tests, deferred_tests };
+  return { passed: !reason, reason, tests };
 }
 
 function main() {
@@ -109,13 +102,13 @@ function main() {
     ['real-project-precision', 'cargo', ['test', '--locked', '-p', 'ruby-fast-lsp', '--lib', 'test::real_project_precision::report_real_project_precision', '--', '--exact', '--nocapture']],
   ] : [
     ['ruby-oracle-controls', 'python3', ['support/simulation/run_oracle_controls.py']],
-    ['simulation', 'cargo', ['test', '--locked', '--release', '-p', 'ruby-fast-lsp', '--lib', 'test::simulation', '--', '--nocapture']],
-    ['large-scale-lsp', 'cargo', ['test', '--locked', '--release', '-p', 'ruby-fast-lsp', '--lib', 'test::simulation::tests::generated_project_large_scale_smoke', '--', '--ignored', '--exact', '--nocapture']],
-    ['large-scale-engine', 'cargo', ['test', '--locked', '--release', '-p', 'ruby-fast-lsp', '--lib', 'test::simulation::tests::generated_project_large_scale_engine_checks_all_edges', '--', '--ignored', '--exact', '--nocapture']],
+    ['simulation', 'cargo', ['test', '--locked', '--release', '-p', 'ruby-fast-lsp', '--lib', 'simulation::', '--', '--nocapture']],
+    ['large-scale-lsp', 'cargo', ['run', '--locked', '--release', '--features', 'simulation', '--bin', 'simulation', '--', 'scale-lsp']],
+    ['large-scale-engine', 'cargo', ['run', '--locked', '--release', '--features', 'simulation', '--bin', 'simulation', '--', 'scale-engine']],
     ['performance', 'cargo', ['run', '--locked', '--release', '--bin', 'profiler', '--', '--benchmark-iterations', '100', '--check-budgets']],
   ];
   if (mode === 'simulation' && process.env.SIM_REAL_CORPUS_ROOT) {
-    commands.push(['real-corpus', 'cargo', ['test', '--locked', '--release', '-p', 'ruby-fast-lsp', '--lib', 'test::simulation::tests::generated_project_real_corpus_smoke', '--', '--ignored', '--exact', '--nocapture']]);
+    commands.push(['real-corpus', 'cargo', ['run', '--locked', '--release', '--features', 'simulation', '--bin', 'simulation', '--', 'corpus', '--root', process.env.SIM_REAL_CORPUS_ROOT]]);
   }
   let failed = false;
   for (const [name, command, args] of commands) {
@@ -134,7 +127,7 @@ function main() {
     }
     const validation = validateResult({ command, args, result, output: fs.readFileSync(logfile, 'utf8') });
     const passed = validation.passed;
-    summary.checks.push({ name, command: [command, ...args], status: passed ? 'passed' : 'failed', exit_code: result.status, signal: result.signal, error: result.error?.message, validation_error: validation.reason, tests: validation.tests, deferred_tests: validation.deferred_tests, elapsed_ms: Date.now() - started, log: path.basename(logfile) });
+    summary.checks.push({ name, command: [command, ...args], status: passed ? 'passed' : 'failed', exit_code: result.status, signal: result.signal, error: result.error?.message, validation_error: validation.reason, tests: validation.tests, elapsed_ms: Date.now() - started, log: path.basename(logfile) });
     fs.writeFileSync(path.join(evidence, `${mode}.json`), JSON.stringify(summary, null, 2) + '\n');
     if (!passed) { failed = true; break; }
   }

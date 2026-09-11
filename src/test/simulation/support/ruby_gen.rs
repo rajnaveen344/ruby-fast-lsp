@@ -89,7 +89,7 @@ pub enum OracleSupport {
     KnownGap(&'static str),
 }
 
-pub(super) const UNPROVEN_BLOCK_RECEIVER_GAP: &str =
+pub(crate) const UNPROVEN_BLOCK_RECEIVER_GAP: &str =
     "implicit receiver calls inside blocks require a proven execution contract";
 
 impl OracleSupport {

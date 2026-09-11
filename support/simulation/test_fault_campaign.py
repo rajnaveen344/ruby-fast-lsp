@@ -22,8 +22,8 @@ ACTUAL_DEFINITION_FAILURE = r"""    Finished `test` profile [unoptimized + debug
      Running unittests src/lib.rs (/neutral/target/debug/deps/ruby_fast_lsp-96c034002f0d757e)
 
 running 1 test
-test test::simulation::exact::exact_method_results_and_rename_edits_survive_edit_recovery ...""" " " r"""
-thread 'test::simulation::exact::exact_method_results_and_rename_edits_survive_edit_recovery' (45340884) panicked at src/test/simulation/exact.rs:21:5:
+test test::simulation::contracts::exact::exact_method_results_and_rename_edits_survive_edit_recovery ...""" " " r"""
+thread 'test::simulation::contracts::exact::exact_method_results_and_rename_edits_survive_edit_recovery' (45340884) panicked at src/test/simulation/contracts/exact.rs:21:5:
 assertion `left == right` failed: exact observation mismatch: method definition
   left: []
  right: ["{\"uri\":\"file:///vessel.rb\",\"range\":{\"start\":{\"line\":1,\"character\":2},\"end\":{\"line\":1,\"character\":18}}}"]
@@ -33,7 +33,7 @@ FAILED
 failures:
 
 failures:
-    test::simulation::exact::exact_method_results_and_rename_edits_survive_edit_recovery
+    test::simulation::contracts::exact::exact_method_results_and_rename_edits_survive_edit_recovery
 
 test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1696 filtered out; finished in 0.22s
 

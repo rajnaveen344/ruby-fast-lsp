@@ -38,8 +38,8 @@ SCOPES = (
     "rust-toolchain.toml", "extensions", "editors", "support", "tests", "AGENTS.md",
 )
 EXCLUDED_PARTS = {".git", ".codex", "pages", "node_modules", "target", ".cache", "__pycache__"}
-EXACT_TEST = "test::simulation::exact::exact_method_results_and_rename_edits_survive_edit_recovery"
-IDENTITY_TEST = "test::simulation::build_identity::tests::seed_artifact_retains_the_exact_compiled_build_identity"
+EXACT_TEST = "test::simulation::contracts::exact::exact_method_results_and_rename_edits_survive_edit_recovery"
+IDENTITY_TEST = "simulation::build_identity::tests::seed_artifact_retains_the_exact_compiled_build_identity"
 DEFINITION_ANCHOR = """    let locations = query.find_definitions_at_position(&uri, position, &content)?;
     Some(GotoDefinitionResponse::Array(locations))"""
 RENAME_ANCHOR = "    let result = rename::handle_rename(lang_server, params).await;"
@@ -160,7 +160,7 @@ FAULTS = (
                 server.publish_diagnostics(uri, diagnostics).await;""",
         """                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
                 let _ = (uri, diagnostics); // Isolated fault: omit consumer publication.""",
-        "test::simulation::observations::late_definition_open_clears_published_unresolved_constant",
+        "test::simulation::contracts::observations::late_definition_open_clears_published_unresolved_constant",
         "opening a late definition must publish the resolved consumer diagnostics",
     ),
     Fault(
@@ -380,7 +380,7 @@ class Campaign:
             "mode_policy": "Inventory identity uses Git's regular-file/executable/symlink modes (100644, 100755, 120000); local owner/group write bits and symlink permissions are not portable source identity.",
             "limits_seconds": {"process": process_seconds, "campaign": campaign_seconds},
             "limitations": [
-                "Eight selected production faults are a reviewed inventory, not exhaustive feature or code coverage.",
+                "Selected production faults are a reviewed inventory, not exhaustive feature or code coverage.",
                 "In-process tests do not prove editor transport delivery, supported platform behavior, or beta usage.",
                 "Shared CARGO_TARGET_DIR requires exclusive caller coordination; the process check is only an admission check.",
                 "Rust build.json source identity excludes editor/runtime assets; the retained overlay manifest separately identifies those inputs.",
@@ -619,7 +619,7 @@ class Campaign:
             for name in {IDENTITY_TEST, *(fault.test for fault in FAULTS)}:
                 if listed.count(name) != 1:
                     raise RuntimeError(f"expected exactly one discovered test named {name}")
-            self.require_pass(self.test_command("test::simulation", exact=False), "baseline/simulation")
+            self.require_pass(self.test_command("simulation::", exact=False), "baseline/simulation")
             self.report["baseline_build_identities"] = self.retain_identities("baseline/simulation")
             for index, name in enumerate(sorted({fault.test for fault in FAULTS})):
                 self.require_pass(self.test_command(name, exact=True), f"baseline/target-{index}", exact=name)

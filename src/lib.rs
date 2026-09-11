@@ -15,6 +15,9 @@ pub mod persistent_cache;
 pub mod query;
 pub mod runtime;
 pub mod server;
+#[cfg(any(test, feature = "simulation"))]
+#[path = "test/simulation/support/mod.rs"]
+pub mod simulation;
 pub mod single_flight;
 #[cfg(test)]
 pub mod test;

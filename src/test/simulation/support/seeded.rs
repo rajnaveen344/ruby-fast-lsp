@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SIM_GENERATOR_VERSION: u32 = 40;
+const SIM_GENERATOR_VERSION: u32 = 41;
 const FIXED_SEEDS: &[u64] = &[1, 42, 20_260_524];
 const REGRESSION_SEEDS_TEXT: &str = include_str!("regression_seeds.txt");
 pub const LARGE_SCALE_RUBY_FILES: usize = 2_284;
@@ -94,7 +94,7 @@ pub fn write_seed_artifact(script: &SeededScript) -> PathBuf {
     fs::write(
         root.join("README.txt"),
         format!(
-            "Replay all seeded lifecycle and incremental/fresh checks:\nSIM_SEED={} cargo test test::simulation -- --nocapture\n\nBuild identity:\nbuild.json retains the compiled Rust workspace source manifest, Cargo build metadata, and SHA-256 of the running test executable. Compare these identities before interpreting a replay from another build. The source scope excludes external runtime assets and editor/platform evidence.\n\nPersist regression:\nAdd `{}` to src/test/simulation/regression_seeds.txt after reducing the failure.\n",
+            "Replay all seeded lifecycle and incremental/fresh checks:\nSIM_SEED={} cargo test test::simulation -- --nocapture\n\nBuild identity:\nbuild.json retains the compiled Rust workspace source manifest, Cargo build metadata, and SHA-256 of the running test executable. Compare these identities before interpreting a replay from another build. The source scope excludes external runtime assets and editor/platform evidence.\n\nPersist regression:\nAdd `{}` to src/test/simulation/support/regression_seeds.txt after reducing the failure.\n",
             script.seed,
             script.seed
         ),
@@ -148,6 +148,7 @@ pub fn seeded_script(seed: u64) -> SeededScript {
     let initial_open_files = initial_open_files(&project);
     let mut open_files = initial_open_files.clone();
     let mut steps = Vec::new();
+    let mut edited_project = project.clone();
 
     steps.push(SeededStep::CheckDefinitions);
     steps.push(SeededStep::CheckReferences);
@@ -156,6 +157,18 @@ pub fn seeded_script(seed: u64) -> SeededScript {
 
     for index in 0..project.edits.len() {
         steps.push(random_check_step(&mut rng));
+        // These are editor edits: every changed file must receive didChange.
+        // A closed file retains its last delivered facts until it is reopened.
+        let before = edited_project.render();
+        for op in &project.edits[index].ops {
+            edited_project.apply_op(op);
+        }
+        for (file, content) in edited_project.render().files {
+            if before.files.get(&file) != Some(&content) && !open_files.contains(&file) {
+                open_files.push(file.clone());
+                steps.push(SeededStep::OpenFile { file });
+            }
+        }
         steps.push(SeededStep::ApplyEdit { index });
         steps.push(random_check_step(&mut rng));
 
@@ -489,7 +502,7 @@ pub fn seeded_project(seed: u64) -> SyntheticProject {
 
 /// Internal module sends must follow each concrete host, while reflection stays
 /// on the named module. An unrelated definition is deliberate competing noise.
-pub(super) fn add_module_dispatch_scenario(project: &mut SyntheticProject, root: &str) {
+pub(crate) fn add_module_dispatch_scenario(project: &mut SyntheticProject, root: &str) {
     let defaults = format!("{root}::Defaults");
     let feature = format!("{root}::Feature");
     let first = format!("{root}::FirstHost");
@@ -845,7 +858,10 @@ fn regression_seeds() -> Vec<u64> {
                 None
             } else {
                 Some(parse_seed(
-                    &format!("src/test/simulation/regression_seeds.txt:{}", line_idx + 1),
+                    &format!(
+                        "src/test/simulation/support/regression_seeds.txt:{}",
+                        line_idx + 1
+                    ),
                     seed,
                 ))
             }

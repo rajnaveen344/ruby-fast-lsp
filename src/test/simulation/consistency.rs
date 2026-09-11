@@ -5,6 +5,48 @@ use super::{
     seeded_script, simulation_seeds_from_env, write_seed_artifact, EditStep, SimulationRunner,
 };
 
+#[test]
+fn generated_editor_edits_have_open_targets() {
+    use super::SeededStep;
+    use std::collections::BTreeSet;
+
+    for seed in [42, 12589402372273313618] {
+        let script = seeded_script(seed);
+        let mut model = script.project;
+        let mut open = script
+            .initial_open_files
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        for step in script.steps {
+            match step {
+                SeededStep::OpenFile { file } => {
+                    open.insert(file);
+                }
+                SeededStep::CloseFile { file } => {
+                    open.remove(&file);
+                }
+                SeededStep::ApplyEdit { index } => {
+                    let before = model.render();
+                    for op in model.edits[index].ops.clone() {
+                        model.apply_op(&op);
+                    }
+                    for (file, content) in model.render().files {
+                        if before.files.get(&file) != Some(&content) {
+                            assert!(open.contains(&file),
+                                "seed {seed}: editor edit {index} must open {file} before expecting changed semantics");
+                        }
+                    }
+                }
+                SeededStep::CheckDefinitions
+                | SeededStep::CheckReferences
+                | SeededStep::CheckHover
+                | SeededStep::CheckTypes
+                | SeededStep::CloseReopen { .. } => {}
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn fresh_equivalence_initial_generated_project() {
     let runner = SimulationRunner::start(phase1_project()).await;

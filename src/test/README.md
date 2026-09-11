@@ -45,10 +45,11 @@ cargo test --locked --workspace
 cargo test --locked --test check_cli
 ```
 
-The workspace suite includes ordinary simulator cases. Explicit scale and
-real-corpus tests have documented ignores and run through the
-[release gate](../../docs/development/release.md). Do not add an ignore to conceal
-a failing or flaky test, or count an unexecuted case as passed.
+The workspace suite includes ordinary simulator cases with no ignored tests.
+Explicit scale and read-only corpus campaigns use the opt-in `simulation` binary;
+see the [commands and boundaries](../../docs/development/simulation.md#explicit-campaigns).
+The release gate runs both synthetic campaigns and records an unselected corpus
+as not run. Do not add an ignore to conceal a failing or flaky regression.
 
 ## What FakeEditor observes
 

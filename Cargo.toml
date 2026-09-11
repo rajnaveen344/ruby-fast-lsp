@@ -50,6 +50,11 @@ path = "src/bin/bench_references.rs"
 name = "extension"
 path = "src/bin/extension.rs"
 
+[[bin]]
+name = "simulation"
+path = "src/bin/simulation.rs"
+required-features = ["simulation"]
+
 # Separate test executable: verifies the real CLI process, alongside internal CLI tests.
 [[test]]
 name = "check_cli"
@@ -136,6 +141,7 @@ sha2 = "0.10.9"
 
 [features]
 default = ["jemalloc"]
+simulation = []
 memory-profiling = []
 jemalloc = ["dep:tikv-jemallocator"]
 

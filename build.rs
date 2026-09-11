@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[path = "src/test/simulation/build_identity.rs"]
-mod simulation_build_identity;
+#[path = "src/test/simulation/support/build_identity/hashing.rs"]
+mod simulation_hashing;
 
 const GEM_FACT_PRODUCER_TREES: &[&str] = &[
     "crates/ruby-analysis/src",
@@ -65,7 +65,7 @@ fn main() {
 }
 
 fn write_simulation_build_identity(manifest_dir: &Path, out_dir: &Path) {
-    use simulation_build_identity::hashing::{manifest_sha256, reader_sha256};
+    use simulation_hashing::{manifest_sha256, reader_sha256};
 
     let mut inputs = Vec::new();
     for relative in [

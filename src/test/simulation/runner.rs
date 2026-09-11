@@ -1722,6 +1722,54 @@ mod consistency_controls {
     use crate::test::simulation::graph::CallShape;
 
     #[tokio::test]
+    async fn closed_source_changes_remain_invisible_until_reopened() {
+        let mut project = SyntheticProject::new("delivery_control");
+        project
+            .class("Provider", |class| {
+                class.method("value").returns("String");
+                class.constant("TOKEN", "1");
+            })
+            .class("Reader", |class| {
+                class
+                    .method("read")
+                    .calls("Provider#value", CallShape::ConstructorSend)
+                    .ref_const("Provider::TOKEN");
+            });
+        let mut runner = SimulationRunner::start(project).await;
+        let delivered = runner.indexed_contents["provider.rb"].clone();
+        runner.check_initial().await;
+        runner.close_file("provider.rb").await;
+        // This models an external source edit with no watcher notification.
+        // Complete oracle checks must still observe the delivered definitions.
+        let delete = EditStep::new("change undelivered source", |edit| {
+            edit.delete_method("Provider#value")
+                .delete_constant("Provider::TOKEN");
+        });
+        runner.apply_step_with_fresh_equivalence(&delete).await;
+        assert_eq!(runner.indexed_contents["provider.rb"], delivered);
+        runner.assert_call_resolves_to("Provider#value").await;
+        assert!(runner.render.map.constants.contains_key("Provider::TOKEN"));
+
+        runner.open_file("provider.rb").await;
+        runner.check_fresh_equivalence().await;
+        assert_ne!(runner.indexed_contents["provider.rb"], delivered);
+        assert!(!runner
+            .render
+            .map
+            .defs
+            .contains_key(&MethodTarget::parse("Provider#value")));
+        assert!(!runner.render.map.constants.contains_key("Provider::TOKEN"));
+
+        let restore = EditStep::new("restore delivered source", |edit| {
+            edit.restore_method("Provider#value")
+                .restore_constant("Provider::TOKEN");
+        });
+        runner.apply_step_with_fresh_equivalence(&restore).await;
+        assert_eq!(runner.indexed_contents["provider.rb"], delivered);
+        runner.assert_call_resolves_to("Provider#value").await;
+    }
+
+    #[tokio::test]
     async fn definition_precedence_guard_rejects_filename_order() {
         let mut project = SyntheticProject::new("definition_priority_control");
         crate::test::simulation::seeded::add_module_dispatch_scenario(&mut project, "Dispatch");

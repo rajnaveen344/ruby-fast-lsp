@@ -8,19 +8,23 @@ and observations; a passing run is not a percentage of Ruby feature coverage.
 
 ## Architecture
 
-All source paths below are under [src/test/simulation/](../../src/test/simulation/).
+Source lives under [src/test/simulation/](../../src/test/simulation/). The
+`support/` module is shared by ordinary regression tests and an opt-in
+`simulation` executable; it is absent from normal server builds. The executable
+runs explicit acceptance campaigns directly, without invoking Cargo tests or
+compiling test-only server fields.
 
 | Part | Responsibility |
 | --- | --- |
-| `project.rs`, `graph.rs` | Independent model of namespaces, methods, edges, and edits |
-| `ruby_gen.rs` | Ruby source plus exact token/source mapping for modeled sites |
-| `oracle.rs` | Expected behavior from the model, independent of production results |
-| `runner.rs`, `engine_runner.rs` | Exercise the LSP-handler harness or analysis engine and compare observations |
-| `seeded.rs`, `regression_seeds.txt` | Bounded generated scripts and retained failure seeds |
+| `support/project.rs`, `support/graph.rs` | Independent model of namespaces, methods, edges, and edits |
+| `support/ruby_gen.rs` | Ruby source plus exact token/source mapping for modeled sites |
+| `support/oracle.rs` | Expected behavior from the model, independent of production results |
+| `runner.rs`, `support/engine_runner.rs` | Exercise the LSP-handler harness or analysis engine and compare observations |
+| `support/seeded.rs`, `support/regression_seeds.txt` | Bounded generated scripts and retained failure seeds |
 | `consistency.rs` | Compare incremental results with a fresh analysis |
-| `exact.rs`, `observations.rs` | Complete response/lifecycle contracts and observer controls |
+| `contracts/exact.rs`, `contracts/observations.rs` | Complete response/lifecycle contracts and observer controls |
 | `production_schedules.rs`, `dependency_refresh.rs`, `interleavings.rs` | Deterministically pause real work around edits, commits, and publication |
-| `build_identity.rs` | Source/build/executable identity retained with replay evidence |
+| `support/build_identity/` | Source/build/executable identity retained with replay evidence |
 
 The model and production engine must remain independent. Fresh/incremental
 agreement tests consistency, but both engines can agree on the same wrong answer.
@@ -59,7 +63,7 @@ A new handwritten regression does not automatically teach the generator that fea
    observer. Add an isolated production mutation to the fault inventory when
    claiming that the simulator detects that class of defect.
 
-Use `exact.rs` as a complete-output example and `seeded.rs`'s module-dispatch
+Use `contracts/exact.rs` as a complete-output example and `support/seeded.rs`'s module-dispatch
 scenario as an example of expanding generated semantics. The
 [test guide](../../src/test/README.md) explains the production-handler versus
 transport boundary.
@@ -67,20 +71,44 @@ transport boundary.
 ## Run and replay
 
 ```sh
-cargo test --locked --lib test::simulation
-SIM_SEED=42 cargo test --locked --lib test::simulation -- --nocapture
-SIM_RANDOM_SEEDS=10 cargo test --locked --release --lib test::simulation
+cargo test --locked --lib simulation::
+SIM_SEED=42 cargo test --locked --lib simulation:: -- --nocapture
+SIM_RANDOM_SEEDS=10 cargo test --locked --release --lib simulation::
 ```
 
 Failing seeded runs retain generated source, script, generator identity, replay
 instructions, and source/build metadata. Use the reported artifact directory and
 command; compare source and executable identities before interpreting a replay
 from a different build. Reduce the example and retain its seed in
-`regression_seeds.txt`. A seed alone is not an identity-independent reproduction.
+`support/regression_seeds.txt`. A seed alone is not an identity-independent reproduction.
 
 Controlled schedules preserve the chosen ordering. Keep production clock,
 resource admission, and publication boundaries in the replay; arbitrary sleeps
 cannot reproduce a race reliably.
+
+## Explicit campaigns
+
+Scale and real-corpus acceptance are commands, not ignored tests:
+
+```sh
+cargo run --locked --release --features simulation --bin simulation -- scale-lsp
+cargo run --locked --release --features simulation --bin simulation -- scale-engine
+cargo run --locked --release --features simulation --bin simulation -- corpus --root /absolute/path/to/ruby-project
+```
+
+`scale-lsp` samples navigation, references, hover, and hints on a generated large
+project. `scale-engine` checks all modeled edges through the analysis engine.
+`corpus` requires an explicit read-only directory and retains the existing size,
+semantic-sample, and time-budget assertions. Missing or unsuitable inputs fail;
+they never become a passing test. Each successful command emits one completion
+report identifying its campaign. Release validation rejects missing, duplicate,
+or mismatched reports and rejects every ignored Rust test.
+
+Generated editor edits open all changed files before sending changes. The oracle
+tracks only delivered revisions. Separate lifecycle contracts verify that an
+unnotified edit to a closed file stays invisible until reopen, then check removal
+and restoration. Retained failing seeds and generated delivery controls keep
+that distinction executable.
 
 ## Broader gates and limits
 

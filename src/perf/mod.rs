@@ -1,7 +1,7 @@
 //! Performance testing & benchmarking support.
 //!
 //! - `corpus` — fixture loader for OSS/synthetic Ruby projects used by
-//!   `bench_references` and `#[ignore]` perf tests.
+//!   standalone profiling and reference benchmarks.
 //! - `file_open` — library-private document instrumentation for the standalone
 //!   file-open profiler; the binary owns its allocator and CLI entry point.
 

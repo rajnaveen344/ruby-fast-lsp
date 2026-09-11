@@ -1,70 +1,14 @@
 //! Scoped source and executable identity retained with simulation replays.
 //!
 //! `build.rs` imports only `hashing`; runtime metadata and the source manifest
-//! are compiled solely into the test executable, never the shipped server.
+//! are compiled only for tests and the opt-in simulation executable.
 
-pub(crate) mod hashing {
-    use sha2::{Digest, Sha256};
-    use std::io::{self, Read};
+mod hashing;
 
-    pub(crate) fn reader_sha256(mut reader: impl Read) -> io::Result<String> {
-        let mut hasher = Sha256::new();
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            let length = match reader.read(&mut buffer) {
-                Ok(length) => length,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error),
-            };
-            if length == 0 {
-                return Ok(format!("{:x}", hasher.finalize()));
-            }
-            hasher.update(&buffer[..length]);
-        }
-    }
-
-    pub(crate) fn fields_sha256<'a>(fields: impl IntoIterator<Item = &'a [u8]>) -> String {
-        let mut hasher = Sha256::new();
-        for field in fields {
-            hasher.update(
-                u64::try_from(field.len())
-                    .expect(
-                        "INVARIANT VIOLATED: a simulation identity field exceeded u64. This is a bug because one build cannot hold such an input. Fix: reject oversized identity inputs before hashing.",
-                    )
-                    .to_le_bytes(),
-            );
-            hasher.update(field);
-        }
-        format!("{:x}", hasher.finalize())
-    }
-
-    pub(crate) fn manifest_sha256<'a>(
-        records: impl IntoIterator<Item = (&'a str, &'a str)>,
-    ) -> String {
-        let mut records = records.into_iter().collect::<Vec<_>>();
-        records.sort_unstable_by_key(|(path, _)| *path);
-        assert!(
-            records.windows(2).all(|pair| pair[0].0 != pair[1].0),
-            "INVARIANT VIOLATED: a simulation source manifest contains duplicate paths. This is a bug because each path must name exactly one source identity. Fix: deduplicate the collected workspace paths before hashing."
-        );
-        fields_sha256(
-            [b"ruby-fast-lsp-simulation-source-manifest-v1".as_slice()]
-                .into_iter()
-                .chain(
-                    records
-                        .iter()
-                        .flat_map(|(path, sha256)| [path.as_bytes(), sha256.as_bytes()]),
-                ),
-        )
-    }
-}
-
-#[cfg(test)]
 pub(super) use runtime::write_build_identity;
 
-#[cfg(test)]
 mod runtime {
-    use super::hashing::reader_sha256;
+    use super::hashing::{manifest_sha256, reader_sha256};
     use serde::Serialize;
     use std::fs::{self, File};
     use std::path::Path;
@@ -97,6 +41,8 @@ mod runtime {
     }
 
     pub(super) fn build_identity() -> BuildIdentity {
+        assert_eq!(manifest_sha256(compiled::SIMULATION_SOURCE_FILES.iter().copied()), compiled::SIMULATION_SOURCE_SHA256,
+            "INVARIANT VIOLATED: compiled simulation manifest and digest disagree. This is a bug because replay evidence must identify the compiled sources. Fix: generate both from the same source inventory.");
         static TEST_EXECUTABLE_SHA256: OnceLock<String> = OnceLock::new();
         let test_executable_sha256 = TEST_EXECUTABLE_SHA256.get_or_init(|| {
             let executable = std::env::current_exe().expect(
@@ -274,7 +220,7 @@ mod tests {
     fn compiled_manifest_covers_workspace_sources_and_excludes_outside_scope() {
         let files = compiled::SIMULATION_SOURCE_FILES;
         for required in [
-            "src/test/simulation/seeded.rs",
+            "src/test/simulation/support/seeded.rs",
             "src/server.rs",
             "crates/ruby-analysis/src/indexer/fact_collector/nodes/calls/nil_call.rs",
             "Cargo.lock",
