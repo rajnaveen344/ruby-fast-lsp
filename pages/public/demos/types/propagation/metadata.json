@@ -1,0 +1,31 @@
+{
+  "source_commit": "d0acefcc98648d7d7e99a0a358f6fc17a4e4d767",
+  "binary_sha256": "fbcdb019023c5fbc0f4536cbffde2d5e93d890e3cf5ae043e67fd4990e02e5cd",
+  "extension_version": "0.3.0",
+  "capture_date": "2026-09-11",
+  "title": "Collection type propagation",
+  "capture_method": "Actual VS Code window frames from native editor interactions; cropped and retimed. Not continuous video or a latency measurement.",
+  "fixture": "../../../../demos/fixtures/types/propagation.rb",
+  "settings": "../../../../demos/vscode-settings.json",
+  "fixture_sha256": "67a0e347a53f5d47e07b694b9749531bd13a60c0508a81d21e0a44933640e496",
+  "ai_features_disabled": true,
+  "dimensions": [
+    1080,
+    440
+  ],
+  "frame_durations_seconds": [
+    2,
+    2.5,
+    2.5
+  ],
+  "steps": [
+    "Inspect the Array<Symbol> constant and Array<String> result.",
+    "Show Hover on the block parameter: Symbol.",
+    "Show Hover on names: Array<String>."
+  ],
+  "notes": [
+    "Recorded with the current source in a temporary extension development host.",
+    "Read pauses are edited; typing frames use 60\u2013100 ms ordinary gaps where typing is shown.",
+    "Keyboard commands and mouse interactions use the real editor. Pointer motion between sampled frames is not continuous."
+  ]
+}

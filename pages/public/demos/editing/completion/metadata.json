@@ -1,0 +1,36 @@
+{
+  "status": "reviewable pacing sample; not a competitor comparison or release acceptance record",
+  "capture_date": "2026-09-11",
+  "capture_method": "Actual VS Code window frames during native typing, a mouse selection, and Show Hover; playback timing edited. Not continuous full-motion video or a latency benchmark.",
+  "extension_version": "0.3.0",
+  "source_commit": null,
+  "fixture": "../../../../demos/fixtures/notebook.rb",
+  "settings": "../../../../demos/vscode-settings.json",
+  "fixture_sha256": "1fe444ba2ab832c531d6287820fdb1d011dbdc5cf7b7922c22d2f8dba7475ad6",
+  "ai_features_disabled": true,
+  "ordinary_keystroke_gaps_ms": [
+    80,
+    70,
+    60,
+    90,
+    70,
+    80,
+    100,
+    60,
+    80
+  ],
+  "pause_after_receiver_dot_ms": 280,
+  "initial_read_pause_ms": 1200,
+  "completion_read_pause_ms": 1700,
+  "after_accept_pause_ms": 800,
+  "hover_read_pause_ms": 2200,
+  "dimensions": [
+    820,
+    420
+  ],
+  "notes": [
+    "Only built-in AI features and suggestions in the demo workspace were disabled; personal workspace settings were not edited.",
+    "The final result is Notebook#title returning String.",
+    "Independent final profiles should contain only the extensions required by the scenario."
+  ]
+}

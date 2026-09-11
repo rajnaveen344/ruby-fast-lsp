@@ -1,0 +1,39 @@
+{
+  "source_commit": "d0acefcc98648d7d7e99a0a358f6fc17a4e4d767",
+  "binary_sha256": "fbcdb019023c5fbc0f4536cbffde2d5e93d890e3cf5ae043e67fd4990e02e5cd",
+  "extension_version": "0.3.0",
+  "capture_date": "2026-09-11",
+  "title": "Semantic rename",
+  "capture_method": "Actual VS Code window frames from native editor interactions; cropped and retimed. Not continuous video or a latency measurement.",
+  "fixture": "../../../../demos/fixtures/navigate/rename.rb",
+  "settings": "../../../../demos/vscode-settings.json",
+  "fixture_sha256": "a9a1ee49fbfb9212d2c43c15ea5389e7f58cd7fac90294e0a2fac87eb2bf6ea5",
+  "ai_features_disabled": true,
+  "dimensions": [
+    1080,
+    440
+  ],
+  "frame_durations_seconds": [
+    1.5,
+    0.8,
+    0.08,
+    0.07,
+    0.09,
+    0.06,
+    0.1,
+    0.08,
+    0.07,
+    1,
+    3
+  ],
+  "steps": [
+    "Place the cursor on the heading call and press F2.",
+    "Type bearing in the rename input.",
+    "Accept the rename; both the declaration and use change."
+  ],
+  "notes": [
+    "Recorded with the current source in a temporary extension development host.",
+    "Read pauses are edited; typing frames use 60\u2013100 ms ordinary gaps where typing is shown.",
+    "Keyboard commands and mouse interactions use the real editor. Pointer motion between sampled frames is not continuous."
+  ]
+}

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ruby Fast LSP — See the types flowing through your Ruby</title>
+    <meta
+      name="description"
+      content="Ruby Fast LSP documentation: inferred types, structural Hash shapes, navigation, diagnostics, and tools for Ruby and ERB projects."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23e0455e' d='M6 3h12l4 5-10 13L2 8z'/%3E%3Cpath fill='%23ffffff' opacity='.25' d='M6 3h12l4 5H2z'/%3E%3C/svg%3E"
+    />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("rfl-theme");
+          if (t !== "light" && t !== "dark") {
+            t = window.matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+          }
+          document.documentElement.dataset.theme = t;
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

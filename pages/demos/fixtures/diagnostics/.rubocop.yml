@@ -1,0 +1,5 @@
+AllCops:
+  NewCops: disable
+  DisabledByDefault: true
+Layout/SpaceInsideParens:
+  Enabled: true

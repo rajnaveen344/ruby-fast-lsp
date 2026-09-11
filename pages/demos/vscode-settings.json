@@ -1,0 +1,31 @@
+{
+  "chat.disableAIFeatures": true,
+  "editor.inlineSuggest.enabled": false,
+  "github.copilot.enable": {
+    "*": false,
+    "ruby": false,
+    "erb": false,
+    "plaintext": false,
+    "markdown": false,
+    "scminput": false
+  },
+  "github.copilot.nextEditSuggestions.enabled": false,
+  "editor.suggest.showWords": false,
+  "editor.suggest.showSnippets": false,
+  "editor.suggest.preview": false,
+  "editor.quickSuggestions": {
+    "other": "on",
+    "comments": "off",
+    "strings": "off"
+  },
+  "editor.suggestOnTriggerCharacters": true,
+  "editor.fontSize": 20,
+  "editor.minimap.enabled": false,
+  "editor.inlayHints.enabled": "on",
+  "editor.stickyScroll.enabled": false,
+  "breadcrumbs.enabled": false,
+  "workbench.startupEditor": "none",
+  "workbench.tips.enabled": false,
+  "window.title": "Ruby Fast LSP Demo — ${activeEditorShort}",
+  "git.openRepositoryInParentFolders": "never"
+}

@@ -1,0 +1,30 @@
+{
+  "source_commit": "d0acefcc98648d7d7e99a0a358f6fc17a4e4d767",
+  "binary_sha256": "fbcdb019023c5fbc0f4536cbffde2d5e93d890e3cf5ae043e67fd4990e02e5cd",
+  "extension_version": "0.3.0",
+  "capture_date": "2026-09-11",
+  "title": "Safe formatting",
+  "capture_method": "Actual VS Code window frames from native editor interactions; cropped and retimed. Not continuous video or a latency measurement.",
+  "fixture": "../../../../demos/fixtures/diagnostics/fixes.rb",
+  "settings": "../../../../demos/vscode-settings.json",
+  "fixture_sha256": "05956b0bc33e2042136a3a25eb961f6fc9d15d0d6a27502bed312a054a96aad7",
+  "ai_features_disabled": true,
+  "dimensions": [
+    1080,
+    440
+  ],
+  "frame_durations_seconds": [
+    2,
+    3
+  ],
+  "steps": [
+    "Select RuboCop with Ruby Fast LSP: Select Formatter before recording.",
+    "Run Format Document on puts( label ).",
+    "Inspect the safe whitespace correction to puts(label)."
+  ],
+  "notes": [
+    "Recorded with the current source in a temporary extension development host.",
+    "Read pauses are edited; typing frames use 60\u2013100 ms ordinary gaps where typing is shown.",
+    "Keyboard commands and mouse interactions use the real editor. Pointer motion between sampled frames is not continuous."
+  ]
+}

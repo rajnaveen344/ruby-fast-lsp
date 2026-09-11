@@ -1,0 +1,32 @@
+{
+  "source_commit": "d0acefcc98648d7d7e99a0a358f6fc17a4e4d767",
+  "binary_sha256": "fbcdb019023c5fbc0f4536cbffde2d5e93d890e3cf5ae043e67fd4990e02e5cd",
+  "extension_version": "0.3.0",
+  "capture_date": "2026-09-11",
+  "title": "Independent project types",
+  "capture_method": "Actual VS Code window frames from native editor interactions; cropped and retimed. Not continuous video or a latency measurement.",
+  "fixture": "../../../../demos/fixtures/projects/letters/identity.rb",
+  "settings": "../../../../demos/vscode-settings.json",
+  "fixture_sha256": "2d34ebe91062d49377918dc974121d4fde3291ee1fbc98fb78bd947c3dd9dd3e",
+  "ai_features_disabled": true,
+  "dimensions": [
+    1080,
+    440
+  ],
+  "frame_durations_seconds": [
+    3,
+    1.2,
+    3
+  ],
+  "steps": [
+    "Show Hover on VALUE in the letters project: String.",
+    "Open numbers/identity.rb from the other project.",
+    "Show Hover on VALUE: Integer."
+  ],
+  "additional_fixture": "../../../../demos/fixtures/projects/numbers/identity.rb",
+  "notes": [
+    "Recorded with the current source in a temporary extension development host.",
+    "Read pauses are edited; typing frames use 60\u2013100 ms ordinary gaps where typing is shown.",
+    "Keyboard commands and mouse interactions use the real editor. Pointer motion between sampled frames is not continuous."
+  ]
+}

@@ -1,0 +1,3 @@
+VALUE = 42
+
+puts VALUE
