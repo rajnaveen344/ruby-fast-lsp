@@ -13,7 +13,7 @@ platform/runtime combinations. Source package versions must agree with the root
 Cargo version; `editors/check_package_versions.js` defines the checked manifests,
 optional npm dependencies, and VSIX lockfile fields. Keep Cargo.lock aligned too.
 
-The server/npm version uses SemVer. The tagged release workflow computes the
+The server/npm version uses SemVer. The release workflow computes the
 published VS Code/Open VSX CalVer separately. Do not manually apply that published
 CalVer to source manifests before their consistency check.
 
@@ -98,3 +98,12 @@ validated combinations for that artifact. Installation failures, incorrect
 edits, stale results, isolation leaks, crashes, and unsupported concrete type
 claims require triage before broader promotion. Intended Unknown outcomes are
 separate from defects and missing validation.
+
+For a weekly extension release, dispatch the `Release` workflow on the intended
+commit with `publish_extensions=true`. It runs the same validation, native
+builds, and VSIX verification, then publishes Marketplace and Open VSX using
+`ISO_YEAR.ISO_WEEK.PATCH`. Source manifests retain their aligned server version;
+this dispatch does not publish npm packages or create a server-version tag.
+The default manual dispatch (`publish_extensions=false`) validates and packages
+without publishing. Review both registry jobs and verify the resulting versions
+before reporting the extension as published.

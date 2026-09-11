@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      publish_extensions:
+        description: "Publish the validated weekly extension to Marketplace and Open VSX"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -205,7 +210,7 @@ jobs:
         id: prepare
         run: |
           # VSIX uses CalVer: YYYY.WW.PATCH (e.g., 2026.14.0)
-          YEAR=$(date -u +%Y)
+          YEAR=$(date -u +%G)
           WEEK=$(date -u +%-V)
           # Check if this year.week already exists, increment patch if so
           EXISTING=$(npx --yes @vscode/vsce@3.9.2 show naveenraj.ruby-fast-lsp --json 2>/dev/null | node -e "
@@ -301,7 +306,9 @@ jobs:
         run: editors/scripts/stress_bundled_extensions.sh "artifacts/ruby-fast-lsp-${{ needs.package-vsix.outputs.vsix-version }}.vsix"
 
   publish-marketplace:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_extensions)
     needs: [package-vsix, verify-vsix]
     runs-on: ubuntu-latest
 
@@ -333,7 +340,9 @@ jobs:
           VSIX_VERSION: ${{ needs.package-vsix.outputs.vsix-version }}
 
   publish-open-vsx:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_extensions)
     needs: [package-vsix, verify-vsix]
     runs-on: ubuntu-latest
 
