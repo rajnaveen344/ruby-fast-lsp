@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { REPOSITORY } from "../content/catalog.js";
 
 export default function Demo({ id, title }) {
   const [paused, setPaused] = useState(
@@ -41,7 +42,13 @@ export default function Demo({ id, title }) {
             </button>
           )}
           <a href={root + "demo.gif"}>GIF ↗</a>
-          <a href={root + "README.md"}>Demo notes ↗</a>
+          <a
+            href={
+              REPOSITORY + "/blob/main/pages/public/demos/" + id + "/README.md"
+            }
+          >
+            Demo notes ↗
+          </a>
         </span>
       </figcaption>
     </figure>

@@ -33,6 +33,16 @@ The static output is `dist/`. The deployment base is `/ruby-fast-lsp/`; override
 it with `npm run build -- --base=/` for a domain root. Hash routes keep direct
 feature links usable on static hosting. Building does not publish the site.
 
+## Publish
+
+The guide is hosted on [GitHub Pages](https://rajnaveen344.github.io/ruby-fast-lsp/).
+The [documentation workflow](../.github/workflows/pages.yml) builds changes to
+`pages/` on pull requests and publishes them when pushed to `main`. It can also
+be run manually from the Actions tab. Only `pages/dist/` is deployed.
+
+Repository Settings → Pages must use **GitHub Actions** as the publishing
+source. Keep the `/ruby-fast-lsp/` build base aligned with the repository URL.
+
 ## Maintain
 
 - [src/content](src/content) owns grouped feature content and navigation.
