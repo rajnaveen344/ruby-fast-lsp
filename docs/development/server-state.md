@@ -91,6 +91,10 @@ isolated directories without a mutable test-only override. Normal LSP startup
 defers extension discovery until initialization; embedded constructors preserve
 their documented setup behavior.
 
+Completion holds the document's semantic lock while reading its source, local
+scopes, and engine results. Accepted open/change operations finish replacing
+that state before completion returns a candidate list for the editor to reuse.
+
 Server clones share document locks, registries, publishers, schedulers, resource
 admission, and cache handles. They do not copy project databases. Delayed require
 refresh still holds the document, project-ownership, dependency-index, and engine

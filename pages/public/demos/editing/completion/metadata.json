@@ -1,36 +1,43 @@
 {
-  "status": "reviewable pacing sample; not a competitor comparison or release acceptance record",
+  "title": "Local variables and method completion",
   "capture_date": "2026-09-11",
-  "capture_method": "Actual VS Code window frames during native typing, a mouse selection, and Show Hover; playback timing edited. Not continuous full-motion video or a latency benchmark.",
+  "capture_method": "Actual VS Code window frames from native typing, mouse selections, and Show Hover; cropped and retimed. Not continuous video or a latency measurement.",
   "extension_version": "0.3.0",
-  "source_commit": null,
-  "fixture": "../../../../demos/fixtures/notebook.rb",
-  "settings": "../../../../demos/vscode-settings.json",
-  "fixture_sha256": "1fe444ba2ab832c531d6287820fdb1d011dbdc5cf7b7922c22d2f8dba7475ad6",
-  "ai_features_disabled": true,
-  "ordinary_keystroke_gaps_ms": [
-    80,
-    70,
-    60,
-    90,
-    70,
-    80,
-    100,
-    60,
-    80
+  "source_commit": "ec70c39ab9a1c9b8c7fec9fc308df60317575d0b",
+  "source_dirty": true,
+  "source_changes": [
+    "src/capabilities/completion/mod.rs: wait for the active document edit before reading completion candidates"
   ],
-  "pause_after_receiver_dot_ms": 280,
-  "initial_read_pause_ms": 1200,
-  "completion_read_pause_ms": 1700,
-  "after_accept_pause_ms": 800,
-  "hover_read_pause_ms": 2200,
-  "dimensions": [
-    820,
-    420
+  "production_diff_sha256": "2fc0c052d3b0ea37467c2b3fb02ad0992f7b7422378dea22e2e20b7b373d1525",
+  "binary_sha256": "36889efdbc678ba4cb5f5d45fa0e6305287d3b6b2eb9fee08e08bcd9c932dfab",
+  "fixture": "../../../../demos/fixtures/notebook.rb",
+  "fixture_sha256": "1fe444ba2ab832c531d6287820fdb1d011dbdc5cf7b7922c22d2f8dba7475ad6",
+  "settings": "../../../../demos/vscode-settings.json",
+  "settings_overrides": {
+    "workbench.colorTheme": "Dark Modern",
+    "files.autoSave": "off",
+    "editor.formatOnType": false,
+    "editor.accessibilitySupport": "on"
+  },
+  "ai_features_disabled": true,
+  "dimensions": [820, 420],
+  "duration_seconds": 9,
+  "ordinary_keystroke_gaps_ms": [80, 80, 80],
+  "frame_durations_seconds": [
+    1.2, 0.08, 0.08, 1.8, 0.64, 0.28, 0.08, 1.8, 0.8, 2.2, 0.04
+  ],
+  "steps": [
+    "Read the Notebook class and its local variable.",
+    "Type not to see the automatic local-variable suggestion.",
+    "Select notebook with the mouse.",
+    "Type .ti to see the title method and its String result.",
+    "Select title with the mouse.",
+    "Use Show Hover on the completed call to inspect String."
   ],
   "notes": [
-    "Only built-in AI features and suggestions in the demo workspace were disabled; personal workspace settings were not edited.",
-    "The final result is Notebook#title returning String.",
-    "Independent final profiles should contain only the extensions required by the scenario."
+    "Recorded in an extension development host using the identified source build and working-tree change.",
+    "The initial source omits the final method call from the fixture; the clip adds it.",
+    "Word suggestions and snippets are disabled so the list shows language-server results.",
+    "Read pauses and ordinary typing gaps are edited. Pointer motion between captured frames is not continuous."
   ]
 }

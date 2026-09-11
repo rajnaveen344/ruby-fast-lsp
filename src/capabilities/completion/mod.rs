@@ -31,6 +31,12 @@ pub async fn find_completion_at_position(
     position: Position,
     context: Option<CompletionContext>,
 ) -> CompletionResponse {
+    // An accepted edit replaces the source and local scopes in separate steps.
+    // Wait for that transaction before returning a list the editor may reuse
+    // while the user continues typing the same identifier.
+    let semantic_lock = server.document_semantic_lock(&uri);
+    let _semantic_guard = semantic_lock.lock().await;
+
     // Use unified document access to ensure we get the latest in-memory content
     let document = match server.get_doc(&uri) {
         Some(doc) => doc,

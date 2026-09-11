@@ -1,7 +1,7 @@
 {
   "name": "@ruby-fast/lsp",
   "version": "0.3.0",
-  "description": "A fast Language Server Protocol implementation for Ruby",
+  "description": "Ruby navigation, completion, diagnostics, and type inference for Ruby and ERB projects",
   "license": "MIT",
   "repository": {
     "type": "git",

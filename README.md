@@ -7,7 +7,7 @@ Navigate your project, complete method calls, rename symbols, and get feedback
 as you edit. Explore type inference and Hash shapes for more detail about
 the values in your code.
 
-![Ruby method completion in VS Code](pages/public/demos/editing/completion/demo.gif)
+![Ruby variable and method completion in VS Code](pages/public/demos/editing/completion/demo.gif)
 
 [Explore the feature guide](https://rajnaveen344.github.io/ruby-fast-lsp/) ·
 [View this demo and its example](pages/public/demos/editing/completion/README.md)

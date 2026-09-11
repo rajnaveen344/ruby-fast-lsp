@@ -1,7 +1,7 @@
 {
   "name": "ruby-fast-lsp",
   "displayName": "Ruby Fast LSP",
-  "description": "High-performance Ruby Language Server with fast code navigation, syntax highlighting, and intelligent code insights for Ruby developers",
+  "description": "Ruby navigation, completion, diagnostics, and type inference for Ruby and ERB projects",
   "version": "0.3.0",
   "publisher": "naveenraj",
   "icon": "icon.png",

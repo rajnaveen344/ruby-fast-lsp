@@ -36,6 +36,6 @@ See the [sitemap and shot list](../planning/feature-docs.md) and
 [positioning notes](../planning/positioning.md).
 
 The first edition contains 14 clips. Every asset folder contains its exact
-actions and any capture-specific limitation. Most clips use the current source
-in an extension development host; the previously approved completion sample
-records its installed version and explicitly marks its source commit as unknown.
+actions and any capture-specific limitation. Capture metadata identifies the
+source build and records any working-tree changes used in the extension
+development host.

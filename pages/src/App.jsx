@@ -65,7 +65,10 @@ function Overview() {
         <h2 id="features-title">Everyday editor tools</h2>
         <FeatureGroups section="editor" />
       </section>
-      <Demo id="editing/completion" title="Complete a method call" />
+      <Demo
+        id="editing/completion"
+        title="Complete variables and method calls"
+      />
       <section className="overview-section" aria-labelledby="stories-title">
         <p className="eyebrow">TYPE INFERENCE</p>
         <h2 id="stories-title">A closer look at your values</h2>
