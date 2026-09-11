@@ -1,5 +1,5 @@
 // Test modules
-mod check_cli;
+mod cli;
 pub mod harness;
 mod inference_scorecard;
 pub mod integration;

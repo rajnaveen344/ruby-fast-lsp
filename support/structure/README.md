@@ -19,8 +19,8 @@ baseline. A same-size replacement still introduces a new entry and fails. When
 removing entries, trim the baseline; once a folder meets the ordinary limit,
 remove its allowance. Do not expand the baseline to admit new work.
 
-Bundled RBS/stub snapshots, vendored dependency code, and historical measurement
-data have explicit ownership exclusions. The enclosing maintained folder still
+Bundled RBS/stub snapshots and vendored dependency code have explicit ownership
+exclusions. Maintained support folders follow the ordinary limit. The enclosing maintained folder still
 counts each data directory once. These are data-layout decisions, not approved
 exceptions for source code.
 

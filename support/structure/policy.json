@@ -14,8 +14,7 @@
   "excluded": {
     "crates/rbs-parser/rbs_types": "Bundled upstream signature data; preserve library and version paths.",
     "editors/vscode/vsix/stubs": "Bundled Ruby version snapshots; preserve package navigation paths.",
-    "extensions/mruby-sdk/vendor": "Vendored upstream dependency code retains its source layout.",
-    "support/performance": "Historical measurement artifacts, not maintained source modules."
+    "extensions/mruby-sdk/vendor": "Vendored upstream dependency code retains its source layout."
   },
   "legacy": {
     "editors/scripts": [

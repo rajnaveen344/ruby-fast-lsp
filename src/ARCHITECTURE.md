@@ -465,7 +465,7 @@ project registry, indexing services, runtime products, extension services,
 diagnostic publisher, watched-file changes, and namespace-tree cache. Focused
 modules under `src/server/` keep state with its operations; `server.rs` retains
 common construction and the LSP protocol facade. See
-[server state ownership](../docs/server-state-ownership.md) for field counts,
+[server state ownership](../docs/development/server-state.md) for field counts,
 responsibilities, shared lifetimes, and test boundaries.
 
 #### Design Decisions:
@@ -640,9 +640,9 @@ Callable facts follow ordinary register/replace/delete ownership, including
 RBS parse failure and watcher deletion. Fixed bounds are eight overloads, eight
 type variables, four block parameters, 16 binding iterations, eight template
 levels, and eight union variants. See
-`docs/higher-order-call-inference.md` for the concise product contract.
+`docs/features/higher-order-call-inference.md` for the concise product contract.
 Callable-body behavior and its additional fixed bounds are documented in
-`docs/callable-body-inference.md`.
+`docs/features/callable-body-inference.md`.
 
 The reviewed acceptance contract is
 `support/type_inference/scorecard.toml`. Historical accepted and rejected

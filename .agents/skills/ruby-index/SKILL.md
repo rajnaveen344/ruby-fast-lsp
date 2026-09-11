@@ -1,44 +1,29 @@
 ---
 name: ruby-index
-description: "Debug the Ruby Index tree view, namespace graph, exported JSON, mixin resolution, included_by, and MRO."
+description: "Debug Ruby Index tree projections, namespace identity, include/prepend/extend edges, MRO, and navigation ordering."
 ---
 
-# Ruby Index
+# Ruby Index and namespace debugging
 
-Use this skill for the VS Code Ruby Index tree, namespace hierarchy, mixins, `included_by`, MRO, or graph export debugging.
+1. Reproduce with a small generic namespace graph. Distinguish a wrong fact or
+   lookup result from an incorrect tree projection or editor display.
+2. Inspect the engine-owned query/debug output and source facts. Read
+   `crates/ruby-analysis/src/engine/README.md` for graph/query ownership and
+   `docs/features/definition-navigation.md` for selection and ordering.
+3. Check class/module/singleton kind identity, lexical constant resolution,
+   include/prepend/extend direction, ancestor order, and unresolved dependency
+   edges. Incomplete lookup evidence must not produce a missing-method claim.
+4. Check `src/query/namespace_tree.rs` and `src/capabilities/namespace_tree.rs`
+   for protocol projection, then `editors/vscode/vsix/ruby_index_tree.js` for
+   editor display. External-type filtering is a projection policy; it must not
+   delete reusable semantic facts.
+5. For navigation, preserve token identity and the effective implementations
+   selected by the engine. Do not impose lexical filepath order as a semantic
+   preference or add shadowed ancestors to an exact known-receiver result.
+6. Add a focused engine or integration regression at the broken boundary.
+   Use FakeEditor for edit/root/provenance lifecycle issues and editor tests only
+   when server output is correct but rendering is wrong.
 
-## Current Product Goal
-
-`goal.md` treats hierarchical Ruby Projects as **done (M7)**. Indexing
-performance is maintenance: defend RSS/fingerprints/readiness, do not open
-endless wall-clock micro-opt campaigns.
-
-## Current Ownership
-
-- UI/tree behavior lives in the VS Code extension under `vsix/`.
-- LSP request handling and command response shaping live in `src/`.
-- Namespace tree, graph, mixin, and hierarchy truth live in `ruby-analysis::engine`.
-- Query adapters should use `ruby_analysis::engine::AnalysisQuery`.
-
-## Common Debug Path
-
-1. Reproduce with a tiny Ruby fixture.
-2. Use the Ruby Index export/debug command if the issue is visible in the tree.
-3. Inspect engine facts through `AnalysisQuery::debug_*` or focused tests.
-4. Verify whether the issue is fact collection, engine resolution, adapter shaping, or extension display.
-
-## Things To Check
-
-- Class/module `GraphNodeKind` is explicit and not defaulted.
-- Include/prepend/extend edges point in the expected direction.
-- Singleton class edges are distinct from instance namespace edges.
-- External types filtering is applied only at projection/display time.
-- MRO order matches Ruby semantics and engine resolution policy.
-- Ambiguous method definitions should resolve references but suppress unresolved-method diagnostics.
-
-## Test Guidance
-
-- Use `check()` for direct navigation/reference behavior.
-- Use `FakeEditor` when tree/debug results depend on lifecycle indexing.
-- Add engine-level tests when the bug is in graph or hierarchy semantics.
-- Add extension tests only when server output is correct and display logic is wrong.
+No completed goal file or historical performance rating defines current tree
+behavior. Follow the source and tests, and update the nearest guide when the
+public projection contract changes.

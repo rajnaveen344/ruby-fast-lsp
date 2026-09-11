@@ -1,177 +1,91 @@
-# Tests Directory
+# Testing Ruby Fast LSP
 
-This directory contains test files used for testing the Ruby Fast LSP server.
+Choose the smallest harness that exercises the behavior's real owner. Most
+feature tests are internal Rust tests in `integration/`; Cargo runs them with
+`cargo test --locked --lib`. Shared fixtures live in `fixtures/`.
 
-## Structure
+| Need | Use |
+| --- | --- |
+| One indexed Ruby snippet | `harness::check()` with inline tags |
+| Static cross-file behavior | `harness::check_multi_file()` |
+| Open/edit/save/close, reindexing, or delayed work | `harness::FakeEditor` |
+| Pure graph, inference, parser, or contract behavior | A focused unit test beside the owning code |
+| Public LSP initialization / extension integration | [crates/lsp-test-harness](../../crates/lsp-test-harness/) |
+| Real CLI exit code and serialized output | [cli/process.rs](cli/process.rs) |
+| Generated semantic/edit scenarios and controlled schedules | [simulation guide](../../docs/development/simulation.md) |
 
-- **fixtures/**: Contains Ruby files used for testing the parser, indexer, and LSP features
-- **integration_test.rs**: Integration tests for verifying fixture availability and basic integration points
+## CLI test organization
 
-## Fixtures
+`cli/mod.rs` contains internal `CheckSession` and CLI/LSP parity tests.
+`cli/process.rs` launches the real `ruby-fast-lsp` executable and checks its exit
+code, stdout/stderr, and JSON report. Cargo.toml registers it as the separate
+`check_cli` integration-test target, supplying `CARGO_BIN_EXE_ruby-fast-lsp` even
+though its source lives here. It is not compiled as a module of the library test
+suite. Both targets run in `cargo test --workspace`; no root `tests/` folder is
+needed.
 
-The `fixtures/` directory contains various Ruby files that test different aspects of the Ruby language and LSP functionality. These fixtures include:
+## Add a regression
 
-- Class and module definitions
-- Method declarations and calls
-- Variable declarations (local, instance, class)
-- Control flow structures
-- Error handling
-- Blocks and procs
+Reduce a reported defect to neutral Ruby names and minimal source. First write
+and run an integration test that fails on the intended semantic assertion. Fix
+the owning production layer, then run that test and related coverage. Add a
+recovery observation when an edit or delayed result caused the defect. Do not
+copy application code, private paths, or business examples into the repository.
 
-Additionally, there are LSP-specific fixtures for testing:
+Inline fixtures use `$0` for the cursor and tags such as `<def>`, `<ref>`,
+`<type>`, `<err>`, `<warn>`, `<hint label="...">`, and
+`<complete items="..." excludes="...">`. The
+[harness module](harness/mod.rs), [tag parser](harness/fixture.rs), and
+[assertion runner](harness/check.rs) define the actual syntax. Prefer an existing
+nearby feature test over inventing a new fixture convention.
 
-- Definition/goto functionality
-- References
-- Symbols
-- Completion
-- Hover information
-
-## Integration Tests
-
-The integration tests focus on ensuring that all LSP related functionalities(goto, references, completion, etc.) is working as expected for all fixtures.
-
-## Running Tests
-
-Run all tests with:
-
-```bash
-cargo test
+```sh
+cargo test --locked --lib test_name
+cargo test --locked --workspace
+cargo test --locked --test check_cli
 ```
 
-Run only the integration tests with:
+The workspace suite includes ordinary simulator cases. Explicit scale and
+real-corpus tests have documented ignores and run through the
+[release gate](../../docs/development/release.md). Do not add an ignore to conceal
+a failing or flaky test, or count an unexecuted case as passed.
 
-```bash
-cargo test --test integration_test
-```
+## What FakeEditor observes
 
-## Adding Tests
-
-When adding new tests:
-
-1. Add new Ruby fixtures to the `fixtures/` directory
-2. Add test functions to the appropriate test file
-
-### Adding LSP Integration Tests
-
-For future LSP-specific integration tests:
-
-1. Focus on testing the integration between our Ruby indexing/parsing and the LSP protocol
-2. Avoid duplicating tests already covered by the `tower_lsp` crate
-3. Use the provided fixtures to test specific LSP features like definition, references, etc.
-
-## Test Harness Helpers
-
-We provide a unified `check()` function in `src/test/harness` that auto-detects what to verify based on inline markers.
-
-### Unified Check Function (Recommended)
-
-Use `check()` for all LSP tests - it determines what to verify from the tags present:
-
-```rust
-use crate::test::harness::check;
-
-// Goto definition: $0 cursor + <def> tags
-check(r#"
-<def>class Foo
-end</def>
-
-Foo$0.new
-"#).await;
-
-// Inlay hints: <hint> tags
-check(r#"x<hint label="String"> = "hello""#).await;
-
-// Diagnostics: <err>/<warn> tags
-check(r#"class <err>end</err>"#).await;
-
-// Code lens: <lens> tags
-check(r#"
-module MyModule <lens title="include">
-end
-
-class MyClass
-  include MyModule
-end
-"#).await;
-
-// References: $0 cursor + <ref> tags
-check(r#"
-class <ref>Foo$0</ref>
-end
-
-<ref>Foo</ref>.new
-"#).await;
-```
-
-### Supported Markers
-
-| Tag                  | Requires `$0` | Purpose                        |
-| -------------------- | ------------- | ------------------------------ |
-| `<def>...</def>`     | Yes           | Expected goto definition range |
-| `<ref>...</ref>`     | Yes           | Expected reference range       |
-| `<type>...</type>`   | Yes           | Expected type at cursor        |
-| `<hint label="...">` | No            | Expected inlay hint            |
-| `<lens title="...">` | No            | Expected code lens             |
-| `<err>...</err>`     | No            | Expected error diagnostic      |
-| `<warn>...</warn>`   | No            | Expected warning diagnostic    |
-
-### The `none` Attribute (Range-Scoped)
-
-Use `none` to assert zero occurrences **within the wrapped range**:
-
-```rust
-// No errors expected in this block
-check(r#"<err none>class Foo; end</err>"#).await;
-
-// No warnings expected in this block
-check(r#"<warn none>def bar; end</warn>"#).await;
-
-// No inlay hints expected in this block
-check(r#"<hint none>FOO = 42</hint>"#).await;
-
-// No code lenses expected in this block
-check(r#"<lens none>module Unused; end</lens>"#).await;
-```
-
-**Important**: The `none` attribute requires a closing tag (e.g., `</err>`). The assertion only applies to the wrapped range, allowing you to have both positive and negative assertions in the same fixture.
-
-### Subprocess behavior and deadline tests
-
-`harness::with_process_clock` runs real child processes and production async
-functions with a manually advanced Tokio clock. Success assertions for command
-arguments, stdin, output, and resource admission therefore do not depend on how
-quickly the OS schedules the fixture. A blocking watchdog prevents Tokio from
-auto-advancing during real I/O and fails a hung test after 30 seconds of wall
-time. This helper is for current-thread Tokio tests and restores the clock and
-releases the watchdog on completion, panic, or cancellation.
-
-Timeout tests wait for a child-written readiness marker, assert that the
-operation is pending just before its deadline, then advance past the timer's
-millisecond tick and assert the timeout result and released resource claim.
-The deliberately hung shell fixtures use `exec sleep` so the process being
-timed out is the sleeper itself. Production deadlines stay unchanged. Do not
-use retries, ignored tests, or elapsed-time assertions to paper over scheduling
-noise. The linter, formatter, and runtime-probe tests cover different public
-contracts; retain those checks even when they share this clock helper.
-
-### Lifecycle and publication observations
-
-`FakeEditor` initializes a real `LspService`; its `client_messages` reader consumes
-the ordinary outbound `ClientSocket`. Document operations and queries call the
-production handlers directly. `diagnostics().await` waits for the submitted
-diagnostics to arrive through `textDocument/publishDiagnostics`, including empty
-clears. The observer never parses, collects facts, replaces sources, or resolves
-the engine to repair an assertion.
+FakeEditor initializes an ordinary `LspService` and consumes its outbound
+`ClientSocket`. Async `diagnostics()` waits for the submitted value to arrive as
+`textDocument/publishDiagnostics`; absent delivery differs from an explicit
+empty clear. The reader acknowledges protocol requests without performing analysis.
 
 `published_diagnostics()` and inline diagnostic tags observe synchronous
-submission, which allows race tests to assert intermediate state before releasing
-paused production work. Submission and delivered notifications are separate
-evidence; a missing publication is not an empty clear. `with_cache_root` supplies
-a fixture cache directory through ordinary server construction.
+submission, useful while a deterministic race gate holds production identity
+locks. Lifecycle/query helpers invoke production handlers directly, so this is
+not full inbound LSP transport or an installed-editor test. The external harness
+and package smoke tests provide separate evidence. Do not merge the external
+harness into root-crate internals: it already depends on the server crate.
 
-Deterministic gates remain at real indexing/commit/publication boundaries, with
-worker progress observations owned by indexing. Ownership and publisher controls
-live in `src/server/tests.rs`; simulation schedules live in `simulation/`.
-The external `crates/lsp-test-harness` remains separate because it depends on the
-root crate. Installed editor, process restart, and full inbound transport behavior
-require their corresponding external or black-box tests.
+Assertion helpers must be read-only. They must not reindex, resolve, refresh, or
+repair the state they are about to check. Require complete target sets/ranges
+where identity matters, including missing, extra, and duplicate output controls.
+
+## Deterministic process and race tests
+
+Use [with_process_clock](harness/process.rs) for subprocess argv, stdin, resource
+admission, and deadline contracts. Keep real child processes and production
+functions. For timeouts, wait for child readiness before advancing the controlled
+clock. An independent wall-clock watchdog guards hangs; it is not the asserted
+product deadline. Do not solve scheduler flakiness by lengthening production timeouts.
+
+Use existing schedule gates to pause collection/commit/publication and perform
+normal editor operations across that boundary. A test-only observer or gate is
+valid when it exercises the production flow; a test-only alternative semantic
+implementation is not.
+
+## Acceptance contracts
+
+[scorecard.toml](../../support/type_inference/scorecard.toml) and
+[real_project_precision.toml](../../support/type_inference/real_project_precision.toml)
+are reviewed inference expectations. Their report tests run in the ordinary
+workspace suite and explicitly in release validation. Fixture size, code coverage,
+and passing counts do not measure how many future user defects the simulator
+will detect. Keep unsupported or unexercised forms visible.

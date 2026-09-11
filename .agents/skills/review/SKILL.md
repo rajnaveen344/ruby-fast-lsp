@@ -1,43 +1,32 @@
 ---
 name: review
-description: "Review Ruby Fast LSP changes for correctness, architecture boundaries, tests, and TigerBeetle-style invariants."
+description: "Review Ruby Fast LSP changes for observable correctness, ownership, regression coverage, and readable APIs."
 ---
 
 # Review
 
-Use this skill for code review, PR review, or pre-merge checks. Findings come first, ordered by severity, with file/line references.
+Read the diff and the affected owner, then apply `AGENTS.md`. Follow local source
+guides instead of relying on past task summaries or test counts.
 
-## Blocking Checks
+Prioritize concrete defects:
 
-- The change preserves the `ruby-analysis` vs `src/` boundary from `AGENTS.md`.
-- Method lookup, MRO, unresolved-method diagnostics, and ambiguity policy are not duplicated outside engine resolution.
-- Reindexing uses `register_file -> replace_facts -> resolve` and does not reintroduce broad inline affected-file fanout on edit.
-- No `debug_assert!`; production invariants use `assert!`, `panic!`, or `expect` with actionable messages.
-- No silent fallback for invalid internal state.
-- No wildcard `_` match arm for an invariant panic/unreachable case when explicit variants are possible.
-- Tests cover new behavior or regression risk.
+- Wrong symbol/type/range, invented proof, stale facts after edits, or unsupported
+  edits to ambiguous/external declarations.
+- Project isolation, source-snapshot, cache-identity, lock, or resource-admission
+  regressions.
+- Duplicated method/MRO/diagnostic policy outside the engine; mutable store leaks
+  or state with unclear ownership.
+- Observers that repair state, subset assertions that hide extra targets, ignored
+  failures, scheduling-sensitive deadlines, or missing recovery coverage.
+- Misleading public behavior, stale source links, unclear module responsibilities,
+  or new source folders that violate the structure policy.
 
-## Architecture Checks
+Check that evidence matches the claim: ordinary tests, generated semantics,
+transport, installed packages, and measured performance establish different
+things. Use `src/test/README.md` and `docs/development/performance.md` to choose
+additional checks only when an unresolved concern warrants them.
 
-- `src/query/*` should adapt LSP/document context to `AnalysisQuery` and map domain ranges to protocol locations.
-- Reusable graph/type/fact logic belongs in `crates/ruby-analysis`.
-- Engine resolution may coordinate inference equation solvers, and inference may consult engine queries. Preserve engine ownership of lookup policy and solved state; keep AST traversal and type derivation rules out of engine.
-- The crate root exposes only the four ownership modules; import domain contracts from their owner and keep store/representation types internal.
-- Public APIs should expose domain views, not arena/store internals.
-- Snippets, trigger routing, and completion item shaping stay in `src/capabilities/completion`.
-
-## Test Checks
-
-- Scenario-driven bug fixes should show a failing test before implementation.
-- Prefer `check()` for single-pass feature tests and `FakeEditor` for lifecycle behavior.
-- Black-box tests belong in `crates/lsp-test-harness` only when they need public LSP startup/package behavior.
-
-## Review Output
-
-Use this structure:
-
-1. Findings, ordered by severity.
-2. Open questions or assumptions.
-3. Brief change summary only if useful.
-
-If no issues are found, state that clearly and mention remaining test gaps or residual risk.
+Report actionable findings by severity, with file/line references, a trigger,
+and the resulting user impact. Separate open questions from established defects.
+If no issues are found, say so and state material untested boundaries without
+inventing findings or claiming exhaustive correctness.

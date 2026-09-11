@@ -1,65 +1,32 @@
 ---
 name: test
-description: "Write, debug, and understand Ruby Fast LSP tests, including check() tags, FakeEditor lifecycle tests, and black-box LSP tests."
+description: "Add or debug Ruby Fast LSP regressions, choose check/FakeEditor/process harnesses, and repair flaky tests."
 ---
 
-# Testing
+# Tests and regressions
 
-Use this skill when adding tests, debugging failures, or choosing the right harness.
+Read `src/test/README.md` for harness boundaries and
+`docs/development/simulation.md` when changing generated coverage.
 
-## Commands
+1. Reduce a concrete bug to generic Ruby source and a complete expected result.
+   Write and run the regression before the production fix; require the intended
+   semantic assertion to fail. Setup or compiler failures do not establish red.
+2. Use `check()` for one pass, `check_multi_file()` for static cross-file cases,
+   and `FakeEditor` for lifecycle transitions. Use the external LSP harness or
+   `src/test/cli/process.rs` only when that public/process boundary matters.
+3. Follow existing inline tag examples in `src/test/harness/mod.rs` and nearby
+   integration tests. Confirm unfamiliar Prism nodes with
+   `cargo run --bin ast -- --loc '<neutral Ruby snippet>'`.
+4. Keep observations read-only. Compare complete identities/ranges where needed;
+   missing publication must not satisfy an empty-output assertion. Add restoration
+   or reopen checks for edit-dependent bugs.
+5. Use `with_process_clock` and real children for subprocess contracts. Wait for
+   child readiness before advancing a timeout clock. Use production schedule gates
+   for races, not sleeps or larger deadlines.
+6. Run the focused green test, related coverage, and the workspace suite for
+   shared semantic/lifecycle changes. Report actual results and any deferrals.
 
-```bash
-cargo test
-cargo test test_name
-cargo test -- --nocapture
-cargo run --bin ast -- '<ruby snippet>'
-cargo run --bin ast -- --loc '<ruby snippet>'
-```
-
-## Harness Choice
-
-- Use `check()` for a single indexing pass with inline tags.
-- Use `check_multi_file()` for cross-file scenarios that do not need edit lifecycle.
-- Use `FakeEditor` for `didOpen`/`didChange`/`didSave`, multi-step editing, completion filtering, snippets, diagnostics lifecycle, and reindexing behavior.
-- Use `crates/lsp-test-harness` only for black-box package/extension tests that must exercise public LSP initialization.
-
-Do not merge `FakeEditor` and `crates/lsp-test-harness`; the external harness depends on the root crate and cannot be used by root crate internals without a cycle.
-
-## Inline Tags
-
-Common tags:
-
-- `<complete items="a,b" excludes="c">`
-- `<hint label="...">`
-- `<def>...</def>`
-- `<ref>...</ref>`
-- `<type>...</type>`
-- `<err>...</err>` and `<err none>...</err>`
-- `<warn>...</warn>`
-- `<lens title="...">`
-- `<th supertypes="A,B" subtypes="C,D">`
-
-Cursor tags use `$0`. LSP positions are 0-indexed; Prism offsets are byte offsets.
-
-## TDD Rule For User Scenarios
-
-When the user provides a concrete Ruby scenario:
-
-1. Write the integration test first.
-2. Run it and confirm it fails for the expected reason.
-3. Implement the smallest fix.
-4. Run the focused test again, then a broader relevant test if risk warrants it.
-
-Report the red and green commands in the final answer.
-
-## Style
-
-- For subprocess argv/stdin/admission checks, use `with_process_clock` from the
-  test harness so OS scheduling cannot consume a production deadline. Keep real
-  child processes and production functions. Timeout tests observe child readiness
-  before explicitly advancing the clock; the independent wall-clock watchdog is
-  only a hang guard. See `src/test/harness/process.rs` and `AGENTS.md`.
-- Prefer `assert!`/`expect` with clear invariant messages over silent defaults.
-- Keep fixtures minimal and focused on the behavior under test.
-- Use `cargo run --bin ast -- '<snippet>'` to verify Prism node names/accessors instead of guessing.
+A handwritten test does not add a generated semantic form. Simulator expansion
+also needs a model, source mapping, independent oracle, observation, edits where
+relevant, and a required coverage bucket. Do not remove a useful contract or add
+an ignore merely because its current synchronization is flaky.

@@ -1,47 +1,28 @@
 ---
 name: performance
-description: "Profile and optimize Ruby Fast LSP latency, indexing, memory, and query hot paths with measurement-first workflow."
+description: "Investigate a concrete Ruby Fast LSP indexing, query-latency, or memory problem with comparable before/after measurements."
 ---
 
-# Performance
+# Performance investigation
 
-Use this skill for slow indexing, high memory use, editor latency, benchmark design, or performance-sensitive architecture decisions.
+Use `docs/development/performance.md` as the single workflow and budget guide.
+Do not start a broad optimization campaign for a refactor or prose change with
+no observed performance impact.
 
-## Ground Rules
+1. Name the symptom and acceptance question. Fix the workload, runtime, compiler
+   profile, resource settings, and cold/warm cache state before collecting samples.
+2. Build the release `profiler` and establish a baseline. Use its phase/query
+   controls; add CPU or allocation profiling only to resolve a concrete unknown.
+3. Change one measured cause. Preserve exact semantic results and all source,
+   ownership, cache-key, and resource-governor contracts.
+4. Alternate equivalent baseline/candidate runs. Compare raw samples, medians,
+   affected p95, memory, and semantic manifests under unchanged ceilings.
+5. Accept or revert, record the decision, and stop once the evidence resolves
+   the question. Keep local logs under `target/performance/` and a concise durable
+   decision record under `support/performance/` only when a maintained contract
+   needs it. Routine run reports belong in build/release artifacts.
 
-- Correctness first. Do not optimize by weakening invariants.
-- Measure before changing code.
-- Keep editor typing latency separate from project-wide background work.
-- Do not reintroduce broad inline affected-file fanout during `didChange`; the May 23 2026 experiment regressed real editing by fanning out to 2186 affected files.
-
-## Likely Hot Areas
-
-- Duplicate parse/fact passes.
-- Full-file work on every edit.
-- Extension hook overhead.
-- Source offset and `TextRange` conversions.
-- Repeated engine graph resolution.
-- Method lookup, MRO, and unresolved-method suggestions.
-
-## Workflow
-
-1. Reproduce with a focused project or fixture.
-2. Capture baseline timing/memory.
-3. Identify the hot path with profiling, not intuition.
-4. Make one scoped change.
-5. Re-run the same measurement and relevant tests.
-
-## Useful Commands
-
-```bash
-cargo test
-cargo build --release
-cargo run --release --bin profile_indexer -- <path>
-cargo run --release --bin profiler -- <path>
-```
-
-Use existing scripts or binaries before adding new tooling. If new benchmarks are needed, keep fixtures deterministic and checked in only when they are small enough to maintain.
-
-## Design Direction
-
-Future edit performance work should prefer semantic export fingerprints plus bounded or visible-file diagnostic refresh. Project-wide refresh should run outside the typing critical path.
+Read relevant accepted/rejected historical reports before repeating a design.
+Old private-corpus timings are context, not a mandate to inspect a private
+workspace or certification of a different build. Report unavailable evidence
+instead of replacing its workload or relaxing its limits.

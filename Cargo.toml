@@ -50,6 +50,11 @@ path = "src/bin/bench_references.rs"
 name = "extension"
 path = "src/bin/extension.rs"
 
+# Separate test executable: verifies the real CLI process, alongside internal CLI tests.
+[[test]]
+name = "check_cli"
+path = "src/test/cli/process.rs"
+
 [dependencies]
 # LSP related dependencies
 tower-lsp = "0.20.0"

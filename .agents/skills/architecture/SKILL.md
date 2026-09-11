@@ -1,87 +1,32 @@
 ---
 name: architecture
-description: "Design Ruby Fast LSP changes using the current ruby-analysis core/engine/indexer/inference boundaries."
+description: "Plan Ruby Fast LSP module, API, and state-ownership changes across the LSP adapter and ruby-analysis layers."
 ---
 
-# Architecture
+# Architecture changes
 
-Use this skill for structural changes, module placement, dependency direction, or questions about where logic belongs.
+Read `AGENTS.md` and the local guide for the affected owner before choosing a
+new abstraction. Start at `src/ARCHITECTURE.md`, `crates/ruby-analysis/README.md`,
+and `docs/development/server-state.md`; follow their source links as needed.
 
-## Source Of Truth
+1. Identify the state owner and its lifetime: buffer, file facts, isolated project
+   engine, process-wide immutable product, or editor projection.
+2. Keep parser/fact production in `indexer`, type derivation in `inference`, and
+   graph/query/diagnostic policy in `engine`. The LSP adapter converts context and
+   responses; it must not introduce a second semantic resolution policy.
+3. Read through `AnalysisQuery`/`TypeQuery`; write through the existing file-fact
+   lifecycle. Expose domain operations, not mutable stores. Engine and inference
+   can cooperate inside the analysis crate while preserving engine state ownership.
+4. Preserve source snapshots, project isolation, lock lifetimes, resource
+   admission, and cache identity when moving state. Avoid global lock consolidation
+   or accessors that merely make every internal field public again.
+5. Group files by semantic responsibility. Follow the ten-entry policy in
+   `support/structure/README.md`; do not grow legacy baselines or merge unrelated
+   code solely to satisfy the count.
+6. Update affected reading guides and run structure/format checks plus tests that
+   exercise the changed boundary. Structural moves alone need no performance
+   campaign; behavior or hot-path changes may need focused measurements.
 
-Read `AGENTS.md` first. It contains the detailed current architecture direction. Treat this skill as a compact checklist, not a replacement.
-
-## Current Boundary
-
-`ruby-fast-lsp` should stay a thin LSP/editor adapter over reusable analysis crates.
-
-| Layer                      | Owns                                                                                                   | Must Not Own                                             |
-| -------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| `ruby-analysis::core`      | FQNs, Ruby names, ranges, source IDs, facts, Ruby types                                                | AST traversal, query policy, LSP/editor protocol         |
-| `ruby-analysis::engine`    | Workspace semantic state, fact ingestion, graph/reference/diagnostic resolution, deterministic queries | `tower_lsp` types, snippets, editor triggers             |
-| `ruby-analysis::indexer`   | Ruby parsing and AST traversal that emits facts/candidates                                             | Global semantic truth, LSP protocol, workspace lifecycle |
-| `ruby-analysis::inference` | Type derivation, local flow tracking, RBS lookup/substitution                                          | LSP protocol, editor UX, persistent workspace ownership  |
-| `src/*`                    | Server lifecycle, document cache, handlers, capabilities, protocol conversion                          | Reusable type/graph algorithms                           |
-| `extensions/*`             | External DSL/library facts and patches                                                                 | Global source of truth                                   |
-
-## Placement Rules
-
-- If code consumes or returns `tower_lsp::lsp_types::*`, `Url`, snippets, trigger characters, editor commands, or diagnostics publishing, keep it in `src/`.
-- If code consumes or returns `TextRange`, FQNs, facts, graph entries, or `RubyType`, put it in `crates/ruby-analysis`.
-- `src/query/*` is an adapter over `ruby-analysis::engine::AnalysisQuery`; it may map cursor/document context to domain queries and map `TextRange` back to LSP `Location`.
-- Method lookup semantics must stay single-sourced in engine resolution. Use `AnalysisQuery::resolve_method_callees*` for navigation and `AnalysisQuery::resolve_method_reference*` for reference/diagnostic policy.
-- Do not reintroduce public store getters or public `HashMap<FullyQualifiedName, Vec<Fact>>` data access.
-- Follow `AGENTS.md`'s source-directory limit: at most 10 immediate files and
-  subfolders for new or reorganized folders. Group by semantic responsibility;
-  cohesive node families without a useful split require a documented local
-  exception. Keep Rust module ownership and visibility aligned with the layout.
-- Run `python3 -B support/structure/check.py`. The entire analysis crate is
-  enforced without legacy allowances; other oversized source folders have an
-  exact temporary baseline. Never expand that baseline to admit new work.
-
-## Library API
-
-The crate root exposes only `core`, `engine`, `indexer`, and `inference`.
-Import `RubyType` from `core`; use `engine::AnalysisQuery` or file-scoped
-`engine::TypeQuery` for reads. Core implementation modules, stores, and interned
-representations stay crate-private. Extension collectors expose fact operations,
-not a mutable store handle. `FactCollector` keeps traversal state private and
-returns `CollectedFile` through `finish()` for production and simulation file
-composition. Keep new state and helpers beside their collector responsibility;
-see `crates/ruby-analysis/src/indexer/fact_collector/README.md` and the library
-guide at `crates/ruby-analysis/README.md`.
-
-Core, engine, and indexer each have a local reading guide. Group internal
-contracts/stores, query families, parser inputs, and visitor callbacks by those
-responsibilities while preserving public domain exports. Query result types
-belong beside their query family; AST node handlers have semantic subfamilies.
-
-`TypeTracker` similarly keeps seven private state owners and uses existing
-Prism nodes without retaining source bytes. Keep branch-cloned flow metadata
-together and its identity allocator outside those clones. Follow
-`crates/ruby-analysis/src/inference/type_tracker/README.md` for traversal,
-expression, flow, return-solving, and observation responsibilities.
-
-Engine resolution coordinates inference's AST-free constant and method-return
-equation solvers. Inference may consult engine queries; engine retains ownership
-of lookup policy, file replacement, and solved state. These are cooperating
-modules in one crate, not a strictly acyclic set of crate dependencies.
-
-## Engine Write Path
-
-Use one write path:
-
-```rust
-let file_id = engine.register_file(input);
-let facts = collect_facts(file_id, &content);
-engine.replace_facts(file_id, facts, ResolveMode::Immediate);
-```
-
-For workspace indexing, defer resolution per file and call `engine.resolve()` once after the batch.
-
-## Review Questions
-
-- Can this logic be used by a non-LSP client? If yes, it probably belongs in `ruby-analysis`.
-- Does this duplicate method/MRO/diagnostic policy already owned by engine resolution?
-- Does the proposed API expose store internals rather than domain views or query primitives?
-- Does this change keep parsing/fact collection separate from semantic graph ownership?
+For collector changes, consult
+`crates/ruby-analysis/src/indexer/fact_collector/README.md`; for flow ownership,
+consult `crates/ruby-analysis/src/inference/type_tracker/README.md`.
