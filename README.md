@@ -3,13 +3,14 @@
 A Ruby language server written in Rust, with type-aware navigation, diagnostics,
 and editor features for Ruby and ERB projects.
 
-**See the types flowing through your Ruby.** Inspect Hash contents, follow
-collection element types, and use inferred values in navigation and diagnostics.
+Navigate your project, complete method calls, rename symbols, and get feedback
+as you edit. Explore type inference and Hash shapes for more detail about
+the values in your code.
 
-![Compact Hash type hints and a formatted shape tooltip in VS Code](pages/public/demos/types/hash-shapes/demo.gif)
+![Ruby method completion in VS Code](pages/public/demos/editing/completion/demo.gif)
 
 [Explore the feature guide](https://rajnaveen344.github.io/ruby-fast-lsp/) ·
-[View this demo and its example](pages/public/demos/types/hash-shapes/README.md)
+[View this demo and its example](pages/public/demos/editing/completion/README.md)
 
 The demo uses generic Ruby code with AI suggestions disabled. Playback pauses
 are edited for readability; they are not latency measurements.

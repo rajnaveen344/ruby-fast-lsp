@@ -6,23 +6,27 @@ without a server-side router. The site is built locally; publication is separate
 
 ## Overview and README
 
-The overview leads with “See the types flowing through your Ruby” and one
-Hash-shape demo. Four static previews introduce propagation, Hash contents,
-type hints, and explained uncertainty. Six feature groups link to the guide.
-The repository README reuses the same Hash-shape GIF and links to the guide.
+The overview leads with “Ruby tools for everyday coding” and introduces
+navigation, completion, hover, diagnostics, and formatting. A completion demo
+shows an everyday editing action. A separate type inference section links to
+inferred values and Hash shapes, followed by project and framework tools.
+The repository README reuses the completion GIF and links to the guide.
+
+Feature copy describes durable user workflows. Keep implementation mechanics
+and individual regression cases in the technical guides and tests.
 
 ## Pages
 
-| Group                    | Routes after `#/`                                                                            | Demos                                |
-| ------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------ |
-| Start                    | `install`                                                                                    | —                                    |
-| Understand types         | `types/hash-shapes`, `types/propagation`, `types/hints`, `types/unknown`, `types/signatures` | First four                           |
-| Navigate                 | `navigate/definition`, `navigate/rename`, `navigate/symbols`                                 | First two                            |
-| Write and edit           | `editing/completion`                                                                         | Completion                           |
-| Diagnose and fix         | `diagnostics/live`, `diagnostics/fixes`                                                      | Live correction; safe formatting     |
-| Projects and runtimes    | `projects/indexing`, `projects/isolation`, `projects/jruby`                                  | All three                            |
-| Frameworks and templates | `frameworks/templates`, `frameworks/tests`                                                   | ERB navigation; focused Minitest run |
-| Reference                | `extensions`, `support`                                                                      | —                                    |
+| Group                    | Routes after `#/`                                                             | Demos                                 |
+| ------------------------ | ----------------------------------------------------------------------------- | ------------------------------------- |
+| Start                    | `install`                                                                     | —                                     |
+| Type inference           | `types/propagation`, `types/hash-shapes`, `types/signatures`, `types/unknown` | Inference, Hash shapes, unknown types |
+| Navigate                 | `navigate/definition`, `navigate/rename`, `navigate/symbols`                  | First two                             |
+| Write and edit           | `editing/completion`, `types/hints`                                           | Completion; hover and hints           |
+| Diagnose and fix         | `diagnostics/live`, `diagnostics/fixes`                                       | Live correction; safe formatting      |
+| Projects and runtimes    | `projects/indexing`, `projects/isolation`, `projects/jruby`                   | All three                             |
+| Frameworks and templates | `frameworks/templates`, `frameworks/tests`                                    | ERB navigation; focused Minitest run  |
+| Reference                | `extensions`, `support`                                                       | —                                     |
 
 Related capabilities share a page when that makes the guide easier to browse:
 references and hierarchies accompany navigation; editor structure accompanies

@@ -5,23 +5,23 @@ content brief, not a completed comparative benchmark. Record exact published
 versions and run identical fixtures before publishing exclusive feature claims
 or a pass/fail comparison table.
 
-## Lead with what developers can see
+## Lead with everyday editor tools
 
-Suggested headline: **See the types flowing through your Ruby.**
+Headline: **Ruby tools for everyday coding.**
 
-Supporting copy: Ruby Fast LSP follows supported assignments, method results,
-collection blocks, and Hash fields to show useful types while you work. Hover,
-completion, navigation, and diagnostics use the same analysis. When evidence
-is incomplete, it explains what remains unknown.
+Introduce navigation, completion, hover, rename, diagnostics, and formatting
+before specialized type features. Describe what a Ruby developer can do in the
+editor. Avoid implementation terminology and explanations of individual fixes.
 
-The overview should show these four stories before the general feature index:
+Give type inference and Hash shapes their own overview section and feature
+pages. These topics add depth after the everyday editor workflow:
 
-| Story | What the demo should prove | Current contract |
-| --- | --- | --- |
-| Follow values through real code | A frozen Symbol collection passes through a constant and a block; the element remains Symbol and a transformation produces String values | [Higher-order calls](../../docs/features/higher-order-call-inference.md) |
-| Understand the contents of a Hash | Compact generic hints, formatted nested shapes on hover, literal-key completion, and a known field's result type | [Hash shapes](../../docs/features/structural-hash-shapes.md) |
-| Read and follow inferred types | Binding name/type/kind, compact clickable inlay types, and navigation to the correct binding even when its value type is unknown | [Contributor contracts](../../AGENTS.md), [navigation](../../docs/features/definition-navigation.md) |
-| Explain uncertainty | An unsupported mutation or escape invalidates the old shape and exposes an Unknown reason rather than retaining misleading field evidence | [Hash proof boundaries](../../docs/features/structural-hash-shapes.md) |
+| Story                             | What the demo should prove                                                                                       | Current contract                                                         |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Infer types from Ruby             | Inspect method results and collection element types without extra annotations                                    | [Higher-order calls](../../docs/features/higher-order-call-inference.md) |
+| Understand the contents of a Hash | Compact generic hints, formatted nested shapes on hover, literal-key completion, and a known field's result type | [Hash shapes](../../docs/features/structural-hash-shapes.md)             |
+| Read and follow inferred types    | Read types on hover or inline, and follow linked types to their declarations                                     | [Usage](../../docs/usage.md)                                             |
+| Understand unknown types          | Read available explanations and provide more context with signatures when needed                                 | [Hash proof boundaries](../../docs/features/structural-hash-shapes.md)   |
 
 Then show secondary strengths: independently indexed Ruby projects, exact
 runtime/dependency selection, and JRuby/Java navigation. Explain their concrete
@@ -81,9 +81,9 @@ change.
 
 ## Homepage order
 
-1. Headline and a real value-flow or Hash-shape recording, with installation nearby.
-2. Four linked feature stories above, each with a focused demo on its own page.
-3. Six-group index for all the familiar editor and project features.
+1. Headline, installation link, and everyday navigation, editing, and diagnostics.
+2. A completion recording demonstrating an ordinary editor workflow.
+3. A separate type inference section, then project and framework features.
 4. A short, sourced “How it compares” section; link detailed reproduction results
    only after the comparison runs exist.
 5. Support limits and contribution links.

@@ -2,110 +2,119 @@ export default [
   {
     id: "types/hash-shapes",
     title: "Hash shapes",
-    summary:
-      "See the fields inside a Hash, while keeping your code readable with compact type hints.",
+    summary: "Explore the keys and value types inside your Hashes.",
     demo: "types/hash-shapes",
     steps: [
-      "Open the example and inspect the compact Hash hint.",
-      "Hover the inlay hint to read the formatted shape.",
-      "Read a known key and inspect the resulting type.",
+      "Create a Hash and inspect its type hint.",
+      "Hover the hint to see its keys and value types.",
+      "Access a key and hover the result to inspect its type.",
     ],
     code: "measurements = { width: 12.5, height: 8.0, depth: 3.25 }\n\nputs measurements[:width]\n\ndepth = measurements[:depth]\nputs depth",
     sections: [
       {
-        title: "Compact outside, detailed inside",
-        body: "Inlay hints show a generic summary such as Hash<Symbol, Float>. Hover preserves the full structural shape, with one field per line and nested indentation. Compatible shape alternatives can share a compact label without changing the underlying inferred union.",
+        title: "See the contents at a glance",
+        body: "A Hash shape describes its known keys and the type of each value. This helps you understand structured data and explore nested values from the editor.",
       },
       {
-        title: "Follow known changes",
-        body: "Supported literal-key writes, aliases, merge operations, and collection blocks update the same shape evidence. Key completion, chained calls, and diagnostics consume that result.",
+        title: "Choose the level of detail",
+        body: "Inline hints show a compact summary such as Hash<Symbol, Float>. Hover for a formatted list of fields, including nested Hashes.",
       },
     ],
     limits:
-      "Shapes describe Hash-backed values with proven fields. Unknown calls, unsupported mutation, and exceeded bounds invalidate evidence. Symbol and String keys remain distinct. Up to 32 fields, eight nested levels, and eight correlated variants are supported.",
+      "Shape information is available when the server can follow the Hash’s contents. Complex transformations or unknown method calls may leave some types unavailable.",
     contract: "docs/features/structural-hash-shapes.md",
     related: ["types/propagation", "types/unknown"],
   },
   {
     id: "types/propagation",
-    title: "Type propagation",
+    title: "Type inference",
     summary:
-      "Follow values through constants, collection blocks, and supported method results.",
+      "Discover types from your Ruby code, including method results and collection elements.",
     demo: "types/propagation",
     steps: [
-      "Declare a frozen collection of symbols.",
-      "Read it inside a map block and inspect the block element.",
-      "Convert the elements to strings and inspect the resulting collection.",
+      "Open Ruby code that assigns a value or calls a method.",
+      "Inspect the inferred type in a hint or hover.",
+      "Follow the value through a collection operation to see the resulting type.",
     ],
     code: "module Vocabulary\n  KEYS = [:title, :author].freeze\nend\n\nnames = Vocabulary::KEYS.map do |key|\n  key.to_s\nend\n\nputs names",
     sections: [
       {
-        title: "Evidence travels with the value",
-        body: "A value constant is not automatically a class object. Known element types flow into supported collection blocks; the block result determines the collection result. Cross-file declarations enter the same analysis.",
+        title: "Understand values without extra annotations",
+        body: "The server uses assignments, constants, and method bodies to infer types. These types help provide completion, hover information, and diagnostics throughout your code.",
       },
       {
-        title: "Beyond map",
-        body: "Core RBS signatures support collect, filter_map, select/filter/reject, each, and each_with_object. Supported lambdas, procs, yield wrappers, and block forwarding use the same bounded inference path.",
+        title: "Work with collections",
+        body: "Inspect the element types of arrays and the values used inside collection blocks. Operations such as map can produce a new collection type based on the block’s result.",
       },
     ],
     limits:
-      "The dependent result remains Unknown when required inputs, overloads, or callable bodies cannot be proven. Arbitrary metaprogramming and all possible yielding methods are not supported.",
+      "Type inference covers supported Ruby expressions and method signatures. Highly dynamic code or missing information can leave a type unknown.",
     contract: "docs/features/higher-order-call-inference.md",
     related: ["types/hash-shapes", "types/signatures"],
   },
   {
     id: "types/hints",
-    title: "Hover and clickable types",
+    title: "Hover and type hints",
     summary:
-      "Read inferred types next to your code and follow a type to its declaration.",
+      "Read information about your code on hover and see types beside variables and methods.",
     demo: "types/hints",
     steps: [
-      "Open the example with inlay hints enabled.",
-      "Inspect the variable and method return hints.",
-      "Follow a linked type in a hint, or Show Hover on the variable for its name, type, and binding kind.",
+      "Hover a method, variable, or constant to inspect it.",
+      "Enable inlay hints to see type information alongside your code.",
+      "Modifier-click a linked type in a hint to open its declaration.",
     ],
     code: 'class Journal\n  def title\n    "Trail notes"\n  end\nend\n\nentry = Journal.new\nentry.title',
     sections: [
       {
-        title: "Hints that fit",
-        body: "Long names are shortened in labels, while tooltips retain full type information. Hash hints keep useful generic key/value types; the formatted structure stays in the tooltip.",
+        title: "Read code in context",
+        body: "Hover shows information about the symbol under your cursor, such as its type or method signature. Variable hovers include the name and kind of variable.",
       },
       {
-        title: "Navigate the type",
-        body: "Resolvable type labels can link to their declaration. In VS Code, use the modifier-click behavior displayed by the editor. Ordinary Go to Definition on a local binding still goes to its assignment.",
+        title: "Keep useful types in view",
+        body: "Inlay hints show variable and return types without adding annotations to your source. Hover a hint for the full type name or more detail about a structured value.",
+      },
+      {
+        title: "Explore a type",
+        body: "Linked type names in hints take you to their declaration. Follow your editor’s modifier-click shortcut to open them.",
       },
     ],
     requirements:
-      "Enable Editor: Inlay Hints in VS Code. Named types need an indexed declaration to provide a navigation target.",
+      "Enable Editor: Inlay Hints in VS Code to display inline types.",
     limits:
-      "An Unknown type cannot supply a concrete type target. Compact labels summarize presentation; they do not remove real union alternatives from analysis.",
+      "Type information depends on the code available to the server. A type name is clickable when its declaration can be found.",
     contract: "docs/usage.md",
     related: ["types/hash-shapes", "navigate/definition"],
   },
   {
     id: "types/unknown",
-    title: "Explained Unknowns",
+    title: "Understanding unknown types",
     summary:
-      "Understand when the server has enough evidence for a type—and when it does not.",
+      "Understand why a type may be unavailable and where to look for more information.",
     demo: "types/unknown",
     steps: [
-      "Inspect a known Hash value.",
-      "Pass the Hash to an unresolved call that may change it.",
-      "Hover a subsequent read and inspect the Unknown result and explanation.",
+      "Find a value whose type is shown as ?.",
+      "Hover it to see the available type information and explanation.",
+      "Check the surrounding code and any relevant method signatures.",
     ],
     code: 'record = { title: "Field guide" }\n\nhand_off(record)\n\ntitle = record[:title]\nputs title',
     intro:
-      "An Unknown result is useful information. It tells you where the analysis stopped proving a type instead of silently treating an earlier guess as current.",
+      "An Unknown type means the server does not have enough information to determine the value’s type. You can still explore the code and use other editor features.",
     limits:
-      "An unresolved call may retain or mutate the Hash. The server invalidates the shape and tracked aliases. Not every uncertain expression has a specific explanation; signatures can supply missing contracts, but cannot prove arbitrary runtime behavior.",
+      "Not every unknown type has a detailed explanation. Some Ruby behavior can only be determined at runtime.",
     contract: "docs/features/structural-hash-shapes.md",
     related: ["types/signatures", "diagnostics/live"],
+    sections: [
+      {
+        title: "Add context when needed",
+        body: "Check that dependencies are available and indexing has completed. YARD annotations and RBS signatures can provide type information for methods the server cannot infer on its own.",
+      },
+    ],
   },
   {
     id: "types/signatures",
     title: "YARD and RBS",
     summary:
-      "Supplement inferred Ruby behavior with explicit contracts from documentation and signature files.",
+      "Describe method parameters and return types with YARD annotations or RBS files.",
     steps: [
       "Add a YARD return or parameter annotation to a method.",
       "For project signatures, place RBS declarations under sig/.",
@@ -114,14 +123,14 @@ export default [
     code: '# @param name [String]\n# @return [String]\ndef greeting(name)\n  "Hello, #{name}"\nend',
     sections: [
       {
-        title: "Project RBS",
-        body: "Project sig/**/*.rbs files supply ordinary signature facts. Ruby implementations take navigation precedence when both exist. Supported RBS records use the same Hash-shape model.",
+        title: "Keep signatures alongside your project",
+        body: "Use YARD comments in Ruby files or place RBS declarations under sig/. The server uses supported signatures to provide type information in hover, completion, and signature help.",
         lang: "rbs",
         code: "class Notebook\n  def title: () -> String\nend",
       },
     ],
     limits:
-      "Signature support is bounded. Incomplete or conflicting evidence can remain Unknown; an annotation is not a guarantee that runtime code obeys it. Signature sources are navigation inputs and are not editable through project rename.",
+      "Not every YARD or RBS form is supported. Keep signatures in sync with the Ruby code they describe.",
     contract: "docs/usage.md",
     related: ["types/propagation", "editing/completion"],
   },

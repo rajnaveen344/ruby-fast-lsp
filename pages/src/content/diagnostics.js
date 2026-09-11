@@ -2,27 +2,26 @@ export default [
   {
     id: "diagnostics/live",
     title: "Live diagnostics",
-    summary:
-      "See supported syntax and semantic problems as you edit, then watch them clear when fixed.",
+    summary: "Find syntax errors and code problems while you work.",
     demo: "diagnostics/live",
     steps: [
-      "Introduce a misspelled method on a receiver with a known type.",
-      "Inspect the underline or Problems panel.",
-      "Correct the method name and verify that the diagnostic clears.",
+      "Open a Ruby file and look for diagnostic underlines.",
+      "Hover an underline or open the Problems panel to read the message.",
+      "Edit the code and review the updated results.",
     ],
     code: 'class Notebook\n  def title\n    "Field guide"\n  end\nend\n\nNotebook.new.titel',
     sections: [
       {
-        title: "Current source, current results",
-        body: "Open buffers are authoritative. Syntax and semantic diagnostics refresh after edits. Cold indexing keeps facts for project files while publishing diagnostics only for open documents.",
+        title: "Feedback as you edit",
+        body: "Diagnostics update as you change an open file, helping you catch problems before running your code.",
       },
       {
-        title: "Semantic checks",
-        body: "Supported checks include unresolved constants, missing methods on complete lookup chains, and incompatible argument counts/shapes. Unresolved ancestry suppresses unsupported missing-method claims.",
+        title: "Understand the problem",
+        body: "Checks include syntax errors, unresolved constants, missing methods, and incompatible method arguments. Messages appear alongside your code and in the Problems panel.",
       },
     ],
     limits:
-      "This is not a proof that arbitrary Ruby code is correct. Unknown evidence, dynamic behavior, and incomplete dependencies limit what can be diagnosed. Linter diagnostics are a separate opt-in integration.",
+      "Available checks depend on what the server knows about your code. Dynamic Ruby behavior can limit the results. Enable RuboCop or Standard for additional linting rules.",
     contract: "docs/usage.md",
     related: ["types/unknown", "diagnostics/fixes"],
   },
@@ -30,18 +29,18 @@ export default [
     id: "diagnostics/fixes",
     title: "Safe fixes and formatting",
     summary:
-      "Use RuboCop or Standard against your current Ruby buffer, with safe corrections returned as editor edits.",
+      "Apply quick fixes and keep Ruby code formatted with RuboCop or Standard.",
     demo: "diagnostics/fixes",
     steps: [
-      "Run Ruby Fast LSP: Select Linter and choose a tool available to your project.",
-      "Open or save a Ruby file and apply an offered safe quick fix.",
-      "Select a formatter independently, then run Format Document.",
+      "Run Ruby Fast LSP: Select Linter and choose your project’s tool.",
+      "Open or save a Ruby file, then review any available quick fixes.",
+      "Run Ruby Fast LSP: Select Formatter, then use Format Document.",
     ],
     code: '# frozen_string_literal: true\n\nlabel = "Trail notes"\nputs( label )',
     requirements:
-      "Install and configure RuboCop or Standard for the owning project. Linter and formatter selections are independent editor commands; they are not public settings.json options.",
+      "Install RuboCop or Standard in your project. Choose the linter and formatter with the extension’s commands; you can select them independently.",
     limits:
-      "Linting runs on open/save, outside the typing path. Only supported safe corrections become edits. Failed, timed-out, invalid, or unsafe empty output produces no edit. Ruby linters/formatters do not edit ERB templates.",
+      "Linting runs when a Ruby file is opened or saved. Quick fixes use the tool’s safe corrections. These integrations apply to Ruby files; ERB templates are not formatted or linted by them.",
     contract: "docs/usage.md",
     related: ["diagnostics/live"],
     demoTitle: "Safe whitespace formatting with RuboCop",

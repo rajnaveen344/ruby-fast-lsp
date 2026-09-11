@@ -3,11 +3,34 @@ import Sidebar, { GemIcon } from "./components/Sidebar.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
 import Demo from "./components/Demo.jsx";
 import CodeBlock from "./components/CodeBlock.jsx";
-import { GROUPS, PAGES, STORIES, REPOSITORY } from "./content/catalog.js";
+import { GROUPS, PAGES, TYPE_FEATURES, REPOSITORY } from "./content/catalog.js";
 
 function currentPage() {
   return (
     window.location.hash.replace(/^#\/?/, "").replace(/\/$/, "") || "overview"
+  );
+}
+
+function FeatureGroups({ section }) {
+  return (
+    <div className="feature-grid">
+      {GROUPS.filter((group) => group.overview === section).map((group) => (
+        <section className="feature-group" key={group.label}>
+          <h3>{group.label}</h3>
+          <p>{group.summary}</p>
+          <ul>
+            {group.items.map((id) => (
+              <li key={id}>
+                <a href={"#/" + id}>
+                  {PAGES[id].title}
+                  <span aria-hidden="true">↗</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -17,34 +40,48 @@ function Overview() {
       <header className="hero">
         <p className="eyebrow">RUBY FAST LSP · DOCUMENTATION</p>
         <h1>
-          See the types flowing
+          Ruby tools for
           <br />
-          through your <em>Ruby.</em>
+          <em>everyday coding.</em>
         </h1>
         <p className="lead">
-          Follow values through methods, collections, and Hashes. Get useful
-          types, navigation, and diagnostics while you work—with clear
-          explanations when a type remains unknown.
+          Jump to definitions, complete method calls, rename symbols, and catch
+          errors as you edit. Ruby Fast LSP brings navigation, code assistance,
+          and diagnostics to your Ruby workspace.
         </p>
         <div className="hero-actions">
           <a className="btn btn-primary" href="#/install">
             Get started ↗
           </a>
-          <a className="btn" href="#/types/hash-shapes">
-            Explore Hash shapes
+          <a className="btn" href="#/navigate/definition">
+            Explore navigation
           </a>
         </div>
       </header>
-      <Demo id="types/hash-shapes" title="A closer look inside your Hashes" />
+      <section
+        className="overview-section overview-intro"
+        aria-labelledby="features-title"
+      >
+        <h2 id="features-title">Everyday editor tools</h2>
+        <FeatureGroups section="editor" />
+      </section>
+      <Demo id="editing/completion" title="Complete a method call" />
       <section className="overview-section" aria-labelledby="stories-title">
-        <p className="eyebrow">FROM THE VALUE TO THE EDITOR</p>
-        <h2 id="stories-title">More context. Less guessing.</h2>
+        <p className="eyebrow">TYPE INFERENCE</p>
+        <h2 id="stories-title">A closer look at your values</h2>
+        <p className="section-intro">
+          Explore the types of method results and collection elements without
+          adding annotations. For Hashes, inspect individual keys and their
+          value types. Add{" "}
+          <a href="#/types/signatures">YARD or RBS signatures</a> where you need
+          more detail, and learn what an{" "}
+          <a href="#/types/unknown">Unknown type</a> means.
+        </p>
         <div className="story-grid">
-          {STORIES.map((id, n) => {
+          {TYPE_FEATURES.map((id) => {
             const p = PAGES[id];
             return (
               <a className="story" href={"#/" + id} key={id}>
-                <span className="story-number">0{n + 1}</span>
                 <h3>
                   {p.title}
                   <span aria-hidden="true">↗</span>
@@ -64,42 +101,24 @@ function Overview() {
           })}
         </div>
       </section>
-      <section className="overview-section" aria-labelledby="features-title">
-        <p className="eyebrow">THE EVERYDAY TOOLKIT</p>
-        <h2 id="features-title">Explore the features</h2>
-        <div className="feature-grid">
-          {GROUPS.filter((g) => g.feature).map((g) => (
-            <section className="feature-group" key={g.label}>
-              <h3>{g.label}</h3>
-              <p>{g.summary}</p>
-              <ul>
-                {g.items.map((id) => (
-                  <li key={id}>
-                    <a href={"#/" + id}>
-                      {PAGES[id].title}
-                      <span aria-hidden="true">↗</span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
+      <section className="overview-section" aria-labelledby="projects-title">
+        <h2 id="projects-title">Work across your Ruby projects</h2>
+        <FeatureGroups section="projects" />
       </section>
       <section className="comparison overview-section">
         <p className="eyebrow">FIND YOUR FIT</p>
         <h2>How it compares</h2>
         <p>
-          Ruby Fast LSP focuses on inferred value flow, structural Hash
-          contents, and readable type information across the editor.
+          Alongside familiar editor features, Ruby Fast LSP offers inferred
+          types and a detailed view of Hash contents. Explore the guides to see
+          how these features fit your workflow.
         </p>
         <div className="comparison-grid">
           <div>
             <h3>Ruby LSP</h3>
             <p>
               Shopify’s Ruby LSP provides a broad editor toolkit, type-aware
-              completion for known receivers, and guessed types. Explore our
-              Hash and collection examples to see the behavior we focus on.
+              completion for known receivers, and guessed types.
             </p>
             <a href="https://shopify.github.io/ruby-lsp/#completion">
               Read Ruby LSP’s feature guide ↗
@@ -108,10 +127,8 @@ function Overview() {
           <div>
             <h3>Solargraph</h3>
             <p>
-              Solargraph also supports type inference, YARD annotations, and
-              type checking. Our examples make specific shape, propagation, and
-              presentation behavior visible, rather than claiming inference is
-              exclusive.
+              Solargraph supports type inference, YARD annotations, and type
+              checking alongside its editor features.
             </p>
             <a href="https://solargraph.org/guides/type-checking">
               Read Solargraph’s type-checking guide ↗
@@ -119,9 +136,9 @@ function Overview() {
           </div>
         </div>
         <p className="fine-print">
-          Documentation reviewed September 2026. These are differences in
-          emphasis, not a comparative benchmark. Inference has{" "}
-          <a href="#/types/unknown">documented limits</a>.
+          Features vary by tool and configuration. See each project’s guide for
+          details and our <a href="#/support">support guide</a> for current
+          limitations.
         </p>
       </section>
     </>
@@ -193,7 +210,7 @@ function FeaturePage({ page }) {
       {page.contract && (
         <p className="contract-link">
           <a href={REPOSITORY + "/blob/main/" + page.contract}>
-            Read the detailed support contract ↗
+            Read the detailed guide ↗
           </a>
         </p>
       )}
@@ -227,13 +244,13 @@ export default function App() {
   useEffect(() => {
     document.title =
       (active === "overview"
-        ? "See the types flowing through your Ruby"
+        ? "Ruby tools for everyday coding"
         : page?.title || "Page not found") + " · Ruby Fast LSP";
     const meta = document.querySelector('meta[name="description"]');
     if (meta)
       meta.content =
         page?.summary ||
-        "Ruby Fast LSP documentation: type inference, navigation, diagnostics, and project tools.";
+        "Ruby Fast LSP documentation: navigation, completion, diagnostics, and type inference for Ruby projects.";
   }, [active, page]);
   useEffect(() => {
     const close = (e) => {

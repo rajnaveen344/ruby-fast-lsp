@@ -2,55 +2,60 @@ export default [
   {
     id: "navigate/definition",
     title: "Definitions and references",
-    summary:
-      "Move from a use to its source and find where that source is used.",
+    summary: "Jump to definitions and find references throughout your project.",
     demo: "navigate/definition",
     steps: [
-      "Place the cursor on a method call or local binding.",
-      "Use Go to Definition (F12) or modifier-click.",
-      "Use Find All References to inspect the related uses.",
+      "Place the cursor on a method, variable, or constant.",
+      "Use Go to Definition (F12) or modifier-click to open its declaration.",
+      "Use Find All References to see where it is used.",
     ],
     code: "class Compass\n  def heading\n    :north\n  end\nend\n\ncompass = Compass.new\ncompass.heading",
     sections: [
       {
-        title: "The clicked token matters",
-        body: "A local variable used inside brackets navigates to its binding, not the enclosing [] method. A binding can be navigable even when its value type is unknown.",
+        title: "Find your way through the code",
+        body: "Open the declaration of a method, class, constant, or variable directly from its use. Follow references to understand how a piece of code fits into the rest of your project.",
       },
       {
-        title: "Several valid definitions",
-        body: "The engine resolves identity and ranks valid targets semantically. A known receiver uses its effective implementation; ambiguous contexts can return multiple candidates. Path ordering is only a deterministic tie-breaker, not the meaning of the result.",
+        title: "Explore related code",
+        body: "Go to Implementation and type hierarchy help you explore inheritance. Call hierarchy shows which methods call a method and which methods it calls.",
       },
       {
-        title: "More ways to explore",
-        body: "Use Go to Implementation, incoming/outgoing call hierarchy, and type hierarchy for related declarations. Document highlights show same-file occurrences of the selected symbol.",
+        title: "Choose a destination",
+        body: "When more than one definition is possible, your editor shows the available destinations so you can choose which to open.",
       },
     ],
     limits:
-      "Dynamic calls and incomplete lookup chains may leave several candidates or no proven target. Dependency navigation retains the owning project context.",
+      "Navigation depends on the code and dependencies available to the server. Dynamically defined methods may have several possible destinations or none.",
     contract: "docs/features/definition-navigation.md",
     related: ["navigate/rename", "navigate/symbols"],
   },
   {
     id: "navigate/rename",
     title: "Rename across files",
-    summary: "Change a proven symbol and its editable references together.",
+    summary: "Rename a symbol and update its references across your project.",
     demo: "navigate/rename",
     steps: [
-      "Place the cursor on an unambiguous method or constant.",
-      "Run Rename Symbol (F2), enter a valid Ruby name, and review the changes.",
-      "Confirm that declarations and their resolved uses changed together.",
+      "Place the cursor on the symbol you want to rename.",
+      "Run Rename Symbol (F2) and enter the new name.",
+      "Review the proposed changes, then apply them.",
     ],
     code: "class DirectionFinder\n  def heading\n    :north\n  end\nend\n\nDirectionFinder.new.heading",
     limits:
-      "Rename is deliberately conservative. Ambiguous targets, external/generated declarations, unsupported operator transformations, collisions, and certain coupled override families are rejected rather than producing a partial unsafe edit.",
-    contract: "AGENTS.md",
+      "Some symbols cannot be renamed automatically, including ambiguous references, naming conflicts, and declarations in external or generated files.",
+    contract: "docs/features/definition-navigation.md",
     related: ["navigate/definition"],
+    sections: [
+      {
+        title: "Review changes together",
+        body: "Rename updates the declaration and the references the server can identify. Use your editor’s rename preview to review the affected files before applying the changes.",
+      },
+    ],
   },
   {
     id: "navigate/symbols",
     title: "Symbols and code structure",
     summary:
-      "Find declarations without remembering their file, then explore their namespace and structure.",
+      "Find classes, modules, and methods without remembering their file names.",
     steps: [
       "Use Go to Symbol in Editor for declarations in the current file.",
       "Use Go to Symbol in Workspace for project-wide search.",
@@ -58,16 +63,16 @@ export default [
     ],
     sections: [
       {
-        title: "Selection and folding",
-        body: "Expand Selection follows nested syntax ranges. Folding ranges collapse methods, classes, and other supported regions. Semantic highlighting distinguishes symbols that plain text coloring can confuse.",
+        title: "Search your project",
+        body: "Search symbols in the current file or across your workspace. The Ruby Index view lets you browse classes, modules, and their members.",
       },
       {
-        title: "Project ownership",
-        body: "Workspace symbol search aggregates isolated project engines. External dependencies remain navigation inputs; the project-only namespace view does not promote them into editable project sources.",
+        title: "Read the structure",
+        body: "Fold methods and classes to focus on the surrounding code. Expand Selection selects larger parts of an expression, while semantic highlighting helps distinguish different kinds of symbols.",
       },
     ],
     limits:
-      "The exact command names and keyboard shortcuts vary by editor. Indexing must have discovered the relevant declarations.",
+      "Available commands and shortcuts vary by editor. Search results expand as your project is indexed.",
     contract: "docs/usage.md",
     related: ["navigate/definition", "projects/indexing"],
   },

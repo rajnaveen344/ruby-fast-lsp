@@ -3,71 +3,70 @@ export default [
     id: "projects/indexing",
     title: "Background indexing",
     summary:
-      "Open a Ruby workspace and keep track of what is ready to navigate.",
+      "Browse project code and dependencies while indexing runs in the background.",
     demo: "projects/indexing",
     steps: [
-      "Open a project folder and watch the Ruby status item.",
-      "Click the indexing status to inspect the project details.",
-      "Open a file and begin navigating once its declarations are available.",
+      "Open a Ruby project folder.",
+      "Check the Ruby status item for indexing progress.",
+      "Open the status view for details, or start exploring the indexed code.",
     ],
     sections: [
       {
-        title: "Files and dependencies",
-        body: "Indexing discovers project sources, core declarations, and selected dependencies. A standalone folder without a Gemfile receives core analysis without searching unrelated globally installed gems.",
+        title: "Explore more of your project",
+        body: "Indexing discovers classes, modules, methods, and dependencies so you can navigate beyond the files you have open.",
       },
       {
-        title: "Keep editing",
-        body: "Open buffers take precedence over disk. Delayed background work cannot overwrite a newer accepted interactive revision. The status view distinguishes progress for discovered projects.",
+        title: "Keep working",
+        body: "Continue editing while the rest of your project is indexed. Use the status view to see progress and which projects are ready.",
       },
     ],
     limits:
-      "Readiness and resource use depend on the corpus, runtime, dependencies, and machine. Edited demo timings are not indexing benchmarks.",
+      "Initial indexing time varies with project size, dependencies, and your machine. Some results may be unavailable until the relevant files have been indexed.",
     contract: "docs/usage.md",
     related: ["projects/isolation", "projects/jruby"],
     demoTitle: "Inspect project indexing status",
   },
   {
     id: "projects/isolation",
-    title: "Isolated projects",
+    title: "Multiple projects",
     summary:
-      "Work with several Ruby projects without mixing their declarations, dependencies, or runtimes.",
+      "Work across Ruby projects with their own dependencies and runtime settings.",
     demo: "projects/isolation",
     steps: [
-      "Open an umbrella folder containing two nearest project Gemfiles.",
-      "Inspect the independently discovered projects in indexing status.",
-      "Switch between source files and inspect a same-named constant with different definitions.",
+      "Open a workspace containing your Ruby projects.",
+      "Use the indexing status view to inspect the detected projects.",
+      "Switch between projects and select the runtime each one needs.",
     ],
     sections: [
       {
-        title: "A folder can contain several projects",
-        body: "A root Gemfile owns its folder. Without one, nearest nested Gemfiles define isolated project roots. Requests route to the deepest owning root.",
+        title: "Keep project context",
+        body: "Navigation, completion, and diagnostics use the dependencies and runtime selected for the file’s project. This lets you work on different applications in the same workspace.",
       },
       {
-        title: "Select the right runtime",
-        body: "Run Ruby Fast LSP: Select Runtime for the active project. Auto follows exact project markers. Saving a runtime to .ruby-version is a separate confirmed project write; the default selection stays in private editor state.",
+        title: "Select a runtime",
+        body: "Run Ruby Fast LSP: Select Runtime for the active project. Automatic selection uses the project’s runtime markers; you can also choose an installed runtime.",
       },
     ],
     limits:
-      "Each project has its own semantic engine. Immutable dependency products may be shared, but source identity and query ownership stay separate. Ambiguous external files do not borrow an arbitrary project context.",
+      "Project detection uses the workspace layout and Gemfiles. Check the status view if a file is being associated with an unexpected project.",
     contract: "docs/usage.md",
     related: ["projects/indexing", "projects/jruby"],
   },
   {
     id: "projects/jruby",
     title: "JRuby and Java",
-    summary:
-      "Navigate supported Java types and methods from a project using JRuby.",
+    summary: "Explore Java classes and methods from your JRuby code.",
     demo: "projects/jruby",
     steps: [
-      "Select the exact installed JRuby runtime for the demo project.",
-      "Open a Ruby file importing a supported Java class with java_import.",
-      "Hover or navigate a Java proxy reference after its classpath is indexed.",
+      "Select the JRuby runtime for your project.",
+      "Open Ruby code that imports a Java class.",
+      "Hover or use Go to Definition on a Java reference.",
     ],
     code: 'java_import "java.util.ArrayList"\n\nitems = ArrayList.new\nitems.add("Field guide")',
     requirements:
-      "A compatible JRuby runtime and JDK must be available. Java classpath inputs belong to the selected project. Runtime detection does not certify every Ruby/JDK combination.",
+      "Install a compatible JRuby runtime and JDK, and make your project’s Java dependencies available.",
     limits:
-      "Static classfile facts support navigation; they do not execute application artifacts. Implementation navigation may use bounded decompilation and depends on available inputs. MRI projects do not gain Java semantics just from a similar-looking constant.",
+      "Java navigation depends on the available classpath and supported Java integration forms. This feature requires a JRuby project.",
     contract: "docs/usage.md",
     related: ["projects/isolation"],
   },

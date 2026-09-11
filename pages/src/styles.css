@@ -357,6 +357,15 @@ h3 {
 .overview-section {
   padding-top: 78px;
 }
+.overview-intro {
+  padding-top: 0;
+  padding-bottom: 38px;
+}
+.section-intro {
+  max-width: 730px;
+  margin: 0 0 28px;
+  color: var(--muted);
+}
 .story-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -374,11 +383,6 @@ h3 {
 .story:hover {
   text-decoration: none;
   border-color: var(--accent);
-}
-.story-number {
-  font-family: monospace;
-  font-size: 12px;
-  color: var(--accent-text);
 }
 .story h3 {
   display: flex;
@@ -406,7 +410,7 @@ h3 {
 }
 .feature-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 20px;
 }
 .feature-group {
@@ -414,7 +418,7 @@ h3 {
   padding-top: 23px;
 }
 .feature-group p {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   min-height: 45px;
   margin-bottom: 16px;
@@ -431,7 +435,7 @@ h3 {
   border-top: 1px solid var(--border);
 }
 .feature-group li a {
-  font-size: 12px;
+  font-size: 14px;
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -676,6 +680,9 @@ h3 {
   }
   .overview-section {
     padding-top: 50px;
+  }
+  .overview-intro {
+    padding-top: 0;
   }
   .story-grid {
     gap: 14px;

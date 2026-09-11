@@ -26,7 +26,7 @@ export default function Demo({ id, title }) {
         onError={() => setFailed(true)}
       />
       <figcaption>
-        <span>Real editor capture · AI suggestions off</span>
+        <span>Recorded in VS Code</span>
         <span>
           {failed ? (
             <span>Animation unavailable.</span>
@@ -41,7 +41,7 @@ export default function Demo({ id, title }) {
             </button>
           )}
           <a href={root + "demo.gif"}>GIF ↗</a>
-          <a href={root + "README.md"}>Steps & capture notes ↗</a>
+          <a href={root + "README.md"}>Demo notes ↗</a>
         </span>
       </figcaption>
     </figure>

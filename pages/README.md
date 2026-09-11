@@ -1,12 +1,13 @@
 # Ruby Fast LSP feature guide
 
 A static React/Vite documentation site with an overview and 19 focused pages.
-The overview introduces type inference and links into six feature groups.
+The overview starts with navigation, completion, hover, diagnostics, and
+formatting, followed by type inference and project tools.
 Feature pages explain the editor actions, examples, prerequisites, and limits.
 
 The site includes **14 real editor demos**. GIFs, MP4s, posters, transcripts, and
 capture metadata live in [public/demos](public/demos). The root repository README
-reuses the Hash-shape GIF. Playback timings are edited for readability and are
+reuses the completion GIF. Playback timings are edited for readability and are
 not performance measurements.
 
 ## Develop locally
@@ -39,6 +40,11 @@ feature links usable on static hosting. Building does not publish the site.
 - [Recording guide](demos/README.md) documents generic fixtures and capture settings.
 - [Sitemap](planning/feature-docs.md) maps the current first edition.
 - [Positioning](planning/positioning.md) records primary sources for comparisons.
+
+Write feature pages around everyday use: what the feature does, how to use it,
+and practical limitations. Keep bug-specific examples, implementation details,
+and regression history in the linked technical guides or tests. Demo transcripts
+describe the recorded actions and should remain accurate to their capture.
 
 GIFs loop automatically when loaded near the viewport. Visitors can pause a
 loop to show its poster; reduced-motion preferences start with the poster.

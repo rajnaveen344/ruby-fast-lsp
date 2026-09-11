@@ -2,28 +2,31 @@ export default [
   {
     id: "editing/completion",
     title: "Completion and signatures",
-    summary:
-      "Discover methods on a known receiver and see the arguments a call expects.",
+    summary: "Complete method names and see which arguments a method expects.",
     demo: "editing/completion",
     steps: [
-      "Type notebook.ti in the example below.",
-      "Choose title from the language-server completion list.",
-      "Use Show Hover to inspect its inferred String result; trigger signature help inside a call with parameters.",
+      "Start typing a method name after an object, or use Trigger Suggest.",
+      "Choose a suggestion to complete the name.",
+      "Use signature help while entering arguments to check the method’s parameters.",
     ],
     code: 'class Notebook\n  def title\n    "Field guide"\n  end\nend\n\nnotebook = Notebook.new\nnotebook.title',
     sections: [
       {
-        title: "Types guide the candidates",
-        body: "Completion uses known receiver evidence, including supported inferred values and signatures. Signature help understands user-defined parameters, nested calls, keywords, rest arguments, and supported RBS overloads.",
+        title: "Find the method you need",
+        body: "Completion suggests methods using the information available about your code. As you type, narrow the list and choose a method without leaving the editor.",
       },
       {
-        title: "Editing assistance",
-        body: "The editor can also show snippets and on-type formatting. Their availability depends on the client and its settings. The demo disables AI, word-based suggestions, and snippets to isolate the language-server result.",
+        title: "Check arguments as you type",
+        body: "Signature help shows method parameters, including keyword and optional arguments. Hover over a method for more information about its signature and result.",
+      },
+      {
+        title: "Use your editor’s writing tools",
+        body: "Snippets and on-type formatting provide additional help while writing Ruby. Enable them through your editor’s settings.",
       },
     ],
     limits:
-      "An unresolved receiver may not have a precise completion set. Dynamic dispatch and unsupported callable forms can remain Unknown.",
+      "Suggestions can be less precise when an object’s type is unknown or methods are created dynamically.",
     contract: "docs/usage.md",
-    related: ["types/propagation", "types/signatures"],
+    related: ["types/hints", "types/propagation", "types/signatures"],
   },
 ];

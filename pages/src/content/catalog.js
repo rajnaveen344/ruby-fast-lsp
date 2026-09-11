@@ -13,45 +13,49 @@ export const GROUPS = [
     items: ["install"],
   },
   {
-    label: "Understand types",
-    feature: true,
-    summary: "Follow evidence from Ruby values to useful editor types.",
-    items: [
-      "types/hash-shapes",
-      "types/propagation",
-      "types/hints",
-      "types/unknown",
-      "types/signatures",
-    ],
-  },
-  {
     label: "Navigate",
-    feature: true,
-    summary: "Find the declaration, trace its uses, and change names safely.",
+    overview: "editor",
+    summary:
+      "Jump to definitions, find references, and rename symbols across files.",
     items: ["navigate/definition", "navigate/rename", "navigate/symbols"],
   },
   {
     label: "Write and edit",
-    feature: true,
-    summary: "Discover receiver methods and fill in call arguments.",
-    items: ["editing/completion"],
+    overview: "editor",
+    summary:
+      "Complete code, check method arguments, and read information on hover.",
+    items: ["editing/completion", "types/hints"],
   },
   {
     label: "Diagnose and fix",
-    feature: true,
-    summary: "Read current diagnostics and apply supported safe edits.",
+    overview: "editor",
+    summary:
+      "Find errors while editing, apply quick fixes, and format your code.",
     items: ["diagnostics/live", "diagnostics/fixes"],
   },
   {
+    label: "Type inference",
+    summary:
+      "Explore inferred types, collection elements, and the contents of Hashes.",
+    items: [
+      "types/propagation",
+      "types/hash-shapes",
+      "types/signatures",
+      "types/unknown",
+    ],
+  },
+  {
     label: "Projects and runtimes",
-    feature: true,
-    summary: "Keep project facts, dependencies, and runtimes separate.",
+    overview: "projects",
+    summary:
+      "Browse indexed code and manage Ruby runtimes across your projects.",
     items: ["projects/indexing", "projects/isolation", "projects/jruby"],
   },
   {
     label: "Frameworks and templates",
-    feature: true,
-    summary: "Work inside templates and run tests where they are declared.",
+    overview: "projects",
+    summary:
+      "Edit ERB templates, explore Rails views, and run individual tests.",
     items: ["frameworks/templates", "frameworks/tests"],
   },
   {
@@ -76,9 +80,4 @@ export const PAGES = Object.fromEntries(
     },
   ]),
 );
-export const STORIES = [
-  "types/propagation",
-  "types/hash-shapes",
-  "types/hints",
-  "types/unknown",
-];
+export const TYPE_FEATURES = ["types/propagation", "types/hash-shapes"];

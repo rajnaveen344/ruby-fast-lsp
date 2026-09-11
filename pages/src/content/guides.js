@@ -3,11 +3,11 @@ export default [
     id: "install",
     title: "Install and start",
     summary:
-      "Open your Ruby project with a language server that follows its code and types.",
+      "Set up Ruby Fast LSP and start using navigation, completion, and diagnostics.",
     steps: [
       "Install Ruby Fast LSP from the VS Code Marketplace or Open VSX.",
-      "Open your Ruby project folder and wait for its indexing status.",
-      "Open a Ruby file, inspect an inferred type, and try Go to Definition.",
+      "Open your Ruby project folder and check its indexing status.",
+      "Open a Ruby file, try Go to Definition, and start typing a method call to see completions.",
     ],
     sections: [
       {
@@ -36,15 +36,15 @@ export default [
       },
     ],
     limits:
-      "The npm server and the server bundled inside the VS Code extension are separate installations. Avoid enabling overlapping Ruby providers while evaluating a feature.",
+      "The VS Code extension includes its own server; other LSP clients use a separate installation. Choose one Ruby language server in your editor to avoid duplicate results.",
     contract: "docs/usage.md",
-    related: ["types/hash-shapes", "projects/indexing"],
+    related: ["navigate/definition", "editing/completion", "projects/indexing"],
   },
   {
     id: "support",
     title: "Support and limits",
     summary:
-      "Check the active project, inspect the evidence, and share a small reproducible example.",
+      "Check your setup, understand current limitations, and get help with a problem.",
     sections: [
       {
         title: "Start with the current project",
@@ -56,7 +56,7 @@ export default [
       },
       {
         title: "Report a useful issue",
-        body: "Include editor/extension/server versions, OS, Ruby runtime, project layout, whether indexing finished, and a small generic reproduction. Share expected and actual results. Private source and business examples are unnecessary.",
+        body: "Include your editor and extension versions, operating system, Ruby version, and a small example that reproduces the problem. Describe what you expected and what happened, and remove any private information.",
         links: [
           {
             label: "Report a bug",
@@ -65,12 +65,12 @@ export default [
         ],
       },
       {
-        title: "Understand the boundary",
-        body: "Ruby reflection, eval, unconstrained method_missing, unsupported mutation, and exceeded inference bounds can remain Unknown. A missing runtime still retains conservative core declarations, but runtime-dependent modules may be unavailable.",
+        title: "Current limitations",
+        body: "Highly dynamic Ruby code may have incomplete navigation or type information. If a required runtime or dependency is unavailable, features that depend on it may be limited.",
       },
       {
         title: "Contribute",
-        body: "Correctness checks, lifecycle simulation, and release validation cover different contracts. A feature demonstration shows one editor workflow; it is not a replacement for regression coverage.",
+        body: "Help improve Ruby Fast LSP through bug reports, documentation, or code contributions. The contributor guide explains the project structure and how to run its checks.",
         links: [
           {
             label: "Contributor guide",
@@ -93,20 +93,19 @@ export default [
   {
     id: "extensions",
     title: "Framework extensions",
-    summary:
-      "Add framework knowledge through validated extension facts and editor responses.",
+    summary: "Add editor support for Ruby frameworks and their conventions.",
     sections: [
       {
         title: "Bundled integrations",
-        body: "Rails, RSpec, Minitest, Sinatra, and Cucumber integrations activate against their declared locked dependency ranges. Each manifest describes its supported capabilities.",
+        body: "Integrations for Rails, RSpec, Minitest, Sinatra, and Cucumber add support for framework conventions. They activate when compatible dependencies are found in your project’s lockfile.",
       },
       {
-        title: "Project-local extensions",
-        body: "Trusted projects may provide manifest packages under .ruby-fast-lsp/extensions/*/extension.toml or ruby_fast_lsp/**/extension.toml. Compatibility, checksums, permissions, and resource limits are validated before execution.",
+        title: "Project extensions",
+        body: "Add a custom extension when your project needs support for its own conventions. Project extensions run in trusted workspaces.",
       },
       {
-        title: "Author an extension",
-        body: "Use the existing guest SDK and framework examples. Extensions contribute facts through the ordinary file lifecycle; they do not own a second semantic database.",
+        title: "Create an extension",
+        body: "The extension guide includes the SDK, examples, and instructions for packaging a project integration.",
         links: [
           {
             label: "Extension authoring guide",
@@ -116,7 +115,7 @@ export default [
       },
     ],
     limits:
-      "Untrusted workspaces do not run project-local Wasm. Manifest activation ranges describe supported inputs, not an exhaustive compatibility certification.",
+      "Framework features depend on the versions and conventions supported by each integration. See the extension guide for compatibility details.",
     contract: "extensions/README.md",
     related: ["frameworks/templates", "frameworks/tests"],
   },
