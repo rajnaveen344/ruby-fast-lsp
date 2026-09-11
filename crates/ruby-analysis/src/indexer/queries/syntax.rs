@@ -1,7 +1,18 @@
 use crate::core::NamespaceKind;
-use ruby_prism::{ConstantPathNode, Location as PrismLocation, Node};
+use ruby_prism::{CallNode, ConstantPathNode, Location as PrismLocation, Node};
 
 use crate::core::RubyConstant;
+
+/// The source token that names a call for references and diagnostics.
+/// Prism's `message_loc` for `receiver[key]` spans `[key]`, including
+/// independent argument expressions. Anchor index calls to `[` so their
+/// method reference cannot capture navigation on those arguments. Explicit
+/// `receiver.[](key)` and ordinary sends retain their method-name token.
+pub fn call_reference_location<'a>(node: &CallNode<'a>) -> Option<PrismLocation<'a>> {
+    node.opening_loc()
+        .filter(|location| location.as_slice() == b"[")
+        .or_else(|| node.message_loc())
+}
 
 /// Recursively collect all namespaces from a ConstantPathNode
 /// Eg: `Core::Platform::API::Users` will return

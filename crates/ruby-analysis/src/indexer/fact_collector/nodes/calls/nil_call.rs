@@ -18,7 +18,7 @@ impl FactCollector {
         let Some(local) = receiver.as_local_variable_read_node() else {
             return;
         };
-        let Some(message) = node.message_loc() else {
+        let Some(message) = crate::indexer::call_reference_location(node) else {
             return;
         };
         self.facts

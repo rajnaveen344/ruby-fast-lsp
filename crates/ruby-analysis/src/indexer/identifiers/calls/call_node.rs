@@ -180,13 +180,22 @@ impl IdentifierVisitor {
             return;
         }
 
-        // Check if cursor is in the arguments - if so, skip matching the method call
-        // and let the argument visitors (like constant_read_node) handle it
-        if let Some(arguments) = node.arguments() {
-            if self.is_position_in_location(&arguments.location()) {
-                // Cursor is in arguments, don't match the method call
-                return;
-            }
+        // Index references are anchored to `[`, but `]` still names the call.
+        // The argument check includes its end for completion, which would
+        // otherwise treat the adjacent closing bracket as part of the last local.
+        let on_index_closing = node
+            .opening_loc()
+            .is_some_and(|location| location.as_slice() == b"[")
+            && node.closing_loc().is_some_and(|location| {
+                location.start_offset() == self.cursor_offset() as usize
+                    && location.as_slice() == b"]"
+            });
+        if !on_index_closing
+            && node
+                .arguments()
+                .is_some_and(|arguments| self.is_position_in_location(&arguments.location()))
+        {
+            return;
         }
 
         // Check if position is on the method name

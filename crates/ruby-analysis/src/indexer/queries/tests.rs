@@ -11,6 +11,47 @@ mod tests {
     }
 
     #[test]
+    fn index_call_reference_locations_exclude_arguments() {
+        use ruby_prism::{CallNode, Visit};
+
+        #[derive(Default)]
+        struct Calls(Vec<(String, String)>);
+
+        impl<'a> Visit<'a> for Calls {
+            fn visit_call_node(&mut self, node: &CallNode<'a>) {
+                if matches!(node.name().as_slice(), b"[]" | b"[]=") {
+                    let location =
+                        call_reference_location(node).expect("index calls have a reference token");
+                    self.0.push((
+                        utf8_str(node.name().as_slice()).to_string(),
+                        utf8_str(location.as_slice()).to_string(),
+                    ));
+                }
+                ruby_prism::visit_call_node(self, node);
+            }
+        }
+
+        let source = "table[key]\ntable[key] = value\ntable.[](key)\ntable.[]=(key, value)\ntable&.[](key)\ntable[]\ntable[key] { value }\n";
+        let parsed = ruby_prism::parse(source.as_bytes());
+        assert_eq!(parsed.errors().count(), 0, "the fixture must be valid Ruby");
+        let mut calls = Calls::default();
+        calls.visit(&parsed.node());
+        assert_eq!(
+            calls.0,
+            [
+                ("[]", "["),
+                ("[]=", "["),
+                ("[]", "[]"),
+                ("[]=", "[]="),
+                ("[]", "[]"),
+                ("[]", "["),
+                ("[]", "["),
+            ]
+            .map(|(method, token)| (method.to_string(), token.to_string()))
+        );
+    }
+
+    #[test]
     fn analyzer_position_adapter_uses_utf16_before_same_line_identifier() {
         let analyzer = create_analyzer("\"😀\"; value = 1; value\n");
 

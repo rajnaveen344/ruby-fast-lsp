@@ -847,7 +847,7 @@ impl FactCollector {
             .as_ref()
             .map(|(_name, range)| *range)
             .or_else(|| {
-                node.message_loc().map(|loc| {
+                crate::indexer::call_reference_location(node).map(|loc| {
                     self.text_range_from_prism_location(&loc, "method diagnostic candidate")
                 })
             })

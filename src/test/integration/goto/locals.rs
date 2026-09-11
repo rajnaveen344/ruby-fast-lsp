@@ -2,6 +2,118 @@ use crate::test::harness::check;
 use crate::test::harness::FakeEditor;
 
 #[tokio::test]
+async fn goto_index_argument_uses_local_binding() {
+    check(
+        r#"
+class Table
+  def [](key)
+    self
+  end
+
+  def []=(key, value)
+    value
+  end
+end
+
+buckets = Table.new
+[:north].each do |entry|
+  <def>partition</def> = { active: true }
+  buckets[par$0tition][entry] = buckets[entry]
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_index_brackets_preserve_operator_navigation() {
+    for (method, expressions) in [
+        (
+            "[](key)",
+            ["table$0[key]", "table[key$0]", "table.$0[](key)"],
+        ),
+        (
+            "[]=(key, value)",
+            [
+                "table$0[key] = 1",
+                "table[key$0] = 1",
+                "table.$0[]=(key, 1)",
+            ],
+        ),
+    ] {
+        for expression in expressions {
+            check(&format!(
+                "class Parent\n  <def>def {method}\n    1\n  end</def>\nend\nclass Table < Parent; end\ntable = Table.new\nkey = :north\n{expression}\n"
+            ))
+            .await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn goto_index_arguments_survive_edits_and_reopen() {
+    use tower_lsp::lsp_types::{Location, Position, Range, Url};
+
+    let source = "class Table\n  def [](key); Table.new; end\n  def []=(key, value); value; end\nend\ntable = Table.new\n[:north].each do |entry|\n  partition = { active: true }\n  table[partition][entry] = table[entry]\n  table.[](partition)\n  table.[]=(partition, entry)\nend\n";
+    let edited = format!(
+        "# moved bindings\n{}",
+        source.replace("  table", "  \"🧩\"; table")
+    );
+    let mut editor = FakeEditor::new().await;
+    let file = "indexed_locals.rb";
+    editor.open(file, source).await;
+
+    for (phase, content) in [source, edited.as_str(), edited.as_str()]
+        .into_iter()
+        .enumerate()
+    {
+        if phase == 1 {
+            editor.set(file, content).await;
+        } else if phase == 2 {
+            editor.close(file).await;
+            editor.open(file, content).await;
+        }
+        for (name, declaration) in [
+            ("table", "table ="),
+            ("entry", "|entry|"),
+            ("partition", "partition ="),
+        ] {
+            let (line, text) = content
+                .lines()
+                .enumerate()
+                .find(|(_, text)| text.contains(declaration))
+                .unwrap();
+            let start = text[..text.find(name).unwrap()].encode_utf16().count() as u32;
+            let expected = Location::new(
+                Url::parse("file:///indexed_locals.rb").unwrap(),
+                Range::new(
+                    Position::new(line as u32, start),
+                    Position::new(line as u32, start + name.len() as u32),
+                ),
+            );
+            for (line, text) in content
+                .lines()
+                .enumerate()
+                .filter(|(_, text)| text.contains("table[") || text.contains("table.[]"))
+            {
+                for (start, _) in text.match_indices(name) {
+                    // Every character must select the binding, including the
+                    // first character directly after an opening bracket.
+                    for offset in 0..name.len() {
+                        let character = text[..start + offset].encode_utf16().count() as u32;
+                        assert_eq!(
+                            editor.goto_def_at(file, line as u32, character).await,
+                            vec![expected.clone()],
+                            "{name} must keep its lexical binding in phase {phase} at {line}:{character}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn goto_unknown_local_in_rescue_interpolation() {
     check(
         r##"

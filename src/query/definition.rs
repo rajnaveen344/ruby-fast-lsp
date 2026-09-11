@@ -45,18 +45,24 @@ impl EngineQuery {
             return self.find_yard_type_definitions(&yard_type.type_name, &ancestors);
         }
 
-        let dispatch_blocked = match self.resolved_reference_definition_locations(position) {
-            Some(locations) if !locations.is_empty() => return Some(locations),
-            Some(_) => true,
-            None => false,
-        };
-
         let analyzer = self.analyzer_at_position(uri, content, position);
         let byte_offset = u32::try_from(position_to_offset(content, position)).expect(
             "INVARIANT VIOLATED: definition position exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
         );
         let (identifier, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier(byte_offset);
+
+        // Lexical bindings own their tokens even at the trailing cursor boundary
+        // of an adjacent method reference, such as the `[` in table[key].
+        // Neither a resolved enclosing call nor an Unknown dispatch barrier may
+        // replace that binding with method navigation.
+        if let Some(Identifier::RubyLocalVariable { name, .. }) = &identifier {
+            return self.find_local_variable_definitions_at_position(name, position);
+        }
+
+        if let Some(locations) = self.resolved_reference_definition_locations(position) {
+            return Some(locations);
+        }
 
         let identifier = match identifier {
             Some(id) => id,
@@ -65,13 +71,6 @@ impl EngineQuery {
                 return None;
             }
         };
-
-        // Unknown values prevent speculative method dispatch, but do not erase
-        // lexical bindings. Classify the cursor before applying that barrier so
-        // local reads still reach the scope-based assignment lookup below.
-        if dispatch_blocked && !matches!(identifier, Identifier::RubyLocalVariable { .. }) {
-            return Some(Vec::new());
-        }
 
         info!(
             "Looking for definition of: {}->{}",

@@ -25,8 +25,7 @@ pub trait FactCollectorExtensionHost: std::fmt::Debug + Send + Sync {
 
     fn resolved_call_for_stack(&self, visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
         let call_range = source_range(visitor, &node.location());
-        let message_range = node
-            .message_loc()
+        let message_range = crate::indexer::call_reference_location(node)
             .map(|loc| source_range(visitor, &loc))
             .unwrap_or(call_range);
         ResolvedCall {

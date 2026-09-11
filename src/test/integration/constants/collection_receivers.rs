@@ -21,7 +21,7 @@ module Toolkit::Reports
     def render(row)
       output = {}
       Toolkit::Reports::ColumnSet::ENTRIES.<warn none code="unresolved-method">each</warn> do |entry|
-        output[entry<hover label="Symbol">] = row[entry]
+        output[en<hover label="Symbol">try] = row[entry]
         entry.<warn none code="unresolved-method">to_s</warn>
         entry.<warn code="unresolved-method">missing_symbol_operation</warn>
       end
@@ -140,7 +140,7 @@ async fn cold_partial_array_constant_does_not_invent_a_symbol_element_type() {
         .replace("<hint label=\"Array<Symbol>\">", "")
         .replace("[:title, :rank, :active]", "[:title, runtime_entry]");
     let consumer = CONSUMER
-        .replace("entry<hover label=\"Symbol\">", "en<hover label=\"?\">try")
+        .replace("en<hover label=\"Symbol\">try", "en<hover label=\"?\">try")
         .replace(
             "<warn code=\"unresolved-method\">",
             "<warn none code=\"unresolved-method\">",

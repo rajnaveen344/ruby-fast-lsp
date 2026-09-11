@@ -76,7 +76,7 @@ pub fn generate_local_variable_hover(
     };
 
     if let Some(ruby_type) = local_read_type_from_analysis(context, *byte_offset) {
-        return Some(HoverInfo::text(ruby_type.to_string()));
+        return Some(local_binding_hover(name, ruby_type, context, *byte_offset));
     }
 
     // A flow-owned Unknown is an explicit proof barrier, not absence. Never
@@ -84,14 +84,16 @@ pub fn generate_local_variable_hover(
     // already established that at least one reaching path is unresolved.
     match get_type_from_variable_scopes(context, name, *byte_offset) {
         Some(RubyType::Unknown) => {
-            if let Some((RubyType::Unknown, Some(reason))) =
-                expression_type_from_analysis(context, *byte_offset)
-            {
-                return Some(HoverInfo::text(format_unknown_type(reason)));
-            }
-            return Some(HoverInfo::text("?".to_string()));
+            return Some(local_binding_hover(
+                name,
+                RubyType::Unknown,
+                context,
+                *byte_offset,
+            ));
         }
-        Some(ruby_type) => return Some(HoverInfo::text(ruby_type.to_string())),
+        Some(ruby_type) => {
+            return Some(local_binding_hover(name, ruby_type, context, *byte_offset))
+        }
         None => {}
     }
 
@@ -99,18 +101,38 @@ pub fn generate_local_variable_hover(
     if let Some(ruby_type) = get_type_from_type_query(context, name, *byte_offset)
         .filter(|ruby_type| *ruby_type != RubyType::Unknown)
     {
-        return Some(HoverInfo::text(ruby_type.to_string()));
-    }
-
-    if let Some((RubyType::Unknown, Some(reason))) =
-        expression_type_from_analysis(context, *byte_offset)
-    {
-        return Some(HoverInfo::text(format_unknown_type(reason)));
+        return Some(local_binding_hover(name, ruby_type, context, *byte_offset));
     }
 
     // Prism already identified a local. Its unknown type must not depend on
     // whether an unchanged cold-indexed document retained editor scope data.
-    Some(HoverInfo::text("?".to_string()))
+    Some(local_binding_hover(
+        name,
+        RubyType::Unknown,
+        context,
+        *byte_offset,
+    ))
+}
+
+fn local_binding_hover(
+    name: &str,
+    ruby_type: RubyType,
+    context: &HoverContext,
+    byte_offset: u32,
+) -> HoverInfo {
+    let reason = if ruby_type == RubyType::Unknown {
+        match expression_type_from_analysis(context, byte_offset) {
+            Some((RubyType::Unknown, reason)) => reason,
+            // A flow-owned Unknown cannot borrow an older concrete assignment.
+            Some((_, None)) | None => None,
+            Some((ruby_type, Some(reason))) => panic!(
+                "INVARIANT VIOLATED: concrete local type `{ruby_type}` carried Unknown reason `{}`. This is a bug because proof-failure evidence belongs only to Unknown. Fix: keep expression outcomes mutually exclusive.", reason.code()
+            ),
+        }
+    } else {
+        None
+    };
+    binding_hover(name, &ruby_type, reason, "local variable")
 }
 
 fn local_read_type_from_analysis(context: &HoverContext, byte_offset: u32) -> Option<RubyType> {
@@ -169,10 +191,12 @@ pub fn generate_constant_hover(node: &HoverTarget, context: &HoverContext) -> Op
     if let Some(hover) = constant_hover_from_analysis(context, path) {
         return Some(hover);
     }
-    if context.analysis_engine.is_some() {
-        return Some(HoverInfo::text(constant_path_to_string(path)));
-    }
-    Some(HoverInfo::text(constant_path_to_string(path)))
+    Some(binding_hover(
+        &constant_path_to_string(path),
+        &RubyType::Unknown,
+        None,
+        "constant",
+    ))
 }
 
 /// Generate hover info for a method (call or definition).
@@ -284,22 +308,19 @@ pub fn generate_variable_hover(node: &HoverTarget, context: &HoverContext) -> Op
     if let Some((ruby_type, unknown_reason)) =
         variable_type_from_analysis(context, name, variable_kind)
     {
-        return Some(HoverInfo::text(match (ruby_type, unknown_reason) {
-            (RubyType::Unknown, Some(reason)) => {
-                format!("{}: {}", name, format_unknown_type(reason))
-            }
-            (RubyType::Unknown, None) => format!("{}: ?", name),
-            (ruby_type, None) => format!("{}: {}", name, ruby_type),
-            (ruby_type, Some(reason)) => panic!(
-                "INVARIANT VIOLATED: concrete variable type `{ruby_type}` carried Unknown reason `{}`. This is a bug because proof-failure evidence belongs only to RubyType::Unknown. Fix: return a reason only when the exact expression type is Unknown.",
-                reason.code()
-            ),
-        }));
+        return Some(binding_hover(
+            name,
+            &ruby_type,
+            unknown_reason,
+            variable_kind.label(),
+        ));
     }
-    if context.analysis_engine.is_some() {
-        return Some(HoverInfo::text(format!("{}: ?", name)));
-    }
-    Some(HoverInfo::text(name.to_string()))
+    Some(binding_hover(
+        name,
+        &RubyType::Unknown,
+        None,
+        variable_kind.label(),
+    ))
 }
 
 /// Generate hover info for a YARD type reference.
@@ -319,6 +340,39 @@ enum VariableHoverKind {
     Instance,
     Class,
     Global,
+}
+
+impl VariableHoverKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Instance => "instance variable",
+            Self::Class => "class variable",
+            Self::Global => "global variable",
+        }
+    }
+}
+
+/// Keep binding identity in the code header and proof explanations below it.
+/// Canonical types remain complete, including qualified names and shape fields.
+fn binding_hover(
+    name: &str,
+    ruby_type: &RubyType,
+    reason: Option<UnknownReason>,
+    kind: &str,
+) -> HoverInfo {
+    assert!(
+        reason.is_none() || *ruby_type == RubyType::Unknown,
+        "INVARIANT VIOLATED: a concrete binding hover carries an Unknown reason. This is a bug because proof states are mutually exclusive. Fix: attach reasons only to Unknown types."
+    );
+    let mut hover = HoverInfo::ruby_code(format!("{name}: {ruby_type} # {kind}"));
+    if let Some(reason) = reason {
+        hover.content.push_str(&format!(
+            "\n\nUnknown[{}]: {}",
+            reason.code(),
+            reason.explanation()
+        ));
+    }
+    hover
 }
 
 fn variable_type_kind(kind: VariableHoverKind) -> VariableTypeKind {
@@ -427,7 +481,7 @@ fn format_constant_hover(hover: ConstantHover) -> HoverInfo {
         ConstantHoverKind::Class => HoverInfo::text(format!("class {}", hover.name)),
         ConstantHoverKind::Module => HoverInfo::text(format!("module {}", hover.name)),
         ConstantHoverKind::Value(ruby_type) => {
-            HoverInfo::text(format!("{}: {}", hover.name, ruby_type))
+            binding_hover(&hover.name, &ruby_type, None, "constant")
         }
     }
 }

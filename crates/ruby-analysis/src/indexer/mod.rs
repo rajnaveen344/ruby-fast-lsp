@@ -47,6 +47,7 @@ pub use queries::semantic_tokens::{
     SemanticTokenData, SemanticTokenKind, SemanticTokenModifierKind, TokenVisitor, TOKEN_MODIFIERS,
     TOKEN_TYPES,
 };
+pub use queries::syntax::call_reference_location;
 pub use queries::{
     CompletionReceiverTarget, RubyPrismAnalyzer, ShapeKeyCompletionTarget, ShapeKeySyntax,
     SignatureHelpTarget,

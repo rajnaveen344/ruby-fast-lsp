@@ -4924,8 +4924,7 @@ fn call_context(visitor: &FactCollector, node: &CallNode, include_project: bool)
         block_range: node
             .block()
             .map(|block| source_range(visitor, &block.location())),
-        message_range: node
-            .message_loc()
+        message_range: ruby_analysis::indexer::call_reference_location(node)
             .map(|loc| source_range(visitor, &loc))
             .unwrap_or_else(|| source_range(visitor, &node.location())),
         resolved_callees: resolved_callees_for_call(visitor, node),
@@ -4954,8 +4953,7 @@ pub fn resolved_call_for_stack(visitor: &FactCollector, node: &CallNode) -> Reso
             .unwrap_or_default(),
         resolved_callees,
         call_range: source_range(visitor, &node.location()),
-        message_range: node
-            .message_loc()
+        message_range: ruby_analysis::indexer::call_reference_location(node)
             .map(|loc| source_range(visitor, &loc))
             .unwrap_or_else(|| source_range(visitor, &node.location())),
         frame_extension_ids: Vec::new(),
