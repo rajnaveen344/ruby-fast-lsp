@@ -8,6 +8,15 @@ use std::time::Duration;
 
 const PROCESS_TEST_WATCHDOG: Duration = Duration::from_secs(30);
 
+/// Independent real-decompiler acceptance tests share one process-wide budget.
+/// Isolate their lifetimes so unrelated tests cannot consume each other's slots.
+/// The production permits and limits remain active inside each test.
+pub(crate) fn isolate_decompiler_budget() -> std::sync::MutexGuard<'static, ()> {
+    static TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // This lock protects no data; a failed test must not poison later cases.
+    TESTS.lock().unwrap_or_else(|error| error.into_inner())
+}
+
 /// Exercise ordinary production futures and real children with manual Tokio
 /// time. OS scheduling must not decide argv, stdin, or admission assertions.
 /// Timeout tests explicitly advance time after observing child readiness.

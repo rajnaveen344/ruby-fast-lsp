@@ -963,6 +963,7 @@ mod tests {
 
     #[test]
     fn decompiles_only_the_selected_class_and_returns_verified_implementation_ranges() {
+        let _decompiler_budget = crate::test::harness::isolate_decompiler_budget();
         let fixture = tempfile::tempdir().unwrap();
         let declaration = fixture_declaration(fixture.path());
         let cache = fixture.path().join("cache");
@@ -1073,6 +1074,32 @@ mod tests {
             256 * 1024 * 1024,
             "the JVM child must fit the same conservative 256 MiB resource claim used by JRuby indexing and interactive materialization"
         );
+    }
+
+    #[test]
+    fn decompiler_process_permits_reject_excess_and_recover_after_release() {
+        let _decompiler_budget = crate::test::harness::isolate_decompiler_budget();
+        let limit = JavaDecompilerLimits::default().max_parallel_processes;
+        let mut permits = (0..limit)
+            .map(|_| ProcessPermit::acquire(limit).expect("available slot must admit a process"))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            ProcessPermit::acquire(limit),
+            Err(JavaDecompilerError::ProcessLimit)
+        ));
+
+        drop(permits.pop().expect("the full budget must hold a permit"));
+        let replacement = ProcessPermit::acquire(limit)
+            .expect("releasing a permit must make its slot available again");
+        assert!(matches!(
+            ProcessPermit::acquire(limit),
+            Err(JavaDecompilerError::ProcessLimit)
+        ));
+        drop(replacement);
+        drop(permits);
+        let _restored = (0..limit)
+            .map(|_| ProcessPermit::acquire(limit).expect("all released slots must be reusable"))
+            .collect::<Vec<_>>();
     }
 
     #[cfg(unix)]

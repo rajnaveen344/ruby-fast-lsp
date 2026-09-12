@@ -1345,6 +1345,7 @@ mod tests {
         use crate::config::runtime::ProjectJrubyConfig;
         use std::os::unix::fs::symlink;
 
+        let _decompiler_budget = crate::test::harness::isolate_decompiler_budget();
         let fixture = tempfile::tempdir().unwrap();
         let project = fixture.path().join("admin");
         let jruby_home = fixture.path().join("jruby-9.2.21.0");

@@ -82,6 +82,12 @@ functions. For timeouts, wait for child readiness before advancing the controlle
 clock. An independent wall-clock watchdog guards hangs; it is not the asserted
 product deadline. Do not solve scheduler flakiness by lengthening production timeouts.
 
+Real decompiler acceptance tests hold `isolate_decompiler_budget()` for their
+lifetime. Independent tests share the process-wide two-child limit and must not
+consume each other's slots. The guard isolates tests; production admission,
+memory limits, timeouts, and navigation assertions remain active. Permit exhaustion
+and recovery have their own explicit regression.
+
 Use existing schedule gates to pause collection/commit/publication and perform
 normal editor operations across that boundary. A test-only observer or gate is
 valid when it exercises the production flow; a test-only alternative semantic

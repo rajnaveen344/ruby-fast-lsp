@@ -38,6 +38,7 @@ pub use fixture::{
     setup_with_multi_file_fixture, InlineFixture, Tag, CURSOR_MARKER,
 };
 pub use inlay_hints::{get_hint_label, get_hint_tooltip};
+pub(crate) use process::isolate_decompiler_budget;
 #[cfg(unix)]
 pub(crate) use process::{wait_for_process_ready, with_process_clock};
 

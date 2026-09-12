@@ -3917,6 +3917,7 @@ mod coordinator_integration_tests {
     #[cfg(unix)]
     #[test]
     fn source_less_jruby_import_navigates_to_verified_decompiled_implementation() {
+        let _decompiler_budget = crate::test::harness::isolate_decompiler_budget();
         let fixture = TempDir::new().unwrap();
         let root = fixture.path().join("admin");
         let jruby_home = fixture.path().join("jruby-9.2.21.0");
