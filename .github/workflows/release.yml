@@ -92,7 +92,7 @@ jobs:
         run: cargo build --locked --release --bin ruby-fast-lsp --target ${{ matrix.target }}
 
       - name: Test on native target
-        run: cargo test --locked --workspace --target ${{ matrix.target }}
+        run: cargo test --locked --workspace --no-fail-fast --target ${{ matrix.target }}
 
       - name: Copy binary to npm package
         shell: bash

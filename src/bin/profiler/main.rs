@@ -2819,31 +2819,41 @@ mod tests {
     fn loads_and_validates_bounded_canonical_configuration() {
         let fixture = tempfile::tempdir().expect("profiler config fixture must be created");
         let path = fixture.path().join("config.json");
+        let project_root = fixture.path().join("workspace/admin");
+        let executable = fixture
+            .path()
+            .join("runtimes/jruby/bin")
+            .join(format!("jruby{}", std::env::consts::EXE_SUFFIX));
+        let java_home = fixture.path().join("jdks/17");
         std::fs::write(
             &path,
-            br#"{
+            serde_json::to_vec(&serde_json::json!({
                 "runtime": {
                     "mode": "auto",
                     "projects": [{
-                        "root": "/workspace/admin",
+                        "root": project_root,
                         "selection": {
                             "implementation": "jruby",
                             "family": "9.2",
                             "engineVersion": "9.2.21.0",
                             "compatibilityVersion": "2.5",
-                            "executable": "/runtimes/jruby/bin/jruby",
+                            "executable": executable,
                             "discoverySource": "rvm",
-                            "javaHome": "/jdks/17"
+                            "javaHome": java_home
                         }
                     }]
                 }
-            }"#,
+            }))
+            .expect("profiler configuration must serialize"),
         )
         .expect("profiler config fixture must be written");
 
         let config = load_profiler_config(&path);
         assert_eq!(config.runtime.projects.len(), 1);
-        assert_eq!(config.runtime.projects[0].root, "/workspace/admin");
+        assert_eq!(
+            PathBuf::from(&config.runtime.projects[0].root),
+            project_root
+        );
     }
 
     #[test]
