@@ -265,14 +265,8 @@ else
     echo "Stubs will not be included in the VSIX package"
 fi
 
-# Build the server-loaded extensions before the shared asset validator stages
-# their exact manifest, README and checksum-matching Wasm files.
-if [ "$SKIP_BUILDS" = false ]; then
-    "$ROOT_DIR/extensions/sinatra-rust/build-and-test.sh"
-    "$ROOT_DIR/extensions/cucumber-rust/build-and-test.sh"
-    "$ROOT_DIR/extensions/minitest-ruby/build-and-test.sh"
-    "$ROOT_DIR/extensions/rails-ruby/build-and-test.sh"
-fi
+# Package the reviewed Wasm assets from this checkout. Rebuilding a guest is an
+# explicit source change; packaging validates its committed manifest and bytes.
 echo "Bundling validated runtime assets and Ruby Fast LSP extensions..."
 node "$ROOT_DIR/editors/scripts/stage_package_assets.js" vsix "$EXTENSION_DIR"
 

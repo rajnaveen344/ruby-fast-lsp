@@ -191,13 +191,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip1
-
-      - name: Add Wasm target to the pinned project toolchain
-        run: rustup target add wasm32-wasip1
-
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -254,12 +247,10 @@ jobs:
           # Pre-zip stubs if script exists
           ./editors/scripts/zip_vscode_stubs.sh
 
-      - name: Build and stage validated VSIX assets
+      - name: Stage validated VSIX assets
         run: |
-          extensions/sinatra-rust/build-and-test.sh
-          extensions/cucumber-rust/build-and-test.sh
-          extensions/minitest-ruby/build-and-test.sh
-          extensions/rails-ruby/build-and-test.sh
+          # Ship the reviewed, checksum-pinned Wasm assets from this commit.
+          # Native workspace tests and archive verification exercise these bytes.
           node editors/scripts/stage_package_assets.js vsix editors/vscode/vsix
 
       - name: Install VSIX dependencies

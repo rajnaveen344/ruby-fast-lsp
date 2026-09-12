@@ -68,6 +68,19 @@ builds and installed-package verification. Linux musl, 32-bit ARM, and Windows
 ARM64 are not current package targets. A successful cross-compile is not a native
 installation test.
 
+For Linux platform changes, build and run the workspace suite in local Docker
+before dispatching native release verification. Exercise the installed npm
+tarball and assembled VSIX in that container too. Record its architecture,
+toolchain, JDK, commit, and artifact checksums. Host macOS tests and a Linux
+cross-compile do not replace these checks; Windows still needs a Windows runner.
+
+Bundled Wasm guests are versioned artifacts. Packaging validates their committed
+checksums and copies those exact bytes; the native workspace and extracted-archive
+tests exercise them. Rebuild a guest deliberately when changing its source or SDK,
+review the artifact and manifest together, and run its integration tests. Rebuilding
+during release assembly can change compiler paths and byte layout across hosts
+without changing guest behavior, so it cannot serve as a checksum acceptance test.
+
 Use the workflow's asset staging and package smoke scripts; do not hand-copy an
 incomplete subset of stubs, framework extensions, licenses, or JRuby assets.
 For a local VSIX and real VS Code acceptance:
