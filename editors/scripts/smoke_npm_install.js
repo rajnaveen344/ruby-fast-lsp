@@ -8,7 +8,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '../..');
 const platform = `${process.platform}-${process.arch}`;
-if (!['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64'].includes(platform)) {
+if (!['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64'].includes(platform)) {
   throw new Error(`No published npm package for ${platform}`);
 }
 const nodeDirectory = path.dirname(process.execPath);

@@ -125,6 +125,18 @@ impl FakeEditor {
         }
     }
 
+    /// Choose the production resource policy before starting or sharing work.
+    pub fn set_indexing_resource_policy(
+        &mut self,
+        policy: crate::indexing_resources::IndexingResourcePolicy,
+    ) {
+        assert!(
+            self.buffers.is_empty() && self.workspace_count() == 0,
+            "configure editor resources before opening documents or adding workspaces"
+        );
+        self.server.set_indexing_resource_policy(policy);
+    }
+
     /// Count actual serialized diagnostic notifications observed from the client.
     pub fn delivered_diagnostic_notifications(&self) -> u64 {
         self.client_messages.notification_count()

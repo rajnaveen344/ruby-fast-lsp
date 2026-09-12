@@ -19,7 +19,7 @@ if [ "$1" == "--dry-run" ]; then
 fi
 
 # Platform packages first (order matters — main package depends on these)
-for PKG in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+for PKG in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
   echo "Publishing @ruby-fast/lsp-${PKG}..."
   cd "$NPM_DIR/$PKG"
   npm publish --access public $DRY_RUN

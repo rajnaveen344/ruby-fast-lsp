@@ -86,6 +86,12 @@ Controlled schedules preserve the chosen ordering. Keep production clock,
 resource admission, and publication boundaries in the replay; arbitrary sleeps
 cannot reproduce a race reliably.
 
+Declare the resource policy needed by a controlled schedule. A paused worker
+still owns its admitted lane: concurrent edit/commit tests need two lanes,
+while a one-lane test must assert queuing and release the worker before waiting
+for the edit. Use the production governor for both cases; do not infer a test's
+required concurrency from the machine's CPU count.
+
 ## Explicit campaigns
 
 Scale and real-corpus acceptance are commands, not ignored tests:
@@ -101,7 +107,7 @@ project. `scale-engine` checks all modeled edges through the analysis engine.
 `corpus` requires an explicit read-only directory and retains the existing size,
 semantic-sample, and time-budget assertions. Missing or unsuitable inputs fail;
 they never become a passing test. Each successful command emits one completion
-report identifying its campaign. Release validation rejects missing, duplicate,
+report identifying its campaign. The validation runner rejects missing, duplicate,
 or mismatched reports and rejects every ignored Rust test.
 
 Generated editor edits open all changed files before sending changes. The oracle
@@ -112,10 +118,12 @@ that distinction executable.
 
 ## Broader gates and limits
 
-The [release runner](release.md) adds release-mode simulations, explicit synthetic
+The [validation runner](release.md) adds release-mode simulations, explicit synthetic
 scale tests, reviewed Ruby oracle execution, and fixed performance budgets.
 Real-corpus checks require an explicitly selected read-only workspace. Scale,
-Ruby semantics, and installed-editor behavior are different evidence.
+Ruby semantics, and installed-editor behavior are different evidence. These
+campaigns run in the independent `Validate` workflow; `Release` does not wait
+for them. Maintainers review the available evidence before choosing to publish.
 
 [support/simulation/](../../support/simulation/) holds the fault campaign and
 independent Ruby oracle controls. A mutation counts as detected only when its

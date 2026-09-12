@@ -48,7 +48,7 @@ cargo test --locked --test check_cli
 The workspace suite includes ordinary simulator cases with no ignored tests.
 Explicit scale and read-only corpus campaigns use the opt-in `simulation` binary;
 see the [commands and boundaries](../../docs/development/simulation.md#explicit-campaigns).
-The release gate runs both synthetic campaigns and records an unselected corpus
+The independent validation workflow runs both synthetic campaigns and records an unselected corpus
 as not run. Do not add an ignore to conceal a failing or flaky regression.
 
 ## What FakeEditor observes
@@ -87,6 +87,6 @@ implementation is not.
 [scorecard.toml](../../support/type_inference/scorecard.toml) and
 [real_project_precision.toml](../../support/type_inference/real_project_precision.toml)
 are reviewed inference expectations. Their report tests run in the ordinary
-workspace suite and explicitly in release validation. Fixture size, code coverage,
+workspace suite and explicitly in the validation workflow. Fixture size, code coverage,
 and passing counts do not measure how many future user defects the simulator
 will detect. Keep unsupported or unexercised forms visible.

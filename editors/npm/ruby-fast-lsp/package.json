@@ -18,6 +18,7 @@
     "@ruby-fast/lsp-darwin-arm64": "0.3.0",
     "@ruby-fast/lsp-darwin-x64": "0.3.0",
     "@ruby-fast/lsp-linux-x64": "0.3.0",
+    "@ruby-fast/lsp-linux-arm64": "0.3.0",
     "@ruby-fast/lsp-win32-x64": "0.3.0"
   }
 }

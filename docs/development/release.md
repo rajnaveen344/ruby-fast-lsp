@@ -17,7 +17,13 @@ The server/npm version uses SemVer. The release workflow computes the
 published VS Code/Open VSX CalVer separately. Do not manually apply that published
 CalVer to source manifests before their consistency check.
 
-## 2. Run the shared checks
+## 2. Review validation before choosing the release
+
+Release readiness is a maintainer decision. Run or review the independent
+`Validate` workflow before manually cutting a tag or dispatching publication.
+The `Release` workflow does not invoke or wait for `Validate`; it starts with
+native builds and retains native tests and installed-package checks. A release
+run passing does not imply that the separate simulation campaigns ran.
 
 Use the same runners as [.github/workflows/validate.yml](../../.github/workflows/validate.yml).
 The CI file also specifies toolchain prerequisites: Rust, Node, Python, Java,
@@ -41,7 +47,7 @@ with `RUBY_FAST_LSP_EVIDENCE_DIR`). The runner rejects failures, every ignored R
 simulation completion reports. Explicit campaigns are separate from the ordinary
 workspace suite; an unselected real corpus is never counted as passed.
 
-The separate CI fault-detection gate proves that reviewed injected defects fail
+The separate CI fault-detection campaign proves that reviewed injected defects fail
 their intended assertions:
 
 ```sh
@@ -56,9 +62,11 @@ and for the distinction between consistency and independent semantic evidence.
 ## 3. Validate the installed artifacts
 
 The [release workflow](../../.github/workflows/release.yml) builds and checks npm
-and VSIX packages for macOS ARM64, macOS Intel, Linux x64 GNU, and Windows x64.
-Linux ARM64/musl and Windows ARM64 are not current package targets. A successful
-cross-compile is not a native installation test.
+and VSIX packages for macOS ARM64, macOS Intel, Linux x64 GNU, Linux ARM64 GNU,
+and Windows x64. Linux ARM64 uses the native `ubuntu-24.04-arm` runner for both
+builds and installed-package verification. Linux musl, 32-bit ARM, and Windows
+ARM64 are not current package targets. A successful cross-compile is not a native
+installation test.
 
 Use the workflow's asset staging and package smoke scripts; do not hand-copy an
 incomplete subset of stubs, framework extensions, licenses, or JRuby assets.
@@ -100,10 +108,10 @@ claims require triage before broader promotion. Intended Unknown outcomes are
 separate from defects and missing validation.
 
 For a weekly extension release, dispatch the `Release` workflow on the intended
-commit with `publish_extensions=true`. It runs the same validation, native
-builds, and VSIX verification, then publishes Marketplace and Open VSX using
+commit with `publish_extensions=true`. It runs native builds, native tests,
+and VSIX verification, then publishes Marketplace and Open VSX using
 `ISO_YEAR.ISO_WEEK.PATCH`. Source manifests retain their aligned server version;
 this dispatch does not publish npm packages or create a server-version tag.
-The default manual dispatch (`publish_extensions=false`) validates and packages
+The default manual dispatch (`publish_extensions=false`) builds, checks, and packages
 without publishing. Review both registry jobs and verify the resulting versions
 before reporting the extension as published.

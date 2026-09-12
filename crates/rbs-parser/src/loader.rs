@@ -174,7 +174,35 @@ impl Loader {
     }
 
     /// Index a declaration for lookup
-    fn index_declaration(&mut self, decl: Declaration) {
+    fn index_declaration(&mut self, mut decl: Declaration) {
+        // RBS files can reopen classes and modules. Keep their accumulated
+        // declarations consistent with the method lookup index in either file
+        // discovery order (for example, Enumerable is extended by Set).
+        match &mut decl {
+            Declaration::Class(class) => {
+                if let Some(previous) = self.get_class(&class.name) {
+                    if class.type_params.is_empty() {
+                        class.type_params.clone_from(&previous.type_params);
+                    }
+                    if class.superclass.is_none() {
+                        class.superclass.clone_from(&previous.superclass);
+                    }
+                    class.members = merge_members(&previous.members, &class.members);
+                    class.methods = merge_methods(&previous.methods, &class.methods);
+                }
+            }
+            Declaration::Module(module) => {
+                if let Some(previous) = self.get_module(&module.name) {
+                    if module.type_params.is_empty() {
+                        module.type_params.clone_from(&previous.type_params);
+                    }
+                    module.self_types = merge_members(&previous.self_types, &module.self_types);
+                    module.members = merge_members(&previous.members, &module.members);
+                    module.methods = merge_methods(&previous.methods, &module.methods);
+                }
+            }
+            _ => {}
+        }
         match &decl {
             Declaration::Class(class) => {
                 let name = &class.name;
@@ -324,6 +352,33 @@ impl Loader {
     }
 }
 
+fn merge_members<T: Clone + PartialEq>(previous: &[T], added: &[T]) -> Vec<T> {
+    let mut merged = previous.to_vec();
+    for member in added {
+        if !merged.contains(member) {
+            merged.push(member.clone());
+        }
+    }
+    merged
+}
+
+fn merge_methods(previous: &[MethodDecl], added: &[MethodDecl]) -> Vec<MethodDecl> {
+    let mut merged = previous.to_vec();
+    for method in added {
+        if let Some(existing) = merged
+            .iter_mut()
+            .find(|existing| existing.name == method.name && existing.kind == method.kind)
+        {
+            // Preserve the loader's existing last-definition policy for a
+            // repeated method, while retaining all other methods on the owner.
+            existing.clone_from(method);
+        } else {
+            merged.push(method.clone());
+        }
+    }
+    merged
+}
+
 impl Default for Loader {
     fn default() -> Self {
         Self::new()
@@ -408,6 +463,81 @@ end
 
         let module = loader.get_module("Enumerable");
         assert!(module.is_some());
+    }
+
+    #[test]
+    fn reopened_declarations_retain_methods_and_ancestors_in_either_file_order() {
+        let original = "module Sequence[Elem]\n  include Support[Elem]\n  def transform: [U] () { (Elem) -> U } -> Array[U]\nend\nclass Collection[Elem] < Parent[Elem]\n  include Sequence[Elem]\n  def first: () -> Elem\nend\n";
+        let extension = "module Sequence[Elem]\n  def archive: () -> Array[Elem]\nend\nclass Collection[Elem]\n  def self.empty: () -> bool\nend\n";
+        for sources in [[original, extension], [extension, original]] {
+            let mut loader = Loader::new();
+            for source in sources {
+                loader.load_string(source, None).unwrap();
+            }
+            let module = loader.get_module("Sequence").unwrap();
+            let mut methods: Vec<_> = module
+                .methods
+                .iter()
+                .map(|method| method.name.as_str())
+                .collect();
+            methods.sort_unstable();
+            assert_eq!(
+                methods,
+                ["archive", "transform"],
+                "reopening must retain every method regardless of file discovery order"
+            );
+            assert_eq!(module.type_params, vec![TypeParam::new("Elem")]);
+            assert_eq!(module.members.len(), 1);
+            for method in &module.methods {
+                assert_eq!(
+                    loader.get_instance_method("Sequence", &method.name),
+                    Some(method)
+                );
+            }
+            let class = loader.get_class("Collection").unwrap();
+            assert_eq!(class.type_params, vec![TypeParam::new("Elem")]);
+            assert_eq!(
+                class.superclass,
+                Some(RbsType::generic("Parent", vec![RbsType::class("Elem")]))
+            );
+            assert_eq!(class.members.len(), 1);
+            assert_eq!(class.methods.len(), 2);
+            assert!(loader.get_instance_method("Collection", "first").is_some());
+            assert!(loader.get_singleton_method("Collection", "empty").is_some());
+        }
+    }
+
+    #[test]
+    fn reopened_method_keeps_declaration_and_direct_lookup_consistent() {
+        let mut loader = Loader::new();
+        loader
+            .load_string(
+                "class Container\n  def value: () -> String\n  def self.value: () -> Symbol\nend\n",
+                None,
+            )
+            .unwrap();
+        loader
+            .load_string("class Container\n  def value: () -> Integer\nend\n", None)
+            .unwrap();
+        let class = loader.get_class("Container").unwrap();
+        assert_eq!(class.methods.len(), 2);
+        let instance = class
+            .methods
+            .iter()
+            .find(|method| method.kind == MethodKind::Instance)
+            .unwrap();
+        assert_eq!(instance.return_type(), Some(&RbsType::class("Integer")));
+        assert_eq!(
+            loader.get_instance_method("Container", "value"),
+            Some(instance)
+        );
+        assert_eq!(
+            loader
+                .get_singleton_method("Container", "value")
+                .unwrap()
+                .return_type(),
+            Some(&RbsType::class("Symbol"))
+        );
     }
 
     #[test]

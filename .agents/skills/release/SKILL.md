@@ -16,8 +16,11 @@ user's requested scope; reuse authorization already given.
    dependencies, and source VSIX package/lockfile versions aligned. The exact
    checked paths are in `editors/check_package_versions.js`; run that checker.
    Updating only Cargo.toml is insufficient.
-3. Run the shared candidate gates and installed-artifact checks from the release
-   guide. Retain commit/artifact identities, results, and untested combinations.
+3. Review candidate-specific validation from the independent `Validate` workflow
+   or local checks. The maintainer decides readiness before manually cutting a
+   tag or dispatching publication; do not reintroduce `Validate` as a release
+   dependency. Retain the release workflow's native tests and installed-artifact
+   checks, and record commit/artifact identities, results, and untested combinations.
 4. Prepare concise release notes for the final change. Review the intended commit
    and tag against the tested candidate. Do not treat historical reports as fresh
    acceptance or silently include unrelated work in the release.

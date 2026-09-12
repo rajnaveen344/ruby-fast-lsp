@@ -19,6 +19,7 @@ get_target() {
     darwin-arm64) echo "aarch64-apple-darwin" ;;
     darwin-x64)   echo "x86_64-apple-darwin" ;;
     linux-x64)    echo "x86_64-unknown-linux-gnu" ;;
+    linux-arm64)  echo "aarch64-unknown-linux-gnu" ;;
     win32-x64)    echo "x86_64-pc-windows-msvc" ;;
   esac
 }
@@ -29,10 +30,11 @@ if [ "$1" = "--current-only" ]; then
     Darwin-arm64)  PLATFORMS="darwin-arm64" ;;
     Darwin-x86_64) PLATFORMS="darwin-x64" ;;
     Linux-x86_64)  PLATFORMS="linux-x64" ;;
+    Linux-aarch64|Linux-arm64) PLATFORMS="linux-arm64" ;;
     *) echo "Unknown platform: $(uname -s)-$(uname -m)"; exit 1 ;;
   esac
 else
-  PLATFORMS="darwin-arm64 darwin-x64 linux-x64 win32-x64"
+  PLATFORMS="darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64"
 fi
 
 for PLATFORM in $PLATFORMS; do
@@ -54,13 +56,13 @@ for PLATFORM in $PLATFORMS; do
 done
 
 # Sync version across all package.json files
-for PKG in ruby-fast-lsp darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+for PKG in ruby-fast-lsp darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
   sed -i '' "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" "$NPM_DIR/$PKG/package.json" 2>/dev/null || \
   sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" "$NPM_DIR/$PKG/package.json"
 done
 
 # Sync optionalDependencies versions in main package
-for DEP in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+for DEP in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
   sed -i '' "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$NPM_DIR/ruby-fast-lsp/package.json" 2>/dev/null || \
   sed -i "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$NPM_DIR/ruby-fast-lsp/package.json"
 done

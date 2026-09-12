@@ -4,7 +4,7 @@
 | --- | --- |
 | [vscode/vsix/](vscode/vsix/README.md) | VS Code adapter, language UX, extension manifest, and editor tests |
 | [vscode/create_vsix.sh](vscode/create_vsix.sh) | Assemble the VSIX for local installation |
-| [npm/](npm/) | CLI wrapper and four platform package manifests |
+| [npm/](npm/) | CLI wrapper and native platform package manifests |
 | [scripts/](scripts/) | Shared asset staging, package smoke tests, and release checks |
 | [check_package_versions.js](check_package_versions.js) | Keep source Cargo/npm/VSIX versions aligned |
 

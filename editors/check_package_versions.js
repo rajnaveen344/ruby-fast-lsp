@@ -20,6 +20,7 @@ const manifests = [
     'editors/npm/darwin-arm64/package.json',
     'editors/npm/darwin-x64/package.json',
     'editors/npm/linux-x64/package.json',
+    'editors/npm/linux-arm64/package.json',
     'editors/npm/win32-x64/package.json'
 ];
 const errors = [];

@@ -17,7 +17,11 @@ enum Completion {
     CancelAndRestart,
 }
 
-async fn edit_between_real_collection_and_commit(open_before_start: bool, completion: Completion) {
+async fn edit_between_real_collection_and_commit(
+    open_before_start: bool,
+    completion: Completion,
+    cpu_lanes: usize,
+) {
     let fixture = tempfile::tempdir().expect("neutral coordinator fixture must be writable");
     let root = fixture.path().join("project");
     std::fs::create_dir(&root).unwrap();
@@ -27,6 +31,11 @@ async fn edit_between_real_collection_and_commit(open_before_start: bool, comple
     let root_uri = Url::from_directory_path(&root).unwrap();
     let filename = path.to_str().unwrap().trim_start_matches('/').to_string();
     let mut editor = FakeEditor::with_cache_root(fixture.path().join("cache")).await;
+    // The concurrent schedule needs one lane for each producer. Set its
+    // resource contract explicitly instead of inheriting the host CPU count.
+    editor.set_indexing_resource_policy(crate::indexing_resources::IndexingResourcePolicy::new(
+        cpu_lanes, cpu_lanes,
+    ));
     let server = editor.server().clone();
     server.set_discovered_runtimes_for_tests(Vec::new());
     let workspace = server.add_workspace(root_uri.clone());
@@ -75,30 +84,55 @@ async fn edit_between_real_collection_and_commit(open_before_start: bool, comple
         server.cancel_all_indexing();
     }
     updated.release();
-    // Finish the real edit while cold work is still paused. Releasing both
-    // producers together allowed the edit to repair a stale cold commit before
-    // observation; the source-guard mutant exposed that false confidence.
-    let editor = tokio::time::timeout(Duration::from_secs(30), editing)
-        .await
-        .expect("interactive editing must finish independently of paused cold work")
-        .expect("real document handler must not panic");
     let mut attempted = server
         .indexing
         .schedule
         .arm(Point::ProjectCommitAttempted, path.clone());
-    collected.release();
-    attempted.wait().await;
-    // Observe before any coordinator tail can refresh the open document. This
-    // must catch a stale write even if a later pass would repair the damage.
-    assert_eq!(
-        editor.goto_def_at(&filename, 3, 14).await,
-        vec![Location::new(
-            uri.clone(),
-            Range::new(Position::new(1, 2), Position::new(1, 19))
-        )],
-        "a delayed cold commit must preserve the exact new method definition"
-    );
-    attempted.release();
+    let editor = if cpu_lanes == 1 {
+        // A one-lane governor correctly queues the edit while cold work owns
+        // that lane. Check admission, then let the real worker release it.
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while server.indexing_resource_snapshot().queued_tasks == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the edit must queue behind the occupied indexing lane");
+        let resources = server.indexing_resource_snapshot();
+        assert_eq!(resources.active_cpu_lanes, 1);
+        assert_eq!(resources.active_tasks, 1);
+        assert!(
+            !editing.is_finished(),
+            "the edit must respect resource admission"
+        );
+        collected.release();
+        attempted.wait().await;
+        attempted.release();
+        tokio::time::timeout(Duration::from_secs(30), editing)
+            .await
+            .expect("the queued edit must finish after cold work releases its lane")
+            .expect("real document handler must not panic")
+    } else {
+        // Finish the edit while cold work is still paused, then observe before
+        // a coordinator tail could repair a stale commit. The source-guard
+        // mutant must continue to fail this exact intermediate assertion.
+        let editor = tokio::time::timeout(Duration::from_secs(30), editing)
+            .await
+            .expect("interactive editing must finish independently of paused cold work")
+            .expect("real document handler must not panic");
+        collected.release();
+        attempted.wait().await;
+        assert_eq!(
+            editor.goto_def_at(&filename, 3, 14).await,
+            vec![Location::new(
+                uri.clone(),
+                Range::new(Position::new(1, 2), Position::new(1, 19))
+            )],
+            "a delayed cold commit must preserve the exact new method definition"
+        );
+        attempted.release();
+        editor
+    };
     let completed = tokio::time::timeout(Duration::from_secs(30), indexing)
         .await
         .expect("cold indexing must finish after the coordinator is released")
@@ -166,17 +200,22 @@ async fn edit_between_real_collection_and_commit(open_before_start: bool, comple
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_coordinator_rejects_cold_facts_after_a_startup_edit() {
-    edit_between_real_collection_and_commit(true, Completion::Commit).await;
+    edit_between_real_collection_and_commit(true, Completion::Commit, 2).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_coordinator_rejects_disk_facts_after_an_unsaved_open() {
-    edit_between_real_collection_and_commit(false, Completion::Commit).await;
+    edit_between_real_collection_and_commit(false, Completion::Commit, 2).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_coordinator_recovers_after_cancelling_collected_work() {
-    edit_between_real_collection_and_commit(true, Completion::CancelAndRestart).await;
+    edit_between_real_collection_and_commit(true, Completion::CancelAndRestart, 2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn real_coordinator_and_edit_share_a_single_resource_lane() {
+    edit_between_real_collection_and_commit(true, Completion::Commit, 1).await;
 }
 
 #[tokio::test]

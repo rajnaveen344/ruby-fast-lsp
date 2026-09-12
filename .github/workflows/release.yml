@@ -23,11 +23,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate:
-    uses: ./.github/workflows/validate.yml
-
   build:
-    needs: validate
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +44,12 @@ jobs:
             target: x86_64-unknown-linux-gnu
             npm-pkg: linux-x64
             vsix-platform: linux-x64
+            bin: ruby-fast-lsp
+
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            npm-pkg: linux-arm64
+            vsix-platform: linux-arm64
             bin: ruby-fast-lsp
 
           - os: windows-latest
@@ -154,23 +156,23 @@ jobs:
           fi
 
           # Copy built binaries into npm package dirs
-          for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+          for pkg in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
             cp -r artifacts/npm-${pkg}/* editors/npm/${pkg}/
           done
 
           # Sync version in all package.json files
-          for pkg in ruby-fast-lsp darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+          for pkg in ruby-fast-lsp darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
             sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" editors/npm/${pkg}/package.json
           done
 
           # Sync optionalDependencies versions
-          for dep in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+          for dep in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
             sed -i "s|\"@ruby-fast/lsp-${dep}\": \".*\"|\"@ruby-fast/lsp-${dep}\": \"${VERSION}\"|" editors/npm/ruby-fast-lsp/package.json
           done
 
       - name: Publish platform packages
         run: |
-          for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+          for pkg in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
             echo "Publishing @ruby-fast/lsp-${pkg}@${VERSION}..."
             (cd editors/npm/${pkg} && npm publish --access public)
           done
@@ -230,7 +232,7 @@ jobs:
           echo "VSIX version: ${VSIX_VERSION}"
 
           # Move binaries into place
-          for platform in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
             mkdir -p editors/vscode/vsix/bin/${platform}
             cp -r editors/vscode/vsix/bin-artifacts/vsix-bin-${platform}/* editors/vscode/vsix/bin/${platform}/
           done
@@ -281,7 +283,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, macos-15-intel, ubuntu-latest, windows-latest]
+        os: [macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5

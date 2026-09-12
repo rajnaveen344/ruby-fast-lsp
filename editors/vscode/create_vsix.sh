@@ -16,8 +16,8 @@ SELECTED_PLATFORMS=""
 node "$ROOT_DIR/editors/check_package_versions.js"
 
 # Define target platforms and architectures as arrays
-ALL_PLATFORMS=("macos-x64" "macos-arm64" "linux-x64" "win32-x64")
-ALL_TARGETS=("x86_64-apple-darwin" "aarch64-apple-darwin" "x86_64-unknown-linux-gnu" "x86_64-pc-windows-msvc")
+ALL_PLATFORMS=("macos-x64" "macos-arm64" "linux-x64" "linux-arm64" "win32-x64")
+ALL_TARGETS=("x86_64-apple-darwin" "aarch64-apple-darwin" "x86_64-unknown-linux-gnu" "aarch64-unknown-linux-gnu" "x86_64-pc-windows-msvc")
 
 # Determine current platform
 CURRENT_PLATFORM=""
@@ -30,6 +30,8 @@ if [ "$(uname)" == "Darwin" ]; then
 elif [ "$(uname)" == "Linux" ]; then
     if [ "$(uname -m)" == "x86_64" ]; then
         CURRENT_PLATFORM="linux-x64"
+    elif [ "$(uname -m)" == "aarch64" ] || [ "$(uname -m)" == "arm64" ]; then
+        CURRENT_PLATFORM="linux-arm64"
     fi
 else
     # Assuming Windows
@@ -65,7 +67,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --rebuild               Force rebuild of the LSP binary"
             echo "  --skip-builds           Skip building binaries (use existing ones)"
             echo "  --platforms LIST        Comma-separated list of platforms to build for"
-            echo "                          Available: macos-x64,macos-arm64,linux-x64,linux-arm64,win32-x64,win32-arm64"
+            echo "                          Available: macos-x64,macos-arm64,linux-x64,linux-arm64,win32-x64"
             echo "  --current-platform-only Build only for the current platform ($CURRENT_PLATFORM)"
             echo "  --help                  Show this help message"
             exit 0
@@ -329,6 +331,6 @@ done
 
 echo ""
 echo "To build for additional platforms, use the --platforms option:"
-echo "  ./editors/vscode/create_vsix.sh --platforms macos-x64,macos-arm64,linux-x64,linux-arm64,win32-x64,win32-arm64"
+echo "  ./editors/vscode/create_vsix.sh --platforms macos-x64,macos-arm64,linux-x64,linux-arm64,win32-x64"
 echo "  or"
 echo "  ./editors/vscode/create_vsix.sh --platforms all"

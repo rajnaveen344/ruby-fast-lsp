@@ -104,9 +104,7 @@ impl<'a> Visitor<'a> {
                     class.type_params = self.visit_type_parameters(child)?;
                 }
                 "superclass" | "class_super" => {
-                    if let Some(type_node) = child.child(0) {
-                        class.superclass = Some(self.visit_type(type_node)?);
-                    }
+                    class.superclass = Some(self.visit_member_target(child)?);
                 }
                 "members" | "class_body" => {
                     self.visit_members(child, &mut class.members, &mut class.methods)?;

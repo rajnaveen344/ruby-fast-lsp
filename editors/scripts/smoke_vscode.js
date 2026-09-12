@@ -45,7 +45,7 @@ async function main() {
     const manifest = JSON.parse(fs.readFileSync(path.join(extensionRoot, 'package.json'), 'utf8'));
     assert.ok(manifest.publisher && manifest.name && manifest.main, 'The extracted VSIX must contain its extension identity and entry point.');
     assert.ok(fs.statSync(path.join(extensionRoot, manifest.main)).isFile(), 'The exact VSIX is missing its extension entry point.');
-    const platforms = { 'darwin-arm64': 'macos-arm64', 'darwin-x64': 'macos-x64', 'linux-x64': 'linux-x64', 'win32-x64': 'win32-x64' };
+    const platforms = { 'darwin-arm64': 'macos-arm64', 'darwin-x64': 'macos-x64', 'linux-x64': 'linux-x64', 'linux-arm64': 'linux-arm64', 'win32-x64': 'win32-x64' };
     const platform = platforms[report.platform];
     assert.ok(platform, `Unsupported VSIX editor-test platform: ${report.platform}`);
     const binaryName = process.platform === 'win32' ? 'ruby-fast-lsp.exe' : 'ruby-fast-lsp';
