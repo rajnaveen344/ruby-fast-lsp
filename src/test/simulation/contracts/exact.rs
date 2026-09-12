@@ -30,7 +30,7 @@ fn range(line: u32, start: u32, end: u32) -> Range {
 }
 
 fn uri(file: &str) -> Url {
-    Url::parse(&format!("file:///{file}")).expect("neutral fixture URI must be valid")
+    crate::test::harness::fixture_uri(format!("/{file}"))
 }
 
 fn location(file: &str, line: u32, start: u32, end: u32) -> Location {

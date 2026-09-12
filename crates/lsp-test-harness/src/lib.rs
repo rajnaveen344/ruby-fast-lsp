@@ -376,6 +376,36 @@ impl FakeEditor {
 }
 
 pub fn filename_to_uri(filename: &str) -> Url {
-    Url::parse(&format!("file:///{}", filename.trim_start_matches('/')))
-        .expect("INVARIANT VIOLATED: FakeEditor built invalid file URI. This is a bug because test filenames must map to file:// URIs. Fix: sanitize filename_to_uri input.")
+    let path = std::path::Path::new(filename);
+    #[cfg(windows)]
+    let root = std::path::Path::new("C:/");
+    #[cfg(not(windows))]
+    let root = std::path::Path::new("/");
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path.strip_prefix("/").unwrap_or(path))
+    };
+    Url::from_file_path(path)
+        .expect("INVARIANT VIOLATED: FakeEditor built invalid file URI. This is a bug because test filenames must map to native file:// URIs. Fix: preserve an absolute native path in filename_to_uri.")
+}
+
+#[test]
+fn editor_file_uri_preserves_the_complete_native_filename() {
+    #[cfg(windows)]
+    let expected = std::path::PathBuf::from("C:/nested/shape #1.rb");
+    #[cfg(not(windows))]
+    let expected = std::path::PathBuf::from("/nested/shape #1.rb");
+    assert_eq!(
+        filename_to_uri("nested/shape #1.rb")
+            .to_file_path()
+            .unwrap(),
+        expected
+    );
+    assert_eq!(
+        filename_to_uri(expected.to_str().unwrap())
+            .to_file_path()
+            .unwrap(),
+        expected
+    );
 }

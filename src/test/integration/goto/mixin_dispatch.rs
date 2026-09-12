@@ -2,7 +2,7 @@
 
 use crate::test::harness::{check_multi_file, FakeEditor};
 use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyMethod, RubyType};
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp::lsp_types::Location;
 
 const FEATURE: &str = "module Feature
   include Defaults
@@ -34,7 +34,7 @@ fn assert_targets(locations: &[Location], expected: &[(&str, u32)]) {
     actual.sort();
     let mut expected = expected
         .iter()
-        .map(|(file, line)| (Url::parse(&format!("file:///{file}")).unwrap(), *line))
+        .map(|(file, line)| (crate::test::harness::fixture_uri(format!("/{file}")), *line))
         .collect::<Vec<_>>();
     expected.sort();
     assert_eq!(
@@ -60,7 +60,7 @@ async fn mixin_dispatch_follows_host_override_after_edits() {
             .await
             .iter()
             .any(|location| {
-                location.uri == Url::parse("file:///feature.rb").unwrap()
+                location.uri == crate::test::harness::fixture_uri("/feature.rb")
                     && location.range.start.line == 3
             }),
         "references must agree with the effective override"
@@ -128,7 +128,7 @@ async fn mixin_dispatch_unknown_override_does_not_reuse_default_type() {
     let return_type = |editor: &FakeEditor| {
         let engine = editor
             .server()
-            .analysis_engine_for_uri(&Url::parse("file:///feature.rb").unwrap());
+            .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
         let engine = engine.read();
         engine.query().method_return_type_for_receiver(
             &FullyQualifiedName::namespace(vec![RubyConstant::new("Feature").unwrap()]),

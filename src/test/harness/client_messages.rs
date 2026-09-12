@@ -88,7 +88,7 @@ async fn missing_client_notification_cannot_satisfy_an_empty_diagnostic_assertio
         crate::server::RubyLanguageServer::new(client).expect("construct client observer control")
     });
     let messages = ClientMessages::listen(socket);
-    let uri = Url::parse("file:///observer/unpublished.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/observer/unpublished.rb");
     // A submitted empty array is only an expectation. Until an actual client
     // message arrives, the observer must stay pending instead of returning it.
     assert!(

@@ -90,7 +90,7 @@ mod tests {
         let source = "class User\n  def name\n  end\nend";
         let mut engine = AnalysisEngine::new();
         let file_id = engine.register_file(SourceFileInput {
-            path: "/tmp/user.rb".into(),
+            path: crate::test::harness::fixture_path("/tmp/user.rb"),
             content: source.into(),
             kind: SourceKind::Project,
         });

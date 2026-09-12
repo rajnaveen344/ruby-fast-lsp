@@ -572,6 +572,10 @@ fn wait_for_bounded_child(
                 Err(JavaDecompilerError::AbnormalExit(status.code()))
             };
         }
+        if started.elapsed() >= timeout {
+            terminate_and_reap(child);
+            return Err(JavaDecompilerError::Timeout);
+        }
         let resident_bytes = match resident_memory_bytes(child.id()) {
             Ok(Some(resident_bytes)) => resident_bytes,
             Ok(None) => {
@@ -589,10 +593,6 @@ fn wait_for_bounded_child(
                 limit_bytes: max_process_resident_bytes,
                 observed_bytes: resident_bytes,
             });
-        }
-        if started.elapsed() >= timeout {
-            terminate_and_reap(child);
-            return Err(JavaDecompilerError::Timeout);
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -639,36 +639,42 @@ fn resident_memory_bytes(pid: u32) -> Result<Option<u64>, String> {
 
 #[cfg(target_os = "linux")]
 fn resident_memory_bytes(pid: u32) -> Result<Option<u64>, String> {
-    let statm_path = PathBuf::from(format!("/proc/{pid}/statm"));
-    let statm = match fs::read_to_string(&statm_path) {
-        Ok(statm) => statm,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("failed to read {}: {error}", statm_path.display())),
+    // statm/VmRSS use asynchronous counters and can overcount resident memory.
+    // A hard process limit needs the accurate page-table accounting in smaps_rollup.
+    let path = PathBuf::from(format!("/proc/{pid}/smaps_rollup"));
+    let report = match fs::read_to_string(&path) {
+        Ok(report) => report,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(libc::ESRCH) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(format!("failed to read {}: {error}", path.display())),
     };
-    let resident_pages = statm
-        .split_whitespace()
-        .nth(1)
-        .ok_or_else(|| format!("{} has no resident-page field", statm_path.display()))?
-        .parse::<u64>()
-        .map_err(|error| {
-            format!(
-                "{} has an invalid resident-page field: {error}",
-                statm_path.display()
-            )
-        })?;
-    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    if page_size <= 0 {
-        return Err(format!(
-            "sysconf(_SC_PAGESIZE) failed: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
-    let page_size = u64::try_from(page_size)
-        .map_err(|_| format!("negative page size `{page_size}` escaped validation"))?;
-    resident_pages
-        .checked_mul(page_size)
+    parse_linux_resident_bytes(&report)
         .map(Some)
-        .ok_or_else(|| format!("resident bytes overflowed for child {pid}"))
+        .map_err(|error| format!("{}: {error}", path.display()))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_linux_resident_bytes(report: &str) -> Result<u64, String> {
+    let resident = report
+        .lines()
+        .find_map(|line| line.strip_prefix("Rss:"))
+        .ok_or_else(|| "missing Rss field".to_string())?;
+    let mut fields = resident.split_whitespace();
+    let kibibytes = fields
+        .next()
+        .ok_or_else(|| "missing Rss value".to_string())?
+        .parse::<u64>()
+        .map_err(|error| format!("invalid Rss value: {error}"))?;
+    if fields.next() != Some("kB") || fields.next().is_some() {
+        return Err("invalid Rss unit; expected kB".to_string());
+    }
+    kibibytes
+        .checked_mul(1024)
+        .ok_or_else(|| "resident bytes overflowed".to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -918,7 +924,10 @@ mod tests {
         for candidate in [
             std::env::var_os("JAVA_HOME")
                 .map(PathBuf::from)
-                .map(|home| home.join("bin/java")),
+                .map(|home| {
+                    home.join("bin")
+                        .join(format!("java{}", std::env::consts::EXE_SUFFIX))
+                }),
             Some(PathBuf::from("/opt/homebrew/opt/openjdk/bin/java")),
             Some(PathBuf::from("/usr/local/opt/openjdk/bin/java")),
         ]
@@ -999,6 +1008,26 @@ mod tests {
             decompiler.decompile(&declaration),
             Err(JavaDecompilerError::AssetFingerprintMismatch(asset.path))
         );
+    }
+
+    #[test]
+    fn linux_resident_report_uses_rss_and_rejects_unverifiable_values() {
+        assert_eq!(
+            parse_linux_resident_bytes(
+                "1000-2000 ---p 00000000 00:00 0 [rollup]\nRss: 1234 kB\nPss: 567 kB\n"
+            ),
+            Ok(1234 * 1024)
+        );
+        for report in [
+            "Pss: 1 kB\n",
+            "Rss: -1 kB\n",
+            "Rss: unknown kB\n",
+            "Rss: 10 MB\n",
+            "Rss: 10 kB unexpected\n",
+            "Rss: 18446744073709551615 kB\n",
+        ] {
+            assert!(parse_linux_resident_bytes(report).is_err(), "{report}");
+        }
     }
 
     #[test]

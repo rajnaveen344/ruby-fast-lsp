@@ -148,15 +148,13 @@ impl FakeEditor {
     /// `root` (e.g. `add_workspace("workspace_a"); open("workspace_a/foo.rb", ..)`)
     /// will route to that workspace's index instead of the orphan index.
     pub fn add_workspace(&self, root: &str) {
-        let uri = Url::parse(&format!("file:///{}/", root.trim_end_matches('/')))
-            .expect("Invalid workspace URI");
+        let uri = super::fixture_uri(format!("{}/", root.trim_end_matches('/')));
         self.server.add_workspace(uri);
     }
 
     /// Remove a previously added workspace folder.
     pub fn remove_workspace(&self, root: &str) {
-        let uri = Url::parse(&format!("file:///{}/", root.trim_end_matches('/')))
-            .expect("Invalid workspace URI");
+        let uri = super::fixture_uri(format!("{}/", root.trim_end_matches('/')));
         self.server.remove_workspace(&uri);
     }
 
@@ -934,7 +932,7 @@ impl FakeEditor {
 
     /// Convert a filename to a virtual URI.
     pub(super) fn filename_to_uri(filename: &str) -> Url {
-        Url::parse(&format!("file:///{}", filename)).expect("Invalid virtual URI")
+        super::fixture_uri(filename)
     }
 
     /// Assert a file is open, panicking with a clear message if not.

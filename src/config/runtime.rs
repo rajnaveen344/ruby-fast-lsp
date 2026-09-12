@@ -292,9 +292,9 @@ mod tests {
             family: "9.2".to_string(),
             engine_version: "9.2.21.0".to_string(),
             compatibility_version: "2.5".to_string(),
-            executable: PathBuf::from("/runtimes/jruby-9.2.21.0/bin/jruby"),
+            executable: crate::test::harness::fixture_path("/runtimes/jruby-9.2.21.0/bin/jruby"),
             discovery_source: RuntimeDiscoverySource::Rvm,
-            java_home: Some(PathBuf::from("/jdks/17")),
+            java_home: Some(crate::test::harness::fixture_path("/jdks/17")),
         }
     }
 

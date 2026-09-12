@@ -66,7 +66,7 @@ fn method_fact_in_path(
         }
         engine
             .file(fact.range.file_id)
-            .map(|file| file.path.to_string_lossy().ends_with(path_suffix))
+            .map(|file| file.path.ends_with(path_suffix))
             .unwrap_or(false)
     })
 }

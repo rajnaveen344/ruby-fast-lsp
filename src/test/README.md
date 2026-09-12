@@ -32,6 +32,11 @@ the owning production layer, then run that test and related coverage. Add a
 recovery observation when an edit or delayed result caused the defect. Do not
 copy application code, private paths, or business examples into the repository.
 
+Use `harness::fixture_uri` and `fixture_path` for in-memory files. They preserve
+the same fixture names while producing absolute paths on every supported OS.
+Use temporary directories for disk-backed cases. Avoid hardcoded Unix file URLs
+and compare filesystem paths as paths, including when checking suffixes.
+
 Inline fixtures use `$0` for the cursor and tags such as `<def>`, `<ref>`,
 `<type>`, `<err>`, `<warn>`, `<hint label="...">`, and
 `<complete items="..." excludes="...">`. The

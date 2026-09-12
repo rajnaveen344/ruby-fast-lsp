@@ -3,12 +3,11 @@
 use crate::capabilities::folding_range::FoldingRangeVisitor;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_prism::Visit;
-use tower_lsp::lsp_types::Url;
 
 #[test]
 fn test_folding_range_class() {
     let content = "class MyClass\n  def method\n    puts 'hello'\n  end\nend";
-    let uri = Url::parse("file:///test.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/test.rb");
     let document = RubyDocument::new(uri, content.to_string(), 1);
 
     let parse_result = ruby_prism::parse(content.as_bytes());
@@ -27,7 +26,7 @@ fn test_folding_range_class() {
 #[test]
 fn test_folding_range_control_flow() {
     let content = "if condition\n  puts 'true'\nelse\n  puts 'false'\nend";
-    let uri = Url::parse("file:///test.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/test.rb");
     let document = RubyDocument::new(uri, content.to_string(), 1);
 
     let parse_result = ruby_prism::parse(content.as_bytes());
@@ -43,7 +42,7 @@ fn test_folding_range_control_flow() {
 #[test]
 fn test_folding_range_multiline_array() {
     let content = "array = [\n  1,\n  2,\n  3\n]";
-    let uri = Url::parse("file:///test.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/test.rb");
     let document = RubyDocument::new(uri, content.to_string(), 1);
 
     let parse_result = ruby_prism::parse(content.as_bytes());
@@ -59,7 +58,7 @@ fn test_folding_range_multiline_array() {
 #[test]
 fn test_folding_range_single_line_no_fold() {
     let content = "puts 'hello world'";
-    let uri = Url::parse("file:///test.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/test.rb");
     let document = RubyDocument::new(uri, content.to_string(), 1);
 
     let parse_result = ruby_prism::parse(content.as_bytes());
@@ -126,7 +125,7 @@ for i in 1..5
 end
 "#;
 
-    let uri = Url::parse("file:///test.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/test.rb");
     let document = RubyDocument::new(uri, content.to_string(), 1);
 
     let parse_result = ruby_prism::parse(content.as_bytes());

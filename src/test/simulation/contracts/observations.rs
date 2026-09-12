@@ -3,12 +3,12 @@
 
 use crate::test::harness::FakeEditor;
 use ruby_analysis::engine::{FileFacts, ResolveMode};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 #[tokio::test]
 async fn diagnostic_publication_distinguishes_absence_from_an_empty_clear() {
     let editor = FakeEditor::new().await;
-    let uri = Url::parse("file:///not-open.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/not-open.rb");
     assert_eq!(editor.server().last_diagnostic_publication(&uri), None);
     editor
         .server()
@@ -24,7 +24,7 @@ async fn diagnostic_publication_distinguishes_absence_from_an_empty_clear() {
 async fn diagnostic_observation_retains_published_output_and_empty_clears() {
     let mut editor = FakeEditor::new().await;
     editor.open("observation.rb", "value = 1\n").await;
-    let uri = Url::parse("file:///observation.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/observation.rb");
     let published = vec![Diagnostic {
         range: Range::new(Position::new(0, 0), Position::new(0, 5)),
         severity: Some(DiagnosticSeverity::WARNING),
@@ -59,7 +59,7 @@ async fn diagnostic_observation_cannot_repair_missing_semantic_facts() {
             "class Service\n  def call; missing; end\nend\n",
         )
         .await;
-    let uri = Url::parse("file:///observation.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/observation.rb");
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let document = editor
         .server()
@@ -87,7 +87,7 @@ async fn diagnostic_observation_cannot_repair_missing_semantic_facts() {
 async fn tagged_diagnostic_observation_retains_published_output() {
     let mut editor = FakeEditor::new().await;
     editor.open("observation.rb", "value = 1\n").await;
-    let uri = Url::parse("file:///observation.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/observation.rb");
     editor
         .server()
         .publish_diagnostics(
@@ -113,7 +113,7 @@ async fn tagged_diagnostic_observation_cannot_repair_missing_semantic_facts() {
     let mut editor = FakeEditor::new().await;
     let source = "class Service\n  def call; missing; end\nend\n";
     editor.open("observation.rb", source).await;
-    let uri = Url::parse("file:///observation.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/observation.rb");
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let document = editor
         .server()
@@ -187,7 +187,7 @@ async fn opening_another_project_cannot_rebuild_or_publish_this_projects_state()
     editor.add_workspace("alpha");
     editor.add_workspace("beta");
     editor.open("alpha/caller.rb", "value = VALUE\n").await;
-    let uri = Url::parse("file:///alpha/caller.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/alpha/caller.rb");
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let document = editor
         .server()
@@ -224,8 +224,8 @@ async fn editing_a_definition_cannot_refresh_another_projects_consumer() {
     editor.add_workspace("beta");
     editor.open("alpha/caller.rb", "_value = VALUE\n").await;
     editor.open("beta/definition.rb", "VALUE = 1\n").await;
-    let alpha_uri = Url::parse("file:///alpha/caller.rb").unwrap();
-    let beta_uri = Url::parse("file:///beta/definition.rb").unwrap();
+    let alpha_uri = crate::test::harness::fixture_uri("/alpha/caller.rb");
+    let beta_uri = crate::test::harness::fixture_uri("/beta/definition.rb");
     let alpha = editor.server().analysis_engine_for_uri(&alpha_uri);
     let beta = editor.server().analysis_engine_for_uri(&beta_uri);
     let alpha_facts = alpha.read().semantic_result_fingerprint();

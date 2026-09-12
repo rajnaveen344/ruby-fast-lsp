@@ -3612,8 +3612,10 @@ mod tests {
                 platform: "ruby".to_string(),
                 locked_version: "9.0.0".to_string(),
                 source: GemSource::GlobalInstalled,
-                path: PathBuf::from("/global/example-9.0.0"),
-                lib_paths: vec![PathBuf::from("/global/example-9.0.0/lib")],
+                path: crate::test::harness::fixture_path("/global/example-9.0.0"),
+                lib_paths: vec![crate::test::harness::fixture_path(
+                    "/global/example-9.0.0/lib",
+                )],
                 dependencies: Vec::new(),
                 is_default: false,
             }],
@@ -3696,9 +3698,9 @@ mod tests {
         std::fs::create_dir_all(installed_path.join("lib")).unwrap();
         let mut indexer = create_cached_gem_indexer(workspace.path(), extraction_cache.path());
         indexer.set_selected_runtime(
-            PathBuf::from("/runtimes/jruby/bin/jruby"),
+            crate::test::harness::fixture_path("/runtimes/jruby/bin/jruby"),
             RubyImplementation::JRuby,
-            Some(PathBuf::from("/jdks/17")),
+            Some(crate::test::harness::fixture_path("/jdks/17")),
         );
         indexer.detect_active_ruby_engine().unwrap();
         indexer.discovered_gems.insert(
@@ -3980,8 +3982,8 @@ end
                 platform: "ruby".to_string(),
                 locked_version: "3.13.2".to_string(),
                 source: GemSource::BundlerInstalled,
-                path: PathBuf::from("/tmp/rspec"),
-                lib_paths: vec![PathBuf::from("/tmp/rspec/lib")],
+                path: crate::test::harness::fixture_path("/tmp/rspec"),
+                lib_paths: vec![crate::test::harness::fixture_path("/tmp/rspec/lib")],
                 dependencies: vec![
                     "rspec-core".to_string(),
                     "rspec-expectations".to_string(),
@@ -3998,8 +4000,8 @@ end
                 platform: "ruby".to_string(),
                 locked_version: "3.13.6".to_string(),
                 source: GemSource::BundlerInstalled,
-                path: PathBuf::from("/tmp/rspec-core"),
-                lib_paths: vec![PathBuf::from("/tmp/rspec-core/lib")],
+                path: crate::test::harness::fixture_path("/tmp/rspec-core"),
+                lib_paths: vec![crate::test::harness::fixture_path("/tmp/rspec-core/lib")],
                 dependencies: vec!["rspec-support".to_string()],
                 is_default: false,
             }],
@@ -4012,8 +4014,8 @@ end
                 platform: "ruby".to_string(),
                 locked_version: "3.13.7".to_string(),
                 source: GemSource::BundlerInstalled,
-                path: PathBuf::from("/tmp/rspec-support"),
-                lib_paths: vec![PathBuf::from("/tmp/rspec-support/lib")],
+                path: crate::test::harness::fixture_path("/tmp/rspec-support"),
+                lib_paths: vec![crate::test::harness::fixture_path("/tmp/rspec-support/lib")],
                 dependencies: Vec::new(),
                 is_default: false,
             }],
@@ -4094,8 +4096,8 @@ end
                 platform: "ruby".to_string(),
                 locked_version: "8.0.0".to_string(),
                 source: GemSource::BundlerInstalled,
-                path: PathBuf::from("/tmp/rails"),
-                lib_paths: vec![PathBuf::from("/tmp/rails/lib")],
+                path: crate::test::harness::fixture_path("/tmp/rails"),
+                lib_paths: vec![crate::test::harness::fixture_path("/tmp/rails/lib")],
                 dependencies: vec!["activesupport".to_string()],
                 is_default: false,
             }],

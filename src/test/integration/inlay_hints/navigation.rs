@@ -108,21 +108,20 @@ async fn compact_inlay_navigation_retains_abbreviated_identity_after_provider_ed
 async fn compact_inlay_navigation_retains_external_project_context() {
     use crate::indexer::file_processor::FileProcessor;
     use ruby_analysis::core::SourceKind;
-    use tower_lsp::lsp_types::Url;
 
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("workspace_a");
     editor.add_workspace("workspace_b");
     let processor =
         FileProcessor::with_extension_registry(editor.server().extensions.registry().clone());
-    let entry_uri = Url::parse("file:///external/catalog/lib/entry.rb").unwrap();
+    let entry_uri = crate::test::harness::fixture_uri("/external/catalog/lib/entry.rb");
     let source = "module Catalog\n  class Entry\n    Inner\n  end\nend\n";
     for project in ["workspace_a", "workspace_b"] {
         let workspace = editor.workspace_for(&format!("{project}/app.rb")).unwrap();
         for (uri, content) in [
             (entry_uri.clone(), source),
             (
-                Url::parse(&format!("file:///external/catalog/lib/{project}.rb")).unwrap(),
+                crate::test::harness::fixture_uri(format!("/external/catalog/lib/{project}.rb")),
                 "module Catalog; class Inner; end; end\n",
             ),
         ] {

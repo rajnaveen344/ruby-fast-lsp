@@ -2421,7 +2421,7 @@ mod tests {
     };
     use ruby_prism::Visit;
     use std::collections::BTreeMap;
-    use std::path::PathBuf;
+
     use tower_lsp::lsp_types::Url;
 
     fn catalog(class_names: &[&str]) -> Arc<ProjectJavaCatalog> {
@@ -2447,7 +2447,7 @@ mod tests {
                             record_components: Vec::new(),
                             module_name: None,
                         }),
-                        artifact_path: PathBuf::from("/fixture/runtime.jar"),
+                        artifact_path: crate::test::harness::fixture_path("/fixture/runtime.jar"),
                         artifact_fingerprint_sha256: "fixture".to_string(),
                         entry_name: format!("{name}.class"),
                         release: None,
@@ -2492,7 +2492,7 @@ mod tests {
     }
 
     fn collect_with_provider(source: &str, provider: Arc<JrubyImportProvider>) -> FactCollector {
-        let path = PathBuf::from("/workspace/admin/imports.rb");
+        let path = crate::test::harness::fixture_path("/workspace/admin/imports.rb");
         let uri = Url::from_file_path(&path).expect("fixture path must be a file URI");
         let mut engine = AnalysisEngine::new();
         let file_id = engine.register_file(SourceFileInput {

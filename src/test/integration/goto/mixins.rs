@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::Location;
 // ============================================================================
 
 fn filename_to_uri(name: &str) -> tower_lsp::lsp_types::Url {
-    tower_lsp::lsp_types::Url::parse(&format!("file:///{name}")).unwrap()
+    crate::test::harness::fixture_uri(format!("/{name}"))
 }
 
 fn assert_hits_file(locs: &[Location], expected_filename: &str) {

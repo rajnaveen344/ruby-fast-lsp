@@ -323,12 +323,12 @@ pub fn extract_tags_with_attributes(text: &str, tag_names: &[&str]) -> (Vec<Tag>
 
 /// Virtual URI used for inline fixtures.
 fn virtual_uri() -> Url {
-    Url::parse("file:///inline_test.rb").expect("Invalid virtual URI")
+    crate::test::harness::fixture_uri("/inline_test.rb")
 }
 
 /// Virtual URI with custom filename
 fn virtual_uri_with_name(name: &str) -> Url {
-    Url::parse(&format!("file:///{}", name)).expect("Invalid virtual URI")
+    super::fixture_uri(name)
 }
 
 /// Sets up a server with an inline fixture loaded.

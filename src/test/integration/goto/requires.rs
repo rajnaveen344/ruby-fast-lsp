@@ -5,7 +5,7 @@ use crate::test::harness::FakeEditor;
 use tower_lsp::lsp_types::{Location, NumberOrString, Position, Url};
 
 fn filename_to_uri(name: &str) -> Url {
-    Url::parse(&format!("file:///{name}")).unwrap()
+    crate::test::harness::fixture_uri(format!("/{name}"))
 }
 
 fn assert_hits_file(locs: &[Location], expected_filename: &str) {

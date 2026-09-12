@@ -172,7 +172,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tower_lsp::lsp_types::{
-        DidOpenTextDocumentParams, TextDocumentIdentifier, TextDocumentItem, Url,
+        DidOpenTextDocumentParams, TextDocumentIdentifier, TextDocumentItem,
     };
 
     fn create_test_range() -> Range {
@@ -326,8 +326,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn request_time_extension_symbols_wait_for_admission_without_blocking_reactor() {
-        let uri =
-            Url::parse("file:///tmp/governed_document_symbols.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/governed_document_symbols.rb");
         let mut server = RubyLanguageServer::default();
         server
             .indexing

@@ -8,7 +8,6 @@ use ruby_analysis::engine::{AnalysisEngine, FileFacts, SourceFileSnapshot};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use tower_lsp::lsp_types::Url;
 
 const FILE: &str = "release_alpha/service.rb";
 const OLD: &str = "class Service\n  def old_value; 1; end\n  def call; old_value; end\nend\n";
@@ -22,7 +21,7 @@ struct Collected {
 }
 
 fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
-    let uri = Url::parse(&format!("file:///{filename}")).unwrap();
+    let uri = crate::test::harness::fixture_uri(format!("/{filename}"));
     let path = uri.to_file_path().unwrap();
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let snapshot = engine.read().source_snapshot_for_path(&path).unwrap();
@@ -153,7 +152,7 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
         editor.add_workspace("release_beta");
         editor.open(FILE, OLD).await;
         let old = collect(&editor, FILE, OLD);
-        let uri = Url::parse(&format!("file:///{FILE}")).unwrap();
+        let uri = crate::test::harness::fixture_uri(format!("/{FILE}"));
         let engine = editor.server().analysis_engine_for_uri(&uri);
         match seed {
             0 => {
@@ -192,7 +191,7 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
             4 => {
                 let other_file = "release_beta/service.rb";
                 editor.open(other_file, NEW).await;
-                let other_uri = Url::parse(&format!("file:///{other_file}")).unwrap();
+                let other_uri = crate::test::harness::fixture_uri(format!("/{other_file}"));
                 let other_engine = editor.server().analysis_engine_for_uri(&other_uri);
                 assert!(!release_commit(pending_commit(old, other_engine)).await,
                     "project-specific facts must never cross isolated engines");

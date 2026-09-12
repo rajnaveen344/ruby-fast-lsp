@@ -760,7 +760,7 @@ async fn cross_file_instance_variable_constructor_receiver_has_engine_proof() {
         )
         .await;
 
-    let uri = tower_lsp::lsp_types::Url::parse("file:///client.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/client.rb");
     let document = editor.server().get_doc(&uri).unwrap();
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let engine = engine.read();

@@ -2182,7 +2182,7 @@ mod tests {
         let server = RubyLanguageServer::default();
         let processor =
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
-        let uri = Url::parse("file:///app/user.rb").unwrap();
+        let uri = crate::test::harness::fixture_uri("/app/user.rb");
 
         let initial = processor
             .process_file_current_file_resolution_forced(
@@ -2519,7 +2519,7 @@ mod tests {
         let server = RubyLanguageServer::default();
         let processor =
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
-        let uri = Url::parse("file:///project/Rakefile").unwrap();
+        let uri = crate::test::harness::fixture_uri("/project/Rakefile");
         let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nrequire File.expand_path('../config/application', __FILE__)\nExampleApp::Application.load_tasks\n";
 
         let result = processor
@@ -2534,8 +2534,8 @@ mod tests {
         let server = RubyLanguageServer::default();
         let processor =
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
-        let helpers_uri = Url::parse("file:///project/helpers.rb").unwrap();
-        let app_uri = Url::parse("file:///project/app.rb").unwrap();
+        let helpers_uri = crate::test::harness::fixture_uri("/project/helpers.rb");
+        let app_uri = crate::test::harness::fixture_uri("/project/app.rb");
         let helpers = "module API\n  module Catalog\n    def get_images\n    end\n  end\n\n  include Catalog\nend\n";
         let app = "class Base\n  include API\nend\n\nclass PlatformApp < Base\n  def route\n    get_images\n  end\nend\n";
 
@@ -2577,8 +2577,8 @@ mod tests {
         let server = RubyLanguageServer::default();
         let processor =
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
-        let declaration_uri = Url::parse("file:///project/types.rb").unwrap();
-        let reopening_uri = Url::parse("file:///project/reopening.rb").unwrap();
+        let declaration_uri = crate::test::harness::fixture_uri("/project/types.rb");
+        let reopening_uri = crate::test::harness::fixture_uri("/project/reopening.rb");
 
         processor
             .process_file_current_file_resolution_forced(
@@ -2617,10 +2617,11 @@ mod tests {
     #[test]
     fn explicit_project_engine_owns_external_gem_source() {
         let server = RubyLanguageServer::default();
-        let project_uri = Url::parse("file:///workspace/server/").unwrap();
+        let project_uri = crate::test::harness::fixture_uri("/workspace/server/");
         let project = server.add_workspace(project_uri);
-        let dependency_uri =
-            Url::parse("file:///workspace/server/vendor/cache/pbkdf2/lib/pbkdf2.rb").unwrap();
+        let dependency_uri = crate::test::harness::fixture_uri(
+            "/workspace/server/vendor/cache/pbkdf2/lib/pbkdf2.rb",
+        );
         let processor =
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
 
@@ -2647,7 +2648,7 @@ mod tests {
         let processor =
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
-        let dependency_uri = Url::parse("file:///shared/gems/widget/lib/widget.rb").unwrap();
+        let dependency_uri = crate::test::harness::fixture_uri("/shared/gems/widget/lib/widget.rb");
         let template = processor
             .collect_project_neutral_file_template_as_deferred_resolution_in_engine(
                 &dependency_uri,
@@ -2708,7 +2709,7 @@ mod tests {
         let processor =
             FileProcessor::with_extension_registry(server.extensions.registry().clone());
         let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
-        let dependency_uri = Url::parse("file:///shared/gems/widget/lib/widget.rb").unwrap();
+        let dependency_uri = crate::test::harness::fixture_uri("/shared/gems/widget/lib/widget.rb");
         let source = "class SharedWidget\n  def value\n    'cached'\n  end\nend\n";
 
         let template = processor
@@ -2723,12 +2724,12 @@ mod tests {
 
         let mut consumer = AnalysisEngine::new();
         consumer.register_file(ruby_analysis::engine::SourceFileInput {
-            path: PathBuf::from("/consumer/project.rb"),
+            path: crate::test::harness::fixture_path("/consumer/project.rb"),
             content: String::new(),
             kind: SourceKind::Project,
         });
         let dependency_file = consumer.register_file(ruby_analysis::engine::SourceFileInput {
-            path: PathBuf::from("/consumer/cache/widget/lib/widget.rb"),
+            path: crate::test::harness::fixture_path("/consumer/cache/widget/lib/widget.rb"),
             content: source.to_string(),
             kind: SourceKind::Gem,
         });
@@ -2744,7 +2745,7 @@ mod tests {
         assert_eq!(definitions[0].file_id, dependency_file);
         assert_eq!(
             consumer.file(definitions[0].file_id).unwrap().path,
-            PathBuf::from("/consumer/cache/widget/lib/widget.rb")
+            crate::test::harness::fixture_path("/consumer/cache/widget/lib/widget.rb")
         );
     }
 }

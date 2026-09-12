@@ -246,7 +246,7 @@ mod navigation_demand_tests {
     #[test]
     fn constant_definition_request_exposes_exact_project_and_dependency_keys() {
         let source = "ExampleApp::Platform::Users::AccountRecord.find_by_key(key)\n";
-        let uri = Url::parse("file:///project/caller.rb").unwrap();
+        let uri = crate::test::harness::fixture_uri("/project/caller.rb");
 
         let demand = definition_navigation_demand_keys(
             &uri,
@@ -265,7 +265,7 @@ mod navigation_demand_tests {
     #[test]
     fn constant_receiver_method_request_prioritizes_its_owning_constant() {
         let source = "BSON::ObjectId.new\n";
-        let uri = Url::parse("file:///project/caller.rb").unwrap();
+        let uri = crate::test::harness::fixture_uri("/project/caller.rb");
 
         let demand = definition_navigation_demand_keys(&uri, Position::new(0, 16), source).unwrap();
 

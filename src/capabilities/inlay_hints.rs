@@ -116,7 +116,7 @@ mod tests {
     #[tokio::test]
     async fn test_inlay_hints_end_labels() {
         let server = create_test_server().await;
-        let uri = Url::parse("file:///test_end_labels.rb").unwrap();
+        let uri = crate::test::harness::fixture_uri("/test_end_labels.rb");
         let content = "class Foo\nend";
 
         let params = DidOpenTextDocumentParams {
@@ -154,7 +154,7 @@ mod tests {
     #[tokio::test]
     async fn test_inlay_hints_implicit_return() {
         let server = create_test_server().await;
-        let uri = Url::parse("file:///test_implicit.rb").unwrap();
+        let uri = crate::test::harness::fixture_uri("/test_implicit.rb");
         let content = "def foo\n  42\nend";
 
         let params = DidOpenTextDocumentParams {

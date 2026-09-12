@@ -1388,7 +1388,7 @@ mod tests {
     #[tokio::test]
     async fn did_open_registers_source_in_analysis_engine() {
         let server = RubyLanguageServer::default();
-        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
         handle_did_open(
             &server,
@@ -1648,7 +1648,7 @@ mod tests {
     #[tokio::test]
     async fn did_open_preserves_known_external_file_without_reprocessing() {
         let server = RubyLanguageServer::default();
-        let uri = Url::parse("file:///tmp/rubystubs33/kernel.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/rubystubs33/kernel.rb");
         let file_id = server.open_or_update_analysis_file_with_kind(
             &uri,
             "module Kernel\n  def puts\n  end\nend".to_string(),
@@ -1766,7 +1766,7 @@ mod tests {
     #[tokio::test]
     async fn did_change_updates_analysis_engine_source() {
         let server = RubyLanguageServer::default();
-        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
         handle_did_change(
             &server,
@@ -1797,7 +1797,7 @@ mod tests {
     #[tokio::test]
     async fn did_change_replaces_analysis_engine_symbol_facts() {
         let server = RubyLanguageServer::default();
-        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
         handle_did_open(
             &server,
@@ -1843,8 +1843,8 @@ mod tests {
     #[tokio::test]
     async fn exported_api_change_refreshes_open_consumer_diagnostics() {
         let server = RubyLanguageServer::default();
-        let definition_uri = Url::parse("file:///tmp/user.rb").unwrap();
-        let consumer_uri = Url::parse("file:///tmp/use_user.rb").unwrap();
+        let definition_uri = crate::test::harness::fixture_uri("/tmp/user.rb");
+        let consumer_uri = crate::test::harness::fixture_uri("/tmp/use_user.rb");
 
         handle_did_open(
             &server,
@@ -1908,8 +1908,8 @@ mod tests {
     #[tokio::test]
     async fn body_only_change_does_not_refresh_other_open_files() {
         let server = RubyLanguageServer::default();
-        let definition_uri = Url::parse("file:///tmp/user.rb").unwrap();
-        let consumer_uri = Url::parse("file:///tmp/use_user.rb").unwrap();
+        let definition_uri = crate::test::harness::fixture_uri("/tmp/user.rb");
+        let consumer_uri = crate::test::harness::fixture_uri("/tmp/use_user.rb");
         for (uri, text) in [
             (
                 definition_uri.clone(),
@@ -1969,7 +1969,7 @@ mod tests {
     #[tokio::test]
     async fn open_diagnostic_refresh_targets_are_sorted_and_capped() {
         let server = RubyLanguageServer::default();
-        let changed_uri = Url::parse("file:///tmp/changed.rb").unwrap();
+        let changed_uri = crate::test::harness::fixture_uri("/tmp/changed.rb");
         for index in (0..12).rev() {
             let uri = Url::parse(&format!("file:///tmp/consumer_{index:02}.rb")).unwrap();
             handle_did_open(
@@ -1995,7 +1995,7 @@ mod tests {
     #[tokio::test]
     async fn did_open_mirrors_reference_facts_into_analysis_engine() {
         let server = RubyLanguageServer::default();
-        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
         handle_did_open(
             &server,
@@ -2019,7 +2019,7 @@ mod tests {
     #[tokio::test]
     async fn did_open_mirrors_graph_facts_into_analysis_engine() {
         let server = RubyLanguageServer::default();
-        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
         handle_did_open(
             &server,
@@ -2047,8 +2047,8 @@ mod tests {
     #[tokio::test]
     async fn did_open_refreshes_late_resolved_graph_facts_into_analysis_engine() {
         let server = RubyLanguageServer::default();
-        let user_uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
-        let auth_uri = Url::parse("file:///tmp/auth.rb").expect("test URI must parse");
+        let user_uri = crate::test::harness::fixture_uri("/tmp/user.rb");
+        let auth_uri = crate::test::harness::fixture_uri("/tmp/auth.rb");
 
         handle_did_open(
             &server,
@@ -2091,7 +2091,7 @@ mod tests {
     #[tokio::test]
     async fn did_open_mirrors_normalized_extend_edges_into_analysis_engine() {
         let server = RubyLanguageServer::default();
-        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
         handle_did_open(
             &server,
@@ -2123,7 +2123,7 @@ mod tests {
     #[tokio::test]
     async fn did_open_mirrors_method_facts_into_analysis_engine() {
         let server = RubyLanguageServer::default();
-        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
 
         handle_did_open(
             &server,

@@ -123,8 +123,7 @@ end
         )
         .await;
 
-    let uri = tower_lsp::lsp_types::Url::parse("file:///consumer.rb")
-        .expect("the synthetic consumer URI must be valid");
+    let uri = crate::test::harness::fixture_uri("/consumer.rb");
     let document = editor
         .server()
         .get_doc(&uri)
@@ -235,8 +234,7 @@ async fn shape_key_completion_maps_the_exact_utf16_replacement_range() {
 #[tokio::test]
 async fn declared_optional_rbs_record_key_is_available_to_completion() {
     let mut editor = FakeEditor::new().await;
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/payload_factory.rbs")
-        .expect("the synthetic signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/payload_factory.rbs");
     FileProcessor::default()
         .collect_rbs_facts(
             &signature_uri,

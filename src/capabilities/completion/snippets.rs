@@ -1107,12 +1107,14 @@ mod tests {
     #[test]
     fn test_determine_context_with_analyzer() {
         use ruby_analysis::indexer::RubyPrismAnalyzer;
-        use tower_lsp::lsp_types::{Position, Url};
+        use tower_lsp::lsp_types::Position;
 
         // Test method call context (a.each)
         let content = "a = [1, 2, 3]\na.each";
-        let analyzer =
-            RubyPrismAnalyzer::new(Url::parse("file:///test.rb").unwrap(), content.to_string());
+        let analyzer = RubyPrismAnalyzer::new(
+            crate::test::harness::fixture_uri("/test.rb"),
+            content.to_string(),
+        );
         let position = Position::new(1, 5); // Position at last char of "each" in "a.each"
         let (identifier, _, _, _, _) = analyzer.get_identifier_at_position(
             ruby_analysis::core::SourcePosition::new(position.line, position.character),
@@ -1132,8 +1134,10 @@ mod tests {
 
         // Test general context (just "each")
         let content2 = "each";
-        let analyzer2 =
-            RubyPrismAnalyzer::new(Url::parse("file:///test.rb").unwrap(), content2.to_string());
+        let analyzer2 = RubyPrismAnalyzer::new(
+            crate::test::harness::fixture_uri("/test.rb"),
+            content2.to_string(),
+        );
         let position2 = Position::new(0, 3); // Position at last char of "each"
         let (identifier2, _, _, _, _) = analyzer2.get_identifier_at_position(
             ruby_analysis::core::SourcePosition::new(position2.line, position2.character),
@@ -1149,12 +1153,14 @@ mod tests {
     #[test]
     fn test_full_completion_output_with_analyzer() {
         use ruby_analysis::indexer::RubyPrismAnalyzer;
-        use tower_lsp::lsp_types::{Position, Url};
+        use tower_lsp::lsp_types::Position;
 
         // Test method call context (a.each) - should NOT include collection placeholder
         let content = "a = [1, 2, 3]\na.each";
-        let analyzer =
-            RubyPrismAnalyzer::new(Url::parse("file:///test.rb").unwrap(), content.to_string());
+        let analyzer = RubyPrismAnalyzer::new(
+            crate::test::harness::fixture_uri("/test.rb"),
+            content.to_string(),
+        );
         let position = Position::new(1, 5); // Position at last char of "each" in "a.each"
         let (identifier, _, _, _, _) = analyzer.get_identifier_at_position(
             ruby_analysis::core::SourcePosition::new(position.line, position.character),
@@ -1189,8 +1195,10 @@ mod tests {
 
         // Test general context (just "each") - SHOULD include collection placeholder
         let content2 = "each";
-        let analyzer2 =
-            RubyPrismAnalyzer::new(Url::parse("file:///test.rb").unwrap(), content2.to_string());
+        let analyzer2 = RubyPrismAnalyzer::new(
+            crate::test::harness::fixture_uri("/test.rb"),
+            content2.to_string(),
+        );
         let position2 = Position::new(0, 3); // Position at last char of "each"
         let (identifier2, _, _, _, _) = analyzer2.get_identifier_at_position(
             ruby_analysis::core::SourcePosition::new(position2.line, position2.character),

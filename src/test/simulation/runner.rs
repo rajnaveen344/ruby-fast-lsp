@@ -1809,12 +1809,12 @@ mod consistency_controls {
 
     #[test]
     fn definition_observation_normalizes_order_without_hiding_faults() {
-        use tower_lsp::lsp_types::{Range, Url};
+        use tower_lsp::lsp_types::Range;
         let first = Location::new(
-            Url::parse("file:///first.rb").unwrap(),
+            crate::test::harness::fixture_uri("/first.rb"),
             Range::new(Position::new(1, 2), Position::new(3, 4)),
         );
-        let second = Location::new(Url::parse("file:///second.rb").unwrap(), first.range);
+        let second = Location::new(crate::test::harness::fixture_uri("/second.rb"), first.range);
         let observe =
             |locations| definition_observation(Some(GotoDefinitionResponse::Array(locations)));
         let expected = observe(vec![first.clone(), second.clone()]);
@@ -1908,8 +1908,7 @@ impl EditStep {
 }
 
 fn location_matches(loc: &Location, pos: &SourcePos) -> bool {
-    loc.uri.path() == format!("/{}", pos.file.trim_start_matches('/'))
-        && loc.range.start.line == pos.line
+    loc.uri == crate::test::harness::fixture_uri(&pos.file) && loc.range.start.line == pos.line
 }
 
 fn diagnostic_is_unresolved_method(diagnostic: &Diagnostic) -> bool {

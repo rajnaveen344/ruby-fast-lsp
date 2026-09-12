@@ -24,11 +24,13 @@ mod client_messages;
 mod fake_editor;
 mod fixture;
 mod inlay_hints;
+mod paths;
 mod process;
 
 // Re-export unified check functions (the only API)
 pub use check::{check, check_multi_file};
 pub use fake_editor::FakeEditor;
+pub use paths::{fixture_path, fixture_uri, fixture_uri_path};
 
 // Re-export core utilities for tests (used internally by check)
 pub use fixture::{

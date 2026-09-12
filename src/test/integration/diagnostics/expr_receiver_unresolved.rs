@@ -151,8 +151,7 @@ record = DynamicRecord.new
 #[tokio::test]
 async fn top_level_open_method_surface_suppresses_absence_claims() {
     let mut editor = FakeEditor::new().await;
-    let stub_uri =
-        Url::parse("file:///ruby-fast-lsp-stubs/basic_object.rb").expect("stub URI must be valid");
+    let stub_uri = crate::test::harness::fixture_uri("/ruby-fast-lsp-stubs/basic_object.rb");
     FileProcessor::new()
         .collect_file_facts_as(
             &stub_uri,
@@ -211,8 +210,8 @@ async fn jruby_9_2_runtime_source_outranks_java_import_overlay_navigation() {
     FileProcessor::new()
         .collect_file_facts_as(&overlay_uri, &overlay, editor.server(), SourceKind::Stub)
         .expect("JRuby 9.2 overlay must index through the ordinary fact path");
-    let runtime_uri = Url::parse("file:///ruby-fast-lsp-runtime/jruby/core_ext/object.rb")
-        .expect("runtime fixture URI must be valid");
+    let runtime_uri =
+        crate::test::harness::fixture_uri("/ruby-fast-lsp-runtime/jruby/core_ext/object.rb");
     FileProcessor::new()
         .collect_file_facts_as(
             &runtime_uri,
@@ -250,8 +249,8 @@ async fn jruby_9_2_runtime_source_outranks_java_import_overlay_navigation() {
 #[tokio::test]
 async fn unavailable_runtime_stub_method_emits_actionable_diagnostic() {
     let mut editor = FakeEditor::new().await;
-    let stub_uri = Url::parse("file:///ruby-fast-lsp-stubs/jruby-9.2-unavailable.rb")
-        .expect("stub URI must be valid");
+    let stub_uri =
+        crate::test::harness::fixture_uri("/ruby-fast-lsp-stubs/jruby-9.2-unavailable.rb");
     FileProcessor::new()
         .collect_file_facts_as(
             &stub_uri,
@@ -330,10 +329,9 @@ end
 #[tokio::test]
 async fn absent_runtime_overlay_masks_and_restores_compatible_baseline_method() {
     let mut editor = FakeEditor::new().await;
-    let baseline_uri = Url::parse("file:///ruby-fast-lsp-stubs/mri-2.5-object-space.rb")
-        .expect("baseline stub URI must be valid");
-    let overlay_uri = Url::parse("file:///ruby-fast-lsp-stubs/jruby-9.2-absent.rb")
-        .expect("overlay stub URI must be valid");
+    let baseline_uri =
+        crate::test::harness::fixture_uri("/ruby-fast-lsp-stubs/mri-2.5-object-space.rb");
+    let overlay_uri = crate::test::harness::fixture_uri("/ruby-fast-lsp-stubs/jruby-9.2-absent.rb");
     FileProcessor::new()
         .collect_file_facts_as(
             &baseline_uri,

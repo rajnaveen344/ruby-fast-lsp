@@ -709,7 +709,7 @@ mod tests {
         GemDependencySource::new(
             0,
             path.to_string(),
-            PathBuf::from(physical),
+            crate::test::harness::fixture_path(physical),
             content.to_string(),
             "widget",
             "1.0.0",
@@ -764,7 +764,7 @@ mod tests {
 
         let mut seed_engine = AnalysisEngine::new();
         let seed_file = seed_engine.register_file(SourceFileInput {
-            path: PathBuf::from("/seed.rb"),
+            path: crate::test::harness::fixture_path("/seed.rb"),
             content: "class Seed; end".to_string(),
             kind: SourceKind::Stub,
         });
@@ -811,6 +811,7 @@ mod tests {
         assert!(
             std::str::from_utf8(ANALYZER_DEPENDENCY_LOCK)
                 .unwrap()
+                .replace("\r\n", "\n")
                 .contains(&format!(
                     "name = \"ruby-prism\"\nversion = \"{RUBY_PRISM_SEMANTIC_VERSION}\""
                 )),
@@ -905,7 +906,7 @@ mod tests {
         product.bind_into(&first_manifest, &mut first).unwrap();
         let mut second = AnalysisEngine::new();
         second.register_file(SourceFileInput {
-            path: PathBuf::from("/projects/two/project.rb"),
+            path: crate::test::harness::fixture_path("/projects/two/project.rb"),
             content: String::new(),
             kind: SourceKind::Project,
         });
@@ -918,11 +919,11 @@ mod tests {
             AnalysisQuery::new(&second).constant_definition_ranges(&parts, &[])[0];
         assert_eq!(
             first.file(first_definition.file_id).unwrap().path,
-            PathBuf::from("/projects/one/vendor/widget.rb")
+            crate::test::harness::fixture_path("/projects/one/vendor/widget.rb")
         );
         assert_eq!(
             second.file(second_definition.file_id).unwrap().path,
-            PathBuf::from("/projects/two/vendor/widget.rb")
+            crate::test::harness::fixture_path("/projects/two/vendor/widget.rb")
         );
         assert_ne!(first_definition.file_id, second_definition.file_id);
     }

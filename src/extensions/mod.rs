@@ -6560,7 +6560,7 @@ globs = ["config/routes.rb"]
 
     #[test]
     fn watched_file_candidates_use_deepest_root_and_deduplicate() {
-        let root = PathBuf::from("/workspace");
+        let root = crate::test::harness::fixture_path("/workspace");
         let nested = root.join("engines/payments");
         let uri = Url::from_file_path(nested.join("config/routes.rb"))
             .expect("test watched path must convert to URI");
@@ -7274,7 +7274,7 @@ commands = ["standardrb"]
 
     #[test]
     fn extension_process_request_requires_trust_permission_and_allowlist() {
-        let root = PathBuf::from("/workspace");
+        let root = crate::test::harness::fixture_path("/workspace");
         let request = ruby_fast_lsp_extension_api::ProcessRequest {
             request_id: "routes".to_string(),
             command: "bundle".to_string(),
@@ -7369,7 +7369,7 @@ commands = ["standardrb"]
                 .run_async_with_resources(
                     "extension process contention holder",
                     crate::indexing_resources::IndexingWorkSpec::new(
-                        Some(PathBuf::from("/workspace/background")),
+                        Some(crate::test::harness::fixture_path("/workspace/background")),
                         crate::indexing_resources::IndexingResourcePriority::Background,
                         1,
                         128 * 1024 * 1024,
@@ -8161,7 +8161,7 @@ commands = ["standardrb"]
         .expect("a related workspace-relative runtime reindex request must be accepted");
         assert_eq!(uris.len(), 1);
         assert_eq!(
-            uris[0].to_file_path().expect("file URI"),
+            fs::canonicalize(uris[0].to_file_path().expect("file URI")).expect("model path"),
             fs::canonicalize(model).expect("model fixture must canonicalize")
         );
 

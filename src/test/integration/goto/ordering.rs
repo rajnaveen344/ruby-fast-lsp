@@ -4,14 +4,14 @@ use crate::query::EngineQuery;
 use crate::test::harness::FakeEditor;
 use ruby_analysis::core::{NamespaceKind, RubyConstant, RubyMethod};
 use ruby_analysis::indexer::MethodReceiver;
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp::lsp_types::{Location, Position};
 
 fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {
     locations
         .into_iter()
         .map(|location| {
             (
-                location.uri.path().to_owned(),
+                crate::test::harness::fixture_uri_path(&location.uri).to_owned(),
                 location.range.start.line,
                 location.range.start.character,
             )
@@ -22,7 +22,7 @@ fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {
 fn files(locations: Vec<Location>) -> Vec<String> {
     locations
         .into_iter()
-        .map(|location| location.uri.path().to_owned())
+        .map(|location| crate::test::harness::fixture_uri_path(&location.uri).to_owned())
         .collect()
 }
 
@@ -104,7 +104,7 @@ async fn semantic_definition_order_prefers_overrides_and_tracks_edits() {
         );
         let engine = editor
             .server()
-            .analysis_engine_for_uri(&Url::parse("file:///feature.rb").unwrap());
+            .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
         assert_eq!(
             files(
                 EngineQuery::with_engine(engine)
@@ -321,7 +321,7 @@ async fn definition_order_covers_method_lookup_without_document_facts() {
 
     let engine = editor
         .server()
-        .analysis_engine_for_uri(&Url::parse("file:///feature.rb").unwrap());
+        .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
     let locations = EngineQuery::with_engine(engine)
         .find_method_definitions(
             &MethodReceiver::None,

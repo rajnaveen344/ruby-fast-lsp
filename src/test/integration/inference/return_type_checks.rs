@@ -114,8 +114,7 @@ end
 #[tokio::test]
 async fn complete_rbs_record_contract_reports_a_structural_return_mismatch() {
     let mut editor = FakeEditor::new().await;
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/payload_factory.rbs")
-        .expect("test signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/payload_factory.rbs");
     FileProcessor::default()
         .collect_rbs_facts(
             &signature_uri,
@@ -139,8 +138,7 @@ end
 #[tokio::test]
 async fn incomplete_rbs_record_return_evidence_does_not_report_a_mismatch() {
     let mut editor = FakeEditor::new().await;
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/payload_factory.rbs")
-        .expect("test signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/payload_factory.rbs");
     FileProcessor::default()
         .collect_rbs_facts(
             &signature_uri,

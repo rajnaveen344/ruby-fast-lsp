@@ -52,7 +52,7 @@ async fn goto_index_brackets_preserve_operator_navigation() {
 
 #[tokio::test]
 async fn goto_index_arguments_survive_edits_and_reopen() {
-    use tower_lsp::lsp_types::{Location, Position, Range, Url};
+    use tower_lsp::lsp_types::{Location, Position, Range};
 
     let source = "class Table\n  def [](key); Table.new; end\n  def []=(key, value); value; end\nend\ntable = Table.new\n[:north].each do |entry|\n  partition = { active: true }\n  table[partition][entry] = table[entry]\n  table.[](partition)\n  table.[]=(partition, entry)\nend\n";
     let edited = format!(
@@ -85,7 +85,7 @@ async fn goto_index_arguments_survive_edits_and_reopen() {
                 .unwrap();
             let start = text[..text.find(name).unwrap()].encode_utf16().count() as u32;
             let expected = Location::new(
-                Url::parse("file:///indexed_locals.rb").unwrap(),
+                crate::test::harness::fixture_uri("/indexed_locals.rb"),
                 Range::new(
                     Position::new(line as u32, start),
                     Position::new(line as u32, start + name.len() as u32),

@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{
 
 fn folder(root: &str) -> WorkspaceFolder {
     WorkspaceFolder {
-        uri: Url::parse(&format!("file:///{}/", root.trim_end_matches('/'))).unwrap(),
+        uri: crate::test::harness::fixture_uri(format!("{}/", root.trim_end_matches('/'))),
         name: root.to_string(),
     }
 }
@@ -94,8 +94,7 @@ async fn removing_workspace_rehomes_open_documents_in_orphan_engine() {
     .await;
 
     assert!(editor.workspace_for("temporary/user.rb").is_none());
-    let path = Url::parse("file:///temporary/user.rb")
-        .unwrap()
+    let path = crate::test::harness::fixture_uri("/temporary/user.rb")
         .to_file_path()
         .unwrap();
     assert!(editor

@@ -185,8 +185,7 @@ end
 #[tokio::test]
 async fn generic_rbs_block_signature_substitutes_the_block_result() {
     let mut editor = FakeEditor::new().await;
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/transformer.rbs")
-        .expect("the synthetic RBS signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/transformer.rbs");
     FileProcessor::default()
         .collect_rbs_facts(
             &signature_uri,
@@ -209,8 +208,7 @@ end
 #[tokio::test]
 async fn callable_signature_replacement_and_parse_failure_remove_stale_results() {
     let mut editor = FakeEditor::new().await;
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/converter.rbs")
-        .expect("the synthetic RBS signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/converter.rbs");
     let processor = FileProcessor::default();
     processor
         .collect_rbs_facts(
@@ -277,8 +275,7 @@ async fn opening_the_consumer_before_its_signature_converges_after_reindex() {
 "#,
         )
         .await;
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/late_transformer.rbs")
-        .expect("the synthetic RBS signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/late_transformer.rbs");
     FileProcessor::default()
         .collect_rbs_facts(
             &signature_uri,
@@ -311,10 +308,8 @@ end
         seed ^= seed << 17;
         let signature_first = seed & 1 == 0;
         let mut editor = FakeEditor::new().await;
-        let signature_uri = tower_lsp::lsp_types::Url::parse(&format!(
-            "file:///sig/ordered_transformer_{iteration}.rbs"
-        ))
-        .expect("the seeded synthetic signature URI must be valid");
+        let signature_uri =
+            crate::test::harness::fixture_uri(format!("/sig/ordered_transformer_{iteration}.rbs"));
         let processor = FileProcessor::default();
         if signature_first {
             processor

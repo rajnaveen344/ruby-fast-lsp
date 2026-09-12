@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn request_time_extension_code_lenses_wait_for_admission_without_blocking_reactor() {
-        let uri = Url::parse("file:///tmp/governed_code_lenses.rb").expect("test URI must parse");
+        let uri = crate::test::harness::fixture_uri("/tmp/governed_code_lenses.rb");
         let mut server = RubyLanguageServer::default();
         server
             .indexing

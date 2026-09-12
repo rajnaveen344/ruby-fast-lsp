@@ -280,10 +280,9 @@ fn extract_syntax_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::lsp_types::Url;
 
     fn parse_and_generate(content: &str) -> Vec<Diagnostic> {
-        let uri = Url::parse("file:///test.rb").unwrap();
+        let uri = crate::test::harness::fixture_uri("/test.rb");
         let document = RubyDocument::new(uri, content.to_string(), 1);
         let parse_result = ruby_prism::parse(content.as_bytes());
         generate_diagnostics(&parse_result, &document)

@@ -54,13 +54,13 @@ async fn completion_waits_for_the_in_flight_document_edit() {
     use crate::capabilities::indexing::handle_did_change;
     use crate::indexer::test_schedule::Point;
     use tower_lsp::lsp_types::{
-        DidChangeTextDocumentParams, TextDocumentContentChangeEvent, Url,
+        DidChangeTextDocumentParams, TextDocumentContentChangeEvent,
         VersionedTextDocumentIdentifier,
     };
 
     let mut editor = FakeEditor::new().await;
     editor.open("locals.rb", "previous = 1\npre").await;
-    let uri = Url::parse("file:///locals.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/locals.rb");
     let mut pause = editor
         .server()
         .indexing

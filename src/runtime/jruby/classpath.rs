@@ -1605,7 +1605,7 @@ mod tests {
                 classpath
                     .sources
                     .iter()
-                    .any(|source| source.path.to_string_lossy().ends_with(suffix)),
+                    .any(|source| source.path.ends_with(suffix)),
                 "missing discovered Java source root {suffix}: {:?}",
                 classpath.sources
             );

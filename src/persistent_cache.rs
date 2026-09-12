@@ -939,7 +939,9 @@ fn try_acquire_lock(file: &File, exclusive: bool) -> Result<bool> {
     };
     match result {
         Ok(()) => Ok(true),
-        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(false),
+        Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+            Ok(false)
+        }
         Err(error) => Err(error).context("acquiring persistent cache ownership lock"),
     }
 }
@@ -1260,7 +1262,7 @@ mod tests {
         GemDependencySource::new(
             0,
             "gems/widget/1.0.0/ruby/registry/0/widget.rb".to_string(),
-            physical_path.to_path_buf(),
+            crate::test::harness::fixture_path(physical_path),
             content.to_string(),
             "widget",
             "1.0.0",
@@ -1294,7 +1296,7 @@ mod tests {
     ) -> GemDependencyManifest {
         let mut seed_engine = AnalysisEngine::new();
         let seed_file = seed_engine.register_file(ruby_analysis::engine::SourceFileInput {
-            path: PathBuf::from("/stubs/cache_seed.rb"),
+            path: crate::test::harness::fixture_path("/stubs/cache_seed.rb"),
             content: seed_content.to_string(),
             kind: ruby_analysis::core::SourceKind::Stub,
         });
@@ -1393,7 +1395,8 @@ mod tests {
     #[test]
     fn fresh_cache_load_rebinds_exact_path_and_corruption_recovers() {
         let fixture = tempfile::tempdir().unwrap();
-        let first_path = PathBuf::from("/projects/one/gems/widget/lib/widget.rb");
+        let first_path =
+            crate::test::harness::fixture_path("/projects/one/gems/widget/lib/widget.rb");
         let first_manifest = manifest(&first_path);
         let first_product = product(&first_manifest);
 
@@ -1410,7 +1413,8 @@ mod tests {
         reservation.publish(&first_product).unwrap();
         drop(first_cache);
 
-        let second_path = PathBuf::from("/projects/two/gems/widget/lib/widget.rb");
+        let second_path =
+            crate::test::harness::fixture_path("/projects/two/gems/widget/lib/widget.rb");
         let second_manifest = manifest(&second_path);
         let second_cache = PersistentDerivedProductCache::with_limits(
             fixture.path().to_path_buf(),
@@ -1763,6 +1767,19 @@ mod tests {
             &[format!("{name}:1.0.0:ruby:registry")],
             "class CacheSeed; end",
         )
+    }
+
+    #[test]
+    fn contended_cache_lock_is_pending_until_its_owner_releases_it() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("cache.lock");
+        let owner = super::open_private_lock_file(&path).unwrap();
+        let contender = super::open_private_lock_file(&path).unwrap();
+        assert!(super::try_acquire_lock(&owner, true).unwrap());
+        assert!(!super::try_acquire_lock(&contender, true).unwrap());
+        assert!(!super::try_acquire_lock(&contender, false).unwrap());
+        drop(owner);
+        assert!(super::try_acquire_lock(&contender, true).unwrap());
     }
 
     #[test]

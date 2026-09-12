@@ -245,10 +245,8 @@ async fn navigation_into_external_dependency_retains_originating_project_context
     let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
         editor.server().extensions.registry().clone(),
     );
-    let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/demo-gem/lib/entry.rb")
-        .expect("dependency URI must parse");
-    let inner_uri = tower_lsp::lsp_types::Url::parse("file:///external/demo-gem/lib/inner.rb")
-        .expect("dependency URI must parse");
+    let entry_uri = crate::test::harness::fixture_uri("/external/demo-gem/lib/entry.rb");
+    let inner_uri = crate::test::harness::fixture_uri("/external/demo-gem/lib/inner.rb");
     let entry_source = "module DemoGem\n  class Entry\n    Inner\n  end\nend\n";
 
     processor
@@ -308,10 +306,8 @@ async fn directly_opened_dependency_uses_its_unique_indexed_project_owner() {
     let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
         editor.server().extensions.registry().clone(),
     );
-    let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/unique-gem/lib/entry.rb")
-        .expect("dependency URI must parse");
-    let inner_uri = tower_lsp::lsp_types::Url::parse("file:///external/unique-gem/lib/inner.rb")
-        .expect("dependency URI must parse");
+    let entry_uri = crate::test::harness::fixture_uri("/external/unique-gem/lib/entry.rb");
+    let inner_uri = crate::test::harness::fixture_uri("/external/unique-gem/lib/inner.rb");
     let entry_source = "module UniqueGem\n  class Entry\n    Inner\n  end\nend\n";
 
     for (uri, source) in [
@@ -344,8 +340,7 @@ async fn directly_opened_dependency_uses_its_unique_indexed_project_owner() {
 async fn unbound_external_document_is_not_promoted_to_project_source() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("workspace_a");
-    let external_uri = tower_lsp::lsp_types::Url::parse("file:///external/loose.rb")
-        .expect("external URI must parse");
+    let external_uri = crate::test::harness::fixture_uri("/external/loose.rb");
 
     editor.open("external/loose.rb", "UnknownExternal\n").await;
 
@@ -378,8 +373,7 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
     let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
         editor.server().extensions.registry().clone(),
     );
-    let entry_uri = tower_lsp::lsp_types::Url::parse("file:///external/shared-gem/lib/entry.rb")
-        .expect("dependency URI must parse");
+    let entry_uri = crate::test::harness::fixture_uri("/external/shared-gem/lib/entry.rb");
     let entry_source = "module SharedGem\n  class Entry\n    Inner\n  end\nend\n";
 
     for (workspace_file, inner_path) in [
@@ -389,10 +383,8 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
         let workspace = editor
             .workspace_for(workspace_file)
             .expect("project file must have a workspace");
-        let inner_uri = tower_lsp::lsp_types::Url::parse(&format!(
-            "file:///external/shared-gem/lib/{inner_path}"
-        ))
-        .expect("dependency URI must parse");
+        let inner_uri =
+            crate::test::harness::fixture_uri(format!("/external/shared-gem/lib/{inner_path}"));
         processor
             .collect_file_facts_as_deferred_resolution_in_engine(
                 &entry_uri,
@@ -460,7 +452,7 @@ fn method_fact_in_path(
                 }
                 engine
                     .file(fact.range.file_id)
-                    .map(|file| file.path.to_string_lossy().ends_with(path_suffix))
+                    .map(|file| file.path.ends_with(path_suffix))
                     .unwrap_or(false)
             })
         })

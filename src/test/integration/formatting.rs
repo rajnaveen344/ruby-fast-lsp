@@ -6,7 +6,7 @@ use crate::test::harness::FakeEditor;
 use std::collections::HashMap;
 use std::fs;
 use tempfile::TempDir;
-use tower_lsp::lsp_types::{InitializeParams, OneOf, Position, Range, Url, WorkspaceEdit};
+use tower_lsp::lsp_types::{InitializeParams, OneOf, Position, Range, WorkspaceEdit};
 use tower_lsp::LanguageServer;
 
 #[tokio::test]
@@ -72,7 +72,7 @@ async fn formats_current_unsaved_buffer_with_utf16_full_document_edit() {
         editor
             .apply_edit(&WorkspaceEdit {
                 changes: Some(HashMap::from([(
-                    Url::parse("file:///sample.rb").unwrap(),
+                    crate::test::harness::fixture_uri("/sample.rb"),
                     edits,
                 )])),
                 document_changes: None,

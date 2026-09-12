@@ -30,8 +30,8 @@ use tower_lsp::lsp_types::{Diagnostic, FileChangeType, FileEvent, Url};
 fn server_ownership_clones_share_document_locks_and_isolate_project_engines() {
     let server = RubyLanguageServer::default();
     let clone = server.clone();
-    let uri = Url::parse("file:///ownership/entry.rb").unwrap();
-    let other_uri = Url::parse("file:///ownership/other.rb").unwrap();
+    let uri = crate::test::harness::fixture_uri("/ownership/entry.rb");
+    let other_uri = crate::test::harness::fixture_uri("/ownership/other.rb");
     let lock = server.document_semantic_lock(&uri);
     assert!(Arc::ptr_eq(&lock, &clone.document_semantic_lock(&uri)));
     assert!(!Arc::ptr_eq(
@@ -39,8 +39,8 @@ fn server_ownership_clones_share_document_locks_and_isolate_project_engines() {
         &clone.document_semantic_lock(&other_uri)
     ));
 
-    let first = server.add_workspace(Url::parse("file:///ownership/").unwrap());
-    let second = clone.add_workspace(Url::parse("file:///neighbor/").unwrap());
+    let first = server.add_workspace(crate::test::harness::fixture_uri("/ownership/"));
+    let second = clone.add_workspace(crate::test::harness::fixture_uri("/neighbor/"));
     assert_eq!(server.list_workspaces().len(), 2);
     assert!(Arc::ptr_eq(
         &first.analysis_engine,
@@ -50,7 +50,7 @@ fn server_ownership_clones_share_document_locks_and_isolate_project_engines() {
         &first.analysis_engine,
         &second.analysis_engine
     ));
-    let orphan = Url::parse("file:///loose.rb").unwrap();
+    let orphan = crate::test::harness::fixture_uri("/loose.rb");
     assert!(Arc::ptr_eq(
         &server.analysis_engine_for_uri(&orphan),
         &clone.analysis_engine_for_uri(&orphan)
@@ -203,8 +203,8 @@ fn indexing_snapshot_reports_process_local_classpath_file_reuse() {
 #[test]
 fn diagnostic_publication_queue_keeps_only_the_latest_per_uri() {
     let mut publication = DiagnosticPublicationState::default();
-    let first = Url::parse("file:///project/a.rb").unwrap();
-    let second = Url::parse("file:///project/b.rb").unwrap();
+    let first = crate::test::harness::fixture_uri("/project/a.rb");
+    let second = crate::test::harness::fixture_uri("/project/b.rb");
     assert!(publication.queue(first.clone(), Vec::new()));
     assert!(!publication.queue(first.clone(), vec![Diagnostic::default()]));
     assert!(!publication.queue(second.clone(), Vec::new()));

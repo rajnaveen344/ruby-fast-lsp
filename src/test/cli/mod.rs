@@ -4,7 +4,7 @@ use crate::check::{
 use crate::indexer::file_processor::FileProcessor;
 use crate::test::harness::{get_hint_label, get_hint_tooltip, FakeEditor};
 use ruby_analysis::core::{RubyType, UnknownReason};
-use tower_lsp::lsp_types::{NumberOrString, Url};
+use tower_lsp::lsp_types::NumberOrString;
 
 fn hover_text(hover: tower_lsp::lsp_types::Hover) -> String {
     match hover.contents {
@@ -800,8 +800,7 @@ async fn structural_return_diagnostics_match_cli_and_lsp_and_fail_closed() {
         .await
         .expect("headless check must evaluate the structural return contract");
     let mut editor = FakeEditor::new().await;
-    let signature_uri = Url::parse("file:///sig/payload_factory.rbs")
-        .expect("the synthetic signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/payload_factory.rbs");
     FileProcessor::default()
         .collect_rbs_facts(&signature_uri, signature, editor.server())
         .expect("the RBS contract must enter the LSP engine");
@@ -1456,7 +1455,7 @@ end
     editor.set("main.rb", unresolved_source).await;
     let document = editor
         .server()
-        .get_doc(&Url::parse("file:///main.rb").expect("test URI must be valid"))
+        .get_doc(&crate::test::harness::fixture_uri("/main.rb"))
         .expect("edited document must remain open");
     let read_position = tower_lsp::lsp_types::Position::new(13, 6);
     let read_source_position = crate::utils::lsp::source_position(read_position);
@@ -1979,7 +1978,7 @@ end
     );
 
     editor.set("main.rb", unknown_return_union_source).await;
-    let main_uri = Url::parse("file:///main.rb").expect("rescue fixture URI must be valid");
+    let main_uri = crate::test::harness::fixture_uri("/main.rb");
     let analysis_engine = editor.server().analysis_engine_for_uri(&main_uri);
     let main_file_id = analysis_engine
         .read()
@@ -2432,9 +2431,9 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
 
     let unchanged_equation = format!("{even_source}# body-independent edit\n");
     editor.set("cycle_even.rb", &unchanged_equation).await;
-    let analysis_engine = editor.server().analysis_engine_for_uri(
-        &Url::parse("file:///cycle_even.rb").expect("cycle fixture URI must be valid"),
-    );
+    let analysis_engine = editor
+        .server()
+        .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/cycle_even.rb"));
     let even_file_id = analysis_engine
         .read()
         .file_id(std::path::Path::new("/cycle_even.rb"))

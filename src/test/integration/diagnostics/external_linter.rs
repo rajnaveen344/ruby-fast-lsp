@@ -124,7 +124,7 @@ async fn dependency_open_retains_current_linter_output_without_rerunning_it() {
         editor.close("sample.rb").await;
         let mut retained_after_close = Vec::new();
         editor.server().append_current_external_linter_diagnostics(
-            &tower_lsp::lsp_types::Url::parse("file:///sample.rb").unwrap(),
+            &crate::test::harness::fixture_uri("/sample.rb"),
             &mut retained_after_close,
         );
         assert!(

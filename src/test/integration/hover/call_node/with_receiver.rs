@@ -73,8 +73,7 @@ end
 async fn rbs_record_return_reaches_cross_file_keyed_reads() {
     let mut editor = FakeEditor::new().await;
     let consumer = "payload = PayloadFactory.build\npayload[:name]\n";
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/payload_factory.rbs")
-        .expect("test signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/payload_factory.rbs");
     FileProcessor::default()
         .collect_rbs_facts(
             &signature_uri,
@@ -97,8 +96,7 @@ end
 #[tokio::test]
 async fn rbs_record_parameter_contract_seeds_ruby_method_flow() {
     let mut editor = FakeEditor::new().await;
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/payload_service.rbs")
-        .expect("test signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/payload_service.rbs");
     FileProcessor::default()
         .collect_rbs_facts(
             &signature_uri,
@@ -125,8 +123,7 @@ end
 #[tokio::test]
 async fn overloaded_rbs_record_parameters_seed_an_exhaustive_correlated_union() {
     let mut editor = FakeEditor::new().await;
-    let signature_uri = tower_lsp::lsp_types::Url::parse("file:///sig/payload_service.rbs")
-        .expect("test signature URI must be valid");
+    let signature_uri = crate::test::harness::fixture_uri("/sig/payload_service.rbs");
     FileProcessor::default()
         .collect_rbs_facts(
             &signature_uri,
