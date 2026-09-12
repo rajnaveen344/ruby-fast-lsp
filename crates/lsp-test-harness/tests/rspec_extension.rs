@@ -118,8 +118,11 @@ async fn rspec_root_describe_has_a_semantic_definition() {
         "RSpec.describe must resolve only to its canonical semantic target, got {definitions:?}"
     );
     assert_eq!(
-        definitions[0].uri.path(),
-        "/__ruby_fast_lsp_extension__/semantic_targets.rb"
+        definitions[0].uri,
+        tower_lsp::lsp_types::Url::from_file_path(
+            std::path::absolute("/__ruby_fast_lsp_extension__/semantic_targets.rb").unwrap()
+        )
+        .unwrap()
     );
 }
 
@@ -345,7 +348,9 @@ end
     let references = editor.references(&consumer_file, 5, 8).await;
     let consumer_reference_lines = references
         .iter()
-        .filter(|location| location.uri.path() == consumer_file)
+        .filter(|location| {
+            location.uri == tower_lsp::lsp_types::Url::from_file_path(&consumer_file).unwrap()
+        })
         .map(|location| location.range.start.line)
         .collect::<Vec<_>>();
     assert_eq!(

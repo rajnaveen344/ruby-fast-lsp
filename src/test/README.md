@@ -24,6 +24,10 @@ though its source lives here. It is not compiled as a module of the library test
 suite. Both targets run in `cargo test --workspace`; no root `tests/` folder is
 needed.
 
+On Unix, the CLI process check uses a 1 MiB stack to match the Windows executable
+default. This keeps large async frames from passing solely because a Unix main
+thread has a larger stack allowance.
+
 ## Add a regression
 
 Reduce a reported defect to neutral Ruby names and minimal source. First write

@@ -10,16 +10,31 @@ fn check_json_uses_stable_output_and_failure_exit_code() {
     )
     .expect("CLI check fixture must be written");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_ruby-fast-lsp"))
+    // Windows executables start with a 1 MiB main-thread stack. Exercise the
+    // same bound on Unix so its larger default cannot mask CLI stack growth.
+    #[cfg(unix)]
+    let mut command = {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "ulimit -s 1024 && exec \"$@\"",
+            "check-with-small-stack",
+        ]);
+        command.arg(env!("CARGO_BIN_EXE_ruby-fast-lsp"));
+        command
+    };
+    #[cfg(not(unix))]
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ruby-fast-lsp"));
+    command
         .args(["check", "--format", "json"])
-        .arg(project.path())
-        .output()
-        .expect("ruby-fast-lsp check must start");
+        .arg(project.path());
+    let output = command.output().expect("ruby-fast-lsp check must start");
 
     assert_eq!(
         output.status.code(),
         Some(1),
-        "a proven warning must make the check command fail"
+        "a proven warning must make the check command fail; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
     assert!(
         output.stderr.is_empty(),

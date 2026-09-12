@@ -200,7 +200,10 @@ async fn run_check_command(mut arguments: impl Iterator<Item = String>) -> Resul
     }
 
     let path = path.unwrap_or(std::env::current_dir()?);
-    let report = CheckSession::default().check_path(&path).await?;
+    let session = CheckSession::default();
+    // Keep the indexing future off the CLI's main-thread stack, which is only
+    // 1 MiB on Windows. Embedding it also enlarges every enclosing async frame.
+    let report = Box::pin(session.check_path(&path)).await?;
     println!("{}", render_report(&report, format)?);
     Ok(i32::from(report.has_failures()))
 }
