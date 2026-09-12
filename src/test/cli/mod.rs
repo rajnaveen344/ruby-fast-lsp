@@ -1982,7 +1982,7 @@ end
     let analysis_engine = editor.server().analysis_engine_for_uri(&main_uri);
     let main_file_id = analysis_engine
         .read()
-        .file_id(std::path::Path::new("/main.rb"))
+        .file_id(&crate::test::harness::fixture_path("/main.rb"))
         .expect("rescue fixture must be registered in the analysis engine");
     let method_return_outcomes = analysis_engine
         .read()
@@ -2436,7 +2436,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/cycle_even.rb"));
     let even_file_id = analysis_engine
         .read()
-        .file_id(std::path::Path::new("/cycle_even.rb"))
+        .file_id(&crate::test::harness::fixture_path("/cycle_even.rb"))
         .expect("cycle fixture must be registered in the analysis engine");
     let equations_before_unchanged_edit = analysis_engine
         .read()

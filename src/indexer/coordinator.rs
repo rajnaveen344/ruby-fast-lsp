@@ -3453,17 +3453,20 @@ mod coordinator_integration_tests {
         );
         let started = Arc::new(tokio::sync::Notify::new());
         let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let release_thread = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            release_tx.send(()).unwrap();
-        });
+        let reactor_thread = std::thread::current().id();
         let started_for_task = started.clone();
         let started_wait = started.notified();
-        let began = Instant::now();
         let task = tokio::spawn(async move {
             resources
                 .run_cpu("test project collection", move || {
                     started_for_task.notify_one();
+                    // Fail before waiting if CPU work regresses onto the reactor,
+                    // so the regression cannot deadlock this handshake.
+                    assert_ne!(
+                        std::thread::current().id(),
+                        reactor_thread,
+                        "CPU indexing must run off the single-threaded async reactor"
+                    );
                     release_rx.recv().unwrap();
                     42
                 })
@@ -3471,13 +3474,10 @@ mod coordinator_integration_tests {
         });
 
         started_wait.await;
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        assert!(
-            began.elapsed() < Duration::from_millis(80),
-            "the async reactor could not run while CPU indexing occupied its worker"
-        );
+        // Only the reactor can release the CPU worker: reaching this send proves
+        // the reactor made progress while the worker was occupied.
+        release_tx.send(()).unwrap();
         assert_eq!(task.await.unwrap().unwrap(), 42);
-        release_thread.join().unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]
