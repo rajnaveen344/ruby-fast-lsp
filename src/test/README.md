@@ -28,6 +28,10 @@ On Unix, the CLI process check uses a 1 MiB stack to match the Windows executabl
 default. This keeps large async frames from passing solely because a Unix main
 thread has a larger stack allowance.
 
+The missing-runtime process case gives only its child an empty executable search
+path and an unavailable project runtime marker. It verifies that a Gemfile project
+still produces diagnostics without borrowing Ruby from the parent environment.
+
 ## Add a regression
 
 Reduce a reported defect to neutral Ruby names and minimal source. First write

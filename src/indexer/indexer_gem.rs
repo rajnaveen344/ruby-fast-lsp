@@ -1070,6 +1070,15 @@ impl IndexerGem {
         self.locked_gems.clear();
         self.discovery_stage = GemDiscoveryStage::NotStarted;
 
+        if self.ruby_executable.is_none() {
+            info!(
+                "No exact Ruby runtime selected for {:?}; gem dependencies remain unavailable",
+                self.workspace_root
+            );
+            self.discovery_stage = GemDiscoveryStage::Complete;
+            return Ok(0);
+        }
+
         if self
             .workspace_root
             .as_ref()
@@ -1163,6 +1172,15 @@ impl IndexerGem {
         self.locked_gems.clear();
         self.discovery_stage = GemDiscoveryStage::NotStarted;
 
+        if self.ruby_executable.is_none() {
+            info!(
+                "No exact Ruby runtime selected for {:?}; gem dependencies remain unavailable",
+                self.workspace_root
+            );
+            self.discovery_stage = GemDiscoveryStage::NavigationInputs;
+            return Ok(0);
+        }
+
         let engine_started = Instant::now();
         self.detect_active_ruby_engine()?;
         let engine_wall = engine_started.elapsed();
@@ -1214,7 +1232,9 @@ impl IndexerGem {
              discover_navigation_gems_blocking."
         );
         let started = Instant::now();
-        self.discover_cached_gem_archives()?;
+        if self.ruby_executable.is_some() {
+            self.discover_cached_gem_archives()?;
+        }
         self.resolve_gem_lib_paths();
         self.discovery_stage = GemDiscoveryStage::Complete;
         info!(
@@ -1244,7 +1264,8 @@ impl IndexerGem {
     }
 
     pub(crate) fn needs_unlocked_explicit_discovery(&self) -> bool {
-        self.discovered_gems.is_empty()
+        self.ruby_executable.is_some()
+            && self.discovered_gems.is_empty()
             && !self.explicitly_included_gems.is_empty()
             && self
                 .workspace_root
@@ -1258,7 +1279,7 @@ impl IndexerGem {
             return Ok(());
         }
         let output = self
-            .ruby_command()
+            .ruby_command()?
             .args(["-e", "print RUBY_ENGINE"])
             .output()
             .map_err(|error| anyhow!("Failed to detect active Ruby engine: {error}"))?;
@@ -1333,7 +1354,7 @@ impl IndexerGem {
             puts "RUBY_FAST_LSP_GEM_DISCOVERY=#{JSON.generate({ source: source, gems: gems })}"
         "#;
         let output = self
-            .ruby_command()
+            .ruby_command()?
             .env("BUNDLE_GEMFILE", &gemfile)
             .args(["-e", script])
             .output()
@@ -1418,7 +1439,7 @@ impl IndexerGem {
         "#;
 
         let output = self
-            .ruby_command()
+            .ruby_command()?
             .env("BUNDLE_GEMFILE", &gemfile)
             .args(["-e", script])
             .output()
@@ -1455,7 +1476,7 @@ impl IndexerGem {
         "#;
 
         let output = self
-            .ruby_command()
+            .ruby_command()?
             .args(["-e", script])
             .output()
             .map_err(|e| anyhow!("Failed to execute ruby gem discovery: {}", e))?;
@@ -1804,33 +1825,24 @@ impl IndexerGem {
         Err(anyhow!("No Gemfile found in workspace hierarchy"))
     }
 
-    fn ruby_command(&self) -> Command {
-        if let Some(executable) = &self.ruby_executable {
-            let mut command = Command::new(executable);
-            command.env_remove("GEM_HOME");
-            command.env_remove("GEM_PATH");
-            command.env_remove("RUBY_VERSION");
-            if let Some(java_home) = &self.java_home {
-                command.env("JAVA_HOME", java_home);
-            }
-            if let Some(root) = &self.workspace_root {
-                command.current_dir(root);
-            }
-            return command;
+    fn ruby_command(&self) -> Result<Command> {
+        let executable = self.ruby_executable.as_ref().ok_or_else(|| {
+            anyhow!(
+                "Gem discovery requires an exact Ruby runtime for {:?}",
+                self.workspace_root
+            )
+        })?;
+        let mut command = Command::new(executable);
+        command.env_remove("GEM_HOME");
+        command.env_remove("GEM_PATH");
+        command.env_remove("RUBY_VERSION");
+        if let Some(java_home) = &self.java_home {
+            command.env("JAVA_HOME", java_home);
         }
-        if let Some(root) = &self.workspace_root {
-            if let Some(ruby_path) = workspace_ruby_path(root) {
-                let mut command = Command::new(ruby_path);
-                command.current_dir(root);
-                return command;
-            }
-        }
-
-        let mut command = Command::new("ruby");
         if let Some(root) = &self.workspace_root {
             command.current_dir(root);
         }
-        command
+        Ok(command)
     }
 
     /// Process gem data from JSON output
@@ -2748,57 +2760,6 @@ fn extract_cached_gem_data(
     Ok(())
 }
 
-fn workspace_ruby_path(workspace_root: &Path) -> Option<PathBuf> {
-    let version = std::fs::read_to_string(workspace_root.join(".ruby-version")).ok()?;
-    let version = normalize_ruby_version(version.trim())?;
-    let rvm_version = if version.starts_with("ruby-")
-        || version.starts_with("jruby-")
-        || version.starts_with("truffleruby-")
-    {
-        version.to_string()
-    } else {
-        format!("ruby-{version}")
-    };
-    let manager_version = version.strip_prefix("ruby-").unwrap_or(version);
-    let home = std::env::var("HOME").ok()?;
-    let candidates = [
-        PathBuf::from(&home)
-            .join(".rvm")
-            .join("wrappers")
-            .join(&rvm_version)
-            .join("ruby"),
-        PathBuf::from(&home)
-            .join(".rvm")
-            .join("rubies")
-            .join(&rvm_version)
-            .join("bin")
-            .join("ruby"),
-        PathBuf::from(&home)
-            .join(".rbenv")
-            .join("versions")
-            .join(manager_version)
-            .join("bin")
-            .join("ruby"),
-        PathBuf::from(&home)
-            .join(".asdf")
-            .join("installs")
-            .join("ruby")
-            .join(manager_version)
-            .join("bin")
-            .join("ruby"),
-    ];
-
-    candidates.into_iter().find(|path| path.is_file())
-}
-
-fn normalize_ruby_version(version: &str) -> Option<&str> {
-    let version = version.trim();
-    if version.is_empty() {
-        return None;
-    }
-    Some(version)
-}
-
 // ============================================================================
 // Tests
 // ============================================================================
@@ -2812,11 +2773,9 @@ mod tests {
     use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, FileFacts, ResolveMode};
     use std::fs;
     use std::io::Cursor;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use tar::{Builder, Header};
     use tempfile::TempDir;
-
-    static HOME_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn create_test_indexer() -> IndexerGem {
         let temp_dir = TempDir::new().unwrap();
@@ -4104,64 +4063,6 @@ end
         );
 
         assert_eq!(indexer.required_gems_with_dependencies(), vec!["rails"]);
-    }
-
-    #[test]
-    fn test_workspace_ruby_path_uses_rvm_ruby_version_file() {
-        let _home_guard = HOME_ENV_LOCK.lock().expect(
-            "INVARIANT VIOLATED: a Ruby path test poisoned the HOME environment lock. This is a test bug because process-global environment mutations must be serialized and restored. Fix: restore HOME before allowing an environment-dependent test to unwind.",
-        );
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join(".ruby-version"), "ruby-3.3.11\n").unwrap();
-        let fake_home = temp_dir.path().join("home");
-        let ruby_path = fake_home
-            .join(".rvm")
-            .join("rubies")
-            .join("ruby-3.3.11")
-            .join("bin")
-            .join("ruby");
-        std::fs::create_dir_all(ruby_path.parent().unwrap()).unwrap();
-        std::fs::write(&ruby_path, "").unwrap();
-
-        let old_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", &fake_home);
-        let detected = workspace_ruby_path(temp_dir.path());
-        if let Some(home) = old_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
-
-        assert_eq!(detected, Some(ruby_path));
-    }
-
-    #[test]
-    fn workspace_ruby_path_supports_rvm_jruby_version_file() {
-        let _home_guard = HOME_ENV_LOCK.lock().expect(
-            "INVARIANT VIOLATED: a Ruby path test poisoned the HOME environment lock. This is a test bug because process-global environment mutations must be serialized and restored. Fix: restore HOME before allowing an environment-dependent test to unwind.",
-        );
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join(".ruby-version"), "jruby-9.2.21.0\n").unwrap();
-        let fake_home = temp_dir.path().join("home");
-        let ruby_path = fake_home
-            .join(".rvm")
-            .join("rubies")
-            .join("jruby-9.2.21.0")
-            .join("bin")
-            .join("ruby");
-        std::fs::create_dir_all(ruby_path.parent().unwrap()).unwrap();
-        std::fs::write(&ruby_path, "").unwrap();
-
-        let old_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", &fake_home);
-        let detected = workspace_ruby_path(temp_dir.path());
-        if let Some(home) = old_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
-
-        assert_eq!(detected, Some(ruby_path));
     }
 
     #[cfg(unix)]

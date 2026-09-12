@@ -2,6 +2,42 @@ use serde_json::Value;
 use std::process::Command;
 
 #[test]
+fn check_without_installed_ruby_keeps_project_diagnostics() {
+    let project = tempfile::tempdir().expect("runtime-free project must be created");
+    std::fs::write(
+        project.path().join("Gemfile"),
+        "source 'https://example.test'\n",
+    )
+    .expect("project Gemfile must be written");
+    std::fs::write(project.path().join(".ruby-version"), "ruby-0.0.0\n")
+        .expect("unavailable runtime marker must be written");
+    std::fs::write(
+        project.path().join("main.rb"),
+        "def greet(name)\n  name\nend\n\ngreet\n",
+    )
+    .expect("project Ruby source must be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ruby-fast-lsp"))
+        .args(["check", "--format", "json"])
+        .arg(project.path())
+        .env("PATH", project.path())
+        .output()
+        .expect("runtime-free CLI check must start");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "missing Ruby must preserve the diagnostic exit code; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout)
+        .expect("missing Ruby must still produce a complete check report");
+    assert_eq!(report["files_checked"], 2);
+    assert_eq!(report["summary"]["warnings"], 1);
+    assert_eq!(report["diagnostics"][0]["code"], "wrong-arity");
+    assert_eq!(report["diagnostics"][0]["path"], "main.rb");
+}
+
+#[test]
 fn check_json_uses_stable_output_and_failure_exit_code() {
     let project = tempfile::tempdir().expect("temporary CLI check project must be created");
     std::fs::write(
