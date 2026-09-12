@@ -401,7 +401,9 @@ async fn goto_require_custom_load_path_wins_before_lib() {
     editor.server().config.lock().indexing.load_paths = LoadPathsConfig {
         default: Vec::new(),
         projects: vec![ProjectLoadPaths {
-            root: "/project".to_string(),
+            root: crate::test::harness::fixture_path("/project")
+                .to_string_lossy()
+                .into_owned(),
             paths: vec!["custom".to_string()],
         }],
     };
@@ -422,11 +424,15 @@ async fn goto_require_load_paths_are_isolated_per_project() {
         default: Vec::new(),
         projects: vec![
             ProjectLoadPaths {
-                root: "/server".to_string(),
+                root: crate::test::harness::fixture_path("/server")
+                    .to_string_lossy()
+                    .into_owned(),
                 paths: vec!["custom".to_string()],
             },
             ProjectLoadPaths {
-                root: "/admin".to_string(),
+                root: crate::test::harness::fixture_path("/admin")
+                    .to_string_lossy()
+                    .into_owned(),
                 paths: vec!["other".to_string()],
             },
         ],

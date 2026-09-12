@@ -213,16 +213,18 @@ impl JavaDecompiler {
                 declaration.artifact_path.clone(),
             ));
         }
-        let class_relative = safe_internal_class_path(&declaration.class.name)?;
+        safe_internal_class_path(&declaration.class.name)?;
         let options_fingerprint = format!("{:x}", Sha256::digest(CFR_OPTIONS_ID.as_bytes()));
-        let cache_key = self
-            .cache_root
-            .join("decompiled")
-            .join(&self.asset.fingerprint_sha256)
-            .join(java_fingerprint)
-            .join(&declaration.artifact_fingerprint_sha256)
-            .join(options_fingerprint)
-            .join(&class_relative);
+        // One digest retains every producer input without nesting four SHA-256
+        // directories. Windows cannot launch a process in that >260-character cwd.
+        let entry = decompilation_cache_id([
+            &self.asset.fingerprint_sha256,
+            &java_fingerprint,
+            &declaration.artifact_fingerprint_sha256,
+            &options_fingerprint,
+            &declaration.class.name,
+        ]);
+        let cache_key = self.cache_root.join("decompiled").join(entry);
         let implementation_root = cache_key.join("implementation");
         if let Some((path, content, location)) =
             find_verified_output(&implementation_root, declaration, self.limits)?
@@ -278,6 +280,15 @@ impl JavaDecompiler {
             location,
         }))
     }
+}
+
+fn decompilation_cache_id(inputs: [&str; 5]) -> String {
+    let mut digest = Sha256::new();
+    for input in inputs {
+        digest.update((input.len() as u64).to_le_bytes());
+        digest.update(input.as_bytes());
+    }
+    format!("{:x}", digest.finalize())
 }
 
 struct ProcessPermit;
@@ -1007,6 +1018,31 @@ mod tests {
         assert_eq!(
             decompiler.decompile(&declaration),
             Err(JavaDecompilerError::AssetFingerprintMismatch(asset.path))
+        );
+    }
+
+    #[test]
+    fn compact_decompiler_cache_identity_retains_every_producer_input() {
+        let inputs = ["asset", "java", "artifact", "options", "fixtures/Example"];
+        let baseline = decompilation_cache_id(inputs);
+        assert_eq!(
+            baseline.len(),
+            64,
+            "cache directory must remain one SHA-256 component"
+        );
+        for index in 0..inputs.len() {
+            let mut changed = inputs;
+            changed[index] = "changed";
+            assert_ne!(
+                decompilation_cache_id(changed),
+                baseline,
+                "input {index} must invalidate cached source"
+            );
+        }
+        assert_ne!(
+            decompilation_cache_id(["ab", "c", "artifact", "options", "Owner"]),
+            decompilation_cache_id(["a", "bc", "artifact", "options", "Owner"]),
+            "component boundaries must be retained in the cache identity"
         );
     }
 

@@ -231,6 +231,11 @@ impl CheckSession {
         let input = input
             .canonicalize()
             .with_context(|| format!("failed to resolve check path {}", input.display()))?;
+        // Workspace routing and indexed files use paths decoded from file URLs.
+        // Windows canonicalization adds a verbatim prefix that URLs do not retain.
+        let input = Url::from_file_path(&input)
+            .and_then(|uri| uri.to_file_path())
+            .map_err(|()| anyhow!("check path is not a valid file URI: {}", input.display()))?;
         if !input.is_dir() && !input.is_file() {
             return Err(anyhow!(
                 "check path is neither a file nor a directory: {}",

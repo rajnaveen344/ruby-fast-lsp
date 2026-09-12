@@ -736,6 +736,10 @@ mod tests {
             .path()
             .canonicalize()
             .expect("synthetic corpus directory must have a canonical path");
+        let base = tower_lsp::lsp_types::Url::from_directory_path(base)
+            .expect("synthetic corpus directory must form a file URI")
+            .to_file_path()
+            .expect("synthetic corpus must use the same native paths as the LSP");
         let root = base.join("project");
         std::fs::create_dir(&root).expect("synthetic project directory must be writable");
         let stub = base.join("core.rb");

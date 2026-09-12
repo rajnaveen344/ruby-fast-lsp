@@ -685,12 +685,7 @@ async fn rspec_cross_file_shared_context_helpers_flow_to_including_group() {
         "source 'https://rubygems.org'\n",
     )
     .expect("RSpec shared-context Gemfile must be written");
-    let root = workspace
-        .path()
-        .strip_prefix("/")
-        .expect("temporary workspace path must be absolute")
-        .to_string_lossy()
-        .to_string();
+    let root = workspace.path().to_string_lossy().to_string();
     let rspec_file = format!("{root}/lib/rspec.rb");
     let support_file = format!("{root}/spec/support/auth_context.rb");
     let consumer_file = format!("{root}/spec/shared_context_consumer_spec.rb");
@@ -760,18 +755,8 @@ async fn rspec_shared_context_identity_is_isolated_between_projects() {
         )
         .expect("RSpec isolation Gemfile must be written");
     }
-    let root_a = project_a
-        .path()
-        .strip_prefix("/")
-        .expect("project A path must be absolute")
-        .to_string_lossy()
-        .to_string();
-    let root_b = project_b
-        .path()
-        .strip_prefix("/")
-        .expect("project B path must be absolute")
-        .to_string_lossy()
-        .to_string();
+    let root_a = project_a.path().to_string_lossy().to_string();
+    let root_b = project_b.path().to_string_lossy().to_string();
     let mut editor = FakeEditor::new().await;
     editor.add_workspace(&root_a);
     editor.add_workspace(&root_b);
