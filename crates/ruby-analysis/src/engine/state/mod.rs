@@ -4,22 +4,18 @@
 mod decls;
 mod files;
 mod hierarchy;
-mod inference;
 mod lifecycle;
 mod names;
+mod solver;
 mod types;
 mod uses;
 
 pub(in crate::engine) use decls::EffectiveMethodFactMatch;
 pub use files::{SourceFile, SourceFileInput, SourceFileSnapshot};
-pub(in crate::engine) use inference::resolve_constant_dependency_type;
+pub(in crate::engine) use solver::resolve_constant_dependency_type;
 pub(in crate::engine) use types::TypeInferenceOutcomeRef;
 
-use std::collections::HashMap;
-use std::mem::size_of;
 use std::sync::atomic::{AtomicU64, Ordering};
-
-use crate::core::{InferenceEvidence, SourceFileId};
 
 use crate::engine::diagnostics::Diagnostics;
 use crate::engine::AnalysisQuery;
@@ -28,6 +24,7 @@ use decls::DeclIndex;
 use files::Files;
 use hierarchy::Hierarchy;
 use names::Names;
+use solver::Solver;
 use types::TypeTable;
 use uses::UseIndex;
 
@@ -145,10 +142,7 @@ pub struct AnalysisEngine {
     pub(in crate::engine) uses: UseIndex,
     pub(in crate::engine) diagnostics: Diagnostics,
     pub(in crate::engine) decls: DeclIndex,
-    inference_by_file: HashMap<SourceFileId, InferenceEvidence>,
-    method_return_equations_dirty: bool,
-    constant_type_equations_dirty: bool,
-    method_return_solution_spans_files: bool,
+    pub(in crate::engine) solver: Solver,
     last_resolve_pass: StatsSnapshot<ResolveStat>,
 }
 
@@ -180,10 +174,7 @@ impl Default for AnalysisEngine {
             uses: UseIndex::default(),
             diagnostics: Diagnostics::default(),
             decls: DeclIndex::default(),
-            inference_by_file: HashMap::new(),
-            method_return_equations_dirty: false,
-            constant_type_equations_dirty: false,
-            method_return_solution_spans_files: false,
+            solver: Solver::default(),
             last_resolve_pass: StatsSnapshot::default(),
         }
     }
@@ -201,10 +192,7 @@ impl Clone for AnalysisEngine {
             uses: self.uses.clone(),
             diagnostics: self.diagnostics.clone(),
             decls: self.decls.clone(),
-            inference_by_file: self.inference_by_file.clone(),
-            method_return_equations_dirty: self.method_return_equations_dirty,
-            constant_type_equations_dirty: self.constant_type_equations_dirty,
-            method_return_solution_spans_files: self.method_return_solution_spans_files,
+            solver: self.solver.clone(),
             last_resolve_pass: StatsSnapshot::default(),
         }
     }
@@ -300,13 +288,7 @@ impl AnalysisEngine {
 
     fn estimated_file_store_heap_bytes(&self) -> usize {
         self.files.estimated_heap_bytes()
-            + self.inference_by_file.capacity()
-                * (size_of::<SourceFileId>() + size_of::<InferenceEvidence>() + 1)
-            + self
-                .inference_by_file
-                .values()
-                .map(InferenceEvidence::estimated_heap_bytes)
-                .sum::<usize>()
+            + self.solver.estimated_heap_bytes()
             + self.types.file_outcomes_heap_bytes()
     }
 
@@ -318,7 +300,7 @@ impl AnalysisEngine {
         self.hierarchy.shrink_to_fit();
         self.uses.shrink_to_fit();
         self.diagnostics.shrink_to_fit();
-        self.inference_by_file.shrink_to_fit();
+        self.solver.shrink_to_fit();
     }
 }
 

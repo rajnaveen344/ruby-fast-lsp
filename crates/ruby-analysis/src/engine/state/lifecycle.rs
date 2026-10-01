@@ -5,12 +5,8 @@ use crate::stats::StatsSnapshot;
 use std::collections::HashSet;
 use std::time::Instant;
 
-use crate::core::{
-    DiagnosticFact, FileAnalysis, InferenceTelemetry, RubyType, SourceFileId, TypeProvenance,
-    TypeSubject,
-};
+use crate::core::{DiagnosticFact, FileAnalysis, RubyType, SourceFileId};
 
-use super::types::TypeInferenceOutcomeRef;
 use super::{AnalysisEngine, ResolveMode, ResolveStat, SourceFileSnapshot};
 use crate::engine::persist::fingerprint::{SemanticChange, SemanticExportFingerprint};
 
@@ -137,29 +133,11 @@ impl AnalysisEngine {
                 fix = "sort and deduplicate TypeTracker results before engine replacement",
             );
         }
-        let equations_changed = match self.inference_by_file.get(&file_id) {
-            Some(previous) => {
-                previous.method_return_equations != facts.inference.method_return_equations
-            }
-            None => !facts.inference.method_return_equations.is_empty(),
-        };
-        if !equations_changed {
-            if let Some(previous) = self.inference_by_file.get(&file_id) {
-                facts.inference.method_return_outcomes = previous.method_return_outcomes.clone();
-                facts.inference.telemetry = previous.telemetry.clone();
-                for fact in &mut facts.types {
-                    if fact.provenance != TypeProvenance::Inferred {
-                        continue;
-                    }
-                    let TypeSubject::MethodReturn(method) = &fact.subject else {
-                        continue;
-                    };
-                    if let Some(outcome) = previous.method_return_outcomes.get(method) {
-                        fact.ruby_type = outcome.clone().into_ruby_type();
-                    }
-                }
-            }
-        }
+        let equations_changed = self.solver.carry_over_unchanged_solution(
+            file_id,
+            &mut facts.inference,
+            &mut facts.types,
+        );
         self.decls.replace_file(
             &mut self.names,
             file_id,
@@ -188,62 +166,10 @@ impl AnalysisEngine {
             call_expression_outcomes,
             facts.local_read_types,
         );
-        self.inference_by_file.insert(file_id, facts.inference);
-        self.method_return_equations_dirty |= equations_changed;
-        self.constant_type_equations_dirty = self.inference_by_file.values().any(|evidence| {
-            !evidence.constant_type_equations.is_empty()
-                || evidence
-                    .method_return_equations
-                    .iter()
-                    .any(|equation| !equation.constant_dependencies().is_empty())
-        });
-        self.refresh_retained_shape_telemetry(file_id);
-    }
-
-    pub(super) fn refresh_retained_shape_telemetry(&mut self, file_id: SourceFileId) {
-        let mut observed = InferenceTelemetry::default();
-        for ruby_type in self.types.ruby_types_in_file(file_id) {
-            observed.observe_retained_type(ruby_type);
-        }
-        if let Some(reads) = self.local_read_type_views_in_file(file_id) {
-            for (_, ruby_type) in reads {
-                observed.observe_retained_type(ruby_type);
-            }
-        }
-        if let Some(evidence) = self.inference_by_file.get(&file_id) {
-            for outcome in evidence.method_return_outcomes.values() {
-                if let Some(ruby_type) = outcome.proven_type() {
-                    observed.observe_retained_type(ruby_type);
-                }
-                if let Some(reason) = outcome.unknown_reason() {
-                    observed.observe_shape_unknown(reason);
-                }
-            }
-            for (_, reason) in &evidence.expression_unknown_reasons {
-                observed.observe_shape_unknown(*reason);
-            }
-        }
-        if let Some(outcomes) = self.call_expression_outcome_views_in_file(file_id) {
-            for (_, outcome) in outcomes {
-                match outcome {
-                    TypeInferenceOutcomeRef::Proven(ruby_type) => {
-                        observed.observe_retained_type(ruby_type);
-                    }
-                    TypeInferenceOutcomeRef::Unknown(reason) => {
-                        observed.observe_shape_unknown(reason);
-                    }
-                }
-            }
-        }
-        self.inference_by_file
-            .get_mut(&file_id)
-            .expect_invariant(
-                "retained shape telemetry lost its file-owned inference evidence",
-                "the refresh runs only after atomic evidence insertion",
-                "keep telemetry refresh inside the file replacement lifecycle",
-            )
-            .telemetry
-            .replace_retained_shape_observations(&observed);
+        self.solver
+            .replace_file(file_id, facts.inference, equations_changed);
+        self.solver
+            .refresh_retained_shape_telemetry(file_id, &self.types);
     }
 }
 

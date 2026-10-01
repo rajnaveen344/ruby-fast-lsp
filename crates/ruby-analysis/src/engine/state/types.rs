@@ -467,7 +467,7 @@ impl AnalysisEngine {
         &self,
         file_id: SourceFileId,
     ) -> Option<impl Iterator<Item = (TextRange, &RubyType)>> {
-        self.inference_by_file.get(&file_id)?;
+        self.solver.evidence(file_id)?;
         Some(self.types.local_read_type_views_in_file(file_id))
     }
 
@@ -475,7 +475,7 @@ impl AnalysisEngine {
         &self,
         range: TextRange,
     ) -> Option<&RubyType> {
-        self.inference_by_file.get(&range.file_id)?;
+        self.solver.evidence(range.file_id)?;
         self.types.exact_local_read_type_at(range)
     }
 
@@ -484,7 +484,7 @@ impl AnalysisEngine {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> Option<&RubyType> {
-        self.inference_by_file.get(&file_id)?;
+        self.solver.evidence(file_id)?;
         self.types.local_read_type_at(file_id, byte_offset)
     }
 
@@ -492,10 +492,10 @@ impl AnalysisEngine {
         &mut self,
         outcomes: HashMap<TextRange, TypeInferenceOutcome>,
     ) {
-        let inference_by_file = &self.inference_by_file;
+        let solver = &self.solver;
         self.types
             .merge_resolved_call_expression_outcomes(outcomes, |file_id| {
-                inference_by_file.contains_key(&file_id)
+                solver.has_evidence(file_id)
             });
     }
 }
