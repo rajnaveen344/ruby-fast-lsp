@@ -11,8 +11,8 @@ use tower_lsp::lsp_types::{
 };
 
 use ruby_analysis::core::MethodReceiver;
+use ruby_analysis::engine::completion::{CompletionSemanticQuery, CompletionVariableKind};
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
-use ruby_analysis::inference::completion::{CompletionSemanticQuery, CompletionVariableKind};
 
 use crate::lsp::query::{analyzer_for_document, EngineQuery};
 use crate::server::RubyLanguageServer;
@@ -61,7 +61,7 @@ pub async fn find_completion_at_position(
         analysis_engine: server.analysis_engine_for_uri(&uri),
     };
     if let Some(target) = shape_key_completion_target {
-        let shape_keys = ruby_analysis::inference::completion::shape_key_completions_for_target(
+        let shape_keys = ruby_analysis::engine::completion::shape_key_completions_for_target(
             &semantic_query,
             &document,
             &target,
@@ -286,7 +286,7 @@ pub async fn find_completion_at_position(
         // Method call context: provide type-aware method completions
 
         // Get receiver type using type snapshots
-        let receiver_type = ruby_analysis::inference::completion::receiver_type_from_context(
+        let receiver_type = ruby_analysis::engine::completion::receiver_type_from_context(
             &semantic_query,
             &document,
             &document.content,

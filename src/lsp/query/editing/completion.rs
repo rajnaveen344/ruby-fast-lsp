@@ -9,9 +9,9 @@ use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
+use ruby_analysis::engine::completion::rbs_method_matches_for_type;
 use ruby_analysis::engine::{ConstantLookupRequest, ConstantMatch, MethodMatch};
 use ruby_analysis::indexer::RubyPrismAnalyzer;
-use ruby_analysis::inference::completion::rbs_method_matches_for_type;
 
 use crate::lsp::query::EngineQuery;
 

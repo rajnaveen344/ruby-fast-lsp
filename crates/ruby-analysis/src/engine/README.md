@@ -20,6 +20,7 @@ Implementation folders are private to the engine.
 | `semantics.rs` | The read-only `Semantics` trait the fact collector and `TypeTracker` use for mid-walk reads, implemented for `View` and for the shared engine lock, which takes one short read guard per call and delegates to a `View` |
 | `queries/cache/` | Per-source and thread-local method lookup memos (`memo`, `thread_memo`), and expression, binding, namespace/constant, and method-return type queries |
 | `queries/definitions/` | Definition source selection and partial ordering from participating Ruby lookup chains |
+| `queries/completion/` | Completion receiver/type probing over documents, exported as `engine::completion`; editor trigger routing and snippets stay in the server |
 | `queries/lookup/` | Constant/method matching and hover lookup results |
 | `queries/hierarchy/` | Call/type hierarchy queries and result types |
 | `queries/namespace_tree/` | Namespace-tree projections and their result types |

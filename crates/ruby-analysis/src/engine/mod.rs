@@ -31,6 +31,7 @@ pub use persist::fingerprint::{
     SemanticChange, SemanticExportFingerprint, SemanticResultFingerprint,
 };
 pub use queries::cache::AnalysisQueryCache;
+pub use queries::completion;
 pub use queries::hierarchy::types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
     TypeHierarchyRelation,

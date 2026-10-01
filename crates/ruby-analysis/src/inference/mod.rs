@@ -113,8 +113,9 @@
 //! Unknown rather than widening a result.
 //!
 //! [`rbs`] performs supported RBS conversion and generic substitution.
-//! [`completion`] exposes reusable receiver/type probing; editor trigger
-//! routing and snippet construction remain outside this crate.
+//! Completion receiver/type probing reads documents and lives with the engine
+//! queries (`crate::engine::completion`); editor trigger routing and snippet
+//! construction remain outside this crate.
 //!
 //! # Determinism and lifecycle
 //!
@@ -213,7 +214,6 @@
 //!    path or retained-memory change with the release profiler.
 
 pub(crate) mod callable_body;
-pub mod completion;
 pub(crate) mod constant;
 pub mod control_flow;
 pub(crate) mod higher_order;

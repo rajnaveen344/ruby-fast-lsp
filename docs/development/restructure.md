@@ -218,7 +218,7 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] B8. Break the indexer ↔ inference ↔ engine cycle so dependencies point
       one way: core ← inference ← indexer ← engine.
   - [x] B8a. Move `MethodReceiver` and `VariableTypeKind` to `core`.
-  - [ ] B8b. Move `inference/completion/` to `engine/queries/completion/`.
+  - [x] B8b. Move `inference/completion/` to `engine/queries/completion/`.
   - [ ] B8c. Move callable-literal lowering helpers into inference.
   - [ ] B8d. Move `Semantics`, `ReceiverAccess`, and `LocalType` to
         `inference/semantics.rs`; the engine keeps the impls.

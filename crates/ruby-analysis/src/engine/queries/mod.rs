@@ -1,4 +1,5 @@
 pub(in crate::engine) mod cache;
+pub mod completion;
 mod constructors;
 pub(in crate::engine) mod definitions;
 pub(in crate::engine) mod hierarchy;
