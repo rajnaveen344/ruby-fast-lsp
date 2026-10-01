@@ -117,14 +117,10 @@ end
     indexer
         .collect_project_navigation_facts(
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
     indexer
-        .collect_remaining_project_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .collect_remaining_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
     workspace_state.analysis_engine.write().resolve();
 
@@ -300,14 +296,10 @@ end
     indexer
         .collect_project_navigation_facts(
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
     indexer
-        .collect_remaining_project_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .collect_remaining_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
     workspace_state.analysis_engine.write().resolve();
 

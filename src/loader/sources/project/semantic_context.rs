@@ -3,7 +3,6 @@
 use super::IndexerProject;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
-use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::info;
 use rayon::prelude::*;
@@ -18,10 +17,7 @@ use tower_lsp::lsp_types::Url;
 const MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES: usize = 128 * 1024 * 1024;
 
 impl IndexerProject {
-    pub(crate) fn refresh_exhaustive_semantic_context(
-        &mut self,
-        _server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub(crate) fn refresh_exhaustive_semantic_context(&mut self) -> Result<()> {
         invariant!(
             self.pending_project_navigation_files.is_none()
                 && self.pending_project_files.is_some()

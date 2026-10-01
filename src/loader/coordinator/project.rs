@@ -7,7 +7,6 @@ use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
 use crate::loader::sources::project::IndexerProject;
-use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use log::info;
 use std::sync::Arc;
@@ -26,7 +25,6 @@ impl IndexingCoordinator {
     pub(super) async fn collect_project_navigation_facts(
         &mut self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         priority_keys: ActiveDocumentPriorityKeys,
     ) -> Result<()> {
         let mut project_indexer = self.project_indexer.take().unwrap_or_else(|| {
@@ -53,7 +51,6 @@ impl IndexingCoordinator {
         } else {
             None
         };
-        let worker_server = server.clone();
         let worker_ctx = ctx.clone();
         let worker_root = self.workspace_root.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
@@ -80,7 +77,6 @@ impl IndexingCoordinator {
                     .collect_initial_project_navigation_demand_facts(
                         &initial_demand_keys,
                         &worker_ctx,
-                        &worker_server,
                     )
                     .and_then(|selection| {
                         if let Some((demands, generation)) = frontier_demands.as_ref() {
@@ -100,7 +96,7 @@ impl IndexingCoordinator {
                                 );
                             }
                         }
-                        project_indexer.finish_project_navigation_facts(&worker_ctx, &worker_server)
+                        project_indexer.finish_project_navigation_facts(&worker_ctx)
                     })
                     .and_then(|()| {
                         let Some((demands, generation)) = frontier_demands.as_ref() else {
@@ -115,7 +111,6 @@ impl IndexingCoordinator {
                         project_indexer.collect_project_file_batch(
                             &selection.files,
                             &worker_ctx,
-                            &worker_server,
                             true,
                         )?;
                         if !selection.completed_keys.is_empty() {
@@ -205,7 +200,6 @@ impl IndexingCoordinator {
     pub(super) async fn collect_remaining_project_facts(
         &mut self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         mut runtime_provider_ready_rx: Option<
             tokio::sync::oneshot::Receiver<Result<Option<Arc<JrubyImportProvider>>, String>>,
         >,
@@ -231,11 +225,7 @@ impl IndexingCoordinator {
                 None => None,
             };
             return self
-                .collect_remaining_project_facts_without_demands(
-                    ctx,
-                    server,
-                    exact_runtime_provider,
-                )
+                .collect_remaining_project_facts_without_demands(ctx, exact_runtime_provider)
                 .await;
         };
         let generation = run.generation();
@@ -256,7 +246,6 @@ impl IndexingCoordinator {
             "demands and batches mutate the IndexerProject that found the files",
             "retain the frontier IndexerProject across every batch",
         );
-        let worker_server = server.clone();
         let worker_ctx = ctx.clone();
         let worker_demands = demands.clone();
         let worker_root = self.workspace_root.clone();
@@ -270,7 +259,7 @@ impl IndexingCoordinator {
             "bounded exhaustive project fact collection",
             move || {
                 let result = (|| -> Result<(usize, usize, usize, usize, usize)> {
-                    project_indexer.refresh_exhaustive_semantic_context(&worker_server)?;
+                    project_indexer.refresh_exhaustive_semantic_context()?;
                     let mut batch_count = 0usize;
                     let mut demanded_batch_count = 0usize;
                     let mut collected_file_count = 0usize;
@@ -340,7 +329,6 @@ impl IndexingCoordinator {
                         project_indexer.collect_project_file_batch(
                             &files,
                             &worker_ctx,
-                            &worker_server,
                             demanded || remaining == 0,
                         )?;
                         if provider_installed {
@@ -439,7 +427,6 @@ impl IndexingCoordinator {
     async fn collect_remaining_project_facts_without_demands(
         &mut self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         exact_runtime_provider: Option<Arc<JrubyImportProvider>>,
     ) -> Result<()> {
         let mut project_indexer = self.project_indexer.take().expect_invariant(
@@ -450,7 +437,6 @@ impl IndexingCoordinator {
         if let Some(provider) = exact_runtime_provider {
             project_indexer.install_jruby_import_provider(provider);
         }
-        let worker_server = server.clone();
         let worker_ctx = ctx.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
             &ctx.resources,
@@ -459,8 +445,7 @@ impl IndexingCoordinator {
             IndexingWorkClass::ProjectParallelIo,
             "exhaustive project fact collection",
             move || {
-                let result =
-                    project_indexer.collect_remaining_project_facts(&worker_ctx, &worker_server);
+                let result = project_indexer.collect_remaining_project_facts(&worker_ctx);
                 (project_indexer, result)
             },
         )
@@ -472,7 +457,6 @@ impl IndexingCoordinator {
     pub(super) async fn replay_jruby_catalog_sensitive_project_facts(
         &mut self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
     ) -> Result<usize> {
         let mut project_indexer = self.project_indexer.take().expect_invariant(
             "JRuby catalog-sensitive replay started before the first project pass",
@@ -484,7 +468,6 @@ impl IndexingCoordinator {
             "runtime facts need the same extension and project context as the project pass",
             "rebuild the processor with the completed provider before replay",
         );
-        let worker_server = server.clone();
         let worker_ctx = ctx.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
             &ctx.resources,
@@ -493,11 +476,8 @@ impl IndexingCoordinator {
             IndexingWorkClass::ProjectParallelIo,
             "JRuby catalog-sensitive project replay",
             move || {
-                let result = project_indexer.replay_jruby_catalog_sensitive_files(
-                    file_processor,
-                    &worker_ctx,
-                    &worker_server,
-                );
+                let result = project_indexer
+                    .replay_jruby_catalog_sensitive_files(file_processor, &worker_ctx);
                 (project_indexer, result)
             },
         )

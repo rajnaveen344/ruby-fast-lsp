@@ -13,10 +13,7 @@ async fn test_coordinator_complete_indexing_workflow() {
 
     // Execute the complete indexing process
     let result = coordinator
-        .run_complete_indexing(
-            &server.load_context_for_project(coordinator.workspace_root()),
-            &server,
-        )
+        .run_complete_indexing(&server.load_context_for_project(coordinator.workspace_root()))
         .await;
     assert!(
         result.is_ok(),
@@ -66,10 +63,7 @@ async fn identical_core_stubs_use_one_template_but_keep_isolated_engines() {
         let mut coordinator =
             IndexingCoordinator::new(root.to_path_buf(), RubyFastLspConfig::default());
         coordinator
-            .run_complete_indexing(
-                &server.load_context_for_project(coordinator.workspace_root()),
-                &server,
-            )
+            .run_complete_indexing(&server.load_context_for_project(coordinator.workspace_root()))
             .await
             .unwrap();
     }
@@ -243,10 +237,7 @@ async fn test_coordinator_with_missing_directories() {
 
     // Test indexing with missing directories (should not panic)
     let result = coordinator
-        .run_complete_indexing(
-            &server.load_context_for_project(coordinator.workspace_root()),
-            &server,
-        )
+        .run_complete_indexing(&server.load_context_for_project(coordinator.workspace_root()))
         .await;
     assert!(
         result.is_ok(),

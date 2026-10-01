@@ -7,7 +7,6 @@ use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, Stat
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{LoadContext, LoadSink};
 use crate::loader::file_processor::ProjectFileCollectionTiming;
-use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
@@ -52,20 +51,12 @@ where
 
 impl IndexerProject {
     /// Collect facts from project files and track dependencies
-    pub fn collect_project_facts(
-        &mut self,
-        ctx: &LoadContext,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
-        self.collect_project_navigation_facts(ctx, server)?;
-        self.collect_remaining_project_facts(ctx, server)
+    pub fn collect_project_facts(&mut self, ctx: &LoadContext) -> Result<()> {
+        self.collect_project_navigation_facts(ctx)?;
+        self.collect_remaining_project_facts(ctx)
     }
 
-    pub(crate) fn collect_remaining_project_facts(
-        &mut self,
-        ctx: &LoadContext,
-        _server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub(crate) fn collect_remaining_project_facts(&mut self, ctx: &LoadContext) -> Result<()> {
         invariant!(
             self.pending_project_navigation_files.is_none()
                 && self.project_navigation_started_at.is_none(),
@@ -160,7 +151,6 @@ impl IndexerProject {
         &mut self,
         files: &[PathBuf],
         ctx: &LoadContext,
-        _server: &RubyLanguageServer,
         resolve_open_documents: bool,
     ) -> Result<()> {
         if files.is_empty() {

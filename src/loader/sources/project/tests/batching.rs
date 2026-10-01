@@ -117,7 +117,6 @@ fn project_indexing_status_reports_completed_files_against_a_stable_total() {
         .collect_initial_project_navigation_demand_facts(
             &[],
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
     let discovered = workspace_state.indexing_status.snapshot();
@@ -129,20 +128,14 @@ fn project_indexing_status_reports_completed_files_against_a_stable_total() {
     );
 
     indexer
-        .finish_project_navigation_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .finish_project_navigation_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
     let after_frontier = workspace_state.indexing_status.snapshot();
     assert_eq!(after_frontier.total, Some(4));
     assert_eq!(after_frontier.completed, Some(1));
 
     indexer
-        .collect_remaining_project_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .collect_remaining_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
     let after_all = workspace_state.indexing_status.snapshot();
     assert_eq!(after_all.total, Some(4));
@@ -179,7 +172,6 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
     indexer
         .collect_project_navigation_facts(
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
 
@@ -189,7 +181,6 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
         .collect_project_file_batch(
             &parent_batch,
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
             false,
         )
         .unwrap();
@@ -199,7 +190,6 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
         .collect_project_file_batch(
             &child_batch,
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
             false,
         )
         .unwrap();
@@ -259,7 +249,6 @@ fn exhaustive_semantics_do_not_depend_on_batch_boundaries() {
         indexer
             .collect_project_navigation_facts(
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
             )
             .unwrap();
 
@@ -274,7 +263,6 @@ fn exhaustive_semantics_do_not_depend_on_batch_boundaries() {
                         .collect_project_file_batch(
                             &batch,
                             &server.load_context_for_project(indexer.workspace_root()),
-                            &server,
                             false,
                         )
                         .unwrap();
@@ -328,7 +316,6 @@ fn parallel_batch_collection_has_a_stable_semantic_result() {
         indexer
             .collect_project_navigation_facts(
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
             )
             .unwrap();
 
@@ -338,7 +325,6 @@ fn parallel_batch_collection_has_a_stable_semantic_result() {
             .collect_project_file_batch(
                 &batch,
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
                 true,
             )
             .unwrap();

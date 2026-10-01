@@ -7,7 +7,6 @@ use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::loader::context::LoadContext;
 use crate::loader::sources::stdlib::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
 use crate::loader::version::ruby_version::{RubyImplementation, RubyVersion};
-use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::info;
 use std::time::Instant;
@@ -65,10 +64,7 @@ fn ruby_version_for_runtime(runtime: &SelectedRuntimeDescriptor) -> Option<RubyV
 
 impl IndexingCoordinator {
     /// Step 1: Select the Ruby version for the already resolved runtime.
-    pub(super) async fn detect_ruby_version_off_reactor(
-        &mut self,
-        _server: &RubyLanguageServer,
-    ) -> Result<Option<RubyVersion>> {
+    pub(super) async fn detect_ruby_version_off_reactor(&mut self) -> Result<Option<RubyVersion>> {
         if let Some(runtime) = &self.effective_runtime {
             let version = ruby_version_for_runtime(runtime);
             self.detected_ruby_version = version;

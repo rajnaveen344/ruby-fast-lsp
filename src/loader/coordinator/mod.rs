@@ -11,7 +11,6 @@ use crate::loader::sources::gems::IndexerGem;
 use crate::loader::sources::project::IndexerProject;
 use crate::loader::sources::stdlib::IndexerStdlib;
 use crate::loader::version::ruby_version::RubyVersion;
-use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use gems::configured_gem_selection;
 use jruby::build_jruby_import_provider_off_reactor;
@@ -195,11 +194,7 @@ impl IndexingCoordinator {
     /// 4. Scan project dependencies
     /// 5. Collect facts from gems, stdlib, then project files
     /// 6. Publish diagnostics
-    pub async fn run_complete_indexing(
-        &mut self,
-        ctx: &LoadContext,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub async fn run_complete_indexing(&mut self, ctx: &LoadContext) -> Result<()> {
         info!("Starting complete indexing process");
         if self.cache_root.is_none() {
             self.set_cache_root(ctx.products.cache_root());
@@ -224,7 +219,7 @@ impl IndexingCoordinator {
         .await?;
 
         // Step 1: Figure out which Ruby version we're using
-        let ruby_version = self.detect_ruby_version_off_reactor(server).await?;
+        let ruby_version = self.detect_ruby_version_off_reactor().await?;
         ctx.sink.set_ruby_version(
             &self.workspace_root,
             ruby_version.map(|version| version.to_string()),
@@ -369,7 +364,7 @@ impl IndexingCoordinator {
             )
             .await?;
             let project_start = Instant::now();
-            self.collect_project_navigation_facts(ctx, server, project_priority_keys)
+            self.collect_project_navigation_facts(ctx, project_priority_keys)
                 .await?;
             project_frontier_wait.await.map_err(|_| {
                 anyhow!(
@@ -460,8 +455,7 @@ impl IndexingCoordinator {
         );
         let remaining_project = async {
             let remaining_start = Instant::now();
-            self.collect_remaining_project_facts(ctx, server, None)
-                .await?;
+            self.collect_remaining_project_facts(ctx, None).await?;
             Ok::<Duration, anyhow::Error>(remaining_start.elapsed())
         };
         let (remaining_project_result, gem_indexing_result) =
@@ -473,7 +467,7 @@ impl IndexingCoordinator {
         let replay_dur = if provider_present {
             let replay_start = Instant::now();
             let replayed = self
-                .replay_jruby_catalog_sensitive_project_facts(ctx, server)
+                .replay_jruby_catalog_sensitive_project_facts(ctx)
                 .await?;
             info!(
                 "Replaced {} JRuby catalog-sensitive project file(s) after exact provider setup",

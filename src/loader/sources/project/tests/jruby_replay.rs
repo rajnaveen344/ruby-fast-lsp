@@ -79,10 +79,7 @@ fn providerless_project_pass_records_exact_compact_jruby_replay_candidates() {
         IndexingConfig::default(),
     );
     indexer
-        .collect_project_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .collect_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
 
     assert_eq!(
@@ -114,10 +111,7 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
         IndexingConfig::default(),
     );
     indexer
-        .collect_project_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .collect_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
     let imported =
         ruby_analysis::core::FullyQualifiedName::try_from("Demo").expect("valid fixture FQN");
@@ -137,7 +131,6 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
         .replay_jruby_catalog_sensitive_files(
             FileProcessor::new().with_jruby_import_provider(provider.clone()),
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
 
@@ -181,7 +174,6 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
     indexer
         .collect_project_navigation_facts(
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
 
@@ -201,10 +193,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
     );
     indexer.install_jruby_import_provider(provider.clone());
     indexer
-        .collect_remaining_project_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .collect_remaining_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
 
     {
@@ -229,7 +218,6 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
         .replay_jruby_catalog_sensitive_files(
             FileProcessor::new().with_jruby_import_provider(provider),
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
     assert_eq!(replayed, 1);
@@ -273,12 +261,9 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
     indexer
         .collect_project_navigation_facts(
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
-    indexer
-        .refresh_exhaustive_semantic_context(&server)
-        .unwrap();
+    indexer.refresh_exhaustive_semantic_context().unwrap();
 
     let first_batch = indexer.take_next_remaining_project_files(1);
     assert_eq!(first_batch, vec![first_path.clone()]);
@@ -286,7 +271,6 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
         .collect_project_file_batch(
             &first_batch,
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
             false,
         )
         .unwrap();
@@ -303,7 +287,6 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
         .collect_project_file_batch(
             &second_batch,
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
             true,
         )
         .unwrap();
@@ -327,7 +310,6 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
         .replay_jruby_catalog_sensitive_files(
             FileProcessor::new().with_jruby_import_provider(provider),
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
     assert_eq!(replayed, 1);
@@ -374,12 +356,9 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
         indexer
             .collect_project_navigation_facts(
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
             )
             .unwrap();
-        indexer
-            .refresh_exhaustive_semantic_context(&server)
-            .unwrap();
+        indexer.refresh_exhaustive_semantic_context().unwrap();
 
         let provider = Arc::new(
             jruby_provider_with_superclasses(&[
@@ -398,7 +377,6 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
             .collect_project_file_batch(
                 &first_batch,
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
                 false,
             )
             .unwrap();
@@ -412,7 +390,6 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
             .collect_project_file_batch(
                 &second_batch,
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
                 true,
             )
             .unwrap();
@@ -421,7 +398,6 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
             .replay_jruby_catalog_sensitive_files(
                 FileProcessor::new().with_jruby_import_provider(provider),
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
             )
             .unwrap();
         workspace_state.analysis_engine.write().resolve();
@@ -486,12 +462,9 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
         indexer
             .collect_project_navigation_facts(
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
             )
             .unwrap();
-        indexer
-            .refresh_exhaustive_semantic_context(&server)
-            .unwrap();
+        indexer.refresh_exhaustive_semantic_context().unwrap();
 
         let provider = Arc::new(
             jruby_provider(&["com/example/Imported"])
@@ -507,7 +480,6 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
             .collect_project_file_batch(
                 &ordinary_batch,
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
                 false,
             )
             .unwrap();
@@ -521,7 +493,6 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
             .collect_project_file_batch(
                 &import_batch,
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
                 true,
             )
             .unwrap();
@@ -530,7 +501,6 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
             .replay_jruby_catalog_sensitive_files(
                 FileProcessor::new().with_jruby_import_provider(provider),
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
             )
             .unwrap();
         assert_eq!(
@@ -592,7 +562,6 @@ fn exact_jruby_replay_is_independent_of_exhaustive_batch_boundaries() {
         indexer
             .collect_project_navigation_facts(
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
             )
             .unwrap();
         while indexer.remaining_project_file_count() > 0 {
@@ -602,7 +571,6 @@ fn exact_jruby_replay_is_independent_of_exhaustive_batch_boundaries() {
                 .collect_project_file_batch(
                     &batch,
                     &server.load_context_for_project(indexer.workspace_root()),
-                    &server,
                     is_last,
                 )
                 .unwrap();
@@ -625,7 +593,6 @@ fn exact_jruby_replay_is_independent_of_exhaustive_batch_boundaries() {
             .replay_jruby_catalog_sensitive_files(
                 FileProcessor::new().with_jruby_import_provider(provider),
                 &server.load_context_for_project(indexer.workspace_root()),
-                &server,
             )
             .unwrap();
         assert_eq!(replayed, 2);

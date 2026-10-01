@@ -6,7 +6,6 @@ use super::MAX_PROJECT_NAVIGATION_DEMAND_KEYS;
 use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
-use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::Result;
 use log::info;
@@ -120,26 +119,21 @@ pub(super) fn project_file_matches_navigation_key(path: &Path, key: &str) -> boo
 }
 
 impl IndexerProject {
-    pub(crate) fn collect_project_navigation_facts(
-        &mut self,
-        ctx: &LoadContext,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
-        let selection = self.collect_initial_project_navigation_demand_facts(&[], ctx, server)?;
+    pub(crate) fn collect_project_navigation_facts(&mut self, ctx: &LoadContext) -> Result<()> {
+        let selection = self.collect_initial_project_navigation_demand_facts(&[], ctx)?;
         invariant!(
             selection == ProjectNavigationDemandSelection::default(),
             what = "an empty project-demand frontier produced a non-empty selection",
             why = "demand selection must be driven only by normalized queued keys",
             fix = "inspect the initial project frontier partitioning",
         );
-        self.finish_project_navigation_facts(ctx, server)
+        self.finish_project_navigation_facts(ctx)
     }
 
     pub(crate) fn collect_initial_project_navigation_demand_facts(
         &mut self,
         demand_keys: &[String],
         ctx: &LoadContext,
-        _server: &RubyLanguageServer,
     ) -> Result<ProjectNavigationDemandSelection> {
         invariant!(
             self.pending_project_navigation_files.is_none()
@@ -231,11 +225,7 @@ impl IndexerProject {
         Ok(selection)
     }
 
-    pub(crate) fn finish_project_navigation_facts(
-        &mut self,
-        ctx: &LoadContext,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub(crate) fn finish_project_navigation_facts(&mut self, ctx: &LoadContext) -> Result<()> {
         let start_time = self.project_navigation_started_at.take().expect_invariant(
             "navigation completion started without a matching initial frontier",
             "demand collection and the active frontier are one lifecycle",
@@ -266,7 +256,7 @@ impl IndexerProject {
             )),
         )?;
         self.record_processed_project_files(&ruby_files, ctx.sink.as_ref());
-        self.refresh_exhaustive_semantic_context(server)?;
+        self.refresh_exhaustive_semantic_context()?;
 
         info!(
             "Project navigation frontier completed in {:?}. Found {} stdlib deps, {} gem deps",

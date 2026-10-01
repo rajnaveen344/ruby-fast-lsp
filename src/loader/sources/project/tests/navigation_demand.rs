@@ -98,7 +98,6 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
     indexer
         .collect_project_navigation_facts(
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
 
@@ -122,10 +121,7 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
     }
 
     indexer
-        .collect_remaining_project_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .collect_remaining_project_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
 
     let engine = workspace_state.analysis_engine.read();
@@ -157,7 +153,6 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
         .collect_initial_project_navigation_demand_facts(
             &["accountrecord".to_string()],
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
 
@@ -183,10 +178,7 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
     }
 
     indexer
-        .finish_project_navigation_facts(
-            &server.load_context_for_project(indexer.workspace_root()),
-            &server,
-        )
+        .finish_project_navigation_facts(&server.load_context_for_project(indexer.workspace_root()))
         .unwrap();
     let engine = workspace_state.analysis_engine.read();
     assert!(
@@ -217,7 +209,6 @@ fn navigation_demand_completes_when_the_frontier_already_processed_its_file() {
     indexer
         .collect_project_navigation_facts(
             &server.load_context_for_project(indexer.workspace_root()),
-            &server,
         )
         .unwrap();
     let selection = indexer.take_navigation_demand_files(&["accountrecord".to_string()]);

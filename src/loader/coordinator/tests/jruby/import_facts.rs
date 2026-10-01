@@ -113,10 +113,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         coordinator.config.indexing.clone(),
     );
     project_indexer
-        .collect_project_facts(
-            &server.load_context_for_project(project_indexer.workspace_root()),
-            &server,
-        )
+        .collect_project_facts(&server.load_context_for_project(project_indexer.workspace_root()))
         .unwrap();
     let proxy = FullyQualifiedName::namespace(
         ["Java", "ComExample", "Demo"]

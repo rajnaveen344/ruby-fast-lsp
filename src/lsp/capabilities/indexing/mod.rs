@@ -137,7 +137,7 @@ async fn init_workspace_inner(
         coordinator.set_indexing_run(run);
     }
     let ctx = server.load_context_for_project(coordinator.workspace_root());
-    coordinator.run_complete_indexing(&ctx, server).await?;
+    coordinator.run_complete_indexing(&ctx).await?;
 
     Ok(coordinator.last_timings())
 }

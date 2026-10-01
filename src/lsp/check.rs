@@ -297,7 +297,6 @@ impl CheckSession {
             coordinator
                 .run_complete_indexing(
                     &server.load_context_for_project(coordinator.workspace_root()),
-                    &server,
                 )
                 .await
                 .with_context(|| {

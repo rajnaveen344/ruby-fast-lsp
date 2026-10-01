@@ -5,7 +5,6 @@ use crate::environment::runtime::jruby::imports::{JrubyImportProvider, StaticJav
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
-use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::info;
 use rayon::prelude::*;
@@ -30,7 +29,6 @@ impl IndexerProject {
         &mut self,
         file_processor: FileProcessor,
         ctx: &LoadContext,
-        _server: &RubyLanguageServer,
     ) -> Result<usize> {
         let provider = file_processor
             .jruby_import_provider()

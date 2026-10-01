@@ -168,10 +168,7 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
 
     let wall_start = Instant::now();
     coordinator
-        .run_complete_indexing(
-            &server.load_context_for_project(coordinator.workspace_root()),
-            &server,
-        )
+        .run_complete_indexing(&server.load_context_for_project(coordinator.workspace_root()))
         .await
         .context("indexing failed")?;
     let wall = wall_start.elapsed();

@@ -18,6 +18,7 @@ use crate::environment::runtime::catalog::RuntimeDiscoverySource;
 use crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache;
 use crate::loader::cache::persistent::PersistentDerivedProductCache;
 use crate::loader::version::ruby_version::RubyImplementation;
+use crate::server::RubyLanguageServer;
 use ruby_analysis::core::{FullyQualifiedName, RubyType, TypeSubject};
 use ruby_analysis::engine::{AnalysisQuery, SourceFileInput};
 use ruby_fast_lsp_jvm_metadata::ArchiveLimits;
@@ -49,7 +50,7 @@ async fn select_ruby_version(
         .await
         .expect("fixture runtime selection must resolve");
     coordinator
-        .detect_ruby_version_off_reactor(server)
+        .detect_ruby_version_off_reactor()
         .await
         .expect("fixture Ruby version selection must succeed")
 }

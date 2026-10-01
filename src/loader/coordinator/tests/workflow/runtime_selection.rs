@@ -53,14 +53,11 @@ async fn unavailable_auto_runtime_uses_conservative_core_fallback() {
         .await
         .unwrap();
     assert!(coordinator.effective_runtime.is_none());
-    assert_eq!(coordinator.detect_ruby_version_off_reactor(&server).await.unwrap(), None,
+    assert_eq!(coordinator.detect_ruby_version_off_reactor().await.unwrap(), None,
         "an unavailable automatic runtime must use the bundled Ruby 3.0 fallback, not derive compatibility from an unfulfilled marker");
     coordinator.config.ruby_version = "2.5".to_string();
     assert_eq!(
-        coordinator
-            .detect_ruby_version_off_reactor(&server)
-            .await
-            .unwrap(),
+        coordinator.detect_ruby_version_off_reactor().await.unwrap(),
         Some(RubyVersion::new(2, 5)),
         "explicit compatibility configuration must still win over automatic fallback"
     );
@@ -102,10 +99,7 @@ async fn auto_runtime_marker_becomes_the_exact_effective_runtime() {
         .await
         .unwrap();
     assert_eq!(
-        coordinator
-            .detect_ruby_version_off_reactor(&server)
-            .await
-            .unwrap(),
+        coordinator.detect_ruby_version_off_reactor().await.unwrap(),
         Some(RubyVersion::new_with_implementation(
             2,
             5,

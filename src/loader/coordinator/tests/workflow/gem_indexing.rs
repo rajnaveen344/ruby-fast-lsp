@@ -13,10 +13,7 @@ async fn test_coordinator_gem_discovery() {
 
     // Execute indexing which should include gem discovery
     let result = coordinator
-        .run_complete_indexing(
-            &server.load_context_for_project(coordinator.workspace_root()),
-            &server,
-        )
+        .run_complete_indexing(&server.load_context_for_project(coordinator.workspace_root()))
         .await;
     assert!(result.is_ok(), "Indexing with gem discovery should succeed");
 
@@ -37,10 +34,7 @@ async fn test_coordinator_gem_indexing_integration() {
 
     // Test that gem indexing doesn't break the overall indexing process
     let result = coordinator
-        .run_complete_indexing(
-            &server.load_context_for_project(coordinator.workspace_root()),
-            &server,
-        )
+        .run_complete_indexing(&server.load_context_for_project(coordinator.workspace_root()))
         .await;
     assert!(
         result.is_ok(),
@@ -72,10 +66,7 @@ async fn test_coordinator_gem_error_handling() {
     // Even if gem discovery fails, the overall indexing should still succeed
     // This tests the error handling in discover_and_index_gems
     let result = coordinator
-        .run_complete_indexing(
-            &server.load_context_for_project(coordinator.workspace_root()),
-            &server,
-        )
+        .run_complete_indexing(&server.load_context_for_project(coordinator.workspace_root()))
         .await;
     assert!(
         result.is_ok(),
@@ -95,10 +86,7 @@ async fn test_coordinator_gem_performance() {
     // Measure time for indexing including gem discovery
     let start = std::time::Instant::now();
     let result = coordinator
-        .run_complete_indexing(
-            &server.load_context_for_project(coordinator.workspace_root()),
-            &server,
-        )
+        .run_complete_indexing(&server.load_context_for_project(coordinator.workspace_root()))
         .await;
     let elapsed = start.elapsed();
 
