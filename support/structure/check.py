@@ -1,4 +1,4 @@
-"""Check semantic source-folder limits without counting local build output."""
+"""Check semantic source-folder and source-file limits without counting local build output."""
 
 import argparse
 import json
@@ -8,6 +8,8 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath
 
 LIMIT = 10
+LINE_LIMIT = 1000
+SOURCE_SUFFIXES = ('.rs', '.py', '.js', '.mjs', '.ts', '.sh', '.rb')
 
 
 def relative_path(value):
@@ -30,18 +32,20 @@ def in_scope(path, policy):
 
 
 def validate_policy(policy):
-    fields = {'version', 'limit', 'roots', 'strict_roots', 'excluded', 'legacy', 'exceptions'}
+    fields = {'version', 'limit', 'line_limit', 'roots', 'strict_roots', 'excluded', 'legacy', 'legacy_lines', 'exceptions'}
     if not isinstance(policy, dict) or set(policy) != fields:
-        raise ValueError('policy must contain exactly version, limit, roots, strict_roots, excluded, legacy, and exceptions')
+        raise ValueError('policy must contain exactly version, limit, line_limit, roots, strict_roots, excluded, legacy, legacy_lines, and exceptions')
     if type(policy['version']) is not int or policy['version'] != 1 or policy['limit'] != LIMIT:
         raise ValueError('policy version must be 1 and the source-folder limit must remain 10')
+    if policy['line_limit'] != LINE_LIMIT:
+        raise ValueError(f'the source-file line limit must remain {LINE_LIMIT}')
     for name in ['roots', 'strict_roots']:
         values = policy[name]
         if not isinstance(values, list) or not values or not all(isinstance(path, str) for path in values) or len(values) != len(set(values)):
             raise ValueError(f'{name} must be a nonempty list of distinct paths')
         for path in values:
             relative_path(path)
-    for name in ['excluded', 'legacy', 'exceptions']:
+    for name in ['excluded', 'legacy', 'legacy_lines', 'exceptions']:
         if not isinstance(policy[name], dict):
             raise ValueError(f'{name} must be a path-keyed object')
         for path in policy[name]:
@@ -64,6 +68,11 @@ def validate_policy(policy):
         for entry in entries:
             if '/' in relative_path(entry):
                 raise ValueError(f'{path}: legacy entries must be immediate children')
+    for path, lines in policy['legacy_lines'].items():
+        if not in_scope(path, policy) or not path.endswith(SOURCE_SUFFIXES):
+            raise ValueError(f'{path}: line allowance must name an audited source file')
+        if type(lines) is not int or lines <= LINE_LIMIT:
+            raise ValueError(f'{path}: line allowance must be an oversized line count')
     for path, exception in policy['exceptions'].items():
         if not in_scope(path, policy) or path in policy['legacy']:
             raise ValueError(f'{path}: exception must be audited and separate from legacy debt')
@@ -85,10 +94,37 @@ def inventory(files):
     return directories
 
 
+def line_count(text):
+    return len(text.splitlines())
+
+
+def audit_lines(sources, policy, read_text):
+    violations = []
+    present = set()
+    for path in sources:
+        try:
+            lines = line_count(read_text(path))
+        except UnicodeError:
+            continue
+        present.add(path)
+        allowance = policy['legacy_lines'].get(path)
+        if allowance is None:
+            if lines > LINE_LIMIT:
+                violations.append(f'{path}: {lines} lines exceed {LINE_LIMIT}; split by semantic responsibility')
+        elif lines > allowance:
+            violations.append(f'{path}: {lines} lines exceed its legacy baseline {allowance}; split it before adding code')
+        elif lines <= LINE_LIMIT:
+            violations.append(f'{path}: remove the obsolete legacy_lines allowance')
+    for path in sorted(set(policy['legacy_lines']) - present):
+        violations.append(f'{path}: remove the obsolete legacy_lines allowance')
+    return violations
+
+
 def audit(files, policy, read_text):
     validate_policy(policy)
     directories = {path: entries for path, entries in inventory(files).items() if in_scope(path, policy)}
-    violations = []
+    sources = sorted(path for path in files if path.endswith(SOURCE_SUFFIXES) and in_scope(path, policy))
+    violations = audit_lines(sources, policy, read_text)
     for path, entries in sorted(directories.items()):
         if len(entries) <= LIMIT:
             continue
@@ -117,7 +153,9 @@ def audit(files, policy, read_text):
                 violations.append(f'{path}: remove the obsolete {name} allowance')
     return {
         'audited_directories': len(directories),
+        'audited_sources': len(sources),
         'legacy_directories': len(policy['legacy']),
+        'legacy_files': len(policy['legacy_lines']),
         'exceptions': len(policy['exceptions']),
         'violations': violations,
     }
@@ -160,11 +198,11 @@ def main(argv=None):
     if args.json:
         print(json.dumps(report, indent=2))
     else:
-        print(f"Audited {report['audited_directories']} source folders; {report['legacy_directories']} legacy folders, {report['exceptions']} approved exceptions.")
+        print(f"Audited {report['audited_directories']} source folders and {report['audited_sources']} source files; {report['legacy_directories']} legacy folders, {report['legacy_files']} legacy files, {report['exceptions']} approved exceptions.")
         for violation in report['violations']:
             print(violation, file=sys.stderr)
         if not report['violations']:
-            print('Directory limits passed.')
+            print('Directory and file limits passed.')
     return 1 if report['violations'] else 0
 
 

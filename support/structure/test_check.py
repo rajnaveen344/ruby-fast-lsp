@@ -12,9 +12,9 @@ import check
 
 def policy():
     return {
-        'version': 1, 'limit': 10, 'roots': ['src', 'crates'],
+        'version': 1, 'limit': 10, 'line_limit': 1000, 'roots': ['src', 'crates'],
         'strict_roots': ['crates/analysis'], 'excluded': {},
-        'legacy': {}, 'exceptions': {},
+        'legacy': {}, 'legacy_lines': {}, 'exceptions': {},
     }
 
 
@@ -123,6 +123,56 @@ class DirectoryLimitTests(unittest.TestCase):
             self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
             configuration.write_text('{')
             self.assertEqual(subprocess.run(command, capture_output=True).returncode, 2)
+
+
+def lines(count):
+    return 'line\n' * count
+
+
+class FileLineLimitTests(unittest.TestCase):
+    def run_audit(self, contents, configuration=None):
+        return check.audit(sorted(contents), configuration or policy(), contents.__getitem__)['violations']
+
+    def test_thousand_lines_pass_but_one_more_fails(self):
+        self.assertEqual(self.run_audit({'src/a.rs': lines(1000)}), [])
+        self.assertIn('1001 lines exceed 1000', self.run_audit({'src/a.rs': lines(1001)})[0])
+
+    def test_only_audited_source_files_count(self):
+        contents = {'src/data.json': lines(5000), 'docs/a.rs': lines(5000), 'src/README.md': lines(5000)}
+        self.assertEqual(self.run_audit(contents), [])
+        config = policy()
+        config['excluded']['src/vendor'] = 'Vendored upstream code.'
+        self.assertEqual(self.run_audit({'src/vendor/big.rs': lines(5000)}, config), [])
+        self.assertIn('src/a.py', self.run_audit({'src/a.py': lines(1001)})[0])
+
+    def test_legacy_file_may_shrink_but_not_grow(self):
+        config = policy()
+        config['legacy_lines']['src/a.rs'] = 1500
+        self.assertEqual(self.run_audit({'src/a.rs': lines(1500)}, config), [])
+        self.assertEqual(self.run_audit({'src/a.rs': lines(1200)}, config), [])
+        self.assertIn('legacy baseline 1500', self.run_audit({'src/a.rs': lines(1501)}, config)[0])
+
+    def test_split_or_removed_legacy_file_must_lose_its_allowance(self):
+        config = policy()
+        config['legacy_lines']['src/a.rs'] = 1500
+        self.assertIn('obsolete legacy_lines', self.run_audit({'src/a.rs': lines(1000)}, config)[0])
+        self.assertIn('obsolete legacy_lines', self.run_audit({}, config)[0])
+
+    def test_line_allowances_apply_to_strict_roots_but_must_be_oversized_sources(self):
+        config = policy()
+        config['legacy_lines']['crates/analysis/a.rs'] = 1200
+        self.assertEqual(self.run_audit({'crates/analysis/a.rs': lines(1200)}, config), [])
+        for path, count in [('src/a.rs', 1000), ('src/a.json', 1200), ('docs/a.rs', 1200), ('src/a.rs', '1200')]:
+            config = policy()
+            config['legacy_lines'][path] = count
+            with self.subTest(path=path, count=count), self.assertRaises(ValueError):
+                check.validate_policy(config)
+
+    def test_line_limit_cannot_be_raised(self):
+        config = policy()
+        config['line_limit'] = 2000
+        with self.assertRaisesRegex(ValueError, 'line limit must remain 1000'):
+            check.validate_policy(config)
 
 
 if __name__ == '__main__':

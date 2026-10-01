@@ -103,7 +103,8 @@ strict. Other oversized source folders have exact legacy baselines that may
 shrink but must not grow. A cohesive node family without a useful semantic split
 requires a documented, bounded exception in the structure policy. Vendored
 snapshots have explicit ownership exclusions; maintained support folders follow
-the ordinary limit.
+the ordinary limit. Source files, tests included, have at most **1,000 lines**;
+older oversized files have line ceilings that may shrink but must not grow.
 
 Run `python3 -B support/structure/check.py`; see the
 [policy guide](support/structure/README.md) before changing an exception.
