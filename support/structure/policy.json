@@ -165,10 +165,7 @@
     "src/indexer/sources/gems/tests.rs": 1344,
     "src/indexer/sources/project/tests.rs": 1611,
     "src/server/tests.rs": 1032,
-    "src/test/harness/fake_editor.rs": 1040,
-    "src/test/integration/goto/methods.rs": 1725,
-    "src/test/integration/hover/call_node/with_receiver.rs": 1180,
-    "src/test/integration/references/methods.rs": 1245
+    "src/test/harness/fake_editor.rs": 1040
   },
   "exceptions": {}
 }
