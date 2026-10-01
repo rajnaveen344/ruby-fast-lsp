@@ -748,3 +748,49 @@ end
     )
     .await;
 }
+
+#[tokio::test]
+async fn bare_kernel_method_in_basic_object_subclass_warns() {
+    check_multi_file(&[
+        (
+            "leaf.rb",
+            r#"
+class Leaf < BasicObject
+  def to_output
+    <warn code="unresolved-method">puts</warn> "ok"
+  end
+end
+"#,
+        ),
+        (
+            "kernel.rb",
+            "module Kernel\n  def puts(obj = nil, *args)\n  end\nend\n",
+        ),
+        ("object.rb", "class Object\n  include Kernel\nend\n"),
+        ("basic_object.rb", "class BasicObject\nend\n"),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn literal_receivers_use_core_signatures_for_missing_methods() {
+    check(
+        r#"
+items = [1, 2, 3]
+lookup = { name: "ruby" }
+name = "ruby"
+count = 1
+<warn none code="unresolved-method">items.first</warn>
+<warn none code="unresolved-method">items << 4</warn>
+<warn none code="unresolved-method">lookup.fetch(:name)</warn>
+<warn none code="unresolved-method">lookup.each_key {}</warn>
+<warn none code="unresolved-method">name.upcase</warn>
+<warn none code="unresolved-method">count.zero?</warn>
+items.<warn code="unresolved-method">nope_array</warn>
+lookup.<warn code="unresolved-method">nope_hash</warn>
+name.<warn code="unresolved-method">nope_string</warn>
+count.<warn code="unresolved-method">nope_integer</warn>
+"#,
+    )
+    .await;
+}

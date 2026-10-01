@@ -66,7 +66,7 @@ describe supported forms and limits.
 | [crates/](Cargo.toml) | RBS/JVM support, extension APIs and hosts, and the external LSP test harness |
 | [extensions/](extensions/README.md) | Framework integrations and extension examples |
 | [editors/](editors/README.md) | Editor adapters and npm/VSIX packaging |
-| [src/test/](src/test/README.md) | Feature and CLI tests, lifecycle simulation, and shared fixtures |
+| [src/test/](src/test/README.md) | Feature, lifecycle, robustness, and CLI tests, and shared fixtures |
 | [docs/](docs/README.md) / [support/](support/README.md) | Maintained guides / validation tools, assets, and evidence |
 
 ## Next priorities
@@ -79,7 +79,7 @@ describe supported forms and limits.
   `Unknown` outcomes easier to investigate.
 - Refine dependency-driven invalidation so cross-file refresh stays correct
   without unnecessary work during editing.
-- Expand independent simulator expectations and native/editor acceptance before
+- Expand robustness coverage and native/editor acceptance before
   broader public promotion.
 
 These are directions, not delivery promises. Completed implementation plans

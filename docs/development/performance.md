@@ -97,5 +97,5 @@ decision records keep their original measurements and paths and do not certify
 a new build.
 
 For a release candidate, run the existing
-[simulation release gate](release.md), which already includes the deterministic
+[performance release gate](release.md), which runs the deterministic
 profiler. Do not add a second copy of the same gate to a release procedure.

@@ -78,6 +78,6 @@ publication collapses them. It exercises the production traversal and verifies
 linear visits without a test-only counter or an alternate execution path.
 
 Use the focused tracker suite while changing local inference, then the workspace
-suite for collector, engine, editor, and simulation consumers. Keep branch clone
+suite for collector, engine, editor, and robustness consumers. Keep branch clone
 boundaries, method reset order, and return dependency publication explicit when
 adding state.

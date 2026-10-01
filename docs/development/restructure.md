@@ -27,7 +27,7 @@ Delete this file when the last task is done. Git history keeps the record.
       not matter, and that clean code has no diagnostics.
 - [x] A2. Move the handwritten lifecycle and schedule cases out of the simulator
       into `src/test/integration/`.
-- [ ] A3. Delete the simulator binary, its generator and oracle, the
+- [x] A3. Delete the simulator binary, its generator and oracle, the
       simulation build identity in `build.rs`, and the simulation guide and
       release step.
 - [ ] A4. Move `src/bin/*` and `utils/perf` into a `crates/devtools` crate so

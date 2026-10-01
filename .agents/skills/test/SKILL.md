@@ -5,8 +5,7 @@ description: "Add or debug Ruby Fast LSP regressions, choose check/FakeEditor/pr
 
 # Tests and regressions
 
-Read `src/test/README.md` for harness boundaries and
-`docs/development/simulation.md` when changing generated coverage.
+Read `src/test/README.md` for harness boundaries.
 
 1. Reduce a concrete bug to generic Ruby source and a complete expected result.
    Write and run the regression before the production fix; require the intended
@@ -26,7 +25,5 @@ Read `src/test/README.md` for harness boundaries and
 6. Run the focused green test, related coverage, and the workspace suite for
    shared semantic/lifecycle changes. Report actual results and any deferrals.
 
-A handwritten test does not add a generated semantic form. Simulator expansion
-also needs a model, source mapping, independent oracle, observation, edits where
-relevant, and a required coverage bucket. Do not remove a useful contract or add
+Do not remove a useful contract or add
 an ignore merely because its current synchronization is flaky.

@@ -77,8 +77,8 @@ export default [
             href: "https://github.com/rajnaveen344/ruby-fast-lsp/blob/main/AGENTS.md",
           },
           {
-            label: "Testing and simulation",
-            href: "https://github.com/rajnaveen344/ruby-fast-lsp/blob/main/docs/development/simulation.md",
+            label: "Testing",
+            href: "https://github.com/rajnaveen344/ruby-fast-lsp/blob/main/src/test/README.md",
           },
           {
             label: "Performance measurements",

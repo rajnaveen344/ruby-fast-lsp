@@ -130,5 +130,5 @@ fn inspect(reference: &ReferenceFact) {
 Add shared fact contracts in `core`, collect them in `indexer`, put type rules
 in `inference`, and expose persistent results through `engine`. Export only
 the operations and records callers need. Start with a focused semantic test,
-then use the server's lifecycle and simulation tests when file replacement,
+then use the server's lifecycle and robustness tests when file replacement,
 project ownership, or asynchronous publication is involved.

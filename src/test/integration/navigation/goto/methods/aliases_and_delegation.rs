@@ -111,3 +111,17 @@ S3Storage.get_storage$0
     )
     .await;
 }
+
+#[tokio::test]
+async fn goto_class_attribute_reader_through_class_receiver() {
+    check(
+        r#"
+class Worker
+  class_attribute <def>:queue_config</def>
+end
+
+Worker.queue_config$0
+"#,
+    )
+    .await;
+}

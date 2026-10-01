@@ -2,6 +2,7 @@
 
 mod classes;
 mod constants;
+mod dispatch_contracts;
 mod locals;
 mod methods;
 mod mixin_dispatch;

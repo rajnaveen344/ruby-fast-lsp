@@ -13,7 +13,7 @@ counts to this guide.
 | Understand the product and priorities | [README](README.md)                                                                                                                        |
 | Find user and developer documentation | [Documentation index](docs/README.md)                                                                                                      |
 | Place code or change state ownership  | [Architecture](src/ARCHITECTURE.md), [analysis library](crates/ruby-analysis/README.md), [server owners](docs/development/server-state.md) |
-| Add or debug a test                   | [Test guide](src/test/README.md), [simulation guide](docs/development/simulation.md)                                                       |
+| Add or debug a test                   | [Test guide](src/test/README.md)                                                                                                           |
 | Change inference                      | [Inference proof model](crates/ruby-analysis/src/inference/mod.rs), [feature contracts](docs/README.md#feature-contracts)                  |
 | Measure or release                    | [Performance workflow](docs/development/performance.md), [release checklist](docs/development/release.md)                                  |
 
@@ -120,7 +120,7 @@ scripts, and historical measurements. Generated logs and profiles belong under
    paths, business terminology, or code into fixtures or documentation.
 2. Fix the owning layer. Use `check()` for static feature cases, `FakeEditor` for
    edit/reindex behavior, and the external harness or CLI test for process-level
-   contracts. See the test guide for actual boundaries and simulation authoring.
+   contracts. See the test guide for actual harness boundaries.
 3. Run the focused test, then relevant broader checks. Do not ignore a failing
    test, replace a semantic assertion with a weak subset check, or extend a
    wall-clock timeout to hide flaky scheduling. Subprocess tests use the harness
@@ -130,8 +130,7 @@ scripts, and historical measurements. Generated logs and profiles belong under
    measurements for changes to hot paths, inference bounds, scheduling, or caches;
    documentation and presentation-only edits do not require a performance campaign.
 5. Report what changed, the checks actually run, and any remaining limitation.
-   A regression test does not automatically expand generated simulator coverage.
-   Keep standard, simulation, native package, and real-editor evidence distinct.
+   Keep standard, robustness, native package, and real-editor evidence distinct.
 
 Common commands (run from the repository root):
 
@@ -140,7 +139,7 @@ cargo test --locked --workspace
 cargo fmt --all -- --check
 python3 -B support/structure/check.py
 node editors/scripts/release_checks.js correctness
-node editors/scripts/release_checks.js simulation
+node editors/scripts/release_checks.js performance
 ./editors/vscode/create_vsix.sh --current-platform-only
 ```
 

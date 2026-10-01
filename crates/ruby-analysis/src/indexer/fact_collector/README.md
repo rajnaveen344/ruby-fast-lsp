@@ -90,7 +90,7 @@ owned domain values; traversal stacks and mutable stores cannot escape.
 Finishing packages existing evidence. It does not traverse again, rerun the
 solver, or publish to the engine. The file processor merges the declaration
 seed and extension/runtime facts, applies source-kind policy, and uses ordinary
-per-file replacement. The simulation engine uses this same completion API.
+per-file replacement.
 The reference-query scope rebuild uses `into_document()` because it needs only
 the updated scopes, without creating unused proof snapshots.
 
@@ -107,7 +107,7 @@ They contribute through explicit operations such as `add_symbol_fact`,
 Direct-declaration helpers retain their existing provenance and lookup policies.
 Do not expose a mutable owner or storage handle to make a caller compile.
 
-Use the existing feature and simulation tests for observable behavior. Focused
+Use the existing feature and lifecycle tests for observable behavior. Focused
 collector regressions in `tests/` cover traversal and evidence boundaries,
 including nested extension calls, same-pass namespace visibility, shape
 invalidation, and execution-context ownership.

@@ -76,7 +76,7 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 
 - Storage is owned by `ruby-analysis::engine`
 - `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass. Its ten private owners separate source/scope context, options, extensions, facts, flow, lookup inputs, and method/expression/constant evidence.
-- `FactCollector::finish()` returns an owned `CollectedFile`; production and simulation composers apply source policy before engine replacement. `traversal.rs` owns visit order, node modules own syntax handling, and responsibility modules own the shared helpers. See the [collector guide](../crates/ruby-analysis/src/indexer/fact_collector/README.md).
+- `FactCollector::finish()` returns an owned `CollectedFile`; the production composer applies source policy before engine replacement. `traversal.rs` owns visit order, node modules own syntax handling, and responsibility modules own the shared helpers. See the [collector guide](../crates/ruby-analysis/src/indexer/fact_collector/README.md).
 - File discovery and parsing stay separate from engine query logic
 
 ### 2. Analyzer (`crates/ruby-analysis/src/indexer/`)

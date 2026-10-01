@@ -8,6 +8,8 @@ mod coordinator_schedules;
 mod commit_interleavings;
 // Dependency refresh interleaved with edits, roots, and workspace changes.
 mod dependency_refresh;
+// Consumer diagnostics after a definition is deleted and restored.
+mod diagnostic_edits;
 // Method targets across ancestor edits, partial opens, and closed buffers.
 mod hierarchy_edits;
 // Complete navigation and rename results that survive edit recovery.

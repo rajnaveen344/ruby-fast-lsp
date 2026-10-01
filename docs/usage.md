@@ -101,7 +101,6 @@ Use the [bug report form](../.github/ISSUE_TEMPLATE/bug_report.yml). Include ser
 and editor-extension versions, OS/architecture, runtime, Bundler, project layout,
 expected/actual behavior, whether indexing finished, and steps to reproduce.
 Share generic reduced examples and sanitized logs; private source is unnecessary.
-For simulation failures, retain the seed and replay artifact.
 
 To roll back npm, install an explicitly selected previous version with
 `npm install -g @ruby-fast/lsp@<previous-version>` and restart the client. In

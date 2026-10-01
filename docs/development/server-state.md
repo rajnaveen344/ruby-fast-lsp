@@ -135,7 +135,7 @@ dependency cycle.
 
 Use the tests beside [server.rs](../../src/server/mod.rs) for shared clone identity,
 project isolation, construction, cache reuse, and outbound diagnostic delivery.
-The [test guide](../../src/test/README.md) explains harness boundaries, and the
-[simulation guide](simulation.md) explains controlled schedule coverage. These
+The [test guide](../../src/test/README.md) explains harness boundaries and
+controlled schedule coverage. These
 checks provide evidence for exercised behavior, not proof that every future
 ownership or scheduling defect will be caught.

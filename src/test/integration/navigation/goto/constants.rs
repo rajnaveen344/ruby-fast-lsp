@@ -259,3 +259,37 @@ end
     )
     .await;
 }
+
+#[tokio::test]
+async fn top_level_class_eval_block_does_not_open_target_constant_scope() {
+    check(
+        r#"
+module Owner
+  class Target
+    VALUE = "token"
+  end
+end
+
+Owner::Target.class_eval do
+  def evaluated
+    VALUE$0<def none>
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_const_defined_literal_symbol_on_constant_receiver() {
+    check(
+        r#"
+class PushUnit
+  <def>TYPE = "push"</def>
+end
+
+PushUnit.const_defined?(:TYPE$0)
+"#,
+    )
+    .await;
+}
