@@ -202,6 +202,11 @@ impl AnalysisEngine {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// The engine identity and semantic revision that key every query cache.
+    pub(crate) fn query_cache_identity(&self) -> (u64, u64) {
+        (self.instance_id, self.semantic_revision)
+    }
 }
 
 impl AnalysisEngine {

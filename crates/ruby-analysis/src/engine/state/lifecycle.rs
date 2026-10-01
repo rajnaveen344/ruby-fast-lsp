@@ -1,12 +1,15 @@
-//! File-owned fact replacement and resolve passes.
+//! Orchestration over the engine components: file-owned fact replacement
+//! and resolve passes. Each component owns its own state; this module only
+//! fixes the order in which they are written.
 
 use crate::invariant::ExpectInvariant;
 use crate::stats::StatsSnapshot;
 use std::collections::HashSet;
 use std::time::Instant;
 
-use crate::core::{DiagnosticFact, FileAnalysis, RubyType, SourceFileId};
+use crate::core::{DiagnosticFact, FileAnalysis, SourceFileId};
 
+use super::types::TypeTable;
 use super::{AnalysisEngine, ResolveMode, ResolveStat, SourceFileSnapshot};
 use crate::engine::persist::fingerprint::{SemanticChange, SemanticExportFingerprint};
 
@@ -100,39 +103,25 @@ impl AnalysisEngine {
 }
 
 impl AnalysisEngine {
-    fn replace_facts_deferred(&mut self, file_id: SourceFileId, mut facts: FileAnalysis) {
+    /// Invalidate every query cache keyed by `query_cache_identity`.
+    fn advance_semantic_revision(&mut self) {
         self.semantic_revision = self.semantic_revision.checked_add(1).expect_invariant(
             "analysis engine semantic revision exhausted u64",
             "cached queries require monotonic invalidation",
             "widen the semantic revision before performing u64::MAX replacements",
         );
+    }
+
+    /// Replace one file's facts in every component, in a fixed order: the
+    /// solver's carried-over outcomes first, then declarations, hierarchy,
+    /// uses, diagnostics, types, and finally the solver's evidence and its
+    /// retained-shape telemetry, which observes the new types.
+    fn replace_facts_deferred(&mut self, file_id: SourceFileId, mut facts: FileAnalysis) {
+        self.advance_semantic_revision();
         self.hierarchy.invalidate_method_lookup_chains();
         self.files
             .assert_known(file_id, "file analysis references unknown source file id");
-        for (range, ruby_type) in facts.local_read_types.as_ref() {
-            invariant_eq!(
-                range.file_id,
-                file_id,
-                what = "compact local-read type belongs to a different file",
-                why = "inference evidence must be replaced atomically with its source",
-                fix = "attach the registered SourceFileId while converting TypeTracker offsets",
-            );
-            invariant!(
-                *ruby_type != RubyType::Unknown,
-                what = "compact local-read evidence contains Unknown at {range:?}",
-                why = "only proven flow types may enter local_read_types",
-                fix = "retain the failure in expression_unknown_reasons instead",
-                range = range,
-            );
-        }
-        for adjacent in facts.local_read_types.windows(2) {
-            invariant!(
-                adjacent[0].0 < adjacent[1].0,
-                what = "compact local-read evidence is duplicated or unsorted",
-                why = "deterministic range queries require one result per AST read",
-                fix = "sort and deduplicate TypeTracker results before engine replacement",
-            );
-        }
+        TypeTable::check_local_read_types(file_id, &facts.local_read_types);
         let equations_changed = self.solver.carry_over_unchanged_solution(
             file_id,
             &mut facts.inference,
@@ -213,11 +202,7 @@ impl AnalysisEngine {
                 fact.code,
             );
         }
-        self.semantic_revision = self.semantic_revision.checked_add(1).expect_invariant(
-            "analysis engine semantic revision exhausted u64",
-            "cached queries require monotonic invalidation",
-            "widen the semantic revision before performing u64::MAX replacements",
-        );
+        self.advance_semantic_revision();
         self.diagnostics
             .replace_unresolved_require(file_id, require_diagnostics);
         true

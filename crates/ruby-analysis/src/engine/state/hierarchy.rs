@@ -340,10 +340,6 @@ impl Hierarchy {
 }
 
 impl AnalysisEngine {
-    pub(crate) fn query_cache_identity(&self) -> (u64, u64) {
-        (self.instance_id, self.semantic_revision)
-    }
-
     pub(in crate::engine) fn cached_top_level_method_lookup_chain(
         &self,
     ) -> Option<Vec<FullyQualifiedName>> {

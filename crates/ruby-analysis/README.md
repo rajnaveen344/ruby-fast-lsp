@@ -23,6 +23,10 @@ Follow a file through `indexer` (collection), `inference` (type derivation), and
 constant and method-return equation solvers in `inference`; those solvers may
 consult engine queries. These are cooperating modules in one crate. The engine
 owns the solved state and Ruby lookup policy; inference owns the type rules.
+Inside the engine, each kind of state is a component (`Files`, `Names`,
+`DeclIndex`, `Hierarchy`, `UseIndex`, `Diagnostics`, `TypeTable`, `Solver`);
+the `Solver` plans a solve from read-only engine queries, then applies it to the
+`TypeTable`.
 
 Use the [core guide](src/core/README.md) for contracts and compact stores,
 the [indexer guide](src/indexer/README.md) for documents and parser queries,

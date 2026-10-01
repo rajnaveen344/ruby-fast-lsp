@@ -61,6 +61,38 @@ impl TypeTable {
         &self.store
     }
 
+    /// Check one file's proven local-read types before they replace the
+    /// file's previous ones.
+    pub(in crate::engine) fn check_local_read_types(
+        file_id: SourceFileId,
+        local_read_types: &[(TextRange, RubyType)],
+    ) {
+        for (range, ruby_type) in local_read_types {
+            invariant_eq!(
+                range.file_id,
+                file_id,
+                what = "compact local-read type belongs to a different file",
+                why = "inference evidence must be replaced atomically with its source",
+                fix = "attach the registered SourceFileId while converting TypeTracker offsets",
+            );
+            invariant!(
+                *ruby_type != RubyType::Unknown,
+                what = "compact local-read evidence contains Unknown at {range:?}",
+                why = "only proven flow types may enter local_read_types",
+                fix = "retain the failure in expression_unknown_reasons instead",
+                range = range,
+            );
+        }
+        for adjacent in local_read_types.windows(2) {
+            invariant!(
+                adjacent[0].0 < adjacent[1].0,
+                what = "compact local-read evidence is duplicated or unsorted",
+                why = "deterministic range queries require one result per AST read",
+                fix = "sort and deduplicate TypeTracker results before engine replacement",
+            );
+        }
+    }
+
     /// Replace one file's type facts, call-expression outcomes, and proven
     /// local-read types.
     pub(in crate::engine) fn replace_file(
