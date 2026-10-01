@@ -11,13 +11,13 @@ use crate::core::{
     SourceKind, TypeProvenance, TypeSubject,
 };
 
-use super::fingerprint::{SemanticChange, SemanticExportFingerprint};
 use super::inference::{StoredTypeInferenceOutcome, TypeInferenceOutcomeRef};
 use super::storage::source_hash;
 use super::{
     AnalysisEngine, ResolveMode, ResolveStat, SourceFile, SourceFileInput, SourceFileSnapshot,
     SourceLineIndex,
 };
+use crate::engine::persist::fingerprint::{SemanticChange, SemanticExportFingerprint};
 
 impl AnalysisEngine {
     pub fn register_file(&mut self, file: SourceFileInput) -> SourceFileId {

@@ -96,7 +96,7 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] B3. Extract the `AnalysisEngine` components one at a time: `Files`,
       `Names`, `DeclIndex`, `Hierarchy`, `UseIndex`, `TypeTable`, `Solver`,
       `Diagnostics`. Each owns its impls in its own module.
-  - [ ] B3a. Move `engine/state/fingerprint/` and
+  - [x] B3a. Move `engine/state/fingerprint/` and
         `engine/state/external_facts_template/` to a new `engine/persist/` so
         `engine/state/` has room for one module per component. No behavior
         change.

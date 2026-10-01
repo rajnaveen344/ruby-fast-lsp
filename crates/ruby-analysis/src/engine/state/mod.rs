@@ -1,10 +1,8 @@
 //! Project semantic state: source registration, file-owned facts, resolution
 //! passes, and the engine-owned reads that queries build on.
 
-pub(in crate::engine) mod external_facts_template;
 mod facts;
 pub(in crate::engine) mod file_id_map;
-pub(in crate::engine) mod fingerprint;
 mod graph;
 mod inference;
 mod lifecycle;
@@ -26,9 +24,9 @@ use crate::core::{
     SourceFileId, SourceKind, TextRange,
 };
 
+use crate::engine::persist::fingerprint::SemanticExportFingerprint;
 use crate::engine::AnalysisQuery;
 use crate::stats::{self, StatsSnapshot};
-use fingerprint::SemanticExportFingerprint;
 use inference::StoredTypeInferenceOutcome;
 use parking_lot::Mutex;
 use storage::{FactArena, NameRegistry, SourceRegistry};
@@ -270,16 +268,17 @@ pub struct AnalysisEngine {
     pub(in crate::engine) facts: FactArena,
     pub(in crate::engine) graph: SemanticGraph,
     pub(in crate::engine) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
-    execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
+    pub(in crate::engine) execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
     inference_by_file: HashMap<SourceFileId, InferenceEvidence>,
     call_expression_outcomes_by_file:
         HashMap<SourceFileId, Box<[(TextRange, StoredTypeInferenceOutcome)]>>,
-    local_read_types_by_file:
+    pub(in crate::engine) local_read_types_by_file:
         HashMap<SourceFileId, Box<[(TextRange, crate::core::storage::type_store::RubyTypeId)]>>,
     method_return_equations_dirty: bool,
     constant_type_equations_dirty: bool,
     method_return_solution_spans_files: bool,
-    semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
+    pub(in crate::engine) semantic_export_fingerprints:
+        HashMap<SourceFileId, SemanticExportFingerprint>,
     top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
     universal_object_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
     last_resolve_pass: StatsSnapshot<ResolveStat>,

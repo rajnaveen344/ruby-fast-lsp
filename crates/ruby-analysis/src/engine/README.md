@@ -8,8 +8,9 @@ Implementation folders are private to the engine.
 
 | Area | Responsibility |
 | --- | --- |
-| `state/` | `AnalysisEngine` ownership, source and name registries (`storage`), file replacement and resolve passes (`lifecycle`), fact reads (`facts`), graph reads and lookup caches (`graph`), stored inference outcomes (`inference`), and semantic fingerprints (`fingerprint/`) |
-| `state/external_facts_template/` | Project-neutral dependency fact templates and their snapshot codecs |
+| `state/` | `AnalysisEngine` ownership, source and name registries (`storage`), file replacement and resolve passes (`lifecycle`), fact reads (`facts`), graph reads and lookup caches (`graph`), and stored inference outcomes (`inference`) |
+| `persist/fingerprint/` | Semantic export and result fingerprints that classify file replacements and key persistent caches |
+| `persist/external_facts_template/` | Project-neutral dependency fact templates and their snapshot codecs |
 | `state/tests/` | Engine state tests grouped by lifecycle, fingerprints, inference outcomes, navigation, graph, caches, and constants |
 | `resolution/` | Ruby lookup chains and MRO (`lookup_chain`), chain method facts and visibility (`chain_methods`), callees, signatures, method references, reference ranges, definitions, and rename policy |
 | `queries/` | Common reads and the `AnalysisQuery` entry point |

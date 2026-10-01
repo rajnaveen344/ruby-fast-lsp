@@ -7,9 +7,9 @@ use crate::core::{
     UnknownReason, UnresolvedGraphEdgeFact,
 };
 
-use super::fingerprint::SemanticChange;
 use super::*;
 use crate::core::TypeResolution;
+use crate::engine::persist::fingerprint::SemanticChange;
 use crate::engine::resolution::{
     method_lookup_chain, method_lookup_chain_for_reference_cached,
     method_lookup_chain_uncached_construction_count, namespace_target_exists,

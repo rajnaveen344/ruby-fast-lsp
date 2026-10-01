@@ -11,12 +11,20 @@
 
 mod debug;
 mod diagnostics;
+mod persist;
 mod queries;
 mod resolution;
 mod state;
 
 pub use debug::reference_storage_sizes;
 pub use debug::types::{ExportGraphResponse, LookupResponse};
+pub use persist::external_facts_template::{
+    ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate,
+    ProjectNeutralTemplateRejection,
+};
+pub use persist::fingerprint::{
+    SemanticChange, SemanticExportFingerprint, SemanticResultFingerprint,
+};
 pub use queries::cache::AnalysisQueryCache;
 pub use queries::hierarchy::types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
@@ -33,14 +41,7 @@ pub use queries::namespace_tree::types::{
 pub use queries::workspace_symbols::types::WorkspaceSymbolMatch;
 pub use queries::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
-pub use state::external_facts_template::{
-    ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate,
-    ProjectNeutralTemplateRejection,
-};
 pub use state::file_id_map::FileIdMap;
-pub use state::fingerprint::{
-    SemanticChange, SemanticExportFingerprint, SemanticResultFingerprint,
-};
 pub use state::{
     AnalysisEngine, AnalysisStat, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
     SourceFileSnapshot,

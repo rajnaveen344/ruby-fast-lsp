@@ -10,7 +10,7 @@ use std::hash::Hash;
 use crate::core::equations::method_return_equation::MethodReturnBase;
 use crate::core::{FileAnalysis, SourceFileId, SymbolKind, TypeSubject};
 
-use super::AnalysisEngine;
+use crate::engine::AnalysisEngine;
 use stable_hash::{
     export_hash, result_hash, stable_bool, stable_callable_body_summary,
     stable_callable_signatures, stable_diagnostic_severity, stable_direct_yield_call,
@@ -23,7 +23,7 @@ use stable_hash::{
 };
 
 impl SemanticExportFingerprint {
-    pub(super) fn from_facts(facts: &FileAnalysis) -> Self {
+    pub(in crate::engine) fn from_facts(facts: &FileAnalysis) -> Self {
         let mut exports = Vec::new();
 
         for fact in &facts.symbols {
