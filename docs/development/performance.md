@@ -22,7 +22,7 @@ changes unless there is evidence that they affect a hot path.
 Build once per revision, then run the same executable repeatedly:
 
 ```sh
-cargo build --locked --release --bin profiler
+cargo build --locked --release -p devtools --bin profiler
 mkdir -p target/performance
 ./target/release/profiler --benchmark-iterations 100 --check-budgets \
   > target/performance/budgets.log 2>&1
@@ -50,14 +50,16 @@ for example `samply record ./target/release/profiler /path/to/project` if samply
 is installed. Target the phase indicated by the baseline report.
 
 For allocation investigation, build with
-`--no-default-features --features memory-profiling` and run the profiler with
-`--memory`. DHAT changes the allocator and writes `dhat-heap.json`; use it to
-locate allocation cost, not as a directly comparable production timing sample.
+`cargo build --release -p devtools --bin profiler --no-default-features --features memory-profiling`
+and run the profiler with `--memory`. DHAT changes the allocator and writes
+`dhat-heap.json`; use it to locate allocation cost, not as a directly comparable
+production timing sample.
 Rebuild the ordinary release executable before evaluating the candidate.
 
-The narrower `profile_indexer`, `profile_project_collection`, `profile_file_open`,
-`profile_single_file`, and `bench_references` tools remain available for isolated
-questions. They are not additional mandatory gates for every change.
+The profiler and the narrower `profile_indexer`, `profile_project_collection`,
+`profile_file_open`, `profile_single_file`, and `bench_references` tools live in
+the [devtools crate](../../crates/devtools/README.md) and remain available for
+isolated questions. They are not additional mandatory gates for every change.
 
 ## Acceptance
 

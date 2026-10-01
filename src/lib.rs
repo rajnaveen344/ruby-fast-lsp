@@ -5,3 +5,6 @@ pub mod server;
 #[cfg(test)]
 pub mod test;
 pub mod utils;
+
+/// Server package version, for tools that report which server they measured.
+pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -32,6 +32,7 @@ over old status reports. Update the nearest guide when its contract changes.
 | `ruby-analysis::inference`          | Type derivation, local flow, signature substitution, bounded equation solving                 |
 | `crates/extension-*`, `extensions/` | Extension contracts, hosts, and framework-specific fact producers                             |
 | `editors/`                          | Editor UX, distribution packaging, installed-artifact validation                              |
+| `crates/devtools`                   | Profilers, benchmarks, AST dump, and extension validation; never shipped                      |
 
 Keep reusable analysis independent of LSP types. `src/lsp/query/` adapts cursor and
 document context to `AnalysisQuery`/`TypeQuery` and converts domain ranges to
@@ -51,7 +52,7 @@ singular. Expose domain operations and views, never mutable stores or arena IDs.
   external tool failures must not be treated as corrupt internal state. Never
   replace uncertainty with a guessed concrete type or silently hide a failure.
 - Use recursive Prism traversal. Verify unfamiliar nodes with
-  `cargo run --bin ast -- --loc '<neutral Ruby snippet>'`. Prism ranges use bytes;
+  `cargo run -p devtools --bin ast -- --loc '<neutral Ruby snippet>'`. Prism ranges use bytes;
   LSP positions are zero-based UTF-16. Preserve original source coordinates,
   including ERB projections and non-BMP characters.
 - Register and replace file-owned facts through the engine lifecycle; resolve

@@ -37,11 +37,11 @@ are temporary reports, not additional stored server state. Startup policy method
 require mutable access and must be called before starting work or sharing the
 server. Normal LSP configuration continues through the existing handlers.
 
-The standalone file-open profiler's low-level document instrumentation lives in
-`src/utils/perf/file_open.rs`; its executable retains the DHAT allocator and entry point.
-This preserves the measurement path without exposing document-cache mutation to
-other crates. The profiler's existing output schema and counter fields remain
-unchanged.
+The standalone file-open profiler lives in `crates/devtools`. It drives open
+buffers only through `open_embedded_document` and `close_embedded_document`, which
+store or drop a buffer and run the current-file pass without notifications, so
+the document cache itself stays private to the server. The profiler's output
+schema and counter fields remain unchanged.
 
 ```mermaid
 flowchart TD

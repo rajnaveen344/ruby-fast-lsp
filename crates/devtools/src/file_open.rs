@@ -1,14 +1,10 @@
-//! Low-level file-open measurement used by the profile_file_open executable.
-//! Document/cache instrumentation stays inside the library boundary.
+//! File-open memory measurement used by the profile_file_open executable.
+//! The caller must install the DHAT allocator and start its heap profiler.
 
-use crate::indexer::file_processor::FileProcessor;
-use crate::lsp::capabilities::indexing;
-use crate::server::RubyLanguageServer;
 use log::{info, LevelFilter};
-use parking_lot::RwLock;
-use ruby_analysis::indexer::RubyDocument;
+use ruby_fast_lsp::lsp::capabilities::indexing;
+use ruby_fast_lsp::server::RubyLanguageServer;
 use std::env;
-use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tower_lsp::lsp_types::Url;
 
@@ -113,23 +109,14 @@ pub fn run() {
         let facts_before = analysis_fact_count(&server);
 
         // Simulate handle_did_open
-        {
-            // Create document
-            let document = RubyDocument::new(file_uri.clone(), content.clone(), 1);
-            server
-                .documents
-                .insert(file_uri.clone(), Arc::new(RwLock::new(document)));
-
-            // Process file (collect facts/references)
-            let indexer =
-                FileProcessor::with_extension_registry(server.extensions.registry().clone());
-            let open_start = std::time::Instant::now();
-            let _ = indexer.process_file_current_file_resolution(&file_uri, &content, &server);
-            info!(
-                "Current-file semantic pass completed in {:?}",
-                open_start.elapsed()
-            );
+        let open_start = std::time::Instant::now();
+        if let Err(e) = server.open_embedded_document(&file_uri, &content, 1) {
+            info!("Current-file semantic pass failed: {}", e);
         }
+        info!(
+            "Current-file semantic pass completed in {:?}",
+            open_start.elapsed()
+        );
 
         let stats_after_open = dhat::HeapStats::get();
         let facts_after_open = analysis_fact_count(&server);
@@ -159,10 +146,8 @@ pub fn run() {
 
         // Phase 3: Simulate file close
         info!("\n=== PHASE 3: Closing File ===");
-        {
-            server.documents.remove(&file_uri);
-            // Note: Analysis facts are NOT removed (intentional for cross-file navigation)
-        }
+        // Analysis facts are NOT removed (intentional for cross-file navigation).
+        server.close_embedded_document(&file_uri);
 
         let stats_after_close = dhat::HeapStats::get();
         let facts_after_close = analysis_fact_count(&server);
@@ -186,35 +171,14 @@ pub fn run() {
         // Phase 4: Reopen same file
         info!("\n=== PHASE 4: Reopening Same File ===");
         let stats_before_reopen = dhat::HeapStats::get();
-        {
-            {
-                let documents = server.documents.read();
-                if let Some(document) = documents.get(&file_uri) {
-                    document.write().update(content.clone(), 2);
-                    info!("Updated existing document");
-                } else {
-                    drop(documents);
-                    server.documents.insert(
-                        file_uri.clone(),
-                        Arc::new(RwLock::new(RubyDocument::new(
-                            file_uri.clone(),
-                            content.clone(),
-                            2,
-                        ))),
-                    );
-                    info!("Created new document");
-                }
-            }
-
-            let indexer =
-                FileProcessor::with_extension_registry(server.extensions.registry().clone());
-            let reopen_start = std::time::Instant::now();
-            let _ = indexer.process_file_current_file_resolution(&file_uri, &content, &server);
-            info!(
-                "Current-file reopen pass completed in {:?}",
-                reopen_start.elapsed()
-            );
+        let reopen_start = std::time::Instant::now();
+        if let Err(e) = server.open_embedded_document(&file_uri, &content, 2) {
+            info!("Current-file reopen pass failed: {}", e);
         }
+        info!(
+            "Current-file reopen pass completed in {:?}",
+            reopen_start.elapsed()
+        );
 
         let stats_after_reopen = dhat::HeapStats::get();
         let facts_after_reopen = analysis_fact_count(&server);

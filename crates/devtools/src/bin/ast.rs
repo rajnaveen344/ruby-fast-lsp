@@ -1,11 +1,11 @@
 //! AST explorer — dumps Prism tree for a Ruby snippet or file.
 //!
 //! Usage:
-//!   cargo run --bin ast -- 'foo.bar&.baz'
-//!   cargo run --bin ast -- --file path/to.rb
-//!   cargo run --bin ast -- --stdin
-//!   cargo run --bin ast -- --no-source 'x + 1'   # omit source snippets
-//!   cargo run --bin ast -- --loc 'x.foo'           # include byte offsets + 1-based line:col
+//!   cargo run -p devtools --bin ast -- 'foo.bar&.baz'
+//!   cargo run -p devtools --bin ast -- --file path/to.rb
+//!   cargo run -p devtools --bin ast -- --stdin
+//!   cargo run -p devtools --bin ast -- --no-source 'x + 1'   # omit source snippets
+//!   cargo run -p devtools --bin ast -- --loc 'x.foo'           # include byte offsets + 1-based line:col
 
 use ruby_prism::{parse, Node, Visit};
 use std::fs;

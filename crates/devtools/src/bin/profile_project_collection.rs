@@ -5,12 +5,12 @@
 //! clean CPU flame of FileProcessor work.
 //!
 //! Usage:
-//!   cargo build --release --bin profile_project_collection
+//!   cargo build --release -p devtools --bin profile_project_collection
 //!   ./target/release/profile_project_collection /path/to/project
 //!
 //! For symbolized samply:
 //!   CARGO_PROFILE_RELEASE_DEBUG=1 CARGO_PROFILE_RELEASE_STRIP=none \
-//!     cargo build --release --bin profile_project_collection
+//!     cargo build --release -p devtools --bin profile_project_collection
 //!   RAYON_NUM_THREADS=1 samply record -r 100 -s --unstable-presymbolicate \
 //!     -o /tmp/project-collection-profile.json.gz \
 //!     ./target/release/profile_project_collection /path/to/project

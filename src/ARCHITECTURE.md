@@ -8,14 +8,14 @@ The Ruby Fast LSP server follows a modular architecture with clear separation of
 
 ```
 crates/
-└── ruby-analysis/  - Reusable core facts, engine, inference, and parser-to-facts indexer
+├── ruby-analysis/  - Reusable core facts, engine, inference, and parser-to-facts indexer
+└── devtools/       - Profilers, benchmarks, AST dump, and extension validation tools
 src/
 ├── environment/    - Configuration, Ruby runtime discovery, and extension hosts
 ├── indexer/        - Workspace discovery, fact collection, scheduling, and caches
 ├── lsp/            - Editor projections: capabilities, query adapters, handlers, check
 ├── server/         - LSP protocol facade, documents, project routing, and publication
-├── utils/          - Shared helpers, single-flight, and performance corpus tooling
-├── bin/            - Profilers, benchmarks, and developer tools
+├── utils/          - Shared helpers and single-flight
 └── main.rs         - Application entry point
 src/test/           - Test harnesses and integration tests
 editors/

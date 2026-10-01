@@ -15,7 +15,7 @@ Read `src/test/README.md` for harness boundaries.
    `src/test/cli/process.rs` only when that public/process boundary matters.
 3. Follow existing inline tag examples in `src/test/harness/mod.rs` and nearby
    integration tests. Confirm unfamiliar Prism nodes with
-   `cargo run --bin ast -- --loc '<neutral Ruby snippet>'`.
+   `cargo run -p devtools --bin ast -- --loc '<neutral Ruby snippet>'`.
 4. Keep observations read-only. Compare complete identities/ranges where needed;
    missing publication must not satisfy an empty-output assertion. Add restoration
    or reopen checks for edit-dependent bugs.

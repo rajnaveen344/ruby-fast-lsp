@@ -731,6 +731,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "devtools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dhat",
+ "env_logger",
+ "libc",
+ "log",
+ "parking_lot",
+ "rayon",
+ "ruby-analysis",
+ "ruby-fast-lsp",
+ "ruby-prism",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "tikv-jemallocator",
+ "tokio",
+ "tower-lsp",
+ "walkdir",
+ "zstd",
+]
+
+[[package]]
 name = "dhat"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2144,8 +2170,6 @@ dependencies = [
  "async-trait",
  "cc",
  "chrono",
- "clap",
- "dhat",
  "env_logger",
  "flate2",
  "fs2",

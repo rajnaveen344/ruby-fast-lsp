@@ -84,5 +84,5 @@ code.
 Validate the result with:
 
 ```bash
-cargo run --bin extension -- validate extensions/example-dsl
+cargo run -p devtools --bin extension -- validate extensions/example-dsl
 ```

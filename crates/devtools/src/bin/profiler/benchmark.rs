@@ -1,12 +1,10 @@
 //! Production editor-latency benchmark over the deterministic sample corpus.
 
+use devtools::metrics::{LatencySummary, ProductionBudget, ProductionMeasurements};
 use ruby_fast_lsp::lsp::capabilities::navigation::{definitions, references};
 use ruby_fast_lsp::lsp::capabilities::{editing::completion, indexing, presentation::hover};
 use ruby_fast_lsp::lsp::query::EngineQuery;
 use ruby_fast_lsp::server::RubyLanguageServer;
-use ruby_fast_lsp::utils::perf::metrics::{
-    LatencySummary, ProductionBudget, ProductionMeasurements,
-};
 use std::fs;
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{

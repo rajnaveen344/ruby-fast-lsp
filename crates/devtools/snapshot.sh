@@ -2,11 +2,11 @@
 # snapshot.sh — fetch pinned OSS Ruby projects for perf benchmarks.
 #
 # Usage:
-#   src/utils/perf/snapshot.sh <discourse|mastodon|all>
+#   crates/devtools/snapshot.sh <discourse|mastodon|all>
 #
 # Downloads the pinned revision's source tarball from GitHub, extracts
 # only *.rb files, and drops them into target/perf-corpus/<name>/ with a
-# .corpus-ready marker so src/utils/perf/corpus.rs ensure_corpus() picks them
+# .corpus-ready marker so crates/devtools/src/corpus.rs ensure_corpus() picks them
 # up without further work.
 #
 # Pinned revisions (bump intentionally):
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CACHE_ROOT="$ROOT/target/perf-corpus"
 mkdir -p "$CACHE_ROOT"
 

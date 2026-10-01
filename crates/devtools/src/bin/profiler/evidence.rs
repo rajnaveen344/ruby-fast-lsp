@@ -77,12 +77,12 @@ pub(crate) fn machine_evidence() -> serde_json::Value {
 }
 
 pub(crate) fn build_evidence() -> serde_json::Value {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let source_revision = bounded_command_output_in(manifest_dir, "git", &["rev-parse", "HEAD"]);
+    let workspace_root = devtools::workspace_root();
+    let source_revision = bounded_command_output_in(&workspace_root, "git", &["rev-parse", "HEAD"]);
     let source_worktree_status =
-        bounded_command_output_in(manifest_dir, "git", &["status", "--short"]);
+        bounded_command_output_in(&workspace_root, "git", &["status", "--short"]);
     let tracked_diff_sha256 = command_stdout_sha256_in(
-        manifest_dir,
+        &workspace_root,
         "git",
         &["diff", "--binary", "HEAD", "--", "."],
     );

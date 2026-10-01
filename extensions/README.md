@@ -203,8 +203,8 @@ ruby-fast-lsp/extensions/status
 Validate a package before wiring it through an editor:
 
 ```bash
-cargo run --bin extension validate extensions/rspec-ruby
-cargo run --bin extension smoke extensions/rspec-ruby
+cargo run -p devtools --bin extension validate extensions/rspec-ruby
+cargo run -p devtools --bin extension smoke extensions/rspec-ruby
 ```
 
 ## Wasm ABI V1

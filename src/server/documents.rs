@@ -1,4 +1,6 @@
 //! Open editor buffers and per-document lifecycle serialization.
+use super::RubyLanguageServer;
+use crate::indexer::file_processor::FileProcessor;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::indexer::RubyDocument;
@@ -71,5 +73,36 @@ impl OpenDocuments {
         let lock = Arc::new(tokio::sync::Mutex::new(()));
         locks.insert(uri.clone(), Arc::downgrade(&lock));
         lock
+    }
+}
+
+impl RubyLanguageServer {
+    /// Store an embedded server's open buffer and run its current-file
+    /// analysis pass without editor notifications or diagnostics publication.
+    /// Measurement tools use this to observe the open-document lifecycle alone.
+    pub fn open_embedded_document(
+        &self,
+        uri: &Url,
+        content: &str,
+        version: i32,
+    ) -> anyhow::Result<()> {
+        {
+            let mut entries = self.documents.entries.lock();
+            if let Some(document) = entries.get(uri) {
+                document.write().update(content.to_string(), version);
+            } else {
+                let document = RubyDocument::new(uri.clone(), content.to_string(), version);
+                entries.insert(uri.clone(), Arc::new(RwLock::new(document)));
+            }
+        }
+        FileProcessor::with_extension_registry(self.extensions.registry().clone())
+            .process_file_current_file_resolution(uri, content, self)
+            .map(|_| ())
+    }
+
+    /// Drop an embedded server's open buffer. Analysis facts stay, matching
+    /// editor close semantics for cross-file navigation.
+    pub fn close_embedded_document(&self, uri: &Url) {
+        self.documents.remove(uri);
     }
 }

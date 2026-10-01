@@ -377,7 +377,7 @@ pub(crate) fn indexing_summary_json(
 
     serde_json::json!({
         "schema_version": 15,
-        "ruby_fast_lsp_version": env!("CARGO_PKG_VERSION"),
+        "ruby_fast_lsp_version": ruby_fast_lsp::SERVER_VERSION,
         "target_os": std::env::consts::OS,
         "target_arch": std::env::consts::ARCH,
         "logical_cpus": std::thread::available_parallelism().map(usize::from).unwrap_or(1),

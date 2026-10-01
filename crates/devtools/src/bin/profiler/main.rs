@@ -9,11 +9,11 @@
 //!
 //! Usage:
 //!   # CPU profiling with samply (recommended)
-//!   cargo build --release --bin profiler
+//!   cargo build --release -p devtools --bin profiler
 //!   samply record ./target/release/profiler [options]
 //!
 //!   # Memory profiling with dhat
-//!   cargo build --release --bin profiler --no-default-features --features memory-profiling
+//!   cargo build --release -p devtools --bin profiler --no-default-features --features memory-profiling
 //!   ./target/release/profiler --memory [options]
 //!
 //! Options:
@@ -48,10 +48,10 @@ mod sample_project;
 mod tests;
 mod workspace_indexing;
 
+use devtools::metrics::ProductionBudget;
 use log::info;
 use ruby_fast_lsp::indexer::scheduling::resources;
 use ruby_fast_lsp::server::RubyLanguageServer;
-use ruby_fast_lsp::utils::perf::metrics::ProductionBudget;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tower_lsp::lsp_types::Url;

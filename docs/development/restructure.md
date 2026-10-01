@@ -30,7 +30,7 @@ Delete this file when the last task is done. Git history keeps the record.
 - [x] A3. Delete the simulator binary, its generator and oracle, the
       simulation build identity in `build.rs`, and the simulation guide and
       release step.
-- [ ] A4. Move `src/bin/*` and `utils/perf` into a `crates/devtools` crate so
+- [x] A4. Move `src/bin/*` and `utils/perf` into a `crates/devtools` crate so
       the server crate holds only the server.
 - [ ] A5. Delete dead code, APIs used only by tests, and unused debug
       endpoints.

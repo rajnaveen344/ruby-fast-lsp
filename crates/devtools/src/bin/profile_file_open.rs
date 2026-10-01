@@ -1,6 +1,6 @@
 //! Profile memory usage when opening a file
 //!
-//! Usage: cargo run --release --bin profile_file_open -- <workspace_path> <file_to_open>
+//! Usage: cargo run --release -p devtools --bin profile_file_open -- <workspace_path> <file_to_open>
 //!
 //! This simulates:
 //! 1. Indexing the workspace
@@ -12,5 +12,5 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() {
     let _profiler = dhat::Profiler::new_heap();
-    ruby_fast_lsp::utils::perf::profile_file_open();
+    devtools::file_open::run();
 }

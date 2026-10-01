@@ -94,7 +94,7 @@ function main() {
     ['inference-acceptance', 'cargo', ['test', '--locked', '-p', 'ruby-fast-lsp', '--lib', 'test::acceptance::inference_scorecard::report_m0_scorecard', '--', '--exact', '--nocapture']],
     ['real-project-precision', 'cargo', ['test', '--locked', '-p', 'ruby-fast-lsp', '--lib', 'test::acceptance::real_project_precision::report_real_project_precision', '--', '--exact', '--nocapture']],
   ] : [
-    ['performance', 'cargo', ['run', '--locked', '--release', '--bin', 'profiler', '--', '--benchmark-iterations', '100', '--check-budgets']],
+    ['performance', 'cargo', ['run', '--locked', '--release', '-p', 'devtools', '--bin', 'profiler', '--', '--benchmark-iterations', '100', '--check-budgets']],
   ];
   let failed = false;
   for (const [name, command, args] of commands) {

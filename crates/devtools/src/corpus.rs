@@ -27,7 +27,7 @@ const READY_MARKER: &str = ".corpus-ready";
 /// Ensure the named corpus exists on disk and return its root directory.
 ///
 /// `name` maps to a tarball at `tests/perf/corpus/<name>.tar.zst` (relative
-/// to the crate root). Pass e.g. `"discourse"` or `"mastodon"`.
+/// to the repository root). Pass e.g. `"discourse"` or `"mastodon"`.
 pub fn ensure_corpus(name: &str) -> Result<PathBuf> {
     assert!(
         !name.is_empty() && !name.contains('/') && !name.contains(".."),
@@ -58,7 +58,7 @@ pub fn ensure_corpus(name: &str) -> Result<PathBuf> {
 
     Err(anyhow!(
         "corpus {:?} not available. \
-         Run `src/utils/perf/snapshot.sh {}` to fetch it into {}, \
+         Run `crates/devtools/snapshot.sh {}` to fetch it into {}, \
          ship a tarball at {}, or set RUBY_FAST_LSP_CORPUS_DIR to an existing checkout.",
         name,
         name,
@@ -98,25 +98,17 @@ pub fn ensure_synthetic(
 }
 
 fn cache_root() -> Result<PathBuf> {
-    let workspace = workspace_root()?;
-    let dir = workspace.join("target").join("perf-corpus");
+    let dir = crate::workspace_root().join("target").join("perf-corpus");
     fs::create_dir_all(&dir).with_context(|| format!("creating cache root {}", dir.display()))?;
     Ok(dir)
 }
 
 fn tarball_path(name: &str) -> PathBuf {
-    workspace_root()
-        .expect("INVARIANT VIOLATED: CARGO_MANIFEST_DIR missing")
+    crate::workspace_root()
         .join("tests")
         .join("perf")
         .join("corpus")
         .join(format!("{}.tar.zst", name))
-}
-
-fn workspace_root() -> Result<PathBuf> {
-    // Baked in at compile time by cargo; survives after the binary is
-    // detached from the cargo harness (e.g. `./target/release/bench_references`).
-    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
 }
 
 fn is_ready(dir: &Path) -> bool {
@@ -175,7 +167,7 @@ mod tests {
         let err = ensure_corpus("does-not-exist-xyz").unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("src/utils/perf/snapshot.sh"),
+            msg.contains("crates/devtools/snapshot.sh"),
             "unexpected error: {}",
             msg
         );

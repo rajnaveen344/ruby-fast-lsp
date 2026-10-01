@@ -346,14 +346,14 @@ OPTIONS:
 
 EXAMPLES:
     # Profile with samply (CPU)
-    cargo build --release --bin profiler
+    cargo build --release -p devtools --bin profiler
     samply record ./target/release/profiler /path/to/ruby/project
 
     # Profile specific phase
     samply record ./target/release/profiler --phase infer /path/to/project
 
     # Memory profiling replaces the default jemalloc allocator with DHAT.
-    cargo build --release --bin profiler --no-default-features --features memory-profiling
+    cargo build --release -p devtools --bin profiler --no-default-features --features memory-profiling
     ./target/release/profiler --memory /path/to/project
 
     # Check deterministic built-in production budgets
