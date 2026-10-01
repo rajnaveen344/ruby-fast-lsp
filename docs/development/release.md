@@ -22,8 +22,9 @@ CalVer to source manifests before their consistency check.
 Release readiness is a maintainer decision. Run or review the independent
 `Validate` workflow before manually cutting a tag or dispatching publication.
 The `Release` workflow does not invoke or wait for `Validate`; it starts with
-native builds and retains native tests and installed-package checks. A release
-run passing does not imply that the separate simulation campaigns ran.
+native builds and retains native tests and installed-package checks. `Validate`
+runs only the `correctness` checks; run the `simulation` checks locally before a
+release.
 
 Use the same runners as [.github/workflows/validate.yml](../../.github/workflows/validate.yml).
 The CI file also specifies toolchain prerequisites: Rust, Node, Python, Java,

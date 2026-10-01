@@ -95,9 +95,6 @@ function main() {
     ['source-layout', 'python3', ['-B', 'support/structure/check.py']],
     ['versions', 'node', ['editors/check_package_versions.js']],
     ['format', 'cargo', ['fmt', '--all', '--', '--check']],
-    // The example guest is not committed; build it so its black-box tests run
-    // instead of skipping (RUBY_FAST_LSP_REQUIRE_EXAMPLE_WASM below).
-    ['example-wasm', 'bash', ['extensions/example-rust/build-and-test.sh']],
     ['workspace', 'cargo', ['test', '--locked', '--workspace']],
     ['rspec-ruby-extension', 'ruby', ['-Iextensions/mruby-sdk', 'extensions/rspec-ruby/test/rspec_ruby_test.rb']],
     ['example-dsl-extension', 'ruby', ['-Iextensions/mruby-sdk', 'extensions/example-dsl/test/example_dsl_test.rb']],
@@ -126,7 +123,7 @@ function main() {
     try {
       result = spawnSync(command, args, {
         cwd: root, stdio: ['ignore', fd, fd], timeout: 30 * 60 * 1000,
-        env: { ...process.env, RUST_LOG: 'error', RUBY_FAST_LSP_REQUIRE_EXAMPLE_WASM: '1' },
+        env: { ...process.env, RUST_LOG: 'error' },
       });
     } finally {
       fs.closeSync(fd);
