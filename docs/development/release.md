@@ -19,16 +19,13 @@ CalVer to source manifests before their consistency check.
 
 ## 2. Review validation before choosing the release
 
-Release readiness is a maintainer decision. Run or review the independent
-`Validate` workflow before manually cutting a tag or dispatching publication.
-The `Release` workflow does not invoke or wait for `Validate`; it starts with
-native builds and retains native tests and installed-package checks. `Validate`
-runs only the `correctness` checks; run the `simulation` checks locally before a
-release.
+Release readiness is a maintainer decision. There is no CI validation workflow;
+run the checks below locally before manually cutting a tag or dispatching
+publication. The `Release` workflow starts with native builds and retains native
+tests and installed-package checks.
 
-Use the same runners as [.github/workflows/validate.yml](../../.github/workflows/validate.yml).
-The CI file also specifies toolchain prerequisites: Rust, Node, Python, Java,
-and Ruby for oracle execution. Install the editor's test dependencies first:
+The checks need Rust, Node, Python, Java, and Ruby for oracle execution. Install
+the editor's test dependencies first:
 
 ```sh
 npm ci --prefix editors/vscode/vsix
@@ -48,7 +45,7 @@ with `RUBY_FAST_LSP_EVIDENCE_DIR`). The runner rejects failures, every ignored R
 simulation completion reports. Explicit campaigns are separate from the ordinary
 workspace suite; an unselected real corpus is never counted as passed.
 
-The separate CI fault-detection campaign proves that reviewed injected defects fail
+The separate fault-detection campaign proves that reviewed injected defects fail
 their intended assertions:
 
 ```sh
@@ -56,7 +53,7 @@ python3 -B -m unittest discover -s support/simulation -p 'test_fault_campaign.py
 python3 -B support/simulation/run_fault_campaign.py --run
 ```
 
-This campaign belongs to release/CI acceptance or simulator changes. It is not
+This campaign belongs to release acceptance or simulator changes. It is not
 required for every documentation edit. See [simulation](simulation.md) for replay
 and for the distinction between consistency and independent semantic evidence.
 

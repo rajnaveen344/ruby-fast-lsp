@@ -10,7 +10,7 @@
 
 Installation and editor workflows are in [usage](../docs/usage.md). Use the
 [release checklist](../docs/development/release.md) for package preparation and
-native acceptance; it points to the same checks that CI runs.
+native acceptance; it lists the local validation checks.
 
 Editor code owns presentation and commands. Ruby identity, inference, and
 resolution belong to the server's analysis engine. Keep packaged assets and

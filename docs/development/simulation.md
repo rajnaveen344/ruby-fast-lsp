@@ -122,8 +122,7 @@ The [validation runner](release.md) adds release-mode simulations, explicit synt
 scale tests, reviewed Ruby oracle execution, and fixed performance budgets.
 Real-corpus checks require an explicitly selected read-only workspace. Scale,
 Ruby semantics, and installed-editor behavior are different evidence. These
-campaigns run in the independent `Validate` workflow; `Release` does not wait
-for them. Maintainers review the available evidence before choosing to publish.
+campaigns run locally; `Release` does not run them. Maintainers review the available evidence before choosing to publish.
 
 [support/simulation/](../../support/simulation/) holds the fault campaign and
 independent Ruby oracle controls. A mutation counts as detected only when its
