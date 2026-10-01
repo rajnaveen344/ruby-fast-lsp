@@ -11,8 +11,8 @@ use ruby_analysis::indexer::yard::YardParser;
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use super::analysis_location::{locations_for_ranges, non_empty_locations};
-use super::EngineQuery;
+use crate::lsp::query::analysis_location::{locations_for_ranges, non_empty_locations};
+use crate::lsp::query::EngineQuery;
 use crate::utils::lsp::{lsp_text_location, source_position};
 use crate::utils::position_to_offset;
 

@@ -854,7 +854,7 @@ end
     );
     drop(engine);
 
-    let hints = crate::lsp::capabilities::inlay_hints::handle_inlay_hints(
+    let hints = crate::lsp::capabilities::presentation::inlay_hints::handle_inlay_hints(
         &server,
         InlayHintParams {
             work_done_progress_params: Default::default(),
@@ -972,7 +972,7 @@ end
     );
     drop(engine);
 
-    let hints = crate::lsp::capabilities::inlay_hints::handle_inlay_hints(
+    let hints = crate::lsp::capabilities::presentation::inlay_hints::handle_inlay_hints(
         &server,
         InlayHintParams {
             work_done_progress_params: Default::default(),

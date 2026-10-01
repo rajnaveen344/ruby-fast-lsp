@@ -1,6 +1,6 @@
 //! Editor projection cache; semantic identity stays with the analysis engine.
 use super::RubyLanguageServer;
-use crate::lsp::query::namespace_tree::NamespaceTreeResponse;
+use crate::lsp::query::navigation::namespace_tree::NamespaceTreeResponse;
 use log::debug;
 use parking_lot::Mutex;
 use std::sync::Arc;

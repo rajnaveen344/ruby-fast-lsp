@@ -47,17 +47,17 @@ use ruby_analysis::core::{
 };
 use ruby_fast_lsp::environment::config::RubyFastLspConfig;
 use ruby_fast_lsp::indexer::scheduling::{resources, scheduler, status};
-use ruby_fast_lsp::lsp::capabilities::{completion, definitions, hover, indexing, references};
+use ruby_fast_lsp::lsp::capabilities::navigation::{definitions, references};
+use ruby_fast_lsp::lsp::capabilities::{editing::completion, indexing, presentation::hover};
 use ruby_fast_lsp::lsp::{handlers::request, query::EngineQuery};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use ruby_fast_lsp::utils::perf::metrics::{
     LatencySummary, ProductionBudget, ProductionMeasurements,
 };
 use sha2::{Digest, Sha256};
-use std::env;
-use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use std::{env, fs};
 use tokio::runtime::Runtime;
 use tower_lsp::lsp_types::{
     CompletionContext, CompletionResponse, CompletionTriggerKind, DidChangeTextDocumentParams,

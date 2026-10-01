@@ -4,8 +4,8 @@ use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
 use ruby_analysis::engine::AnalysisQuery;
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind};
 
-use super::analysis_location::location_for_range;
-use super::EngineQuery;
+use crate::lsp::query::analysis_location::location_for_range;
+use crate::lsp::query::EngineQuery;
 
 impl EngineQuery {
     pub fn get_top_level_symbols(&self) -> Vec<SymbolInformation> {

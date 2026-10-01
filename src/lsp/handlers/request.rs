@@ -7,11 +7,17 @@ use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusRespo
 use crate::indexer::scheduling::navigation_demand::{
     NavigationDemandOutcome, NavigationDemandStage,
 };
-use crate::lsp::capabilities::{
-    call_hierarchy, code_actions, code_lens, completion, debug, definitions, document_highlights,
-    document_symbols, folding_range, formatting, hover, implementation, inlay_hints,
-    namespace_tree, references, rename, selection_ranges, semantic_tokens, signature_help,
+use crate::lsp::capabilities::debug;
+use crate::lsp::capabilities::editing::{
+    code_actions, completion, formatting, rename, signature_help,
+};
+use crate::lsp::capabilities::navigation::{
+    call_hierarchy, definitions, document_highlights, implementation, namespace_tree, references,
     type_hierarchy, workspace_symbols,
+};
+use crate::lsp::capabilities::presentation::{
+    code_lens, document_symbols, folding_range, hover, inlay_hints, selection_ranges,
+    semantic_tokens,
 };
 use crate::server::RubyLanguageServer;
 use log::{debug, info, trace};

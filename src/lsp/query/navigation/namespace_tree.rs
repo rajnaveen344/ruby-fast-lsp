@@ -3,7 +3,7 @@
 use ruby_analysis::engine::AnalysisQuery;
 use serde::{Deserialize, Serialize};
 
-use super::EngineQuery;
+use crate::lsp::query::EngineQuery;
 
 pub use ruby_analysis::engine::{
     IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,

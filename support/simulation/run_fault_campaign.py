@@ -86,7 +86,7 @@ FAULTS = (
     ),
     Fault(
         "generated-definition-extra", "Append an unrelated destination to otherwise correct generated navigation.",
-        "src/lsp/capabilities/definitions.rs", DEFINITION_ANCHOR,
+        "src/lsp/capabilities/navigation/definitions.rs", DEFINITION_ANCHOR,
         DEFINITION_ANCHOR.replace("let locations =", "let mut locations =").replace(
             "    Some(GotoDefinitionResponse::Array(locations))",
             '    let mut extra = locations.first().cloned().expect("fault requires a definition");\n'
@@ -96,7 +96,7 @@ FAULTS = (
     ),
     Fault(
         "definition-missing", "Discard every returned method definition.",
-        "src/lsp/capabilities/definitions.rs", DEFINITION_ANCHOR,
+        "src/lsp/capabilities/navigation/definitions.rs", DEFINITION_ANCHOR,
         DEFINITION_ANCHOR.replace("let locations =", "let mut locations =").replace(
             "    Some(GotoDefinitionResponse::Array(locations))",
             "    locations.clear();\n    Some(GotoDefinitionResponse::Array(locations))"),
@@ -104,7 +104,7 @@ FAULTS = (
     ),
     Fault(
         "definition-duplicate", "Append a duplicate of the first returned definition.",
-        "src/lsp/capabilities/definitions.rs", DEFINITION_ANCHOR,
+        "src/lsp/capabilities/navigation/definitions.rs", DEFINITION_ANCHOR,
         DEFINITION_ANCHOR.replace("let locations =", "let mut locations =").replace(
             "    Some(GotoDefinitionResponse::Array(locations))",
             "    if let Some(first) = locations.first().cloned() { locations.push(first); }\n"
@@ -113,7 +113,7 @@ FAULTS = (
     ),
     Fault(
         "reference-wrong-range", "Move the first reference start one UTF-16 character to the right.",
-        "src/lsp/capabilities/references.rs",
+        "src/lsp/capabilities/navigation/references.rs",
         "    query.find_references_at_position(uri, position, &content)",
         """    let mut locations = query.find_references_at_position(uri, position, &content)?;
     if let Some(first) = locations.first_mut() { first.range.start.character += 1; }

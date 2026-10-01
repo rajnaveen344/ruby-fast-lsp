@@ -1,5 +1,5 @@
 use crate::environment::config::LinterKind;
-use crate::lsp::capabilities::formatting::full_document_range;
+use crate::lsp::capabilities::editing::formatting::full_document_range;
 use crate::lsp::linter::fix_document;
 use crate::server::RubyLanguageServer;
 use log::warn;

@@ -142,10 +142,10 @@ pub async fn handle_initialize(
             resolve_provider: Some(false),
         }),
         inlay_hint_provider: Some(OneOf::Right(
-            capabilities::inlay_hints::get_inlay_hints_capability(),
+            capabilities::presentation::inlay_hints::get_inlay_hints_capability(),
         )),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
-            capabilities::semantic_tokens::get_semantic_tokens_options(),
+            capabilities::presentation::semantic_tokens::get_semantic_tokens_options(),
         )),
         completion_provider: Some(CompletionOptions {
             resolve_provider: Some(true),
@@ -169,7 +169,7 @@ pub async fn handle_initialize(
             work_done_progress_options: WorkDoneProgressOptions::default(),
         })),
         document_on_type_formatting_provider: Some(
-            capabilities::formatting::get_document_on_type_formatting_options(),
+            capabilities::editing::formatting::get_document_on_type_formatting_options(),
         ),
         document_formatting_provider: Some(OneOf::Left(true)),
         rename_provider: Some(OneOf::Right(RenameOptions {

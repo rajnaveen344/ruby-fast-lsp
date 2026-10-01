@@ -5,7 +5,7 @@ parsing, document context, and protocol conversion. Reusable domain logic belong
 in `crates/ruby-analysis/src/engine`.
 
 ```text
-server.rs (LSP) -> query/ (adapter) -> ruby-analysis::engine (domain)
+server/ (LSP) -> query/ (adapter) -> ruby-analysis::engine (domain)
 ```
 
 ## Public API
@@ -48,8 +48,8 @@ The split between `src/lsp/capabilities/` and `src/lsp/query/` is intentional. K
 
 | Layer | Owns | Imports `tower_lsp::lsp_types`? |
 | :--- | :--- | :--- |
-| `capabilities/*.rs` | LSP handler: URI -> doc lookup -> build `EngineQuery` -> format result as LSP types | **Yes** |
-| `query/*.rs` | LSP adapter over `AnalysisQuery`: cursor parsing, document context, `TextRange -> Location` | **Yes, only at adapter boundary** |
+| `capabilities/<family>/*.rs` | LSP handler: URI -> doc lookup -> build `EngineQuery` -> format result as LSP types | **Yes** |
+| `query/<family>/*.rs` | LSP adapter over `AnalysisQuery`: cursor parsing, document context, `TextRange -> Location` | **Yes, only at adapter boundary** |
 | `crates/ruby-analysis/src/engine` | Reusable domain queries over facts, graph, references, types | **No** |
 
 **Rules:**
@@ -57,12 +57,12 @@ The split between `src/lsp/capabilities/` and `src/lsp/query/` is intentional. K
 1. `query/` must not depend on `RubyLanguageServer`, the `docs` map, or handler-specific plumbing. It takes `AnalysisEngine` + optional document context.
 2. `capabilities/` adapter files stay thin (~20–120 lines). If a capability file grows past ~150 lines while backed by analysis facts, the extra logic probably belongs in `query/` or, if editor-agnostic, `ruby-analysis::engine`.
 3. **Exception:** features that don't need analysis facts live only in `capabilities/`. Current examples:
-   - `capabilities/formatting.rs` — runs an external formatter
-   - `capabilities/folding_range.rs` — pure AST visitor
-   - `capabilities/semantic_tokens.rs` — pure AST visitor
-   - `capabilities/document_symbols.rs` — pure AST visitor
+   - `capabilities/editing/formatting.rs` — runs an external formatter
+   - `capabilities/presentation/folding_range.rs` — pure AST visitor
+   - `capabilities/presentation/semantic_tokens.rs` — pure AST visitor
+   - `capabilities/presentation/document_symbols.rs` — pure AST visitor
    No query counterpart is needed for these.
-4. New LSP feature that needs project facts -> put domain query in `ruby-analysis::engine`, then add `query/foo.rs` for protocol conversion and `capabilities/foo.rs` for handler plumbing.
+4. New LSP feature that needs project facts -> put domain query in `ruby-analysis::engine`, then add `query/<family>/foo.rs` for protocol conversion and `capabilities/<family>/foo.rs` for handler plumbing, using the same `navigation`, `editing`, or `presentation` family in both.
 
 **Why the split matters:** engine is reusable from tests, CLI binaries, and future
 non-LSP frontends. `query/` is allowed to speak LSP because it is the editor

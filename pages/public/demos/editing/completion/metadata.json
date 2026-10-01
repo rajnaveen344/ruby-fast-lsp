@@ -6,7 +6,7 @@
   "source_commit": "ec70c39ab9a1c9b8c7fec9fc308df60317575d0b",
   "source_dirty": true,
   "source_changes": [
-    "src/lsp/capabilities/completion/mod.rs: wait for the active document edit before reading completion candidates"
+    "src/lsp/capabilities/editing/completion/mod.rs: wait for the active document edit before reading completion candidates"
   ],
   "production_diff_sha256": "2fc0c052d3b0ea37467c2b3fb02ad0992f7b7422378dea22e2e20b7b373d1525",
   "binary_sha256": "36889efdbc678ba4cb5f5d45fa0e6305287d3b6b2eb9fee08e08bcd9c932dfab",

@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{
 };
 
 use super::position_params;
-use crate::lsp::capabilities::type_hierarchy;
+use crate::lsp::capabilities::navigation::type_hierarchy;
 use crate::server::RubyLanguageServer;
 use crate::test::harness::fixture::Tag;
 

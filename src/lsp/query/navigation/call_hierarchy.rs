@@ -19,8 +19,8 @@ use tower_lsp::lsp_types::{
 
 use ruby_analysis::indexer::Identifier;
 
-use super::analysis_location::{location_for_range, lsp_ranges_for_ranges};
-use super::EngineQuery;
+use crate::lsp::query::analysis_location::{location_for_range, lsp_ranges_for_ranges};
+use crate::lsp::query::EngineQuery;
 use crate::utils::lsp::source_position;
 
 // ============================================================================

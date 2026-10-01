@@ -108,15 +108,16 @@ adapters, analysis APIs, and editor-specific behavior.
 - **Primary Responsibility**: Implement LSP feature endpoints, trigger routing, snippets, and editor-only behavior
 - **Secondary Responsibility**: Convert between LSP types and internal types
 
-#### Key Files:
+#### Layout:
 
-- `definition.rs`: Go-to-definition entry point
-- `references.rs`: Find-references entry point
-- `hover.rs`: Hover information entry point
-- `completion/`: Code completion coordination
-- `semantic_tokens.rs`: Syntax highlighting functionality
-- `type_hierarchy.rs`: Superclass/Subclass navigation
-- `inlay_hints.rs`: Inline type and parameter hints coordination
+- `navigation/`: definitions, references, implementations, call and type
+  hierarchies, document highlights, workspace symbols, and the namespace tree
+- `editing/`: completion (with snippets and trigger handling), signature help,
+  rename, code actions, and formatting
+- `presentation/`: hover, inlay hints, code lenses, semantic tokens, document
+  symbols, folding ranges, and selection ranges
+- `diagnostics.rs`, `indexing.rs`, `debug.rs`: diagnostic generation, document
+  lifecycle indexing, and debug requests
 
 #### Design Decisions:
 
@@ -135,11 +136,14 @@ The Query Engine provides a unified service layer for querying the `AnalysisEngi
 #### Key Files:
 
 - `mod.rs`: Defines `EngineQuery` struct and entry points
-- `definition.rs`: Unified definition lookups
-- `references.rs`: Unified reference lookups
-- `hover/`: Type and documentation lookups
+- `navigation/`: definition, reference, implementation, hierarchy, and symbol lookups
+- `editing/`: completion candidates and signature help
+- `presentation/`: hover, inlay hints, and code lenses
 - `method/`: Method resolution and dispatch logic
-- `inlay_hints/`: Unified inlay hints and on-demand inference logic
+- `analysis_location.rs`, `diagnostics.rs`: shared range conversion and diagnostic projection
+
+Both folders use the same `navigation/`, `editing/`, and `presentation/`
+families, so a feature's handler and query adapter sit in matching places.
 
 #### Design Decisions:
 
@@ -677,10 +681,10 @@ Ruby version detection and version-manager integration.
 ### 2. Go to Definition
 
 1. Client sends a "go to definition" request with a position
-2. Server delegates to the definition capability (`src/lsp/capabilities/definitions.rs`)
+2. Server delegates to the definition capability (`src/lsp/capabilities/navigation/definitions.rs`)
 3. Definition capability:
    - Uses the analyzer to identify the identifier and local scope at the position
-   - If not a local variable, delegates to the **Query Engine** (`src/lsp/query/definition.rs`)
+   - If not a local variable, delegates to the **Query Engine** (`src/lsp/query/navigation/definition.rs`)
 4. Query Engine:
    - Uses `EngineQuery` to perform project-wide lookups in `AnalysisEngine` (handling inheritance, mixins, etc.)
    - Returns resolved locations

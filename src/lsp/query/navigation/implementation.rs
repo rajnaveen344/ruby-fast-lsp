@@ -11,8 +11,8 @@ use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::Identifier;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use super::analysis_location::{locations_for_ranges, non_empty_locations};
-use super::EngineQuery;
+use crate::lsp::query::analysis_location::{locations_for_ranges, non_empty_locations};
+use crate::lsp::query::EngineQuery;
 use crate::utils::lsp::source_position;
 
 impl EngineQuery {

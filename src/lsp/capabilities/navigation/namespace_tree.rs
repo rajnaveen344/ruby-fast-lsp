@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use tower_lsp::lsp_types::Url;
 
 // Re-export types for external consumers
-pub use crate::lsp::query::namespace_tree::{
+pub use crate::lsp::query::navigation::namespace_tree::{
     IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
     MixinInfo, NamespaceNode, NamespaceTreeParams, NamespaceTreeResponse, ViaModuleInfo,
 };

@@ -3,8 +3,8 @@
 use super::*;
 use crate::indexer::scheduling::navigation_demand;
 use crate::indexer::scheduling::status;
-use crate::lsp::capabilities::definitions;
 use crate::lsp::capabilities::indexing;
+use crate::lsp::capabilities::navigation::definitions;
 
 /// Test fixture that creates a realistic Ruby project structure
 struct TestProjectFixture {

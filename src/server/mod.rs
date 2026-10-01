@@ -28,7 +28,7 @@ use crate::lsp::capabilities::debug::{
 };
 use crate::lsp::handlers::{notification, request};
 
-use crate::lsp::query::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
+use crate::lsp::query::navigation::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 
 use anyhow::Result;
 use log::{info, warn};

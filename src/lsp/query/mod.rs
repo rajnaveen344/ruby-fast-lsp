@@ -6,7 +6,7 @@
 //! # Architecture
 //!
 //! ```text
-//! server.rs → query/ protocol adapters → ruby-analysis engine/indexer/inference
+//! server/ → query/ protocol adapters → ruby-analysis engine/indexer/inference
 //! ```
 //!
 //! # Usage
@@ -26,27 +26,18 @@
 //! ```
 
 pub(crate) mod analysis_location;
-pub mod call_hierarchy;
-mod code_lens;
-mod completion;
 mod debug;
-pub(crate) mod definition;
 pub mod diagnostics;
-mod hover;
-mod implementation;
-mod inlay_hints;
+pub mod editing;
 mod method;
-pub mod namespace_tree;
-mod references;
-mod signature_help;
-pub mod type_hierarchy;
-mod workspace_symbols;
+pub mod navigation;
+pub mod presentation;
 
-pub use code_lens::CodeLensData;
-pub use hover::HoverInfo;
-pub use inlay_hints::{InlayHintData, InlayHintKind};
+pub use editing::signature_help::{SignatureData, SignatureHelpData, SignatureParameterData};
 pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
-pub use signature_help::{SignatureData, SignatureHelpData, SignatureParameterData};
+pub use presentation::code_lens::CodeLensData;
+pub use presentation::hover::HoverInfo;
+pub use presentation::inlay_hints::{InlayHintData, InlayHintKind};
 
 use crate::utils::lsp::source_position;
 use parking_lot::RwLock;

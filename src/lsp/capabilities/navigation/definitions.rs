@@ -23,13 +23,15 @@ pub(crate) fn navigation_demand_keys_at_position(
     server: &RubyLanguageServer,
     uri: &Url,
     position: Position,
-) -> Option<crate::lsp::query::definition::DefinitionNavigationDemandKeys> {
+) -> Option<crate::lsp::query::navigation::definition::DefinitionNavigationDemandKeys> {
     let content = {
         let documents = server.documents.read();
         let content = documents.get(uri)?.read().content.clone();
         content
     };
-    crate::lsp::query::definition::definition_navigation_demand_keys(uri, position, &content)
+    crate::lsp::query::navigation::definition::definition_navigation_demand_keys(
+        uri, position, &content,
+    )
 }
 
 /// Find definition at position using the unified EngineQuery layer.

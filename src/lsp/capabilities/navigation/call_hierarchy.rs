@@ -2,7 +2,7 @@
 //!
 //! Extracts LSP parameters and delegates to the query layer.
 
-use crate::lsp::query::call_hierarchy::CallHierarchyData;
+use crate::lsp::query::navigation::call_hierarchy::CallHierarchyData;
 use crate::lsp::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use log::info;

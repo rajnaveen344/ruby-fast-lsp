@@ -5,7 +5,7 @@ use ruby_analysis::inference::method::rbs_method_signatures_for_type;
 use ruby_analysis::inference::rbs::{RbsMethodSignature, RbsSignatureParameter};
 use tower_lsp::lsp_types::{Position, Url};
 
-use super::EngineQuery;
+use crate::lsp::query::EngineQuery;
 use crate::utils::lsp::source_position;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

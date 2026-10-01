@@ -15,8 +15,8 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use ruby_analysis::core::FullyQualifiedName;
 
-use super::analysis_location::location_for_range;
-use super::EngineQuery;
+use crate::lsp::query::analysis_location::location_for_range;
+use crate::lsp::query::EngineQuery;
 use crate::utils::lsp::lsp_position;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
