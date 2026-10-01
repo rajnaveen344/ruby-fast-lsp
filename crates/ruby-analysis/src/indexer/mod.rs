@@ -28,7 +28,7 @@ pub use documents::variable_scopes::{
 };
 pub use identifiers::types::{Identifier, MethodReceiver};
 pub use identifiers::{IdentifierType, IdentifierVisitor};
-pub use lowering::analysis_indexer::{AnalysisIndex, AnalysisIndexer};
+pub use lowering::analysis_indexer::AnalysisIndexer;
 pub(crate) use lowering::callable_body::{
     is_static_callable_literal, lower_callable_literal, lower_callable_literal_with_outer_locals,
 };

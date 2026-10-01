@@ -16,7 +16,7 @@ pub(super) fn collect_direct_facts(
     content: &str,
     file_id: ruby_analysis::core::SourceFileId,
     known_namespaces: Option<&HashSet<FullyQualifiedName>>,
-) -> ruby_analysis::indexer::AnalysisIndex {
+) -> ruby_analysis::core::FileAnalysis {
     let known_namespaces = known_namespaces
         .cloned()
         .unwrap_or_else(|| collect_known_namespaces(analysis_engine));
@@ -26,8 +26,8 @@ pub(super) fn collect_direct_facts(
 }
 
 pub(super) fn merge_execution_context_direct_facts(
-    extension_aware: &ruby_analysis::indexer::AnalysisIndex,
-    merged: &mut ruby_analysis::indexer::AnalysisIndex,
+    extension_aware: &ruby_analysis::core::FileAnalysis,
+    merged: &mut ruby_analysis::core::FileAnalysis,
 ) {
     let generated_methods = extension_aware
         .methods
@@ -100,8 +100,8 @@ pub(super) fn merge_execution_context_direct_facts(
 }
 
 pub(super) fn merge_runtime_direct_facts(
-    runtime_aware: &ruby_analysis::indexer::AnalysisIndex,
-    merged: &mut ruby_analysis::indexer::AnalysisIndex,
+    runtime_aware: &ruby_analysis::core::FileAnalysis,
+    merged: &mut ruby_analysis::core::FileAnalysis,
 ) {
     let runtime_types = runtime_aware
         .types

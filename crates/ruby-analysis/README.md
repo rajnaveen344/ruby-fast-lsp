@@ -38,7 +38,8 @@ and converts domain byte ranges to editor positions outside this library.
 
 ## Register, collect, replace, query
 
-This declaration-only example uses `AnalysisIndexer`. Full semantic collection
+This declaration-only example uses `AnalysisIndexer`, which returns a
+`FileAnalysis` holding only declaration facts. Full semantic collection
 also uses `FactCollector` for body inference, references, diagnostics, and
 extension hooks. After traversal, `FactCollector::finish()` returns an owned
 `CollectedFile`; the server composes it into the same `FileAnalysis`. See the
@@ -57,17 +58,8 @@ let file_id = engine.register_file(SourceFileInput {
     content: source.into(),
     kind: SourceKind::Project,
 });
-let collected = AnalysisIndexer::new(file_id).index_source(source);
-engine.replace_facts(file_id, FileAnalysis {
-    symbols: collected.symbols,
-    methods: collected.methods,
-    method_visibility_overrides: collected.method_visibility_overrides,
-    graph_nodes: collected.graph_nodes,
-    graph_edges: collected.graph_edges,
-    unresolved_graph_edges: collected.unresolved_graph_edges,
-    types: collected.types,
-    ..FileAnalysis::default()
-}, ResolveMode::Immediate);
+let analysis = AnalysisIndexer::new(file_id).index_source(source);
+engine.replace_facts(file_id, analysis, ResolveMode::Immediate);
 
 assert_eq!(engine.query().symbol_facts_in_file(file_id).len(), 1);
 

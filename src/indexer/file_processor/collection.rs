@@ -35,10 +35,10 @@ use tower_lsp::lsp_types::Url;
 pub(super) fn replace_analysis_facts_for_file(
     analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
     file_id: ruby_analysis::core::SourceFileId,
-    facts: &ruby_analysis::indexer::AnalysisIndex,
+    facts: &ruby_analysis::core::FileAnalysis,
     resolve_references: bool,
 ) {
-    let mut file_facts = file_analysis_facts_from_index(facts);
+    let mut file_facts = facts.clone();
     if file_facts.inference == ruby_analysis::core::InferenceEvidence::default() {
         if let Some(previous) = analysis_engine.read().inference_evidence_in_file(file_id) {
             file_facts.inference = previous;
@@ -71,26 +71,6 @@ pub(super) fn replace_file_analysis(
             semantic_change
         }
         FileResolution::Deferred => engine.replace_facts(file_id, facts, ResolveMode::Deferred),
-    }
-}
-
-pub(crate) fn file_analysis_facts_from_index(
-    facts: &ruby_analysis::indexer::AnalysisIndex,
-) -> FileFacts {
-    FileFacts {
-        symbols: facts.symbols.clone(),
-        methods: facts.methods.clone(),
-        method_visibility_overrides: facts.method_visibility_overrides.clone(),
-        types: facts.types.clone(),
-        graph_nodes: facts.graph_nodes.clone(),
-        graph_edges: facts.graph_edges.clone(),
-        unresolved_graph_edges: facts.unresolved_graph_edges.clone(),
-        reference_candidates: Vec::new(),
-        diagnostic_candidates: Vec::new(),
-        diagnostics: Vec::new(),
-        execution_contexts: Vec::new(),
-        inference: Default::default(),
-        local_read_types: Default::default(),
     }
 }
 
@@ -216,21 +196,7 @@ impl FileProcessor {
                 ));
             }
         };
-        replace_file_analysis(
-            &analysis_engine,
-            analysis_file_id,
-            FileFacts {
-                symbols: facts.symbols,
-                methods: facts.methods,
-                method_visibility_overrides: facts.method_visibility_overrides,
-                types: facts.types,
-                graph_nodes: facts.graph_nodes,
-                graph_edges: facts.graph_edges,
-                unresolved_graph_edges: facts.unresolved_graph_edges,
-                ..Default::default()
-            },
-            resolution,
-        );
+        replace_file_analysis(&analysis_engine, analysis_file_id, facts, resolution);
         Ok(())
     }
 
@@ -650,7 +616,7 @@ impl FileProcessor {
                 known_namespaces.as_deref(),
             )
         } else {
-            ruby_analysis::indexer::AnalysisIndex::default()
+            ruby_analysis::core::FileAnalysis::default()
         };
         if resolve_references {
             replace_analysis_facts_for_file(

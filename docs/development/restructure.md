@@ -48,7 +48,7 @@ Delete this file when the last task is done. Git history keeps the record.
         (`core/source/file_analysis.rs`) with the same fields, and leave
         `FileFacts` as a temporary alias. Switch the engine internals
         (lifecycle, fingerprint, template, codec).
-  - [ ] B1b. Make `AnalysisIndexer` and `index_rbs` return `FileAnalysis` and
+  - [x] B1b. Make `AnalysisIndexer` and `index_rbs` return `FileAnalysis` and
         type the collector's direct facts as `FileAnalysis`. Delete
         `AnalysisIndex`, `file_analysis_facts_from_index`, and the RBS and
         stdlib field-copy blocks.

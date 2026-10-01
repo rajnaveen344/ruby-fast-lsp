@@ -214,20 +214,7 @@ impl IndexerStdlib {
                 "invariant violated: embedded Ruby core RBS {CORE_RUNTIME_CONSTANTS_RBS} failed to parse: {error} — bug: bundled language semantics must produce valid facts — fix: validate vendored RBS updates before embedding"
             )
         })?;
-        engine.replace_facts(
-            file_id,
-            ruby_analysis::engine::FileFacts {
-                symbols: facts.symbols,
-                methods: facts.methods,
-                method_visibility_overrides: facts.method_visibility_overrides,
-                types: facts.types,
-                graph_nodes: facts.graph_nodes,
-                graph_edges: facts.graph_edges,
-                unresolved_graph_edges: facts.unresolved_graph_edges,
-                ..Default::default()
-            },
-            ruby_analysis::engine::ResolveMode::Deferred,
-        );
+        engine.replace_facts(file_id, facts, ruby_analysis::engine::ResolveMode::Deferred);
         Ok(())
     }
 

@@ -63,7 +63,7 @@ fn execution_context_merge_replaces_lexical_method_with_generated_owner() {
     let generated_parts = vec![generated_part];
     let lexical_fqn = FullyQualifiedName::method(lexical_parts.clone(), method);
     let generated_fqn = FullyQualifiedName::method(generated_parts.clone(), method);
-    let mut merged = ruby_analysis::indexer::AnalysisIndex {
+    let mut merged = ruby_analysis::core::FileAnalysis {
         methods: vec![MethodFact::new(
             lexical_fqn.clone(),
             FullyQualifiedName::namespace(lexical_parts),
@@ -76,7 +76,7 @@ fn execution_context_merge_replaces_lexical_method_with_generated_owner() {
         )],
         ..Default::default()
     };
-    let extension_aware = ruby_analysis::indexer::AnalysisIndex {
+    let extension_aware = ruby_analysis::core::FileAnalysis {
         methods: vec![MethodFact::new(
             generated_fqn.clone(),
             FullyQualifiedName::namespace(generated_parts.clone()),

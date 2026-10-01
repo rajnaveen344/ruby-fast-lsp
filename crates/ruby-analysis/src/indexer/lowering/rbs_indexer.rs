@@ -10,15 +10,15 @@ use rbs_parser::{
     RbsType, Visibility,
 };
 
-use crate::indexer::AnalysisIndex;
+use crate::core::FileAnalysis;
 
 pub fn index_rbs(
     file_id: SourceFileId,
     source: &str,
-) -> Result<AnalysisIndex, rbs_parser::ParseError> {
+) -> Result<FileAnalysis, rbs_parser::ParseError> {
     let declarations = rbs_parser::parse(source)?;
     let offsets = LineOffsets::new(source);
-    let mut facts = AnalysisIndex::default();
+    let mut facts = FileAnalysis::default();
 
     for declaration in declarations {
         match declaration {
@@ -163,7 +163,7 @@ pub fn index_rbs(
 }
 
 fn push_method(
-    facts: &mut AnalysisIndex,
+    facts: &mut FileAnalysis,
     parts: &[RubyConstant],
     owner_type_params: &[rbs_parser::TypeParam],
     method: &MethodDecl,
@@ -340,7 +340,7 @@ fn complete_rbs_type_union<'a>(
 }
 
 fn push_members(
-    facts: &mut AnalysisIndex,
+    facts: &mut FileAnalysis,
     parts: &[RubyConstant],
     namespace: &FullyQualifiedName,
     owner_type_params: &[rbs_parser::TypeParam],
@@ -447,7 +447,7 @@ fn normalized_type_parameter_name(parameter: &rbs_parser::TypeParam) -> String {
 }
 
 fn push_unresolved_edge(
-    facts: &mut AnalysisIndex,
+    facts: &mut FileAnalysis,
     source: FullyQualifiedName,
     target: &RbsType,
     kind: GraphEdgeKind,
@@ -479,7 +479,7 @@ fn rbs_type_name(rbs_type: &RbsType) -> Option<&str> {
 }
 
 fn push_type_fact(
-    facts: &mut AnalysisIndex,
+    facts: &mut FileAnalysis,
     subject: TypeSubject,
     rbs_type: &RbsType,
     range: TextRange,

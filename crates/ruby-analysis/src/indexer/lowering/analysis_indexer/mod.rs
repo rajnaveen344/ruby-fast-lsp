@@ -5,9 +5,8 @@ use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, MethodVisibility,
-    MethodVisibilityOverrideFact, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceFileId,
-    SymbolFact, TextRange, TypeFact, UnresolvedGraphEdgeFact,
+    FileAnalysis, FullyQualifiedName, MethodVisibility, NamespaceKind, RubyConstant, RubyMethod,
+    RubyType, SourceFileId, TextRange,
 };
 use ruby_prism::{ConstantPathWriteNode, ConstantWriteNode, Node, Visit};
 
@@ -19,17 +18,6 @@ mod syntax;
 mod types;
 mod variables;
 mod visitor;
-
-#[derive(Debug, Clone, Default)]
-pub struct AnalysisIndex {
-    pub symbols: Vec<SymbolFact>,
-    pub methods: Vec<MethodFact>,
-    pub method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
-    pub graph_nodes: Vec<GraphNodeFact>,
-    pub graph_edges: Vec<GraphEdgeFact>,
-    pub unresolved_graph_edges: Vec<UnresolvedGraphEdgeFact>,
-    pub types: Vec<TypeFact>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScopeKind {
@@ -49,7 +37,7 @@ pub struct AnalysisIndexer {
     known_namespaces: HashSet<FullyQualifiedName>,
     known_constant_types: HashMap<FullyQualifiedName, RubyType>,
     source: Option<String>,
-    facts: AnalysisIndex,
+    facts: FileAnalysis,
 }
 
 impl AnalysisIndexer {
@@ -100,18 +88,18 @@ impl AnalysisIndexer {
             known_namespaces,
             known_constant_types,
             source: None,
-            facts: AnalysisIndex::default(),
+            facts: FileAnalysis::default(),
         }
     }
 
-    pub fn index_source(mut self, source: &str) -> AnalysisIndex {
+    pub fn index_source(mut self, source: &str) -> FileAnalysis {
         self.source = Some(source.to_string());
         let parse = ruby_prism::parse(source.as_bytes());
         self.visit(&parse.node());
         self.facts
     }
 
-    pub fn index_node_with_source(mut self, node: &Node<'_>, source: &str) -> AnalysisIndex {
+    pub fn index_node_with_source(mut self, node: &Node<'_>, source: &str) -> FileAnalysis {
         self.source = Some(source.to_string());
         self.visit(node);
         self.facts

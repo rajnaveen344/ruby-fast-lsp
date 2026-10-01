@@ -1,11 +1,11 @@
 use crate::core::storage::type_store::TypeStore;
 use crate::core::{
-    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ExecutionContextFact, GraphEdgeFact,
-    GraphNodeFact, InferenceEvidence, ReferenceCandidate, RubyType, SymbolFact, TextRange,
-    TypeFact, TypeSubject,
+    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ExecutionContextFact, FileAnalysis,
+    GraphEdgeFact, GraphNodeFact, InferenceEvidence, ReferenceCandidate, RubyType, SymbolFact,
+    TextRange, TypeFact, TypeSubject,
 };
 use crate::indexer::fact_collector::FactCollector;
-use crate::indexer::{AnalysisIndex, RubyDocument};
+use crate::indexer::RubyDocument;
 use ruby_fast_lsp_extension_api::IndexPatch;
 use std::collections::HashMap;
 
@@ -15,7 +15,7 @@ pub(in crate::indexer::fact_collector) struct CollectedFacts {
     pub(in crate::indexer::fact_collector) types: TypeStore,
     pub(in crate::indexer::fact_collector) references: Vec<ReferenceCandidate>,
     pub(in crate::indexer::fact_collector) diagnostic_candidates: Vec<DiagnosticCandidate>,
-    pub(in crate::indexer::fact_collector) direct: AnalysisIndex,
+    pub(in crate::indexer::fact_collector) direct: FileAnalysis,
     /// Append-only range index into `direct.types` for expression facts.
     ///
     /// Recursive receiver inference consults expressions frequently while a
@@ -35,7 +35,7 @@ pub(in crate::indexer::fact_collector) struct CollectedFacts {
 /// declaration seed before replacing the file through the analysis engine.
 pub struct CollectedFile {
     pub document: RubyDocument,
-    pub direct_facts: AnalysisIndex,
+    pub direct_facts: FileAnalysis,
     pub type_facts: Vec<TypeFact>,
     pub reference_candidates: Vec<ReferenceCandidate>,
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
@@ -67,7 +67,7 @@ impl FactCollector {
         }
     }
 
-    pub fn direct_facts(&self) -> &AnalysisIndex {
+    pub fn direct_facts(&self) -> &FileAnalysis {
         &self.facts.direct
     }
 

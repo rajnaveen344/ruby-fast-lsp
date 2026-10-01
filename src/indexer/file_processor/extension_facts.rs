@@ -32,7 +32,7 @@ pub(super) fn add_extension_analysis_facts(
     document: &RubyDocument,
     patches: &[IndexPatch],
     project: Option<&ProjectContext>,
-    facts: &mut ruby_analysis::indexer::AnalysisIndex,
+    facts: &mut ruby_analysis::core::FileAnalysis,
 ) {
     if patches.is_empty() {
         return;
@@ -460,7 +460,7 @@ fn analysis_patch_owner(
 }
 
 fn push_extension_graph_edge(
-    facts: &mut ruby_analysis::indexer::AnalysisIndex,
+    facts: &mut ruby_analysis::core::FileAnalysis,
     known_namespaces: &HashSet<FullyQualifiedName>,
     edge: ExtensionGraphEdge<'_>,
 ) {
