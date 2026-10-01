@@ -128,7 +128,7 @@ Delete this file when the last task is done. Git history keeps the record.
         inference evidence, dirty flags, equation solving split into a
         read-only plan step and an `apply` step that writes `TypeTable`.
         Profiler comparison.
-  - [ ] B3j. Leave `state/lifecycle.rs` as orchestration over the components,
+  - [x] B3j. Leave `state/lifecycle.rs` as orchestration over the components,
         with `semantic_revision` and `query_cache_identity` on the engine.
         Update `engine/README.md` and the analysis README.
   - [ ] B3k. Add the read-only `Semantics` trait (`engine/semantics.rs`) for
