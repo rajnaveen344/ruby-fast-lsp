@@ -3,9 +3,9 @@ use super::RubyLanguageServer;
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{ProjectContextSeed, ProjectContextSnapshot};
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
-use crate::indexer::scheduling::navigation_demand::NavigationDemandController;
-use crate::indexer::scheduling::status::{IndexingRun, ProjectIndexingStatus};
 use crate::invariant::ExpectInvariant;
+use crate::loader::scheduling::navigation_demand::NavigationDemandController;
+use crate::loader::scheduling::status::{IndexingRun, ProjectIndexingStatus};
 use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
 use ruby_analysis::engine::AnalysisEngine;
@@ -17,8 +17,8 @@ use tower_lsp::lsp_types::Url;
 
 fn new_orphan_analysis_engine() -> Arc<RwLock<AnalysisEngine>> {
     let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
-    crate::indexer::sources::stdlib::IndexerStdlib::new(
-        crate::indexer::file_processor::FileProcessor::new(),
+    crate::loader::sources::stdlib::IndexerStdlib::new(
+        crate::loader::file_processor::FileProcessor::new(),
         None,
     )
     .index_core_runtime_constants(None, engine.clone())
@@ -56,14 +56,14 @@ impl ProjectRuntimeState {
 #[derive(Clone)]
 struct DependencyRequireState {
     paths: Arc<RwLock<Vec<PathBuf>>>,
-    index: Arc<RwLock<Arc<crate::indexer::require_paths::RequireFeatureIndex>>>,
+    index: Arc<RwLock<Arc<crate::loader::require_paths::RequireFeatureIndex>>>,
 }
 impl Default for DependencyRequireState {
     fn default() -> Self {
         Self {
             paths: Arc::default(),
             index: Arc::new(RwLock::new(Arc::new(
-                crate::indexer::require_paths::RequireFeatureIndex::empty(),
+                crate::loader::require_paths::RequireFeatureIndex::empty(),
             ))),
         }
     }
@@ -72,7 +72,7 @@ impl DependencyRequireState {
     fn replace(
         &self,
         paths: Vec<PathBuf>,
-        index: Arc<crate::indexer::require_paths::RequireFeatureIndex>,
+        index: Arc<crate::loader::require_paths::RequireFeatureIndex>,
     ) {
         *self.paths.write() = paths;
         *self.index.write() = index;
@@ -149,7 +149,7 @@ impl Workspace {
 
     #[cfg(test)]
     pub(crate) fn set_dependency_require_paths(&self, paths: Vec<PathBuf>) {
-        let index = Arc::new(crate::indexer::require_paths::RequireFeatureIndex::build(
+        let index = Arc::new(crate::loader::require_paths::RequireFeatureIndex::build(
             &paths, None,
         ));
         self.set_dependency_require_resolution(paths, index);
@@ -158,19 +158,19 @@ impl Workspace {
     /// Hold this identity guard through delayed require-fact commit/publication.
     pub(super) fn require_feature_guard(
         &self,
-    ) -> parking_lot::RwLockReadGuard<'_, Arc<crate::indexer::require_paths::RequireFeatureIndex>>
+    ) -> parking_lot::RwLockReadGuard<'_, Arc<crate::loader::require_paths::RequireFeatureIndex>>
     {
         self.requires.index.read()
     }
 
-    pub fn require_feature_index(&self) -> Arc<crate::indexer::require_paths::RequireFeatureIndex> {
+    pub fn require_feature_index(&self) -> Arc<crate::loader::require_paths::RequireFeatureIndex> {
         self.requires.index.read().clone()
     }
 
     pub(crate) fn set_dependency_require_resolution(
         &self,
         paths: Vec<PathBuf>,
-        index: Arc<crate::indexer::require_paths::RequireFeatureIndex>,
+        index: Arc<crate::loader::require_paths::RequireFeatureIndex>,
     ) {
         self.requires.replace(paths, index);
     }
@@ -227,7 +227,7 @@ impl RubyLanguageServer {
     pub fn require_feature_index_for_uri(
         &self,
         uri: &Url,
-    ) -> Arc<crate::indexer::require_paths::RequireFeatureIndex> {
+    ) -> Arc<crate::loader::require_paths::RequireFeatureIndex> {
         self.projects.require_feature_index_for_uri(uri)
     }
 
@@ -431,7 +431,7 @@ impl RubyLanguageServer {
             )
         })?;
         let explicit_roots = self.config.lock().indexing.project_roots.clone();
-        let roots = crate::indexer::sources::project::roots::discover_project_roots_with_explicit(
+        let roots = crate::loader::sources::project::roots::discover_project_roots_with_explicit(
             &folder_path,
             &explicit_roots,
         )?;
@@ -498,12 +498,10 @@ impl ProjectRegistry {
     pub fn require_feature_index_for_uri(
         &self,
         uri: &Url,
-    ) -> Arc<crate::indexer::require_paths::RequireFeatureIndex> {
+    ) -> Arc<crate::loader::require_paths::RequireFeatureIndex> {
         self.workspace_for_uri(uri)
             .map(|workspace| workspace.require_feature_index())
-            .unwrap_or_else(
-                || Arc::new(crate::indexer::require_paths::RequireFeatureIndex::empty()),
-            )
+            .unwrap_or_else(|| Arc::new(crate::loader::require_paths::RequireFeatureIndex::empty()))
     }
 
     pub fn analysis_workspace_for_uri(&self, uri: &Url) -> Option<Workspace> {

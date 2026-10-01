@@ -5,7 +5,7 @@
 //! for definite `NilClass`; Unknown and nilable unions remain silent.
 //! Diagnostic observations only read the output published by the handlers.
 
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check, FakeEditor};
 use ruby_analysis::core::{DiagnosticFact, SourceKind, TextRange};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};

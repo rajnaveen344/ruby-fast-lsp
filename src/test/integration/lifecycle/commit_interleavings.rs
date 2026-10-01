@@ -1,7 +1,7 @@
 //! Controlled collection/commit schedules over the production snapshot guard.
 //! No timing sleeps decide which result wins: channels release each producer.
 
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::FakeEditor;
 use parking_lot::RwLock;
 use ruby_analysis::core::FileAnalysis;

@@ -1,6 +1,6 @@
 //! Open editor buffers and per-document lifecycle serialization.
 use super::RubyLanguageServer;
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::indexer::RubyDocument;

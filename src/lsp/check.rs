@@ -6,9 +6,9 @@
 //! `FileProcessor`, and `AnalysisEngine` used by the LSP.
 
 use crate::environment::config::{IndexingConfig, RubyFastLspConfig};
-use crate::indexer::coordinator::IndexingCoordinator;
-use crate::indexer::file_processor::analysis_source;
 use crate::invariant::ExpectInvariant;
+use crate::loader::coordinator::IndexingCoordinator;
+use crate::loader::file_processor::analysis_source;
 use crate::lsp::capabilities::diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use crate::utils::file_ops::should_index_file;

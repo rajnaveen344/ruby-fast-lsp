@@ -1,8 +1,8 @@
 //! Current-source diagnostic projection and latest-per-document publication.
 use super::projects::ProjectRegistry;
 use super::{RubyLanguageServer, Workspace};
-use crate::indexer::scheduling::status::IndexingPhase;
 use crate::invariant::ExpectInvariant;
+use crate::loader::scheduling::status::IndexingPhase;
 use log::{info, warn};
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
@@ -157,7 +157,7 @@ impl RubyLanguageServer {
         &self,
         workspace: &Workspace,
     ) {
-        use crate::indexer::require_paths::{
+        use crate::loader::require_paths::{
             require_diagnostic_candidates, reresolve_unresolved_require_diagnostics,
             UNRESOLVED_REQUIRE_CODE,
         };
@@ -234,7 +234,7 @@ impl RubyLanguageServer {
             self.indexing
                 .schedule
                 .checkpoint(
-                    crate::indexer::scheduling::test_schedule::Point::RequireRefreshCollected,
+                    crate::loader::scheduling::test_schedule::Point::RequireRefreshCollected,
                     &path,
                 )
                 .await;
@@ -335,7 +335,7 @@ impl RubyLanguageServer {
             self.indexing
                 .schedule
                 .checkpoint(
-                    crate::indexer::scheduling::test_schedule::Point::RequireRefreshAttempted,
+                    crate::loader::scheduling::test_schedule::Point::RequireRefreshAttempted,
                     &path,
                 )
                 .await;

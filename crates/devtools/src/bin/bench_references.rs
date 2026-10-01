@@ -22,7 +22,7 @@ mod invariant;
 use anyhow::{anyhow, Context, Result};
 use devtools::corpus;
 use log::{info, LevelFilter};
-use ruby_fast_lsp::indexer::coordinator::{IndexingCoordinator, IndexingTimings};
+use ruby_fast_lsp::loader::coordinator::{IndexingCoordinator, IndexingTimings};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::env;
 use std::path::PathBuf;

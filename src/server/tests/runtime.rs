@@ -9,7 +9,7 @@ use crate::environment::runtime::catalog::{
     DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation, RuntimeStatusParams,
     RuntimeSupportStatus,
 };
-use crate::indexer::scheduling::status::{IndexingPhase, IndexingSingleFlightReuseSnapshot};
+use crate::loader::scheduling::status::{IndexingPhase, IndexingSingleFlightReuseSnapshot};
 use crate::server::RubyLanguageServer;
 use tower_lsp::lsp_types::Url;
 

@@ -204,8 +204,8 @@ mod tests {
 
         let mut server = RubyLanguageServer::default();
         server.indexing.set_resources(
-            crate::indexer::scheduling::resources::IndexingResourceGovernor::new(
-                crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(
+            crate::loader::scheduling::resources::IndexingResourceGovernor::new(
+                crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
                     1,
                     1,
                     256 * 1024 * 1024,
@@ -235,9 +235,9 @@ mod tests {
             holder_resources
                 .run_async_with_resources(
                     "inlay semantic commit contention holder",
-                    crate::indexer::scheduling::resources::IndexingWorkSpec::new(
+                    crate::loader::scheduling::resources::IndexingWorkSpec::new(
                         Some(holder_root),
-                        crate::indexer::scheduling::resources::IndexingResourcePriority::Background,
+                        crate::loader::scheduling::resources::IndexingResourcePriority::Background,
                         1,
                         256 * 1024 * 1024,
                         1,

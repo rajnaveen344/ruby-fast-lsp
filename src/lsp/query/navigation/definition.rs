@@ -234,10 +234,10 @@ fn normalized_definition_navigation_keys(
     dependency_name: Option<&str>,
 ) -> Option<DefinitionNavigationDemandKeys> {
     let project_key = project_name
-        .map(crate::indexer::scheduling::navigation_demand::normalize_navigation_key)
+        .map(crate::loader::scheduling::navigation_demand::normalize_navigation_key)
         .filter(|key| !key.is_empty());
     let dependency_key = dependency_name
-        .map(crate::indexer::scheduling::navigation_demand::normalize_navigation_key)
+        .map(crate::loader::scheduling::navigation_demand::normalize_navigation_key)
         .filter(|key| !key.is_empty());
     (project_key.is_some() || dependency_key.is_some()).then_some(DefinitionNavigationDemandKeys {
         project_key,

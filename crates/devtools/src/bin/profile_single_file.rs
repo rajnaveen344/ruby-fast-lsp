@@ -6,7 +6,7 @@ use anyhow::Result;
 use log::{info, LevelFilter};
 use ruby_fast_lsp::environment::config::RubyFastLspConfig;
 use ruby_fast_lsp::environment::extensions::ExtensionRegistryHandle;
-use ruby_fast_lsp::indexer::file_processor::FileProcessor;
+use ruby_fast_lsp::loader::file_processor::FileProcessor;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use tower_lsp::lsp_types::Url;
 

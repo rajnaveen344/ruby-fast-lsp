@@ -1,7 +1,7 @@
 //! Diagnostic parity between `check` output and LSP published diagnostics.
 
 use super::support::{assert_diagnostic_parity, find_cli_diagnostic, find_lsp_diagnostic};
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::lsp::check::CheckSession;
 use crate::test::harness::FakeEditor;
 use tower_lsp::lsp_types::NumberOrString;

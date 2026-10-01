@@ -4,7 +4,7 @@
 mod invariant;
 
 pub mod environment;
-pub mod indexer;
+pub mod loader;
 pub mod lsp;
 pub mod server;
 #[cfg(test)]

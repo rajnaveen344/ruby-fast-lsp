@@ -81,7 +81,7 @@ async fn ready_project_definition_stays_responsive_while_sibling_workers_are_sat
             let _permit = scheduler
                 .acquire(
                     format!("/busy/project-{index}").into(),
-                    crate::indexer::scheduling::scheduler::IndexingPriority::Background,
+                    crate::loader::scheduling::scheduler::IndexingPriority::Background,
                 )
                 .await;
             tokio::task::spawn_blocking(move || {
@@ -243,7 +243,7 @@ async fn navigation_into_external_dependency_retains_originating_project_context
     let workspace = editor
         .workspace_for("workspace_a/app.rb")
         .expect("workspace_a must own its project files");
-    let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
+    let processor = crate::loader::file_processor::FileProcessor::with_extension_registry(
         editor.server().extensions.registry().clone(),
     );
     let entry_uri = crate::test::harness::fixture_uri("/external/demo-gem/lib/entry.rb");
@@ -304,7 +304,7 @@ async fn directly_opened_dependency_uses_its_unique_indexed_project_owner() {
     let workspace = editor
         .workspace_for("workspace_a/app.rb")
         .expect("workspace_a must own its project files");
-    let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
+    let processor = crate::loader::file_processor::FileProcessor::with_extension_registry(
         editor.server().extensions.registry().clone(),
     );
     let entry_uri = crate::test::harness::fixture_uri("/external/unique-gem/lib/entry.rb");
@@ -371,7 +371,7 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
     let mut editor = FakeEditor::new().await;
     editor.add_workspace("workspace_a");
     editor.add_workspace("workspace_b");
-    let processor = crate::indexer::file_processor::FileProcessor::with_extension_registry(
+    let processor = crate::loader::file_processor::FileProcessor::with_extension_registry(
         editor.server().extensions.registry().clone(),
     );
     let entry_uri = crate::test::harness::fixture_uri("/external/shared-gem/lib/entry.rb");

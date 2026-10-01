@@ -106,7 +106,7 @@ async fn compact_inlay_navigation_retains_abbreviated_identity_after_provider_ed
 
 #[tokio::test]
 async fn compact_inlay_navigation_retains_external_project_context() {
-    use crate::indexer::file_processor::FileProcessor;
+    use crate::loader::file_processor::FileProcessor;
     use ruby_analysis::core::SourceKind;
 
     let mut editor = FakeEditor::new().await;

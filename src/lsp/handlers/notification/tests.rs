@@ -44,11 +44,11 @@ async fn shutdown_cancels_every_project_indexing_generation() {
     assert!(second_run.is_cancelled());
     assert_eq!(
         first.indexing_status.snapshot().phase,
-        crate::indexer::scheduling::status::IndexingPhase::Cancelled
+        crate::loader::scheduling::status::IndexingPhase::Cancelled
     );
     assert_eq!(
         second.indexing_status.snapshot().phase,
-        crate::indexer::scheduling::status::IndexingPhase::Cancelled
+        crate::loader::scheduling::status::IndexingPhase::Cancelled
     );
     assert!(
         server
@@ -350,7 +350,7 @@ async fn classpath_change_clears_external_facts_and_reopens_project_documents_on
     );
     assert_eq!(
         workspace.indexing_status.snapshot().phase,
-        crate::indexer::scheduling::status::IndexingPhase::Failed
+        crate::loader::scheduling::status::IndexingPhase::Failed
     );
     assert_eq!(
         workspace.indexing_status.snapshot().generation,

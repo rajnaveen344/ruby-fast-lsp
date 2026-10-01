@@ -4,7 +4,7 @@
 //! Each handler delegates to the appropriate capability module for the actual logic.
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
-use crate::indexer::scheduling::navigation_demand::{
+use crate::loader::scheduling::navigation_demand::{
     NavigationDemandOutcome, NavigationDemandStage,
 };
 use crate::lsp::capabilities::debug;
@@ -579,9 +579,9 @@ pub async fn handle_prepare_rename(
 #[cfg(test)]
 mod navigation_demand_tests {
     use super::*;
-    use crate::indexer::file_processor::FileProcessor;
-    use crate::indexer::scheduling::navigation_demand::NavigationDemandStage;
-    use crate::indexer::scheduling::status::IndexingPhase;
+    use crate::loader::file_processor::FileProcessor;
+    use crate::loader::scheduling::navigation_demand::NavigationDemandStage;
+    use crate::loader::scheduling::status::IndexingPhase;
     use std::sync::Arc;
     use std::time::Duration;
 

@@ -12,7 +12,7 @@
 //! chains, so universal methods such as `User.new` are resolved consistently
 //! with constructor inference.
 
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check, check_multi_file, FakeEditor};
 use ruby_analysis::core::{
     FullyQualifiedName, MethodAvailability, NamespaceKind, RubyConstant, RubyMethod, SourceKind,

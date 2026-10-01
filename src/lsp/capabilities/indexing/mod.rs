@@ -1,6 +1,6 @@
-use crate::indexer::coordinator::IndexingCoordinator;
-use crate::indexer::file_processor::FileProcessor;
 use crate::invariant::ExpectInvariant;
+use crate::loader::coordinator::IndexingCoordinator;
+use crate::loader::file_processor::FileProcessor;
 use crate::lsp::capabilities::diagnostics::generate_diagnostics;
 use crate::lsp::linter::lint_document;
 use crate::lsp::query::EngineQuery;
@@ -39,7 +39,7 @@ async fn process_interactive_file(
     uri: &Url,
     content: &str,
     mode: DocumentSemanticMode,
-) -> anyhow::Result<crate::indexer::file_processor::ProcessResult> {
+) -> anyhow::Result<crate::loader::file_processor::ProcessResult> {
     let workspace = server.workspace_for_uri(uri);
     let project_root = workspace
         .as_ref()
@@ -60,9 +60,9 @@ async fn process_interactive_file(
     let server = server.clone();
     let uri = uri.clone();
     let content = content.to_string();
-    let spec = crate::indexer::scheduling::resources::IndexingWorkSpec::new(
+    let spec = crate::loader::scheduling::resources::IndexingWorkSpec::new(
         project_root,
-        crate::indexer::scheduling::resources::IndexingResourcePriority::OpenDocument,
+        crate::loader::scheduling::resources::IndexingResourcePriority::OpenDocument,
         1,
         INTERACTIVE_SEMANTIC_TRANSIENT_MEMORY_BYTES,
         1,
@@ -99,23 +99,23 @@ async fn process_interactive_file(
 pub async fn init_workspace(
     server: &RubyLanguageServer,
     folder_uri: Url,
-) -> anyhow::Result<crate::indexer::coordinator::IndexingTimings> {
+) -> anyhow::Result<crate::loader::coordinator::IndexingTimings> {
     init_workspace_inner(server, folder_uri, None).await
 }
 
 pub async fn init_workspace_for_run(
     server: &RubyLanguageServer,
     folder_uri: Url,
-    run: crate::indexer::scheduling::status::IndexingRun,
-) -> anyhow::Result<crate::indexer::coordinator::IndexingTimings> {
+    run: crate::loader::scheduling::status::IndexingRun,
+) -> anyhow::Result<crate::loader::coordinator::IndexingTimings> {
     init_workspace_inner(server, folder_uri, Some(run)).await
 }
 
 async fn init_workspace_inner(
     server: &RubyLanguageServer,
     folder_uri: Url,
-    run: Option<crate::indexer::scheduling::status::IndexingRun>,
-) -> anyhow::Result<crate::indexer::coordinator::IndexingTimings> {
+    run: Option<crate::loader::scheduling::status::IndexingRun>,
+) -> anyhow::Result<crate::loader::coordinator::IndexingTimings> {
     let workspace_path = folder_uri
         .to_file_path()
         .map_err(|_| anyhow::anyhow!("Failed to convert folder URI to file path"))?;
@@ -161,7 +161,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
             .indexing
             .schedule
             .checkpoint(
-                crate::indexer::scheduling::test_schedule::Point::DocumentSourceUpdated,
+                crate::loader::scheduling::test_schedule::Point::DocumentSourceUpdated,
                 &path,
             )
             .await;
@@ -379,7 +379,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
             .indexing
             .schedule
             .checkpoint(
-                crate::indexer::scheduling::test_schedule::Point::DocumentSourceUpdated,
+                crate::loader::scheduling::test_schedule::Point::DocumentSourceUpdated,
                 &path,
             )
             .await;

@@ -154,7 +154,7 @@ Delete this file when the last task is done. Git history keeps the record.
 
 - [ ] C1. Rename `src/indexer` to `loader` and make it a function of a
       `LoadContext` that returns `FileAnalysis` values.
-  - [ ] C1a. Rename `src/indexer` to `src/loader` with no other change. Rewrite
+  - [x] C1a. Rename `src/indexer` to `src/loader` with no other change. Rewrite
         `crate::indexer` and `ruby_fast_lsp::indexer` paths (not
         `ruby_analysis::indexer`), `build.rs` `GEM_FACT_PRODUCER_TREES`,
         `crates/devtools`, `src/main.rs`, and the guides that name the folder.

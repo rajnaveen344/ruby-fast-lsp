@@ -2,7 +2,7 @@
 //! and deliver a real editor operation first. Gates determine order; timeouts
 //! only bound hangs.
 
-use crate::indexer::scheduling::test_schedule::Point;
+use crate::loader::scheduling::test_schedule::Point;
 use crate::lsp::capabilities::indexing::init_workspace_for_run;
 use crate::test::harness::FakeEditor;
 use std::time::Duration;
@@ -34,7 +34,7 @@ async fn edit_between_real_collection_and_commit(
     // The concurrent schedule needs one lane for each producer. Set its
     // resource contract explicitly instead of inheriting the host CPU count.
     editor.set_indexing_resource_policy(
-        crate::indexer::scheduling::resources::IndexingResourcePolicy::new(cpu_lanes, cpu_lanes),
+        crate::loader::scheduling::resources::IndexingResourcePolicy::new(cpu_lanes, cpu_lanes),
     );
     let server = editor.server().clone();
     server.set_discovered_runtimes_for_tests(Vec::new());
@@ -221,7 +221,7 @@ async fn real_coordinator_and_edit_share_a_single_resource_lane() {
 #[tokio::test]
 async fn dropped_schedule_controller_releases_its_worker() {
     let schedule =
-        std::sync::Arc::new(crate::indexer::scheduling::test_schedule::TestSchedule::default());
+        std::sync::Arc::new(crate::loader::scheduling::test_schedule::TestSchedule::default());
     let path = std::path::PathBuf::from("neutral.rb");
     let mut pause = schedule.arm(Point::ProjectFactsCollected, path.clone());
     let worker_schedule = schedule.clone();

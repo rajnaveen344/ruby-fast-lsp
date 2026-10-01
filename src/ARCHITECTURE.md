@@ -12,7 +12,7 @@ crates/
 └── devtools/       - Profilers, benchmarks, AST dump, and extension validation tools
 src/
 ├── environment/    - Configuration, Ruby runtime discovery, and extension hosts
-├── indexer/        - Workspace discovery, fact collection, scheduling, and caches
+├── loader/         - Workspace discovery, fact collection, scheduling, and caches
 ├── lsp/            - Editor projections: capabilities, query adapters, handlers, check
 ├── server/         - LSP protocol facade, documents, project routing, and publication
 ├── utils/          - Shared helpers and single-flight
@@ -57,9 +57,9 @@ from the [library guide](../crates/ruby-analysis/README.md). Every analysis fold
 meets the ten-entry limit, enforced by `support/structure/check.py` through the
 correctness gate.
 
-### 1. Indexer (`src/indexer/`)
+### 1. Loader (`src/loader/`)
 
-The Indexer is responsible for discovering Ruby files, parsing them, and feeding facts into `ruby-analysis::engine`.
+The loader is responsible for discovering Ruby files, parsing them, and feeding facts into `ruby-analysis::engine`.
 
 - **Primary Responsibility**: Workspace scanning and per-file fact collection
 - **Secondary Responsibility**: Coordinate gem, stdlib, and project indexing
@@ -370,7 +370,7 @@ product has three distinct layers:
 2. **Project-neutral semantic template** in `ruby-analysis::engine`: immutable
    declarations and graph/type facts that cannot be inserted directly because
    their template file IDs are private.
-3. **Project binding** in `src/indexer`: register the requesting project's exact
+3. **Project binding** in `src/loader`: register the requesting project's exact
    source path/content/kind, instantiate every template with that engine's file
    ID, validate provenance and source precedence, then use the ordinary
    `AnalysisEngine::replace_facts` lifecycle.
@@ -660,7 +660,7 @@ Handlers manage the routing of LSP requests and notifications.
 - **Primary Responsibility**: Receive requests from the server and route them to capabilities
 - **Secondary Responsibility**: Handle document lifecycle notifications (open, change, save)
 
-### 8. Ruby Version (`src/indexer/version/`)
+### 8. Ruby Version (`src/loader/version/`)
 
 Ruby version detection and version-manager integration.
 
@@ -672,8 +672,8 @@ Ruby version detection and version-manager integration.
 
 1. Client connects to the LSP server
 2. Server initializes and receives workspace information
-3. Server asks the indexer to index all Ruby files in the workspace
-4. Indexer finds all Ruby files and processes each one:
+3. Server asks the loader to index all Ruby files in the workspace
+4. The loader finds all Ruby files and processes each one:
    - Parse the file using Ruby Prism
    - Traverse the AST once to collect facts and candidates
    - Replace that file's facts in `AnalysisEngine`
@@ -695,8 +695,8 @@ Ruby version detection and version-manager integration.
 1. Client edits a file and sends a "did change" notification
 2. Server receives the notification and:
    - Updates its document cache
-   - Asks the indexer to reindex the file
-3. Indexer:
+   - Asks the loader to reindex the file
+3. Loader:
    - Parses the updated content
    - Replaces that file's facts in `AnalysisEngine`
    - Recomputes engine diagnostics

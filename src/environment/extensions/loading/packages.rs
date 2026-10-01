@@ -14,7 +14,7 @@ use crate::environment::extensions::loading::wasm::{
     load_wasm_extension_with_cache, manifest_wasm_path, read_extension_wasm, read_manifest,
 };
 use crate::environment::extensions::registry::loaded::LoadedWasmExtension;
-use crate::indexer::cache::persistent::PersistentDerivedProductCache;
+use crate::loader::cache::persistent::PersistentDerivedProductCache;
 
 pub(in crate::environment::extensions) fn discover_extension_packages(
     config: &ExtensionLoadConfig,

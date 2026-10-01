@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, LocationLink, Position, Range, Url};
 
-use crate::indexer::require_paths::{
+use crate::loader::require_paths::{
     find_require_string_at_offset, location_for_require_target, resolve_require_path,
     RequireStringTarget,
 };

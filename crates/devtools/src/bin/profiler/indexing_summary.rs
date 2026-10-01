@@ -20,7 +20,7 @@ pub(crate) fn duration_ms(duration: Duration) -> f64 {
 
 pub(crate) fn indexing_timing_json(
     uri: &Url,
-    timings: ruby_fast_lsp::indexer::coordinator::IndexingTimings,
+    timings: ruby_fast_lsp::loader::coordinator::IndexingTimings,
 ) -> serde_json::Value {
     serde_json::json!({
         "project": uri,
@@ -37,7 +37,7 @@ pub(crate) fn indexing_timing_json(
 
 pub(crate) fn indexing_summary_json(
     server: &RubyLanguageServer,
-    completed: &[(Url, ruby_fast_lsp::indexer::coordinator::IndexingTimings)],
+    completed: &[(Url, ruby_fast_lsp::loader::coordinator::IndexingTimings)],
     wall: Duration,
     resources_started: Option<ProcessResourceUsage>,
     resources_finished: Option<ProcessResourceUsage>,

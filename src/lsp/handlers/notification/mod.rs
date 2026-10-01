@@ -261,7 +261,7 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
             let run = ws.begin_indexing_run();
             let admission = server.indexing.scheduler().register_cancellable(
                 ws.root_path.clone(),
-                crate::indexer::scheduling::scheduler::IndexingPriority::Background,
+                crate::loader::scheduling::scheduler::IndexingPriority::Background,
                 run.cancellation(),
             );
             (ws, run, admission)
@@ -280,7 +280,7 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
                 .indexing_status
                 .transition(
                     run.generation(),
-                    crate::indexer::scheduling::status::IndexingPhase::ResolvingRuntime,
+                    crate::loader::scheduling::status::IndexingPhase::ResolvingRuntime,
                     None,
                     None,
                 )
@@ -306,15 +306,15 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
                     );
                     ws.navigation_demands.complete_stage(
                         run.generation(),
-                        crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
+                        crate::loader::scheduling::navigation_demand::NavigationDemandStage::Project,
                     );
                     ws.navigation_demands.complete_stage(
                         run.generation(),
-                        crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
+                        crate::loader::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                     );
                     let _ = ws.indexing_status.transition(
                         run.generation(),
-                        crate::indexer::scheduling::status::IndexingPhase::Ready,
+                        crate::loader::scheduling::status::IndexingPhase::Ready,
                         None,
                         None,
                     );
@@ -533,7 +533,7 @@ async fn rebuild_runtime_owned_project_state(
         .scheduler()
         .acquire_cancellable(
             workspace.root_path.clone(),
-            crate::indexer::scheduling::scheduler::IndexingPriority::OpenDocument,
+            crate::loader::scheduling::scheduler::IndexingPriority::OpenDocument,
             run.cancellation(),
         )
         .await
@@ -544,7 +544,7 @@ async fn rebuild_runtime_owned_project_state(
         .indexing_status
         .transition(
             run.generation(),
-            crate::indexer::scheduling::status::IndexingPhase::ResolvingRuntime,
+            crate::loader::scheduling::status::IndexingPhase::ResolvingRuntime,
             None,
             None,
         )
@@ -588,15 +588,15 @@ async fn rebuild_runtime_owned_project_state(
         Ok(_) => {
             workspace.navigation_demands.complete_stage(
                 run.generation(),
-                crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
+                crate::loader::scheduling::navigation_demand::NavigationDemandStage::Project,
             );
             workspace.navigation_demands.complete_stage(
                 run.generation(),
-                crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
+                crate::loader::scheduling::navigation_demand::NavigationDemandStage::Dependency,
             );
             let _ = workspace.indexing_status.transition(
                 run.generation(),
-                crate::indexer::scheduling::status::IndexingPhase::Ready,
+                crate::loader::scheduling::status::IndexingPhase::Ready,
                 None,
                 None,
             );
@@ -715,7 +715,7 @@ pub async fn handle_did_change_workspace_folders(
                 .scheduler()
                 .acquire_cancellable(
                     project_root,
-                    crate::indexer::scheduling::scheduler::IndexingPriority::Background,
+                    crate::loader::scheduling::scheduler::IndexingPriority::Background,
                     run.cancellation(),
                 )
                 .await
@@ -725,7 +725,7 @@ pub async fn handle_did_change_workspace_folders(
             if indexing_status
                 .transition(
                     run.generation(),
-                    crate::indexer::scheduling::status::IndexingPhase::ResolvingRuntime,
+                    crate::loader::scheduling::status::IndexingPhase::ResolvingRuntime,
                     None,
                     None,
                 )
@@ -752,15 +752,15 @@ pub async fn handle_did_change_workspace_folders(
                     );
                     workspace.navigation_demands.complete_stage(
                         run.generation(),
-                        crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
+                        crate::loader::scheduling::navigation_demand::NavigationDemandStage::Project,
                     );
                     workspace.navigation_demands.complete_stage(
                         run.generation(),
-                        crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
+                        crate::loader::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                     );
                     let _ = indexing_status.transition(
                         run.generation(),
-                        crate::indexer::scheduling::status::IndexingPhase::Ready,
+                        crate::loader::scheduling::status::IndexingPhase::Ready,
                         None,
                         None,
                     );

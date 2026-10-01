@@ -1,6 +1,6 @@
 //! Hover on keyed reads of Hash shapes and RBS records returned across files.
 
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check_multi_file, FakeEditor};
 
 #[tokio::test]

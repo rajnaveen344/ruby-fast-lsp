@@ -43,8 +43,8 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
     let uri = Url::from_file_path(&path).unwrap();
     let mut server = RubyLanguageServer::default();
     server.indexing.set_resources(
-        crate::indexer::scheduling::resources::IndexingResourceGovernor::new(
-            crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(
+        crate::loader::scheduling::resources::IndexingResourceGovernor::new(
+            crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
                 1,
                 1,
                 256 * 1024 * 1024,
@@ -62,9 +62,9 @@ async fn did_open_semantic_pass_waits_for_weighted_admission_without_blocking_re
         holder_resources
             .run_async_with_resources(
                 "interactive semantic contention holder",
-                crate::indexer::scheduling::resources::IndexingWorkSpec::new(
+                crate::loader::scheduling::resources::IndexingWorkSpec::new(
                     Some(holder_root),
-                    crate::indexer::scheduling::resources::IndexingResourcePriority::Background,
+                    crate::loader::scheduling::resources::IndexingResourcePriority::Background,
                     1,
                     256 * 1024 * 1024,
                     1,
@@ -141,8 +141,8 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
     let uri = Url::from_file_path(&path).unwrap();
     let mut server = RubyLanguageServer::default();
     server.indexing.set_resources(
-        crate::indexer::scheduling::resources::IndexingResourceGovernor::new(
-            crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(
+        crate::loader::scheduling::resources::IndexingResourceGovernor::new(
+            crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
                 1,
                 1,
                 256 * 1024 * 1024,
@@ -172,9 +172,9 @@ async fn overlapping_did_change_versions_cannot_publish_older_semantic_facts() {
         holder_resources
             .run_async_with_resources(
                 "didChange ordering contention holder",
-                crate::indexer::scheduling::resources::IndexingWorkSpec::new(
+                crate::loader::scheduling::resources::IndexingWorkSpec::new(
                     Some(holder_root),
-                    crate::indexer::scheduling::resources::IndexingResourcePriority::Background,
+                    crate::loader::scheduling::resources::IndexingResourcePriority::Background,
                     1,
                     256 * 1024 * 1024,
                     1,

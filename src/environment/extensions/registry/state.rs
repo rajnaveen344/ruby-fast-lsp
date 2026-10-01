@@ -24,7 +24,7 @@ use crate::environment::extensions::registry::handle::ExtensionRegistryHandle;
 use crate::environment::extensions::registry::loaded::LoadedWasmExtension;
 use crate::environment::extensions::registry::status::ExtensionStatusReport;
 use crate::environment::extensions::ExtensionApplicabilityFingerprint;
-use crate::indexer::cache::persistent::PersistentDerivedProductCache;
+use crate::loader::cache::persistent::PersistentDerivedProductCache;
 
 pub(in crate::environment::extensions) struct ExtensionRegistry {
     pub(super) extensions: Vec<Arc<LoadedWasmExtension>>,

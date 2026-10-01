@@ -4,7 +4,7 @@
 //! collection behavior out of the assertions themselves: the expected type
 //! must come from the selected callable signature and inferred block.
 
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check, FakeEditor};
 
 #[tokio::test]

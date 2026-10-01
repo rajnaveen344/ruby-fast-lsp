@@ -1,6 +1,6 @@
 //! Live and post-indexing navigation and diagnostic probes at workspace positions.
 
-use ruby_fast_lsp::indexer::scheduling::status;
+use ruby_fast_lsp::loader::scheduling::status;
 use ruby_fast_lsp::lsp::capabilities::indexing;
 use ruby_fast_lsp::lsp::capabilities::navigation::{definitions, references};
 use ruby_fast_lsp::lsp::{handlers::request, query::EngineQuery};

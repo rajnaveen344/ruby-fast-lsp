@@ -1,4 +1,4 @@
-use crate::indexer::scheduling::status::{
+use crate::loader::scheduling::status::{
     IndexingPhase, IndexingReuseSnapshot, IndexingStatusParams,
 };
 use crate::server::RubyLanguageServer;

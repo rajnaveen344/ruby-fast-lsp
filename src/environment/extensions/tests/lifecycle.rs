@@ -1,6 +1,6 @@
 use super::*;
 use crate::environment::extensions::ExtensionStat;
-use crate::indexer::cache::persistent::PersistentProductStat;
+use crate::loader::cache::persistent::PersistentProductStat;
 
 #[test]
 fn tracked_call_name_set_is_shared_arc_and_covers_rspec_without_ordinary_ruby_names() {
@@ -189,7 +189,7 @@ async fn extension_reconfiguration_waits_for_weighted_admission_without_blocking
     };
     let registry = ExtensionRegistryHandle::from_config(&RubyFastLspConfig::default());
     let governor = IndexingResourceGovernor::new(
-        crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(
+        crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
             1,
             1,
             256 * 1024 * 1024,
@@ -269,7 +269,7 @@ async fn extension_reconfiguration_waits_for_weighted_admission_without_blocking
 async fn response_requests_without_loaded_capability_bypass_resource_admission() {
     let registry = ExtensionRegistryHandle::empty();
     let governor = IndexingResourceGovernor::new(
-        crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(1, 1, 1, 1),
+        crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(1, 1, 1, 1),
     );
 
     assert!(registry

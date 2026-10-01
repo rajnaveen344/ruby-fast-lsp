@@ -5,9 +5,9 @@ use crate::environment::runtime::catalog::{
     DiscoveredRuntime, ProjectRuntimeStatus, RuntimeCatalog, RuntimeDiscoverParams, RuntimeStatus,
     RuntimeStatusParams,
 };
-use crate::indexer::cache::dependency_product::GemBindingStat;
-use crate::indexer::cache::persistent::PersistentProductStat;
 use crate::invariant::ExpectInvariant;
+use crate::loader::cache::dependency_product::GemBindingStat;
+use crate::loader::cache::persistent::PersistentProductStat;
 use crate::utils::single_flight::SingleFlightStat;
 use anyhow::Result;
 use log::warn;
@@ -40,24 +40,24 @@ fn new_core_engine_cache() -> crate::utils::single_flight::BoundedSingleFlightCa
 }
 
 fn new_gem_dependency_cache() -> crate::utils::single_flight::BoundedSingleFlightCache<
-    crate::indexer::cache::dependency_product::GemDependencyProductKey,
-    crate::indexer::cache::dependency_product::GemDependencyProduct,
+    crate::loader::cache::dependency_product::GemDependencyProductKey,
+    crate::loader::cache::dependency_product::GemDependencyProduct,
 > {
     crate::utils::single_flight::BoundedSingleFlightCache::ephemeral(
-        |product: &crate::indexer::cache::dependency_product::GemDependencyProduct| {
+        |product: &crate::loader::cache::dependency_product::GemDependencyProduct| {
             product.estimated_weight_bytes()
         },
     )
 }
 
 fn new_runtime_stdlib_path_cache() -> crate::utils::single_flight::BoundedSingleFlightCache<
-    crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
-    crate::indexer::sources::stdlib::RuntimeStdlibPaths,
+    crate::loader::sources::stdlib::RuntimeStdlibPathKey,
+    crate::loader::sources::stdlib::RuntimeStdlibPaths,
 > {
     crate::utils::single_flight::BoundedSingleFlightCache::new(
         RUNTIME_STDLIB_PATH_CACHE_MAX_ENTRIES,
         RUNTIME_STDLIB_PATH_CACHE_MAX_WEIGHT_BYTES,
-        crate::indexer::sources::stdlib::RuntimeStdlibPaths::estimated_weight_bytes,
+        crate::loader::sources::stdlib::RuntimeStdlibPaths::estimated_weight_bytes,
     )
 }
 
@@ -80,16 +80,16 @@ pub(crate) struct RuntimeProducts {
     pub(super) discovered_runtimes: Arc<tokio::sync::OnceCell<Vec<DiscoveredRuntime>>>,
     core_templates: crate::utils::single_flight::BoundedSingleFlightCache<String, AnalysisEngine>,
     stdlib_paths: crate::utils::single_flight::BoundedSingleFlightCache<
-        crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
-        crate::indexer::sources::stdlib::RuntimeStdlibPaths,
+        crate::loader::sources::stdlib::RuntimeStdlibPathKey,
+        crate::loader::sources::stdlib::RuntimeStdlibPaths,
     >,
     gem_dependencies: crate::utils::single_flight::BoundedSingleFlightCache<
-        crate::indexer::cache::dependency_product::GemDependencyProductKey,
-        crate::indexer::cache::dependency_product::GemDependencyProduct,
+        crate::loader::cache::dependency_product::GemDependencyProductKey,
+        crate::loader::cache::dependency_product::GemDependencyProduct,
     >,
     classpath_files: crate::environment::runtime::jruby::classpath::ClasspathFileProductCache,
     java_artifacts: crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache,
-    persistent: crate::indexer::cache::persistent::PersistentDerivedProductCache,
+    persistent: crate::loader::cache::persistent::PersistentDerivedProductCache,
     gem_bindings: Arc<StatsRegistry<GemBindingStat>>,
 }
 impl RuntimeProducts {
@@ -115,7 +115,7 @@ impl RuntimeProducts {
             gem_dependencies: new_gem_dependency_cache(),
             classpath_files: Default::default(),
             java_artifacts: Default::default(),
-            persistent: crate::indexer::cache::persistent::PersistentDerivedProductCache::new(root),
+            persistent: crate::loader::cache::persistent::PersistentDerivedProductCache::new(root),
             gem_bindings: Arc::default(),
         }
     }
@@ -127,16 +127,16 @@ impl RuntimeProducts {
     pub(crate) fn stdlib_paths(
         &self,
     ) -> &crate::utils::single_flight::BoundedSingleFlightCache<
-        crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
-        crate::indexer::sources::stdlib::RuntimeStdlibPaths,
+        crate::loader::sources::stdlib::RuntimeStdlibPathKey,
+        crate::loader::sources::stdlib::RuntimeStdlibPaths,
     > {
         &self.stdlib_paths
     }
     pub(crate) fn gem_dependencies(
         &self,
     ) -> &crate::utils::single_flight::BoundedSingleFlightCache<
-        crate::indexer::cache::dependency_product::GemDependencyProductKey,
-        crate::indexer::cache::dependency_product::GemDependencyProduct,
+        crate::loader::cache::dependency_product::GemDependencyProductKey,
+        crate::loader::cache::dependency_product::GemDependencyProduct,
     > {
         &self.gem_dependencies
     }
@@ -152,7 +152,7 @@ impl RuntimeProducts {
     }
     pub(crate) fn persistent(
         &self,
-    ) -> &crate::indexer::cache::persistent::PersistentDerivedProductCache {
+    ) -> &crate::loader::cache::persistent::PersistentDerivedProductCache {
         &self.persistent
     }
     pub(crate) fn gem_bindings(&self) -> &StatsRegistry<GemBindingStat> {

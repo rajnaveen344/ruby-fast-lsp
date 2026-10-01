@@ -1,10 +1,10 @@
-use crate::indexer::scheduling::resources;
+use crate::loader::scheduling::resources;
 use crate::server::indexing::{
     IndexingStatusPublicationDecision, IndexingStatusPublicationState,
     INDEXING_COUNTER_PUBLICATION_INTERVAL,
 };
 
-use crate::indexer::scheduling::status::{
+use crate::loader::scheduling::status::{
     IndexingPhase, IndexingStatusParams, IndexingStatusSnapshot,
 };
 use crate::server::RubyLanguageServer;

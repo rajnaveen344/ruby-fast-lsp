@@ -1,4 +1,4 @@
-use crate::indexer::file_processor::FileProcessor;
+use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check, FakeEditor};
 use ruby_analysis::engine::AnalysisQuery;
 

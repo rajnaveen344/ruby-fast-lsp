@@ -28,8 +28,8 @@ use crate::environment::extensions::{
     ProjectContextSnapshot, EXTENSION_LOAD_TRANSIENT_MEMORY_BYTES,
     EXTENSION_RESPONSE_TRANSIENT_MEMORY_BYTES,
 };
-use crate::indexer::cache::persistent::PersistentDerivedProductCache;
-use crate::indexer::scheduling::resources::{
+use crate::loader::cache::persistent::PersistentDerivedProductCache;
+use crate::loader::scheduling::resources::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 

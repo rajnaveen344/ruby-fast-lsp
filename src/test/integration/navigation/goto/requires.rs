@@ -26,7 +26,7 @@ async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_projec
     };
     use crate::environment::config::RubyFastLspConfig;
     use crate::environment::runtime::catalog::{RuntimeDiscoverySource, RuntimeImplementation};
-    use crate::indexer::coordinator::IndexingCoordinator;
+    use crate::loader::coordinator::IndexingCoordinator;
     use std::os::unix::fs::PermissionsExt;
 
     let fixture = tempfile::tempdir().unwrap();

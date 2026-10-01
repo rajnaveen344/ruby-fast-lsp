@@ -9,7 +9,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
-use crate::indexer::scheduling::resources::{
+use crate::loader::scheduling::resources::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
 
@@ -106,7 +106,7 @@ pub struct ProjectRuntimeStatus {
     pub java_home: Option<PathBuf>,
     pub stub_overlay: Option<String>,
     pub classpath_fingerprint_sha256: Option<String>,
-    pub indexing: crate::indexer::scheduling::status::ProjectIndexingSnapshot,
+    pub indexing: crate::loader::scheduling::status::ProjectIndexingSnapshot,
     /// Backward-compatible projection for clients predating structured
     /// indexing state. New clients must use `indexing`.
     pub indexing_complete: bool,
@@ -879,8 +879,8 @@ mod tests {
         with_process_clock(async {
             use std::os::unix::fs::PermissionsExt;
 
-            let governor = crate::indexer::scheduling::resources::IndexingResourceGovernor::new(
-                crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(
+            let governor = crate::loader::scheduling::resources::IndexingResourceGovernor::new(
+                crate::loader::scheduling::resources::IndexingResourcePolicy::with_limits(
                     1,
                     1,
                     64 * 1024 * 1024,
@@ -895,9 +895,9 @@ mod tests {
                 holder_governor
                     .run_async_with_resources(
                         "runtime probe contention holder",
-                        crate::indexer::scheduling::resources::IndexingWorkSpec::new(
+                        crate::loader::scheduling::resources::IndexingWorkSpec::new(
                             None,
-                            crate::indexer::scheduling::resources::IndexingResourcePriority::Background,
+                            crate::loader::scheduling::resources::IndexingResourcePriority::Background,
                             1,
                             64 * 1024 * 1024,
                             1,

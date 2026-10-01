@@ -123,7 +123,7 @@ fn run_cache_command(mut arguments: impl Iterator<Item = String>) -> Result<()> 
             "cache command received unexpected argument `{unexpected}`"
         ));
     }
-    let cache = ruby_fast_lsp::indexer::cache::persistent::PersistentDerivedProductCache::new(
+    let cache = ruby_fast_lsp::loader::cache::persistent::PersistentDerivedProductCache::new(
         ruby_fast_lsp::utils::cache::ruby_fast_lsp_user_cache_root()?,
     );
     let (action, summary) = match operation.as_str() {
