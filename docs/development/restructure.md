@@ -154,13 +154,118 @@ Delete this file when the last task is done. Git history keeps the record.
 
 - [ ] C1. Rename `src/indexer` to `loader` and make it a function of a
       `LoadContext` that returns `FileAnalysis` values.
+  - [ ] C1a. Rename `src/indexer` to `src/loader` with no other change. Rewrite
+        `crate::indexer` and `ruby_fast_lsp::indexer` paths (not
+        `ruby_analysis::indexer`), `build.rs` `GEM_FACT_PRODUCER_TREES`,
+        `crates/devtools`, `src/main.rs`, and the guides that name the folder.
+        The gem producer fingerprint changes, so expect one cold gem reindex.
+  - [ ] C1b. Move `lsp::capabilities::diagnostics::generate_diagnostics`
+        (syntax diagnostics) to `src/loader/syntax_diagnostics.rs`. This
+        removes the two production loader → lsp edges.
+  - [ ] C1c. Add `src/loader/context.rs` with `LoadContext`, `LoadConfig`,
+        `RequireContext`, `SharedProducts`, `SourceReader`, and
+        `RuntimeDiscovery`. Build it in `init_workspace_inner` and in the
+        interactive path from the server, and pass it next to `server`. No
+        reads move yet.
+  - [ ] C1d. Switch reads from `server` to `ctx`, one area per commit: config
+        and require roots (delete `RequireDiagnosticRoots::Server`), products
+        and the governor, runtime discovery, open buffers through
+        `SourceReader`.
+  - [ ] C1e. Add the `LoadSink` trait and a server adapter. Route source
+        registration, commits, resolve, runtime setters, status, and progress
+        through it, one source (`stdlib`, `gems`, `project`, `jruby`) per
+        commit. `src/server` is at 10 entries, so the adapter replaces a file
+        or lives under `projects`. Profiler comparison.
+  - [ ] C1f. Make `analyze_file` return `LoadedFile`: the caller commits and
+        updates `documents`. Only the seed commit stays inside, through
+        `LoadSink::commit_seed`, until B3k. Profiler comparison, with didOpen
+        p95 called out.
+  - [ ] C1g. Remove the `server` parameter from the loader. Publish
+        open-project diagnostics from `LoadSink::project_facts_ready` on the
+        server side. Update `src/loader/README.md`, `src/ARCHITECTURE.md`, and
+        `docs/development/server-state.md`.
+
+  Notes: the loader must never take `&RubyLanguageServer` after C1g. The
+  seed-before-walk commit goes away when `analyze_file` takes `&dyn
+  Semantics` (B3k/B4). `LoadContext` is a cloneable value of `Arc` fields that
+  replaces the loader's reads of the server; `LoadSink` replaces its writes.
 - [ ] C2. Break the indexer ↔ server, lsp ↔ server, and indexer ↔ environment
       cycles.
+  - [ ] C2a. Move `ProjectRuntimeStatus` and its use of
+        `ProjectIndexingSnapshot` from `environment/runtime/catalog.rs` to
+        `server/products.rs`.
+  - [ ] C2b. Move `loader/scheduling/resources` to `src/utils/admission/` with
+        no other change.
+  - [ ] C2c. Make the persistent cache generic over a `PersistentProduct`
+        trait (kind, key, encode, decode). Keep the namespace and magic
+        constants so existing caches stay valid. `GemDependencyProduct` and
+        `JavaArtifactProduct` implement it in their own modules.
+  - [ ] C2d. Move `loader/cache/persistent` to `src/utils/persistent_cache/`
+        with no other change. Environment then no longer imports the loader.
+  - [ ] C2e. Move `collect_project_files` from `utils/file_ops.rs` to
+        `loader/sources/project`, so utils no longer reads `IndexingConfig`.
+  - [ ] C2f. Make the extension registry return the seed `FileAnalysis`
+        instead of writing the engine. The loader commits it through
+        `LoadSink::commit_seed`.
+  - [ ] C2g. Move `impl LanguageServer` and the debug and namespace-tree
+        request methods from `server/mod.rs` to `src/lsp/service.rs`. The
+        server keeps state only.
+  - [ ] C2h. Move the namespace-tree response types to
+        `server/namespace_tree.rs` and the engine diagnostic projection to
+        `server/diagnostics.rs`. Move
+        `refresh_unresolved_require_diagnostics_for_workspace` up to lsp
+        lifecycle if it still needs the linter.
+  - [ ] C2i. Add a layering check to `support/structure/check.py`: no
+        `crate::server`, `crate::lsp`, or `crate::features` in `src/loader`,
+        `src/environment`, or `src/utils`, and no `crate::lsp` in
+        `src/server`. Move loader and environment tests that drive lsp
+        handlers to `src/test/integration/`.
 - [ ] C3. Merge the handler, capability, and query layers into one `features/`
       module per feature.
+  - [ ] C3a. Add `src/features/` with `mod.rs` and a README. Move `lsp/query`
+        shared code (`EngineQuery`, `analysis_location`, `method`) to
+        `features/cursor/` with no other change.
+  - [ ] C3b. Navigation: merge capability, query, and handler body for
+        definition, implementation, references, highlights, hierarchies,
+        workspace symbols, and namespace tree into `features/navigation/`.
+        One commit per two or three features.
+  - [ ] C3c. Presentation: hover, inlay hints, code lens, document symbols,
+        folding, selection ranges, and semantic tokens into
+        `features/presentation/`.
+  - [ ] C3d. Editing: completion, signature help, formatting, rename, and code
+        actions into `features/editing/`.
+  - [ ] C3e. Diagnostics and debug: engine projection and linter into
+        `features/diagnostics/`, and debug and extension status into
+        `features/debug.rs`.
+  - [ ] C3f. Move `capabilities/indexing` and `handlers/notification` to
+        `src/lsp/lifecycle/`. Delete `lsp/capabilities`, `lsp/query`, and
+        `lsp/handlers`. Update devtools, the test harness, and the guides.
+  - [ ] C3g. Extend the layering check: features may use `server` and
+        `loader` but not `lsp`, and `lsp` reaches features only through
+        `handle`. Update `src/ARCHITECTURE.md` and the skills.
+
+  Notes: each feature exposes `handle(server, params)`, absorbing its body
+  from `handlers/request.rs`. Split any merged file over 1,000 lines inside
+  its feature folder.
 - [ ] C4. Introduce `ProjectHandle`. A single writer task owns each project's
       mutations and readers share the project for reads. Remove the per-project
       locks from `RubyLanguageServer`.
+  - [ ] C4a. Add `ProjectHandle` wrapping the existing
+        `Arc<RwLock<AnalysisEngine>>` with `view()` and `update(|engine| ..)`.
+        No behavior change.
+  - [ ] C4b. Route feature reads through `view()` with one guard per request.
+        Remove the repeated `.read()` calls in references, hover, and
+        definition.
+  - [ ] C4c. Add the writer task: a command channel (commit-if-snapshot,
+        register, resolve chunk, reset) with replies through oneshot. The
+        `LoadSink` adapter sends commands. Profiler comparison, with didOpen
+        and cold indexing called out.
+  - [ ] C4d. Move the lifecycle writes (clear facts, runtime-rebuild reset,
+        the require-diagnostic refresh, the extension seed, and project
+        engine setup) to commands.
+  - [ ] C4e. Fold `ProjectRuntimeState`'s four locks and the require index
+        into the handle's state. Remove `Workspace::analysis_engine` and
+        `analysis_engine_for_uri`. Update `docs/development/server-state.md`.
 - [ ] C5. Reduce the server to `Server { client, config, documents, projects }`.
 - [ ] C6. Put JRuby support behind the existing `jruby-support` crate boundary
       so the server only sees an add-on interface.
@@ -192,4 +297,19 @@ Settle these before the task that needs them.
   also serves B8. Any new mid-walk read must become an equation or be added to
   `Semantics` with a reason. D2 may move flow-feeding reads into equations one
   at a time, each with a profiler comparison.
-- C4: Should readers take a read lock or an immutable snapshot?
+- C4 (settled): Readers take one read lock per request through
+  `ProjectHandle::view()`, not an immutable snapshot. Options were (A) one
+  read lock per request, (B) an immutable snapshot per commit (whole-engine
+  clone or persistent maps), (C) A plus `Arc` snapshots of cheap derived
+  products. Cloning the engine per commit costs up to the 32 MiB heap budget
+  on every edit, breaks `SourceFileSnapshot` identity because a clone gets a
+  new `instance_id`, and does not fit the 100 ms body-edit p95. Persistent
+  data structures would rewrite every B3 component. Chosen: C. A single writer
+  task per project serializes `update`, `remove`, and `resolve`, checks
+  source snapshots, keeps open buffers authoritative, and commits batches and
+  workspace resolve in bounded chunks so no reader waits for a whole batch. A
+  request holds one `View` for its whole run, so its answer reflects one
+  semantic revision. Cheap derived products (namespace tree, symbol lists)
+  are published as `Arc` values keyed by `semantic_revision`. Revisit
+  per-component persistent storage after B4 if the profiler shows reader
+  stalls.
