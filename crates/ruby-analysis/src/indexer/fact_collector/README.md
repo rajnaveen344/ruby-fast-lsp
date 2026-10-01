@@ -23,7 +23,7 @@ implementation across modules does not introduce additional parsing passes.
 fact_collector/
   mod.rs                 Collector construction and private state owners
   traversal.rs           Prism visit order
-  tests.rs               Traversal and evidence regressions
+  tests/                 Traversal and evidence regressions by responsibility
   README.md              This reading guide
   context/               Options, extension context, source, lookup inputs
   collection/            Declaration recording and completed file output
@@ -108,6 +108,6 @@ Direct-declaration helpers retain their existing provenance and lookup policies.
 Do not expose a mutable owner or storage handle to make a caller compile.
 
 Use the existing feature and simulation tests for observable behavior. Focused
-collector regressions in `tests.rs` cover traversal and evidence boundaries,
+collector regressions in `tests/` cover traversal and evidence boundaries,
 including nested extension calls, same-pass namespace visibility, shape
 invalidation, and execution-context ownership.

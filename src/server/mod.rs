@@ -724,5 +724,4 @@ impl LanguageServer for RubyLanguageServer {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod runtime_status_tests;
+mod tests;

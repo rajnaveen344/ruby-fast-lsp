@@ -84,14 +84,10 @@
     ]
   },
   "legacy_lines": {
-    "crates/ruby-analysis/src/indexer/fact_collector/tests.rs": 1050,
-    "crates/ruby-analysis/src/indexer/queries/tests.rs": 2271,
     "src/indexer/coordinator/tests/jruby.rs": 1101,
     "src/indexer/coordinator/tests/workflow.rs": 1270,
     "src/indexer/sources/gems/tests.rs": 1344,
-    "src/indexer/sources/project/tests.rs": 1611,
-    "src/server/tests.rs": 1032,
-    "src/test/harness/fake_editor.rs": 1040
+    "src/indexer/sources/project/tests.rs": 1611
   },
   "exceptions": {}
 }
