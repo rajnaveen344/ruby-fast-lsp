@@ -1,17 +1,13 @@
 //! Content-based fact collection and file-owned fact replacement.
 
-use super::extension_facts::add_extension_analysis_facts;
-use super::merge::{
-    collect_direct_facts, collect_known_namespaces, merge_collected_type_facts,
-    merge_execution_context_direct_facts, merge_runtime_direct_facts,
-};
+use super::compose::{ExtensionDocument, FileComposition, RequireDiagnosticRoots};
+use super::merge::{collect_direct_facts, collect_known_namespaces};
 use super::FileProcessor;
 use super::{
     analysis_source, CollectedFileFactsOutput, CollectedProjectFileFacts, FileResolution,
     ProjectFileCollectionTiming,
 };
 use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
-use crate::indexer::require_paths::unresolved_require_diagnostics;
 use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
@@ -543,7 +539,6 @@ impl FileProcessor {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let require_current_path = path.clone();
         let registration_started = Instant::now();
         let analysis_file_id = if retain_collected_facts {
             analysis_engine.read().file_id(&path).unwrap_or_else(|| {
@@ -607,7 +602,7 @@ impl FileProcessor {
         let jruby_plan_elapsed = jruby_plan_started.elapsed();
 
         let semantic_seed_started = Instant::now();
-        let direct_facts_seed = if resolve_references {
+        let direct_facts_seed = resolve_references.then(|| {
             collect_direct_facts(
                 &analysis_engine,
                 &node,
@@ -615,14 +610,12 @@ impl FileProcessor {
                 analysis_file_id,
                 known_namespaces.as_deref(),
             )
-        } else {
-            ruby_analysis::core::FileAnalysis::default()
-        };
-        if resolve_references {
+        });
+        if let Some(direct_facts_seed) = direct_facts_seed.as_ref() {
             replace_analysis_facts_for_file(
                 &analysis_engine,
                 analysis_file_id,
-                &direct_facts_seed,
+                direct_facts_seed,
                 resolve_references,
             );
         }
@@ -664,57 +657,29 @@ impl FileProcessor {
             fact_collector.with_shared_direct_known_namespaces(shared_direct_known_namespaces);
         fact_collector.extend_direct_known_namespaces(
             direct_facts_seed
-                .graph_nodes
                 .iter()
+                .flat_map(|seed| seed.graph_nodes.iter())
                 .map(|fact| fact.fqn.clone()),
         );
         let semantic_seed_elapsed = semantic_seed_started.elapsed();
         let visitor_started = Instant::now();
         fact_collector.visit(&node);
         let visitor_elapsed = visitor_started.elapsed();
-        let output = fact_collector.finish();
-        let mut file_facts = output.analysis;
-        if !source_kind.contributes_project_diagnostics() {
-            file_facts.inference.method_return_outcomes.clear();
-            file_facts.inference.method_return_equations.clear();
-        }
-
         let assembly_started = Instant::now();
-        if resolve_references {
-            let collected_declarations = file_facts.replace_declarations(direct_facts_seed);
-            merge_execution_context_direct_facts(&collected_declarations, &mut file_facts);
-            merge_runtime_direct_facts(&collected_declarations, &mut file_facts);
-        }
-        add_extension_analysis_facts(
-            &analysis_engine,
-            &document,
-            &output.extension_patches,
-            extension_project_context.as_ref(),
-            &mut file_facts,
+        let (file_facts, _) = self.compose_file_analysis(
+            FileComposition {
+                uri,
+                content: document.content.as_str(),
+                file_id: analysis_file_id,
+                source_kind,
+                analysis_engine: &analysis_engine,
+                extension_project_context: extension_project_context.as_ref(),
+                declarations: direct_facts_seed,
+                extension_document: ExtensionDocument::Original(&document),
+                require_roots: RequireDiagnosticRoots::Processor,
+            },
+            fact_collector.finish(),
         );
-        merge_collected_type_facts(output.flow_types, &mut file_facts.types);
-        if !source_kind.contributes_references() {
-            file_facts.reference_candidates = Vec::new();
-        }
-        if source_kind.contributes_project_diagnostics() {
-            if let Some(project_root) = self.require_project_root.as_ref() {
-                let engine = analysis_engine.read();
-                file_facts
-                    .diagnostics
-                    .extend(unresolved_require_diagnostics(
-                        document.content.as_str(),
-                        analysis_file_id,
-                        &require_current_path,
-                        project_root,
-                        &self.require_load_paths,
-                        &self.require_feature_index,
-                        Some(&engine),
-                    ));
-            }
-        } else {
-            file_facts.diagnostic_candidates = Vec::new();
-            file_facts.diagnostics = Vec::new();
-        }
         let assembly_elapsed = assembly_started.elapsed();
         let replacement_started = Instant::now();
         let template = if capture_project_neutral_template {

@@ -18,18 +18,15 @@ use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed
 use crate::environment::runtime::jruby::imports::{
     JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
 };
-use crate::indexer::require_paths::{unresolved_require_diagnostics, RequireFeatureIndex};
+use crate::indexer::require_paths::RequireFeatureIndex;
 use crate::invariant::ExpectInvariant;
 use crate::lsp::capabilities::diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use collection::{replace_analysis_facts_for_file, replace_file_analysis};
-use extension_facts::add_extension_analysis_facts;
+use compose::{ExtensionDocument, FileComposition, RequireDiagnosticRoots};
 use log::{debug, info};
-use merge::{
-    collect_direct_facts, merge_collected_type_facts, merge_execution_context_direct_facts,
-    merge_runtime_direct_facts,
-};
+use merge::collect_direct_facts;
 use ruby_analysis::core::{FullyQualifiedName, SourceKind};
 use ruby_analysis::engine::{FileFacts, ProjectNeutralFileFactsTemplate, SemanticChange};
 use ruby_analysis::indexer::fact_collector::FactCollector;
@@ -44,6 +41,7 @@ use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
 mod collection;
+mod compose;
 mod extension_facts;
 mod extension_host;
 mod jruby_navigation;
@@ -383,60 +381,21 @@ impl FileProcessor {
         visitor.visit(&node);
         let visitor_elapsed = visitor_start.elapsed();
 
-        let output = visitor.finish();
-        let updated_document = output.document;
-        let mut analysis = output.analysis;
-        if !source_kind.contributes_project_diagnostics() {
-            analysis.inference.method_return_outcomes.clear();
-            analysis.inference.method_return_equations.clear();
-        }
-        let collected_declarations = analysis.replace_declarations(direct_facts_seed);
-        merge_execution_context_direct_facts(&collected_declarations, &mut analysis);
-        merge_runtime_direct_facts(&collected_declarations, &mut analysis);
-        add_extension_analysis_facts(
-            &analysis_engine,
-            &updated_document,
-            &output.extension_patches,
-            extension_project_context.as_ref(),
-            &mut analysis,
+        let (analysis, updated_document) = self.compose_file_analysis(
+            FileComposition {
+                uri,
+                content,
+                file_id: analysis_file_id,
+                source_kind,
+                analysis_engine: &analysis_engine,
+                extension_project_context: extension_project_context.as_ref(),
+                declarations: Some(direct_facts_seed),
+                extension_document: ExtensionDocument::Collected,
+                require_roots: RequireDiagnosticRoots::Server(server),
+            },
+            visitor.finish(),
         );
-        merge_collected_type_facts(output.flow_types, &mut analysis.types);
         let replace_start = Instant::now();
-        if !source_kind.contributes_references() {
-            analysis.reference_candidates = Vec::new();
-        }
-        if source_kind.contributes_project_diagnostics() {
-            let current_path = uri
-                .to_file_path()
-                .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-            if let Some(project_root) = server
-                .workspace_for_uri(uri)
-                .map(|workspace| workspace.root_path)
-                .or_else(|| self.require_project_root.clone())
-            {
-                let load_paths = server
-                    .config
-                    .lock()
-                    .indexing
-                    .load_paths
-                    .paths_for_project(&project_root)
-                    .to_vec();
-                let feature_index = server.require_feature_index_for_uri(uri);
-                let engine = analysis_engine.read();
-                analysis.diagnostics.extend(unresolved_require_diagnostics(
-                    content,
-                    analysis_file_id,
-                    &current_path,
-                    &project_root,
-                    &load_paths,
-                    &feature_index,
-                    Some(&engine),
-                ));
-            }
-        } else {
-            analysis.diagnostic_candidates = Vec::new();
-            analysis.diagnostics = Vec::new();
-        }
         replace_file_analysis(
             &analysis_engine,
             updated_document.analysis_file_id(),

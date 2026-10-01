@@ -56,7 +56,7 @@ Delete this file when the last task is done. Git history keeps the record.
         `FactCollectorOutput { analysis, flow_types, extension_patches,
         document }`. Delete `CollectedFile`. Add
         `FileAnalysis::replace_declarations`.
-  - [ ] B1d. Merge the two server assembly paths (`process_file` and the
+  - [x] B1d. Merge the two server assembly paths (`process_file` and the
         batch collection path) into one `compose_file_analysis`, with a
         profiler run before and after.
   - [ ] B1e. Move the remaining server producers and wrappers (JRuby source
