@@ -249,7 +249,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        _ctx: &LoadContext,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         resolution: FileResolution,
         force_reindex: bool,
@@ -399,7 +399,7 @@ impl FileProcessor {
                 extension_project_context: extension_project_context.as_ref(),
                 declarations: Some(direct_facts_seed),
                 extension_document: ExtensionDocument::Collected,
-                require_roots: RequireDiagnosticRoots::Server(server),
+                require_roots: RequireDiagnosticRoots::Context(ctx),
             },
             visitor.finish(),
         );

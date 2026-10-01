@@ -49,7 +49,10 @@ async fn project_batch_stream_consumes_an_exact_generation_navigation_demand_fir
 
     let mut coordinator = IndexingCoordinator::new(project.clone(), RubyFastLspConfig::default());
     coordinator.set_indexing_run(run.clone());
-    coordinator.setup_file_processor(&server);
+    coordinator.setup_file_processor(
+        &server.load_context_for_project(coordinator.workspace_root()),
+        &server,
+    );
     coordinator
         .collect_project_navigation_facts(
             &server,
@@ -123,7 +126,10 @@ async fn project_frontier_consumes_a_bounded_nonpriority_demand() {
 
     let mut coordinator = IndexingCoordinator::new(project.clone(), RubyFastLspConfig::default());
     coordinator.set_indexing_run(run);
-    coordinator.setup_file_processor(&server);
+    coordinator.setup_file_processor(
+        &server.load_context_for_project(coordinator.workspace_root()),
+        &server,
+    );
     coordinator
         .collect_project_navigation_facts(
             &server,

@@ -197,7 +197,7 @@ impl IndexingCoordinator {
     /// 6. Publish diagnostics
     pub async fn run_complete_indexing(
         &mut self,
-        _ctx: &LoadContext,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<()> {
         info!("Starting complete indexing process");
@@ -246,7 +246,7 @@ impl IndexingCoordinator {
         server.set_jruby_import_provider(&self.workspace_root, None);
         self.jruby_import_provider = None;
         self.jruby_runtime_archive = None;
-        self.setup_file_processor(server);
+        self.setup_file_processor(ctx, server);
         let runtime_selection_dur = runtime_start.elapsed();
 
         // Project facts, exact JRuby runtime metadata, and immutable dependency
@@ -406,7 +406,7 @@ impl IndexingCoordinator {
                 .as_ref()
                 .map(|provider| provider.classpath_fingerprint().to_string()),
         );
-        self.setup_file_processor(server);
+        self.setup_file_processor(ctx, server);
 
         // JRuby ships the Ruby implementation of java_import/include_package
         // inside jruby.jar. Materialize only the bounded runtime source allowlist
@@ -705,7 +705,7 @@ impl IndexingCoordinator {
     }
 
     /// Step 3: Set up the main indexing engine
-    fn setup_file_processor(&mut self, server: &RubyLanguageServer) {
+    fn setup_file_processor(&mut self, ctx: &LoadContext, server: &RubyLanguageServer) {
         let extension_registry = self
             .extension_registry
             .get_or_insert_with(|| server.extensions.registry().clone())
@@ -720,19 +720,8 @@ impl IndexingCoordinator {
                     .with_jruby_import_provider(provider.clone())
             })
             .unwrap_or(processor);
-        let require_load_paths = server
-            .config
-            .lock()
-            .indexing
-            .load_paths
-            .paths_for_project(&self.workspace_root)
-            .to_vec();
-        let require_dependency_roots = server
-            .list_workspaces()
-            .into_iter()
-            .find(|workspace| workspace.root_path == self.workspace_root)
-            .map(|workspace| workspace.dependency_require_paths())
-            .unwrap_or_default();
+        let require_load_paths = ctx.config.load_paths_for_project(&self.workspace_root);
+        let require_dependency_roots = ctx.requires.dependency_require_paths();
         let processor = processor.with_require_resolve_context(
             self.workspace_root.clone(),
             require_load_paths,

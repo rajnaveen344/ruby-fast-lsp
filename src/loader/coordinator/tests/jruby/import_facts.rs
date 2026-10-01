@@ -84,7 +84,10 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
                 .expect("fixture JRuby provider must exist"),
         )
         .unwrap();
-    coordinator.setup_file_processor(&server);
+    coordinator.setup_file_processor(
+        &server.load_context_for_project(coordinator.workspace_root()),
+        &server,
+    );
 
     let source = "module Admin\n\
                           java_import fixtures.RichFixture\n\

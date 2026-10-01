@@ -11,8 +11,8 @@ use super::merge::{
     merge_collected_type_facts, merge_execution_context_direct_facts, merge_runtime_direct_facts,
 };
 use super::FileProcessor;
+use crate::loader::context::LoadContext;
 use crate::loader::require_paths::unresolved_require_diagnostics;
-use crate::server::RubyLanguageServer;
 use ruby_analysis::core::{FileAnalysis, SourceFileId, SourceKind};
 use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::fact_collector::FactCollectorOutput;
@@ -24,9 +24,9 @@ use tower_lsp::lsp_types::Url;
 
 /// Where unresolved-require diagnostics find their project root and load paths.
 pub(super) enum RequireDiagnosticRoots<'a> {
-    /// The owning server workspace and its configured load paths, falling back
-    /// to the processor's batch root when the URI has no workspace.
-    Server(&'a RubyLanguageServer),
+    /// The load context's owning project and its configured load paths,
+    /// falling back to the processor's batch root when the file has no project.
+    Context(&'a LoadContext),
     /// The processor's own batch resolve context.
     Processor,
 }
@@ -132,22 +132,17 @@ impl FileProcessor {
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         match require_roots {
-            RequireDiagnosticRoots::Server(server) => {
-                let Some(project_root) = server
-                    .workspace_for_uri(uri)
-                    .map(|workspace| workspace.root_path)
+            RequireDiagnosticRoots::Context(ctx) => {
+                let Some(project_root) = ctx
+                    .requires
+                    .project_root
+                    .clone()
                     .or_else(|| self.require_project_root.clone())
                 else {
                     return;
                 };
-                let load_paths = server
-                    .config
-                    .lock()
-                    .indexing
-                    .load_paths
-                    .paths_for_project(&project_root)
-                    .to_vec();
-                let feature_index = server.require_feature_index_for_uri(uri);
+                let load_paths = ctx.config.load_paths_for_project(&project_root);
+                let feature_index = ctx.requires.feature_index();
                 let engine = analysis_engine.read();
                 analysis.diagnostics.extend(unresolved_require_diagnostics(
                     content,
