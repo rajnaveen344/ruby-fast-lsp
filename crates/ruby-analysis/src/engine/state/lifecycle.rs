@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use crate::core::{
-    DiagnosticFact, ExecutionContextFact, FileAnalysis, InferenceTelemetry, RubyType, SourceFileId,
-    TypeProvenance, TypeSubject,
+    DiagnosticFact, FileAnalysis, InferenceTelemetry, RubyType, SourceFileId, TypeProvenance,
+    TypeSubject,
 };
 
 use super::inference::{StoredTypeInferenceOutcome, TypeInferenceOutcomeRef};
@@ -161,22 +161,15 @@ impl AnalysisEngine {
                 }
             }
         }
-        let symbols = self.intern_symbol_facts(facts.symbols);
-        self.facts
-            .definitions
-            .symbols
-            .replace_file(file_id, symbols);
-        let methods = self.intern_method_facts(facts.methods);
-        self.facts
-            .definitions
-            .methods
-            .replace_file(file_id, methods);
-        self.method_visibility_overrides
-            .retain(|fact| fact.range.file_id != file_id);
-        self.method_visibility_overrides
-            .extend(facts.method_visibility_overrides);
+        self.decls.replace_file(
+            &mut self.names,
+            file_id,
+            facts.symbols,
+            facts.methods,
+            facts.method_visibility_overrides,
+            facts.execution_contexts,
+        );
         self.facts.types.replace_file(file_id, facts.types);
-        self.replace_execution_contexts(file_id, facts.execution_contexts);
         let graph_nodes = self.intern_graph_node_facts(facts.graph_nodes);
         let graph_edges = self.intern_graph_edge_facts(facts.graph_edges);
         let unresolved_graph_edges =
@@ -275,58 +268,6 @@ impl AnalysisEngine {
             )
             .telemetry
             .replace_retained_shape_observations(&observed);
-    }
-}
-
-impl AnalysisEngine {
-    fn replace_execution_contexts(
-        &mut self,
-        file_id: SourceFileId,
-        mut contexts: Vec<ExecutionContextFact>,
-    ) {
-        for context in &contexts {
-            invariant_eq!(
-                context.range.file_id,
-                file_id,
-                what = "execution context range belongs to a different file",
-                why = "FileAnalysis replacement must be file-local",
-                fix = "construct execution context ranges from the owning RubyDocument",
-            );
-            invariant!(
-                context.lexical_namespace.namespace_kind().is_some()
-                    && context.implicit_receiver.namespace_kind().is_some()
-                    && context.method_definition_owner.namespace_kind().is_some(),
-                what = "execution context contains a non-namespace semantic target",
-                why = "receiver and definition ownership require namespace identities",
-                fix = "validate and convert extension targets before engine ingestion",
-            );
-            invariant!(
-                !context.extension_id.is_empty(),
-                what = "execution context has empty extension provenance",
-                why = "generated runtime semantics must remain attributable",
-                fix = "retain the validated manifest ID in ExecutionContextFact",
-            );
-        }
-        contexts.sort_by_key(|context| {
-            (
-                context.range.start_byte,
-                std::cmp::Reverse(context.range.end_byte),
-                context.extension_id.clone(),
-            )
-        });
-        for pair in contexts.windows(2) {
-            invariant!(
-                pair[0].range != pair[1].range,
-                what = "multiple execution contexts own the same block range",
-                why = "extension context conflicts must be resolved before engine ingestion",
-                fix = "deterministically reject incompatible contexts at the host boundary",
-            );
-        }
-        if contexts.is_empty() {
-            self.execution_contexts.remove(&file_id);
-        } else {
-            self.execution_contexts.insert(file_id, contexts);
-        }
     }
 }
 

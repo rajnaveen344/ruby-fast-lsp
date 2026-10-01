@@ -127,11 +127,6 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn known_namespace_fqns(&self) -> HashSet<FullyQualifiedName> {
-        self.engine
-            .symbol_store()
-            .known_namespace_fqns()
-            .into_iter()
-            .filter_map(|id| self.engine.names.fqn(id).cloned())
-            .collect()
+        self.engine.decls.known_namespace_fqns(&self.engine.names)
     }
 }

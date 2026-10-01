@@ -9,6 +9,7 @@ use crate::core::storage::reference_store::{
 use crate::core::{FullyQualifiedName, ReferenceCandidate, ReferenceCandidateKind, SourceFileId};
 
 use super::names::Names;
+use super::AnalysisEngine;
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct UseIndex {
@@ -105,6 +106,12 @@ impl UseIndex {
     pub(in crate::engine) fn shrink_to_fit(&mut self) {
         self.candidates.shrink_to_fit();
         self.resolved.shrink_to_fit();
+    }
+}
+
+impl AnalysisEngine {
+    pub fn reference_facts_for(&self, target: &FullyQualifiedName) -> &[ReferenceFact] {
+        self.uses.facts_for(&self.names, target)
     }
 }
 

@@ -329,7 +329,7 @@ impl AnalysisEngine {
                 }),
             );
         }
-        for fact in &self.method_visibility_overrides {
+        for fact in self.decls.method_visibility_overrides() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -444,11 +444,11 @@ impl AnalysisEngine {
                 }),
             );
         }
-        for (file_id, contexts) in &self.execution_contexts {
+        for (file_id, contexts) in self.decls.execution_contexts_by_file() {
             for context in contexts {
                 push_component(
                     &mut components,
-                    *file_id,
+                    file_id,
                     export_hash(|hasher| {
                         stable_u8(hasher, 10);
                         stable_fqn(hasher, &context.lexical_namespace);
@@ -560,8 +560,8 @@ impl AnalysisEngine {
             })[0]
                 .push(component);
         }
-        for (file_id, contexts) in &self.execution_contexts {
-            let output = &mut components.get_mut(file_id).unwrap_or_else(|| {
+        for (file_id, contexts) in self.decls.execution_contexts_by_file() {
+            let output = &mut components.get_mut(&file_id).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "execution-context fingerprint belongs to unknown file {:?}",
                     why = "execution contexts cannot outlive their registered source",

@@ -112,7 +112,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B3e. Extract `UseIndex` (`engine/state/uses.rs`): reference candidate
         and resolved stores, candidate interning, reference reads, and
         take/restore of candidates for the workspace pass.
-  - [ ] B3f. Extract `DeclIndex` (rename `state/facts.rs` to `decls.rs`):
+  - [x] B3f. Extract `DeclIndex` (rename `state/facts.rs` to `decls.rs`):
         symbols, methods, visibility overrides, execution contexts, their
         interning and expansion, and the effective-method reads.
   - [ ] B3g. Extract `Hierarchy` (rename `state/graph.rs` to `hierarchy.rs`):

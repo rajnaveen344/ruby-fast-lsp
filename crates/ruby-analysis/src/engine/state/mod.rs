@@ -1,7 +1,7 @@
 //! Project semantic state: source registration, file-owned facts, resolution
 //! passes, and the engine-owned reads that queries build on.
 
-mod facts;
+mod decls;
 mod files;
 mod graph;
 mod inference;
@@ -10,7 +10,7 @@ mod names;
 mod storage;
 mod uses;
 
-pub(in crate::engine) use facts::EffectiveMethodFactMatch;
+pub(in crate::engine) use decls::EffectiveMethodFactMatch;
 pub use files::{SourceFile, SourceFileInput, SourceFileSnapshot};
 pub(in crate::engine) use inference::{resolve_constant_dependency_type, TypeInferenceOutcomeRef};
 
@@ -20,14 +20,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::storage::graph_store::SemanticGraph;
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
-use crate::core::{
-    ExecutionContextFact, FullyQualifiedName, InferenceEvidence, MethodVisibilityOverrideFact,
-    SourceFileId, TextRange,
-};
+use crate::core::{FullyQualifiedName, InferenceEvidence, SourceFileId, TextRange};
 
 use crate::engine::diagnostics::Diagnostics;
 use crate::engine::AnalysisQuery;
 use crate::stats::{self, StatsSnapshot};
+use decls::DeclIndex;
 use files::Files;
 use inference::StoredTypeInferenceOutcome;
 use names::Names;
@@ -148,8 +146,7 @@ pub struct AnalysisEngine {
     pub(in crate::engine) graph: SemanticGraph,
     pub(in crate::engine) uses: UseIndex,
     pub(in crate::engine) diagnostics: Diagnostics,
-    pub(in crate::engine) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
-    pub(in crate::engine) execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
+    pub(in crate::engine) decls: DeclIndex,
     inference_by_file: HashMap<SourceFileId, InferenceEvidence>,
     call_expression_outcomes_by_file:
         HashMap<SourceFileId, Box<[(TextRange, StoredTypeInferenceOutcome)]>>,
@@ -190,8 +187,7 @@ impl Default for AnalysisEngine {
             graph: SemanticGraph::default(),
             uses: UseIndex::default(),
             diagnostics: Diagnostics::default(),
-            method_visibility_overrides: Vec::new(),
-            execution_contexts: HashMap::new(),
+            decls: DeclIndex::default(),
             inference_by_file: HashMap::new(),
             call_expression_outcomes_by_file: HashMap::new(),
             local_read_types_by_file: HashMap::new(),
@@ -216,8 +212,7 @@ impl Clone for AnalysisEngine {
             graph: self.graph.clone(),
             uses: self.uses.clone(),
             diagnostics: self.diagnostics.clone(),
-            method_visibility_overrides: self.method_visibility_overrides.clone(),
-            execution_contexts: self.execution_contexts.clone(),
+            decls: self.decls.clone(),
             inference_by_file: self.inference_by_file.clone(),
             call_expression_outcomes_by_file: self.call_expression_outcomes_by_file.clone(),
             local_read_types_by_file: self.local_read_types_by_file.clone(),
@@ -252,11 +247,11 @@ impl AnalysisEngine {
         );
         stats.set(
             AnalysisStat::Symbols,
-            stats::count(self.facts.definitions.symbols.fact_count()),
+            stats::count(self.decls.symbol_count()),
         );
         stats.set(
             AnalysisStat::Methods,
-            stats::count(self.facts.definitions.methods.fact_count()),
+            stats::count(self.decls.method_count()),
         );
         stats.set(
             AnalysisStat::ReferenceCandidates,
@@ -309,8 +304,8 @@ impl AnalysisEngine {
         AnalysisMemoryStats {
             names: self.names.estimated_heap_bytes(),
             files: self.estimated_file_store_heap_bytes(),
-            symbols: self.facts.definitions.symbols.estimated_heap_bytes(),
-            methods: self.facts.definitions.methods.estimated_heap_bytes(),
+            symbols: self.decls.symbols_heap_bytes(),
+            methods: self.decls.methods_heap_bytes(),
             types: self.facts.types.estimated_heap_bytes(),
             reference_candidates: self.uses.candidates_heap_bytes(),
             references: self.uses.resolved_heap_bytes(),

@@ -6,29 +6,37 @@ use crate::invariant::ExpectInvariant;
 use crate::core::storage::graph_store::StoredGraphEdgeFact;
 use crate::core::storage::graph_store::StoredGraphNodeFact;
 use crate::core::storage::graph_store::StoredUnresolvedGraphEdgeFact;
-use crate::core::storage::method_store::MethodStore;
-use crate::core::storage::method_store::StoredMethodFact;
 use crate::core::storage::reference_store::ConstLookup;
-use crate::core::storage::symbol_store::StoredSymbolFact;
-use crate::core::storage::symbol_store::SymbolStore;
 use crate::core::storage::type_store::TypeStore;
 use crate::core::{
-    ConstantPath, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, SymbolFact,
-    UnresolvedGraphEdgeFact,
+    ConstantPath, GraphEdgeFact, GraphNodeFact, SourceFileId, TypeFact, TypeResolution,
+    TypeSubject, UnresolvedGraphEdgeFact,
 };
 
 use super::AnalysisEngine;
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct FactArena {
-    pub(in crate::engine) definitions: DefinitionFacts,
     pub(in crate::engine) types: TypeStore,
 }
 
-#[derive(Debug, Clone, Default)]
-pub(in crate::engine) struct DefinitionFacts {
-    pub(in crate::engine) symbols: SymbolStore,
-    pub(in crate::engine) methods: MethodStore,
+impl AnalysisEngine {
+    pub fn type_at(
+        &self,
+        subject: &TypeSubject,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> TypeResolution {
+        self.facts.types.type_at(subject, file_id, byte_offset)
+    }
+
+    pub fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
+        self.facts.types.facts_for(subject)
+    }
+
+    pub(crate) fn type_store(&self) -> &TypeStore {
+        &self.facts.types
+    }
 }
 
 impl AnalysisEngine {
@@ -36,8 +44,7 @@ impl AnalysisEngine {
         self.files.shrink_to_fit();
         self.names.shrink_to_fit();
 
-        self.facts.definitions.symbols.shrink_to_fit();
-        self.facts.definitions.methods.shrink_to_fit();
+        self.decls.shrink_to_fit();
         self.facts.types.shrink_to_fit();
         self.graph.shrink_to_fit();
         self.uses.shrink_to_fit();
@@ -49,51 +56,6 @@ impl AnalysisEngine {
 }
 
 impl AnalysisEngine {
-    pub(super) fn intern_symbol_facts(&mut self, facts: Vec<SymbolFact>) -> Vec<StoredSymbolFact> {
-        facts
-            .into_iter()
-            .map(|fact| {
-                let fqn = self.names.intern_fqn(fact.fqn);
-                StoredSymbolFact::new(fqn, fact.kind, fact.range).with_name_range(fact.name_range)
-            })
-            .collect()
-    }
-
-    pub(super) fn intern_method_facts(&mut self, facts: Vec<MethodFact>) -> Vec<StoredMethodFact> {
-        facts
-            .into_iter()
-            .map(|fact| {
-                let method = match &fact.fqn {
-                    FullyQualifiedName::Method(_, method) => Some(*method),
-                    FullyQualifiedName::Namespace(_, _)
-                    | FullyQualifiedName::Constant(_)
-                    | FullyQualifiedName::LocalVariable(_)
-                    | FullyQualifiedName::InstanceVariable(_)
-                    | FullyQualifiedName::ClassVariable(_)
-                    | FullyQualifiedName::GlobalVariable(_) => None,
-                };
-                let fqn = self.names.intern_fqn(fact.fqn);
-                let owner = self.names.intern_fqn(fact.owner);
-                StoredMethodFact {
-                    fqn,
-                    owner,
-                    method,
-                    range: fact.range,
-                    name_range: fact.name_range,
-                    params: fact.params,
-                    param_facts: fact.param_facts,
-                    parameter_shape_complete: fact.parameter_shape_complete,
-                    delegate_receiver: fact.delegate_receiver,
-                    visibility: fact.visibility,
-                    availability: fact.availability,
-                    documentation: fact.documentation,
-                    return_type_label: fact.return_type_label,
-                    higher_order: fact.higher_order,
-                }
-            })
-            .collect()
-    }
-
     pub(super) fn intern_graph_node_facts(
         &mut self,
         facts: Vec<GraphNodeFact>,
@@ -140,55 +102,6 @@ impl AnalysisEngine {
                     .with_provenance(fact.provenance)
             })
             .collect()
-    }
-
-    pub(super) fn expand_symbol_fact(&self, fact: StoredSymbolFact) -> SymbolFact {
-        let fqn = self
-            .names
-            .fqn(fact.fqn)
-            .expect_invariant(
-                "symbol fact points to missing FQN id",
-                "symbol facts must only store interned FQN ids",
-                "intern symbol FQNs before inserting facts",
-            )
-            .clone();
-        SymbolFact::new(fqn, fact.kind, fact.range).with_name_range(fact.name_range)
-    }
-
-    pub(super) fn expand_method_fact(&self, fact: StoredMethodFact) -> MethodFact {
-        let fqn = self
-            .names
-            .fqn(fact.fqn)
-            .expect_invariant(
-                "method fact points to missing FQN id",
-                "method facts must only store interned FQN ids",
-                "intern method FQNs before inserting facts",
-            )
-            .clone();
-        let owner = self
-            .names
-            .fqn(fact.owner)
-            .expect_invariant(
-                "method fact points to missing owner FQN id",
-                "method facts must only store interned owner FQN ids",
-                "intern method owners before inserting facts",
-            )
-            .clone();
-        MethodFact {
-            fqn,
-            owner,
-            range: fact.range,
-            name_range: fact.name_range,
-            params: fact.params,
-            param_facts: fact.param_facts,
-            parameter_shape_complete: fact.parameter_shape_complete,
-            delegate_receiver: fact.delegate_receiver,
-            visibility: fact.visibility,
-            availability: fact.availability,
-            documentation: fact.documentation,
-            return_type_label: fact.return_type_label,
-            higher_order: fact.higher_order,
-        }
     }
 
     pub(super) fn expand_graph_node_fact(&self, fact: StoredGraphNodeFact) -> GraphNodeFact {
