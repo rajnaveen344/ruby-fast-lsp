@@ -42,6 +42,11 @@ impl<T> FileOwned<T> {
         self.files.values().flatten()
     }
 
+    /// Every file that owns at least one row, in unspecified order.
+    pub fn files(&self) -> impl Iterator<Item = SourceFileId> + '_ {
+        self.files.keys().copied()
+    }
+
     pub fn len(&self) -> usize {
         self.files.values().map(Vec::len).sum()
     }

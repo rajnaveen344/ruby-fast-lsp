@@ -35,6 +35,9 @@ fn replace_orders_rows_and_touches_only_the_target_file() {
     assert_eq!(owned.rows(SourceFileId(1)), [row(1, 4), row(1, 9)]);
     assert_eq!(owned.rows(SourceFileId(2)), [row(2, 7)]);
     assert_eq!(owned.len(), 3);
+    let mut files = owned.files().collect::<Vec<_>>();
+    files.sort();
+    assert_eq!(files, [SourceFileId(1), SourceFileId(2)]);
 }
 
 #[test]
