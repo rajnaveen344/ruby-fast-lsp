@@ -16,10 +16,35 @@ impl TypeTracker {
         self.track_statements(&stmts)
     }
 
-    /// Add method parameters to the type environment
+    /// Add method parameters to the type environment. A parameter whose
+    /// contract is a complete shape gets its own abstract Hash identity, like
+    /// a shape-producing assignment, so guards on it narrow correlated variants.
     pub(in crate::inference::type_tracker) fn add_parameters(&mut self, _params: &ParametersNode) {
-        for (name, ruby_type) in &self.context.parameter_types {
-            self.environment.insert(name.clone(), ruby_type.clone());
+        let mut parameters: Vec<(String, RubyType)> = self
+            .context
+            .parameter_types
+            .iter()
+            .map(|(name, ruby_type)| (name.clone(), ruby_type.clone()))
+            .collect();
+        // Identity allocation order must not depend on HashMap iteration.
+        parameters.sort_by(|left, right| left.0.cmp(&right.0));
+        for (name, ruby_type) in parameters {
+            if !type_is_shape_only(&ruby_type) {
+                self.environment.insert(name, ruby_type);
+                continue;
+            }
+            let identity = self.allocate_shape_identity(ruby_type.clone());
+            if matches!(ruby_type, RubyType::Shape(_))
+                && self.materialize_direct_shape_children(identity).is_err()
+            {
+                self.environment.invalidate_identities(
+                    &BTreeSet::from([identity]),
+                    UnknownReason::MutableShapeInvalidated,
+                );
+            }
+            self.environment
+                .bind_shape_identities(name, ruby_type, BTreeSet::from([identity]));
+            self.environment.synchronize_shape_aliases();
         }
     }
 

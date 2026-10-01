@@ -264,3 +264,60 @@ end"#;
         RubyType::string()
     );
 }
+
+#[test]
+fn literal_discriminator_narrows_a_correlated_shape_parameter_contract() {
+    let contract = tracked_method_type(
+        r#"def build(condition)
+  if condition
+    { kind: :number, value: 1 }
+  else
+    { kind: :text, value: "ready" }
+  end
+end"#,
+    );
+    let source = r#"def read(payload)
+  if payload[:kind] == :number
+    payload[:value]
+  else
+    payload[:value]
+  end
+end"#;
+    let parse = ruby_prism::parse(source.as_bytes());
+    let definition = parse
+        .node()
+        .as_program_node()
+        .expect("test source must parse as a program")
+        .statements()
+        .body()
+        .iter()
+        .next()
+        .expect("test source must contain a method")
+        .as_def_node()
+        .expect("test source must begin with a method definition");
+    let mut tracker = TypeTracker::new()
+        .with_parameter_types(HashMap::from([("payload".to_string(), contract)]))
+        .with_local_read_types();
+    assert_eq!(
+        tracker.track_method(&definition),
+        RubyType::union([RubyType::integer(), RubyType::string()])
+    );
+    let reads = tracker.take_local_read_types();
+    let read_type_at = |needle: &str| {
+        let start_offset = source.find(needle).expect("needle must be in the source");
+        reads
+            .iter()
+            .find(|read| read.start_offset == start_offset)
+            .expect("the branch read must be retained")
+            .ruby_type
+            .to_string()
+    };
+    assert_eq!(
+        read_type_at("payload[:value]\n  else"),
+        "{ kind: :number, value: Integer }"
+    );
+    assert_eq!(
+        read_type_at("payload[:value]\n  end"),
+        "{ kind: :text, value: String }"
+    );
+}

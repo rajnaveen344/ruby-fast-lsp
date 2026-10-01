@@ -434,6 +434,20 @@ impl FactCollector {
             );
             (None, TypeProvenance::Inferred, None)
         };
+        if return_equation.is_some() && self.options.resolve_analysis_method_returns {
+            // Constructors and declared contracts fix the return type, but
+            // reads in the body still need exhaustive flow evidence.
+            self.track_method_flow(
+                node,
+                &InferredMethodContext {
+                    fqn: fqn.clone(),
+                    namespace_parts: namespace_parts.clone(),
+                    instance_owner_fqn: instance_owner_fqn.clone(),
+                    param_types: param_types.clone(),
+                    definition_range: self.document.prism_location_to_text_range(&full_location),
+                },
+            );
+        }
 
         if let Some(return_equation) = return_equation {
             self.method_returns
@@ -572,7 +586,14 @@ impl FactCollector {
         self.document.variable_scopes_mut().exit_scope();
     }
 
-    fn collect_inferred_method_return(&mut self, node: &DefNode, pending: InferredMethodContext) {
+    /// Track the method body's local flow and install its exhaustive read
+    /// evidence. Declared (RBS/YARD) methods need this evidence too: their
+    /// contract fixes the return type, not the types of reads in the body.
+    fn track_method_flow(
+        &mut self,
+        node: &DefNode,
+        pending: &InferredMethodContext,
+    ) -> MethodReturnEquation {
         let mut tracker = TypeTracker::new();
         tracker = tracker.with_analysis_engine(self.semantics.engine.clone());
         tracker = tracker.with_analysis_query_cache(self.semantics.query_cache.clone());
@@ -607,6 +628,11 @@ impl FactCollector {
             let reads = tracker.take_local_read_types();
             self.install_local_read_types(reads);
         }
+        equation
+    }
+
+    fn collect_inferred_method_return(&mut self, node: &DefNode, pending: InferredMethodContext) {
+        let equation = self.track_method_flow(node, &pending);
         let immediate = equation.immediate_outcome();
         self.method_returns
             .equations
