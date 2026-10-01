@@ -3,6 +3,7 @@ use std::mem::size_of;
 
 use crate::core::names::fqn_id::ConstLookupId;
 use crate::core::names::fqn_id::FqnId;
+use crate::core::storage::file_owned::{FileOwned, FileRow};
 use crate::core::storage::memory_estimate::{
     map_table_bytes, ruby_type_heap_bytes, vec_payload_bytes,
 };
@@ -366,11 +367,29 @@ impl ReferenceCandidate {
     }
 }
 
+impl FileRow for StoredConstantReferenceCandidate {
+    fn file_id(&self) -> SourceFileId {
+        self.range.file_id
+    }
+}
+
+impl FileRow for StoredMethodReferenceCandidate {
+    fn file_id(&self) -> SourceFileId {
+        self.range.file_id
+    }
+}
+
+impl FileRow for StoredResolvedReferenceCandidate {
+    fn file_id(&self) -> SourceFileId {
+        self.range.file_id
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ReferenceCandidateStore {
-    constants_by_file: HashMap<SourceFileId, Vec<StoredConstantReferenceCandidate>>,
-    methods_by_file: HashMap<SourceFileId, Vec<StoredMethodReferenceCandidate>>,
-    resolved_by_file: HashMap<SourceFileId, Vec<StoredResolvedReferenceCandidate>>,
+    constants: FileOwned<StoredConstantReferenceCandidate>,
+    methods: FileOwned<StoredMethodReferenceCandidate>,
+    resolved: FileOwned<StoredResolvedReferenceCandidate>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -380,26 +399,24 @@ pub struct ReferenceCandidateStats {
     pub resolved: usize,
 }
 
+/// Candidates of one kind are ordered by their source range.
+fn by_range<T>(range: impl Fn(&T) -> TextRange) -> impl Fn(&T, &T) -> std::cmp::Ordering {
+    move |left, right| {
+        let (left, right) = (range(left), range(right));
+        (left.start_byte, left.end_byte).cmp(&(right.start_byte, right.end_byte))
+    }
+}
+
 impl ReferenceCandidateStore {
     pub fn replace_file(
         &mut self,
         file_id: SourceFileId,
         candidates: impl IntoIterator<Item = StoredReferenceCandidate>,
     ) {
-        self.constants_by_file.remove(&file_id);
-        self.methods_by_file.remove(&file_id);
-        self.resolved_by_file.remove(&file_id);
-
         let mut constants = Vec::new();
         let mut methods = Vec::new();
         let mut resolved = Vec::new();
         for candidate in candidates {
-            invariant!(
-                candidate.range.file_id == file_id,
-                what = "replacement reference candidate belongs to another file",
-                why = "replace_file receives only the target file's candidates",
-                fix = "partition candidates by SourceFileId first",
-            );
             match candidate.kind {
                 StoredReferenceCandidateKind::Constant { lookup } => {
                     constants.push(StoredConstantReferenceCandidate {
@@ -438,55 +455,51 @@ impl ReferenceCandidateStore {
                 }
             }
         }
-
-        if !constants.is_empty() {
-            constants
-                .sort_by_key(|candidate| (candidate.range.start_byte, candidate.range.end_byte));
-            constants.shrink_to_fit();
-            self.constants_by_file.insert(file_id, constants);
-        }
-        if !methods.is_empty() {
-            methods.sort_by_key(|candidate| (candidate.range.start_byte, candidate.range.end_byte));
-            methods.shrink_to_fit();
-            self.methods_by_file.insert(file_id, methods);
-        }
-        if !resolved.is_empty() {
-            resolved
-                .sort_by_key(|candidate| (candidate.range.start_byte, candidate.range.end_byte));
-            resolved.shrink_to_fit();
-            self.resolved_by_file.insert(file_id, resolved);
-        }
+        self.constants.replace(
+            file_id,
+            constants,
+            by_range(|candidate: &StoredConstantReferenceCandidate| candidate.range),
+        );
+        self.methods.replace(
+            file_id,
+            methods,
+            by_range(|candidate: &StoredMethodReferenceCandidate| candidate.range),
+        );
+        self.resolved.replace(
+            file_id,
+            resolved,
+            by_range(|candidate: &StoredResolvedReferenceCandidate| candidate.range),
+        );
     }
 
     pub(crate) fn method_candidates_in_file(
         &self,
         file_id: SourceFileId,
     ) -> impl Iterator<Item = &StoredMethodReferenceCandidate> {
-        self.methods_by_file.get(&file_id).into_iter().flatten()
+        self.methods.rows(file_id).iter()
     }
 
     pub fn method_candidates_named(
         &self,
         method: RubyMethod,
     ) -> impl Iterator<Item = &StoredMethodReferenceCandidate> {
-        self.methods_by_file
-            .values()
-            .flat_map(|candidates| candidates.iter())
+        self.methods
+            .iter()
             .filter(move |candidate| candidate.method == method)
     }
 
     pub fn candidates_in_file(&self, file_id: SourceFileId) -> Vec<StoredReferenceCandidate> {
         let mut candidates = Vec::new();
-        if let Some(constants) = self.constants_by_file.get(&file_id) {
-            candidates.extend(constants.iter().map(|candidate| StoredReferenceCandidate {
+        candidates.extend(self.constants.rows(file_id).iter().map(|candidate| {
+            StoredReferenceCandidate {
                 range: candidate.range,
                 kind: StoredReferenceCandidateKind::Constant {
                     lookup: candidate.lookup,
                 },
-            }));
-        }
-        if let Some(methods) = self.methods_by_file.get(&file_id) {
-            candidates.extend(methods.iter().map(|candidate| StoredReferenceCandidate {
+            }
+        }));
+        candidates.extend(self.methods.rows(file_id).iter().map(|candidate| {
+            StoredReferenceCandidate {
                 range: candidate.range,
                 kind: StoredReferenceCandidateKind::Method {
                     owner: candidate.owner,
@@ -499,42 +512,38 @@ impl ReferenceCandidateStore {
                     preferred_definition_range: candidate.preferred_definition_range,
                     diagnostics: candidate.diagnostics.clone(),
                 },
-            }));
-        }
-        if let Some(resolved) = self.resolved_by_file.get(&file_id) {
-            candidates.extend(resolved.iter().map(|candidate| StoredReferenceCandidate {
+            }
+        }));
+        candidates.extend(self.resolved.rows(file_id).iter().map(|candidate| {
+            StoredReferenceCandidate {
                 range: candidate.range,
                 kind: StoredReferenceCandidateKind::Resolved {
                     target: candidate.target,
                     caller: candidate.caller,
                 },
-            }));
-        }
+            }
+        }));
         candidates.sort_by_key(|candidate| (candidate.range.start_byte, candidate.range.end_byte));
         candidates
     }
 
     pub fn iter_candidates(&self) -> impl Iterator<Item = StoredReferenceCandidateRef<'_>> {
-        self.constants_by_file
-            .values()
-            .flat_map(|candidates| candidates.iter().map(StoredReferenceCandidateRef::Constant))
+        self.constants
+            .iter()
+            .map(StoredReferenceCandidateRef::Constant)
+            .chain(self.methods.iter().map(StoredReferenceCandidateRef::Method))
             .chain(
-                self.methods_by_file.values().flat_map(|candidates| {
-                    candidates.iter().map(StoredReferenceCandidateRef::Method)
-                }),
+                self.resolved
+                    .iter()
+                    .map(StoredReferenceCandidateRef::Resolved),
             )
-            .chain(self.resolved_by_file.values().flat_map(|candidates| {
-                candidates.iter().map(StoredReferenceCandidateRef::Resolved)
-            }))
     }
 
     pub(crate) fn method_candidates_at_exact_range(
         &self,
         range: TextRange,
     ) -> &[StoredMethodReferenceCandidate] {
-        let Some(candidates) = self.methods_by_file.get(&range.file_id) else {
-            return &[];
-        };
+        let candidates = self.methods.rows(range.file_id);
         let key = (range.start_byte, range.end_byte);
         let start = candidates.partition_point(|candidate| {
             (candidate.range.start_byte, candidate.range.end_byte) < key
@@ -546,26 +555,23 @@ impl ReferenceCandidateStore {
     }
 
     pub fn candidate_count(&self) -> usize {
-        self.constants_by_file.values().map(Vec::len).sum::<usize>()
-            + self.methods_by_file.values().map(Vec::len).sum::<usize>()
-            + self.resolved_by_file.values().map(Vec::len).sum::<usize>()
+        self.constants.len() + self.methods.len() + self.resolved.len()
     }
 
     pub fn stats(&self) -> ReferenceCandidateStats {
         ReferenceCandidateStats {
-            constants: self.constants_by_file.values().map(Vec::len).sum(),
-            methods: self.methods_by_file.values().map(Vec::len).sum(),
-            resolved: self.resolved_by_file.values().map(Vec::len).sum(),
+            constants: self.constants.len(),
+            methods: self.methods.len(),
+            resolved: self.resolved.len(),
         }
     }
 
     pub fn file_ids(&self) -> Vec<SourceFileId> {
         let mut file_ids = self
-            .constants_by_file
-            .keys()
-            .chain(self.methods_by_file.keys())
-            .chain(self.resolved_by_file.keys())
-            .copied()
+            .constants
+            .files()
+            .chain(self.methods.files())
+            .chain(self.resolved.files())
             .collect::<Vec<_>>();
         file_ids.sort();
         file_ids.dedup();
@@ -573,45 +579,17 @@ impl ReferenceCandidateStore {
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
-        map_table_bytes(&self.constants_by_file)
-            + map_table_bytes(&self.methods_by_file)
-            + map_table_bytes(&self.resolved_by_file)
+        self.constants.estimated_heap_bytes(|_| 0)
             + self
-                .constants_by_file
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
-            + self
-                .methods_by_file
-                .values()
-                .map(|candidates| {
-                    vec_payload_bytes(candidates)
-                        + candidates
-                            .iter()
-                            .map(method_reference_candidate_heap_bytes)
-                            .sum::<usize>()
-                })
-                .sum::<usize>()
-            + self
-                .resolved_by_file
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
+                .methods
+                .estimated_heap_bytes(method_reference_candidate_heap_bytes)
+            + self.resolved.estimated_heap_bytes(|_| 0)
     }
 
     pub fn shrink_to_fit(&mut self) {
-        self.constants_by_file.shrink_to_fit();
-        self.methods_by_file.shrink_to_fit();
-        self.resolved_by_file.shrink_to_fit();
-        for candidates in self.constants_by_file.values_mut() {
-            candidates.shrink_to_fit();
-        }
-        for candidates in self.methods_by_file.values_mut() {
-            candidates.shrink_to_fit();
-        }
-        for candidates in self.resolved_by_file.values_mut() {
-            candidates.shrink_to_fit();
-        }
+        self.constants.shrink_to_fit();
+        self.methods.shrink_to_fit();
+        self.resolved.shrink_to_fit();
     }
 }
 
