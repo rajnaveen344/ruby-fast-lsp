@@ -110,8 +110,7 @@ impl AnalysisEngine {
             "cached queries require monotonic invalidation",
             "widen the semantic revision before performing u64::MAX replacements",
         );
-        *self.top_level_method_lookup_chain_cache.get_mut() = None;
-        *self.universal_object_method_lookup_chain_cache.get_mut() = None;
+        self.hierarchy.invalidate_method_lookup_chains();
         self.files
             .assert_known(file_id, "file analysis references unknown source file id");
         for (range, ruby_type) in facts.local_read_types.as_ref() {
@@ -170,12 +169,13 @@ impl AnalysisEngine {
             facts.execution_contexts,
         );
         self.facts.types.replace_file(file_id, facts.types);
-        let graph_nodes = self.intern_graph_node_facts(facts.graph_nodes);
-        let graph_edges = self.intern_graph_edge_facts(facts.graph_edges);
-        let unresolved_graph_edges =
-            self.intern_unresolved_graph_edge_facts(facts.unresolved_graph_edges);
-        self.graph
-            .replace_file(file_id, graph_nodes, graph_edges, unresolved_graph_edges);
+        self.hierarchy.replace_file(
+            &mut self.names,
+            file_id,
+            facts.graph_nodes,
+            facts.graph_edges,
+            facts.unresolved_graph_edges,
+        );
 
         self.uses
             .replace_candidates(&mut self.names, file_id, facts.reference_candidates);

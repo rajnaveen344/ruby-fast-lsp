@@ -3,7 +3,7 @@
 
 mod decls;
 mod files;
-mod graph;
+mod hierarchy;
 mod inference;
 mod lifecycle;
 mod names;
@@ -18,18 +18,16 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::core::storage::graph_store::SemanticGraph;
-use crate::core::storage::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
-use crate::core::{FullyQualifiedName, InferenceEvidence, SourceFileId, TextRange};
+use crate::core::{InferenceEvidence, SourceFileId, TextRange};
 
 use crate::engine::diagnostics::Diagnostics;
 use crate::engine::AnalysisQuery;
 use crate::stats::{self, StatsSnapshot};
 use decls::DeclIndex;
 use files::Files;
+use hierarchy::Hierarchy;
 use inference::StoredTypeInferenceOutcome;
 use names::Names;
-use parking_lot::Mutex;
 use storage::FactArena;
 use uses::UseIndex;
 
@@ -143,7 +141,7 @@ pub struct AnalysisEngine {
     pub(in crate::engine) files: Files,
     pub(in crate::engine) names: Names,
     pub(in crate::engine) facts: FactArena,
-    pub(in crate::engine) graph: SemanticGraph,
+    pub(in crate::engine) hierarchy: Hierarchy,
     pub(in crate::engine) uses: UseIndex,
     pub(in crate::engine) diagnostics: Diagnostics,
     pub(in crate::engine) decls: DeclIndex,
@@ -155,8 +153,6 @@ pub struct AnalysisEngine {
     method_return_equations_dirty: bool,
     constant_type_equations_dirty: bool,
     method_return_solution_spans_files: bool,
-    top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
-    universal_object_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
     last_resolve_pass: StatsSnapshot<ResolveStat>,
 }
 
@@ -184,7 +180,7 @@ impl Default for AnalysisEngine {
             files: Files::default(),
             names: Names::default(),
             facts: FactArena::default(),
-            graph: SemanticGraph::default(),
+            hierarchy: Hierarchy::default(),
             uses: UseIndex::default(),
             diagnostics: Diagnostics::default(),
             decls: DeclIndex::default(),
@@ -194,8 +190,6 @@ impl Default for AnalysisEngine {
             method_return_equations_dirty: false,
             constant_type_equations_dirty: false,
             method_return_solution_spans_files: false,
-            top_level_method_lookup_chain_cache: Mutex::new(None),
-            universal_object_method_lookup_chain_cache: Mutex::new(None),
             last_resolve_pass: StatsSnapshot::default(),
         }
     }
@@ -209,7 +203,7 @@ impl Clone for AnalysisEngine {
             files: self.files.clone(),
             names: self.names.clone(),
             facts: self.facts.clone(),
-            graph: self.graph.clone(),
+            hierarchy: self.hierarchy.clone(),
             uses: self.uses.clone(),
             diagnostics: self.diagnostics.clone(),
             decls: self.decls.clone(),
@@ -219,8 +213,6 @@ impl Clone for AnalysisEngine {
             method_return_equations_dirty: self.method_return_equations_dirty,
             constant_type_equations_dirty: self.constant_type_equations_dirty,
             method_return_solution_spans_files: self.method_return_solution_spans_files,
-            top_level_method_lookup_chain_cache: Mutex::new(None),
-            universal_object_method_lookup_chain_cache: Mutex::new(None),
             last_resolve_pass: StatsSnapshot::default(),
         }
     }
@@ -287,15 +279,15 @@ impl AnalysisEngine {
         );
         stats.set(
             AnalysisStat::GraphNodes,
-            stats::count(self.graph.node_count()),
+            stats::count(self.hierarchy.node_count()),
         );
         stats.set(
             AnalysisStat::GraphEdges,
-            stats::count(self.graph.edge_count()),
+            stats::count(self.hierarchy.edge_count()),
         );
         stats.set(
             AnalysisStat::UnresolvedGraphEdges,
-            stats::count(self.graph.unresolved_edges().len()),
+            stats::count(self.hierarchy.unresolved_edge_count()),
         );
         stats
     }
@@ -311,27 +303,10 @@ impl AnalysisEngine {
             references: self.uses.resolved_heap_bytes(),
             diagnostics: self.diagnostics.resolved_heap_bytes(),
             diagnostic_candidates: self.diagnostics.candidates_heap_bytes(),
-            graph: self.graph.estimated_heap_bytes(),
-            unresolved_graph_edges: self.graph.estimated_unresolved_heap_bytes(),
-            query_caches: self.estimated_method_lookup_chain_cache_heap_bytes(),
+            graph: self.hierarchy.graph_heap_bytes(),
+            unresolved_graph_edges: self.hierarchy.unresolved_heap_bytes(),
+            query_caches: self.hierarchy.method_lookup_chain_heap_bytes(),
         }
-    }
-
-    fn estimated_method_lookup_chain_cache_heap_bytes(&self) -> usize {
-        let chain_bytes = |chain: &Vec<FullyQualifiedName>| {
-            vec_payload_bytes(chain) + chain.iter().map(fqn_heap_bytes).sum::<usize>()
-        };
-        self.top_level_method_lookup_chain_cache
-            .lock()
-            .as_ref()
-            .map(chain_bytes)
-            .unwrap_or(0)
-            + self
-                .universal_object_method_lookup_chain_cache
-                .lock()
-                .as_ref()
-                .map(chain_bytes)
-                .unwrap_or(0)
     }
 
     fn estimated_file_store_heap_bytes(&self) -> usize {

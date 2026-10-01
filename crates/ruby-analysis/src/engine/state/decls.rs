@@ -135,7 +135,11 @@ impl DeclIndex {
         expand_symbol_facts(names, self.symbols.facts_for(fqn_id))
     }
 
-    fn has_symbol_facts(&self, names: &Names, fqn: &FullyQualifiedName) -> bool {
+    pub(in crate::engine) fn has_symbol_facts(
+        &self,
+        names: &Names,
+        fqn: &FullyQualifiedName,
+    ) -> bool {
         let Some(fqn_id) = names.fqn_id(fqn) else {
             return false;
         };

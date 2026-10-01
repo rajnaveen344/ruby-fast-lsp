@@ -115,7 +115,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B3f. Extract `DeclIndex` (rename `state/facts.rs` to `decls.rs`):
         symbols, methods, visibility overrides, execution contexts, their
         interning and expansion, and the effective-method reads.
-  - [ ] B3g. Extract `Hierarchy` (rename `state/graph.rs` to `hierarchy.rs`):
+  - [x] B3g. Extract `Hierarchy` (rename `state/graph.rs` to `hierarchy.rs`):
         graph nodes and edges, constant path resolution, unresolved-edge
         retry, and the method-lookup-chain caches with their invalidation.
         Route direct `engine.graph`/`engine.names` reads through component

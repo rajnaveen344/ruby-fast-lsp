@@ -48,7 +48,7 @@ impl AnalysisEngine {
             HashMap::new();
         let mut constant_target_cache: HashMap<ConstLookupId, Option<FqnId>> = HashMap::new();
         let mut method_lookup_chain_cache = MethodLookupChainCache::new();
-        let unresolved_method_edge_sources = self.unresolved_method_edge_sources();
+        let unresolved_method_edge_sources = self.unresolved_lookup_edge_sources();
         let mut method_chain_completeness_cache = MethodChainCompletenessCache::default();
         let mut resolved_call_outcomes = HashMap::new();
         let mut call_outcome_caches = MethodCallOutcomeCaches::default();

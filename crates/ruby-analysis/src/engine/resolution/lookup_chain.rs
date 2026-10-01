@@ -321,10 +321,8 @@ pub(super) fn method_lookup_chain_has_unresolved_dependency_from_graph(
                 current = current,
             ),
         };
-        if let Some(source_id) = engine.names.fqn_id(&unresolved_source) {
-            if engine.graph.has_explicit_unresolved_edge_from(source_id) {
-                return true;
-            }
+        if engine.has_explicit_unresolved_graph_edge_from(&unresolved_source) {
+            return true;
         }
 
         pending.extend(

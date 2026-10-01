@@ -8,8 +8,7 @@ use super::ConstantRenameTarget;
 use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
 use crate::core::storage::reference_store::StoredReferenceCandidateRef;
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, RubyConstant, RubyMethod, SourceFileId, SymbolKind,
-    TextRange,
+    FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolKind, TextRange,
 };
 use crate::engine::queries::AnalysisQuery;
 
@@ -338,34 +337,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     fn method_lookup_chain_is_incomplete_for_rename(&self, owner: &FullyQualifiedName) -> bool {
-        let unresolved_sources = self
-            .engine
-            .graph
-            .unresolved_edges()
-            .into_iter()
-            .filter_map(|edge| {
-                let lookup = self
-                    .engine
-                    .names
-                    .const_lookup(edge.target)
-                    .expect_invariant(
-                        "unresolved rename graph edge points to a missing lookup",
-                        "graph edges retain interned targets",
-                        "retain target lookups for the graph edge lifetime",
-                    );
-                if edge.kind == GraphEdgeKind::Superclass
-                    && lookup.absolute
-                    && lookup.path.len() == 1
-                    && lookup.path[0].as_str() == "Object"
-                {
-                    return None;
-                }
-                self.engine
-                    .names
-                    .fqn(edge.source)
-                    .map(FullyQualifiedName::namespace_parts)
-            })
-            .collect::<HashSet<_>>();
+        let unresolved_sources = self.engine.unresolved_lookup_edge_sources();
         let mut pending = vec![owner.clone()];
         let mut visited = HashSet::new();
         while let Some(current) = pending.pop() {

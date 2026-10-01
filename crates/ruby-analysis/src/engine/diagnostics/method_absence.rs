@@ -12,29 +12,6 @@ use crate::core::{
 use crate::engine::AnalysisEngine;
 
 impl AnalysisEngine {
-    pub(super) fn unresolved_method_edge_sources(&self) -> HashSet<Vec<RubyConstant>> {
-        self.graph
-            .unresolved_edges()
-            .into_iter()
-            .filter(|edge| {
-                let lookup = self.names.const_lookup(edge.target).expect_invariant(
-                    "unresolved graph edge points to a missing constant lookup",
-                    "graph edges must retain valid interned targets",
-                    "intern and retain every unresolved graph target for the edge lifetime",
-                );
-                !(edge.kind == GraphEdgeKind::Superclass
-                    && lookup.absolute
-                    && lookup.path.len() == 1
-                    && lookup.path[0].as_str() == "Object")
-            })
-            .filter_map(|edge| {
-                self.names
-                    .fqn(edge.source)
-                    .map(FullyQualifiedName::namespace_parts)
-            })
-            .collect()
-    }
-
     pub(super) fn method_lookup_chain_is_incomplete_cached(
         &self,
         owner: &FullyQualifiedName,
