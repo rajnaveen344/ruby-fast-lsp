@@ -10,7 +10,7 @@ fn namespace_target_exists_accepts_interned_instance_without_a_sibling_declarati
     let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -37,7 +37,7 @@ fn namespace_target_exists_accepts_singleton_when_instance_is_absent() {
         FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 singleton.clone(),
                 GraphNodeKind::Class,
@@ -63,7 +63,7 @@ fn namespace_target_exists_accepts_a_value_constant_without_a_namespace_node() {
     let as_namespace = FullyQualifiedName::namespace(vec![RubyConstant::new("STATUS").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 constant.clone(),
                 SymbolKind::Constant,
@@ -89,7 +89,7 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
     let status = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 status.clone(),
                 SymbolKind::Constant,
@@ -101,7 +101,7 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
     );
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
                 TextRange::new(ref_file, 0, 6),
                 status.namespace_parts(),
@@ -144,7 +144,7 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
     ]);
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(
                     outer.clone(),
@@ -186,7 +186,7 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
     );
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
                 TextRange::new(ref_file, 0, 1),
                 vec![RubyConstant::new("C").unwrap()],
@@ -224,7 +224,7 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
     ]);
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(
                     outer.clone(),
@@ -256,7 +256,7 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
     );
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
                 TextRange::new(ref_file, 0, 1),
                 vec![RubyConstant::new("C").unwrap()],

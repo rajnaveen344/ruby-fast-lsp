@@ -14,7 +14,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
     let method_name = RubyMethod::new("value").unwrap();
     let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
     let range = TextRange::new(file_id, 15, 34);
-    let facts = |ruby_type| FileFacts {
+    let facts = |ruby_type| FileAnalysis {
         graph_nodes: vec![GraphNodeFact::new(
             owner.clone(),
             GraphNodeKind::Class,
@@ -91,7 +91,7 @@ fn thread_local_method_return_cache_reuses_across_per_source_caches() {
     let range = TextRange::new(file_id, 15, 34);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -150,7 +150,7 @@ fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
     let count_range = TextRange::new(file_id, 37, 50);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -218,7 +218,7 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
     let range = TextRange::new(file_id, 15, 34);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -288,7 +288,7 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
     let child_range = TextRange::new(file_id, 70, 84);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -363,7 +363,7 @@ fn resolved_method_callee_cache_is_bounded_per_source_collection() {
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -403,7 +403,7 @@ fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
     let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
     let first_range = TextRange::new(file_id, 15, 34);
     let second_range = TextRange::new(file_id, 15, 35);
-    let facts = |range| FileFacts {
+    let facts = |range| FileAnalysis {
         graph_nodes: vec![GraphNodeFact::new(
             owner.clone(),
             GraphNodeKind::Class,
@@ -450,7 +450,7 @@ fn method_signature_fact_cache_is_bounded_per_source_collection() {
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -490,7 +490,7 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
     let method = RubyMethod::new("value").unwrap();
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -534,7 +534,7 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
         .is_some());
     assert_eq!(engine.valid_method_lookup_chain_cache_len_for_test(), 1);
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(
         engine.valid_method_lookup_chain_cache_len_for_test(),
         0,
@@ -554,7 +554,7 @@ fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -589,7 +589,7 @@ fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
         "repeated lookup of one owner must reuse the constructed MRO for the current engine identity"
     );
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     let after_replace = method_lookup_chain_uncached_construction_count();
     let replaced = method_lookup_chain(&engine, &child);
     assert!(
@@ -615,7 +615,7 @@ fn method_reference_chain_cache_returns_the_stored_chain_by_borrow() {
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -668,7 +668,7 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
     let second = RubyMethod::new("second").unwrap();
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -761,7 +761,7 @@ fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
     let range = TextRange::new(file_id, 0, 75);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(class.clone(), GraphNodeKind::Class, range),
                 GraphNodeFact::new(alpha.clone(), GraphNodeKind::Class, range),

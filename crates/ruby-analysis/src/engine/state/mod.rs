@@ -22,8 +22,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::core::storage::graph_store::SemanticGraph;
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
-    ExecutionContextFact, FileAnalysis, FullyQualifiedName, InferenceEvidence,
-    MethodVisibilityOverrideFact, SourceFileId, SourceKind, TextRange,
+    ExecutionContextFact, FullyQualifiedName, InferenceEvidence, MethodVisibilityOverrideFact,
+    SourceFileId, SourceKind, TextRange,
 };
 
 use crate::engine::AnalysisQuery;
@@ -149,9 +149,6 @@ impl SourceFile {
         ))
     }
 }
-
-/// Temporary name for [`FileAnalysis`] while callers move to the core type.
-pub type FileFacts = FileAnalysis;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFileInput {

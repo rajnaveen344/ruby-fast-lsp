@@ -67,7 +67,7 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 #### Key Files:
 
 - `coordinator/`: Orchestrates workspace indexing
-- `file_processor/`: Parses one file and runs `FactCollector`
+- `file_processor/`: Parses one file, runs `FactCollector`, and composes its `FileAnalysis` (`compose.rs`)
 - `sources/project/`: Discovers and indexes project files
 - `sources/gems/`: Discovers and indexes gem files
 - `sources/stdlib/`: Discovers and indexes stdlib files
@@ -76,7 +76,7 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 
 - Storage is owned by `ruby-analysis::engine`
 - `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass. Its ten private owners separate source/scope context, options, extensions, facts, flow, lookup inputs, and method/expression/constant evidence.
-- `FactCollector::finish()` returns an owned `FactCollectorOutput` holding a `FileAnalysis`; the production composer applies source policy before engine replacement. `traversal.rs` owns visit order, node modules own syntax handling, and responsibility modules own the shared helpers. See the [collector guide](../crates/ruby-analysis/src/indexer/fact_collector/README.md).
+- `FactCollector::finish()` returns an owned `FactCollectorOutput` holding a `FileAnalysis`; interactive and batch indexing share one composer, `compose_file_analysis`, which merges declarations, extension facts, and flow types and applies source policy before engine replacement. `traversal.rs` owns visit order, node modules own syntax handling, and responsibility modules own the shared helpers. See the [collector guide](../crates/ruby-analysis/src/indexer/fact_collector/README.md).
 - File discovery and parsing stay separate from engine query logic
 
 ### 2. Analyzer (`crates/ruby-analysis/src/indexer/`)
@@ -380,7 +380,7 @@ boundary. It accepts only ranges owned by one template source and rejects
 reference candidates, diagnostics, and execution contexts. Those facts depend
 on project/query/extension state and cannot enter a generic external dependency
 cache. Instantiation clones and rebinds every supported range, including
-expression type subjects, before returning ordinary `FileFacts`.
+expression type subjects, before returning an ordinary `FileAnalysis`.
 
 Gem templates must be produced in a deterministic dependency-only engine seeded
 by the exact runtime/core semantic input—not by whichever project happens to

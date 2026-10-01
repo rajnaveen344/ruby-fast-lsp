@@ -3,10 +3,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{Mutex, RwLock};
-use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphNodeFact, MethodFact, NamespaceKind, SourceKind, SymbolFact,
-    SymbolKind as AnalysisSymbolKind, TextRange,
+    FileAnalysis, FullyQualifiedName, GraphNodeFact, MethodFact, NamespaceKind, SourceKind,
+    SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
 };
 use ruby_analysis::engine::{ResolveMode, SourceFileInput};
 use ruby_analysis::indexer as utils;

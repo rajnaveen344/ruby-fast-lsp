@@ -23,7 +23,7 @@ fn union_method_completion_requires_every_receiver_member() {
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(alpha.clone(), GraphNodeKind::Class, range),
                 GraphNodeFact::new(beta.clone(), GraphNodeKind::Class, range),
@@ -141,7 +141,7 @@ fn method_rename_rejects_external_definition_even_with_exact_name_range() {
     let method = RubyMethod::new("name").unwrap();
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             methods: vec![MethodFact::new(
                 FullyQualifiedName::method(user.namespace_parts(), method),
                 user,
@@ -171,7 +171,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
 
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
                 TextRange::new(ref_file, 0, 4),
                 user.namespace_parts(),
@@ -190,7 +190,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
 
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 user.clone(),
                 SymbolKind::Class,
@@ -226,7 +226,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
 
     engine.replace_facts(
         user_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(user.clone(), SymbolKind::Class, user_range)],
             ..Default::default()
         },
@@ -234,7 +234,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
     );
     engine.replace_facts(
         account_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 account.clone(),
                 SymbolKind::Class,
@@ -247,7 +247,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
     let reference_range = TextRange::new(source_file, 7, 12);
     engine.replace_facts(
         source_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::resolved(
                 reference_range,
                 user.clone(),
@@ -265,7 +265,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
 
     engine.replace_facts(
         source_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![
                 ReferenceCandidate::resolved(reference_range, user, None),
                 ReferenceCandidate::resolved(reference_range, account, None),
@@ -303,7 +303,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
 
     engine.replace_facts(
         model_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -321,7 +321,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
     );
     engine.replace_facts(
         callback_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method_target(
                 reference_range,
                 user.namespace_parts(),
@@ -347,7 +347,11 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
         "exact callback target must participate in ordinary method references"
     );
 
-    engine.replace_facts(callback_file, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(
+        callback_file,
+        FileAnalysis::default(),
+        ResolveMode::Immediate,
+    );
     assert!(
         AnalysisQuery::new(&engine)
             .resolved_reference_definition_ranges_at(callback_file, 15)
@@ -388,7 +392,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
     let string_range = TextRange::new(implementation_file, 48, 87);
     engine.replace_facts(
         signature_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -408,7 +412,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
     );
     engine.replace_facts(
         implementation_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -439,7 +443,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
     let reference_range = TextRange::new(source_file, 16, 20);
     engine.replace_facts(
         source_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method(
                 reference_range,
                 crate::core::MethodReferenceCandidate {
@@ -476,7 +480,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
 
     engine.replace_facts(
         implementation_file,
-        FileFacts::default(),
+        FileAnalysis::default(),
         ResolveMode::Immediate,
     );
     assert_eq!(
@@ -510,7 +514,7 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
     let implementation_range = TextRange::new(implementation_file, 0, 23);
     engine.replace_facts(
         import_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 alias.clone(),
                 SymbolKind::Constant,
@@ -522,19 +526,19 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
                 import_range,
                 TypeProvenance::Runtime,
             )],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
         ResolveMode::Immediate,
     );
     engine.replace_facts(
         implementation_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 proxy,
                 SymbolKind::Class,
                 implementation_range,
             )],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
         ResolveMode::Immediate,
     );
@@ -560,7 +564,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
 
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -572,7 +576,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
     );
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method(
                 TextRange::new(ref_file, 5, 9),
                 crate::core::MethodReferenceCandidate {
@@ -609,7 +613,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
 
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -651,7 +655,7 @@ fn constant_rename_rejects_external_only_definition() {
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(user, SymbolKind::Class, TextRange::new(file_id, 0, 14))
                     .with_name_range(TextRange::new(file_id, 6, 10)),
@@ -688,7 +692,7 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
 
     engine.replace_facts(
         signature_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 owner.clone(),
                 SymbolKind::Class,
@@ -715,7 +719,7 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
     );
     engine.replace_facts(
         implementation_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 owner.clone(),
                 SymbolKind::Class,
@@ -777,7 +781,7 @@ fn inherited_method_callee_keeps_the_defining_parent_owner() {
     let definition_range = TextRange::new(file_id, 15, 31);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -829,7 +833,7 @@ fn public_lookup_of_a_private_method_is_receiver_only() {
     let definition_range = TextRange::new(file_id, 13, 24);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,

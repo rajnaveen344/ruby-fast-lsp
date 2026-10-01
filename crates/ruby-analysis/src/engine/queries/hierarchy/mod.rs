@@ -443,11 +443,11 @@ fn descendants(
 #[cfg(test)]
 mod tests {
     use crate::core::{
-        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind, SymbolFact,
-        SymbolKind, TextRange,
+        FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind,
+        SymbolFact, SymbolKind, TextRange,
     };
     use crate::engine::AnalysisQuery;
-    use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 
     fn query_with_symbols() -> (AnalysisEngine, SourceFileId) {
         let source = "class User\n  def name\n  end\nend";
@@ -460,7 +460,7 @@ mod tests {
         let user = RubyConstant::new("User").expect("test constant must be valid");
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![
                     SymbolFact::new(
                         FullyQualifiedName::namespace(vec![user.clone()]),

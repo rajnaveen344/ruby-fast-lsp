@@ -74,7 +74,7 @@ fn stale_source_revision_cannot_replace_newer_file_facts() {
     let utility = FullyQualifiedName::namespace(vec![RubyConstant::new("Utility").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 utility.clone(),
                 GraphNodeKind::Module,
@@ -88,7 +88,7 @@ fn stale_source_revision_cannot_replace_newer_file_facts() {
     assert_eq!(
         engine.replace_facts_if_source_snapshot(
             stale_snapshot,
-            FileFacts::default(),
+            FileAnalysis::default(),
             ResolveMode::Immediate,
         ),
         None,
@@ -118,7 +118,7 @@ fn namespace_existence_tracks_graph_node_replacement() {
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -137,7 +137,7 @@ fn namespace_existence_tracks_graph_node_replacement() {
         )
         .unwrap()])));
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert!(!engine.query().namespace_exists(&user));
 }
 
@@ -149,7 +149,7 @@ fn replace_facts_removes_stale_type_facts() {
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 subject.clone(),
                 RubyType::integer(),
@@ -162,7 +162,7 @@ fn replace_facts_removes_stale_type_facts() {
     );
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 subject.clone(),
                 RubyType::string(),
@@ -192,7 +192,7 @@ fn replace_facts_removes_stale_symbol_facts() {
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 fqn.clone(),
                 SymbolKind::Class,
@@ -204,7 +204,7 @@ fn replace_facts_removes_stale_symbol_facts() {
     );
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 fqn.clone(),
                 SymbolKind::Class,
@@ -228,7 +228,7 @@ fn rejects_type_fact_for_unknown_file() {
 
     engine.replace_facts(
         SourceFileId(99),
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 subject,
                 RubyType::integer(),
@@ -293,7 +293,7 @@ fn inference_telemetry_replaces_with_its_owning_file() {
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             inference: InferenceEvidence {
                 method_return_outcomes: [(method.clone(), unknown)].into_iter().collect(),
                 method_return_equations: vec![MethodReturnEquation::from_ruby_type(
@@ -322,7 +322,7 @@ fn inference_telemetry_replaces_with_its_owning_file() {
     proven.observe_method_return(&concrete);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             inference: InferenceEvidence {
                 method_return_outcomes: [(method.clone(), concrete)].into_iter().collect(),
                 method_return_equations: vec![MethodReturnEquation::proven(

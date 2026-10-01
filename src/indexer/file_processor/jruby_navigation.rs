@@ -8,8 +8,7 @@ use crate::environment::runtime::jruby::source_navigation::java_source_navigatio
 use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
-use ruby_analysis::core::FileAnalysis;
-use ruby_analysis::core::{FullyQualifiedName, SourceKind};
+use ruby_analysis::core::{FileAnalysis, FullyQualifiedName, SourceKind};
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, SourceFileInput};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;

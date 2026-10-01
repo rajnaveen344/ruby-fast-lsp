@@ -11,7 +11,7 @@ fn type_at_reads_engine_owned_store() {
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 subject.clone(),
                 RubyType::integer(),
@@ -37,7 +37,7 @@ fn expression_query_preserves_an_exact_unknown_proof_barrier() {
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 TypeSubject::Expression(range),
                 RubyType::Unknown,
@@ -67,7 +67,7 @@ fn expression_query_preserves_an_exact_unknown_proof_barrier() {
         Some(UnknownReason::NoReachingAssignment)
     );
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(engine.query().expression_unknown_reason(range), None);
 }
 
@@ -79,7 +79,7 @@ fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             inference: InferenceEvidence {
                 expression_unknown_reasons: vec![(range, UnknownReason::UnresolvedAssignmentValue)],
                 ..Default::default()
@@ -110,7 +110,7 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
 
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             local_read_types: vec![(range, RubyType::string())].into_boxed_slice(),
             ..Default::default()
         },
@@ -131,7 +131,7 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
     );
     assert_ne!(engine.semantic_result_fingerprint(), empty_fingerprint);
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(engine.query().expression_type_at(file_id, 2), None);
     assert_eq!(
         engine.query().local_read_types_in_file(file_id),
@@ -149,7 +149,7 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
 
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 user.clone(),
                 SymbolKind::Class,
@@ -167,7 +167,7 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
     for file_id in [first_ref, second_ref] {
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 reference_candidates: vec![ReferenceCandidate::constant(
                     TextRange::new(file_id, 0, 4),
                     user.namespace_parts(),
@@ -207,7 +207,7 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
 
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -263,7 +263,7 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
         .collect();
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: candidates,
             ..Default::default()
         },
@@ -322,7 +322,7 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
     ] {
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     user.clone(),
                     GraphNodeKind::Class,
@@ -379,7 +379,7 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
         .collect();
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: candidates,
             ..Default::default()
         },
@@ -433,7 +433,7 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
 
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -467,7 +467,7 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
     let missing_owner = vec![RubyConstant::new("MissingOwner").unwrap()];
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![
                 explicit_method_call_candidate(
                     TextRange::new(ref_file, 5, 10),
@@ -539,7 +539,7 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
 
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -562,7 +562,7 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
     );
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             inference: InferenceEvidence {
                 call_expression_outcomes: vec![(
                     kept_range,
@@ -622,7 +622,7 @@ fn duplicate_call_expression_range_is_an_invariant_violation() {
 
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -645,7 +645,7 @@ fn duplicate_call_expression_range_is_an_invariant_violation() {
     );
     engine.replace_facts(
         ref_file,
-        FileFacts {
+        FileAnalysis {
             reference_candidates: vec![
                 explicit_method_call_candidate(
                     TextRange::new(ref_file, 5, 9),
@@ -683,7 +683,7 @@ fn resolve_files_materializes_only_selected_open_document_candidates() {
     for file_id in [first_ref, second_ref] {
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 reference_candidates: vec![ReferenceCandidate::constant(
                     TextRange::new(file_id, 0, 4),
                     user.namespace_parts(),
@@ -696,7 +696,7 @@ fn resolve_files_materializes_only_selected_open_document_candidates() {
     }
     engine.replace_facts(
         def_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -752,7 +752,7 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
 
     engine.replace_facts(
         known_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -771,7 +771,7 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
     );
     engine.replace_facts(
         unresolved_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 owner.clone(),
                 GraphNodeKind::Class,
@@ -833,7 +833,7 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
 
     engine.replace_facts(
         stub_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 basic_object.clone(),
                 GraphNodeKind::Class,
@@ -856,7 +856,7 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
     );
     engine.replace_facts(
         project_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     widget.clone(),
@@ -930,7 +930,7 @@ fn expression_end_query_treats_exact_unknown_call_outcome_as_authoritative() {
     let range = TextRange::new(file_id, 0, 14);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             types: vec![TypeFact::new(
                 TypeSubject::Expression(range),
                 RubyType::string(),

@@ -602,11 +602,11 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Namesp
 mod tests {
     use super::*;
     use crate::core::{
-        FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
-        GraphNodeKind, LibraryPackageId, RubyConstant, SourceKind, TextRange,
+        FileAnalysis, FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind,
+        GraphNodeFact, GraphNodeKind, LibraryPackageId, RubyConstant, SourceKind, TextRange,
     };
     use crate::engine::queries::namespace_tree::types::LibrarySectionId;
-    use crate::engine::{FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::{ResolveMode, SourceFileInput};
 
     fn constant(name: &str) -> RubyConstant {
         RubyConstant::new(name).unwrap()
@@ -629,7 +629,7 @@ mod tests {
         let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
         engine.replace_facts(
             user_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     user.clone(),
                     GraphNodeKind::Class,
@@ -647,7 +647,7 @@ mod tests {
         );
         engine.replace_facts(
             auth_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     auth,
                     GraphNodeKind::Module,
@@ -707,7 +707,7 @@ mod tests {
         let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
         engine.replace_facts(
             user_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     user,
                     GraphNodeKind::Class,
@@ -719,7 +719,7 @@ mod tests {
         );
         engine.replace_facts(
             string_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     string,
                     GraphNodeKind::Class,
@@ -731,7 +731,7 @@ mod tests {
         );
         engine.replace_facts(
             auth_file,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     auth,
                     GraphNodeKind::Module,
@@ -776,7 +776,7 @@ mod tests {
         let string = FullyQualifiedName::namespace(vec![constant("String")]);
         engine.replace_facts(
             stub_string,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     string.clone(),
                     GraphNodeKind::Class,
@@ -788,7 +788,7 @@ mod tests {
         );
         engine.replace_facts(
             as_string,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     string,
                     GraphNodeKind::Class,
@@ -831,7 +831,7 @@ mod tests {
         ]);
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![
                     GraphNodeFact::new(
                         root_namespace,
@@ -876,7 +876,7 @@ mod tests {
         )]);
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
                     generated,
                     GraphNodeKind::Class,

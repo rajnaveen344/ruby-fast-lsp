@@ -1,10 +1,10 @@
 //! Document lifecycle and watched-file indexing tests.
 
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphEdgeKind, MethodFact, NamespaceKind, RubyConstant, RubyMethod,
-    SymbolKind, TextRange,
+    FileAnalysis, FullyQualifiedName, GraphEdgeKind, MethodFact, NamespaceKind, RubyConstant,
+    RubyMethod, SymbolKind, TextRange,
 };
-use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
+use ruby_analysis::engine::{AnalysisQuery, ResolveMode};
 use tower_lsp::LanguageServer;
 
 use super::*;

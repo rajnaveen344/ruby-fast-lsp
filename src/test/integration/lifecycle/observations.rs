@@ -2,7 +2,8 @@
 //! including faulty state, without silently rebuilding or repairing it.
 
 use crate::test::harness::FakeEditor;
-use ruby_analysis::engine::{FileFacts, ResolveMode};
+use ruby_analysis::core::FileAnalysis;
+use ruby_analysis::engine::ResolveMode;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 #[tokio::test]
@@ -71,7 +72,7 @@ async fn diagnostic_observation_cannot_repair_missing_semantic_facts() {
         .clone();
     engine.write().replace_facts(
         document.analysis_file_id(),
-        FileFacts::default(),
+        FileAnalysis::default(),
         ResolveMode::Immediate,
     );
     let before = engine.read().semantic_result_fingerprint();
@@ -125,7 +126,7 @@ async fn tagged_diagnostic_observation_cannot_repair_missing_semantic_facts() {
         .clone();
     engine.write().replace_facts(
         document.analysis_file_id(),
-        FileFacts::default(),
+        FileAnalysis::default(),
         ResolveMode::Immediate,
     );
     let before = engine.read().semantic_result_fingerprint();
@@ -199,7 +200,7 @@ async fn opening_another_project_cannot_rebuild_or_publish_this_projects_state()
         .clone();
     engine.write().replace_facts(
         document.analysis_file_id(),
-        FileFacts::default(),
+        FileAnalysis::default(),
         ResolveMode::Immediate,
     );
     let facts = engine.read().semantic_result_fingerprint();

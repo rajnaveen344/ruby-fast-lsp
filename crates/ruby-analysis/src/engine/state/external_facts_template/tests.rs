@@ -7,15 +7,15 @@ use crate::core::callables::callable_body::CallableBodySummary;
 use crate::core::callables::callable_body::ConstantCallableBodyFact;
 use crate::core::MethodVisibility;
 use crate::core::{
-    DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind,
-    GraphNodeFact, GraphNodeKind, InferenceEvidence, LiteralKey, LiteralValue, MethodFact,
-    MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType, ShapeExactness, ShapeField,
-    ShapeRest, ShapeStability, ShapeType, SourceFileId, SourceKind, SymbolFact, SymbolKind,
-    TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
+    DiagnosticCandidate, DiagnosticCandidateKind, FileAnalysis, FullyQualifiedName, GraphEdgeFact,
+    GraphEdgeKind, GraphNodeFact, GraphNodeKind, InferenceEvidence, LiteralKey, LiteralValue,
+    MethodFact, MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType, ShapeExactness,
+    ShapeField, ShapeRest, ShapeStability, ShapeType, SourceFileId, SourceKind, SymbolFact,
+    SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
 use crate::engine::{
-    AnalysisEngine, AnalysisQuery, FileFacts, ProjectNeutralFileFactsTemplate,
+    AnalysisEngine, AnalysisQuery, ProjectNeutralFileFactsTemplate,
     ProjectNeutralTemplateRejection, ResolveMode, SourceFileInput,
 };
 use std::path::PathBuf;
@@ -63,7 +63,7 @@ fn persistent_snapshot_round_trips_capture_free_callable_constant() {
     };
     let template = ProjectNeutralFileFactsTemplate::try_new(
         source,
-        FileFacts {
+        FileAnalysis {
             inference: InferenceEvidence {
                 constant_callable_bodies: vec![ConstantCallableBodyFact {
                     constant: constant.clone(),
@@ -72,7 +72,7 @@ fn persistent_snapshot_round_trips_capture_free_callable_constant() {
                 }],
                 ..InferenceEvidence::default()
             },
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
     )
     .unwrap();
@@ -125,7 +125,7 @@ fn template_rebinds_declarations_and_drops_file_local_evidence() {
 
     let template = ProjectNeutralFileFactsTemplate::try_new(
         source,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(owner.clone(), SymbolKind::Class, range)
                     .with_name_range(TextRange::new(source, 1, 7)),
@@ -180,7 +180,7 @@ fn template_rebinds_declarations_and_drops_file_local_evidence() {
                 ..Default::default()
             },
             local_read_types: vec![(expression, RubyType::string())].into_boxed_slice(),
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
     )
     .unwrap();
@@ -211,7 +211,7 @@ fn template_rejects_project_specific_candidates() {
     let source = SourceFileId(1);
     let rejection = ProjectNeutralFileFactsTemplate::try_new(
         source,
-        FileFacts {
+        FileAnalysis {
             diagnostic_candidates: vec![DiagnosticCandidate::new(
                 TextRange::new(source, 0, 1),
                 DiagnosticCandidateKind::BadSplat {
@@ -220,7 +220,7 @@ fn template_rejects_project_specific_candidates() {
                     expected: "Array".to_string(),
                 },
             )],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
     )
     .unwrap_err();
@@ -237,14 +237,14 @@ fn rebound_templates_preserve_navigation_without_sharing_file_identity() {
     let declaration = TextRange::new(template_file, 0, 12);
     let template = ProjectNeutralFileFactsTemplate::try_new(
         template_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 owner.clone(),
                 SymbolKind::Class,
                 declaration,
             )],
             graph_nodes: vec![GraphNodeFact::new(owner, GraphNodeKind::Class, declaration)],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
     )
     .unwrap();

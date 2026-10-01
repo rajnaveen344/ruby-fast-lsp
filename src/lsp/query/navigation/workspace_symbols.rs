@@ -72,10 +72,10 @@ mod tests {
 
     use parking_lot::RwLock;
     use ruby_analysis::core::{
-        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind, SymbolFact,
-        SymbolKind as AnalysisSymbolKind, TextRange,
+        FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind,
+        SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
     };
-    use ruby_analysis::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+    use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 
     use super::*;
 
@@ -98,7 +98,7 @@ mod tests {
         let user = RubyConstant::new("User").expect("test constant must be valid");
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![
                     SymbolFact::new(
                         FullyQualifiedName::namespace(vec![user]),

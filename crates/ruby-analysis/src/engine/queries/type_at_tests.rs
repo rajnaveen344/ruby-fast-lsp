@@ -1,10 +1,10 @@
 //! File-scoped type reads through `AnalysisQuery::type_at`.
 
 use crate::core::{
-    FullyQualifiedName, RubyType, SourceFileId, TextRange, TypeFact, TypeProvenance,
+    FileAnalysis, FullyQualifiedName, RubyType, SourceFileId, TextRange, TypeFact, TypeProvenance,
     TypeResolution, TypeSubject,
 };
-use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 
 fn constant_type_at(
     engine: &AnalysisEngine,
@@ -38,14 +38,14 @@ fn file_scoped_queries_follow_replacement_without_losing_other_files() {
         });
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 types: vec![TypeFact::new(
                     TypeSubject::Constant(constant.clone()),
                     ruby_type,
                     TextRange::new(file_id, 0, 5),
                     TypeProvenance::Assignment,
                 )],
-                ..FileFacts::default()
+                ..FileAnalysis::default()
             },
             ResolveMode::Immediate,
         );
@@ -67,7 +67,7 @@ fn file_scoped_queries_follow_replacement_without_losing_other_files() {
         kind: crate::core::SourceKind::Project,
     });
     assert_eq!(edited_id, file_ids[0]);
-    engine.replace_facts(edited_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(edited_id, FileAnalysis::default(), ResolveMode::Immediate);
 
     assert_eq!(constant_type_at(&engine, &constant, edited_id, 3), None,);
     assert_eq!(
@@ -95,7 +95,7 @@ fn query_uses_domain_byte_offsets_without_source_or_protocol_coordinates() {
     );
     engine.replace_facts(
         file_id,
-        crate::engine::FileFacts {
+        crate::core::FileAnalysis {
             types: vec![fact],
             ..Default::default()
         },

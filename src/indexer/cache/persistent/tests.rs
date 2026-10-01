@@ -13,12 +13,10 @@ use crate::indexer::cache::dependency_product::{
     GemDependencyFileTemplate, GemDependencyManifest, GemDependencyProduct, GemDependencySource,
 };
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId, SymbolFact,
-    SymbolKind, TextRange,
+    FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId,
+    SymbolFact, SymbolKind, TextRange,
 };
-use ruby_analysis::engine::{
-    AnalysisEngine, AnalysisQuery, FileFacts, ProjectNeutralFileFactsTemplate,
-};
+use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ProjectNeutralFileFactsTemplate};
 use ruby_fast_lsp_jvm_metadata::ArchiveLimits;
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Write};
@@ -85,7 +83,7 @@ fn manifest_with_inputs(
     let seed_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new(seed_constant).unwrap()]);
     seed_engine.replace_facts(
         seed_file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 seed_fqn.clone(),
                 SymbolKind::Class,
@@ -96,7 +94,7 @@ fn manifest_with_inputs(
                 GraphNodeKind::Class,
                 seed_range,
             )],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
         ruby_analysis::engine::ResolveMode::Deferred,
     );
@@ -115,10 +113,10 @@ fn product(manifest: &GemDependencyManifest) -> GemDependencyProduct {
     let fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
     let facts = ProjectNeutralFileFactsTemplate::try_new(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(fqn.clone(), SymbolKind::Class, range)],
             graph_nodes: vec![GraphNodeFact::new(fqn, GraphNodeKind::Class, range)],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
     )
     .unwrap();

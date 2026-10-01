@@ -9,7 +9,7 @@ fn semantic_export_fingerprint_distinguishes_body_and_api_edits() {
     let owner = FullyQualifiedName::try_from("Object").unwrap();
     let method_fqn =
         FullyQualifiedName::method(owner.namespace_parts(), RubyMethod::new("name").unwrap());
-    let facts = |params: Vec<String>, start_byte: u32| FileFacts {
+    let facts = |params: Vec<String>, start_byte: u32| FileAnalysis {
         methods: vec![MethodFact::with_params(
             method_fqn.clone(),
             owner.clone(),
@@ -53,7 +53,7 @@ fn semantic_context_fingerprint_is_path_independent_but_kind_and_fact_sensitive(
         let method = RubyMethod::new(method_name).unwrap();
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 methods: vec![MethodFact::new(
                     FullyQualifiedName::method(owner.namespace_parts(), method),
                     owner,
@@ -111,7 +111,7 @@ fn semantic_result_fingerprint_is_file_id_independent_and_reference_sensitive() 
         let beta = FullyQualifiedName::constant(vec![RubyConstant::new("Beta").unwrap()]);
         engine.replace_facts(
             definitions_file,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![
                     SymbolFact::new(
                         alpha.clone(),
@@ -135,7 +135,7 @@ fn semantic_result_fingerprint_is_file_id_independent_and_reference_sensitive() 
         };
         engine.replace_facts(
             call_file,
-            FileFacts {
+            FileAnalysis {
                 reference_candidates: vec![ReferenceCandidate::resolved(
                     TextRange::new(call_file, 0, 5),
                     target,
@@ -189,7 +189,7 @@ fn semantic_context_fingerprint_is_cross_process_stable() {
         let method = RubyMethod::new("call").unwrap();
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![SymbolFact::new(
                     owner.clone(),
                     SymbolKind::Class,
@@ -215,7 +215,7 @@ fn semantic_context_fingerprint_is_cross_process_stable() {
                     GraphNodeKind::Class,
                     TextRange::new(file_id, 0, 40),
                 )],
-                ..FileFacts::default()
+                ..FileAnalysis::default()
             },
             ResolveMode::Deferred,
         );

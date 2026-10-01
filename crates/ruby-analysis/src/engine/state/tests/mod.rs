@@ -1,9 +1,10 @@
 use crate::core::{
-    DiagnosticFact, DiagnosticSeverity, FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact,
-    GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind, InferenceEvidence,
-    InferenceTelemetry, MethodCalleeResolution, MethodFact, MethodReturnEquation, NamespaceKind,
-    ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SymbolFact, SymbolKind, TypeFact,
-    TypeInferenceOutcome, TypeProvenance, TypeSubject, UnknownReason, UnresolvedGraphEdgeFact,
+    DiagnosticFact, DiagnosticSeverity, FileAnalysis, FullyQualifiedName, GeneratedOwnerId,
+    GraphEdgeFact, GraphEdgeKind, GraphEdgeProvenance, GraphNodeFact, GraphNodeKind,
+    InferenceEvidence, InferenceTelemetry, MethodCalleeResolution, MethodFact,
+    MethodReturnEquation, NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, RubyType,
+    SymbolFact, SymbolKind, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
+    UnknownReason, UnresolvedGraphEdgeFact,
 };
 
 use super::fingerprint::SemanticChange;

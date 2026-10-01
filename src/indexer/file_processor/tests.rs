@@ -2,13 +2,11 @@ use super::merge::{merge_execution_context_direct_facts, merge_precise_visitor_t
 use super::*;
 use crate::server::RubyLanguageServer;
 use ruby_analysis::core::{
-    FullyQualifiedName, GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant, RubyMethod,
-    RubyType, SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact,
-    TypeProvenance, TypeSubject,
+    FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant,
+    RubyMethod, RubyType, SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
+    TypeFact, TypeProvenance, TypeSubject,
 };
-use ruby_analysis::engine::{
-    AnalysisEngine, AnalysisQuery, FileFacts, ResolveMode, SemanticChange,
-};
+use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ResolveMode, SemanticChange};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -472,7 +470,7 @@ fn explicit_project_engine_owns_external_gem_source() {
     assert!(server.orphan_engine().read().file_id(&path).is_none());
 }
 
-fn collect_gem_template_facts(source: &str) -> FileFacts {
+fn collect_gem_template_facts(source: &str) -> FileAnalysis {
     let server = RubyLanguageServer::default();
     let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
     let producer_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));

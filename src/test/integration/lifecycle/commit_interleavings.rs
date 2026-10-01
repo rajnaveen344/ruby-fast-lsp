@@ -4,7 +4,8 @@
 use crate::indexer::file_processor::FileProcessor;
 use crate::test::harness::FakeEditor;
 use parking_lot::RwLock;
-use ruby_analysis::engine::{AnalysisEngine, FileFacts, SourceFileSnapshot};
+use ruby_analysis::core::FileAnalysis;
+use ruby_analysis::engine::{AnalysisEngine, SourceFileSnapshot};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -17,7 +18,7 @@ const NEW: &str =
 struct Collected {
     path: PathBuf,
     snapshot: SourceFileSnapshot,
-    facts: FileFacts,
+    facts: FileAnalysis,
 }
 
 fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {

@@ -1,16 +1,16 @@
 use crate::core::{
-    InferenceEvidence, MethodReferenceCandidate, MethodReferenceDiagnostics, NamespaceKind,
-    ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SourceFileId, SourceKind, TextRange,
-    UnknownReason,
+    FileAnalysis, InferenceEvidence, MethodReferenceCandidate, MethodReferenceDiagnostics,
+    NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SourceFileId,
+    SourceKind, TextRange, UnknownReason,
 };
-use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 
 fn fixture() -> (
     AnalysisEngine,
     SourceFileId,
     TextRange,
     TextRange,
-    FileFacts,
+    FileAnalysis,
 ) {
     let mut engine = AnalysisEngine::new();
     let file_id = engine.register_file(SourceFileInput {
@@ -20,7 +20,7 @@ fn fixture() -> (
     });
     let receiver = TextRange::new(file_id, 0, 1);
     let message = TextRange::new(file_id, 2, 8);
-    let facts = FileFacts {
+    let facts = FileAnalysis {
         reference_candidates: vec![ReferenceCandidate::method(
             message,
             MethodReferenceCandidate {
@@ -44,7 +44,7 @@ fn fixture() -> (
                 },
             },
         )],
-        ..FileFacts::default()
+        ..FileAnalysis::default()
     };
     (engine, file_id, receiver, message, facts)
 }
@@ -58,7 +58,7 @@ fn exact_call_receiver_type_keeps_unknown_and_union_proof_barriers() {
         Some(RubyType::nil_class())
     );
 
-    let unknown = FileFacts {
+    let unknown = FileAnalysis {
         inference: InferenceEvidence {
             expression_unknown_reasons: vec![(receiver, UnknownReason::UnresolvedAssignmentValue)],
             ..InferenceEvidence::default()
@@ -74,7 +74,7 @@ fn exact_call_receiver_type_keeps_unknown_and_union_proof_barriers() {
     let union = RubyType::union(vec![RubyType::nil_class(), RubyType::string()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             local_read_types: vec![(receiver, union.clone())].into_boxed_slice(),
             ..facts
         },

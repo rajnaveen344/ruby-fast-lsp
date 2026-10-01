@@ -1,8 +1,8 @@
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, GraphNodeFact, GraphNodeKind, RubyConstant, RubyType,
-    SourceKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    FileAnalysis, FullyQualifiedName, GraphEdgeKind, GraphNodeFact, GraphNodeKind, RubyConstant,
+    RubyType, SourceKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
-use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 use crate::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use crate::indexer::RubyDocument;
 use parking_lot::RwLock;
@@ -166,7 +166,7 @@ fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
     // Prior didOpen / earlier pass left the ordinary class ClassReference in the engine.
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 platform_app.clone(),
                 GraphNodeKind::Class,

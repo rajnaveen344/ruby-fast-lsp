@@ -41,7 +41,7 @@ Delete this file when the last task is done. Git history keeps the record.
 
 ## Phase B: analysis data model (`crates/ruby-analysis`)
 
-- [ ] B1. Introduce `FileAnalysis` as the single per-file output. Keep it
+- [x] B1. Introduce `FileAnalysis` as the single per-file output. Keep it
       alongside `FileFacts`, `AnalysisIndex`, and `CollectedFile`, then remove
       those three.
   - [x] B1a. Move `engine::FileFacts` to `core::FileAnalysis`
@@ -62,7 +62,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B1e. Move the remaining server producers and wrappers (JRuby source
         navigation, extension seed file, project batch and retained facts) to
         `FileAnalysis`.
-  - [ ] B1f. Delete the `FileFacts` alias and update the analysis, engine, and
+  - [x] B1f. Delete the `FileFacts` alias and update the analysis, engine, and
         collector guides and `src/ARCHITECTURE.md`.
 
   Notes: `replace_facts` keeps its name until B4 renames it to

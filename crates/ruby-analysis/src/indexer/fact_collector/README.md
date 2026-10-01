@@ -90,11 +90,13 @@ type facts, the extension patches, and the updated document. It exposes owned
 domain values; traversal stacks and mutable stores cannot escape.
 
 Finishing packages existing evidence. It does not traverse again, rerun the
-solver, or publish to the engine. When the file processor has a declaration
-seed, `FileAnalysis::replace_declarations` swaps it in and returns the
-collector's declarations for the execution-context and runtime merges. The
-processor then adds extension facts, merges flow types by slot, applies
-source-kind policy, and uses ordinary per-file replacement.
+solver, or publish to the engine. The file processor's
+`compose_file_analysis` is the one consumer for interactive and batch
+indexing. When it has a declaration seed, `FileAnalysis::replace_declarations`
+swaps it in and returns the collector's declarations for the
+execution-context and runtime merges. It then adds extension facts, merges
+flow types by slot, and applies source-kind policy before ordinary per-file
+replacement.
 The reference-query scope rebuild uses `into_document()` because it needs only
 the updated scopes, without creating unused proof snapshots.
 

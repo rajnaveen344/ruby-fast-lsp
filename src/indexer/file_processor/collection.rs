@@ -12,9 +12,8 @@ use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::debug;
-use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::{
-    FullyQualifiedName, SourceKind, SymbolKind as AnalysisSymbolKind, TypeSubject,
+    FileAnalysis, FullyQualifiedName, SourceKind, SymbolKind as AnalysisSymbolKind, TypeSubject,
 };
 use ruby_analysis::engine::{
     AnalysisEngine, ProjectNeutralFileFactsTemplate, ResolveMode, SemanticChange,

@@ -665,10 +665,9 @@ fn validate_logical_path(logical_path: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ruby_analysis::core::FileAnalysis;
     use ruby_analysis::core::{
-        FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId, SymbolFact,
-        SymbolKind, TextRange,
+        FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId,
+        SymbolFact, SymbolKind, TextRange,
     };
     use ruby_analysis::engine::{AnalysisQuery, ProjectNeutralFileFactsTemplate};
 

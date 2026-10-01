@@ -42,6 +42,6 @@ pub use state::fingerprint::{
     SemanticChange, SemanticExportFingerprint, SemanticResultFingerprint,
 };
 pub use state::{
-    AnalysisEngine, AnalysisStat, FileFacts, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
+    AnalysisEngine, AnalysisStat, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
     SourceFileSnapshot,
 };

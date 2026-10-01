@@ -5,12 +5,11 @@ use super::{
 };
 use crate::invariant::ExpectInvariant;
 use parking_lot::{Mutex, MutexGuard};
-use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::MethodVisibility;
 use ruby_analysis::core::{
-    FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind, NamespaceKind, RubyConstant,
-    RubyMethod, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance,
-    TypeSubject,
+    FileAnalysis, FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind, NamespaceKind,
+    RubyConstant, RubyMethod, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact,
+    TypeProvenance, TypeSubject,
 };
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_fast_lsp_jvm_metadata::{

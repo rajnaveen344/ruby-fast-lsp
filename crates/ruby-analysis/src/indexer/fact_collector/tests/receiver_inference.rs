@@ -1,8 +1,8 @@
 use crate::core::{
-    FullyQualifiedName, RubyConstant, RubyType, SourceKind, SymbolFact, SymbolKind, TextRange,
-    TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject, UnknownReason,
+    FileAnalysis, FullyQualifiedName, RubyConstant, RubyType, SourceKind, SymbolFact, SymbolKind,
+    TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject, UnknownReason,
 };
-use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 use crate::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use crate::indexer::RubyDocument;
 use parking_lot::RwLock;
@@ -218,7 +218,7 @@ fn nested_value_constant_receiver_preserves_its_proven_type() {
     let argv = FullyQualifiedName::constant(vec![RubyConstant::new("ARGV").unwrap()]);
     engine.replace_facts(
         core_file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 argv.clone(),
                 SymbolKind::Constant,
@@ -297,7 +297,7 @@ fn immediate_hash_literal_keeps_established_generic_read_methods() {
 
     engine.write().replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             inference: collector.inference_evidence(),
             ..Default::default()
         },

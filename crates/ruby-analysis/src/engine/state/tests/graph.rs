@@ -12,7 +12,7 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
     let auth = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
     engine.replace_facts(
         user_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 user.clone(),
                 GraphNodeKind::Class,
@@ -34,7 +34,7 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
 
     engine.replace_facts(
         auth_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 auth.clone(),
                 GraphNodeKind::Module,
@@ -64,7 +64,7 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
     let parent_singleton = parent.to_singleton_namespace().unwrap();
     engine.replace_facts(
         child_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     child.clone(),
@@ -93,7 +93,7 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
 
     engine.replace_facts(
         parent_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     parent.clone(),
@@ -128,7 +128,7 @@ fn explicit_superclass_outranks_reopened_implicit_object_fact() {
     let range = TextRange::new(file_id, 0, 16);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 child.clone(),
                 GraphNodeKind::Class,
@@ -179,7 +179,7 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
     let standard_singleton = standard.to_singleton_namespace().unwrap();
     engine.replace_facts(
         class_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     pending.clone(),
@@ -222,7 +222,7 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
 
     engine.replace_facts(
         target_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     optional.clone(),
@@ -264,7 +264,7 @@ fn later_include_wins_mro_when_facts_are_inserted_out_of_range_order() {
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(
                     early.clone(),
@@ -319,7 +319,7 @@ fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
     let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 parent.clone(),
                 GraphNodeKind::Class,
@@ -388,7 +388,7 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
     let stub_range = TextRange::new(stub_file, 0, 34);
     engine.replace_facts(
         project_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![
                 GraphNodeFact::new(client_instance.clone(), GraphNodeKind::Class, project_range),
                 GraphNodeFact::new(client.clone(), GraphNodeKind::Class, project_range),
@@ -449,7 +449,7 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
     );
     engine.replace_facts(
         stub_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 object.clone(),
                 GraphNodeKind::Class,
@@ -532,7 +532,7 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
     let helper_range = TextRange::new(file_id, 1, 7);
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![SymbolFact::new(
                 parent.clone(),
                 SymbolKind::Class,
@@ -599,7 +599,7 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
         .constant_rename_target(&parent.namespace_parts(), &[])
         .is_none());
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert!(engine
         .query()
         .resolve_method_callees(&parent, &helper)
@@ -640,7 +640,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
     let second_range = TextRange::new(applications_file, 16, 31);
     engine.replace_facts(
         template_file,
-        FileFacts {
+        FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
                 template.clone(),
                 GraphNodeKind::Class,
@@ -711,7 +711,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
                 TypeProvenance::Extension,
             ));
         }
-        FileFacts {
+        FileAnalysis {
             graph_nodes: nodes,
             graph_edges: edges,
             methods,
@@ -773,7 +773,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
 
     engine.replace_facts(
         applications_file,
-        FileFacts::default(),
+        FileAnalysis::default(),
         ResolveMode::Immediate,
     );
     let removed = engine
@@ -821,7 +821,7 @@ fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
     };
     engine.replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             execution_contexts: vec![outer.clone(), inner.clone()],
             ..Default::default()
         },
@@ -838,6 +838,6 @@ fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
     );
     assert_eq!(engine.query().execution_context_at(file_id, 5), None);
 
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(engine.query().execution_context_at(file_id, 30), None);
 }

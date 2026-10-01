@@ -175,9 +175,11 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
         second_path
     );
 
-    first_engine
-        .write()
-        .replace_facts(first_file_id, FileFacts::default(), ResolveMode::Immediate);
+    first_engine.write().replace_facts(
+        first_file_id,
+        FileAnalysis::default(),
+        ResolveMode::Immediate,
+    );
     assert!(
         AnalysisQuery::new(&first_engine.read())
             .constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[],)

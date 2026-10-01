@@ -13,8 +13,10 @@ use crate::indexer::scheduling::resources::IndexingWorkSpec;
 use crate::server::RubyLanguageServer;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyMethod, RubyType, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, FileFacts, ResolveMode};
+use ruby_analysis::core::{
+    FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, RubyType, SourceKind,
+};
+use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ResolveMode};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;

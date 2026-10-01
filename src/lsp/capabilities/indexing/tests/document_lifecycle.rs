@@ -276,7 +276,7 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
     let puts_fqn = FullyQualifiedName::method(vec![kernel], puts);
     server.orphan_engine().write().replace_facts(
         file_id,
-        FileFacts {
+        FileAnalysis {
             methods: vec![MethodFact::new(
                 puts_fqn.clone(),
                 FullyQualifiedName::namespace(vec![kernel]),

@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::{
-    GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant, SourceKind, SymbolFact, SymbolKind,
+    FileAnalysis, GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant, SourceKind, SymbolFact,
+    SymbolKind,
 };
-use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 
 fn declaration(
     engine: &mut AnalysisEngine,
@@ -21,7 +22,7 @@ fn declaration(
     let method = RubyMethod::new("label").unwrap();
     engine.replace_facts(
         file,
-        FileFacts {
+        FileAnalysis {
             symbols: vec![
                 SymbolFact::new(owner.clone(), SymbolKind::Class, range),
                 SymbolFact::new(
@@ -41,7 +42,7 @@ fn declaration(
                 range,
                 Vec::new(),
             )],
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         },
         ResolveMode::Immediate,
     );
@@ -86,7 +87,7 @@ fn definition_source_preference_is_shared_and_falls_back_after_removal() {
         );
         engine.replace_facts(
             expected.file_id,
-            FileFacts::default(),
+            FileAnalysis::default(),
             ResolveMode::Immediate,
         );
     }

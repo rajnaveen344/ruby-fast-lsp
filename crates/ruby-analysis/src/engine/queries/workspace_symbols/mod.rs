@@ -274,11 +274,11 @@ impl SymbolMatcher {
 #[cfg(test)]
 mod tests {
     use crate::core::{
-        FullyQualifiedName, GeneratedOwnerId, RubyConstant, RubyMethod, SourceFileId, SourceKind,
-        SymbolFact, SymbolKind, TextRange,
+        FileAnalysis, FullyQualifiedName, GeneratedOwnerId, RubyConstant, RubyMethod, SourceFileId,
+        SourceKind, SymbolFact, SymbolKind, TextRange,
     };
     use crate::engine::AnalysisQuery;
-    use crate::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+    use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 
     use super::*;
 
@@ -293,7 +293,7 @@ mod tests {
         let user = RubyConstant::new("User").expect("test constant must be valid");
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![
                     SymbolFact::new(
                         FullyQualifiedName::namespace(vec![user.clone()]),
@@ -352,7 +352,7 @@ mod tests {
         });
         engine.replace_facts(
             gem_file,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![SymbolFact::new(
                     FullyQualifiedName::namespace(vec![
                         RubyConstant::new("ExternalGem").expect("test name must be valid")
@@ -384,7 +384,7 @@ mod tests {
         );
         engine.replace_facts(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![SymbolFact::new(
                     FullyQualifiedName::method(
                         vec![owner],
