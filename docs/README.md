@@ -19,6 +19,7 @@ boundaries, and bug reports.
 
 - [Architecture](../src/ARCHITECTURE.md) and [analysis library](../crates/ruby-analysis/README.md).
 - [Server state ownership](development/server-state.md).
+- [Restructure plan](development/restructure.md) (in progress).
 - [Namespace indexing](development/namespace-indexing.md).
 - [Testing](../src/test/README.md) and [simulation](development/simulation.md).
 - [Performance workflow](development/performance.md).

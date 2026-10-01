@@ -71,6 +71,8 @@ describe supported forms and limits.
 
 ## Next priorities
 
+- Restructure the code into small modules with plain-value interfaces, following
+  the [restructure plan](docs/development/restructure.md). No features are removed.
 - Improve proof coverage for user-defined yielding methods and additional RBS
   forms, guided by reduced real-world regressions.
 - Consolidate repeated argument/type binding logic and make unexplained
