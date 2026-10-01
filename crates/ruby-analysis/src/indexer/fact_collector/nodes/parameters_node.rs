@@ -1,8 +1,7 @@
 use log::error;
 use ruby_prism::ParametersNode;
 
-use crate::core::RubyType;
-use crate::core::{TypeResolution, TypeSubject};
+use crate::core::{RubyType, TextRange, TypeResolution, TypeSubject};
 
 use crate::indexer::fact_collector::FactCollector;
 
@@ -26,7 +25,7 @@ impl FactCollector {
         for required in requireds.iter() {
             if let Some(param) = required.as_required_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                self.add_parameter_to_index(&param_name, param.location());
+                self.add_parameter_to_index(&param_name, &param.location());
                 self.assign_current_block_parameter_type(
                     &param_name,
                     &param.location(),
@@ -41,7 +40,7 @@ impl FactCollector {
         for optional in optionals.iter() {
             if let Some(param) = optional.as_optional_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                self.add_parameter_to_index(&param_name, param.location());
+                self.add_parameter_to_index(&param_name, &param.location());
                 self.assign_current_block_parameter_type(
                     &param_name,
                     &param.location(),
@@ -56,7 +55,7 @@ impl FactCollector {
             if let Some(param) = rest.as_rest_parameter_node() {
                 if let Some(name) = param.name() {
                     let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
-                    self.add_parameter_to_index(&param_name, param.location());
+                    self.add_parameter_to_index(&param_name, &param.location());
                     self.assign_current_block_parameter_type(
                         &param_name,
                         &param.location(),
@@ -72,7 +71,7 @@ impl FactCollector {
         for post in posts.iter() {
             if let Some(param) = post.as_required_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                self.add_parameter_to_index(&param_name, param.location());
+                self.add_parameter_to_index(&param_name, &param.location());
                 self.assign_current_block_parameter_type(
                     &param_name,
                     &param.location(),
@@ -82,11 +81,49 @@ impl FactCollector {
             }
         }
 
-        // TODO: keywords, keyword_rest, block
+        // Keyword, keyword-rest, and block parameters are not positional, so
+        // block argument types are not assigned to them.
+        for keyword in node.keywords().iter() {
+            let (name, name_loc) = if let Some(param) = keyword.as_required_keyword_parameter_node()
+            {
+                (param.name(), param.name_loc())
+            } else if let Some(param) = keyword.as_optional_keyword_parameter_node() {
+                (param.name(), param.name_loc())
+            } else {
+                continue;
+            };
+            // The keyword name location includes the trailing `:`.
+            let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+            let mut name_range = self.document.prism_location_to_text_range(&name_loc);
+            name_range.end_byte = name_range.start_byte + name.as_slice().len() as u32;
+            self.add_parameter_range_to_index(&param_name, name_range);
+        }
+
+        if let Some(param) = node
+            .keyword_rest()
+            .and_then(|rest| rest.as_keyword_rest_parameter_node())
+        {
+            if let (Some(name), Some(name_loc)) = (param.name(), param.name_loc()) {
+                let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+                self.add_parameter_to_index(&param_name, &name_loc);
+            }
+        }
+
+        if let Some(param) = node.block() {
+            if let (Some(name), Some(name_loc)) = (param.name(), param.name_loc()) {
+                let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+                self.add_parameter_to_index(&param_name, &name_loc);
+            }
+        }
+    }
+
+    fn add_parameter_to_index(&mut self, param_name: &str, location: &ruby_prism::Location) {
+        let text_range = self.document.prism_location_to_text_range(location);
+        self.add_parameter_range_to_index(param_name, text_range);
     }
 
     // Helper method to add a parameter to collected facts/scopes.
-    fn add_parameter_to_index(&mut self, param_name: &str, location: ruby_prism::Location) {
+    fn add_parameter_range_to_index(&mut self, param_name: &str, text_range: TextRange) {
         // Validate parameter name (should be a valid local variable name)
         if param_name.is_empty() {
             error!("Parameter name cannot be empty");
@@ -111,7 +148,6 @@ impl FactCollector {
             return;
         }
 
-        let text_range = self.document.prism_location_to_text_range(&location);
         let parameter_type = self
             .scope_tracker
             .current_method_fqn()

@@ -227,3 +227,16 @@ async fn local_definition_survives_reopen_without_reindex() {
     assert_eq!(locations[0].range.end.line, 1);
     assert_eq!(locations[0].range.end.character, 6);
 }
+
+#[tokio::test]
+async fn goto_keyword_parameter_definitions() {
+    check("def run(<def>key</def>:)\n  ke$0y\nend\n").await;
+    check("def run(<def>key</def>: 1)\n  ke$0y\nend\n").await;
+    check("[1].each do |<def>key</def>:|\n  ke$0y\nend\n").await;
+}
+
+#[tokio::test]
+async fn goto_keyword_rest_and_block_parameter_definitions() {
+    check("def run(**<def>options</def>)\n  optio$0ns\nend\n").await;
+    check("def run(&<def>callback</def>)\n  callba$0ck\nend\n").await;
+}

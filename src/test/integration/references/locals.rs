@@ -16,6 +16,19 @@ end
     .await;
 }
 
+/// Keyword parameter references start at the declared name, without its `:`
+#[tokio::test]
+async fn references_keyword_parameter() {
+    check(
+        r#"
+def greet(<ref>name$0</ref>:, **options)
+  puts <ref>name</ref>, options
+end
+"#,
+    )
+    .await;
+}
+
 /// Multiple method parameters - first param
 #[tokio::test]
 async fn references_multiple_params_first() {
