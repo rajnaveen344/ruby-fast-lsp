@@ -6,8 +6,10 @@ Implementation folders are private to the engine.
 
 | Area | Responsibility |
 | --- | --- |
-| `state/` | Source and name registries, fact ownership, file replacement, immutable templates, and lifecycle tests |
-| `resolution.rs` | Ruby lookup chains, MRO, visibility, dependency resolution, and rename policy |
+| `state/` | `AnalysisEngine` ownership, source and name registries (`storage`), file replacement and resolve passes (`lifecycle`), fact reads (`facts`), graph reads and lookup caches (`graph`), stored inference outcomes (`inference`), and semantic fingerprints (`fingerprint/`) |
+| `state/external_facts_template/` | Project-neutral dependency fact templates and their snapshot codecs |
+| `state/tests/` | Engine state tests grouped by lifecycle, fingerprints, inference outcomes, navigation, graph, caches, and constants |
+| `resolution/` | Ruby lookup chains and MRO (`lookup_chain`), chain method facts and visibility (`chain_methods`), callees, signatures, method references, reference ranges, definitions, and rename policy |
 | `queries/` | Common reads, query caching, and file-scoped type queries |
 | `queries/definitions/` | Definition source selection and partial ordering from participating Ruby lookup chains |
 | `queries/lookup/` | Constant/method matching and hover lookup results |
@@ -19,9 +21,9 @@ Implementation folders are private to the engine.
 
 Query result types live with their query family. Shared helpers retain the
 engine-wide privacy boundary even when a folder adds another module level.
-`state/tests.rs` uses ordinary Rust module discovery beside `state/mod.rs`.
+Submodules of `state/` and `resolution/` extend `AnalysisEngine` and
+`AnalysisQuery` with inherent impl blocks; their helpers stay private to the
+owning folder unless a sibling engine area needs them through a narrow re-export.
 
-Every directory is below the ten-entry ceiling. The large existing state and
-resolution implementations remain separate responsibilities for future internal
-cleanup; this layout change does not merge stores, change locks, or alter the
-file-owned lifecycle.
+Every directory stays within the ten-entry ceiling. The split does not merge
+stores, change locks, or alter the file-owned lifecycle.

@@ -44,8 +44,10 @@ pub use state::external_facts_template::{
     ProjectNeutralTemplateRejection,
 };
 pub use state::file_id_map::FileIdMap;
+pub use state::fingerprint::{
+    SemanticChange, SemanticExportFingerprint, SemanticResultFingerprint,
+};
 pub use state::{
-    AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, ResolvePassStats, SemanticChange,
-    SemanticExportFingerprint, SemanticResultFingerprint, SourceFile, SourceFileInput,
-    SourceFileSnapshot,
+    AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, ResolvePassStats, SourceFile,
+    SourceFileInput, SourceFileSnapshot,
 };
