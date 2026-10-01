@@ -28,7 +28,7 @@ impl AnalysisEngine {
         stats: &mut StatsSnapshot<ResolveStat>,
     ) {
         let mut candidate_file_ids = self.facts.references.candidates.file_ids();
-        for file_id in self.facts.diagnostics.candidates.file_ids() {
+        for file_id in self.diagnostics.candidate_file_ids() {
             if !candidate_file_ids.contains(&file_id) {
                 candidate_file_ids.push(file_id);
             }
@@ -530,27 +530,10 @@ impl AnalysisEngine {
 
         let diagnostic_rebuild_started = Instant::now();
         for file_id in candidate_file_ids {
-            let mut diagnostics = self
-                .facts
-                .diagnostics
-                .resolved
-                .facts_in_file(file_id)
-                .into_iter()
-                .filter(|fact| fact.code != "unresolved-constant")
-                .filter(|fact| fact.code != "unresolved-method")
-                .filter(|fact| fact.code != "unsupported-runtime-api")
-                .filter(|fact| fact.code != "wrong-arity")
-                .filter(|fact| fact.code != "unknown-kwarg")
-                .filter(|fact| fact.code != "missing-kwarg")
-                .filter(|fact| fact.code != "raise-non-exception")
-                .filter(|fact| fact.code != "bad-splat")
-                .filter(|fact| fact.code != "nil-call")
-                .collect::<Vec<_>>();
-            diagnostics.extend(unresolved_constants.remove(&file_id).unwrap_or_default());
-            self.facts
-                .diagnostics
-                .resolved
-                .replace_file(file_id, diagnostics);
+            self.diagnostics.rebuild_resolved(
+                file_id,
+                unresolved_constants.remove(&file_id).unwrap_or_default(),
+            );
         }
         stats.record_duration(
             ResolveStat::DiagnosticRebuildNs,

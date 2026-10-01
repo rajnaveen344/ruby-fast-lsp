@@ -8,7 +8,10 @@ mod grouped_methods;
 pub(in crate::engine) mod helpers;
 mod method_absence;
 mod method_checks;
+mod store;
 mod workspace_pass;
+
+pub(in crate::engine) use store::Diagnostics;
 
 use std::collections::HashMap;
 

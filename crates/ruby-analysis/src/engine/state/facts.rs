@@ -273,13 +273,13 @@ impl AnalysisEngine {
 
 impl AnalysisEngine {
     pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
-        self.facts.diagnostics.resolved.facts_in_file(file_id)
+        self.diagnostics.facts_in_file(file_id)
     }
 }
 
 impl AnalysisEngine {
     pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {
-        self.facts.diagnostics.resolved.all_facts()
+        self.diagnostics.all_facts()
     }
 }
 

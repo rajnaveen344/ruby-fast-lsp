@@ -189,14 +189,8 @@ impl AnalysisEngine {
             .references
             .candidates
             .replace_file(file_id, reference_candidates);
-        self.facts
-            .diagnostics
-            .candidates
-            .replace_file(file_id, facts.diagnostic_candidates);
-        self.facts
-            .diagnostics
-            .resolved
-            .replace_file(file_id, facts.diagnostics);
+        self.diagnostics
+            .replace_file(file_id, facts.diagnostic_candidates, facts.diagnostics);
         let call_expression_outcomes =
             std::mem::take(&mut facts.inference.call_expression_outcomes);
         self.inference_by_file.insert(file_id, facts.inference);
@@ -384,19 +378,8 @@ impl AnalysisEngine {
             "cached queries require monotonic invalidation",
             "widen the semantic revision before performing u64::MAX replacements",
         );
-        let mut diagnostics = self
-            .facts
-            .diagnostics
-            .resolved
-            .facts_in_file(file_id)
-            .into_iter()
-            .filter(|fact| fact.code != "unresolved-require")
-            .collect::<Vec<_>>();
-        diagnostics.extend(require_diagnostics);
-        self.facts
-            .diagnostics
-            .resolved
-            .replace_file(file_id, diagnostics);
+        self.diagnostics
+            .replace_unresolved_require(file_id, require_diagnostics);
         true
     }
 }

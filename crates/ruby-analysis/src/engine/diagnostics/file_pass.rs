@@ -389,26 +389,7 @@ impl AnalysisEngine {
             .resolved
             .replace_file(file_id, resolved_refs);
         self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
-        let mut diagnostics = self
-            .facts
-            .diagnostics
-            .resolved
-            .facts_in_file(file_id)
-            .into_iter()
-            .filter(|fact| fact.code != "unresolved-constant")
-            .filter(|fact| fact.code != "unresolved-method")
-            .filter(|fact| fact.code != "unsupported-runtime-api")
-            .filter(|fact| fact.code != "wrong-arity")
-            .filter(|fact| fact.code != "unknown-kwarg")
-            .filter(|fact| fact.code != "missing-kwarg")
-            .filter(|fact| fact.code != "raise-non-exception")
-            .filter(|fact| fact.code != "bad-splat")
-            .filter(|fact| fact.code != "nil-call")
-            .collect::<Vec<_>>();
-        diagnostics.extend(unresolved.remove(&file_id).unwrap_or_default());
-        self.facts
-            .diagnostics
-            .resolved
-            .replace_file(file_id, diagnostics);
+        self.diagnostics
+            .rebuild_resolved(file_id, unresolved.remove(&file_id).unwrap_or_default());
     }
 }

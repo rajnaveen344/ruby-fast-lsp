@@ -15,7 +15,7 @@ impl AnalysisEngine {
         &self,
     ) -> HashMap<SourceFileId, Vec<DiagnosticFact>> {
         let mut diagnostics = HashMap::new();
-        for candidate in self.facts.diagnostics.candidates.iter_candidates() {
+        for candidate in self.diagnostics.candidates() {
             if let Some(diagnostic) = self.resolve_diagnostic_candidate(candidate) {
                 diagnostics
                     .entry(diagnostic.range.file_id)
@@ -30,9 +30,7 @@ impl AnalysisEngine {
         &self,
         file_id: SourceFileId,
     ) -> Vec<DiagnosticFact> {
-        self.facts
-            .diagnostics
-            .candidates
+        self.diagnostics
             .candidates_in_file(file_id)
             .iter()
             .filter_map(|candidate| self.resolve_diagnostic_candidate(candidate))

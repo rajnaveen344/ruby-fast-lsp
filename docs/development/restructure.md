@@ -106,7 +106,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B3c. Extract `Files` (`engine/state/files.rs`): source registry, file
         id map, source files and line indexes, snapshot issuing, registration,
         and the export fingerprint map. Delete `state/file_id_map.rs`.
-  - [ ] B3d. Extract `Diagnostics` (`engine/diagnostics/store.rs`): candidate
+  - [x] B3d. Extract `Diagnostics` (`engine/diagnostics/store.rs`): candidate
         and resolved stores, candidate install, the unresolved-require swap,
         and the resolved rebuild filter used by the workspace pass.
   - [ ] B3e. Extract `UseIndex` (`engine/state/uses.rs`): reference candidate

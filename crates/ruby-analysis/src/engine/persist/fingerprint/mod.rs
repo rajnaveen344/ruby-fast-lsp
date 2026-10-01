@@ -431,7 +431,7 @@ impl AnalysisEngine {
                 }),
             );
         }
-        for fact in self.facts.diagnostics.resolved.all_facts() {
+        for fact in self.diagnostics.all_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,

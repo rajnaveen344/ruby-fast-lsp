@@ -24,6 +24,7 @@ use crate::core::{
     SourceFileId, TextRange,
 };
 
+use crate::engine::diagnostics::Diagnostics;
 use crate::engine::AnalysisQuery;
 use crate::stats::{self, StatsSnapshot};
 use files::Files;
@@ -143,6 +144,7 @@ pub struct AnalysisEngine {
     pub(in crate::engine) names: Names,
     pub(in crate::engine) facts: FactArena,
     pub(in crate::engine) graph: SemanticGraph,
+    pub(in crate::engine) diagnostics: Diagnostics,
     pub(in crate::engine) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
     pub(in crate::engine) execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
     inference_by_file: HashMap<SourceFileId, InferenceEvidence>,
@@ -183,6 +185,7 @@ impl Default for AnalysisEngine {
             names: Names::default(),
             facts: FactArena::default(),
             graph: SemanticGraph::default(),
+            diagnostics: Diagnostics::default(),
             method_visibility_overrides: Vec::new(),
             execution_contexts: HashMap::new(),
             inference_by_file: HashMap::new(),
@@ -207,6 +210,7 @@ impl Clone for AnalysisEngine {
             names: self.names.clone(),
             facts: self.facts.clone(),
             graph: self.graph.clone(),
+            diagnostics: self.diagnostics.clone(),
             method_visibility_overrides: self.method_visibility_overrides.clone(),
             execution_contexts: self.execution_contexts.clone(),
             inference_by_file: self.inference_by_file.clone(),
@@ -275,11 +279,11 @@ impl AnalysisEngine {
         );
         stats.set(
             AnalysisStat::DiagnosticCandidates,
-            stats::count(self.facts.diagnostics.candidates.candidate_count()),
+            stats::count(self.diagnostics.candidate_count()),
         );
         stats.set(
             AnalysisStat::Diagnostics,
-            stats::count(self.facts.diagnostics.resolved.fact_count()),
+            stats::count(self.diagnostics.fact_count()),
         );
         stats.set(
             AnalysisStat::GraphNodes,
@@ -305,8 +309,8 @@ impl AnalysisEngine {
             types: self.facts.types.estimated_heap_bytes(),
             reference_candidates: self.facts.references.candidates.estimated_heap_bytes(),
             references: self.facts.references.resolved.estimated_heap_bytes(),
-            diagnostics: self.facts.diagnostics.resolved.estimated_heap_bytes(),
-            diagnostic_candidates: self.facts.diagnostics.candidates.estimated_heap_bytes(),
+            diagnostics: self.diagnostics.resolved_heap_bytes(),
+            diagnostic_candidates: self.diagnostics.candidates_heap_bytes(),
             graph: self.graph.estimated_heap_bytes(),
             unresolved_graph_edges: self.graph.estimated_unresolved_heap_bytes(),
             query_caches: self.estimated_method_lookup_chain_cache_heap_bytes(),

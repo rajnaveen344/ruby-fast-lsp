@@ -3,8 +3,6 @@
 
 use crate::invariant::ExpectInvariant;
 
-use crate::core::storage::diagnostic_candidate_store::DiagnosticCandidateStore;
-use crate::core::storage::diagnostic_store::DiagnosticStore;
 use crate::core::storage::graph_store::StoredGraphEdgeFact;
 use crate::core::storage::graph_store::StoredGraphNodeFact;
 use crate::core::storage::graph_store::StoredUnresolvedGraphEdgeFact;
@@ -29,7 +27,6 @@ pub(in crate::engine) struct FactArena {
     pub(in crate::engine) definitions: DefinitionFacts,
     pub(in crate::engine) references: ReferenceFacts,
     pub(in crate::engine) types: TypeStore,
-    pub(in crate::engine) diagnostics: DiagnosticFacts,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -44,12 +41,6 @@ pub(in crate::engine) struct ReferenceFacts {
     pub(in crate::engine) resolved: ReferenceStore,
 }
 
-#[derive(Debug, Clone, Default)]
-pub(in crate::engine) struct DiagnosticFacts {
-    pub(in crate::engine) candidates: DiagnosticCandidateStore,
-    pub(in crate::engine) resolved: DiagnosticStore,
-}
-
 impl AnalysisEngine {
     pub fn shrink_to_fit(&mut self) {
         self.files.shrink_to_fit();
@@ -61,8 +52,7 @@ impl AnalysisEngine {
         self.graph.shrink_to_fit();
         self.facts.references.candidates.shrink_to_fit();
         self.facts.references.resolved.shrink_to_fit();
-        self.facts.diagnostics.candidates.shrink_to_fit();
-        self.facts.diagnostics.resolved.shrink_to_fit();
+        self.diagnostics.shrink_to_fit();
         self.inference_by_file.shrink_to_fit();
         self.call_expression_outcomes_by_file.shrink_to_fit();
         self.local_read_types_by_file.shrink_to_fit();
