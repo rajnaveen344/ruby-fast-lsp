@@ -545,14 +545,6 @@ impl GemDependencyProduct {
         })
     }
 
-    pub fn bind_owned_into_measured(
-        &self,
-        manifest: GemDependencyManifest,
-        engine: &mut AnalysisEngine,
-    ) -> Result<GemDependencyBinding> {
-        self.bind_owned_into_measured_with_resolution(manifest, engine, true)
-    }
-
     pub fn bind_owned_deferred_into_measured(
         &self,
         manifest: GemDependencyManifest,

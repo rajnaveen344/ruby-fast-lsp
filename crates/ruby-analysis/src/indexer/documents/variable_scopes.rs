@@ -391,23 +391,6 @@ impl VariableScopes {
         None
     }
 
-    /// Find a child scope that matches the given range
-    pub fn find_child_scope_by_range(
-        &self,
-        parent_id: LVScopeId,
-        range: TextRange,
-    ) -> Option<LVScopeId> {
-        let scope = self.scopes.get(parent_id)?;
-        for &child_id in &scope.children {
-            if let Some(child) = self.scopes.get(child_id) {
-                if child.range == range {
-                    return Some(child_id);
-                }
-            }
-        }
-        None
-    }
-
     /// Add a type assignment to a variable in a given scope.
     /// If the variable doesn't exist in this scope, returns false.
     pub fn add_type_assignment(

@@ -475,75 +475,12 @@ impl IndexerGem {
         });
     }
 
-    /// Add a required gem to the project
-    pub fn add_required_gem(&mut self, gem_name: String) {
-        if self.required_gems.insert(gem_name.clone()) {
-            debug!("Added required gem: {}", gem_name);
-        }
-    }
-
     // ========================================================================
     // Indexing
     // ========================================================================
 
-    /// Index gems based on project requirements.
-    /// If `selective` is true, only index required gems.
-    /// If `selective` is false, index all discovered gems.
-    pub async fn index_gems(
-        &mut self,
-        selective: bool,
-        server: &RubyLanguageServer,
-    ) -> Result<Vec<Url>> {
-        info!("Starting gem indexing (selective: {})", selective);
-
-        if selective && self.required_gems.is_empty() {
-            info!("No required gems discovered; skipping gem discovery/indexing");
-            return Ok(Vec::new());
-        }
-
-        let prepared_manifests = if selective {
-            Some(self.prepare_required_gem_manifests_blocking()?)
-        } else {
-            self.discover_gems().await?;
-            None
-        };
-        info!("Discovered {} gems", self.discovered_gems.len());
-        let project_root = self.workspace_root.as_ref().expect(
-            "INVARIANT VIOLATED: gem indexing has no Ruby project root. This is a bug because dependency facts must be owned by one isolated project engine. Fix: construct IndexerGem with the owning project root.",
-        );
-        let project_uri = Url::from_directory_path(project_root).map_err(|_| {
-            anyhow!(
-                "Ruby project root is not a valid file URI: {}",
-                project_root.display()
-            )
-        })?;
-        let analysis_engine = server.analysis_engine_for_uri(&project_uri);
-
-        let indexed_files = if selective && !self.required_gems.is_empty() {
-            self.index_prepared_required_gems_with_shared_product(
-                server,
-                analysis_engine.clone(),
-                prepared_manifests.expect(
-                    "INVARIANT VIOLATED: selective gem indexing lost its prepared manifests. \
-                     This is a bug because discovery and manifest construction are one required \
-                    preflight. Fix: retain the prepared manifests until product binding.",
-                ),
-                None,
-            )
-            .await?
-        } else {
-            let indexed_files = self.index_all_gems(analysis_engine.clone()).await?;
-            if !indexed_files.is_empty() {
-                analysis_engine.write().resolve();
-            }
-            indexed_files
-        };
-
-        info!("Indexed {} files from gems", indexed_files.len());
-        Ok(indexed_files)
-    }
-
-    pub(crate) async fn index_prepared_required_gems_with_shared_product(
+    #[cfg(test)]
+    async fn index_prepared_required_gems_with_shared_product(
         &self,
         server: &RubyLanguageServer,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
@@ -809,27 +746,6 @@ impl IndexerGem {
         .await
     }
 
-    pub(crate) fn prepare_required_gem_manifests_blocking(
-        &mut self,
-    ) -> Result<Vec<GemDependencyManifest>> {
-        let names = self.discover_required_gems_blocking()?;
-        names
-            .into_iter()
-            .filter_map(|name| {
-                self.prepare_required_gem_manifest_blocking(&name)
-                    .transpose()
-            })
-            .collect()
-    }
-
-    pub(crate) fn discover_required_gems_blocking(&mut self) -> Result<Vec<String>> {
-        if self.required_gems.is_empty() {
-            return Ok(Vec::new());
-        }
-        self.discover_gems_blocking()?;
-        Ok(self.required_gems_with_dependencies())
-    }
-
     pub(crate) fn prepare_required_gem_manifest_blocking(
         &self,
         gem_name: &str,
@@ -975,29 +891,6 @@ impl IndexerGem {
         Ok(indexed_files)
     }
 
-    /// Index all discovered gems
-    async fn index_all_gems(
-        &self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    ) -> Result<Vec<Url>> {
-        let mut indexed_files = Vec::new();
-
-        for gem_versions in self.discovered_gems.values() {
-            if let Some(gem_info) = self.select_preferred_version(gem_versions) {
-                if self.excluded_gems.contains(&gem_info.name) {
-                    continue;
-                }
-                info!(
-                    "Indexing gem: {} v{} platform={} source={:?}",
-                    gem_info.name, gem_info.version, gem_info.platform, gem_info.source
-                );
-                indexed_files.extend(self.index_gem_files(gem_info, analysis_engine.clone()));
-            }
-        }
-
-        Ok(indexed_files)
-    }
-
     /// Index all Ruby files from a gem's lib paths
     fn index_gem_files(
         &self,
@@ -1056,11 +949,6 @@ impl IndexerGem {
     // ========================================================================
     // Discovery
     // ========================================================================
-
-    /// Discover available gems in the system
-    pub async fn discover_gems(&mut self) -> Result<usize> {
-        self.discover_gems_blocking()
-    }
 
     pub(crate) fn discover_gems_blocking(&mut self) -> Result<usize> {
         debug!("Starting gem discovery process");
@@ -2032,36 +1920,12 @@ impl IndexerGem {
         self.required_gems_with_dependencies()
     }
 
-    pub fn get_all_gems(&self) -> Vec<&GemInfo> {
-        self.discovered_gems
-            .values()
-            .filter_map(|candidates| self.select_preferred_version(candidates))
-            .collect()
-    }
-
     pub fn get_gem_lib_paths(&self) -> Vec<PathBuf> {
         self.discovered_gems
             .values()
             .filter_map(|v| self.select_preferred_version(v))
             .flat_map(|g| g.lib_paths.iter().cloned())
             .collect()
-    }
-
-    pub fn get_gem_paths(&self, name: &str) -> Vec<PathBuf> {
-        self.discovered_gems
-            .get(name)
-            .and_then(|v| self.select_preferred_version(v))
-            .map(|g| g.lib_paths.clone())
-            .unwrap_or_default()
-    }
-
-    pub fn get_gem_lib_paths_for_gems(&self, names: &[String]) -> Vec<PathBuf> {
-        let mut paths: Vec<PathBuf> = names.iter().flat_map(|n| self.get_gem_paths(n)).collect();
-
-        // Deduplicate while preserving order
-        let mut seen = HashSet::new();
-        paths.retain(|p| seen.insert(p.clone()));
-        paths
     }
 }
 

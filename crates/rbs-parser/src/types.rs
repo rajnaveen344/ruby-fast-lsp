@@ -307,11 +307,6 @@ impl MethodParam {
             kind: ParamKind::Optional,
         }
     }
-
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
 }
 
 /// Parameter kind

@@ -79,22 +79,6 @@ impl<'a> TypeQuery<'a> {
             .max_by_key(|fact| fact.range.start_byte)
             .map(|fact| fact.ruby_type)
     }
-
-    pub fn get_method_return_type_at(
-        &self,
-        fqn: &FullyQualifiedName,
-        byte_offset: u32,
-    ) -> Option<RubyType> {
-        match self.query.type_at(
-            &TypeSubject::MethodReturn(fqn.clone()),
-            self.source_file_id,
-            byte_offset,
-        ) {
-            TypeResolution::Resolved(fact) => Some(fact.ruby_type),
-            TypeResolution::Ambiguous(_) => None,
-            TypeResolution::Unresolved => None,
-        }
-    }
 }
 
 #[cfg(test)]

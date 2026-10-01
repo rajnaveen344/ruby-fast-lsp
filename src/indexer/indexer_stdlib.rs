@@ -295,41 +295,13 @@ impl IndexerStdlib {
     // Indexing
     // ========================================================================
 
-    /// Index standard library based on Ruby version and required modules
-    pub async fn index_stdlib(
-        &mut self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    ) -> Result<()> {
-        let start = Instant::now();
-        info!("Starting stdlib indexing");
-
-        self.discover_stdlib_paths()?;
-
-        // Core Ruby classes are language semantics, not optional runtime libraries.
-        // Keep them available even when the selected Ruby executable is missing or
-        // its stdlib paths cannot be discovered.
-        self.index_core_stubs(analysis_engine.clone()).await?;
-
-        if self.stdlib_paths.is_empty() {
-            warn!(
-                "No runtime stdlib paths found; bundled core stubs remain indexed, skipping required stdlib modules"
-            );
-            return Ok(());
-        }
-
-        // Index required stdlib modules
-        self.index_required_modules(analysis_engine).await?;
-
-        info!("Stdlib indexing completed in {:?}", start.elapsed());
-        Ok(())
-    }
-
     /// Index core stubs if available
     ///
     /// Stubs are loaded from the extension's stubs directory (stubs/rubystubsXY/).
     /// In production, these are extracted from zip files by the VS Code extension
     /// on first activation.
-    pub(crate) async fn index_core_stubs(
+    #[cfg(test)]
+    async fn index_core_stubs(
         &self,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) -> Result<()> {
@@ -634,21 +606,6 @@ impl IndexerStdlib {
         Ok(())
     }
 
-    /// Index only the required stdlib modules
-    async fn index_required_modules(
-        &self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    ) -> Result<()> {
-        self.index_required_modules_blocking(analysis_engine)
-    }
-
-    fn index_required_modules_blocking(
-        &self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    ) -> Result<()> {
-        self.index_required_modules_blocking_with_resolution(analysis_engine, true)
-    }
-
     fn index_required_modules_blocking_with_resolution(
         &self,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
@@ -889,14 +846,6 @@ impl IndexerStdlib {
 
     pub fn get_stdlib_paths(&self) -> &[PathBuf] {
         &self.stdlib_paths
-    }
-
-    pub fn get_required_modules(&self) -> Vec<String> {
-        self.required_modules.iter().cloned().collect()
-    }
-
-    pub fn is_module_required(&self, module_name: &str) -> bool {
-        self.required_modules.contains(module_name)
     }
 
     pub fn file_processor(&self) -> &FileProcessor {

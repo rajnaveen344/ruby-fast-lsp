@@ -21,15 +21,6 @@ pub fn core_rbs_file(name: &str) -> Option<&'static str> {
     core_rbs_files().find_map(|(candidate, content)| (candidate == name).then_some(content))
 }
 
-/// Get all embedded stdlib RBS files as (name, content) pairs
-pub fn stdlib_rbs_files() -> impl Iterator<Item = (&'static str, &'static str)> {
-    STDLIB_RBS_FILES.iter().filter_map(|(name, bytes)| {
-        std::str::from_utf8(bytes)
-            .ok()
-            .map(|content| (*name, content))
-    })
-}
-
 /// Get the number of embedded core files
 pub fn core_file_count() -> usize {
     CORE_RBS_FILES.len()
@@ -78,13 +69,6 @@ mod tests {
             core_rbs_file("core/constants.rbs").is_none(),
             "core RBS lookup must use exact paths relative to the embedded root"
         );
-    }
-
-    #[test]
-    fn test_stdlib_files_embedded() {
-        let files: Vec<_> = stdlib_rbs_files().collect();
-        println!("Embedded {} stdlib RBS files", files.len());
-        // stdlib might be empty or have files, both are ok
     }
 
     #[test]

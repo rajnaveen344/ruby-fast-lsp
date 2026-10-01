@@ -127,11 +127,6 @@ impl AnalysisIndexer {
         self.facts
     }
 
-    pub fn index_node(mut self, node: &Node<'_>) -> AnalysisIndex {
-        self.visit(node);
-        self.facts
-    }
-
     pub fn index_node_with_source(mut self, node: &Node<'_>, source: &str) -> AnalysisIndex {
         self.source = Some(source.to_string());
         self.visit(node);

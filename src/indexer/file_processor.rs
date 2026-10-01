@@ -354,15 +354,6 @@ impl FileProcessor {
         )
     }
 
-    pub fn process_file_deferred_resolution(
-        &self,
-        uri: &Url,
-        content: &str,
-        server: &RubyLanguageServer,
-    ) -> Result<ProcessResult> {
-        self.process_file_with_resolution(uri, content, server, FileResolution::Deferred)
-    }
-
     fn process_file_with_resolution(
         &self,
         uri: &Url,
@@ -1050,27 +1041,6 @@ impl FileProcessor {
             },
             resolution,
         );
-        Ok(())
-    }
-
-    pub fn collect_file_facts_as_deferred_resolution_with_known_namespaces(
-        &self,
-        uri: &Url,
-        content: &str,
-        server: &RubyLanguageServer,
-        source_kind: SourceKind,
-        known_namespaces: Arc<HashSet<FullyQualifiedName>>,
-    ) -> Result<()> {
-        self.collect_file_facts_as_with_resolution(
-            uri,
-            content,
-            server.analysis_engine_for_uri(uri),
-            source_kind,
-            false,
-            Some(known_namespaces),
-            false,
-            true,
-        )?;
         Ok(())
     }
 

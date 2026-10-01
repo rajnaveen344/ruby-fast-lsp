@@ -376,16 +376,6 @@ impl JrubyImportProvider {
         resolver.resolve(declaration)
     }
 
-    pub fn resolved_implementation(
-        &self,
-        internal_name: &str,
-    ) -> Result<Option<ResolvedJavaSource>, JavaImplementationResolutionError> {
-        Ok(self
-            .resolved_navigation_implementations(internal_name)?
-            .into_iter()
-            .next())
-    }
-
     pub fn resolved_navigation_implementations(
         &self,
         internal_name: &str,
@@ -476,10 +466,6 @@ impl JrubyImportProvider {
             ));
         }
         Ok(names)
-    }
-
-    pub fn static_navigation_class_names(&self, source: &str) -> Result<Vec<String>, String> {
-        Ok(self.static_navigation_plan(source)?.signature_class_names)
     }
 
     pub fn source_may_reference_static_java(&self, source: &str) -> bool {

@@ -71,10 +71,6 @@ impl MemberInfo {
         self.access_flags & 0x0010 != 0
     }
 
-    pub fn is_synthetic(&self) -> bool {
-        self.access_flags & 0x1000 != 0
-    }
-
     pub fn is_abstract(&self) -> bool {
         self.access_flags & 0x0400 != 0
     }

@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::core::{FullyQualifiedName, RubyConstant, TextRange, TypeSubject};
+use crate::core::{RubyConstant, TextRange, TypeSubject};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ConstantTypeProjection {
@@ -102,17 +102,5 @@ impl ConstantTypeEquation {
 
     pub fn dependencies(&self) -> &BTreeSet<ConstantTypeDependency> {
         &self.dependencies
-    }
-
-    pub fn constant_target(&self) -> Option<&FullyQualifiedName> {
-        match &self.target {
-            ConstantTypeTarget::Fact {
-                subject: TypeSubject::Constant(constant),
-                ..
-            } => Some(constant),
-            ConstantTypeTarget::Fact { .. }
-            | ConstantTypeTarget::LocalAssignment { .. }
-            | ConstantTypeTarget::LocalRead(_) => None,
-        }
     }
 }

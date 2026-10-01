@@ -504,11 +504,6 @@ impl ProjectNeutralFileFactsTemplate {
         facts
     }
 
-    pub fn into_instantiated(mut self, target_file_id: SourceFileId) -> FileFacts {
-        rebind_all_ranges(&mut self.facts, self.source_file_id, target_file_id);
-        self.facts
-    }
-
     pub fn estimated_heap_bytes(&self) -> usize {
         let facts = &self.facts;
         vec_payload_bytes(&facts.symbols)

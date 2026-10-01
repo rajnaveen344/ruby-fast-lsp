@@ -58,19 +58,6 @@ impl Loader {
         Ok(count)
     }
 
-    /// Load embedded Ruby stdlib type definitions
-    ///
-    /// Loads type definitions for standard library modules like JSON, YAML,
-    /// FileUtils, etc. from the embedded RBS content.
-    pub fn load_embedded_stdlib(&mut self) -> Result<usize, LoadError> {
-        let mut count = 0;
-        for (name, content) in embedded::stdlib_rbs_files() {
-            self.load_string(content, Some(PathBuf::from(name)))?;
-            count += 1;
-        }
-        Ok(count)
-    }
-
     /// Check if embedded core types are available
     pub fn has_embedded_core() -> bool {
         embedded::core_file_count() > 0

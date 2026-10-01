@@ -650,14 +650,6 @@ impl<'a> AnalysisQuery<'a> {
         )
     }
 
-    pub fn resolve_public_method_signature_facts(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_inner(namespace_fqn, method, false, None)
-    }
-
     pub fn resolve_protected_method_signature_facts(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -708,14 +700,6 @@ impl<'a> AnalysisQuery<'a> {
             None,
             Some(cache),
         )
-    }
-
-    pub fn resolve_public_method_signature_facts_for_type(
-        &self,
-        receiver_type: &RubyType,
-        method: &RubyMethod,
-    ) -> Vec<MethodFact> {
-        self.resolve_method_signature_facts_for_type_inner(receiver_type, method, false, None, None)
     }
 
     fn resolve_method_signature_facts_for_type_inner(
@@ -899,21 +883,6 @@ impl<'a> AnalysisQuery<'a> {
         self.resolve_method_callees_inner(namespace_fqn, method, false, None, None)
     }
 
-    pub fn resolve_public_method_callees_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        cache.method_callees(
-            self.engine.query_cache_identity(),
-            namespace_fqn,
-            *method,
-            MethodReturnQueryAccess::Public,
-            || self.resolve_public_method_callees(namespace_fqn, method),
-        )
-    }
-
     pub fn resolve_protected_method_callees(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -1006,22 +975,6 @@ impl<'a> AnalysisQuery<'a> {
         });
         all_callees.dedup();
         Some(all_callees)
-    }
-
-    pub fn resolve_protected_method_callees_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-        cache: &AnalysisQueryCache,
-    ) -> Option<Vec<ResolvedMethodCallee>> {
-        cache.method_callees(
-            self.engine.query_cache_identity(),
-            namespace_fqn,
-            *method,
-            MethodReturnQueryAccess::Protected(caller_namespace_fqn.clone()),
-            || self.resolve_protected_method_callees(namespace_fqn, method, caller_namespace_fqn),
-        )
     }
 
     pub(super) fn resolve_method_callees_inner(
@@ -2107,16 +2060,6 @@ impl<'a> AnalysisQuery<'a> {
             .collect()
     }
 
-    pub fn method_reference_ranges_for_constant_receiver(
-        &self,
-        receiver_path: &[RubyConstant],
-        context: &[RubyConstant],
-        method: &RubyMethod,
-    ) -> Vec<TextRange> {
-        let namespace_fqn = self.resolve_constant_receiver(receiver_path, context);
-        self.method_reference_ranges(&namespace_fqn, method)
-    }
-
     pub fn method_reference_ranges_for_constant_receiver_public(
         &self,
         receiver_path: &[RubyConstant],
@@ -2125,18 +2068,6 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Vec<TextRange> {
         let namespace_fqn = self.resolve_constant_receiver(receiver_path, context);
         self.method_reference_ranges_public_receiver(&namespace_fqn, method)
-    }
-
-    pub fn method_reference_ranges_for_current_scope(
-        &self,
-        context: &[RubyConstant],
-        method: &RubyMethod,
-    ) -> Vec<TextRange> {
-        let namespace_fqn = FullyQualifiedName::namespace_with_kind(
-            context.to_vec(),
-            crate::core::NamespaceKind::Instance,
-        );
-        self.method_reference_ranges(&namespace_fqn, method)
     }
 
     pub fn symbol_definition_ranges(

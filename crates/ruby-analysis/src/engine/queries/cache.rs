@@ -1234,19 +1234,6 @@ impl<'a> AnalysisQuery<'a> {
         }
     }
 
-    pub fn constructor_return_type_for_namespace(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-    ) -> Option<RubyType> {
-        if namespace_fqn.namespace_kind() != Some(crate::core::NamespaceKind::Singleton) {
-            return None;
-        }
-
-        Some(RubyType::Class(FullyQualifiedName::constant(
-            namespace_fqn.namespace_parts(),
-        )))
-    }
-
     pub(crate) fn constant_dependency_type(
         &self,
         dependency: &crate::core::ConstantTypeDependency,

@@ -646,10 +646,6 @@ impl<'a> NamespaceBuilder<'a> {
         )
     }
 
-    pub fn alias_class_method(&mut self, new_name: &str, old_name: &str) -> &mut Self {
-        self.push_alias(new_name, old_name, MethodKind::Class, AliasForm::Keyword)
-    }
-
     pub fn delegate_instance_method(&mut self, new_name: &str, receiver_method: &str) -> &mut Self {
         self.push_delegate(
             new_name,

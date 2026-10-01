@@ -50,14 +50,6 @@ impl FactCollector {
         self.semantics.query_cache.as_ref()
     }
 
-    pub fn with_direct_known_namespaces(
-        mut self,
-        known_namespaces: HashSet<FullyQualifiedName>,
-    ) -> Self {
-        self.semantics.known_namespaces = known_namespaces;
-        self
-    }
-
     pub fn with_shared_direct_known_namespaces(
         mut self,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,

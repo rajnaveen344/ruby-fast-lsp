@@ -95,7 +95,6 @@ pub struct WasmExtension {
     alloc: TypedFunc<i32, i32>,
     dealloc: TypedFunc<(i32, i32), ()>,
     abi_version: TypedFunc<(), i32>,
-    indexed_call_names: TypedFunc<(), i64>,
     index_call: TypedFunc<(i32, i32), i64>,
     handle_event: Option<TypedFunc<(i32, i32), i64>>,
     id: String,
@@ -352,7 +351,6 @@ impl WasmExtension {
             alloc,
             dealloc,
             abi_version,
-            indexed_call_names,
             index_call,
             handle_event,
             id: id.into(),
@@ -376,24 +374,6 @@ impl WasmExtension {
 
     pub fn indexed_call_names(&self) -> &[String] {
         &self.indexed_call_names_cache
-    }
-
-    pub fn refresh_indexed_call_names(&mut self) -> Result<()> {
-        self.refuel("indexed_call_names")?;
-        let packed = map_guest_call(
-            self.indexed_call_names.call(&mut self.store, ()),
-            "failed to call extension indexed_call_names",
-        )?;
-        let (bytes, ptr, len) = read_packed_bytes(
-            &self.memory,
-            &mut self.store,
-            packed,
-            self.config.max_output_bytes,
-        )?;
-        self.free_guest_bytes(ptr, len, "indexed_call_names output")?;
-        self.indexed_call_names_cache =
-            serde_json::from_slice(&bytes).context("invalid indexed_call_names JSON")?;
-        Ok(())
     }
 
     pub fn index_call(&mut self, ctx: &CallContext) -> Result<Vec<IndexPatch>> {

@@ -1937,12 +1937,6 @@ pub fn extension_status_reports() -> Vec<ExtensionStatusReport> {
     EXTENSION_REGISTRY.status_reports()
 }
 
-pub fn extension_status_response() -> ExtensionStatusResponse {
-    ExtensionStatusResponse {
-        extensions: extension_status_reports(),
-    }
-}
-
 pub fn validate_extension_package(path: &Path) -> Result<ExtensionStatusReport, String> {
     let mut packages = Vec::new();
     collect_extension_package(

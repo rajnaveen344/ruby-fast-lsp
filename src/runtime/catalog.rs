@@ -284,13 +284,6 @@ struct RuntimeCandidate {
     source: RuntimeDiscoverySource,
 }
 
-pub async fn discover_runtime_catalog(
-    project_roots: Vec<PathBuf>,
-    indexing_resources: IndexingResourceGovernor,
-) -> RuntimeCatalog {
-    runtime_catalog_for_projects(project_roots, discover_runtimes(indexing_resources).await)
-}
-
 pub async fn discover_runtimes(
     indexing_resources: IndexingResourceGovernor,
 ) -> Vec<DiscoveredRuntime> {

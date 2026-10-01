@@ -124,37 +124,6 @@ impl SyntheticProject {
             .unwrap_or(false)
     }
 
-    pub fn method_alias_old_target(&self, target: &MethodTarget) -> Option<MethodTarget> {
-        self.namespaces
-            .iter()
-            .filter(|namespace| namespace.fqn == target.owner && namespace.enabled)
-            .find_map(|namespace| {
-                namespace
-                    .aliases
-                    .iter()
-                    .find(|alias| alias.new_name == target.name && alias.kind == target.kind)
-                    .map(|alias| MethodTarget {
-                        owner: target.owner.clone(),
-                        name: alias.old_name.clone(),
-                        kind: alias.kind,
-                    })
-            })
-    }
-
-    pub fn alias_enabled(&self, target: &MethodTarget) -> bool {
-        self.namespaces
-            .iter()
-            .filter(|namespace| namespace.fqn == target.owner && namespace.enabled)
-            .find_map(|namespace| {
-                namespace
-                    .aliases
-                    .iter()
-                    .find(|alias| alias.new_name == target.name && alias.kind == target.kind)
-            })
-            .map(|alias| alias.enabled)
-            .unwrap_or(false)
-    }
-
     pub fn delegate_enabled(&self, target: &MethodTarget) -> bool {
         self.namespaces
             .iter()

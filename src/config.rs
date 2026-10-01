@@ -289,20 +289,6 @@ impl RubyFastLspConfig {
         }
     }
 
-    /// Get index paths based on Ruby version and workspace (simplified)
-    pub fn get_index_paths(&self, ruby_version: (u8, u8), workspace_root: PathBuf) -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-
-        // Add workspace root
-        paths.push(workspace_root);
-
-        if let Some(core_stubs_path) = self.get_core_stubs_path_internal(ruby_version) {
-            paths.push(PathBuf::from(core_stubs_path));
-        }
-
-        paths
-    }
-
     /// Internal method to get core stubs path
     pub fn get_core_stubs_path_internal(&self, ruby_version: (u8, u8)) -> Option<String> {
         // Use extension path if available

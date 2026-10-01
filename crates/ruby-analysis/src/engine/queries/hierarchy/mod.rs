@@ -3,8 +3,8 @@ pub(in crate::engine) mod types;
 use std::collections::HashSet;
 
 use crate::core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, RubyConstant, RubyMethod,
-    SourceFileId, TextRange,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, RubyConstant, RubyMethod, SourceFileId,
+    TextRange,
 };
 use crate::engine::queries::hierarchy::types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
@@ -91,13 +91,6 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn parse_namespace_fqn(&self, fqn: &str) -> Option<FullyQualifiedName> {
         parse_namespace_fqn_string(fqn)
-    }
-
-    pub fn type_hierarchy_node(
-        &self,
-        fqn: &FullyQualifiedName,
-    ) -> Option<(GraphNodeKind, TextRange)> {
-        self.engine.first_graph_node_definition(fqn)
     }
 
     pub fn type_hierarchy_node_for_constant(
@@ -218,13 +211,6 @@ impl<'a> AnalysisQuery<'a> {
             &mut subtypes,
         );
         subtypes
-    }
-
-    pub fn implementor_namespaces(
-        &self,
-        origin_fqn: &FullyQualifiedName,
-    ) -> Vec<FullyQualifiedName> {
-        collect_all_implementors(self.engine, origin_fqn)
     }
 
     pub fn method_implementation_ranges(

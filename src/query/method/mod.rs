@@ -75,25 +75,6 @@ impl EngineQuery {
         )
     }
 
-    pub fn find_public_method_definitions(
-        &self,
-        receiver: &MethodReceiver,
-        method: &RubyMethod,
-        namespace: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-    ) -> Option<Vec<Location>> {
-        self.find_method_definitions_with_private(
-            receiver,
-            method,
-            namespace,
-            namespace_kind,
-            position,
-            false,
-            None,
-        )
-    }
-
     pub fn find_protected_method_definitions(
         &self,
         receiver: &MethodReceiver,
