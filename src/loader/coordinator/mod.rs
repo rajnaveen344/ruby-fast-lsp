@@ -238,8 +238,7 @@ impl IndexingCoordinator {
         // gems start after the catalog exists so they can share the cooperative
         // partition; only frontier files collected before that need catalog-
         // sensitive replay before this project reports readiness.
-        server.set_runtime_classpath_fingerprint(&self.workspace_root, None);
-        server.set_jruby_import_provider(&self.workspace_root, None);
+        ctx.sink.clear_jruby_import_provider(&self.workspace_root);
         self.jruby_import_provider = None;
         self.jruby_runtime_archive = None;
         self.setup_file_processor(ctx);
@@ -399,12 +398,9 @@ impl IndexingCoordinator {
 
         self.jruby_import_provider = provider;
         self.jruby_runtime_archive = runtime_archive;
-        server.set_jruby_import_provider(&self.workspace_root, self.jruby_import_provider.clone());
-        server.set_runtime_classpath_fingerprint(
+        ctx.sink.install_jruby_import_provider(
             &self.workspace_root,
-            self.jruby_import_provider
-                .as_ref()
-                .map(|provider| provider.classpath_fingerprint().to_string()),
+            self.jruby_import_provider.clone(),
         );
         self.setup_file_processor(ctx);
 

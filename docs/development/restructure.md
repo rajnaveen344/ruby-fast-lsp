@@ -252,7 +252,7 @@ Delete this file when the last task is done. Git history keeps the record.
         and require roots (delete `RequireDiagnosticRoots::Server`), products
         and the governor, runtime discovery, open buffers through
         `SourceReader`.
-  - [ ] C1e. Add the `LoadSink` trait and a server adapter. Route source
+  - [x] C1e. Add the `LoadSink` trait and a server adapter. Route source
         registration, commits, resolve, runtime setters, status, and progress
         through it, one source (`stdlib`, `gems`, `project`, `jruby`) per
         commit. `src/server` is at 10 entries, so the adapter replaces a file

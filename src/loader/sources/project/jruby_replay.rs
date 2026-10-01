@@ -30,7 +30,7 @@ impl IndexerProject {
         &mut self,
         file_processor: FileProcessor,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<usize> {
         let provider = file_processor
             .jruby_import_provider()
@@ -47,7 +47,7 @@ impl IndexerProject {
                 self.workspace_root.display()
             )
         })?;
-        let analysis_engine = server.analysis_engine_for_uri(&project_uri);
+        let analysis_engine = ctx.sink.engine_for_uri(&project_uri);
         let known_namespaces = self.jruby_replay_known_namespaces.take().expect_invariant(
             "JRuby replay has no immutable pre-collection namespace baseline",
             "replayed files use the same context as provider-aware batches",

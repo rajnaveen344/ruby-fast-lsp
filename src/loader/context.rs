@@ -1,17 +1,18 @@
-//! Owner-supplied inputs the loader reads.
+//! Owner-supplied inputs the loader reads, and the owner operations it performs.
 //!
 //! The server builds one [`LoadContext`] per project load or interactive file
-//! pass and passes it next to itself. Every field is a cheap shared handle:
-//! configuration, published require roots, and open buffers are read live at
-//! the moment the loader consults them, exactly as reads through the server
-//! were. Writes (fact commits, document version marks, runtime selections,
-//! publication) remain on the server.
+//! pass. Every field is a cheap shared handle: configuration, published
+//! require roots, and open buffers are read live at the moment the loader
+//! consults them, exactly as reads through the server were. Writes and owner
+//! lookups (source registration, document version marks, runtime selections,
+//! status, progress, publication) go through [`LoadSink`].
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::{
     ExtensionRegistryHandle, ProjectContextSeed, ProjectContextSnapshot,
 };
 use crate::environment::runtime::catalog::DiscoveredRuntime;
+use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use crate::loader::cache::dependency_product::{
     GemBindingStat, GemDependencyProduct, GemDependencyProductKey,
@@ -381,6 +382,16 @@ pub(crate) trait LoadSink: Send + Sync {
     );
     /// Queue a complete diagnostic projection for `uri`.
     fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>);
+    /// Withdraw the JRuby classpath fingerprint and import provider of the
+    /// project at `root`, in that order, before a new run builds them.
+    fn clear_jruby_import_provider(&self, root: &Path);
+    /// Install the JRuby import provider of the project at `root`, then its
+    /// classpath fingerprint; `None` records a run without a provider.
+    fn install_jruby_import_provider(
+        &self,
+        root: &Path,
+        provider: Option<Arc<JrubyImportProvider>>,
+    );
     /// Deterministic interleaving points for tests.
     #[cfg(test)]
     fn test_schedule(&self) -> Arc<crate::loader::scheduling::test_schedule::TestSchedule>;

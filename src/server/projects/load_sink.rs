@@ -5,6 +5,7 @@ use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{
     ExtensionRegistryHandle, ProjectContextSeed, ProjectContextSnapshot,
 };
+use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::loader::context::{IndexingRunState, LoadSink};
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
@@ -160,6 +161,23 @@ impl LoadSink for RubyLanguageServer {
 
     fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
         RubyLanguageServer::queue_diagnostics(self, uri, diagnostics);
+    }
+
+    fn clear_jruby_import_provider(&self, root: &Path) {
+        self.set_runtime_classpath_fingerprint(&root.to_path_buf(), None);
+        self.set_jruby_import_provider(root, None);
+    }
+
+    fn install_jruby_import_provider(
+        &self,
+        root: &Path,
+        provider: Option<Arc<JrubyImportProvider>>,
+    ) {
+        let fingerprint = provider
+            .as_ref()
+            .map(|provider| provider.classpath_fingerprint().to_string());
+        self.set_jruby_import_provider(root, provider);
+        self.set_runtime_classpath_fingerprint(&root.to_path_buf(), fingerprint);
     }
 
     #[cfg(test)]

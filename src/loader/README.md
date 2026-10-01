@@ -13,7 +13,7 @@ reference candidates, resolved references, and diagnostics.
 - `context.rs`: `LoadContext`, the owner-supplied inputs the loader reads
   (live configuration, published require roots, shared products, the
   resource governor, runtime discovery, and open buffers through
-  `SourceReader`)
+  `SourceReader`), and `LoadSink`, the owner operations it performs
 - `file_processor/`: parse one file and run `FactCollector`, merge collected
   facts, and convert extension-produced facts; `syntax_diagnostics.rs` there
   produces parser syntax, unreachable-code, and inconsistent-return
@@ -37,10 +37,21 @@ The server builds a `LoadContext` for each whole-project load
 entry points. Its handles read live: configuration, published require roots,
 and open buffers are observed when the loader consults them. The loader reads
 configuration, require roots, shared products, the resource governor, runtime
-discovery, and open buffers only through this context; it still asks the
-server for project routing (`analysis_engine_for_uri`, `workspace_for_uri`,
-`list_workspaces`), extension context, and per-document locks. Writes stay on
-the server.
+discovery, and open buffers only through this context.
+
+## Writes and owner lookups
+
+`LoadContext::sink` is a `LoadSink`, implemented by the server in
+`src/server/projects/load_sink.rs`. Every write and owner lookup the loader
+makes goes through it as one domain operation: engine and project routing,
+indexing run checks and phase transitions, progress, runtime, Ruby version,
+and JRuby provider selection, source registration, processed-document marks,
+require-root publication, navigation demand queues, extension registry and
+context, document locks, and diagnostic publication. The loader calls them in
+its own order, so the owner observes the same write sequence as before. Fact
+commits and resolution still run on the engine handle returned by
+`engine_for_uri`. The `server` parameter remains on entry points only as a
+pass-through until it is removed.
 
 ## Current Flow
 
