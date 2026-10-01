@@ -92,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tarball_data = download_tarball(&tarball_url)?;
     println!("   Downloaded {} bytes", tarball_data.len());
 
-    // Extract core/ and stdlib/ directories
+    // Extract the core/ directory
     println!("\n📦 Extracting RBS files...");
     let rbs_types_dir = crate_root.join("rbs_types");
     extract_rbs_files(&tarball_data, &rbs_types_dir, &target_commit)?;
@@ -282,29 +282,20 @@ fn extract_rbs_files(
     dest_dir: &Path,
     _commit: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Clean existing directories
+    // Only core/ is embedded; stdlib/ signatures are not loaded by the server.
     let core_dir = dest_dir.join("core");
-    let stdlib_dir = dest_dir.join("stdlib");
 
     if core_dir.exists() {
         println!("   Removing existing core/ directory...");
         fs::remove_dir_all(&core_dir)?;
     }
-    if stdlib_dir.exists() {
-        println!("   Removing existing stdlib/ directory...");
-        fs::remove_dir_all(&stdlib_dir)?;
-    }
-
-    // Create destination directories
     fs::create_dir_all(&core_dir)?;
-    fs::create_dir_all(&stdlib_dir)?;
 
     // Decompress and extract
     let decoder = GzDecoder::new(tarball_data);
     let mut archive = Archive::new(decoder);
 
     let mut core_count = 0;
-    let mut stdlib_count = 0;
 
     for entry in archive.entries()? {
         let mut entry = entry?;
@@ -313,7 +304,6 @@ fn extract_rbs_files(
 
         // Check if this is a core/ file
         let is_core = path_str.contains("/core/") && path_str.ends_with(".rbs");
-        let is_stdlib = path_str.contains("/stdlib/") && path_str.ends_with(".rbs");
 
         if is_core {
             // Extract relative path after "core/"
@@ -332,28 +322,10 @@ fn extract_rbs_files(
                 fs::write(&dest_path, &content)?;
                 core_count += 1;
             }
-        } else if is_stdlib {
-            // Extract relative path after "stdlib/"
-            if let Some(pos) = path_str.find("/stdlib/") {
-                let relative = &path_str[pos + 8..]; // Skip "/stdlib/"
-                let dest_path = stdlib_dir.join(relative);
-
-                // Create parent directories
-                if let Some(parent) = dest_path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-
-                // Extract file
-                let mut content = Vec::new();
-                entry.read_to_end(&mut content)?;
-                fs::write(&dest_path, &content)?;
-                stdlib_count += 1;
-            }
         }
     }
 
     println!("   Extracted {} core RBS files", core_count);
-    println!("   Extracted {} stdlib RBS files", stdlib_count);
 
     if core_count == 0 {
         return Err("No core RBS files found in tarball. Check the repository structure.".into());

@@ -1,7 +1,7 @@
 //! RBS file loader for loading type definitions.
 //!
 //! This module provides functionality to load RBS files from:
-//! - Embedded Ruby core and stdlib type definitions (compiled into the binary)
+//! - Embedded Ruby core type definitions (compiled into the binary)
 //! - Project sig/ directories
 //! - Custom RBS files
 
@@ -61,11 +61,6 @@ impl Loader {
     /// Check if embedded core types are available
     pub fn has_embedded_core() -> bool {
         embedded::core_file_count() > 0
-    }
-
-    /// Check if embedded stdlib types are available
-    pub fn has_embedded_stdlib() -> bool {
-        embedded::stdlib_file_count() > 0
     }
 
     // Legacy methods for backward compatibility with file-based loading
@@ -494,12 +489,6 @@ end
     fn test_embedded_core_exists() {
         let has_core = Loader::has_embedded_core();
         assert!(has_core, "Embedded core RBS types should be available");
-    }
-
-    #[test]
-    fn test_embedded_stdlib_exists() {
-        let has_stdlib = Loader::has_embedded_stdlib();
-        println!("Embedded stdlib available: {}", has_stdlib);
     }
 
     #[test]

@@ -9,11 +9,7 @@ include!(concat!(env!("OUT_DIR"), "/embedded_rbs.rs"));
 
 /// Get all embedded core RBS files as (name, content) pairs
 pub fn core_rbs_files() -> impl Iterator<Item = (&'static str, &'static str)> {
-    CORE_RBS_FILES.iter().filter_map(|(name, bytes)| {
-        std::str::from_utf8(bytes)
-            .ok()
-            .map(|content| (*name, content))
-    })
+    CORE_RBS_FILES.iter().copied()
 }
 
 /// Get one embedded core RBS file by its path relative to `rbs_types/core`.
@@ -24,11 +20,6 @@ pub fn core_rbs_file(name: &str) -> Option<&'static str> {
 /// Get the number of embedded core files
 pub fn core_file_count() -> usize {
     CORE_RBS_FILES.len()
-}
-
-/// Get the number of embedded stdlib files
-pub fn stdlib_file_count() -> usize {
-    STDLIB_RBS_FILES.len()
 }
 
 #[cfg(test)]
