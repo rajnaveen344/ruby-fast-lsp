@@ -1,0 +1,14 @@
+//! Semantic query memoization and the `AnalysisQuery` type queries that use it.
+
+mod bindings;
+mod expressions;
+mod memo;
+mod method_returns;
+mod namespaces;
+mod thread_memo;
+
+pub use memo::AnalysisQueryCache;
+pub(in crate::engine) use memo::MethodReturnQueryAccess;
+
+#[cfg(test)]
+mod tests;

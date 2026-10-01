@@ -10,7 +10,8 @@ Implementation folders are private to the engine.
 | `state/external_facts_template/` | Project-neutral dependency fact templates and their snapshot codecs |
 | `state/tests/` | Engine state tests grouped by lifecycle, fingerprints, inference outcomes, navigation, graph, caches, and constants |
 | `resolution/` | Ruby lookup chains and MRO (`lookup_chain`), chain method facts and visibility (`chain_methods`), callees, signatures, method references, reference ranges, definitions, and rename policy |
-| `queries/` | Common reads, query caching, and file-scoped type queries |
+| `queries/` | Common reads and the `AnalysisQuery`/`TypeQuery` entry points |
+| `queries/cache/` | Per-source and thread-local method lookup memos (`memo`, `thread_memo`), and expression, binding, namespace/constant, and method-return type queries |
 | `queries/definitions/` | Definition source selection and partial ordering from participating Ruby lookup chains |
 | `queries/lookup/` | Constant/method matching and hover lookup results |
 | `queries/hierarchy/` | Call/type hierarchy queries and result types |
