@@ -2,7 +2,7 @@ use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
 use crate::core::names::fqn_id::FqnId;
-use crate::core::storage::file_owned_index::place_appended_file_facts;
+use crate::core::storage::file_owned::ordered_append::place_appended_file_facts;
 use crate::core::storage::memory_estimate::{map_table_bytes, vec_payload_bytes};
 use crate::core::{FullyQualifiedName, SourceFileId, TextRange};
 

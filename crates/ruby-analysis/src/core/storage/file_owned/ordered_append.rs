@@ -2,7 +2,7 @@ use crate::core::SourceFileId;
 
 /// Restore deterministic file/range ordering after one file's facts were
 /// appended to an already ordered shared index.
-pub(super) fn place_appended_file_facts<T: Copy>(
+pub(in crate::core::storage) fn place_appended_file_facts<T: Copy>(
     ids: &mut [T],
     appended_count: usize,
     file_id: SourceFileId,
