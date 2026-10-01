@@ -1,9 +1,9 @@
-use crate::invariant::ExpectInvariant;
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use crate::core::names::fqn_id::FqnId;
-use crate::core::storage::file_owned::ordered_append::place_appended_file_facts;
-use crate::core::storage::memory_estimate::{map_table_bytes, vec_payload_bytes};
+use crate::core::storage::file_owned::arena::{FileArena, FileIndex};
+use crate::core::storage::file_owned::FileRow;
 use crate::core::{FullyQualifiedName, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -84,230 +84,82 @@ impl StoredSymbolFact {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct SymbolStore {
-    facts: Vec<Option<StoredSymbolFact>>,
-    free_facts: Vec<SymbolFactId>,
-    facts_by_fqn: HashMap<FqnId, Vec<SymbolFactId>>,
-    facts_by_file: HashMap<SourceFileId, Vec<SymbolFactId>>,
+impl FileRow for StoredSymbolFact {
+    fn file_id(&self) -> SourceFileId {
+        self.range.file_id
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct SymbolFactId(u32);
+#[derive(Debug, Clone, Default)]
+pub struct SymbolStore {
+    facts: FileArena<StoredSymbolFact>,
+    facts_by_fqn: FileIndex<FqnId>,
+}
 
-impl SymbolFactId {
-    fn from_index(index: usize) -> Self {
-        Self(u32::try_from(index).expect_invariant(
-            "symbol fact arena exceeded u32 ids",
-            "symbol indexes use compact u32 ids",
-            "widen SymbolFactId and every stored symbol index together",
-        ))
-    }
-
-    fn index(self) -> usize {
-        self.0 as usize
-    }
+/// Symbols of one file are ordered by declaration range, then kind.
+fn by_range(left: &StoredSymbolFact, right: &StoredSymbolFact) -> Ordering {
+    let key = |fact: &StoredSymbolFact| (fact.range.start_byte, fact.range.end_byte, fact.kind);
+    key(left).cmp(&key(right))
 }
 
 impl SymbolStore {
     pub fn facts_for(&self, fqn: FqnId) -> Vec<StoredSymbolFact> {
         self.facts_by_fqn
             .get(&fqn)
-            .map(|ids| self.clone_facts(ids))
-            .unwrap_or_default()
+            .iter()
+            .map(|id| *self.facts.get(*id))
+            .collect()
     }
 
     pub fn has_facts(&self, fqn: FqnId) -> bool {
-        self.facts_by_fqn
-            .get(&fqn)
-            .is_some_and(|ids| !ids.is_empty())
+        !self.facts_by_fqn.get(&fqn).is_empty()
     }
 
     pub fn all_facts(&self) -> Vec<StoredSymbolFact> {
-        self.facts.iter().filter_map(|fact| *fact).collect()
+        self.facts.iter().copied().collect()
     }
 
     pub fn fact_count(&self) -> usize {
-        self.facts.iter().filter(|fact| fact.is_some()).count()
+        self.facts.len()
     }
 
     pub fn known_namespace_fqns(&self) -> HashSet<FqnId> {
         self.facts
             .iter()
-            .filter_map(|fact| *fact)
             .filter(|fact| matches!(fact.kind, SymbolKind::Class | SymbolKind::Module))
             .map(|fact| fact.fqn)
             .collect()
     }
 
-    pub fn facts_in_file(&self, file_id: crate::core::SourceFileId) -> Vec<StoredSymbolFact> {
-        self.facts_by_file
-            .get(&file_id)
-            .map(|ids| self.clone_facts(ids))
-            .unwrap_or_default()
-    }
-
-    pub fn remove_file(&mut self, file_id: crate::core::SourceFileId) {
-        let Some(stale_ids) = self.facts_by_file.remove(&file_id) else {
-            return;
-        };
-        for stale_id in stale_ids {
-            let Some(stale) = self.take_fact(stale_id) else {
-                continue;
-            };
-            self.free_facts.push(stale_id);
-            if let Some(ids) = self.facts_by_fqn.get_mut(&stale.fqn) {
-                ids.retain(|id| *id != stale_id);
-                if ids.is_empty() {
-                    self.facts_by_fqn.remove(&stale.fqn);
-                }
-            }
-        }
+    pub fn facts_in_file(&self, file_id: SourceFileId) -> Vec<StoredSymbolFact> {
+        self.facts.rows_in_file(file_id).copied().collect()
     }
 
     pub fn replace_file(
         &mut self,
-        file_id: crate::core::SourceFileId,
+        file_id: SourceFileId,
         facts: impl IntoIterator<Item = StoredSymbolFact>,
     ) {
-        self.remove_file(file_id);
-        let mut touched_fqns = Vec::new();
-        for fact in facts {
-            invariant!(
-                fact.range.file_id == file_id,
-                what = "replacement symbol fact belongs to a different file id",
-                why = "SymbolStore::replace_file must only receive facts for the target file",
-                fix = "partition facts by SourceFileId before replacing",
-            );
-            let key = fact.fqn;
-            if let Some((_, appended_count)) =
-                touched_fqns.iter_mut().find(|(touched, _)| *touched == key)
-            {
-                *appended_count += 1;
-            } else {
-                touched_fqns.push((key, 1));
-            }
-            let id = self.insert_fact(fact);
-            self.facts_by_fqn.entry(key).or_default().push(id);
-            self.facts_by_file.entry(file_id).or_default().push(id);
-        }
-        for (fqn, appended_count) in touched_fqns {
-            if let Some(ids) = self.facts_by_fqn.get_mut(&fqn) {
-                place_appended_file_facts(
-                    ids,
-                    appended_count,
-                    file_id,
-                    |id| {
-                        self.facts[id.index()]
-                            .as_ref()
-                            .expect_invariant(
-                                "symbol index points to missing fact",
-                                "indexes must be removed before arena facts",
-                                "remove stale ids from every SymbolStore index",
-                            )
-                            .range
-                            .file_id
-                    },
-                    |appended| sort_symbol_ids(&self.facts, appended),
-                );
-                ids.shrink_to_fit();
-            }
-        }
-        if let Some(ids) = self.facts_by_file.get_mut(&file_id) {
-            sort_symbol_ids_by_file(&self.facts, ids);
-            ids.shrink_to_fit();
-        }
+        self.facts.remove_file(file_id, |arena, stale| {
+            self.facts_by_fqn.unlink(stale.fqn, file_id, arena)
+        });
+        let ids = self.facts.insert_file(file_id, facts, by_range);
+        self.facts_by_fqn.link(
+            file_id,
+            ids.iter().map(|id| (self.facts.get(*id).fqn, *id)),
+            &self.facts,
+            by_range,
+        );
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
-        vec_payload_bytes(&self.facts)
-            + vec_payload_bytes(&self.free_facts)
-            + map_table_bytes(&self.facts_by_fqn)
-            + map_table_bytes(&self.facts_by_file)
-            + self
-                .facts_by_fqn
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
-            + self
-                .facts_by_file
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
+        self.facts.estimated_heap_bytes() + self.facts_by_fqn.estimated_heap_bytes()
     }
 
     pub fn shrink_to_fit(&mut self) {
         self.facts.shrink_to_fit();
-        self.free_facts.shrink_to_fit();
         self.facts_by_fqn.shrink_to_fit();
-        self.facts_by_file.shrink_to_fit();
-        for ids in self.facts_by_fqn.values_mut() {
-            ids.shrink_to_fit();
-        }
-        for ids in self.facts_by_file.values_mut() {
-            ids.shrink_to_fit();
-        }
     }
-
-    fn insert_fact(&mut self, fact: StoredSymbolFact) -> SymbolFactId {
-        if let Some(id) = self.free_facts.pop() {
-            let slot = self.facts.get_mut(id.index()).expect_invariant(
-                "symbol free list points outside fact arena",
-                "free ids must come from previous arena slots",
-                "only push ids returned by SymbolStore::take_fact",
-            );
-            invariant!(
-                slot.is_none(),
-                what = "symbol free list points to occupied fact slot",
-                why = "free ids must only reference removed facts",
-                fix = "push each removed symbol id at most once",
-            );
-            *slot = Some(fact);
-            return id;
-        }
-        let id = SymbolFactId::from_index(self.facts.len());
-        self.facts.push(Some(fact));
-        id
-    }
-
-    fn fact(&self, id: SymbolFactId) -> Option<StoredSymbolFact> {
-        self.facts.get(id.index()).and_then(|fact| *fact)
-    }
-
-    fn take_fact(&mut self, id: SymbolFactId) -> Option<StoredSymbolFact> {
-        self.facts.get_mut(id.index()).and_then(Option::take)
-    }
-
-    fn clone_facts(&self, ids: &[SymbolFactId]) -> Vec<StoredSymbolFact> {
-        ids.iter().filter_map(|id| self.fact(*id)).collect()
-    }
-}
-
-fn sort_symbol_ids(facts: &[Option<StoredSymbolFact>], ids: &mut [SymbolFactId]) {
-    ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect_invariant(
-            "symbol index points to missing fact",
-            "indexes must be removed before arena facts",
-            "remove stale ids from every SymbolStore index",
-        );
-        (
-            fact.range.file_id,
-            fact.range.start_byte,
-            fact.range.end_byte,
-            fact.kind,
-        )
-    });
-}
-
-fn sort_symbol_ids_by_file(facts: &[Option<StoredSymbolFact>], ids: &mut [SymbolFactId]) {
-    ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect_invariant(
-            "symbol file index points to missing fact",
-            "indexes must be removed before arena facts",
-            "remove stale ids from every SymbolStore index",
-        );
-        (fact.range.start_byte, fact.range.end_byte, fact.kind)
-    });
 }
 
 #[cfg(test)]
