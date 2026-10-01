@@ -93,7 +93,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - `ReferenceStore` is keyed by target, not file. Each workspace pass
     rebuilds it, and `facts_for` returns borrowed slices on the
     references hot path.
-- [ ] B3. Extract the `AnalysisEngine` components one at a time: `Files`,
+- [x] B3. Extract the `AnalysisEngine` components one at a time: `Files`,
       `Names`, `DeclIndex`, `Hierarchy`, `UseIndex`, `TypeTable`, `Solver`,
       `Diagnostics`. Each owns its impls in its own module.
   - [x] B3a. Move `engine/state/fingerprint/` and
@@ -131,7 +131,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B3j. Leave `state/lifecycle.rs` as orchestration over the components,
         with `semantic_revision` and `query_cache_identity` on the engine.
         Update `engine/README.md` and the analysis README.
-  - [ ] B3k. Add the read-only `Semantics` trait (`engine/semantics.rs`) for
+  - [x] B3k. Add the read-only `Semantics` trait (`engine/semantics.rs`) for
         mid-walk reads and switch the fact collector and `TypeTracker` to it
         instead of `Arc<RwLock<AnalysisEngine>>`.
 
