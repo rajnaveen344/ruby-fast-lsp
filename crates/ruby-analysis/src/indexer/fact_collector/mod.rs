@@ -4,8 +4,9 @@
 //! node modules translate Ruby syntax into facts. Call [`FactCollector::finish`]
 //! after visiting to hand the completed collection to the file composer.
 
+use crate::core::{FullyQualifiedName, ResolvedMethodCallee, RubyMethod, TypeFact, TypeSubject};
 use crate::engine::AnalysisEngine;
-use crate::indexer::{RubyDocument, ScopeTracker};
+use crate::indexer::{MethodReceiver, RubyDocument, ScopeTracker};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -52,6 +53,7 @@ impl FactCollector {
         extension_host: Arc<dyn FactCollectorExtensionHost>,
         analysis_engine: Arc<RwLock<AnalysisEngine>>,
     ) -> Self {
+        // Each mid-walk read takes its own short read guard on the shared engine.
         let semantics = SemanticContext::new(&document, analysis_engine);
         Self {
             document,
@@ -81,7 +83,31 @@ impl FactCollector {
         &self.scope_tracker
     }
 
-    pub fn analysis_engine(&self) -> &Arc<RwLock<AnalysisEngine>> {
-        &self.semantics.engine
+    /// Callees an extension sees for a call in the current scope.
+    pub fn extension_call_callees(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+    ) -> Vec<ResolvedMethodCallee> {
+        self.semantics.project.extension_call_callees(
+            receiver,
+            method,
+            &self.scope_tracker.get_ns_stack(),
+            self.scope_tracker.current_method_context(),
+            self.semantics.query_cache.as_ref(),
+        )
+    }
+
+    /// Whether the project engine has a class or module node for `namespace`.
+    pub fn project_namespace_exists(&self, namespace: &FullyQualifiedName) -> bool {
+        self.semantics
+            .project
+            .namespace_node_kind(namespace)
+            .is_some()
+    }
+
+    /// Type facts the project engine has installed for `subject`.
+    pub fn project_type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
+        self.semantics.project.type_facts_for(subject)
     }
 }

@@ -1,7 +1,7 @@
 //! Call receiver classification and receiver namespace/type resolution.
 
 use crate::core::{FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant};
-use crate::engine::{AnalysisQuery, VariableTypeKind};
+use crate::engine::VariableTypeKind;
 use crate::indexer::{build_constant_path_name, mixin_ref_from_node, utf8_str};
 use crate::invariant::ExpectInvariant;
 use ruby_prism::Node;
@@ -91,10 +91,7 @@ impl FactCollector {
                     .graph_nodes
                     .iter()
                     .any(|fact| fact.fqn == namespace_fqn)
-                    || {
-                        let engine = self.semantics.engine.read();
-                        AnalysisQuery::new(&engine).has_graph_node(&namespace_fqn)
-                    };
+                    || self.semantics.project.has_graph_node(&namespace_fqn);
                 if is_namespace {
                     return (
                         constant_fqn.namespace_parts(),
@@ -117,15 +114,9 @@ impl FactCollector {
                 if unproven_value_constant {
                     return None;
                 }
-                let engine = self.semantics.engine.read();
-                let query = AnalysisQuery::new(&engine);
-                query
-                    .resolve_constant_in_context(std::slice::from_ref(&constant), current_namespace)
-                    .and_then(|resolved| {
-                        query.constant_value_type(&FullyQualifiedName::constant(
-                            resolved.namespace_parts(),
-                        ))
-                    })
+                self.semantics
+                    .project
+                    .resolved_constant_value_type(&constant, current_namespace)
             });
             if let Some(ref ruby_type) = value_type {
                 if let Some(namespace) = self.type_to_namespace_parts(ruby_type) {
@@ -139,13 +130,12 @@ impl FactCollector {
                         | RubyType::Literal(_)
                         | RubyType::Shape(_)
                         | RubyType::Union(_)
-                        | RubyType::Unknown => {
-                            let engine = self.semantics.engine.read();
-                            AnalysisQuery::new(&engine)
-                                .type_to_namespace(ruby_type)
-                                .and_then(|fqn| fqn.namespace_kind())
-                                .unwrap_or(NamespaceKind::Instance)
-                        }
+                        | RubyType::Unknown => self
+                            .semantics
+                            .project
+                            .type_namespace(ruby_type)
+                            .and_then(|fqn| fqn.namespace_kind())
+                            .unwrap_or(NamespaceKind::Instance),
                     };
                     return (namespace, kind, value_type);
                 }
@@ -367,10 +357,7 @@ impl FactCollector {
                 )
             })
             .map(|fact| fact.kind)
-            .or_else(|| {
-                let engine = self.semantics.engine.read();
-                AnalysisQuery::new(&engine).namespace_node_kind(&namespace)
-            })?;
+            .or_else(|| self.semantics.project.namespace_node_kind(&namespace))?;
         let constant = FullyQualifiedName::constant(namespace_parts.to_vec());
         Some(match kind {
             GraphNodeKind::Class => RubyType::ClassReference(constant),
@@ -391,9 +378,9 @@ impl FactCollector {
             | RubyType::Union(_)
             | RubyType::Unknown => {}
         }
-        let engine = self.semantics.engine.read();
-        AnalysisQuery::new(&engine)
-            .type_to_namespace(ruby_type)
+        self.semantics
+            .project
+            .type_namespace(ruby_type)
             .map(|namespace| namespace.namespace_parts())
     }
 
@@ -402,8 +389,8 @@ impl FactCollector {
         parts: &[RubyConstant],
         current_namespace: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let engine = self.semantics.engine.read();
-        crate::engine::AnalysisQuery::new(&engine)
+        self.semantics
+            .project
             .resolve_constant_in_context(parts, current_namespace)
     }
 }

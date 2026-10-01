@@ -8,12 +8,17 @@
 //! lifecycle. The engine owns lookup policy and solved state; inference owns
 //! type rules. Parsing, scheduling, and editor protocol conversion stay outside
 //! this module. Stores and their compact representations are internal.
+//!
+//! A file walk reads project semantics only through the read-only
+//! `Semantics` trait (`semantics.rs`). Any new mid-walk read must become an
+//! equation or be added to `Semantics` with a reason.
 
 mod debug;
 mod diagnostics;
 mod persist;
 mod queries;
 mod resolution;
+mod semantics;
 mod state;
 
 pub use debug::reference_storage_sizes;
@@ -41,6 +46,7 @@ pub use queries::namespace_tree::types::{
 pub use queries::workspace_symbols::types::WorkspaceSymbolMatch;
 pub use queries::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
+pub(crate) use semantics::{ReceiverAccess, Semantics};
 pub use state::{
     AnalysisEngine, AnalysisStat, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
     SourceFileSnapshot,

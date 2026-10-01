@@ -93,8 +93,7 @@ impl FactCollector {
             .map(|fact| fact.kind)
             .collect::<Vec<_>>();
         let definition_is_proven_class = if direct_definition_kinds.is_empty() {
-            crate::engine::AnalysisQuery::new(&self.semantics.engine.read())
-                .namespace_node_kind(&definition_fqn)
+            self.semantics.project.namespace_node_kind(&definition_fqn)
                 == Some(GraphNodeKind::Class)
         } else {
             direct_definition_kinds
@@ -306,14 +305,20 @@ impl FactCollector {
             (None, Vec::new())
         };
         let rbs_param_types = {
-            let engine = self.semantics.engine.read();
-            let query = crate::engine::AnalysisQuery::new(&engine);
+            let parameter_names = params
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>();
+            let contracts = self.semantics.project.rbs_parameter_contract_types(
+                &fqn,
+                &owner_fqn,
+                &parameter_names,
+            );
             params
                 .iter()
-                .filter_map(|parameter| {
-                    query
-                        .rbs_parameter_contract_type(&fqn, &owner_fqn, &parameter.name)
-                        .map(|ruby_type| (parameter.name.clone(), ruby_type, parameter.range))
+                .zip(contracts)
+                .filter_map(|(parameter, contract)| {
+                    contract.map(|ruby_type| (parameter.name.clone(), ruby_type, parameter.range))
                 })
                 .collect::<Vec<_>>()
         };
@@ -350,10 +355,10 @@ impl FactCollector {
         // Project RBS facts use the same isolated engine as Ruby source and
         // outrank the process-wide bundled core signatures. Owner identity is
         // required so instance/singleton homonyms cannot exchange contracts.
-        let project_rbs_return_type = {
-            let engine = self.semantics.engine.read();
-            crate::engine::AnalysisQuery::new(&engine).rbs_return_contract_type(&fqn, &owner_fqn)
-        };
+        let project_rbs_return_type = self
+            .semantics
+            .project
+            .rbs_return_contract_type(&fqn, &owner_fqn);
         let rbs_return_type = project_rbs_return_type.or_else(|| {
             let class_name = namespace_parts
                 .iter()
@@ -607,7 +612,7 @@ impl FactCollector {
         pending: &InferredMethodContext,
     ) -> MethodReturnEquation {
         let mut tracker = TypeTracker::new();
-        tracker = tracker.with_analysis_engine(self.semantics.engine.clone());
+        tracker = tracker.with_semantics(self.semantics.project.clone());
         tracker = tracker.with_analysis_query_cache(self.semantics.query_cache.clone());
         tracker = tracker.with_local_method_returns(self.local_method_returns_for_tracker());
         tracker = tracker

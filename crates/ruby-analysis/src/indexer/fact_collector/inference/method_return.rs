@@ -3,7 +3,7 @@ use crate::core::{
     MethodReturnEquation, RubyConstant, RubyMethod, RubyType, TextRange, TypeInferenceOutcome,
     TypeProvenance, TypeResolution, TypeSubject, UnknownReason,
 };
-use crate::engine::AnalysisQuery;
+use crate::engine::ReceiverAccess;
 use crate::indexer::fact_collector::FactCollector;
 use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
 use crate::inference::r#type::shape as shape_reads;
@@ -91,8 +91,9 @@ impl FactCollector {
 
         if method_name == "new" {
             if let RubyType::ClassReference(fqn) = receiver_type {
-                let engine = self.semantics.engine.read();
-                return AnalysisQuery::new(&engine)
+                return self
+                    .semantics
+                    .project
                     .constructor_result(fqn)
                     .into_type_outcome(RubyType::Class(fqn.clone()));
             }
@@ -147,22 +148,19 @@ impl FactCollector {
         // Same-file facts are not in the engine yet. Engine lookup is the
         // TypeTracker path: one cached receiver return, not a fresh callee
         // vector plus per-callee type_at on every expression.
-        let engine = self.semantics.engine.read();
-        let query = AnalysisQuery::new(&engine);
-        if allow_private {
-            query.method_return_type_for_receiver_cached(
-                &namespace,
-                &method,
-                &self.semantics.query_cache,
-            )
+        let access = if allow_private {
+            ReceiverAccess::Any
         } else {
-            query.method_return_type_for_protected_receiver_cached(
-                &namespace,
-                &method,
-                &caller_namespace,
-                &self.semantics.query_cache,
-            )
-        }
+            ReceiverAccess::Protected {
+                caller: &caller_namespace,
+            }
+        };
+        self.semantics.project.receiver_method_return_type(
+            &namespace,
+            &method,
+            access,
+            Some(&self.semantics.query_cache),
+        )
     }
 
     fn local_method_return_type(&self, method_fqn: &FullyQualifiedName) -> Option<RubyType> {
@@ -424,9 +422,7 @@ impl FactCollector {
                                         )
                                         .map(|(_constant, ruby_type)| ruby_type),
                                     ConstantTypeProjection::ConstructorInstance => {
-                                        let engine = self.semantics.engine.read();
-                                        AnalysisQuery::new(&engine)
-                                            .constant_dependency_type(dependency)
+                                        self.semantics.project.constant_dependency_type(dependency)
                                     }
                                 }
                             }),

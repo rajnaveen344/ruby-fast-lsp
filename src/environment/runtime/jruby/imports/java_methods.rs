@@ -614,9 +614,7 @@ fn current_runtime_proxy(visitor: &FactCollector) -> Option<FullyQualifiedName> 
     });
     let ruby_type = local.or_else(|| {
         visitor
-            .analysis_engine()
-            .read()
-            .type_facts_for(&subject)
+            .project_type_facts_for(&subject)
             .into_iter()
             .rev()
             .find(|fact| fact.provenance == TypeProvenance::Runtime)

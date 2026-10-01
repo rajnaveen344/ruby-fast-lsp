@@ -117,7 +117,7 @@ impl Visit<'_> for FactCollector {
         // older assignment-only view and could publish stale shape fields.
         if self.options.record_local_read_unknown_reasons {
             let mut tracker = TypeTracker::new()
-                .with_analysis_engine(self.semantics.engine.clone())
+                .with_semantics(self.semantics.project.clone())
                 .with_analysis_query_cache(self.semantics.query_cache.clone())
                 .with_local_read_types();
             tracker.track_program(node);

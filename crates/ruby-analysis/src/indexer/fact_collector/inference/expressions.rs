@@ -165,8 +165,9 @@ impl FactCollector {
                 return ruby_type;
             }
             if let Some(fqn) = self.constant_reference_type(value_node) {
-                let engine = self.semantics.engine.read();
-                return crate::engine::AnalysisQuery::new(&engine)
+                return self
+                    .semantics
+                    .project
                     .constant_reference_type(fqn.namespace_parts_slice())
                     .unwrap_or(RubyType::Unknown);
             }

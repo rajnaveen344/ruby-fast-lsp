@@ -53,15 +53,23 @@ find; block and parameter handlers are shared across calls and declarations.
 | `extensions` | Host, project context, enclosing calls, and pending block context | `context/extensions.rs` |
 | `facts` | Collected declarations, local type staging, candidates, diagnostics, and extension output | `collection/facts.rs` |
 | `flow` | Block parameters, pattern captures, multi-assignment elements, callable aliases, yields, and active writes | `inference/flow.rs` |
-| `semantics` | The owning engine, per-pass query cache, and same-pass lookup inputs | `context/semantic_context.rs` |
+| `semantics` | Read-only project `Semantics`, per-pass query cache, and same-pass lookup inputs | `context/semantic_context.rs` |
 | `method_returns` | Return equations, completed solves, proof outcomes, and telemetry | `inference/method_return.rs` |
 | `expressions` | Call outcomes, deferred calls, local-read evidence, and Unknown reasons | `inference/expressions.rs` |
 | `constants` | Constant equations and callable bodies | `inference/constants.rs` |
 
 These owners are private to the collector module. They organize temporary
-per-file state, not independent semantic databases. The engine handle and query
-cache retain their original sharing and lifetime. Mutable flow identities end
-with this pass.
+per-file state, not independent semantic databases. The query cache retains its
+original sharing and lifetime. Mutable flow identities end with this pass.
+
+The collector and every `TypeTracker` it builds read other files only through
+the read-only `engine::Semantics` trait (`engine/semantics.rs`), never through
+the engine lock. The shared engine implements it with one short read guard per
+call, so no guard spans the walk. The walk never writes the engine. Its reads
+either decide which facts get emitted or feed local flow; any new mid-walk read
+must become an equation or be added to `Semantics` with a reason. Extension
+hosts read through `FactCollector::extension_call_callees`,
+`project_namespace_exists`, and `project_type_facts_for`.
 
 Internal cross-family access uses `pub(in crate::indexer::fact_collector)` to
 retain that same boundary at every folder depth. Moving a helper into a deeper
@@ -77,7 +85,8 @@ exiting that nested call must not remove the parent or change its handled state.
 
 ## Collection and publication
 
-Create a collector with the document, extension host, and owning engine. Apply
+Create a collector with the document, extension host, and the owning engine
+handle, which it reads only as `Semantics`. Apply
 source-specific collection options and namespace inputs, then call
 `collector.visit(&parse.node())` through Prism's `Visit` trait. Finally consume
 it with `collector.finish()`.

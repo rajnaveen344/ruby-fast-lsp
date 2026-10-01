@@ -14,6 +14,7 @@ Implementation folders are private to the engine.
 | `state/tests/` | Engine state tests grouped by lifecycle, fingerprints, inference outcomes, navigation, graph, caches, and constants |
 | `resolution/` | Ruby lookup chains and MRO (`lookup_chain`), chain method facts and visibility (`chain_methods`), callees, signatures, method references, reference ranges, definitions, and rename policy |
 | `queries/` | Common reads and the `AnalysisQuery` entry point |
+| `semantics.rs` | The read-only `Semantics` trait the fact collector and `TypeTracker` use for mid-walk reads, implemented for the shared engine lock with one short read guard per call |
 | `queries/cache/` | Per-source and thread-local method lookup memos (`memo`, `thread_memo`), and expression, binding, namespace/constant, and method-return type queries |
 | `queries/definitions/` | Definition source selection and partial ordering from participating Ruby lookup chains |
 | `queries/lookup/` | Constant/method matching and hover lookup results |
@@ -50,6 +51,19 @@ engine-wide privacy boundary even when a folder adds another module level.
 Submodules of `state/` and `resolution/` extend `AnalysisEngine` and
 `AnalysisQuery` with inherent impl blocks; their helpers stay private to the
 owning folder unless a sibling engine area needs them through a narrow re-export.
+
+## Mid-walk reads
+
+A file walk (the fact collector and `TypeTracker`) never holds the engine lock.
+It reads other files through `Semantics`, whose methods each answer one
+question and return plain domain values. They come in two kinds: reads that
+decide which facts get emitted (namespace or singleton receivers, `initialize`
+inside a class, extension call targets) and reads that feed local flow (RBS
+contracts, higher-order block parameters, callable constant bodies, dispatched
+method returns, `super`, and constructors). Everything else crosses files as an
+equation solved after replacement. Any new mid-walk read must become an
+equation or be added to `Semantics` with a reason. The walk never writes the
+engine.
 
 Every directory stays within the ten-entry ceiling. The split does not merge
 stores, change locks, or alter the file-owned lifecycle.

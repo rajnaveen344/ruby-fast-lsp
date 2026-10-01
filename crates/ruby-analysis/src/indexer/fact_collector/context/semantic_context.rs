@@ -1,13 +1,13 @@
 use crate::core::FullyQualifiedName;
-use crate::engine::{AnalysisEngine, AnalysisQueryCache};
+use crate::engine::{AnalysisQueryCache, Semantics};
 use crate::indexer::fact_collector::FactCollector;
 use crate::indexer::RubyDocument;
-use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 pub(in crate::indexer::fact_collector) struct SemanticContext {
-    pub(in crate::indexer::fact_collector) engine: Arc<RwLock<AnalysisEngine>>,
+    /// Read-only project semantics for mid-walk reads; see [`Semantics`].
+    pub(in crate::indexer::fact_collector) project: Arc<dyn Semantics>,
     pub(in crate::indexer::fact_collector) query_cache: Arc<AnalysisQueryCache>,
     pub(in crate::indexer::fact_collector) method_candidates: Arc<HashSet<FullyQualifiedName>>,
     /// Same-pass method identities whose complete collected declaration set is
@@ -24,18 +24,16 @@ pub(in crate::indexer::fact_collector) struct SemanticContext {
 impl SemanticContext {
     pub(in crate::indexer::fact_collector) fn new(
         document: &RubyDocument,
-        engine: Arc<RwLock<AnalysisEngine>>,
+        project: Arc<dyn Semantics>,
     ) -> Self {
         let method_candidates = Arc::new(
-            engine
-                .read()
-                .method_facts_in_file(document.analysis_file_id())
+            project
+                .method_fqns_in_file(document.analysis_file_id())
                 .into_iter()
-                .map(|fact| fact.fqn)
                 .collect(),
         );
         Self {
-            engine,
+            project,
             query_cache: Arc::new(AnalysisQueryCache::default()),
             method_candidates,
             public_method_candidates: Arc::new(HashSet::new()),

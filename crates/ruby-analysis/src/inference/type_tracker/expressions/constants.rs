@@ -1,5 +1,4 @@
 use crate::core::{FullyQualifiedName, RubyConstant, RubyType, UnknownReason};
-use crate::engine::AnalysisQuery;
 use crate::inference::type_tracker::TypeTracker;
 use ruby_prism::*;
 
@@ -9,24 +8,8 @@ impl TypeTracker {
         parts: &[RubyConstant],
         absolute: bool,
     ) -> Option<RubyType> {
-        let analysis_engine = self.analysis.engine.as_ref()?;
-        let engine = analysis_engine.read();
-        let query = AnalysisQuery::new(&engine);
-        let constant = if absolute {
-            FullyQualifiedName::constant(parts.to_vec())
-        } else {
-            let lexical_context = self
-                .context
-                .class
-                .as_ref()
-                .map(FullyQualifiedName::namespace_parts)
-                .unwrap_or_default();
-            let resolved = query.resolve_constant_in_context(parts, &lexical_context)?;
-            FullyQualifiedName::constant(resolved.namespace_parts())
-        };
-        query
-            .constant_value_type(&constant)
-            .or_else(|| query.constant_reference_type(constant.namespace_parts_slice()))
+        let project = self.analysis.project.as_ref()?;
+        project.constant_value_type_in_context(parts, absolute, &self.lexical_context(absolute))
     }
 
     pub(in crate::inference::type_tracker) fn constant_callable_body_for_node(
@@ -35,22 +18,21 @@ impl TypeTracker {
     ) -> Option<Result<crate::core::callables::callable_body::CallableBodySummary, UnknownReason>>
     {
         let (parts, absolute) = Self::constant_reference(node)?;
-        let analysis_engine = self.analysis.engine.as_ref()?;
-        let engine = analysis_engine.read();
-        let query = AnalysisQuery::new(&engine);
-        let constant = if absolute {
-            FullyQualifiedName::constant(parts)
-        } else {
-            let lexical_context = self
-                .context
-                .class
-                .as_ref()
-                .map(FullyQualifiedName::namespace_parts)
-                .unwrap_or_default();
-            let resolved = query.resolve_constant_in_context(&parts, &lexical_context)?;
-            FullyQualifiedName::constant(resolved.namespace_parts())
-        };
-        query.constant_callable_body(&constant)
+        let project = self.analysis.project.as_ref()?;
+        project.constant_callable_body_in_context(&parts, absolute, &self.lexical_context(absolute))
+    }
+
+    /// The current class namespace for lexical constant lookup; absolute
+    /// references need none.
+    fn lexical_context(&self, absolute: bool) -> Vec<RubyConstant> {
+        if absolute {
+            return Vec::new();
+        }
+        self.context
+            .class
+            .as_ref()
+            .map(FullyQualifiedName::namespace_parts)
+            .unwrap_or_default()
     }
 
     pub(in crate::inference::type_tracker) fn constant_reference(

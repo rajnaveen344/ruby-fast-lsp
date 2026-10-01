@@ -1,11 +1,5 @@
 use crate::invariant::ExpectInvariant;
-use std::sync::Arc;
-
-use parking_lot::RwLock;
-use ruby_analysis::core::{
-    FullyQualifiedName, MethodCalleeResolution, NamespaceKind, RubyConstant, RubyMethod,
-};
-use ruby_analysis::engine::AnalysisQueryCache;
+use ruby_analysis::core::{MethodCalleeResolution, NamespaceKind, RubyConstant, RubyMethod};
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
@@ -106,47 +100,7 @@ pub(in crate::environment::extensions) fn resolved_core_callees_for_call(
         .map(|receiver| core_method_receiver_from_node(visitor, &receiver))
         .unwrap_or(CoreMethodReceiver::None);
 
-    resolved_core_callees_for_call_analysis(
-        visitor.analysis_engine(),
-        visitor.analysis_query_cache(),
-        &core_receiver,
-        &method,
-        &visitor.scope_tracker().get_ns_stack(),
-        visitor.scope_tracker().current_method_context(),
-    )
-}
-
-fn resolved_core_callees_for_call_analysis(
-    engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    cache: &AnalysisQueryCache,
-    receiver: &CoreMethodReceiver,
-    method: &RubyMethod,
-    current_namespace: &[RubyConstant],
-    namespace_kind: NamespaceKind,
-) -> Vec<ruby_analysis::core::ResolvedMethodCallee> {
-    let engine = engine.read();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-    let namespace_fqn = match receiver {
-        CoreMethodReceiver::Constant(path) => {
-            query.resolve_constant_receiver(path, current_namespace)
-        }
-        CoreMethodReceiver::None | CoreMethodReceiver::SelfReceiver | CoreMethodReceiver::Super => {
-            FullyQualifiedName::namespace_with_kind(current_namespace.to_vec(), namespace_kind)
-        }
-        CoreMethodReceiver::LocalVariable(_)
-        | CoreMethodReceiver::InstanceVariable(_)
-        | CoreMethodReceiver::ClassVariable(_)
-        | CoreMethodReceiver::GlobalVariable(_)
-        | CoreMethodReceiver::Expression
-        | CoreMethodReceiver::MethodCall { .. }
-        | CoreMethodReceiver::Literal(_) => return Vec::new(),
-    };
-
-    let Some(callees) = query.resolve_method_callees_cached(&namespace_fqn, method, cache) else {
-        return Vec::new();
-    };
-
-    callees
+    visitor.extension_call_callees(&core_receiver, &method)
 }
 
 fn resolved_callee_to_abi(callee: ruby_analysis::core::ResolvedMethodCallee) -> ResolvedCallee {

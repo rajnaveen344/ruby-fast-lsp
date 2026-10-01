@@ -1,12 +1,10 @@
 //! ActiveSupport `delegate` and Forwardable `def_delegator(s)` method facts.
 
 use crate::core::{FullyQualifiedName, MethodFact, RubyMethod, TypeFact, TypeSubject};
-use crate::engine::AnalysisQuery;
+use crate::engine::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
 use log::trace;
 use ruby_prism::CallNode;
-
-use crate::inference::method::return_type::method_call_return_type;
 
 use super::names::direct_attr_name_and_range;
 use crate::indexer::fact_collector::FactCollector;
@@ -21,13 +19,16 @@ impl FactCollector {
         let range = self.direct_range(&node.location());
 
         let receiver_type = {
-            let engine = self.semantics.engine.read();
-            let query = AnalysisQuery::new(&engine);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
             let Ok(method) = RubyMethod::new(&receiver_method) else {
                 return;
             };
-            query.method_return_type_for_receiver(&owner, &method)
+            self.semantics.project.receiver_method_return_type(
+                &owner,
+                &method,
+                ReceiverAccess::Any,
+                None,
+            )
         };
 
         for method_name in methods {
@@ -58,11 +59,10 @@ impl FactCollector {
             let Some(receiver_type) = receiver_type.as_ref() else {
                 continue;
             };
-            let return_type = {
-                let engine = self.semantics.engine.read();
-                let query = AnalysisQuery::new(&engine);
-                method_call_return_type(Some(&query), receiver_type, &method_name)
-            };
+            let return_type = self
+                .semantics
+                .project
+                .method_call_return_type(receiver_type, &method_name);
             let Some(return_type) = return_type else {
                 continue;
             };
@@ -96,10 +96,13 @@ impl FactCollector {
         };
 
         let receiver_type = {
-            let engine = self.semantics.engine.read();
-            let query = AnalysisQuery::new(&engine);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
-            query.method_return_type_for_receiver(&owner, &receiver_method)
+            self.semantics.project.receiver_method_return_type(
+                &owner,
+                &receiver_method,
+                ReceiverAccess::Any,
+                None,
+            )
         };
 
         for (defined_name, target_name) in methods {
@@ -128,11 +131,10 @@ impl FactCollector {
             else {
                 continue;
             };
-            let return_type = {
-                let engine = self.semantics.engine.read();
-                let query = AnalysisQuery::new(&engine);
-                method_call_return_type(Some(&query), receiver_type, target_method.as_str())
-            };
+            let return_type = self
+                .semantics
+                .project
+                .method_call_return_type(receiver_type, target_method.as_str());
             let Some(return_type) = return_type else {
                 continue;
             };

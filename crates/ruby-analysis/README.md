@@ -26,7 +26,10 @@ owns the solved state and Ruby lookup policy; inference owns the type rules.
 Inside the engine, each kind of state is a component (`Files`, `Names`,
 `DeclIndex`, `Hierarchy`, `UseIndex`, `Diagnostics`, `TypeTable`, `Solver`);
 the `Solver` plans a solve from read-only engine queries, then applies it to the
-`TypeTable`.
+`TypeTable`. While a file is walked, the collector and `TypeTracker` read other
+files only through the read-only `engine::Semantics` trait, one short read guard
+per question; any new mid-walk read must become an equation or be added to
+`Semantics` with a reason.
 
 Use the [core guide](src/core/README.md) for contracts and compact stores,
 the [indexer guide](src/indexer/README.md) for documents and parser queries,

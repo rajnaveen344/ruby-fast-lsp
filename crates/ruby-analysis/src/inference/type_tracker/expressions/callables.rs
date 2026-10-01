@@ -1,5 +1,4 @@
 use crate::core::{FullyQualifiedName, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason};
-use crate::engine::AnalysisQuery;
 use crate::inference::control_flow;
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
@@ -206,9 +205,7 @@ impl TypeTracker {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let prepared_result = if let Some(analysis_engine) = &self.analysis.engine {
-            let engine = analysis_engine.read();
-            let query = AnalysisQuery::new(&engine);
+        let prepared_result = if let Some(project) = &self.analysis.project {
             let namespace = FullyQualifiedName::namespace(
                 self.context
                     .class
@@ -216,11 +213,10 @@ impl TypeTracker {
                     .map(FullyQualifiedName::namespace_parts)
                     .unwrap_or_default(),
             );
-            crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
-                Some(&query),
+            project.prepare_higher_order_call(
                 self.analysis.query_cache.as_deref(),
                 receiver_type.as_ref(),
-                Some(&namespace),
+                &namespace,
                 method_name,
                 &argument_types,
             )

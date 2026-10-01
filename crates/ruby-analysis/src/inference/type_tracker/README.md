@@ -13,9 +13,10 @@ method solve into `returns/`.
 
 Construct with `TypeTracker::new()`. The tracker takes Prism nodes in its
 tracking methods and does not retain source bytes or a source lifetime. The
-collector supplies method contracts, same-file evidence, and optional engine
-queries through builders and context setters. Local tracking without an engine
-remains supported; unavailable lookup evidence stays unproven.
+collector supplies method contracts, same-file evidence, and optional project
+reads through builders and context setters. Project reads go through the
+read-only `engine::Semantics` trait, never the engine lock. Local tracking
+without it remains supported; unavailable lookup evidence stays unproven.
 
 | Entry point | Responsibility |
 | --- | --- |
@@ -35,7 +36,7 @@ tree; splitting implementation files does not expose mutable state to callers.
 | --- | --- | --- |
 | `environment` | `flow/environment.rs` | Current locals, callable bindings, correlated shape aliases and containment, and their proof metadata |
 | `context` | `context.rs` | Parameter contracts and the current class and method |
-| `analysis` | `context.rs` | Optional engine/query cache and supplied same-file lookup evidence |
+| `analysis` | `context.rs` | Optional `Semantics` reads, query cache, and supplied same-file lookup evidence |
 | `returns` | `returns/mod.rs` | Private return terms, dependencies, explicit returns, and recursive approximation |
 | `observations` | `observations.rs` | Offset snapshots and exact local-read evidence for publication |
 | `control_flow` | `flow/mod.rs` | Loop bounds/depth and lexical rescue-entry accumulators |

@@ -195,14 +195,11 @@ impl FactCollector {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let engine = self.semantics.engine.read();
-        let query = crate::engine::AnalysisQuery::new(&engine);
         let namespace = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
-        crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
-            Some(&query),
+        self.semantics.project.prepare_higher_order_call(
             Some(self.semantics.query_cache.as_ref()),
             receiver_type.as_ref(),
-            Some(&namespace),
+            &namespace,
             &method_name,
             &argument_types,
         )
@@ -256,7 +253,7 @@ impl FactCollector {
                 })
                 .collect::<Vec<_>>();
             let mut tracker = TypeTracker::new()
-                .with_analysis_engine(self.semantics.engine.clone())
+                .with_semantics(self.semantics.project.clone())
                 .with_analysis_query_cache(self.semantics.query_cache.clone());
             let namespace = self.scope_tracker.get_ns_stack();
             if !namespace.is_empty() {
@@ -569,8 +566,7 @@ impl FactCollector {
             }
             return Some(Ok(first.clone()));
         }
-        let engine = self.semantics.engine.read();
-        crate::engine::AnalysisQuery::new(&engine).constant_callable_body(&constant)
+        self.semantics.project.constant_callable_body(&constant)
     }
 
     pub(in crate::indexer::fact_collector) fn infer_block_param_types_for_call(

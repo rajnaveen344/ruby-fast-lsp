@@ -455,6 +455,5 @@ pub(super) fn extension_target_owner_exists(
     target: &ExtensionMethodTarget,
 ) -> bool {
     let required_owner = FullyQualifiedName::namespace(target.owner.clone());
-    let engine = visitor.analysis_engine().read();
-    ruby_analysis::engine::AnalysisQuery::new(&engine).namespace_exists(&required_owner)
+    visitor.project_namespace_exists(&required_owner)
 }

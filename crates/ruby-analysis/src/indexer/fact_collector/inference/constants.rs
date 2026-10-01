@@ -23,8 +23,9 @@ impl FactCollector {
             return Some(namespace);
         }
         let lexical_context = self.scope_tracker.get_ns_stack();
-        let engine = self.semantics.engine.read();
-        if let Some(resolved) = crate::engine::AnalysisQuery::new(&engine)
+        if let Some(resolved) = self
+            .semantics
+            .project
             .resolve_constant_in_context(&reference.parts, &lexical_context)
         {
             return Some(resolved);
@@ -123,11 +124,9 @@ impl FactCollector {
             });
         }
 
-        let engine = self.semantics.engine.read();
-        let query = crate::engine::AnalysisQuery::new(&engine);
-        query
-            .constant_value_type(&constant_fqn)
-            .or_else(|| query.constant_reference_type(&parts))
+        self.semantics
+            .project
+            .constant_value_or_reference_type(&constant_fqn, &parts)
             .or_else(|| Some(RubyType::ClassReference(constant_fqn)))
     }
 
@@ -261,8 +260,9 @@ impl FactCollector {
         } else {
             self.scope_tracker.get_ns_stack()
         };
-        let engine = self.semantics.engine.read();
-        if let Some(fqn) = crate::engine::AnalysisQuery::new(&engine)
+        if let Some(fqn) = self
+            .semantics
+            .project
             .resolve_constant_in_context(&receiver_ref.parts, &context)
         {
             return Some(fqn.namespace_parts());

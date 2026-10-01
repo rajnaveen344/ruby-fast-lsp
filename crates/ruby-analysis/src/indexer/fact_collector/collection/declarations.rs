@@ -127,8 +127,7 @@ impl FactCollector {
         if self.direct_namespace_is_known(fqn) {
             return true;
         }
-        let engine = self.semantics.engine.read();
-        crate::engine::AnalysisQuery::new(&engine).has_graph_node(fqn)
+        self.semantics.project.has_graph_node(fqn)
     }
 
     pub fn resolve_constant_value_type_from(
@@ -142,26 +141,22 @@ impl FactCollector {
         } else {
             lexical_context.to_vec()
         };
-        let engine = self.semantics.engine.read();
-        let query = crate::engine::AnalysisQuery::new(&engine);
-
+        let mut candidates = Vec::new();
         loop {
             let mut probe = search.clone();
             probe.extend(parts.iter().cloned());
-            let constant = FullyQualifiedName::constant(probe);
-            if let Some(ruby_type) = self
-                .direct_constant_value_type(&constant)
-                .or_else(|| query.constant_value_type(&constant))
-            {
-                return Some((constant, ruby_type));
-            }
+            candidates.push(FullyQualifiedName::constant(probe));
             if absolute || search.is_empty() {
                 break;
             }
             search.pop();
         }
 
-        None
+        self.semantics
+            .project
+            .first_constant_value_type(&candidates, &|constant| {
+                self.direct_constant_value_type(constant)
+            })
     }
 
     pub fn resolve_declaration_constant_value_type_from(
@@ -182,14 +177,15 @@ impl FactCollector {
             candidates.push(parts.to_vec());
         }
 
-        let engine = self.semantics.engine.read();
-        let query = crate::engine::AnalysisQuery::new(&engine);
-        candidates.into_iter().find_map(|candidate| {
-            let constant = FullyQualifiedName::constant(candidate);
-            self.direct_constant_value_type(&constant)
-                .or_else(|| query.constant_value_type(&constant))
-                .map(|ruby_type| (constant, ruby_type))
-        })
+        let candidates = candidates
+            .into_iter()
+            .map(FullyQualifiedName::constant)
+            .collect::<Vec<_>>();
+        self.semantics
+            .project
+            .first_constant_value_type(&candidates, &|constant| {
+                self.direct_constant_value_type(constant)
+            })
     }
 
     pub fn direct_push_edge(
