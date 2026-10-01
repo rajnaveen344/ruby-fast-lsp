@@ -151,7 +151,7 @@ pub async fn handle_initialize(
             resolve_provider: Some(true),
             trigger_characters: Some(vec![
                 ":".to_string(), // Trigger on ":" to handle "::" for constant completion
-                ".".to_string(), // Trigger on "." for method completion (future enhancement)
+                ".".to_string(), // Trigger on "." for method completion
             ]),
             completion_item: Some(CompletionOptionsCompletionItem {
                 label_details_support: Some(true),

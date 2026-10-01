@@ -79,7 +79,7 @@ RUBY_FAST_LSP_EXTENSION_PATHS="$PWD/extensions/rspec-ruby" \
   ruby-fast-lsp
 ```
 
-VS Code/Zed should pass this package path to the LSP server via initialization
+Editors should pass this package path to the LSP server via initialization
 options:
 
 ```json

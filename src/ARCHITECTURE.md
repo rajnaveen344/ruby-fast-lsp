@@ -137,10 +137,9 @@ The Query Engine provides a unified service layer for querying the `AnalysisEngi
 - `mod.rs`: Defines `EngineQuery` struct and entry points
 - `definition.rs`: Unified definition lookups
 - `references.rs`: Unified reference lookups
-- `hover.rs`: Type and documentation lookups
-- `types.rs`: Type inference helpers
-- `method.rs`: Method resolution and dispatch logic
-- `inlay_hints.rs`: Unified inlay hints and on-demand inference logic
+- `hover/`: Type and documentation lookups
+- `method/`: Method resolution and dispatch logic
+- `inlay_hints/`: Unified inlay hints and on-demand inference logic
 
 #### Design Decisions:
 
@@ -678,7 +677,7 @@ Ruby version detection and version-manager integration.
 ### 2. Go to Definition
 
 1. Client sends a "go to definition" request with a position
-2. Server delegates to the definition capability (`src/capabilities/definition.rs`)
+2. Server delegates to the definition capability (`src/capabilities/definitions.rs`)
 3. Definition capability:
    - Uses the analyzer to identify the identifier and local scope at the position
    - If not a local variable, delegates to the **Query Engine** (`src/query/definition.rs`)
@@ -748,15 +747,6 @@ Capabilities use the Query Engine as their primary data service:
 1. Capabilities handle the AST traversal and identifying _what_ the user is interacting with.
 2. They call the Query Engine to resolve _where_ that thing is defined or referenced across the workspace.
 3. They translate the results back into LSP-specific formats.
-
-## Future Extensions
-
-The modular architecture facilitates extending the server with new capabilities:
-
-1. Add a new capability module in `src/capabilities/`
-2. Use existing services (Analyzer, Indexer) as needed
-3. Wire it up in the server implementation
-4. Update server capabilities in the initialize method
 
 ## Performance Considerations
 

@@ -119,7 +119,7 @@ Package shape:
 - optional source files/docs
 
 The server discovers `extension.toml`, validates ABI/runtime/call names, then
-instantiates the `.wasm`. A VSIX/Zed extension can ship those files, but the
+instantiates the `.wasm`. An editor extension such as the VSIX can ship those files, but the
 extension ABI stays editor-agnostic.
 
 Minimal manifest:
@@ -460,22 +460,17 @@ method patches with block-return inference. The same guest provides TDD,
 Rails-style, and spec-style symbols plus Run/Debug lenses. Applicability
 requires locked Minitest `>= 5, < 7`; unsupported versions fail closed.
 
-### Readiness assessment
+### Scope
 
-The extension platform is beyond its original **7/10** design-discovery state
-and now earns **9/10**. Execution contexts, source/project hidden
-owners, project/version applicability, private Wasm instance isolation, typed
-Ruby and Rust authoring, cross-file RSpec contexts, independent Sinatra and
-Minitest execution scopes, and Cucumber World semantics now have black-box
-evidence. The official framework migration, core eval audit, project-wide method
-rename, bounded telemetry/load stress, and installed production gates are
-complete.
+Execution contexts, source/project hidden owners, project/version applicability,
+private Wasm instance isolation, typed Ruby and Rust authoring, cross-file RSpec
+contexts, independent Sinatra and Minitest execution scopes, and Cucumber World
+semantics have black-box tests.
 
-A literal 10/10 is not credible for a static Ruby analyzer because arbitrary
-runtime code can always manufacture behavior. The production target is 9/10:
-correct and deterministic for supported static semantics, explicit and
-conservative for dynamic cases, and extensible without framework-specific core
-hooks.
+A static Ruby analyzer cannot model everything, because arbitrary runtime code
+can always manufacture behavior. The target is correct and deterministic results
+for supported static semantics, explicit and conservative handling of dynamic
+cases, and extensibility without framework-specific core hooks.
 
 ## Extension State Model
 
@@ -515,36 +510,10 @@ host validates and merges the relationship deterministically, then converts it
 to ordinary `Superclass` graph facts; engine MRO and hierarchy queries remain
 the only semantic authority.
 
-## Roadmap Beyond 9/10 Extension Infra
+## Roadmap
 
-Current evidence-backed rating: 9.0/10. The packaged-release and
-criterion-by-criterion product audit are complete; further work targets 9.5+
-maturity rather than another foundational semantic primitive.
-
-What is done:
-
-- Server-scoped extension registry.
-- Manifest/package loading with ABI, runtime, server version, and checksum
-  validation.
-- mruby-authored RSpec extension compiled to Wasm and packaged in VSIX.
-- Native Rust RSpec extension kept as fallback/reference implementation.
-- Extension-generated methods, mixins, document symbols, and code lenses.
-- Extension hook context uses the same core method-resolution path as
-  definitions, including exact and receiver-only callee options.
-- Wasm host enforces input/output payload limits, memory growth limits, and
-  per-call fuel budgets. A 500 ms Wasmtime epoch deadline independently bounds
-  wall-clock execution at every guest call boundary. Failures are recoverable
-  and disable only that extension; deadline failures are observable as `slow`.
-- Recoverable failure path for bad response patches and guest failures.
-- Project/version-aware private Wasm instances, activation-time immutable
-  project context, and frame-owner provenance for overlapping DSL ecosystems.
-- Bounded status telemetry for latency, patch volume, conflicts, rejections,
-  traps, resource failures, disablements, and per-project instance creation.
-- Repeatable six-project stress coverage for all five official guests,
-  including an RSpec+Minitest overlap and unsupported versions.
-- Full test suite green for current scope.
-
-What remains to reach 9.5+/10:
+The design notes below record the extension contracts and the remaining work.
+Open items:
 
 - Push the shared resolver into remaining diagnostics/reference paths that still
   carry local lookup variants.
@@ -555,7 +524,7 @@ What remains to reach 9.5+/10:
 - Publish stable Ruby SDK docs with versioning/migration rules for third-party
   extension authors.
 - Add perf benchmarks for many loaded extensions and large projects.
-- Finish editor-neutral install/update flow for VS Code and Zed wrappers.
+- Finish an editor-neutral install/update flow for editor wrappers.
 - Cover the major Ruby extension shapes: Rails indexing subset, Standard,
   rubyfmt, Reek, and deeper RSpec test discovery/run/debug.
 
@@ -735,11 +704,11 @@ Reek, and RuboCop-style tools.
 
 ### Acceptance Gate
 
-Extension infra reaches 9/10 only when:
+Extension infrastructure is complete only when:
 
 - Bad extension cannot crash the server.
 - Slow extension cannot freeze indexing or requests.
-- VS Code and Zed install through the same package protocol.
+- Every editor wrapper installs through the same package protocol.
 - Manifest compatibility gates are enforced.
 - Settings, watchers, external process permissions, and status reporting work.
 - At least five extension shapes are covered: RSpec, Rails indexing subset,
