@@ -124,7 +124,7 @@ Delete this file when the last task is done. Git history keeps the record.
         expression outcomes, local-read types, the outcome merge, and the
         target writers the solver uses. Delete `state/storage.rs`; memory
         stats and `shrink_to_fit` delegate per component. Profiler comparison.
-  - [ ] B3i. Extract `Solver` (rename `state/inference.rs` to `solver.rs`):
+  - [x] B3i. Extract `Solver` (rename `state/inference.rs` to `solver.rs`):
         inference evidence, dirty flags, equation solving split into a
         read-only plan step and an `apply` step that writes `TypeTable`.
         Profiler comparison.
