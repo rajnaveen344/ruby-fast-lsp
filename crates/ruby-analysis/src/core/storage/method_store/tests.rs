@@ -121,13 +121,8 @@ fn exact_owner_name_match_borrows_one_effective_fact_and_deduplicates() {
     let StoredMethodFactMatch::Unique(selected) = match_result else {
         panic!("identical stored method facts must collapse to one borrowed match")
     };
-    let first_id = store.facts_by_owner_name[&(owner, method)][0];
-    assert!(std::ptr::eq(
-        selected,
-        store
-            .fact(first_id)
-            .expect("the indexed method fact must remain in the arena")
-    ));
+    let first_id = store.facts_by_owner_name.get(&(owner, method))[0];
+    assert!(std::ptr::eq(selected, store.facts.get(first_id)));
 }
 
 #[test]

@@ -1,13 +1,15 @@
-use crate::invariant::ExpectInvariant;
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use crate::core::callables::callable_signature::CallableSignature;
 use crate::core::callables::callable_signature::CallableTypeTemplate;
 use crate::core::callables::callable_signature::DirectYieldCall;
 use crate::core::callables::callable_signature::ForwardedBlockCall;
 use crate::core::names::fqn_id::FqnId;
+use crate::core::storage::file_owned::arena::{FileArena, FileIndex, RowId};
+use crate::core::storage::file_owned::FileRow;
 use crate::core::storage::memory_estimate::{
-    map_table_bytes, ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
+    ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
 };
 use crate::core::{FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
 
@@ -400,52 +402,33 @@ pub(crate) enum StoredMethodFactMatch<'a> {
 
 #[derive(Debug, Clone, Default)]
 pub struct MethodStore {
-    facts: Vec<Option<StoredMethodFact>>,
-    free_facts: Vec<MethodFactId>,
-    facts_by_fqn: HashMap<FqnId, Vec<MethodFactId>>,
-    facts_by_owner: HashMap<FqnId, Vec<MethodFactId>>,
-    facts_by_owner_name: HashMap<(FqnId, RubyMethod), Vec<MethodFactId>>,
-    facts_by_file: HashMap<SourceFileId, Vec<MethodFactId>>,
+    facts: FileArena<StoredMethodFact>,
+    facts_by_fqn: FileIndex<FqnId>,
+    facts_by_owner: FileIndex<FqnId>,
+    facts_by_owner_name: FileIndex<(FqnId, RubyMethod)>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct MethodFactId(u32);
-
-impl MethodFactId {
-    fn from_index(index: usize) -> Self {
-        Self(u32::try_from(index).expect_invariant(
-            "method fact arena exceeded u32 ids",
-            "method indexes use compact u32 ids",
-            "widen MethodFactId and every stored method index together",
-        ))
-    }
-
-    fn index(self) -> usize {
-        self.0 as usize
+impl FileRow for StoredMethodFact {
+    fn file_id(&self) -> SourceFileId {
+        self.range.file_id
     }
 }
 
 impl MethodStore {
     pub fn facts_for(&self, fqn: FqnId) -> Vec<StoredMethodFact> {
-        self.facts_by_fqn
-            .get(&fqn)
-            .map(|ids| self.clone_facts(ids))
-            .unwrap_or_default()
+        self.clone_facts(self.facts_by_fqn.get(&fqn))
     }
 
     pub fn all_facts(&self) -> Vec<StoredMethodFact> {
-        self.facts.iter().filter_map(|fact| fact.clone()).collect()
+        self.facts.iter().cloned().collect()
     }
 
     pub fn fact_count(&self) -> usize {
-        self.facts.iter().filter(|fact| fact.is_some()).count()
+        self.facts.len()
     }
 
     pub fn facts_matching_owner(&self, owner: FqnId, partial: &str) -> Vec<StoredMethodFact> {
-        self.facts_by_owner
-            .get(&owner)
-            .into_iter()
-            .flat_map(|ids| ids.iter().filter_map(|id| self.fact(*id)))
+        self.indexed(self.facts_by_owner.get(&owner))
             .filter(|fact| {
                 fact.method
                     .is_some_and(|method| method.get_name().starts_with(partial))
@@ -459,10 +442,7 @@ impl MethodStore {
         owner: FqnId,
         method: &RubyMethod,
     ) -> Vec<StoredMethodFact> {
-        self.facts_by_owner_name
-            .get(&(owner, *method))
-            .map(|ids| self.clone_facts(ids))
-            .unwrap_or_default()
+        self.clone_facts(self.facts_by_owner_name.get(&(owner, *method)))
     }
 
     /// Select the effective exact owner/name fact without cloning or expanding
@@ -478,29 +458,17 @@ impl MethodStore {
         owner: FqnId,
         method: &RubyMethod,
     ) -> StoredMethodFactMatch<'_> {
-        let Some(ids) = self.facts_by_owner_name.get(&(owner, *method)) else {
-            return StoredMethodFactMatch::Missing;
-        };
-        let indexed_fact = |id: &MethodFactId| {
-            self.fact(*id).expect_invariant(
-                "method owner/name index points to a missing fact",
-                "indexes must be cleared before arena facts",
-                "remove every MethodFactId from owner/name indexes before freeing it",
-            )
-        };
-
-        if ids
-            .iter()
-            .map(indexed_fact)
+        let ids = self.facts_by_owner_name.get(&(owner, *method));
+        if self
+            .indexed(ids)
             .any(|fact| matches!(fact.availability, MethodAvailability::Absent { .. }))
         {
             return StoredMethodFactMatch::Missing;
         }
-        let unavailable_wins = ids
-            .iter()
-            .map(indexed_fact)
+        let unavailable_wins = self
+            .indexed(ids)
             .any(|fact| matches!(fact.availability, MethodAvailability::Unavailable { .. }));
-        let mut effective = ids.iter().map(indexed_fact).filter(|fact| {
+        let mut effective = self.indexed(ids).filter(|fact| {
             !unavailable_wins || matches!(fact.availability, MethodAvailability::Unavailable { .. })
         });
         let Some(first) = effective.next() else {
@@ -517,10 +485,7 @@ impl MethodStore {
     pub(crate) fn ruby_method_names_for_owner(&self, owner: FqnId) -> Vec<RubyMethod> {
         let mut names = Vec::new();
         let mut seen = HashSet::new();
-        let Some(facts) = self.facts_by_owner.get(&owner) else {
-            return names;
-        };
-        for fact in facts.iter().filter_map(|id| self.fact(*id)) {
+        for fact in self.indexed(self.facts_by_owner.get(&owner)) {
             let Some(method) = fact.method else {
                 continue;
             };
@@ -531,191 +496,79 @@ impl MethodStore {
         names
     }
 
-    pub fn facts_in_file(&self, file_id: crate::core::SourceFileId) -> Vec<StoredMethodFact> {
-        self.facts_by_file
-            .get(&file_id)
-            .map(|ids| self.clone_facts(ids))
-            .unwrap_or_default()
-    }
-
-    pub fn remove_file(&mut self, file_id: crate::core::SourceFileId) {
-        let Some(stale_facts) = self.facts_by_file.remove(&file_id) else {
-            return;
-        };
-        for stale_id in stale_facts {
-            let Some(stale) = self.take_fact(stale_id) else {
-                continue;
-            };
-            self.free_facts.push(stale_id);
-            if let Some(ids) = self.facts_by_fqn.get_mut(&stale.fqn) {
-                ids.retain(|id| *id != stale_id);
-                if ids.is_empty() {
-                    self.facts_by_fqn.remove(&stale.fqn);
-                }
-            }
-            if let Some(ids) = self.facts_by_owner.get_mut(&stale.owner) {
-                ids.retain(|id| *id != stale_id);
-                if ids.is_empty() {
-                    self.facts_by_owner.remove(&stale.owner);
-                }
-            }
-            if let Some(method) = stale.method {
-                let key = (stale.owner, method);
-                if let Some(ids) = self.facts_by_owner_name.get_mut(&key) {
-                    ids.retain(|id| *id != stale_id);
-                    if ids.is_empty() {
-                        self.facts_by_owner_name.remove(&key);
-                    }
-                }
-            }
-        }
+    pub fn facts_in_file(&self, file_id: SourceFileId) -> Vec<StoredMethodFact> {
+        self.facts.rows_in_file(file_id).cloned().collect()
     }
 
     pub fn replace_file(
         &mut self,
-        file_id: crate::core::SourceFileId,
+        file_id: SourceFileId,
         facts: impl IntoIterator<Item = StoredMethodFact>,
     ) {
-        self.remove_file(file_id);
-        let mut touched_fqns = HashSet::new();
-        let mut touched_owners = HashSet::new();
-        let mut touched_owner_names = HashSet::new();
-        for fact in facts {
-            invariant!(
-                fact.range.file_id == file_id,
-                what = "replacement method fact belongs to a different file id",
-                why = "MethodStore::replace_file must only receive facts for the target file",
-                fix = "partition method facts by SourceFileId before replacing",
-            );
-            let fqn = fact.fqn;
-            let owner = fact.owner;
-            let method_name = fact.method;
-            let id = self.insert_fact(fact);
-            touched_fqns.insert(fqn);
-            touched_owners.insert(owner);
-            self.facts_by_fqn.entry(fqn).or_default().push(id);
-            self.facts_by_owner.entry(owner).or_default().push(id);
-            if let Some(method) = method_name {
-                let key = (owner, method);
-                touched_owner_names.insert(key);
-                self.facts_by_owner_name.entry(key).or_default().push(id);
+        self.facts.remove_file(file_id, |arena, stale| {
+            self.facts_by_fqn.unlink(stale.fqn, file_id, arena);
+            self.facts_by_owner.unlink(stale.owner, file_id, arena);
+            if let Some(method) = stale.method {
+                self.facts_by_owner_name
+                    .unlink((stale.owner, method), file_id, arena);
             }
-            self.facts_by_file.entry(file_id).or_default().push(id);
-        }
-        for fqn in touched_fqns {
-            if let Some(ids) = self.facts_by_fqn.get_mut(&fqn) {
-                sort_method_ids_by_fqn(&self.facts, ids);
-                ids.shrink_to_fit();
-            }
-        }
-        for owner in touched_owners {
-            if let Some(ids) = self.facts_by_owner.get_mut(&owner) {
-                sort_method_ids_by_owner(&self.facts, ids);
-                ids.shrink_to_fit();
-            }
-        }
-        for key in touched_owner_names {
-            if let Some(ids) = self.facts_by_owner_name.get_mut(&key) {
-                sort_method_ids_by_owner(&self.facts, ids);
-                ids.shrink_to_fit();
-            }
-        }
-        if let Some(ids) = self.facts_by_file.get_mut(&file_id) {
-            sort_method_ids_by_file(&self.facts, ids);
-            ids.shrink_to_fit();
-        }
+        });
+        let ids = self.facts.insert_file(file_id, facts, by_range);
+        let facts = &self.facts;
+        self.facts_by_fqn.link(
+            file_id,
+            ids.iter().map(|id| (facts.get(*id).fqn, *id)),
+            facts,
+            |left, right| by_range(left, right).then(left.owner.cmp(&right.owner)),
+        );
+        self.facts_by_owner.link(
+            file_id,
+            ids.iter().map(|id| (facts.get(*id).owner, *id)),
+            facts,
+            by_range_then_fqn,
+        );
+        self.facts_by_owner_name.link(
+            file_id,
+            ids.iter().filter_map(|id| {
+                let fact = facts.get(*id);
+                fact.method.map(|method| ((fact.owner, method), *id))
+            }),
+            facts,
+            by_range_then_fqn,
+        );
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
-        vec_payload_bytes(&self.facts)
-            + vec_payload_bytes(&self.free_facts)
-            + self
-                .facts
-                .iter()
-                .filter_map(|fact| fact.as_ref())
-                .map(method_fact_heap_bytes)
-                .sum::<usize>()
-            + map_table_bytes(&self.facts_by_fqn)
-            + map_table_bytes(&self.facts_by_owner)
-            + map_table_bytes(&self.facts_by_owner_name)
-            + map_table_bytes(&self.facts_by_file)
-            + self
-                .facts_by_fqn
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
-            + self
-                .facts_by_owner
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
-            + self
-                .facts_by_owner_name
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
-            + self
-                .facts_by_file
-                .values()
-                .map(vec_payload_bytes)
-                .sum::<usize>()
+        self.facts.estimated_heap_bytes()
+            + self.facts.iter().map(method_fact_heap_bytes).sum::<usize>()
+            + self.facts_by_fqn.estimated_heap_bytes()
+            + self.facts_by_owner.estimated_heap_bytes()
+            + self.facts_by_owner_name.estimated_heap_bytes()
     }
 
     pub fn shrink_to_fit(&mut self) {
         self.facts.shrink_to_fit();
-        self.free_facts.shrink_to_fit();
         self.facts_by_fqn.shrink_to_fit();
         self.facts_by_owner.shrink_to_fit();
         self.facts_by_owner_name.shrink_to_fit();
-        self.facts_by_file.shrink_to_fit();
-        for ids in self.facts_by_fqn.values_mut() {
-            ids.shrink_to_fit();
-        }
-        for ids in self.facts_by_owner.values_mut() {
-            ids.shrink_to_fit();
-        }
-        for ids in self.facts_by_owner_name.values_mut() {
-            ids.shrink_to_fit();
-        }
-        for ids in self.facts_by_file.values_mut() {
-            ids.shrink_to_fit();
-        }
     }
 
-    fn insert_fact(&mut self, fact: StoredMethodFact) -> MethodFactId {
-        if let Some(id) = self.free_facts.pop() {
-            let slot = self.facts.get_mut(id.index()).expect_invariant(
-                "method free list points outside fact arena",
-                "free ids must come from previous arena slots",
-                "only push ids returned by MethodStore::take_fact",
-            );
-            invariant!(
-                slot.is_none(),
-                what = "method free list points to occupied fact slot",
-                why = "free ids must only reference removed facts",
-                fix = "push each removed method id at most once",
-            );
-            *slot = Some(fact);
-            return id;
-        }
-        let id = MethodFactId::from_index(self.facts.len());
-        self.facts.push(Some(fact));
-        id
+    fn indexed<'a>(&'a self, ids: &'a [RowId]) -> impl Iterator<Item = &'a StoredMethodFact> {
+        ids.iter().map(|id| self.facts.get(*id))
     }
 
-    fn fact(&self, id: MethodFactId) -> Option<&StoredMethodFact> {
-        self.facts.get(id.index()).and_then(Option::as_ref)
+    fn clone_facts(&self, ids: &[RowId]) -> Vec<StoredMethodFact> {
+        self.indexed(ids).cloned().collect()
     }
+}
 
-    fn take_fact(&mut self, id: MethodFactId) -> Option<StoredMethodFact> {
-        self.facts.get_mut(id.index()).and_then(Option::take)
-    }
+fn by_range(left: &StoredMethodFact, right: &StoredMethodFact) -> Ordering {
+    (left.range.start_byte, left.range.end_byte)
+        .cmp(&(right.range.start_byte, right.range.end_byte))
+}
 
-    fn clone_facts(&self, ids: &[MethodFactId]) -> Vec<StoredMethodFact> {
-        ids.iter()
-            .filter_map(|id| self.fact(*id).cloned())
-            .collect()
-    }
+fn by_range_then_fqn(left: &StoredMethodFact, right: &StoredMethodFact) -> Ordering {
+    by_range(left, right).then(left.fqn.cmp(&right.fqn))
 }
 
 fn method_fact_heap_bytes(fact: &StoredMethodFact) -> usize {
@@ -836,49 +689,6 @@ fn callable_template_heap_bytes(template: &CallableTypeTemplate) -> usize {
         }
         CallableTypeTemplate::Unconstrained => 0,
     }
-}
-
-fn sort_method_ids_by_fqn(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
-    ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect_invariant(
-            "method index points to missing fact",
-            "indexes must be removed before arena facts",
-            "remove stale ids from every MethodStore index",
-        );
-        (
-            fact.range.file_id,
-            fact.range.start_byte,
-            fact.range.end_byte,
-            fact.owner,
-        )
-    });
-}
-
-fn sort_method_ids_by_owner(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
-    ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect_invariant(
-            "method owner index points to missing fact",
-            "indexes must be removed before arena facts",
-            "remove stale ids from every MethodStore index",
-        );
-        (
-            fact.range.file_id,
-            fact.range.start_byte,
-            fact.range.end_byte,
-            fact.fqn,
-        )
-    });
-}
-
-fn sort_method_ids_by_file(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
-    ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect_invariant(
-            "method file index points to missing fact",
-            "indexes must be removed before arena facts",
-            "remove stale ids from every MethodStore index",
-        );
-        (fact.range.start_byte, fact.range.end_byte)
-    });
 }
 
 #[cfg(test)]
