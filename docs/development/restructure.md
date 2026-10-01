@@ -44,6 +44,35 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] B1. Introduce `FileAnalysis` as the single per-file output. Keep it
       alongside `FileFacts`, `AnalysisIndex`, and `CollectedFile`, then remove
       those three.
+  - [ ] B1a. Move `engine::FileFacts` to `core::FileAnalysis`
+        (`core/source/file_analysis.rs`) with the same fields, and leave
+        `FileFacts` as a temporary alias. Switch the engine internals
+        (lifecycle, fingerprint, template, codec).
+  - [ ] B1b. Make `AnalysisIndexer` and `index_rbs` return `FileAnalysis` and
+        type the collector's direct facts as `FileAnalysis`. Delete
+        `AnalysisIndex`, `file_analysis_facts_from_index`, and the RBS and
+        stdlib field-copy blocks.
+  - [ ] B1c. Give the collector one `FileAnalysis`. `finish()` returns
+        `FactCollectorOutput { analysis, flow_types, extension_patches,
+        document }`. Delete `CollectedFile`. Add
+        `FileAnalysis::replace_declarations`.
+  - [ ] B1d. Merge the two server assembly paths (`process_file` and the
+        batch collection path) into one `compose_file_analysis`, with a
+        profiler run before and after.
+  - [ ] B1e. Move the remaining server producers and wrappers (JRuby source
+        navigation, extension seed file, project batch and retained facts) to
+        `FileAnalysis`.
+  - [ ] B1f. Delete the `FileFacts` alias and update the analysis, engine, and
+        collector guides and `src/ARCHITECTURE.md`.
+
+  Notes: `replace_facts` keeps its name until B4 renames it to
+  `Project::update`. `FileAnalysis` has no `file_id` field until B4. Flow
+  types, extension patches, and the document stay out of `FileAnalysis`;
+  they move when C1 makes the loader own composition. The persisted gem
+  product DTO does not change, so its schema stays the same. Skipping the
+  didOpen re-analysis (which reruns the collector to rebuild local variable
+  scopes) is a separate follow-up after C1: either a bounded scope cache keyed
+  by source snapshot, or a scope-only walk.
 - [ ] B2. Add `FileOwned<T>` for rows that belong to a file. Port the existing
       stores to it, one store per commit.
 - [ ] B3. Extract the `AnalysisEngine` components one at a time: `Files`,
