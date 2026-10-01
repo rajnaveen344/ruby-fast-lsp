@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{
 };
 
 use super::position_params;
-use crate::handlers::request;
+use crate::lsp::handlers::request;
 use crate::server::RubyLanguageServer;
 use crate::test::harness::fixture::Tag;
 

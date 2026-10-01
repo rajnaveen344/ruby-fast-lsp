@@ -1,6 +1,6 @@
 //! Folding range integration tests.
 
-use crate::capabilities::folding_range::FoldingRangeVisitor;
+use crate::lsp::capabilities::folding_range::FoldingRangeVisitor;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_prism::Visit;
 

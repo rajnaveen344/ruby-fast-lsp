@@ -1,7 +1,7 @@
 //! Resource admission, memory logging, and allocator release for indexing work.
 
 use super::IndexingCoordinator;
-use crate::indexing_resources::{IndexingResourcePriority, IndexingWorkSpec};
+use crate::indexer::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::info;

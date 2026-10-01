@@ -1,8 +1,8 @@
-use crate::config::IndexingConfig;
-use crate::indexer::file_processor::FileProcessor;
-use crate::runtime::jruby::imports::{
+use crate::environment::config::IndexingConfig;
+use crate::environment::runtime::jruby::imports::{
     JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
 };
+use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use navigation::project_file_matches_navigation_key;

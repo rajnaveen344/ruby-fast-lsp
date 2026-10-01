@@ -8,9 +8,9 @@ use tower_lsp::lsp_types::{
 };
 
 use super::{position_in_range, position_params, ranges_overlap};
-use crate::capabilities::code_lens::handle_code_lens;
-use crate::capabilities::hover::handle_hover;
-use crate::capabilities::inlay_hints::handle_inlay_hints;
+use crate::lsp::capabilities::code_lens::handle_code_lens;
+use crate::lsp::capabilities::hover::handle_hover;
+use crate::lsp::capabilities::inlay_hints::handle_inlay_hints;
 use crate::server::RubyLanguageServer;
 use crate::test::harness::fixture::Tag;
 use crate::test::harness::{get_hint_label, get_hint_tooltip};

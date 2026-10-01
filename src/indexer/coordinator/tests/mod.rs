@@ -10,14 +10,14 @@ use super::priority::{
 use super::resources::MIB;
 use super::runtime::runtime_stdlib_paths_for_project;
 use super::*;
-use crate::config::runtime::{
+use crate::environment::config::runtime::{
     ProjectJrubyConfig, ProjectRuntimeSelection, RuntimeMode, RuntimeSelection,
     RuntimeSelectionConfig, SelectedRuntimeDescriptor,
 };
+use crate::environment::runtime::catalog::RuntimeDiscoverySource;
+use crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache;
+use crate::indexer::cache::persistent::PersistentDerivedProductCache;
 use crate::indexer::version::ruby_version::RubyImplementation;
-use crate::persistent_cache::PersistentDerivedProductCache;
-use crate::runtime::catalog::RuntimeDiscoverySource;
-use crate::runtime::jruby::java_catalog::JavaArtifactProductCache;
 use ruby_analysis::core::{FullyQualifiedName, RubyType, TypeSubject};
 use ruby_analysis::engine::{AnalysisQuery, SourceFileInput};
 use ruby_fast_lsp_jvm_metadata::ArchiveLimits;

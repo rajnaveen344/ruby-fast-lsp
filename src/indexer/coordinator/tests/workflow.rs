@@ -1,6 +1,10 @@
 //! Complete indexing workflow over realistic project fixtures.
 
 use super::*;
+use crate::indexer::scheduling::navigation_demand;
+use crate::indexer::scheduling::status;
+use crate::lsp::capabilities::definitions;
+use crate::lsp::capabilities::indexing;
 
 /// Test fixture that creates a realistic Ruby project structure
 struct TestProjectFixture {
@@ -311,10 +315,10 @@ fn create_test_server() -> RubyLanguageServer {
 
 #[test]
 fn test_configured_gem_selection_augments_inferred_and_preserves_exclusions() {
-    let indexing = crate::config::IndexingConfig {
+    let indexing = crate::environment::config::IndexingConfig {
         included_gems: vec!["rails".to_string(), "debug".to_string()],
         excluded_gems: vec!["debug".to_string(), "rack".to_string()],
-        ..crate::config::IndexingConfig::default()
+        ..crate::environment::config::IndexingConfig::default()
     };
 
     let (required, excluded) =
@@ -374,7 +378,7 @@ async fn unavailable_auto_runtime_uses_conservative_core_fallback() {
 
 #[tokio::test]
 async fn auto_runtime_marker_becomes_the_exact_effective_runtime() {
-    use crate::runtime::catalog::{
+    use crate::environment::runtime::catalog::{
         DiscoveredRuntime, RuntimeDiscoverySource, RuntimeSupportStatus,
     };
 
@@ -529,7 +533,7 @@ async fn core_template_binding_preserves_an_open_unsaved_document() {
     let uri = Url::from_file_path(&path).expect("live document URI must be valid");
     let server = create_test_server();
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
-    crate::capabilities::indexing::handle_did_open(
+    indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -559,8 +563,8 @@ async fn core_template_binding_preserves_an_open_unsaved_document() {
     );
     drop(engine);
 
-    let definitions = crate::capabilities::definitions::definition_locations(
-        crate::capabilities::definitions::find_definition_at_position(
+    let definitions = definitions::definition_locations(
+        definitions::find_definition_at_position(
             &server,
             uri,
             tower_lsp::lsp_types::Position::new(2, 14),
@@ -598,7 +602,7 @@ async fn project_batch_stream_consumes_an_exact_generation_navigation_demand_fir
 
     let server = create_test_server();
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
-    crate::capabilities::indexing::handle_did_open(
+    indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -615,7 +619,7 @@ async fn project_batch_stream_consumes_an_exact_generation_navigation_demand_fir
         .indexing_status
         .transition(
             run.generation(),
-            crate::indexing_status::IndexingPhase::IndexingProject,
+            status::IndexingPhase::IndexingProject,
             None,
             None,
         )
@@ -635,18 +639,14 @@ async fn project_batch_stream_consumes_an_exact_generation_navigation_demand_fir
         .await
         .unwrap();
     assert!(
-        crate::capabilities::definitions::find_definition_at_position(
-            &server,
-            caller_uri.clone(),
-            Position::new(0, 2),
-        )
-        .await
-        .is_none(),
+        definitions::find_definition_at_position(&server, caller_uri.clone(), Position::new(0, 2),)
+            .await
+            .is_none(),
         "the target must remain outside the fixed startup frontier before its demand"
     );
     let ticket = workspace.navigation_demands.request(
         run.generation(),
-        crate::navigation_demand::NavigationDemandStage::Project,
+        navigation_demand::NavigationDemandStage::Project,
         "accountrecord",
     );
 
@@ -657,16 +657,12 @@ async fn project_batch_stream_consumes_an_exact_generation_navigation_demand_fir
 
     assert_eq!(
         ticket.wait().await,
-        crate::navigation_demand::NavigationDemandOutcome::TargetProcessed
+        navigation_demand::NavigationDemandOutcome::TargetProcessed
     );
-    let definitions = crate::capabilities::definitions::definition_locations(
-        crate::capabilities::definitions::find_definition_at_position(
-            &server,
-            caller_uri,
-            Position::new(0, 2),
-        )
-        .await
-        .expect("the exact demanded target must resolve before project-stage completion"),
+    let definitions = definitions::definition_locations(
+        definitions::find_definition_at_position(&server, caller_uri, Position::new(0, 2))
+            .await
+            .expect("the exact demanded target must resolve before project-stage completion"),
     );
     assert_eq!(definitions.len(), 1);
     assert_eq!(
@@ -692,14 +688,14 @@ async fn project_frontier_consumes_a_bounded_nonpriority_demand() {
         .indexing_status
         .transition(
             run.generation(),
-            crate::indexing_status::IndexingPhase::IndexingProject,
+            status::IndexingPhase::IndexingProject,
             None,
             None,
         )
         .unwrap();
     let ticket = workspace.navigation_demands.request(
         run.generation(),
-        crate::navigation_demand::NavigationDemandStage::Project,
+        navigation_demand::NavigationDemandStage::Project,
         "accountrecord",
     );
 
@@ -721,7 +717,7 @@ async fn project_frontier_consumes_a_bounded_nonpriority_demand() {
         tokio::time::timeout(Duration::from_millis(50), ticket.wait())
             .await
             .expect("the project frontier must consume its bounded demand"),
-        crate::navigation_demand::NavigationDemandOutcome::TargetProcessed
+        navigation_demand::NavigationDemandOutcome::TargetProcessed
     );
 }
 
@@ -750,7 +746,7 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
 
     let live_path = live_project.join("live.rb");
     let live_uri = Url::from_file_path(&live_path).expect("live document URI must be valid");
-    crate::capabilities::indexing::handle_did_open(
+    indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -849,7 +845,7 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
     drop(engine);
 
     let usage_uri = Url::from_file_path(&usage_path).expect("usage URI must be valid");
-    crate::capabilities::indexing::handle_did_open(
+    indexing::handle_did_open(
         &server,
         tower_lsp::lsp_types::DidOpenTextDocumentParams {
             text_document: tower_lsp::lsp_types::TextDocumentItem {
@@ -867,8 +863,10 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
         .get(&usage_uri)
         .cloned()
         .expect("opened usage document must exist");
-    let query =
-        crate::query::EngineQuery::with_doc_and_engine(document, server.orphan_engine().clone());
+    let query = crate::lsp::query::EngineQuery::with_doc_and_engine(
+        document,
+        server.orphan_engine().clone(),
+    );
     let definitions = query
         .find_definitions_at_position(&usage_uri, tower_lsp::lsp_types::Position::new(1, 9), usage)
         .expect("native RBS method call must resolve");
@@ -1253,7 +1251,7 @@ async fn cold_indexing_retains_but_does_not_publish_closed_file_diagnostics() {
         "closed-file engine diagnostics must not flood the LSP client"
     );
 
-    crate::capabilities::indexing::handle_did_open(
+    indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {

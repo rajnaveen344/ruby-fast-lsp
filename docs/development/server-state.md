@@ -3,7 +3,7 @@
 `RubyLanguageServer` groups protocol state into owners with separate lifetimes
 and locks. The semantic database remains isolated per Ruby project.
 
-Start with [server.rs](../../src/server.rs): it constructs the owners and implements
+Start with [server.rs](../../src/server/mod.rs): it constructs the owners and implements
 the LSP protocol facade. Each module under `src/server/` keeps related state and
 operations together. The semantic database remains
 [AnalysisEngine](../../crates/ruby-analysis/src/engine/state/mod.rs), isolated per Ruby
@@ -14,7 +14,7 @@ project, with a separate orphan engine for unowned documents.
 | Field | Responsibility | Where to read next |
 | --- | --- | --- |
 | `client` | Outbound LSP notifications, registration, and refresh requests. | Protocol methods in `server.rs`. |
-| `config` | One shared accepted server configuration. | `config/` and initialization handlers. |
+| `config` | One shared accepted server configuration. | `environment/config/` and initialization handlers. |
 | `documents` | Open buffers, versions, document handles, and per-URI lifecycle locks. | [documents.rs](../../src/server/documents.rs) |
 | `projects` | Longest-root routing, isolated project engines, orphan engine, and retained external-document provenance. | [projects.rs](../../src/server/projects.rs) |
 | `indexing` | Project scheduler, resource governor, and sequenced status publication. | [indexing.rs](../../src/server/indexing.rs) |
@@ -38,7 +38,7 @@ require mutable access and must be called before starting work or sharing the
 server. Normal LSP configuration continues through the existing handlers.
 
 The standalone file-open profiler's low-level document instrumentation lives in
-`src/perf/file_open.rs`; its executable retains the DHAT allocator and entry point.
+`src/utils/perf/file_open.rs`; its executable retains the DHAT allocator and entry point.
 This preserves the measurement path without exposing document-cache mutation to
 other crates. The profiler's existing output schema and counter fields remain
 unchanged.
@@ -133,7 +133,7 @@ dependency cycle.
 
 ## Where to verify ownership changes
 
-Use the tests beside [server.rs](../../src/server.rs) for shared clone identity,
+Use the tests beside [server.rs](../../src/server/mod.rs) for shared clone identity,
 project isolation, construction, cache reuse, and outbound diagnostic delivery.
 The [test guide](../../src/test/README.md) explains harness boundaries, and the
 [simulation guide](simulation.md) explains controlled schedule coverage. These

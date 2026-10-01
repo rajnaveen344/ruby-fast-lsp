@@ -221,7 +221,7 @@ mod tests {
         let files = compiled::SIMULATION_SOURCE_FILES;
         for required in [
             "src/test/simulation/support/seeded.rs",
-            "src/server.rs",
+            "src/server/mod.rs",
             "crates/ruby-analysis/src/indexer/fact_collector/nodes/calls/nil_call.rs",
             "Cargo.lock",
             "build.rs",

@@ -3,7 +3,7 @@
 use super::IndexerProject;
 use super::ProjectNavigationDemandSelection;
 use super::MAX_PROJECT_NAVIGATION_DEMAND_KEYS;
-use crate::runtime::jruby::imports::StaticJavaNavigationPlan;
+use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::Result;

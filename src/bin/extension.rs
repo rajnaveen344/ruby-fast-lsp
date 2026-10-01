@@ -24,7 +24,7 @@ fn main() {
         Command::Validate { package } | Command::Smoke { package } => package,
     };
 
-    match ruby_fast_lsp::extensions::validate_extension_package(&package) {
+    match ruby_fast_lsp::environment::extensions::validate_extension_package(&package) {
         Ok(report) => {
             println!(
                 "ok id={} status={} calls=[{}]",

@@ -12,5 +12,5 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() {
     let _profiler = dhat::Profiler::new_heap();
-    ruby_fast_lsp::perf::profile_file_open();
+    ruby_fast_lsp::utils::perf::profile_file_open();
 }

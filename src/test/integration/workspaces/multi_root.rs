@@ -81,7 +81,7 @@ async fn ready_project_definition_stays_responsive_while_sibling_workers_are_sat
             let _permit = scheduler
                 .acquire(
                     format!("/busy/project-{index}").into(),
-                    crate::indexing_scheduler::IndexingPriority::Background,
+                    crate::indexer::scheduling::scheduler::IndexingPriority::Background,
                 )
                 .await;
             tokio::task::spawn_blocking(move || {
@@ -217,7 +217,7 @@ async fn workspace_symbol_search_aggregates_isolated_project_engines() {
         .open("workspace_b/b.rb", "class BetaService\nend\n")
         .await;
 
-    let symbols = crate::capabilities::workspace_symbols::handle_workspace_symbols(
+    let symbols = crate::lsp::capabilities::workspace_symbols::handle_workspace_symbols(
         editor.server(),
         WorkspaceSymbolParams {
             query: "Service".to_string(),

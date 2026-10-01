@@ -65,7 +65,7 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::LanguageServer;
 
-use crate::capabilities::indexing;
+use crate::lsp::capabilities::indexing;
 use crate::server::RubyLanguageServer;
 
 use super::check::{run_fixture_checks, FixtureFile};
@@ -129,7 +129,7 @@ impl FakeEditor {
     /// Choose the production resource policy before starting or sharing work.
     pub fn set_indexing_resource_policy(
         &mut self,
-        policy: crate::indexing_resources::IndexingResourcePolicy,
+        policy: crate::indexer::scheduling::resources::IndexingResourcePolicy,
     ) {
         assert!(
             self.buffers.is_empty() && self.workspace_count() == 0,

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ruby_fast_lsp::extensions::{ExtensionStatusParams, ExtensionStatusReport};
+use ruby_fast_lsp::environment::extensions::{ExtensionStatusParams, ExtensionStatusReport};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use tower_lsp::jsonrpc::ErrorCode;
 use tower_lsp::lsp_types::{

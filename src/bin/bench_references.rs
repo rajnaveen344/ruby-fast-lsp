@@ -1,6 +1,6 @@
 //! bench_references — targeted perf harness for reference/fact indexing.
 //!
-//! Loads a named corpus (via `src/perf/corpus.rs`), runs full indexing, and
+//! Loads a named corpus (via `src/utils/perf/corpus.rs`), runs full indexing, and
 //! reports wall-time breakdown — fact collection, reserved resolution,
 //! diagnostics publishing, and total. Optionally repeats the full
 //! pass K times on a fresh index each iteration to measure variance.
@@ -17,8 +17,8 @@
 use anyhow::{anyhow, Context, Result};
 use log::{info, LevelFilter};
 use ruby_fast_lsp::indexer::coordinator::{IndexingCoordinator, IndexingTimings};
-use ruby_fast_lsp::perf::corpus;
 use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::utils::perf::corpus;
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -92,14 +92,14 @@ USAGE:
 
 OPTIONS:
     -c, --corpus   <NAME>   Corpus name, e.g. discourse, mastodon.
-                            Looked up via src/perf/corpus.rs ensure_corpus.
+                            Looked up via src/utils/perf/corpus.rs ensure_corpus.
     -r, --repeats  <N>      Full indexing passes on a fresh index each (default 1).
     -w, --workers  <N>      Override rayon thread pool size. Default: num_cpus.
 
 ENV:
     RUBY_FAST_LSP_CORPUS_DIR=/parent
                             Overrides corpus lookup to /parent/<corpus>/.
-                            Skip src/perf/snapshot.sh for local iteration.
+                            Skip src/utils/perf/snapshot.sh for local iteration.
 
 EXAMPLES:
     cargo run --release --bin bench_references -- --corpus discourse

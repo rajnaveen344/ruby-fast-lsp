@@ -1,8 +1,8 @@
 //! Indexing admission and process-wide status publication; no semantic store.
 use super::RubyLanguageServer;
-use crate::indexing_resources::IndexingResourceGovernor;
-use crate::indexing_scheduler::IndexingScheduler;
-use crate::indexing_status::{
+use crate::indexer::scheduling::resources::IndexingResourceGovernor;
+use crate::indexer::scheduling::scheduler::IndexingScheduler;
+use crate::indexer::scheduling::status::{
     IndexingAggregateSnapshot, IndexingPersistentProductReuseSnapshot, IndexingPhase,
     IndexingReuseSnapshot, IndexingSingleFlightReuseSnapshot, IndexingStatusNotification,
     IndexingStatusParams, IndexingStatusSnapshot,
@@ -121,7 +121,7 @@ pub(crate) struct IndexingServices {
     resources: IndexingResourceGovernor,
     pub(super) status: IndexingStatusPublisher,
     #[cfg(test)]
-    pub(crate) schedule: Arc<crate::indexer::test_schedule::TestSchedule>,
+    pub(crate) schedule: Arc<crate::indexer::scheduling::test_schedule::TestSchedule>,
     #[cfg(test)]
     pub(super) progress_reports: Arc<Mutex<Vec<(PathBuf, u64, u64)>>>,
 }
@@ -181,25 +181,27 @@ impl RubyLanguageServer {
     /// Select the resource budget before starting work or sharing the server.
     pub fn set_indexing_resource_policy(
         &mut self,
-        policy: crate::indexing_resources::IndexingResourcePolicy,
+        policy: crate::indexer::scheduling::resources::IndexingResourcePolicy,
     ) {
         self.indexing
             .set_resources(IndexingResourceGovernor::new(policy));
     }
 
-    pub fn indexing_resource_policy(&self) -> crate::indexing_resources::IndexingResourcePolicy {
+    pub fn indexing_resource_policy(
+        &self,
+    ) -> crate::indexer::scheduling::resources::IndexingResourcePolicy {
         self.indexing.resources().policy()
     }
 
     pub fn indexing_resource_snapshot(
         &self,
-    ) -> crate::indexing_resources::IndexingResourceSnapshot {
+    ) -> crate::indexer::scheduling::resources::IndexingResourceSnapshot {
         self.indexing.resources().snapshot()
     }
 
     pub fn indexing_scheduler_snapshot(
         &self,
-    ) -> crate::indexing_scheduler::IndexingSchedulerSnapshot {
+    ) -> crate::indexer::scheduling::scheduler::IndexingSchedulerSnapshot {
         self.indexing.scheduler().snapshot()
     }
 
@@ -207,9 +209,9 @@ impl RubyLanguageServer {
     pub fn register_indexing_run(
         &self,
         project_root: std::path::PathBuf,
-        priority: crate::indexing_scheduler::IndexingPriority,
-        run: &crate::indexing_status::IndexingRun,
-    ) -> crate::indexing_scheduler::IndexingAdmission {
+        priority: crate::indexer::scheduling::scheduler::IndexingPriority,
+        run: &crate::indexer::scheduling::status::IndexingRun,
+    ) -> crate::indexer::scheduling::scheduler::IndexingAdmission {
         self.indexing
             .scheduler()
             .register_cancellable(project_root, priority, run.cancellation())

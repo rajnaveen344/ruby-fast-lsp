@@ -14,12 +14,12 @@
 //! Each indexer (project, stdlib, gem) discovers files to process, then delegates
 //! the actual processing to `FileProcessor` with appropriate options.
 
-use crate::capabilities::diagnostics::generate_diagnostics;
-use crate::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
-use crate::indexer::require_paths::{unresolved_require_diagnostics, RequireFeatureIndex};
-use crate::runtime::jruby::imports::{
+use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
+use crate::environment::runtime::jruby::imports::{
     JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
 };
+use crate::indexer::require_paths::{unresolved_require_diagnostics, RequireFeatureIndex};
+use crate::lsp::capabilities::diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use collection::{replace_analysis_facts_for_file, replace_file_analysis};

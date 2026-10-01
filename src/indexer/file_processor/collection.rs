@@ -10,8 +10,8 @@ use super::{
     analysis_source, CollectedFileFactsOutput, CollectedProjectFileFacts, FileResolution,
     ProjectFileCollectionTiming,
 };
+use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::indexer::require_paths::unresolved_require_diagnostics;
-use crate::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::debug;

@@ -1,7 +1,7 @@
-use crate::check::{
+use crate::indexer::file_processor::FileProcessor;
+use crate::lsp::check::{
     CheckDiagnostic, CheckReport, CheckSession, CheckTypeOutcome, CheckTypeSubjectKind,
 };
-use crate::indexer::file_processor::FileProcessor;
 use crate::test::harness::{get_hint_label, get_hint_tooltip, FakeEditor};
 use ruby_analysis::core::{RubyType, UnknownReason};
 use tower_lsp::lsp_types::NumberOrString;
@@ -3035,12 +3035,12 @@ async fn syntax_diagnostic_matches_cli_and_lsp() {
         .filter(|diagnostic| diagnostic.code.is_none())
         .map(|diagnostic| {
             (
-                crate::check::CheckRange {
-                    start: crate::check::CheckPosition {
+                crate::lsp::check::CheckRange {
+                    start: crate::lsp::check::CheckPosition {
                         line: diagnostic.range.start.line + 1,
                         column: diagnostic.range.start.character + 1,
                     },
-                    end: crate::check::CheckPosition {
+                    end: crate::lsp::check::CheckPosition {
                         line: diagnostic.range.end.line + 1,
                         column: diagnostic.range.end.character + 1,
                     },
@@ -3091,12 +3091,12 @@ async fn multi_diagnostic_file_keeps_deterministic_cli_lsp_parity() {
                 _ => return None,
             };
             Some((
-                crate::check::CheckRange {
-                    start: crate::check::CheckPosition {
+                crate::lsp::check::CheckRange {
+                    start: crate::lsp::check::CheckPosition {
                         line: diagnostic.range.start.line + 1,
                         column: diagnostic.range.start.character + 1,
                     },
-                    end: crate::check::CheckPosition {
+                    end: crate::lsp::check::CheckPosition {
                         line: diagnostic.range.end.line + 1,
                         column: diagnostic.range.end.character + 1,
                     },

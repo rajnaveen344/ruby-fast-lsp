@@ -1,7 +1,7 @@
 use super::RubyLanguageServer;
-use crate::config::RubyFastLspConfig;
-use crate::extensions::ExtensionRegistryHandle;
-use crate::extensions::ExtensionStatusReport;
+use crate::environment::config::RubyFastLspConfig;
+use crate::environment::extensions::ExtensionRegistryHandle;
+use crate::environment::extensions::ExtensionStatusReport;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

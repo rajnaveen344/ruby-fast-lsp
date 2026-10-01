@@ -1,6 +1,6 @@
 //! Conversion of extension-produced facts into analysis facts.
 
-use crate::extensions::analysis_ruby_type_from_extension;
+use crate::environment::extensions::analysis_ruby_type_from_extension;
 use ruby_analysis::core::MethodVisibility as AnalysisMethodVisibility;
 use ruby_analysis::core::{
     FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,

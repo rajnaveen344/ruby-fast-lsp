@@ -3,6 +3,8 @@ pub mod cache;
 pub mod file_ops;
 pub mod lsp;
 pub mod parser;
+pub mod perf;
+pub mod single_flight;
 pub mod stub_loader;
 
 // Re-export commonly used functions for convenience

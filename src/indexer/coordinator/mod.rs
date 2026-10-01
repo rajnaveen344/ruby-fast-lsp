@@ -1,14 +1,14 @@
-use crate::config::runtime::SelectedRuntimeDescriptor;
-use crate::config::RubyFastLspConfig;
-use crate::extensions::ExtensionRegistryHandle;
+use crate::environment::config::runtime::SelectedRuntimeDescriptor;
+use crate::environment::config::RubyFastLspConfig;
+use crate::environment::extensions::ExtensionRegistryHandle;
+use crate::environment::runtime::catalog::RuntimeImplementation;
+use crate::environment::runtime::jruby::classpath::ClasspathArtifact;
+use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::sources::gems::IndexerGem;
 use crate::indexer::sources::project::IndexerProject;
 use crate::indexer::sources::stdlib::IndexerStdlib;
 use crate::indexer::version::ruby_version::RubyVersion;
-use crate::runtime::catalog::RuntimeImplementation;
-use crate::runtime::jruby::classpath::ClasspathArtifact;
-use crate::runtime::jruby::imports::JrubyImportProvider;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use gems::configured_gem_selection;
@@ -103,7 +103,7 @@ pub struct IndexingCoordinator {
 
     /// Timings from the most recent `run_complete_indexing` call.
     last_timings: IndexingTimings,
-    indexing_run: Option<crate::indexing_status::IndexingRun>,
+    indexing_run: Option<crate::indexer::scheduling::status::IndexingRun>,
     analysis_engine_override: Option<Arc<parking_lot::RwLock<AnalysisEngine>>>,
 }
 
@@ -155,14 +155,14 @@ impl IndexingCoordinator {
         self.extension_registry = Some(extension_registry);
     }
 
-    pub fn set_indexing_run(&mut self, run: crate::indexing_status::IndexingRun) {
+    pub fn set_indexing_run(&mut self, run: crate::indexer::scheduling::status::IndexingRun) {
         self.indexing_run = Some(run);
     }
 
     fn resource_cancellation(&self) -> Option<CancellationToken> {
         self.indexing_run
             .as_ref()
-            .map(crate::indexing_status::IndexingRun::cancellation)
+            .map(crate::indexer::scheduling::status::IndexingRun::cancellation)
     }
 
     pub fn set_analysis_engine(
@@ -209,7 +209,7 @@ impl IndexingCoordinator {
         self.resolve_effective_runtime(server).await?;
         self.transition_indexing_status(
             server,
-            crate::indexing_status::IndexingPhase::DiscoveringInputs,
+            crate::indexer::scheduling::status::IndexingPhase::DiscoveringInputs,
         )
         .await?;
 
@@ -240,11 +240,11 @@ impl IndexingCoordinator {
         // remains isolated and waits until the exact owning-project inputs exist.
         info!("Collecting analysis facts");
         let facts_start = Instant::now();
-        crate::runtime::jruby::imports::reset_jruby_call_host_probe();
+        crate::environment::runtime::jruby::imports::reset_jruby_call_host_probe();
 
         self.transition_indexing_status(
             server,
-            crate::indexing_status::IndexingPhase::IndexingCore,
+            crate::indexer::scheduling::status::IndexingPhase::IndexingCore,
         )
         .await?;
 
@@ -351,7 +351,7 @@ impl IndexingCoordinator {
             // locked gem construction on the cooperative partition.
             self.transition_indexing_status(
                 server,
-                crate::indexing_status::IndexingPhase::IndexingProject,
+                crate::indexer::scheduling::status::IndexingPhase::IndexingProject,
             )
             .await?;
             let project_start = Instant::now();
@@ -476,21 +476,21 @@ impl IndexingCoordinator {
         };
         project_dur += replay_dur;
         drop(project_navigation_reservation.take());
-        crate::runtime::jruby::imports::log_jruby_call_host_probe(
+        crate::environment::runtime::jruby::imports::log_jruby_call_host_probe(
             "project_navigation_ready",
             &self.workspace_root,
         );
         self.transition_indexing_status(
             server,
-            crate::indexing_status::IndexingPhase::ProjectNavigationReady,
+            crate::indexer::scheduling::status::IndexingPhase::ProjectNavigationReady,
         )
         .await?;
         self.transition_indexing_status(
             server,
-            crate::indexing_status::IndexingPhase::IndexingDependencies,
+            crate::indexer::scheduling::status::IndexingPhase::IndexingDependencies,
         )
         .await?;
-        crate::runtime::jruby::imports::log_jruby_call_host_probe(
+        crate::environment::runtime::jruby::imports::log_jruby_call_host_probe(
             "after_dependencies",
             &self.workspace_root,
         );
@@ -519,7 +519,7 @@ impl IndexingCoordinator {
         info!("Publishing diagnostics");
         self.transition_indexing_status(
             server,
-            crate::indexing_status::IndexingPhase::ResolvingSemantics,
+            crate::indexer::scheduling::status::IndexingPhase::ResolvingSemantics,
         )
         .await?;
         let resolve_start = Instant::now();
@@ -560,18 +560,18 @@ impl IndexingCoordinator {
             {
                 workspace.navigation_demands.complete_stage(
                     run.generation(),
-                    crate::navigation_demand::NavigationDemandStage::Dependency,
+                    crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                 );
             }
         }
         self.transition_indexing_status(
             server,
-            crate::indexing_status::IndexingPhase::DependencyNavigationReady,
+            crate::indexer::scheduling::status::IndexingPhase::DependencyNavigationReady,
         )
         .await?;
         self.transition_indexing_status(
             server,
-            crate::indexing_status::IndexingPhase::PublishingDiagnostics,
+            crate::indexer::scheduling::status::IndexingPhase::PublishingDiagnostics,
         )
         .await?;
         let publish_start = Instant::now();
@@ -626,7 +626,7 @@ impl IndexingCoordinator {
     async fn transition_indexing_status(
         &self,
         server: &RubyLanguageServer,
-        phase: crate::indexing_status::IndexingPhase,
+        phase: crate::indexer::scheduling::status::IndexingPhase,
     ) -> Result<()> {
         let Some(run) = &self.indexing_run else {
             return Ok(());

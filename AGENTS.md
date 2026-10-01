@@ -33,7 +33,7 @@ over old status reports. Update the nearest guide when its contract changes.
 | `crates/extension-*`, `extensions/` | Extension contracts, hosts, and framework-specific fact producers                             |
 | `editors/`                          | Editor UX, distribution packaging, installed-artifact validation                              |
 
-Keep reusable analysis independent of LSP types. `src/query/` adapts cursor and
+Keep reusable analysis independent of LSP types. `src/lsp/query/` adapts cursor and
 document context to `AnalysisQuery`/`TypeQuery` and converts domain ranges to
 protocol responses. Do not duplicate MRO, identity, ranking, or missing-method
 policy in feature adapters. Engine resolution may coordinate inference solvers;

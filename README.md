@@ -61,7 +61,7 @@ describe supported forms and limits.
 
 | Path | Purpose |
 | --- | --- |
-| [src/](src/ARCHITECTURE.md) | Server, workspace lifecycle, and LSP adapters; start at `src/main.rs` and `src/server.rs` |
+| [src/](src/ARCHITECTURE.md) | Server, workspace lifecycle, and LSP adapters; start at `src/main.rs` and `src/server/mod.rs` |
 | [crates/ruby-analysis/](crates/ruby-analysis/README.md) | Shared facts, indexing, inference, and semantic queries |
 | [crates/](Cargo.toml) | RBS/JVM support, extension APIs and hosts, and the external LSP test harness |
 | [extensions/](extensions/README.md) | Framework integrations and extension examples |

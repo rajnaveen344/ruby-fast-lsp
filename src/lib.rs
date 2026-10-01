@@ -1,24 +1,10 @@
-pub mod capabilities;
-pub mod check;
-pub mod config;
-mod dependency_product;
-pub mod extensions;
-pub mod handlers;
+pub mod environment;
 pub mod indexer;
-pub mod indexing_resources;
-pub mod indexing_scheduler;
-pub mod indexing_status;
-pub mod linter;
-mod navigation_demand;
-pub mod perf;
-pub mod persistent_cache;
-pub mod query;
-pub mod runtime;
+pub mod lsp;
 pub mod server;
 #[cfg(any(test, feature = "simulation"))]
 #[path = "test/simulation/support/mod.rs"]
 pub mod simulation;
-pub mod single_flight;
 #[cfg(test)]
 pub mod test;
 pub mod utils;

@@ -3,8 +3,8 @@
 use super::collection::replace_file_analysis;
 use super::FileProcessor;
 use super::{FileResolution, JrubyNavigationResolution};
-use crate::runtime::jruby::imports::StaticJavaNavigationPlan;
-use crate::runtime::jruby::source_navigation::java_source_navigation_facts_with_declaration;
+use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
+use crate::environment::runtime::jruby::source_navigation::java_source_navigation_facts_with_declaration;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use ruby_analysis::core::{FullyQualifiedName, SourceKind};

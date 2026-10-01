@@ -45,13 +45,14 @@ use ruby_analysis::core::{
     InferenceTelemetry, MethodFact, ReferenceCandidate, ReferenceFact, SourceKind, SymbolFact,
     TypeFact, TypeSubject,
 };
-use ruby_fast_lsp::capabilities::indexing;
-use ruby_fast_lsp::capabilities::{completion, definitions, hover, references};
-use ruby_fast_lsp::config::RubyFastLspConfig;
-use ruby_fast_lsp::handlers::request;
-use ruby_fast_lsp::perf::metrics::{LatencySummary, ProductionBudget, ProductionMeasurements};
-use ruby_fast_lsp::query::EngineQuery;
+use ruby_fast_lsp::environment::config::RubyFastLspConfig;
+use ruby_fast_lsp::indexer::scheduling::{resources, scheduler, status};
+use ruby_fast_lsp::lsp::capabilities::{completion, definitions, hover, indexing, references};
+use ruby_fast_lsp::lsp::{handlers::request, query::EngineQuery};
 use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::utils::perf::metrics::{
+    LatencySummary, ProductionBudget, ProductionMeasurements,
+};
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
@@ -510,7 +511,7 @@ fn main() -> anyhow::Result<()> {
                 })
                 .unwrap_or_else(|| default_policy.transient_memory_limit_bytes());
             server.set_indexing_resource_policy(
-                    ruby_fast_lsp::indexing_resources::IndexingResourcePolicy::with_limits(
+                    resources::IndexingResourcePolicy::with_limits(
                         config
                             .resource_cpu_lanes
                             .unwrap_or_else(|| default_policy.cpu_lanes()),
@@ -984,9 +985,9 @@ async fn observe_first_live_definition(
         }
         if matches!(
             status.phase,
-            ruby_fast_lsp::indexing_status::IndexingPhase::Ready
-                | ruby_fast_lsp::indexing_status::IndexingPhase::Failed
-                | ruby_fast_lsp::indexing_status::IndexingPhase::Cancelled
+            status::IndexingPhase::Ready
+                | status::IndexingPhase::Failed
+                | status::IndexingPhase::Cancelled
         ) {
             panic!(
                 "INVARIANT VIOLATED: live definition probe {}:{}:{} never resolved before project {} reached terminal phase {:?}. This is a profiler acceptance failure because readiness timestamps without a successful semantic query are not evidence. Fix: repair the selected probe or the staged indexing lifecycle. Failure: {:?}",
@@ -1278,7 +1279,7 @@ async fn run_registered_workspace_indexing(
             let run = workspace.begin_indexing_run();
             let admission = server.register_indexing_run(
                 workspace.root_path.clone(),
-                ruby_fast_lsp::indexing_scheduler::IndexingPriority::Background,
+                scheduler::IndexingPriority::Background,
                 &run,
             );
             (workspace, run, admission)
@@ -1300,7 +1301,7 @@ async fn run_registered_workspace_indexing(
             };
             let _ = workspace.indexing_status.transition(
                 run.generation(),
-                ruby_fast_lsp::indexing_status::IndexingPhase::ResolvingRuntime,
+                status::IndexingPhase::ResolvingRuntime,
                 None,
                 None,
             );
@@ -1309,7 +1310,7 @@ async fn run_registered_workspace_indexing(
                 Ok(_) => {
                     let _ = workspace.indexing_status.transition(
                         run.generation(),
-                        ruby_fast_lsp::indexing_status::IndexingPhase::Ready,
+                        status::IndexingPhase::Ready,
                         None,
                         None,
                     );

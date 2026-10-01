@@ -2,12 +2,12 @@
 
 use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
-use crate::config::runtime::{EffectiveRuntimeSelection, SelectedRuntimeDescriptor};
+use crate::environment::config::runtime::{EffectiveRuntimeSelection, SelectedRuntimeDescriptor};
+use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::indexer::sources::stdlib::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
 use crate::indexer::version::ruby_version::{RubyImplementation, RubyVersion};
 #[cfg(test)]
 use crate::indexer::version::version_detector::RubyVersionDetector;
-use crate::runtime::catalog::RuntimeImplementation;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::{debug, info, warn};

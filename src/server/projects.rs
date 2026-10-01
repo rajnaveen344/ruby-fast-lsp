@@ -1,10 +1,10 @@
 //! Ruby project ownership, longest-root routing, and external provenance.
 use super::RubyLanguageServer;
-use crate::config::runtime::SelectedRuntimeDescriptor;
-use crate::extensions::{ProjectContextSeed, ProjectContextSnapshot};
-use crate::indexing_status::{IndexingRun, ProjectIndexingStatus};
-use crate::navigation_demand::NavigationDemandController;
-use crate::runtime::jruby::imports::JrubyImportProvider;
+use crate::environment::config::runtime::SelectedRuntimeDescriptor;
+use crate::environment::extensions::{ProjectContextSeed, ProjectContextSnapshot};
+use crate::environment::runtime::jruby::imports::JrubyImportProvider;
+use crate::indexer::scheduling::navigation_demand::NavigationDemandController;
+use crate::indexer::scheduling::status::{IndexingRun, ProjectIndexingStatus};
 use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
 use ruby_analysis::engine::AnalysisEngine;

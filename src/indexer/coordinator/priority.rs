@@ -73,7 +73,7 @@ impl ActiveDocumentPriorityKeys {
 }
 
 pub(crate) fn dependency_priority_key(name: &str) -> String {
-    crate::navigation_demand::normalize_navigation_key(name)
+    crate::indexer::scheduling::navigation_demand::normalize_navigation_key(name)
 }
 
 pub(super) fn active_document_constant_priority_keys(source: &str) -> ActiveDocumentPriorityKeys {

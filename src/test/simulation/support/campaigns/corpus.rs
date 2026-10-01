@@ -1,5 +1,5 @@
-use crate::capabilities::indexing;
 use crate::indexer::file_processor::FileProcessor;
+use crate::lsp::capabilities::indexing;
 use crate::server::RubyLanguageServer;
 use parking_lot::RwLock;
 use ruby_analysis::core::{FullyQualifiedName, SourceKind, TextRange};

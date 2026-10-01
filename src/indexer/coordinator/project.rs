@@ -3,8 +3,8 @@
 use super::priority::ActiveDocumentPriorityKeys;
 use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
+use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::indexer::sources::project::IndexerProject;
-use crate::runtime::jruby::imports::JrubyImportProvider;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use log::info;
@@ -69,7 +69,7 @@ impl IndexingCoordinator {
                     .map(|(demands, generation)| {
                         demands.drain(
                             *generation,
-                            crate::navigation_demand::NavigationDemandStage::Project,
+                            crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                         )
                     })
                     .unwrap_or_default();
@@ -83,7 +83,7 @@ impl IndexingCoordinator {
                             if !selection.completed_keys.is_empty() {
                                 demands.complete_keys(
                                     *generation,
-                                    crate::navigation_demand::NavigationDemandStage::Project,
+                                    crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                                     &selection.completed_keys,
                                 );
                             }
@@ -104,7 +104,7 @@ impl IndexingCoordinator {
                         };
                         let demand_keys = demands.drain(
                             *generation,
-                            crate::navigation_demand::NavigationDemandStage::Project,
+                            crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                         );
                         let selection = project_indexer.take_navigation_demand_files(&demand_keys);
                         let demanded_file_count = selection.files.len();
@@ -116,7 +116,7 @@ impl IndexingCoordinator {
                         if !selection.completed_keys.is_empty() {
                             demands.complete_keys(
                                 *generation,
-                                crate::navigation_demand::NavigationDemandStage::Project,
+                                crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                                 &selection.completed_keys,
                             );
                         }
@@ -179,7 +179,7 @@ impl IndexingCoordinator {
             .filter(|key| {
                 workspace.navigation_demands.claim_if_requested(
                     generation,
-                    crate::navigation_demand::NavigationDemandStage::Project,
+                    crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                     key,
                 )
             })
@@ -187,7 +187,7 @@ impl IndexingCoordinator {
         if !completed_keys.is_empty() {
             workspace.navigation_demands.complete_keys(
                 generation,
-                crate::navigation_demand::NavigationDemandStage::Project,
+                crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                 &completed_keys,
             );
             info!(
@@ -316,7 +316,7 @@ impl IndexingCoordinator {
                         }
                         let demand_keys = worker_demands.drain(
                             generation,
-                            crate::navigation_demand::NavigationDemandStage::Project,
+                            crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                         );
                         let selection = project_indexer.take_navigation_demand_files(&demand_keys);
                         let demanded = !selection.files.is_empty();
@@ -369,7 +369,7 @@ impl IndexingCoordinator {
                         if !selection.completed_keys.is_empty() {
                             worker_demands.complete_keys(
                                 generation,
-                                crate::navigation_demand::NavigationDemandStage::Project,
+                                crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                                 &selection.completed_keys,
                             );
                         }
@@ -385,7 +385,7 @@ impl IndexingCoordinator {
                             project_indexer.finish_remaining_project_facts();
                             worker_demands.complete_stage(
                                 generation,
-                                crate::navigation_demand::NavigationDemandStage::Project,
+                                crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Project,
                             );
                             break;
                         }

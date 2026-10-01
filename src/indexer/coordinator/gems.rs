@@ -5,10 +5,10 @@ use super::priority::{
 };
 use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
-use crate::config::IndexingConfig;
+use crate::environment::config::IndexingConfig;
+use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::indexer::sources::gems::IndexerGem;
 use crate::indexer::version::ruby_version::RubyImplementation;
-use crate::runtime::catalog::RuntimeImplementation;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use futures::stream::{self, StreamExt};
@@ -130,7 +130,10 @@ impl IndexingCoordinator {
         dependency_seed: AnalysisEngine,
         priority_keys: HashSet<String>,
         excluded_gems: HashSet<String>,
-        navigation_demands: Option<(crate::navigation_demand::NavigationDemandController, u64)>,
+        navigation_demands: Option<(
+            crate::indexer::scheduling::navigation_demand::NavigationDemandController,
+            u64,
+        )>,
         project_frontier_release: tokio::sync::oneshot::Sender<()>,
     ) -> Result<(IndexerGem, Duration)> {
         // An active constant may suggest a dependency name even in a plain
@@ -247,12 +250,12 @@ impl IndexingCoordinator {
                     let key = dependency_priority_key(gem_name);
                     if demands.claim_if_requested(
                         *generation,
-                        crate::navigation_demand::NavigationDemandStage::Dependency,
+                        crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                         &key,
                     ) {
                         demands.complete_keys(
                             *generation,
-                            crate::navigation_demand::NavigationDemandStage::Dependency,
+                            crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                             std::slice::from_ref(&key),
                         );
                     }
@@ -302,7 +305,10 @@ impl IndexingCoordinator {
         analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
         mut gem_indexer: IndexerGem,
         priority_keys: HashSet<String>,
-        navigation_demands: Option<(crate::navigation_demand::NavigationDemandController, u64)>,
+        navigation_demands: Option<(
+            crate::indexer::scheduling::navigation_demand::NavigationDemandController,
+            u64,
+        )>,
     ) -> Result<IndexerGem> {
         if gem_indexer.needs_unlocked_explicit_discovery() {
             let (next_indexer, discovery) = run_cpu_indexing_task(
@@ -333,7 +339,7 @@ impl IndexingCoordinator {
         let (manifest_sender, manifest_receiver) = tokio::sync::mpsc::channel::<
             Result<(
                 String,
-                crate::dependency_product::GemDependencyManifest,
+                crate::indexer::cache::dependency_product::GemDependencyManifest,
                 Vec<String>,
             )>,
         >(GEM_PRODUCT_LOAD_PREFETCH);
@@ -348,7 +354,7 @@ impl IndexingCoordinator {
                 if let Some((demands, generation)) = &producer_navigation_demands {
                     let keys = demands.drain(
                         *generation,
-                        crate::navigation_demand::NavigationDemandStage::Dependency,
+                        crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                     );
                     for (gem_name, mut keys) in
                         prioritize_demanded_gem_names(&mut remaining_gem_names, &keys)
@@ -417,7 +423,7 @@ impl IndexingCoordinator {
                                 );
                             demands.complete_keys(
                                 *generation,
-                                crate::navigation_demand::NavigationDemandStage::Dependency,
+                                crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                                 &matched_demand_keys,
                             );
                         }
@@ -496,7 +502,7 @@ impl IndexingCoordinator {
                         .is_some_and(|(demands, generation)| {
                             demands.claim_if_requested(
                                 *generation,
-                                crate::navigation_demand::NavigationDemandStage::Dependency,
+                                crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                                 &dependency_key,
                             )
                         });
@@ -516,7 +522,7 @@ impl IndexingCoordinator {
                     );
                     demands.complete_keys(
                         *generation,
-                        crate::navigation_demand::NavigationDemandStage::Dependency,
+                        crate::indexer::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                         std::slice::from_ref(&dependency_key),
                     );
                     info!(

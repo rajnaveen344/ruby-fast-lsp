@@ -9,8 +9,8 @@ use tower_lsp::lsp_types::{
 };
 
 use super::{assert_same_locations, position_params};
-use crate::capabilities::rename::handle_rename;
-use crate::handlers::request;
+use crate::lsp::capabilities::rename::handle_rename;
+use crate::lsp::handlers::request;
 use crate::server::RubyLanguageServer;
 use crate::test::harness::fixture::{Tag, TagKind};
 

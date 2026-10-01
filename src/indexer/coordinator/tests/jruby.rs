@@ -1,6 +1,9 @@
 //! JRuby runtime, Java catalog, and decompiled navigation coordination.
 
 use super::*;
+use crate::environment::runtime::jruby::classpath;
+use crate::environment::runtime::jruby::java_catalog;
+use crate::indexer::scheduling::resources;
 
 #[test]
 fn cached_java_artifact_metadata_is_reused_without_cross_project_path_leakage() {
@@ -22,13 +25,13 @@ fn cached_java_artifact_metadata_is_reused_without_cross_project_path_leakage() 
     let artifact = |path: PathBuf| {
         fs::write(&path, &bytes).unwrap();
         let metadata = fs::metadata(&path).unwrap();
-        crate::runtime::jruby::classpath::ClasspathArtifact {
+        classpath::ClasspathArtifact {
             path,
-            origin: crate::runtime::jruby::classpath::ArtifactOrigin::Explicit,
-            kind: crate::runtime::jruby::classpath::ArtifactKind::Jar,
+            origin: classpath::ArtifactOrigin::Explicit,
+            kind: classpath::ArtifactKind::Jar,
             fingerprint_sha256: format!("{:x}", Sha256::digest(&bytes)),
             byte_length: bytes.len() as u64,
-            file_identity: crate::runtime::jruby::classpath::SourceFileIdentity {
+            file_identity: classpath::SourceFileIdentity {
                 byte_length: metadata.len(),
                 modified: metadata.modified().unwrap(),
             },
@@ -36,21 +39,18 @@ fn cached_java_artifact_metadata_is_reused_without_cross_project_path_leakage() 
     };
     let first_artifact = artifact(fixture.path().join("project-one.jar"));
     let second_artifact = artifact(fixture.path().join("project-two.jar"));
-    let classpath = |root: PathBuf, artifact: ClasspathArtifact| {
-        crate::runtime::jruby::classpath::ProjectClasspath {
-            project_root: root,
-            artifacts: vec![artifact],
-            sources: Vec::new(),
-            unresolved: Vec::new(),
-            fingerprint_sha256: "fixture-classpath".to_string(),
-        }
+    let classpath = |root: PathBuf, artifact: ClasspathArtifact| classpath::ProjectClasspath {
+        project_root: root,
+        artifacts: vec![artifact],
+        sources: Vec::new(),
+        unresolved: Vec::new(),
+        fingerprint_sha256: "fixture-classpath".to_string(),
     };
     let first_classpath = classpath(fixture.path().join("project-one"), first_artifact.clone());
     let second_classpath = classpath(fixture.path().join("project-two"), second_artifact.clone());
     let cache =
         PersistentDerivedProductCache::with_limits(fixture.path().join("cache"), 8, 1024 * 1024);
-    let process_cache =
-        crate::runtime::jruby::java_catalog::JavaArtifactProductCache::new(8, 1024 * 1024);
+    let process_cache = java_catalog::JavaArtifactProductCache::new(8, 1024 * 1024);
 
     let first = build_cached_project_java_catalog(
         &first_classpath,
@@ -118,11 +118,11 @@ fn parallel_cached_java_products_preserve_classpath_winner_order() {
         let metadata = fs::metadata(&path).unwrap();
         ClasspathArtifact {
             path,
-            origin: crate::runtime::jruby::classpath::ArtifactOrigin::Explicit,
-            kind: crate::runtime::jruby::classpath::ArtifactKind::Jar,
+            origin: classpath::ArtifactOrigin::Explicit,
+            kind: classpath::ArtifactKind::Jar,
             fingerprint_sha256: format!("{:x}", Sha256::digest(&bytes)),
             byte_length: bytes.len() as u64,
-            file_identity: crate::runtime::jruby::classpath::SourceFileIdentity {
+            file_identity: classpath::SourceFileIdentity {
                 byte_length: metadata.len(),
                 modified: metadata.modified().unwrap(),
             },
@@ -130,7 +130,7 @@ fn parallel_cached_java_products_preserve_classpath_winner_order() {
     };
     let winner = artifact("winner.jar", "winner");
     let shadowed = artifact("shadowed.jar", "shadowed");
-    let classpath = crate::runtime::jruby::classpath::ProjectClasspath {
+    let classpath = classpath::ProjectClasspath {
         project_root: fixture.path().join("project"),
         artifacts: vec![winner.clone(), shadowed.clone()],
         sources: Vec::new(),
@@ -156,7 +156,7 @@ fn parallel_cached_java_products_preserve_classpath_winner_order() {
     );
     assert_eq!(
         catalog.duplicates,
-        vec![crate::runtime::jruby::java_catalog::DuplicateJavaClass {
+        vec![java_catalog::DuplicateJavaClass {
             name: "com/example/Demo".to_string(),
             winner: winner.path,
             shadowed: shadowed.path,
@@ -204,8 +204,8 @@ async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource
     let mut server = RubyLanguageServer::default();
     server
         .indexing
-        .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
+        .set_resources(resources::IndexingResourceGovernor::new(
+            resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
         ));
     server
         .indexing
@@ -284,8 +284,8 @@ async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
     let mut server = RubyLanguageServer::default();
     server
         .indexing
-        .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
+        .set_resources(resources::IndexingResourceGovernor::new(
+            resources::IndexingResourcePolicy::with_limits(6, 2, 512 * MIB, 2),
         ));
     server
         .indexing
@@ -839,7 +839,7 @@ fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project() {
         .get(&uri)
         .cloned()
         .expect("processed JRuby document must exist");
-    let query = crate::query::EngineQuery::with_doc_and_engine(
+    let query = crate::lsp::query::EngineQuery::with_doc_and_engine(
         document,
         server.analysis_engine_for_uri(&uri),
     );
@@ -997,7 +997,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     let uri = Url::from_file_path(&source_path).unwrap();
     let initial = "VALUE = 1\n";
     fs::write(&source_path, initial).unwrap();
-    crate::capabilities::indexing::handle_did_open(
+    crate::lsp::capabilities::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -1015,7 +1015,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     );
 
     let added = "java_import fixtures.RichFixture\nRICH = RichFixture.new(nil)\n";
-    crate::capabilities::indexing::handle_did_change(
+    crate::lsp::capabilities::indexing::handle_did_change(
         &server,
         DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
@@ -1067,7 +1067,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     );
     drop(engine);
 
-    crate::capabilities::indexing::handle_did_change(
+    crate::lsp::capabilities::indexing::handle_did_change(
         &server,
         DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {

@@ -3,7 +3,7 @@
 //! This module handles gem discovery and indexing for the Ruby Language Server.
 //! It supports both Bundler-based (Gemfile) and global gem discovery.
 
-use crate::dependency_product::{GemDependencyManifest, GemDependencyProduct};
+use crate::indexer::cache::dependency_product::{GemDependencyManifest, GemDependencyProduct};
 use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::version::ruby_version::RubyImplementation;
 use log::debug;

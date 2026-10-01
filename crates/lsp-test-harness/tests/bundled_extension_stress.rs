@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use ruby_fast_lsp::extensions::ExtensionStatusReport;
+use ruby_fast_lsp::environment::extensions::ExtensionStatusReport;
 use ruby_fast_lsp_test_harness::FakeEditor;
 use tempfile::TempDir;
 

@@ -86,7 +86,7 @@ FAULTS = (
     ),
     Fault(
         "generated-definition-extra", "Append an unrelated destination to otherwise correct generated navigation.",
-        "src/capabilities/definitions.rs", DEFINITION_ANCHOR,
+        "src/lsp/capabilities/definitions.rs", DEFINITION_ANCHOR,
         DEFINITION_ANCHOR.replace("let locations =", "let mut locations =").replace(
             "    Some(GotoDefinitionResponse::Array(locations))",
             '    let mut extra = locations.first().cloned().expect("fault requires a definition");\n'
@@ -96,7 +96,7 @@ FAULTS = (
     ),
     Fault(
         "definition-missing", "Discard every returned method definition.",
-        "src/capabilities/definitions.rs", DEFINITION_ANCHOR,
+        "src/lsp/capabilities/definitions.rs", DEFINITION_ANCHOR,
         DEFINITION_ANCHOR.replace("let locations =", "let mut locations =").replace(
             "    Some(GotoDefinitionResponse::Array(locations))",
             "    locations.clear();\n    Some(GotoDefinitionResponse::Array(locations))"),
@@ -104,7 +104,7 @@ FAULTS = (
     ),
     Fault(
         "definition-duplicate", "Append a duplicate of the first returned definition.",
-        "src/capabilities/definitions.rs", DEFINITION_ANCHOR,
+        "src/lsp/capabilities/definitions.rs", DEFINITION_ANCHOR,
         DEFINITION_ANCHOR.replace("let locations =", "let mut locations =").replace(
             "    Some(GotoDefinitionResponse::Array(locations))",
             "    if let Some(first) = locations.first().cloned() { locations.push(first); }\n"
@@ -113,7 +113,7 @@ FAULTS = (
     ),
     Fault(
         "reference-wrong-range", "Move the first reference start one UTF-16 character to the right.",
-        "src/capabilities/references.rs",
+        "src/lsp/capabilities/references.rs",
         "    query.find_references_at_position(uri, position, &content)",
         """    let mut locations = query.find_references_at_position(uri, position, &content)?;
     if let Some(first) = locations.first_mut() { first.range.start.character += 1; }
@@ -122,7 +122,7 @@ FAULTS = (
     ),
     Fault(
         "rename-missing-edit", "Drop one edit from the first destination URI in lexical order.",
-        "src/handlers/request.rs", RENAME_ANCHOR,
+        "src/lsp/handlers/request.rs", RENAME_ANCHOR,
         """    let mut result = rename::handle_rename(lang_server, params).await;
     if let Some(changes) = result.as_mut().and_then(|edit| edit.changes.as_mut()) {
         let first_uri = changes.keys().min_by(|a, b| a.as_str().cmp(b.as_str())).cloned();
@@ -136,7 +136,7 @@ FAULTS = (
     ),
     Fault(
         "rename-unrelated-edit", "Add an edit to the unrelated Other#title declaration in the neutral fixture.",
-        "src/handlers/request.rs", RENAME_ANCHOR,
+        "src/lsp/handlers/request.rs", RENAME_ANCHOR,
         """    let mut result = rename::handle_rename(lang_server, params).await;
     if let Some(changes) = result.as_mut().and_then(|edit| edit.changes.as_mut()) {
         changes.entry(Url::parse("file:///other.rb").expect("neutral fault URI is valid"))
@@ -155,7 +155,7 @@ FAULTS = (
     ),
     Fault(
         "consumer-publication-missing", "Refresh semantic facts but suppress the dependency-open consumer publication.",
-        "src/capabilities/indexing.rs",
+        "src/lsp/capabilities/indexing.rs",
         """                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
                 server.publish_diagnostics(uri, diagnostics).await;""",
         """                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);

@@ -65,7 +65,7 @@ impl IndexingCoordinator {
                 .indexing
                 .schedule
                 .checkpoint(
-                    crate::indexer::test_schedule::Point::ColdDiagnosticsPending,
+                    crate::indexer::scheduling::test_schedule::Point::ColdDiagnosticsPending,
                     &publication_path,
                 )
                 .await;
@@ -88,7 +88,7 @@ impl IndexingCoordinator {
                 };
                 let mut diagnostics = {
                     let parse = document.parse();
-                    crate::capabilities::diagnostics::generate_diagnostics(&parse, &document)
+                    crate::lsp::capabilities::diagnostics::generate_diagnostics(&parse, &document)
                 };
                 let engine = analysis_engine.read();
                 let Some(file) = engine.file_id(&path).and_then(|id| engine.file(id)) else {
@@ -121,7 +121,7 @@ impl IndexingCoordinator {
                 .indexing
                 .schedule
                 .checkpoint(
-                    crate::indexer::test_schedule::Point::ColdDiagnosticsAttempted,
+                    crate::indexer::scheduling::test_schedule::Point::ColdDiagnosticsAttempted,
                     &publication_path,
                 )
                 .await;

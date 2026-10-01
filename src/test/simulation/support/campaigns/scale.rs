@@ -7,7 +7,8 @@ use super::assert_elapsed_under_env_budget;
 use super::corpus::{
     goto_def_locations, hover_at, inlay_hints_for_path, reference_locations, LspPoint,
 };
-use crate::{capabilities::indexing, server::RubyLanguageServer};
+use crate::lsp::capabilities::indexing;
+use crate::server::RubyLanguageServer;
 use std::{
     collections::BTreeSet,
     path::PathBuf,

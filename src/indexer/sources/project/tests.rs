@@ -1,9 +1,9 @@
 use super::collection::map_owned_project_inputs;
 use super::navigation::{prioritize_project_files, select_navigation_demand_files};
 use super::*;
-use crate::config::IndexingConfig;
-use crate::runtime::jruby::imports::JrubyImportProvider;
-use crate::runtime::jruby::java_catalog::{JavaClassDeclaration, ProjectJavaCatalog};
+use crate::environment::config::IndexingConfig;
+use crate::environment::runtime::jruby::imports::JrubyImportProvider;
+use crate::environment::runtime::jruby::java_catalog::{JavaClassDeclaration, ProjectJavaCatalog};
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_fast_lsp_jvm_metadata::ClassFile;
@@ -156,7 +156,7 @@ fn delayed_project_discovery_cannot_borrow_a_replacement_generation() {
         .indexing_status
         .transition(
             new_run.generation(),
-            crate::indexing_status::IndexingPhase::IndexingProject,
+            crate::indexer::scheduling::status::IndexingPhase::IndexingProject,
             None,
             None,
         )
@@ -186,7 +186,7 @@ fn project_indexing_status_reports_completed_files_against_a_stable_total() {
         .indexing_status
         .transition(
             run.generation(),
-            crate::indexing_status::IndexingPhase::IndexingProject,
+            crate::indexer::scheduling::status::IndexingPhase::IndexingProject,
             None,
             None,
         )
@@ -321,7 +321,7 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
     let server = RubyLanguageServer::default();
     let workspace = server.add_workspace(Url::from_directory_path(root).unwrap());
     let open_uri = Url::from_file_path(&open_path).unwrap();
-    crate::capabilities::indexing::handle_did_open(
+    crate::lsp::capabilities::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -379,7 +379,7 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
     let server = RubyLanguageServer::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
     for (path, text) in [(&utility_path, open_source), (&caller_path, caller_source)] {
-        crate::capabilities::indexing::handle_did_open(
+        crate::lsp::capabilities::indexing::handle_did_open(
             &server,
             DidOpenTextDocumentParams {
                 text_document: TextDocumentItem {
@@ -732,7 +732,7 @@ end
 
     let server = RubyLanguageServer::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
-    crate::capabilities::indexing::handle_did_open(
+    crate::lsp::capabilities::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -854,7 +854,7 @@ end
     );
     drop(engine);
 
-    let hints = crate::capabilities::inlay_hints::handle_inlay_hints(
+    let hints = crate::lsp::capabilities::inlay_hints::handle_inlay_hints(
         &server,
         InlayHintParams {
             work_done_progress_params: Default::default(),
@@ -903,7 +903,7 @@ end
 
     let server = RubyLanguageServer::default();
     let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
-    crate::capabilities::indexing::handle_did_open(
+    crate::lsp::capabilities::indexing::handle_did_open(
         &server,
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -972,7 +972,7 @@ end
     );
     drop(engine);
 
-    let hints = crate::capabilities::inlay_hints::handle_inlay_hints(
+    let hints = crate::lsp::capabilities::inlay_hints::handle_inlay_hints(
         &server,
         InlayHintParams {
             work_done_progress_params: Default::default(),

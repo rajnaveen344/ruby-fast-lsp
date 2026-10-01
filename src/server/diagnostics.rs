@@ -1,7 +1,7 @@
 //! Current-source diagnostic projection and latest-per-document publication.
 use super::projects::ProjectRegistry;
 use super::{RubyLanguageServer, Workspace};
-use crate::indexing_status::IndexingPhase;
+use crate::indexer::scheduling::status::IndexingPhase;
 use log::{info, warn};
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
@@ -160,7 +160,7 @@ impl RubyLanguageServer {
             require_diagnostic_candidates, reresolve_unresolved_require_diagnostics,
             UNRESOLVED_REQUIRE_CODE,
         };
-        use crate::query::EngineQuery;
+        use crate::lsp::query::EngineQuery;
 
         let feature_index = workspace.require_feature_index();
         let generation = workspace.indexing_status.snapshot().generation;
@@ -221,7 +221,7 @@ impl RubyLanguageServer {
             self.indexing
                 .schedule
                 .checkpoint(
-                    crate::indexer::test_schedule::Point::RequireRefreshCollected,
+                    crate::indexer::scheduling::test_schedule::Point::RequireRefreshCollected,
                     &path,
                 )
                 .await;
@@ -232,7 +232,7 @@ impl RubyLanguageServer {
                 let document = self.get_doc(&uri);
                 let mut diagnostics = document.as_ref().map(|document| {
                     let parse = document.parse();
-                    crate::capabilities::diagnostics::generate_diagnostics(&parse, document)
+                    crate::lsp::capabilities::diagnostics::generate_diagnostics(&parse, document)
                 });
                 // An initially closed file may have opened while collection
                 // waited. Open documents provide all static requires, including
@@ -322,7 +322,7 @@ impl RubyLanguageServer {
             self.indexing
                 .schedule
                 .checkpoint(
-                    crate::indexer::test_schedule::Point::RequireRefreshAttempted,
+                    crate::indexer::scheduling::test_schedule::Point::RequireRefreshAttempted,
                     &path,
                 )
                 .await;

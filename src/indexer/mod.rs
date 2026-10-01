@@ -16,14 +16,14 @@
 //!
 //! - **`inheritance_graph`**: Method resolution order, inheritance, and mixin handling
 //! - **`version`**: Ruby version detection and management
+//! - **`scheduling`**: Work admission, the indexing queue, and progress status
+//! - **`cache`**: Persisted dependency products and their producer identity
 
+pub mod cache;
 pub mod coordinator;
 pub mod file_processor;
 pub mod interner;
 pub mod require_paths;
+pub mod scheduling;
 pub mod sources;
-
-#[cfg(test)]
-pub(crate) mod test_schedule;
-
 pub mod version;

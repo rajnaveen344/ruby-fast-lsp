@@ -3,8 +3,8 @@
 use super::IndexerProject;
 use super::ProjectFileInput;
 use super::RegisteredProjectFileInput;
+use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::indexer::file_processor::ProjectFileCollectionTiming;
-use crate::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
@@ -657,7 +657,7 @@ impl IndexerProject {
                 outcome?;
             #[cfg(test)]
             server.indexing.schedule.checkpoint_blocking(
-                crate::indexer::test_schedule::Point::ProjectFactsCollected,
+                crate::indexer::scheduling::test_schedule::Point::ProjectFactsCollected,
                 &path,
             );
             let replacement_started = Instant::now();
@@ -670,7 +670,7 @@ impl IndexerProject {
                 );
             #[cfg(test)]
             server.indexing.schedule.checkpoint_blocking(
-                crate::indexer::test_schedule::Point::ProjectCommitAttempted,
+                crate::indexer::scheduling::test_schedule::Point::ProjectCommitAttempted,
                 &path,
             );
             if !committed {

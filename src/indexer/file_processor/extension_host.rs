@@ -1,8 +1,8 @@
 //! Extension call tracking host used while collecting project file facts.
 
 use super::FileProcessor;
-use crate::extensions::{ExtensionApplicabilitySnapshot, ExtensionRegistryHandle};
-use crate::runtime::jruby::imports::JrubyImportProvider;
+use crate::environment::extensions::{ExtensionApplicabilitySnapshot, ExtensionRegistryHandle};
+use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_fast_lsp_extension_api::{ProjectContext, ResolvedCall};
 use ruby_prism::CallNode;

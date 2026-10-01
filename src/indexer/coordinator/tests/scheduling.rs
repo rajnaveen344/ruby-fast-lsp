@@ -75,8 +75,8 @@ async fn identical_runtime_stdlib_paths_use_one_server_owned_probe() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn cpu_indexing_task_does_not_block_the_async_reactor() {
-    let resources = crate::indexing_resources::IndexingResourceGovernor::new(
-        crate::indexing_resources::IndexingResourcePolicy::new(2, 2),
+    let resources = crate::indexer::scheduling::resources::IndexingResourceGovernor::new(
+        crate::indexer::scheduling::resources::IndexingResourcePolicy::new(2, 2),
     );
     let started = Arc::new(tokio::sync::Notify::new());
     let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -197,9 +197,9 @@ fn dynamic_dependency_demand_moves_only_the_exact_remaining_locked_gem() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn scheduler_bounds_parallel_cpu_workers_without_blocking_the_reactor() {
-    let scheduler = crate::indexing_scheduler::IndexingScheduler::new(2);
-    let resources = crate::indexing_resources::IndexingResourceGovernor::new(
-        crate::indexing_resources::IndexingResourcePolicy::new(2, 2),
+    let scheduler = crate::indexer::scheduling::scheduler::IndexingScheduler::new(2);
+    let resources = crate::indexer::scheduling::resources::IndexingResourceGovernor::new(
+        crate::indexer::scheduling::resources::IndexingResourcePolicy::new(2, 2),
     );
     let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let maximum = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -213,7 +213,7 @@ async fn scheduler_bounds_parallel_cpu_workers_without_blocking_the_reactor() {
             let _permit = scheduler
                 .acquire(
                     PathBuf::from(format!("/workspace/project-{index}")),
-                    crate::indexing_scheduler::IndexingPriority::Background,
+                    crate::indexer::scheduling::scheduler::IndexingPriority::Background,
                 )
                 .await;
             let running = active.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -276,7 +276,7 @@ async fn superseded_coordinator_cannot_advance_replacement_generation() {
     let result = old_coordinator
         .transition_indexing_status(
             &server,
-            crate::indexing_status::IndexingPhase::IndexingProject,
+            crate::indexer::scheduling::status::IndexingPhase::IndexingProject,
         )
         .await;
 
@@ -286,7 +286,7 @@ async fn superseded_coordinator_cannot_advance_replacement_generation() {
     assert_eq!(snapshot.generation, replacement.generation());
     assert_eq!(
         snapshot.phase,
-        crate::indexing_status::IndexingPhase::Queued
+        crate::indexer::scheduling::status::IndexingPhase::Queued
     );
 }
 

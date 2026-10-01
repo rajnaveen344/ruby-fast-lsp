@@ -1,7 +1,7 @@
 //! Process-wide immutable products. Projects bind results into isolated engines.
 use super::RubyLanguageServer;
-use crate::config::runtime::SelectedRuntimeDescriptor;
-use crate::runtime::catalog::{
+use crate::environment::config::runtime::SelectedRuntimeDescriptor;
+use crate::environment::runtime::catalog::{
     DiscoveredRuntime, ProjectRuntimeStatus, RuntimeCatalog, RuntimeDiscoverParams, RuntimeStatus,
     RuntimeStatusParams,
 };
@@ -17,9 +17,11 @@ pub(super) const CORE_ENGINE_CACHE_MAX_ENTRIES: usize = 8;
 pub(super) const CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES: u64 = 128 * MIB;
 const RUNTIME_STDLIB_PATH_CACHE_MAX_ENTRIES: usize = 32;
 const RUNTIME_STDLIB_PATH_CACHE_MAX_WEIGHT_BYTES: u64 = MIB;
-fn new_core_engine_cache(
-) -> crate::single_flight::BoundedSingleFlightCache<String, ruby_analysis::engine::AnalysisEngine> {
-    crate::single_flight::BoundedSingleFlightCache::new(
+fn new_core_engine_cache() -> crate::utils::single_flight::BoundedSingleFlightCache<
+    String,
+    ruby_analysis::engine::AnalysisEngine,
+> {
+    crate::utils::single_flight::BoundedSingleFlightCache::new(
         CORE_ENGINE_CACHE_MAX_ENTRIES,
         CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES,
         |engine: &ruby_analysis::engine::AnalysisEngine| {
@@ -30,22 +32,22 @@ fn new_core_engine_cache(
     )
 }
 
-fn new_gem_dependency_cache() -> crate::single_flight::BoundedSingleFlightCache<
-    crate::dependency_product::GemDependencyProductKey,
-    crate::dependency_product::GemDependencyProduct,
+fn new_gem_dependency_cache() -> crate::utils::single_flight::BoundedSingleFlightCache<
+    crate::indexer::cache::dependency_product::GemDependencyProductKey,
+    crate::indexer::cache::dependency_product::GemDependencyProduct,
 > {
-    crate::single_flight::BoundedSingleFlightCache::ephemeral(
-        |product: &crate::dependency_product::GemDependencyProduct| {
+    crate::utils::single_flight::BoundedSingleFlightCache::ephemeral(
+        |product: &crate::indexer::cache::dependency_product::GemDependencyProduct| {
             product.estimated_weight_bytes()
         },
     )
 }
 
-fn new_runtime_stdlib_path_cache() -> crate::single_flight::BoundedSingleFlightCache<
+fn new_runtime_stdlib_path_cache() -> crate::utils::single_flight::BoundedSingleFlightCache<
     crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
     crate::indexer::sources::stdlib::RuntimeStdlibPaths,
 > {
-    crate::single_flight::BoundedSingleFlightCache::new(
+    crate::utils::single_flight::BoundedSingleFlightCache::new(
         RUNTIME_STDLIB_PATH_CACHE_MAX_ENTRIES,
         RUNTIME_STDLIB_PATH_CACHE_MAX_WEIGHT_BYTES,
         crate::indexer::sources::stdlib::RuntimeStdlibPaths::estimated_weight_bytes,
@@ -55,7 +57,7 @@ fn new_runtime_stdlib_path_cache() -> crate::single_flight::BoundedSingleFlightC
 /// Detached counters and estimated retained bytes for one immutable-product cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RetainedProductSnapshot {
-    pub reuse: crate::single_flight::SingleFlightSnapshot,
+    pub reuse: crate::utils::single_flight::SingleFlightSnapshot,
     pub retained_weight_bytes: u64,
 }
 
@@ -67,28 +69,28 @@ pub struct RuntimeProductSnapshot {
     pub gem_dependencies: RetainedProductSnapshot,
     pub classpath_files: RetainedProductSnapshot,
     pub java_artifacts: RetainedProductSnapshot,
-    pub persistent_gems: crate::persistent_cache::PersistentProductSnapshot,
-    pub persistent_java: crate::persistent_cache::PersistentProductSnapshot,
-    pub compiled_wasm: crate::persistent_cache::PersistentProductSnapshot,
-    pub gem_bindings: crate::dependency_product::GemDependencyBindingSnapshot,
+    pub persistent_gems: crate::indexer::cache::persistent::PersistentProductSnapshot,
+    pub persistent_java: crate::indexer::cache::persistent::PersistentProductSnapshot,
+    pub compiled_wasm: crate::indexer::cache::persistent::PersistentProductSnapshot,
+    pub gem_bindings: crate::indexer::cache::dependency_product::GemDependencyBindingSnapshot,
 }
 
 #[derive(Clone)]
 pub(crate) struct RuntimeProducts {
     pub(super) discovered_runtimes: Arc<tokio::sync::OnceCell<Vec<DiscoveredRuntime>>>,
-    core_templates: crate::single_flight::BoundedSingleFlightCache<String, AnalysisEngine>,
-    stdlib_paths: crate::single_flight::BoundedSingleFlightCache<
+    core_templates: crate::utils::single_flight::BoundedSingleFlightCache<String, AnalysisEngine>,
+    stdlib_paths: crate::utils::single_flight::BoundedSingleFlightCache<
         crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
         crate::indexer::sources::stdlib::RuntimeStdlibPaths,
     >,
-    gem_dependencies: crate::single_flight::BoundedSingleFlightCache<
-        crate::dependency_product::GemDependencyProductKey,
-        crate::dependency_product::GemDependencyProduct,
+    gem_dependencies: crate::utils::single_flight::BoundedSingleFlightCache<
+        crate::indexer::cache::dependency_product::GemDependencyProductKey,
+        crate::indexer::cache::dependency_product::GemDependencyProduct,
     >,
-    classpath_files: crate::runtime::jruby::classpath::ClasspathFileProductCache,
-    java_artifacts: crate::runtime::jruby::java_catalog::JavaArtifactProductCache,
-    persistent: crate::persistent_cache::PersistentDerivedProductCache,
-    gem_bindings: Arc<crate::dependency_product::GemDependencyBindingCounters>,
+    classpath_files: crate::environment::runtime::jruby::classpath::ClasspathFileProductCache,
+    java_artifacts: crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache,
+    persistent: crate::indexer::cache::persistent::PersistentDerivedProductCache,
+    gem_bindings: Arc<crate::indexer::cache::dependency_product::GemDependencyBindingCounters>,
 }
 impl RuntimeProducts {
     fn snapshot(&self) -> RuntimeProductSnapshot {
@@ -128,18 +130,18 @@ impl RuntimeProducts {
             gem_dependencies: new_gem_dependency_cache(),
             classpath_files: Default::default(),
             java_artifacts: Default::default(),
-            persistent: crate::persistent_cache::PersistentDerivedProductCache::new(root),
+            persistent: crate::indexer::cache::persistent::PersistentDerivedProductCache::new(root),
             gem_bindings: Arc::default(),
         }
     }
     pub(crate) fn core_templates(
         &self,
-    ) -> &crate::single_flight::BoundedSingleFlightCache<String, AnalysisEngine> {
+    ) -> &crate::utils::single_flight::BoundedSingleFlightCache<String, AnalysisEngine> {
         &self.core_templates
     }
     pub(crate) fn stdlib_paths(
         &self,
-    ) -> &crate::single_flight::BoundedSingleFlightCache<
+    ) -> &crate::utils::single_flight::BoundedSingleFlightCache<
         crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
         crate::indexer::sources::stdlib::RuntimeStdlibPaths,
     > {
@@ -147,28 +149,30 @@ impl RuntimeProducts {
     }
     pub(crate) fn gem_dependencies(
         &self,
-    ) -> &crate::single_flight::BoundedSingleFlightCache<
-        crate::dependency_product::GemDependencyProductKey,
-        crate::dependency_product::GemDependencyProduct,
+    ) -> &crate::utils::single_flight::BoundedSingleFlightCache<
+        crate::indexer::cache::dependency_product::GemDependencyProductKey,
+        crate::indexer::cache::dependency_product::GemDependencyProduct,
     > {
         &self.gem_dependencies
     }
     pub(crate) fn classpath_files(
         &self,
-    ) -> &crate::runtime::jruby::classpath::ClasspathFileProductCache {
+    ) -> &crate::environment::runtime::jruby::classpath::ClasspathFileProductCache {
         &self.classpath_files
     }
     pub(crate) fn java_artifacts(
         &self,
-    ) -> &crate::runtime::jruby::java_catalog::JavaArtifactProductCache {
+    ) -> &crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache {
         &self.java_artifacts
     }
-    pub(crate) fn persistent(&self) -> &crate::persistent_cache::PersistentDerivedProductCache {
+    pub(crate) fn persistent(
+        &self,
+    ) -> &crate::indexer::cache::persistent::PersistentDerivedProductCache {
         &self.persistent
     }
     pub(crate) fn gem_bindings(
         &self,
-    ) -> &Arc<crate::dependency_product::GemDependencyBindingCounters> {
+    ) -> &Arc<crate::indexer::cache::dependency_product::GemDependencyBindingCounters> {
         &self.gem_bindings
     }
 
@@ -186,7 +190,7 @@ impl RubyLanguageServer {
 
     pub fn compiled_wasm_cache_snapshot(
         &self,
-    ) -> crate::persistent_cache::PersistentProductSnapshot {
+    ) -> crate::indexer::cache::persistent::PersistentProductSnapshot {
         self.products.persistent().compiled_wasm_snapshot()
     }
 
@@ -196,17 +200,21 @@ impl RubyLanguageServer {
         &self,
         _params: RuntimeDiscoverParams,
     ) -> LspResult<RuntimeCatalog> {
-        Ok(crate::runtime::catalog::runtime_catalog_for_projects(
-            self.workspace_root_paths(),
-            self.discovered_runtimes().await,
-        ))
+        Ok(
+            crate::environment::runtime::catalog::runtime_catalog_for_projects(
+                self.workspace_root_paths(),
+                self.discovered_runtimes().await,
+            ),
+        )
     }
 
     async fn discovered_runtimes(&self) -> Vec<DiscoveredRuntime> {
         let indexing_resources = self.indexing.resources().clone();
         self.products
             .discovered_runtimes
-            .get_or_init(|| crate::runtime::catalog::discover_runtimes(indexing_resources))
+            .get_or_init(|| {
+                crate::environment::runtime::catalog::discover_runtimes(indexing_resources)
+            })
             .await
             .clone()
     }
@@ -222,10 +230,12 @@ impl RubyLanguageServer {
         &self,
         project_root: &std::path::Path,
     ) -> Result<Option<SelectedRuntimeDescriptor>> {
-        let Some(marker) = crate::runtime::catalog::project_runtime_marker(project_root)? else {
+        let Some(marker) =
+            crate::environment::runtime::catalog::project_runtime_marker(project_root)?
+        else {
             return Ok(None);
         };
-        let runtime = crate::runtime::catalog::select_runtime_for_marker(
+        let runtime = crate::environment::runtime::catalog::select_runtime_for_marker(
             &marker,
             &self.discovered_runtimes().await,
         )?;
@@ -236,7 +246,9 @@ impl RubyLanguageServer {
             );
             return Ok(None);
         };
-        if runtime.support_status != crate::runtime::catalog::RuntimeSupportStatus::Supported {
+        if runtime.support_status
+            != crate::environment::runtime::catalog::RuntimeSupportStatus::Supported
+        {
             return Err(anyhow::anyhow!(
                 "project runtime marker `{marker}` selects unsupported {}",
                 runtime.display_name
@@ -274,9 +286,9 @@ impl RubyLanguageServer {
                     java_home,
                     stub_overlay,
                 ) = match selection {
-                    crate::config::runtime::EffectiveRuntimeSelection::Explicit(runtime) => {
+                    crate::environment::config::runtime::EffectiveRuntimeSelection::Explicit(runtime) => {
                         let stub_overlay = (runtime.implementation
-                            == crate::runtime::catalog::RuntimeImplementation::Jruby)
+                            == crate::environment::runtime::catalog::RuntimeImplementation::Jruby)
                             .then(|| runtime.family.clone());
                         (
                             "explicit".to_string(),
@@ -289,10 +301,10 @@ impl RubyLanguageServer {
                             stub_overlay,
                         )
                     }
-                    crate::config::runtime::EffectiveRuntimeSelection::Auto => {
+                    crate::environment::config::runtime::EffectiveRuntimeSelection::Auto => {
                         if let Some(runtime) = workspace.runtime.selected().read().clone() {
                             let stub_overlay = (runtime.implementation
-                                == crate::runtime::catalog::RuntimeImplementation::Jruby)
+                                == crate::environment::runtime::catalog::RuntimeImplementation::Jruby)
                                 .then(|| runtime.family.clone());
                             (
                                 "auto".to_string(),
@@ -308,14 +320,14 @@ impl RubyLanguageServer {
                             ("auto".to_string(), None, None, None, None, None, None, None)
                         }
                     }
-                    crate::config::runtime::EffectiveRuntimeSelection::LegacyMriCompatibility {
+                    crate::environment::config::runtime::EffectiveRuntimeSelection::LegacyMriCompatibility {
                         major,
                         minor,
                     } => {
                         let compatibility = format!("{major}.{minor}");
                         (
                             "legacy".to_string(),
-                            Some(crate::runtime::catalog::RuntimeImplementation::Mri),
+                            Some(crate::environment::runtime::catalog::RuntimeImplementation::Mri),
                             Some(compatibility.clone()),
                             None,
                             Some(compatibility),

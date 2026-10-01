@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::{FormatterKind, LinterKind, RubyFastLspConfig};
+    use crate::environment::config::{FormatterKind, LinterKind, RubyFastLspConfig};
     use serde_json::json;
 
     #[test]

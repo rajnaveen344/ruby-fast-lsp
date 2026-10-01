@@ -1,6 +1,6 @@
 //! Goto definition and unresolved diagnostics for `require` / `require_relative`.
 
-use crate::config::{LoadPathsConfig, ProjectLoadPaths};
+use crate::environment::config::{LoadPathsConfig, ProjectLoadPaths};
 use crate::test::harness::FakeEditor;
 use tower_lsp::lsp_types::{Location, NumberOrString, Position, Url};
 
@@ -20,13 +20,13 @@ fn assert_hits_file(locs: &[Location], expected_filename: &str) {
 #[cfg(unix)]
 #[tokio::test]
 async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_project_precedence() {
-    use crate::config::runtime::{
+    use crate::environment::config::runtime::{
         ProjectRuntimeSelection, RuntimeMode, RuntimeSelection, RuntimeSelectionConfig,
         SelectedRuntimeDescriptor,
     };
-    use crate::config::RubyFastLspConfig;
+    use crate::environment::config::RubyFastLspConfig;
+    use crate::environment::runtime::catalog::{RuntimeDiscoverySource, RuntimeImplementation};
     use crate::indexer::coordinator::IndexingCoordinator;
-    use crate::runtime::catalog::{RuntimeDiscoverySource, RuntimeImplementation};
     use std::os::unix::fs::PermissionsExt;
 
     let fixture = tempfile::tempdir().unwrap();

@@ -4,20 +4,22 @@ use super::indexing::{
     INDEXING_COUNTER_PUBLICATION_INTERVAL,
 };
 use super::products::{CORE_ENGINE_CACHE_MAX_ENTRIES, CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES};
+use crate::environment::runtime::jruby::classpath;
+use crate::indexer::scheduling::resources;
 
 use super::RubyLanguageServer;
-use crate::config::runtime::{
+use crate::environment::config::runtime::{
     ProjectRuntimeSelection, RuntimeMode, RuntimeSelection, RuntimeSelectionConfig,
     SelectedRuntimeDescriptor,
 };
-use crate::config::RubyFastLspConfig;
-use crate::indexing_status::{
-    IndexingPhase, IndexingReuseSnapshot, IndexingSingleFlightReuseSnapshot, IndexingStatusParams,
-    IndexingStatusSnapshot,
-};
-use crate::runtime::catalog::{
+use crate::environment::config::RubyFastLspConfig;
+use crate::environment::runtime::catalog::{
     DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation, RuntimeStatusParams,
     RuntimeSupportStatus,
+};
+use crate::indexer::scheduling::status::{
+    IndexingPhase, IndexingReuseSnapshot, IndexingSingleFlightReuseSnapshot, IndexingStatusParams,
+    IndexingStatusSnapshot,
 };
 use parking_lot::{Mutex, RwLock};
 use ruby_analysis::engine::AnalysisEngine;
@@ -166,7 +168,7 @@ fn indexing_snapshot_reports_process_local_classpath_file_reuse() {
         std::fs::write(path, bytes).unwrap();
     }
     std::fs::create_dir_all(&project).unwrap();
-    let inputs = crate::runtime::jruby::classpath::ClasspathInputs {
+    let inputs = classpath::ClasspathInputs {
         project_root: project,
         jruby_executable: jruby.join("bin/jruby"),
         java_home,
@@ -177,9 +179,9 @@ fn indexing_snapshot_reports_process_local_classpath_file_reuse() {
     };
     let server = RubyLanguageServer::default();
     for _ in 0..2 {
-        crate::runtime::jruby::classpath::discover_project_classpath_with_cache(
+        classpath::discover_project_classpath_with_cache(
             &inputs,
-            crate::runtime::jruby::classpath::ClasspathLimits::default(),
+            classpath::ClasspathLimits::default(),
             &server.products.classpath_files(),
         )
         .unwrap();
@@ -766,11 +768,11 @@ async fn saturated_indexing_keeps_status_switch_and_queued_cancellation_responsi
     std::fs::create_dir_all(&admin).unwrap();
     std::fs::create_dir_all(&server_project).unwrap();
     let mut language_server = RubyLanguageServer::default();
-    language_server.indexing.set_resources(
-        crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(1, 1, 100, 1),
-        ),
-    );
+    language_server
+        .indexing
+        .set_resources(resources::IndexingResourceGovernor::new(
+            resources::IndexingResourcePolicy::with_limits(1, 1, 100, 1),
+        ));
     language_server.add_workspace(Url::from_directory_path(&admin).unwrap());
     language_server.add_workspace(Url::from_directory_path(&server_project).unwrap());
 
@@ -796,9 +798,9 @@ async fn saturated_indexing_keeps_status_switch_and_queued_cancellation_responsi
         cancelled_resources
             .run_with_resources(
                 "cancelled saturated waiter",
-                crate::indexing_resources::IndexingWorkSpec::new(
+                resources::IndexingWorkSpec::new(
                     Some(cancelled_root),
-                    crate::indexing_resources::IndexingResourcePriority::Background,
+                    resources::IndexingResourcePriority::Background,
                     1,
                     1,
                     0,
@@ -889,12 +891,7 @@ async fn runtime_status_reports_server_owned_project_identity_and_classpath() {
         .generation;
     admin_workspace
         .indexing_status
-        .transition(
-            generation,
-            crate::indexing_status::IndexingPhase::Ready,
-            None,
-            None,
-        )
+        .transition(generation, IndexingPhase::Ready, None, None)
         .expect("test workspace must transition to ready");
 
     let status = language_server
@@ -918,10 +915,7 @@ async fn runtime_status_reports_server_owned_project_identity_and_classpath() {
         Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     );
     assert!(status.indexing_complete);
-    assert_eq!(
-        status.indexing.phase,
-        crate::indexing_status::IndexingPhase::Ready
-    );
+    assert_eq!(status.indexing.phase, IndexingPhase::Ready);
 
     let auto_runtime = SelectedRuntimeDescriptor {
         implementation: RuntimeImplementation::Mri,

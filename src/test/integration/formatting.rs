@@ -1,4 +1,4 @@
-use crate::config::{FormatterKind, RubyFastLspConfig};
+use crate::environment::config::{FormatterKind, RubyFastLspConfig};
 use crate::server::RubyLanguageServer;
 #[cfg(unix)]
 use crate::test::harness::with_process_clock;

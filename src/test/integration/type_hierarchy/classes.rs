@@ -387,7 +387,7 @@ end
 
 #[cfg(test)]
 mod cross_file_tests {
-    use crate::capabilities::type_hierarchy;
+    use crate::lsp::capabilities::type_hierarchy;
     use crate::test::harness::{fixture_uri, FakeEditor};
     use tower_lsp::lsp_types::{
         PartialResultParams, Position, TextDocumentIdentifier, TextDocumentPositionParams,

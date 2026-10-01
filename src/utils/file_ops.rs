@@ -10,7 +10,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 
-use crate::config::IndexingConfig;
+use crate::environment::config::IndexingConfig;
 
 // ============================================================================
 // File Detection

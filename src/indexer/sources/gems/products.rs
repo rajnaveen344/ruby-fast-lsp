@@ -4,11 +4,11 @@ use super::GemInfo;
 use super::GemSource;
 use super::IndexerGem;
 use super::LoadedGemDependencyProduct;
-use crate::dependency_product::{
+use crate::indexer::cache::dependency_product::{
     GemDependencyFileTemplate, GemDependencyManifest, GemDependencyProduct, GemDependencySource,
 };
 use crate::indexer::file_processor::FileProcessor;
-use crate::indexing_resources::{IndexingResourcePriority, IndexingWorkSpec};
+use crate::indexer::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
@@ -204,11 +204,11 @@ impl IndexerGem {
                         format!("persistent gem-product lookup worker failed: {error}")
                     })?
                     .map_err(|error| format!("persistent gem-product lookup failed: {error:#}"))?;
-                let crate::persistent_cache::PersistentGemProductLookup::Reservation(
+                let crate::indexer::cache::persistent::PersistentGemProductLookup::Reservation(
                     reservation,
                 ) = lookup
                 else {
-                    let crate::persistent_cache::PersistentGemProductLookup::Hit(product) = lookup
+                    let crate::indexer::cache::persistent::PersistentGemProductLookup::Hit(product) = lookup
                     else {
                         panic!(
                             "INVARIANT VIOLATED: persistent gem-product lookup returned an unhandled state. This is a bug because lookup has exactly hit and reservation outcomes. Fix: handle every PersistentGemProductLookup variant explicitly."
@@ -477,7 +477,7 @@ impl IndexerGem {
         let runtime_provider_fingerprint =
             self.runtime_provider_fingerprint.as_deref().filter(|_| {
                 sources.iter().any(|source| {
-                    crate::runtime::jruby::imports::source_semantics_depend_on_jruby_catalog(
+                    crate::environment::runtime::jruby::imports::source_semantics_depend_on_jruby_catalog(
                         source.content.as_str(),
                     )
                 })

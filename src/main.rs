@@ -1,4 +1,4 @@
-use ruby_fast_lsp::check::{render_report, CheckOutputFormat, CheckSession};
+use ruby_fast_lsp::lsp::check::{render_report, CheckOutputFormat, CheckSession};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::path::PathBuf;
 use std::process::exit;
@@ -141,7 +141,7 @@ fn run_cache_command(mut arguments: impl Iterator<Item = String>) -> Result<()> 
             "cache command received unexpected argument `{unexpected}`"
         ));
     }
-    let cache = ruby_fast_lsp::persistent_cache::PersistentDerivedProductCache::new(
+    let cache = ruby_fast_lsp::indexer::cache::persistent::PersistentDerivedProductCache::new(
         ruby_fast_lsp::utils::ruby_fast_lsp_user_cache_root()?,
     );
     let (action, summary) = match operation.as_str() {

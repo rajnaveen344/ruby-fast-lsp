@@ -226,7 +226,7 @@ class LinkBoundaryTests(unittest.TestCase):
             source_record(self.root, "editors/alias/package/README.md", tracked=True)
 
     def test_build_and_mutation_source_links_are_rejected(self):
-        for relative in ("src/neutral.rs", "src/capabilities/definitions.rs", "support/type_inference/scorecard.toml",
+        for relative in ("src/neutral.rs", "src/lsp/capabilities/definitions.rs", "support/type_inference/scorecard.toml",
                          "editors/vscode/vsix/ruby_file_kinds.json"):
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)

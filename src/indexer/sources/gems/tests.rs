@@ -6,8 +6,8 @@ use super::vendor_cache::{
     CACHED_GEM_PROJECT_DIGEST_MARKER, CACHED_GEM_PROJECT_DIGEST_PREFIX_CHARS,
 };
 use super::*;
-use crate::indexing_resources::IndexingResourcePriority;
-use crate::indexing_resources::IndexingWorkSpec;
+use crate::indexer::scheduling::resources::IndexingResourcePriority;
+use crate::indexer::scheduling::resources::IndexingWorkSpec;
 use crate::server::RubyLanguageServer;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -247,16 +247,16 @@ async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
     let indexer = shared_dependency_indexer(&project_root, &gem_root);
     let mut server = RubyLanguageServer::with_user_cache_root(fixture.path().join("user-cache"))
         .expect("construct isolated cache server");
-    server
-        .indexing
-        .set_resources(crate::indexing_resources::IndexingResourceGovernor::new(
-            crate::indexing_resources::IndexingResourcePolicy::with_limits(
+    server.indexing.set_resources(
+        crate::indexer::scheduling::resources::IndexingResourceGovernor::new(
+            crate::indexer::scheduling::resources::IndexingResourcePolicy::with_limits(
                 6,
                 2,
                 512 * 1024 * 1024,
                 2,
             ),
-        ));
+        ),
+    );
     server
         .indexing
         .resources()

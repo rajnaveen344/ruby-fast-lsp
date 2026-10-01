@@ -10,12 +10,12 @@ The Ruby Fast LSP server follows a modular architecture with clear separation of
 crates/
 └── ruby-analysis/  - Reusable core facts, engine, inference, and parser-to-facts indexer
 src/
-├── capabilities/   - LSP/editor adapters, snippets, trigger handling
-├── indexer/        - Workspace discovery and fact collection orchestration
-├── query/          - LSP protocol adapters over ruby-analysis::engine::AnalysisQuery
-├── handlers/       - LSP request/notification routing
-├── server.rs       - LSP protocol facade and common construction
-├── server/         - Documents, project routing, services, and publication owners
+├── environment/    - Configuration, Ruby runtime discovery, and extension hosts
+├── indexer/        - Workspace discovery, fact collection, scheduling, and caches
+├── lsp/            - Editor projections: capabilities, query adapters, handlers, check
+├── server/         - LSP protocol facade, documents, project routing, and publication
+├── utils/          - Shared helpers, single-flight, and performance corpus tooling
+├── bin/            - Profilers, benchmarks, and developer tools
 └── main.rs         - Application entry point
 src/test/           - Test harnesses and integration tests
 editors/
@@ -100,7 +100,7 @@ The Analyzer is responsible for understanding Ruby code structure using the Pris
 - Separates analysis logic from feature implementation (Capabilities)
 - Stateless analysis: processes one document at a time
 
-### 3. Capabilities (`src/capabilities/`)
+### 3. Capabilities (`src/lsp/capabilities/`)
 
 Capabilities implement LSP/editor feature entry points by coordinating query
 adapters, analysis APIs, and editor-specific behavior.
@@ -125,7 +125,7 @@ adapters, analysis APIs, and editor-specific behavior.
 - For engine-backed queries, capabilities delegate to the **Query Engine**
 - Capabilities handle LSP-specific concerns (request/validation/shaping)
 
-### 4. Query Engine (`src/query/`)
+### 4. Query Engine (`src/lsp/query/`)
 
 The Query Engine provides a unified service layer for querying the `AnalysisEngine`.
 
@@ -457,12 +457,12 @@ and reapplies its own per-file and total-byte limits before independently
 composing classpath order, duplicate winners, Java catalog, imports,
 provenance, and engine facts.
 
-### 5. Server (`src/server.rs`)
+### 5. Server (`src/server/mod.rs`)
 
 The server has ten production fields: client, configuration, open documents,
 project registry, indexing services, runtime products, extension services,
 diagnostic publisher, watched-file changes, and namespace-tree cache. Focused
-modules under `src/server/` keep state with its operations; `server.rs` retains
+modules under `src/server/` keep state with its operations; `server/mod.rs` retains
 common construction and the LSP protocol facade. See
 [server state ownership](../docs/development/server-state.md) for field counts,
 responsibilities, shared lifetimes, and test boundaries.
@@ -649,7 +649,7 @@ measurements live under `support/performance/`; they are evidence, not a second
 architecture document. Mandatory release and memory gates are summarized in
 `AGENTS.md`.
 
-### 7. Handlers (`src/handlers/`)
+### 7. Handlers (`src/lsp/handlers/`)
 
 Handlers manage the routing of LSP requests and notifications.
 
@@ -677,10 +677,10 @@ Ruby version detection and version-manager integration.
 ### 2. Go to Definition
 
 1. Client sends a "go to definition" request with a position
-2. Server delegates to the definition capability (`src/capabilities/definitions.rs`)
+2. Server delegates to the definition capability (`src/lsp/capabilities/definitions.rs`)
 3. Definition capability:
    - Uses the analyzer to identify the identifier and local scope at the position
-   - If not a local variable, delegates to the **Query Engine** (`src/query/definition.rs`)
+   - If not a local variable, delegates to the **Query Engine** (`src/lsp/query/definition.rs`)
 4. Query Engine:
    - Uses `EngineQuery` to perform project-wide lookups in `AnalysisEngine` (handling inheritance, mixins, etc.)
    - Returns resolved locations
@@ -722,8 +722,8 @@ Ruby version detection and version-manager integration.
 
 The Ruby Fast LSP follows a clear 3-layer architecture:
 
-1. **API Layer** (`server.rs`, `handlers/`): Handles LSP protocol, request validation, and routing.
-2. **Service Layer** (`src/query/`, `src/capabilities/`): Implements business logic for LSP features. `EngineQuery` acts as the primary service interface for data lookups.
+1. **API Layer** (`server/`, `lsp/handlers/`): Handles LSP protocol, request validation, and routing.
+2. **Service Layer** (`src/lsp/query/`, `src/lsp/capabilities/`): Implements business logic for LSP features. `EngineQuery` acts as the primary service interface for data lookups.
 3. **Data Layer** (`ruby-analysis::engine`): Owns symbols, graph facts, references, diagnostics, and type facts.
 
 ### Analyzer, Query Engine, and Indexer Relationship

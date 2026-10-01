@@ -1,8 +1,8 @@
 //! Replay of project files whose facts depend on the JRuby Java catalog.
 
 use super::IndexerProject;
+use crate::environment::runtime::jruby::imports::{JrubyImportProvider, StaticJavaNavigationPlan};
 use crate::indexer::file_processor::FileProcessor;
-use crate::runtime::jruby::imports::{JrubyImportProvider, StaticJavaNavigationPlan};
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::info;

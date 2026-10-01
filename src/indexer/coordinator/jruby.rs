@@ -2,27 +2,31 @@
 
 use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
-use crate::config::runtime::SelectedRuntimeDescriptor;
-use crate::config::RubyFastLspConfig;
-use crate::indexer::file_processor::FileProcessor;
-use crate::indexer::sources::gems::discover_locked_java_gem_roots;
-use crate::persistent_cache::{PersistentDerivedProductCache, PersistentJavaArtifactLookup};
-use crate::runtime::catalog::RuntimeImplementation;
-use crate::runtime::jruby::classpath::{
+use crate::environment::config::runtime::SelectedRuntimeDescriptor;
+use crate::environment::config::RubyFastLspConfig;
+use crate::environment::runtime::catalog::RuntimeImplementation;
+use crate::environment::runtime::jruby::classpath::{
     discover_project_classpath, discover_project_classpath_with_cache, ArtifactOrigin,
     ClasspathArtifact, ClasspathFileProductCache, ClasspathInputs, ClasspathLimits,
 };
-use crate::runtime::jruby::decompiler::{
+use crate::environment::runtime::jruby::decompiler::{
     discover_bundled_cfr_asset, JavaDecompiler, JavaDecompilerLimits,
 };
-use crate::runtime::jruby::imports::JrubyImportProvider;
-use crate::runtime::jruby::java_catalog::{
+use crate::environment::runtime::jruby::imports::JrubyImportProvider;
+use crate::environment::runtime::jruby::java_catalog::{
     build_project_java_catalog, verify_artifact_discovery_identity, JavaArtifactProduct,
     JavaArtifactProductCache, JavaArtifactProductKey, ProjectJavaCatalog,
     ProjectJavaCatalogBuilder,
 };
-use crate::runtime::jruby::runtime_sources::materialize_jruby_runtime_sources;
-use crate::runtime::jruby::source_navigation::{JavaSourceResolutionLimits, JavaSourceResolver};
+use crate::environment::runtime::jruby::runtime_sources::materialize_jruby_runtime_sources;
+use crate::environment::runtime::jruby::source_navigation::{
+    JavaSourceResolutionLimits, JavaSourceResolver,
+};
+use crate::indexer::cache::persistent::{
+    PersistentDerivedProductCache, PersistentJavaArtifactLookup,
+};
+use crate::indexer::file_processor::FileProcessor;
+use crate::indexer::sources::gems::discover_locked_java_gem_roots;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
@@ -134,7 +138,7 @@ fn jruby_cache_root_for_project(
 }
 
 pub(super) fn build_cached_project_java_catalog(
-    classpath: &crate::runtime::jruby::classpath::ProjectClasspath,
+    classpath: &crate::environment::runtime::jruby::classpath::ProjectClasspath,
     jdk_feature: u16,
     archive_limits: ArchiveLimits,
     persistent_cache: &PersistentDerivedProductCache,
