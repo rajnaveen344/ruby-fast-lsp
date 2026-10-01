@@ -7,7 +7,7 @@ const {
     RUBY_EXTENSIONS,
     RUBY_FILENAMES,
     fileWatcherPatterns
-} = require('../ruby_file_kinds');
+} = require('../client/ruby_file_kinds');
 
 test('VS Code manifest advertises the complete common Ruby and ERB file set', () => {
     const ruby = packageManifest.contributes.languages.find((language) => language.id === 'ruby');

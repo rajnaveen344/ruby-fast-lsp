@@ -13,7 +13,7 @@ const {
     lspStatusBarError,
     lspStatusBarPresentation,
     lspStatusBarStarting
-} = require('../indexing_status');
+} = require('../client/project_status/indexing_status');
 
 test('active editor URI is sent with the authoritative status request', () => {
     const editor = {

@@ -32,7 +32,7 @@
     "onLanguage:ruby",
     "onLanguage:erb"
   ],
-  "main": "./extension.js",
+  "main": "./client/extension.js",
   "contributes": {
     "languages": [
       {

@@ -39,22 +39,15 @@
       ".vscodeignore",
       "LICENSE",
       "README.md",
-      "configuration_state.js",
-      "erb_html.js",
-      "extension.js",
+      "client",
       "extensions",
       "icon.png",
       "icon.svg",
-      "indexing_status.js",
       "package-lock.json",
       "package.json",
-      "ruby_file_kinds.js",
       "ruby_file_kinds.json",
-      "ruby_index_tree.js",
-      "runtime_selector.js",
       "stubs",
-      "test",
-      "test_commands.js"
+      "test"
     ],
     "extensions/example-dsl": [
       ".gitignore",
@@ -167,7 +160,6 @@
   "legacy_lines": {
     "crates/ruby-analysis/src/indexer/fact_collector/tests.rs": 1050,
     "crates/ruby-analysis/src/indexer/queries/tests.rs": 2271,
-    "editors/vscode/vsix/extension.js": 2021,
     "src/indexer/coordinator/tests/jruby.rs": 1101,
     "src/indexer/coordinator/tests/workflow.rs": 1270,
     "src/indexer/sources/gems/tests.rs": 1344,

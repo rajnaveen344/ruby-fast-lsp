@@ -9,8 +9,8 @@ const {
     runtimeStatusItem,
     runtimeVersionMarker,
     selectRuntime
-} = require('../runtime_selector');
-const { lspStatusBarPresentation } = require('../indexing_status');
+} = require('../client/project_status/runtime_selector');
+const { lspStatusBarPresentation } = require('../client/project_status/indexing_status');
 
 function jruby(version, family, ruby, executable, supportStatus = 'supported') {
     return {

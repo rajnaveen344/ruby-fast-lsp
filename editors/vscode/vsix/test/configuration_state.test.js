@@ -10,7 +10,7 @@ const {
     serverConfiguration,
     updateLoadPaths,
     updateRuntime
-} = require('../configuration_state');
+} = require('../client/configuration_state');
 
 function state(initial = {}) {
     const values = new Map(Object.entries(initial));

@@ -5,7 +5,7 @@ const {
     createErbHtmlDocument,
     projectErbToHtml,
     registerErbHtmlProviders
-} = require('../erb_html');
+} = require('../client/erb_html');
 
 test('ERB HTML projection preserves UTF-16 offsets and host markup', () => {
     const source = '<main>😀</main>\n<%= user.名前 %>\n<footer id="page">Done</footer>\n';

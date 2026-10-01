@@ -6,7 +6,7 @@ const {
     minitestInvocation,
     railsViewRelativePaths,
     rspecInvocation
-} = require('../test_commands');
+} = require('../client/code_lens/test_commands');
 
 test('RSpec run and debug share an exact file-line target', () => {
     const invocation = rspecInvocation('file:///repo/spec/user_spec.rb:12');

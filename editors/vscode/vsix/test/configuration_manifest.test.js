@@ -6,10 +6,14 @@ const test = require('node:test');
 const manifest = JSON.parse(
     fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')
 );
-const extensionSource = fs.readFileSync(
-    path.join(__dirname, '..', 'extension.js'),
-    'utf8'
-);
+// The extension client is split into modules under client/; source-level
+// contracts below apply to all of them together.
+const clientRoot = path.join(__dirname, '..', 'client');
+const extensionSource = fs.readdirSync(clientRoot, { recursive: true })
+    .filter(file => file.endsWith('.js'))
+    .sort()
+    .map(file => fs.readFileSync(path.join(clientRoot, file), 'utf8'))
+    .join('\n');
 
 test('the Settings page exposes only log level', () => {
     assert.deepEqual(

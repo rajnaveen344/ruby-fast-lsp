@@ -54,11 +54,12 @@ const cucumberPackage = path.join(extensionRoot, 'extensions', 'cucumber-rust');
 const cfrJar = path.join(extensionRoot, 'jruby-decompiler', 'cfr-0.152.jar');
 for (const required of [
     binary,
-    path.join(extensionRoot, 'erb_html.js'),
-    path.join(extensionRoot, 'ruby_file_kinds.js'),
+    path.join(extensionRoot, 'client', 'extension.js'),
+    path.join(extensionRoot, 'client', 'erb_html.js'),
+    path.join(extensionRoot, 'client', 'ruby_file_kinds.js'),
     path.join(extensionRoot, 'ruby_file_kinds.json'),
-    path.join(extensionRoot, 'runtime_selector.js'),
-    path.join(extensionRoot, 'configuration_state.js'),
+    path.join(extensionRoot, 'client', 'project_status', 'runtime_selector.js'),
+    path.join(extensionRoot, 'client', 'configuration_state.js'),
     path.join(extensionRoot, 'core-rbs', 'constants.rbs'),
     cfrJar,
     path.join(extensionRoot, 'jruby-decompiler', 'LICENSE-CFR'),
@@ -86,8 +87,8 @@ if (cfrSha256 !== 'f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae876
 }
 if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
 
-const { createErbHtmlDocument } = require(path.join(extensionRoot, 'erb_html.js'));
-const fileKinds = require(path.join(extensionRoot, 'ruby_file_kinds.js'));
+const { createErbHtmlDocument } = require(path.join(extensionRoot, 'client', 'erb_html.js'));
+const fileKinds = require(path.join(extensionRoot, 'client', 'ruby_file_kinds.js'));
 const packagedManifest = require(path.join(extensionRoot, 'package.json'));
 const packagedSettings = Object.keys(packagedManifest.contributes.configuration.properties);
 const packagedCommands = new Set(

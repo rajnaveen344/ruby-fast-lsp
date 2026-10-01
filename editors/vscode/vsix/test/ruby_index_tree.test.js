@@ -13,7 +13,7 @@ const {
     librarySectionsFromResponse,
     namespaceChildDescriptors,
     namespaceHasChildren
-} = require('../ruby_index_tree');
+} = require('../client/ruby_index/ruby_index_tree');
 
 test('project root label uses the final path component', () => {
     assert.equal(projectRootLabel('/workspace/example-app/server'), 'server');
