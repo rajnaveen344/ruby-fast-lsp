@@ -171,8 +171,6 @@
     "crates/ruby-analysis/src/indexer/queries/tests.rs": 2271,
     "editors/vscode/vsix/extension.js": 2021,
     "src/bin/profiler/main.rs": 2959,
-    "src/environment/runtime/jruby/classpath/mod.rs": 1187,
-    "src/indexer/cache/persistent/mod.rs": 1236,
     "src/indexer/coordinator/tests/jruby.rs": 1101,
     "src/indexer/coordinator/tests/workflow.rs": 1270,
     "src/indexer/sources/gems/tests.rs": 1344,

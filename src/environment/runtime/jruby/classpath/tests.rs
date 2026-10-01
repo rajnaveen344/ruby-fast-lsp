@@ -1,5 +1,12 @@
-use super::*;
+use super::coordinates::{parse_jarfile_coordinate, MavenCoordinate};
+use super::{
+    discover_project_classpath, discover_project_classpath_with_cache, ArtifactOrigin,
+    ClasspathError, ClasspathFileProductCache, ClasspathInputs, ClasspathLimits,
+    UnresolvedCoordinate,
+};
+use std::fs;
 use std::io::{Cursor, Write};
+use std::path::Path;
 use zip::write::SimpleFileOptions;
 
 fn write(path: &Path, bytes: &[u8]) {

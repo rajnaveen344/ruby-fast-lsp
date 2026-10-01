@@ -1,9 +1,12 @@
+use super::envelope::decode_envelope;
 use super::{
-    decode_envelope, CompiledWasmProductKey, JavaArtifactProduct, JavaArtifactProductKey,
-    PersistentCompiledWasmLookup, PersistentDerivedProductCache, PersistentGemProductLookup,
-    PersistentJavaArtifactLookup, PersistentProductKind, COMPILED_WASM_PRODUCT_MAGIC,
-    ENVELOPE_HEADER_BYTES, ENVELOPE_SCHEMA, MAX_COMPILED_WASM_LOGICAL_ENTRY_BYTES,
-    RESCAN_PUBLICATION_INTERVAL,
+    CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
+    PersistentGemProductLookup, PersistentJavaArtifactLookup, PersistentProductKind,
+    COMPILED_WASM_PRODUCT_MAGIC, ENVELOPE_HEADER_BYTES, ENVELOPE_SCHEMA,
+    MAX_COMPILED_WASM_LOGICAL_ENTRY_BYTES, RESCAN_PUBLICATION_INTERVAL,
+};
+use crate::environment::runtime::jruby::java_catalog::{
+    JavaArtifactProduct, JavaArtifactProductKey,
 };
 use crate::indexer::cache::dependency_product::{
     GemDependencyFileTemplate, GemDependencyManifest, GemDependencyProduct, GemDependencySource,
@@ -502,13 +505,13 @@ fn unique_test_manifest(root: &Path, name: &str) -> GemDependencyManifest {
 fn contended_cache_lock_is_pending_until_its_owner_releases_it() {
     let fixture = tempfile::tempdir().unwrap();
     let path = fixture.path().join("cache.lock");
-    let owner = super::open_private_lock_file(&path).unwrap();
-    let contender = super::open_private_lock_file(&path).unwrap();
-    assert!(super::try_acquire_lock(&owner, true).unwrap());
-    assert!(!super::try_acquire_lock(&contender, true).unwrap());
-    assert!(!super::try_acquire_lock(&contender, false).unwrap());
+    let owner = super::locks::open_private_lock_file(&path).unwrap();
+    let contender = super::locks::open_private_lock_file(&path).unwrap();
+    assert!(super::locks::try_acquire_lock(&owner, true).unwrap());
+    assert!(!super::locks::try_acquire_lock(&contender, true).unwrap());
+    assert!(!super::locks::try_acquire_lock(&contender, false).unwrap());
     drop(owner);
-    assert!(super::try_acquire_lock(&contender, true).unwrap());
+    assert!(super::locks::try_acquire_lock(&contender, true).unwrap());
 }
 
 #[test]
