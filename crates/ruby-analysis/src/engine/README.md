@@ -16,7 +16,7 @@ Implementation folders are private to the engine.
 | `queries/hierarchy/` | Call/type hierarchy queries and result types |
 | `queries/namespace_tree/` | Namespace-tree projections and their result types |
 | `queries/workspace_symbols/` | Workspace symbol matching and its result type |
-| `diagnostics/` | Reference-candidate resolution, diagnostic derivation, and diagnostic helpers |
+| `diagnostics/` | Reference-candidate resolution passes (`workspace_pass`, `file_pass`), call outcomes, grouped (union-receiver) dispatch, unresolved-method absence proof, resolved-method availability and signature checks, indexer diagnostic candidates, and diagnostic helpers |
 | `debug/` | Introspection and storage-size projections |
 
 Query result types live with their query family. Shared helpers retain the

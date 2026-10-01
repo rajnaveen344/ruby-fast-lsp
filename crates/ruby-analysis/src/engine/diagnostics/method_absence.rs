@@ -1,0 +1,238 @@
+//! Negative proof for `unresolved-method`: lookup-chain completeness, explicit
+//! absence contracts, owner existence, and spelling suggestions.
+
+use std::collections::HashSet;
+
+use super::helpers::{levenshtein, suggestion_threshold};
+use super::MethodChainCompletenessCache;
+use crate::core::{
+    FullyQualifiedName, GraphEdgeKind, GraphNodeKind, NamespaceKind, RubyConstant, RubyMethod,
+};
+use crate::engine::AnalysisEngine;
+
+impl AnalysisEngine {
+    pub(super) fn unresolved_method_edge_sources(&self) -> HashSet<Vec<RubyConstant>> {
+        self.graph
+            .unresolved_edges()
+            .into_iter()
+            .filter(|edge| {
+                let lookup = self.names.const_lookup(edge.target).expect(
+                    "INVARIANT VIOLATED: unresolved graph edge points to a missing constant lookup. This is a bug because graph edges must retain valid interned targets. Fix: intern and retain every unresolved graph target for the edge lifetime.",
+                );
+                !(edge.kind == GraphEdgeKind::Superclass
+                    && lookup.absolute
+                    && lookup.path.len() == 1
+                    && lookup.path[0].as_str() == "Object")
+            })
+            .filter_map(|edge| {
+                self.names
+                    .fqn(edge.source)
+                    .map(FullyQualifiedName::namespace_parts)
+            })
+            .collect()
+    }
+
+    pub(super) fn method_lookup_chain_is_incomplete_cached(
+        &self,
+        owner: &FullyQualifiedName,
+        unresolved_sources: &HashSet<Vec<RubyConstant>>,
+        cache: &mut MethodChainCompletenessCache,
+    ) -> bool {
+        if let Some(incomplete) = cache.results.get(owner) {
+            return *incomplete;
+        }
+        let incomplete = self.method_lookup_chain_is_incomplete(owner, unresolved_sources, cache);
+        cache.results.insert(owner.clone(), incomplete);
+        incomplete
+    }
+
+    fn method_lookup_chain_is_incomplete(
+        &self,
+        owner: &FullyQualifiedName,
+        unresolved_sources: &HashSet<Vec<RubyConstant>>,
+        cache: &mut MethodChainCompletenessCache,
+    ) -> bool {
+        // Top-level Ruby is an open execution environment. Test/framework DSLs
+        // install methods on Object/Kernel at runtime, and an empty namespace
+        // has no closed declaration whose absent method set can be proven.
+        if owner.namespace_parts().is_empty() {
+            return true;
+        }
+        if owner.namespace_kind() == Some(NamespaceKind::Singleton) {
+            let metaclass = match self.first_graph_node_kind(owner) {
+                Some(GraphNodeKind::Class) => Some("Class"),
+                Some(GraphNodeKind::Module) => Some("Module"),
+                None => None,
+            };
+            if metaclass.is_some_and(|name| {
+                let constant = RubyConstant::new(name).unwrap_or_else(|error| {
+                    panic!(
+                        "INVARIANT VIOLATED: Ruby metaclass name `{name}` is invalid: {error}. This is a bug because Class and Module are universal Ruby constants. Fix: preserve RubyConstant support for language-defined class names."
+                    )
+                });
+                !self.has_graph_node(&FullyQualifiedName::namespace(vec![constant]))
+            }) {
+                return true;
+            }
+        }
+        let mut pending = vec![owner.clone()];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(current) = pending.pop() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            if *cache
+                .ambiguous_superclasses
+                .entry(current.clone())
+                .or_insert_with(|| self.superclass_is_ambiguous(&current))
+            {
+                return true;
+            }
+            if unresolved_sources.contains(&current.namespace_parts()) {
+                return true;
+            }
+            if *cache
+                .dynamic_mixin_hooks
+                .entry(current.clone())
+                .or_insert_with(|| self.namespace_has_dynamic_mixin_hook(&current))
+            {
+                return true;
+            }
+            pending.extend(
+                self.graph_edges_from(&current)
+                    .into_iter()
+                    .filter(|edge| {
+                        matches!(
+                            edge.kind,
+                            GraphEdgeKind::Superclass
+                                | GraphEdgeKind::Include
+                                | GraphEdgeKind::Prepend
+                                | GraphEdgeKind::Extend
+                        )
+                    })
+                    .map(|edge| edge.target),
+            );
+        }
+        false
+    }
+
+    pub(super) fn method_absence_has_explicit_contract(
+        &self,
+        owner: &FullyQualifiedName,
+        method: RubyMethod,
+    ) -> bool {
+        self.method_absence_contract_matches_owner_name(owner, &method)
+    }
+
+    /// An include/prepend/extend callback can install methods through arbitrary
+    /// Ruby code. Static edges model the common `base.extend(ClassMethods)`
+    /// shape, but a custom callback remains an incomplete negative-proof
+    /// surface unless every effect is represented. Concrete lookup may still
+    /// resolve known methods; only "method is absent" diagnostics fail closed.
+    fn namespace_has_dynamic_mixin_hook(&self, namespace: &FullyQualifiedName) -> bool {
+        let instance_namespace = match namespace.namespace_kind() {
+            Some(NamespaceKind::Instance) => namespace.clone(),
+            Some(NamespaceKind::Singleton) => namespace.to_instance_namespace().expect(
+                "INVARIANT VIOLATED: singleton namespace cannot produce its instance counterpart. This is a bug because method lookup chains contain only Namespace FQNs. Fix: preserve Namespace identity while traversing mixin hooks.",
+            ),
+            None => panic!(
+                "INVARIANT VIOLATED: method lookup completeness received a non-namespace FQN `{namespace}`. This is a bug because only namespaces own method lookup chains. Fix: convert receiver types to Namespace FQNs before diagnostics."
+            ),
+        };
+
+        for edge in self.graph_edges_from(&instance_namespace) {
+            let callbacks: &[&str] = match edge.kind {
+                GraphEdgeKind::Include => &["included", "append_features"],
+                GraphEdgeKind::Prepend => &["prepended", "prepend_features"],
+                GraphEdgeKind::Superclass
+                | GraphEdgeKind::Extend
+                | GraphEdgeKind::ExecutionContextApplication => continue,
+            };
+            if self.namespace_defines_any_singleton_method(&edge.target, callbacks) {
+                return true;
+            }
+        }
+
+        for edge in self.graph_edges_from(namespace) {
+            if edge.kind == GraphEdgeKind::Extend
+                && self.namespace_defines_any_singleton_method(
+                    &edge.target,
+                    &["extended", "extend_object"],
+                )
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn namespace_defines_any_singleton_method(
+        &self,
+        namespace: &FullyQualifiedName,
+        names: &[&str],
+    ) -> bool {
+        let Some(singleton) = namespace.to_singleton_namespace() else {
+            return false;
+        };
+        names.iter().any(|name| {
+            let method = RubyMethod::new(name).unwrap_or_else(|error| {
+                panic!(
+                    "INVARIANT VIOLATED: Ruby lifecycle method name `{name}` is invalid: {error}. This is a bug because lifecycle names are fixed Ruby identifiers. Fix: preserve RubyMethod support for language-defined callback names."
+                )
+            });
+            !self
+                .method_facts_matching_owner_name(&singleton, &method)
+                .is_empty()
+        })
+    }
+
+    pub(super) fn find_method_suggestion(
+        &self,
+        owner_fqn: &FullyQualifiedName,
+        target: &str,
+    ) -> Option<String> {
+        let threshold = suggestion_threshold(target.len());
+        if threshold == 0 {
+            return None;
+        }
+
+        let target_len = target.len();
+        let mut best: Option<(String, usize)> = None;
+        for candidate in self.method_names_for_owner(owner_fqn) {
+            if candidate == target {
+                continue;
+            }
+            if candidate.len().abs_diff(target_len) > threshold {
+                continue;
+            }
+            let dist = levenshtein(candidate, target);
+            if dist > threshold {
+                continue;
+            }
+            match &best {
+                Some((_, d)) if *d <= dist => {}
+                Some(_) | None => best = Some((candidate.to_string(), dist)),
+            }
+        }
+        best.map(|(name, _)| name)
+    }
+
+    pub(super) fn method_namespace_target_exists(&self, fqn: &FullyQualifiedName) -> bool {
+        let parts = fqn.namespace_parts();
+        if parts.is_empty() {
+            return true;
+        }
+        let instance_fqn = FullyQualifiedName::namespace_with_kind(
+            parts.clone(),
+            crate::core::NamespaceKind::Instance,
+        );
+        let singleton_fqn = FullyQualifiedName::namespace_with_kind(
+            parts.clone(),
+            crate::core::NamespaceKind::Singleton,
+        );
+        self.has_graph_node(&instance_fqn)
+            || self.has_graph_node(&singleton_fqn)
+            || self.has_symbol_facts(&FullyQualifiedName::constant(parts))
+            || !self.method_facts_matching_owner(fqn, "").is_empty()
+    }
+}
