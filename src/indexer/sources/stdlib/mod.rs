@@ -138,7 +138,7 @@ impl IndexerStdlib {
         // Try to load from extension path first
         if let Some(ref ext_path) = self.extension_path {
             if let Some(stubs_dir) = find_stubs_directory(ext_path, version) {
-                let mut stub_files = utils::collect_ruby_files(&stubs_dir);
+                let mut stub_files = utils::file_ops::collect_ruby_files(&stubs_dir);
                 stub_files.sort();
                 if stub_files.is_empty() {
                     warn!("No stub files found in: {:?}", stubs_dir);
@@ -171,7 +171,7 @@ impl IndexerStdlib {
 
         info!("Indexing core stubs from directory: {:?}", stubs_path);
 
-        let mut stub_files = utils::collect_ruby_files(&stubs_path);
+        let mut stub_files = utils::file_ops::collect_ruby_files(&stubs_path);
         stub_files.sort();
         if stub_files.is_empty() {
             warn!("No stub files found in: {:?}", stubs_path);
@@ -410,7 +410,7 @@ impl IndexerStdlib {
 
         let mut indexed = 0usize;
         for directory in directories {
-            let mut files = utils::collect_ruby_files(&directory);
+            let mut files = utils::file_ops::collect_ruby_files(&directory);
             files.sort();
             self.index_stub_files_deterministically(&files, analysis_engine.clone())?;
             indexed += files.len();
@@ -638,7 +638,7 @@ impl IndexerStdlib {
 
                 let module_dir = stdlib_path.join(module_name);
                 if module_dir.exists() && module_dir.is_dir() {
-                    files.extend(utils::collect_ruby_files(&module_dir));
+                    files.extend(utils::file_ops::collect_ruby_files(&module_dir));
                 }
             }
         }

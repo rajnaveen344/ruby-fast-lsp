@@ -4,9 +4,9 @@
 //! the reason that a concrete type was withheld so non-LSP consumers can make
 //! the same decision and explain it without reimplementing inference policy.
 
+use crate::core::callables::callable_body::ConstantCallableBodyFact;
 use crate::core::{
-    ConstantCallableBodyFact, ConstantTypeEquation, FullyQualifiedName, MethodReturnEquation,
-    RubyType, TextRange,
+    ConstantTypeEquation, FullyQualifiedName, MethodReturnEquation, RubyType, TextRange,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

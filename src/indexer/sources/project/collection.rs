@@ -308,7 +308,7 @@ impl IndexerProject {
 
     /// Collect all Ruby files in the project
     pub(super) fn collect_project_files(&self) -> Result<Vec<PathBuf>> {
-        utils::collect_project_files(&self.workspace_root, &self.indexing_config)
+        utils::file_ops::collect_project_files(&self.workspace_root, &self.indexing_config)
     }
 
     /// Collect facts from files and track their dependencies (Parallelized with rayon)

@@ -7,9 +7,10 @@ use super::{
     AmbiguousMethodReturnAccess, CachedMethodVisibility, MethodCallOutcomeCaches,
     MethodReferenceCacheKey,
 };
+use crate::core::names::fqn_id::FqnId;
 use crate::core::MethodVisibility;
 use crate::core::{
-    FqnId, FullyQualifiedName, GraphNodeKind, MethodFact, MethodReferenceAccess, NamespaceKind,
+    FullyQualifiedName, GraphNodeKind, MethodFact, MethodReferenceAccess, NamespaceKind,
     ResolvedMethodCallee, RubyMethod, RubyType, TextRange, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{

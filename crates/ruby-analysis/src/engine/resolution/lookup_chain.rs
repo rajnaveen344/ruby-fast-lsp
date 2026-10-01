@@ -6,9 +6,10 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::{is_module_instance_namespace, MethodLookupChainCache};
+use crate::core::names::fqn_id::FqnId;
+use crate::core::storage::graph_store::StoredGraphEdgeFact;
 use crate::core::{
-    FqnId, FullyQualifiedName, GraphEdgeKind, GraphNodeKind, RubyConstant, RubyMethod, SourceKind,
-    StoredGraphEdgeFact,
+    FullyQualifiedName, GraphEdgeKind, GraphNodeKind, RubyConstant, RubyMethod, SourceKind,
 };
 
 fn is_universal_open_root(owner: &FullyQualifiedName) -> bool {

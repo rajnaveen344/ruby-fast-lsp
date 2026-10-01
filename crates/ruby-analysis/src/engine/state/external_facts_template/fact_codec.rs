@@ -325,22 +325,24 @@ fn restore_method(fact: SnapshotMethodFact, file_id: SourceFileId) -> Result<Met
     let forwarded_block_call = fact
         .forwarded_block_call
         .map(|forwarded| {
-            Ok::<crate::core::ForwardedBlockCall, String>(crate::core::ForwardedBlockCall {
-                receiver_parameter: forwarded.receiver_parameter,
-                method: RubyMethod::new(&forwarded.method).map_err(|error| {
-                    format!(
-                        "invalid persistent forwarded block method `{}`: {error}",
-                        forwarded.method
-                    )
-                })?,
-            })
+            Ok::<crate::core::callables::callable_signature::ForwardedBlockCall, String>(
+                crate::core::callables::callable_signature::ForwardedBlockCall {
+                    receiver_parameter: forwarded.receiver_parameter,
+                    method: RubyMethod::new(&forwarded.method).map_err(|error| {
+                        format!(
+                            "invalid persistent forwarded block method `{}`: {error}",
+                            forwarded.method
+                        )
+                    })?,
+                },
+            )
         })
         .transpose()?;
-    let direct_yield_call = fact
-        .direct_yield_call
-        .map(|direct| crate::core::DirectYieldCall {
+    let direct_yield_call = fact.direct_yield_call.map(|direct| {
+        crate::core::callables::callable_signature::DirectYieldCall {
             parameter_names: direct.parameter_names,
-        });
+        }
+    });
     Ok(MethodFact {
         fqn: restore_fqn(fact.fqn)?,
         owner: restore_fqn(fact.owner)?,

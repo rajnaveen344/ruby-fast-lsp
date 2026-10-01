@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::mem::size_of;
 
+use crate::core::names::fqn_id::ConstLookupId;
+use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::memory_estimate::{
     map_table_bytes, ruby_type_heap_bytes, vec_payload_bytes,
 };
 use crate::core::{
-    ConstLookupId, FqnId, FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType,
-    SourceFileId, TextRange,
+    FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange,
 };
 use smallvec::SmallVec;
 
@@ -795,7 +796,8 @@ fn method_reference_diagnostics_heap_bytes(diagnostics: &MethodReferenceDiagnost
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{FqnId, SourceFileId, TextRange};
+    use crate::core::names::fqn_id::FqnId;
+    use crate::core::{SourceFileId, TextRange};
 
     use super::*;
 

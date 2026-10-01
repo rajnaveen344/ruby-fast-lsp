@@ -1,7 +1,8 @@
+use crate::core::storage::type_store::TypeStore;
 use crate::core::{
     DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ExecutionContextFact, GraphEdgeFact,
     GraphNodeFact, InferenceEvidence, ReferenceCandidate, RubyType, SymbolFact, TextRange,
-    TypeFact, TypeStore, TypeSubject,
+    TypeFact, TypeSubject,
 };
 use crate::indexer::fact_collector::FactCollector;
 use crate::indexer::{AnalysisIndex, RubyDocument};

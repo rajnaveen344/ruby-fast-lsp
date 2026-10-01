@@ -37,7 +37,7 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] A6. Add an `invariant!` macro and shorten the multi-line invariant
       messages without losing what broke, why it is a bug, and the fix.
 - [ ] A7. Replace scattered statistics plumbing with one stats registry.
-- [ ] A8. Remove `mod.rs` files that only re-export.
+- [x] A8. Remove `mod.rs` files that only re-export.
 
 ## Phase B: analysis data model (`crates/ruby-analysis`)
 

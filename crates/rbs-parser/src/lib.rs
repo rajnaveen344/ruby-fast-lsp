@@ -39,7 +39,12 @@ pub use converter::{
 pub use embedded::{core_file_count, core_rbs_file};
 pub use loader::{LoadError, Loader};
 pub use parser::Parser;
-pub use types::*;
+pub use types::{
+    AliasDecl, AttrDecl, AttrKind, Block, ClassDecl, ConstantDecl, Declaration, GlobalDecl,
+    InterfaceDecl, Literal, Location, Member, MethodDecl, MethodKind, MethodParam, MethodType,
+    ModuleDecl, ParamKind, ParseError, RbsType, RecordField, TypeAliasDecl, TypeParam, Variance,
+    Visibility,
+};
 
 /// Parse RBS source code and return declarations
 pub fn parse(source: &str) -> Result<Vec<Declaration>, ParseError> {

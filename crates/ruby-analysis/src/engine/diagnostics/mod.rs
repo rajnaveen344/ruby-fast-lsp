@@ -12,9 +12,10 @@ mod workspace_pass;
 
 use std::collections::HashMap;
 
+use crate::core::names::fqn_id::ConstLookupId;
+use crate::core::names::fqn_id::FqnId;
 use crate::core::{
-    ConstLookupId, FqnId, FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType,
-    TextRange,
+    FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType, TextRange,
 };
 
 type MethodReferenceCacheKey = (ConstLookupId, NamespaceKind, RubyMethod, bool);

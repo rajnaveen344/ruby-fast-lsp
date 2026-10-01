@@ -112,13 +112,13 @@ impl FactCollector {
         );
         if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
             if summary.is_capture_free() {
-                self.constants
-                    .callable_bodies
-                    .push(crate::core::ConstantCallableBodyFact {
+                self.constants.callable_bodies.push(
+                    crate::core::callables::callable_body::ConstantCallableBodyFact {
                         constant: fqn,
                         summary,
                         range: self.direct_range(&node.location()),
-                    });
+                    },
+                );
             }
         }
     }

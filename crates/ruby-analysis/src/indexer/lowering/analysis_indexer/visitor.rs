@@ -37,7 +37,8 @@ use super::syntax::{
 };
 use super::types::{literal_type, method_body_literal_type};
 use super::{AnalysisIndexer, ScopeKind};
-use crate::indexer::yard::{YardMethodDoc, YardParser};
+use crate::indexer::yard::parser::YardParser;
+use crate::indexer::yard::types::YardMethodDoc;
 
 impl Visit<'_> for AnalysisIndexer {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {

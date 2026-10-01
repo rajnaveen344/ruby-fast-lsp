@@ -32,7 +32,8 @@ impl TypeTracker {
     pub(in crate::inference::type_tracker) fn constant_callable_body_for_node(
         &self,
         node: &Node<'_>,
-    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+    ) -> Option<Result<crate::core::callables::callable_body::CallableBodySummary, UnknownReason>>
+    {
         let (parts, absolute) = Self::constant_reference(node)?;
         let analysis_engine = self.analysis.engine.as_ref()?;
         let engine = analysis_engine.read();

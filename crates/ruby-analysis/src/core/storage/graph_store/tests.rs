@@ -1,4 +1,5 @@
-use crate::core::{FqnId, SourceFileId, TextRange};
+use crate::core::names::fqn_id::FqnId;
+use crate::core::{SourceFileId, TextRange};
 
 use super::*;
 

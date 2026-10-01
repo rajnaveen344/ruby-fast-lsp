@@ -9,11 +9,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rbs_parser::{ParamKind, RbsType};
 
-use crate::core::{
-    CallableBlockTemplate, CallableParameterTemplate, CallableSignature,
-    CallableTypeTemplate as TypeTemplate, MethodParamKind, RubyType, TypeInferenceOutcome,
-    UnknownReason,
-};
+use crate::core::callables::callable_signature::CallableBlockTemplate;
+use crate::core::callables::callable_signature::CallableParameterTemplate;
+use crate::core::callables::callable_signature::CallableSignature;
+use crate::core::callables::callable_signature::CallableTypeTemplate as TypeTemplate;
+use crate::core::{MethodParamKind, RubyType, TypeInferenceOutcome, UnknownReason};
 
 pub(crate) const MAX_CALLABLE_OVERLOADS: usize = 8;
 pub(crate) const MAX_CALLABLE_TYPE_VARIABLES: usize = 8;
@@ -27,7 +27,8 @@ pub(crate) struct KnownProcType {
     /// Flow-local identity of the callable literal. Source offsets are unique
     /// within one file traversal and never enter engine storage.
     pub(crate) identity: u32,
-    pub(crate) summary: Result<crate::core::CallableBodySummary, UnknownReason>,
+    pub(crate) summary:
+        Result<crate::core::callables::callable_body::CallableBodySummary, UnknownReason>,
 }
 
 #[derive(Debug, Clone)]

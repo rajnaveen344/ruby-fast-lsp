@@ -17,7 +17,7 @@ use crate::lsp::query::{analyzer_for_document, EngineQuery};
 use crate::server::RubyLanguageServer;
 use crate::utils::ast::is_in_statement_position;
 use crate::utils::lsp::{lsp_position, source_position};
-use crate::utils::position_to_offset;
+use crate::utils::parser::position_to_offset;
 
 pub use snippets::RubySnippets;
 

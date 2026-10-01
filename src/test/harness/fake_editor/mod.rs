@@ -71,7 +71,8 @@ impl FakeEditor {
     /// Create a new FakeEditor with a fresh, initialized server.
     pub async fn new() -> Self {
         Self::with_cache_root(
-            crate::utils::ruby_fast_lsp_user_cache_root().expect("resolve editor cache root"),
+            crate::utils::cache::ruby_fast_lsp_user_cache_root()
+                .expect("resolve editor cache root"),
         )
         .await
     }

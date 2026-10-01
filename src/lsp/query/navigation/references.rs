@@ -10,7 +10,7 @@ use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::core::TextRange;
 use ruby_analysis::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
-use ruby_analysis::indexer::yard::YardTypeConverter;
+use ruby_analysis::indexer::yard::converter::YardTypeConverter;
 use ruby_analysis::indexer::{Identifier, MethodReceiver};
 use ruby_prism::Visit;
 use std::path::Path;
@@ -20,7 +20,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use crate::lsp::query::analysis_location::{locations_for_ranges, non_empty_locations};
 use crate::lsp::query::EngineQuery;
 use crate::utils::lsp::{lsp_text_location, source_position};
-use crate::utils::position_to_offset;
+use crate::utils::parser::position_to_offset;
 
 impl EngineQuery {
     /// Find all references to the symbol at the given position.
@@ -95,9 +95,9 @@ impl EngineQuery {
         } else {
             query.module_call_reference_ranges_at(file_id, byte_offset)?
         };
-        Some(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine, ranges,
-        )))
+        Some(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(&engine, ranges),
+        ))
     }
 
     /// Find references to a constant by FQN.
@@ -566,9 +566,9 @@ impl EngineQuery {
             .into_iter()
             .filter(|range| range.file_id == file_id)
             .collect::<Vec<_>>();
-        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine, ranges,
-        )))
+        non_empty_locations(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(&engine, ranges),
+        ))
     }
 
     fn same_file_fqn_highlight_locations(
@@ -580,9 +580,9 @@ impl EngineQuery {
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let ranges = same_file_reference_ranges(&query, fqn, file_id);
-        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine, ranges,
-        )))
+        non_empty_locations(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(&engine, ranges),
+        ))
     }
 
     fn same_file_method_highlight_locations(
@@ -696,9 +696,9 @@ impl EngineQuery {
         for target in targets {
             ranges.extend(same_file_reference_ranges(&query, &target, file_id));
         }
-        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine, ranges,
-        )))
+        non_empty_locations(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(&engine, ranges),
+        ))
     }
 
     fn method_reference_locations_for_namespace_from_analysis(
@@ -709,10 +709,12 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine,
-            query.method_reference_ranges(namespace_fqn, method),
-        )))
+        non_empty_locations(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(
+                &engine,
+                query.method_reference_ranges(namespace_fqn, method),
+            ),
+        ))
     }
 
     fn method_reference_locations_for_protected_receiver_from_analysis(
@@ -724,14 +726,16 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine,
-            query.method_reference_ranges_protected_receiver(
-                namespace_fqn,
-                method,
-                caller_namespace_fqn,
+        non_empty_locations(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(
+                &engine,
+                query.method_reference_ranges_protected_receiver(
+                    namespace_fqn,
+                    method,
+                    caller_namespace_fqn,
+                ),
             ),
-        )))
+        ))
     }
 
     fn method_reference_locations_for_constant_receiver_from_analysis(
@@ -743,14 +747,16 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine,
-            query.method_reference_ranges_for_constant_receiver_public(
-                receiver_path,
-                ancestors,
-                method,
+        non_empty_locations(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(
+                &engine,
+                query.method_reference_ranges_for_constant_receiver_public(
+                    receiver_path,
+                    ancestors,
+                    method,
+                ),
             ),
-        )))
+        ))
     }
 
     fn method_reference_locations_for_current_scope_from_analysis(
@@ -764,10 +770,12 @@ impl EngineQuery {
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let namespace_fqn =
             FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine,
-            query.method_reference_ranges(&namespace_fqn, method),
-        )))
+        non_empty_locations(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(
+                &engine,
+                query.method_reference_ranges(&namespace_fqn, method),
+            ),
+        ))
     }
 
     fn method_reference_locations_for_super_from_analysis(
@@ -781,10 +789,12 @@ impl EngineQuery {
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let namespace_fqn =
             FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
-        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
-            &engine,
-            query.super_method_reference_ranges(&namespace_fqn, method),
-        )))
+        non_empty_locations(crate::utils::lsp::deduplicate_locations(
+            locations_for_ranges(
+                &engine,
+                query.super_method_reference_ranges(&namespace_fqn, method),
+            ),
+        ))
     }
 
     fn constant_reference_locations_from_analysis(

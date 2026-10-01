@@ -19,12 +19,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use crate::core::storage::graph_store::SemanticGraph;
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
     DiagnosticCandidate, DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact,
     GraphNodeFact, InferenceEvidence, MethodFact, MethodVisibilityOverrideFact, ReferenceCandidate,
-    RubyType, SemanticGraph, SourceFileId, SourceKind, SymbolFact, TextRange, TypeFact,
-    UnresolvedGraphEdgeFact,
+    RubyType, SourceFileId, SourceKind, SymbolFact, TextRange, TypeFact, UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;

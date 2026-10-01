@@ -4,10 +4,12 @@
 //! supplied by the caller and must delegate to `AnalysisQuery`; shape reads
 //! reuse the canonical shape algebra directly.
 
+use crate::core::callables::callable_body::CallableBodyExpression;
+use crate::core::callables::callable_body::CallableBodyParameterKind;
+use crate::core::callables::callable_body::CallableBodySummary;
 use crate::core::{
-    CallableBodyExpression, CallableBodyParameterKind, CallableBodySummary, LiteralKey, RubyMethod,
-    RubyType, ShapeExactness, ShapeField, ShapeStability, ShapeType, TypeInferenceOutcome,
-    UnknownReason,
+    LiteralKey, RubyMethod, RubyType, ShapeExactness, ShapeField, ShapeStability, ShapeType,
+    TypeInferenceOutcome, UnknownReason,
 };
 use crate::inference::r#type::shape as shape_reads;
 

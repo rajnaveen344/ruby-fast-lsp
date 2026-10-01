@@ -204,7 +204,7 @@ fn core_method_receiver_from_node(visitor: &FactCollector, node: &Node) -> CoreM
             method_name: utils::utf8_str(call.name().as_slice()).to_string(),
         }
     } else if let Some(ruby_type) =
-        ruby_analysis::inference::LiteralAnalyzer::new().analyze_literal(node)
+        ruby_analysis::inference::r#type::literal::LiteralAnalyzer::new().analyze_literal(node)
     {
         CoreMethodReceiver::Literal(ruby_type)
     } else {

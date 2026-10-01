@@ -8,7 +8,7 @@ async fn test_coordinator_project_file_collection() {
     fixture.setup_complete_project();
 
     // Test Ruby file collection
-    let files = crate::utils::collect_ruby_files(fixture.project_root());
+    let files = crate::utils::file_ops::collect_ruby_files(fixture.project_root());
 
     assert!(!files.is_empty(), "Should find Ruby files in project");
 
@@ -106,21 +106,39 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
 #[test]
 fn test_coordinator_ruby_file_detection() {
     // Test various Ruby file extensions
-    assert!(crate::utils::should_index_file(&PathBuf::from("test.rb")));
-    assert!(crate::utils::should_index_file(&PathBuf::from("test.ruby")));
-    assert!(crate::utils::should_index_file(&PathBuf::from("test.rake")));
-    assert!(crate::utils::should_index_file(&PathBuf::from(
+    assert!(crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "test.rb"
+    )));
+    assert!(crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "test.ruby"
+    )));
+    assert!(crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "test.rake"
+    )));
+    assert!(crate::utils::file_ops::should_index_file(&PathBuf::from(
         "show.html.erb"
     )));
-    assert!(crate::utils::should_index_file(&PathBuf::from("Rakefile")));
-    assert!(crate::utils::should_index_file(&PathBuf::from("Gemfile")));
-    assert!(crate::utils::should_index_file(&PathBuf::from("Guardfile")));
-    assert!(crate::utils::should_index_file(&PathBuf::from("Capfile")));
+    assert!(crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "Rakefile"
+    )));
+    assert!(crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "Gemfile"
+    )));
+    assert!(crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "Guardfile"
+    )));
+    assert!(crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "Capfile"
+    )));
 
     // Test non-Ruby files
-    assert!(!crate::utils::should_index_file(&PathBuf::from("test.js")));
-    assert!(!crate::utils::should_index_file(&PathBuf::from("test.py")));
-    assert!(!crate::utils::should_index_file(&PathBuf::from(
+    assert!(!crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "test.js"
+    )));
+    assert!(!crate::utils::file_ops::should_index_file(&PathBuf::from(
+        "test.py"
+    )));
+    assert!(!crate::utils::file_ops::should_index_file(&PathBuf::from(
         "README.md"
     )));
 }
@@ -203,7 +221,7 @@ async fn test_coordinator_collects_all_ruby_files() {
         .expect("Failed to write vendor/bundle Ruby file");
 
     // Collect Ruby files from the project
-    let collected_files = crate::utils::collect_ruby_files(fixture.project_root());
+    let collected_files = crate::utils::file_ops::collect_ruby_files(fixture.project_root());
 
     // Verify that vendor files ARE collected (no exclusion)
     let vendor_files: Vec<_> = collected_files

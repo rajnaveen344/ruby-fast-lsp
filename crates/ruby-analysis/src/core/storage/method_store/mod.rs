@@ -1,12 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::core::callables::callable_signature::CallableSignature;
+use crate::core::callables::callable_signature::CallableTypeTemplate;
+use crate::core::callables::callable_signature::DirectYieldCall;
+use crate::core::callables::callable_signature::ForwardedBlockCall;
+use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::memory_estimate::{
     map_table_bytes, ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
 };
-use crate::core::{
-    CallableSignature, CallableTypeTemplate, DirectYieldCall, ForwardedBlockCall, FqnId,
-    FullyQualifiedName, RubyMethod, SourceFileId, TextRange,
-};
+use crate::core::{FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MethodParamKind {

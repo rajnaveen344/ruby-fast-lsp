@@ -54,27 +54,3 @@ pub use types::shape_type::{
 pub use types::type_inference_outcome::{
     InferenceEvidence, InferenceTelemetry, TypeInferenceOutcome, UnknownReason,
 };
-
-// Shared implementation primitives; never part of the consumer API.
-pub(crate) use callables::callable_body::{
-    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
-    ConstantCallableBodyFact,
-};
-pub(crate) use callables::callable_signature::{
-    CallableBlockTemplate, CallableParameterTemplate, CallableSignature, CallableTypeTemplate,
-    DirectYieldCall, ForwardedBlockCall,
-};
-pub(crate) use names::fqn_id::{ConstLookupId, FqnId};
-pub(crate) use storage::diagnostic_candidate_store::DiagnosticCandidateStore;
-pub(crate) use storage::diagnostic_store::DiagnosticStore;
-pub(crate) use storage::graph_store::{
-    SemanticGraph, StoredGraphEdgeFact, StoredGraphNodeFact, StoredSuperclassResolution,
-    StoredUnresolvedGraphEdgeFact,
-};
-pub(crate) use storage::method_store::{MethodStore, StoredMethodFact};
-pub(crate) use storage::reference_store::{
-    ConstLookup, ReferenceCandidateStore, ReferenceStore, StoredMethodReferenceCandidate,
-    StoredReferenceCandidate, StoredReferenceCandidateKind, StoredReferenceCandidateRef,
-};
-pub(crate) use storage::symbol_store::{StoredSymbolFact, SymbolStore};
-pub(crate) use storage::type_store::TypeStore;

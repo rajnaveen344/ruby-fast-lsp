@@ -5,10 +5,11 @@ mod precedence;
 mod tests;
 
 use super::AnalysisQuery;
+use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
+use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, ResolvedMethodCallee, RubyMethod, RubyType,
-    SourceFileId, StoredMethodReferenceCandidate, StoredReferenceCandidateKind, SymbolKind,
-    TextRange,
+    SourceFileId, SymbolKind, TextRange,
 };
 
 pub(in crate::engine) type DefinitionLookupChains = Vec<Vec<FullyQualifiedName>>;

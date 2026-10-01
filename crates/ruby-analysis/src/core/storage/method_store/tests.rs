@@ -1,4 +1,5 @@
-use crate::core::{FqnId, FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
+use crate::core::names::fqn_id::FqnId;
+use crate::core::{FullyQualifiedName, RubyMethod, SourceFileId, TextRange};
 
 use super::*;
 
@@ -44,7 +45,7 @@ fn ordinary_method_has_no_higher_order_payload_and_empty_replacement_clears_it()
         receiver_type_parameters: Vec::new(),
         type_parameters: Vec::new(),
         parameters: Vec::new(),
-        block: crate::core::CallableBlockTemplate {
+        block: crate::core::callables::callable_signature::CallableBlockTemplate {
             parameters: Vec::new(),
             return_type: CallableTypeTemplate::Unconstrained,
             required: true,

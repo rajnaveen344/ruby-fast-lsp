@@ -9,7 +9,9 @@ use log::trace;
 use ruby_prism::CallNode;
 
 use crate::core::RubyType;
-use crate::inference::method::{rbs_class_exists_for_type, rbs_method_exists_for_type};
+use crate::inference::method::return_type::{
+    rbs_class_exists_for_type, rbs_method_exists_for_type,
+};
 use crate::inference::r#type::literal::literal_key;
 use crate::inference::r#type::shape as shape_reads;
 
@@ -209,11 +211,12 @@ impl FactCollector {
             } else if let Some(outcome) = self.shape_call_outcome(node, receiver_type) {
                 Some(outcome)
             } else {
-                let syntax_outcome = crate::inference::method::method_call_type_outcome(
-                    None,
-                    receiver_type,
-                    method_name,
-                );
+                let syntax_outcome =
+                    crate::inference::method::return_type::method_call_type_outcome(
+                        None,
+                        receiver_type,
+                        method_name,
+                    );
                 let outcome = if matches!(receiver_type, RubyType::Union(_))
                     && syntax_outcome.unknown_reason() == Some(UnknownReason::IncompleteUnionMember)
                 {

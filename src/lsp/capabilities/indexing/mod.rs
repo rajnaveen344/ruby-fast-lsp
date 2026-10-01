@@ -4,7 +4,7 @@ use crate::lsp::capabilities::diagnostics::generate_diagnostics;
 use crate::lsp::linter::lint_document;
 use crate::lsp::query::EngineQuery;
 use crate::server::RubyLanguageServer;
-use crate::utils::ProjectFilePolicy;
+use crate::utils::file_ops::ProjectFilePolicy;
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
 

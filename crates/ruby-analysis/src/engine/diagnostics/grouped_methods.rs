@@ -4,9 +4,10 @@
 use std::collections::{HashMap, HashSet};
 
 use super::MethodChainCompletenessCache;
+use crate::core::names::fqn_id::FqnId;
 use crate::core::{
-    DiagnosticFact, FqnId, FullyQualifiedName, MethodCalleeResolution, MethodFact,
-    MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId,
+    DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, MethodFact, MethodReferenceAccess,
+    ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId,
 };
 use crate::engine::{AnalysisEngine, AnalysisQuery};
 

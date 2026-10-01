@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::core::names::fqn_id::ConstLookupId;
+use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::memory_estimate::{map_table_bytes, set_table_bytes, vec_payload_bytes};
-use crate::core::{ConstLookupId, FqnId, FullyQualifiedName, SourceFileId, TextRange};
+use crate::core::{FullyQualifiedName, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum GraphNodeKind {

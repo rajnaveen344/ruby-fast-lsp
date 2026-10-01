@@ -11,10 +11,12 @@ use super::{
     SnapshotCallableParameterTemplate, SnapshotCallableSignature, SnapshotCallableTypeTemplate,
     SnapshotConstantCallableBodyFact,
 };
-use crate::core::{
-    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
-    ConstantCallableBodyFact, RubyMethod, SourceFileId,
-};
+use crate::core::callables::callable_body::CallableBodyExpression;
+use crate::core::callables::callable_body::CallableBodyParameter;
+use crate::core::callables::callable_body::CallableBodyParameterKind;
+use crate::core::callables::callable_body::CallableBodySummary;
+use crate::core::callables::callable_body::ConstantCallableBodyFact;
+use crate::core::{RubyMethod, SourceFileId};
 
 pub(super) fn snapshot_constant_callable_body(
     fact: &ConstantCallableBodyFact,
@@ -262,7 +264,7 @@ fn restore_callable_body_expression(
 }
 
 pub(super) fn snapshot_callable_signature(
-    signature: &crate::core::CallableSignature,
+    signature: &crate::core::callables::callable_signature::CallableSignature,
 ) -> Result<SnapshotCallableSignature, String> {
     Ok(SnapshotCallableSignature {
         receiver_type_parameters: signature.receiver_type_parameters.clone(),
@@ -292,9 +294,9 @@ pub(super) fn snapshot_callable_signature(
 }
 
 fn snapshot_callable_template(
-    template: &crate::core::CallableTypeTemplate,
+    template: &crate::core::callables::callable_signature::CallableTypeTemplate,
 ) -> Result<SnapshotCallableTypeTemplate, String> {
-    use crate::core::CallableTypeTemplate;
+    use crate::core::callables::callable_signature::CallableTypeTemplate;
     Ok(match template {
         CallableTypeTemplate::Concrete(ruby_type) => {
             SnapshotCallableTypeTemplate::Concrete(snapshot_ruby_type(ruby_type)?)
@@ -322,38 +324,42 @@ fn snapshot_callable_template(
 
 pub(super) fn restore_callable_signature(
     signature: SnapshotCallableSignature,
-) -> Result<crate::core::CallableSignature, String> {
-    Ok(crate::core::CallableSignature {
-        receiver_type_parameters: signature.receiver_type_parameters,
-        type_parameters: signature.type_parameters,
-        parameters: signature
-            .parameters
-            .into_iter()
-            .map(|parameter| {
-                Ok(crate::core::CallableParameterTemplate {
-                    kind: restore_param_kind(parameter.kind),
-                    ruby_type: restore_callable_template(parameter.ruby_type)?,
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?,
-        block: crate::core::CallableBlockTemplate {
+) -> Result<crate::core::callables::callable_signature::CallableSignature, String> {
+    Ok(
+        crate::core::callables::callable_signature::CallableSignature {
+            receiver_type_parameters: signature.receiver_type_parameters,
+            type_parameters: signature.type_parameters,
             parameters: signature
-                .block
                 .parameters
                 .into_iter()
-                .map(restore_callable_template)
-                .collect::<Result<Vec<_>, _>>()?,
-            return_type: restore_callable_template(signature.block.return_type)?,
-            required: signature.block.required,
+                .map(|parameter| {
+                    Ok(
+                        crate::core::callables::callable_signature::CallableParameterTemplate {
+                            kind: restore_param_kind(parameter.kind),
+                            ruby_type: restore_callable_template(parameter.ruby_type)?,
+                        },
+                    )
+                })
+                .collect::<Result<Vec<_>, String>>()?,
+            block: crate::core::callables::callable_signature::CallableBlockTemplate {
+                parameters: signature
+                    .block
+                    .parameters
+                    .into_iter()
+                    .map(restore_callable_template)
+                    .collect::<Result<Vec<_>, _>>()?,
+                return_type: restore_callable_template(signature.block.return_type)?,
+                required: signature.block.required,
+            },
+            return_type: restore_callable_template(signature.return_type)?,
         },
-        return_type: restore_callable_template(signature.return_type)?,
-    })
+    )
 }
 
 fn restore_callable_template(
     template: SnapshotCallableTypeTemplate,
-) -> Result<crate::core::CallableTypeTemplate, String> {
-    use crate::core::CallableTypeTemplate;
+) -> Result<crate::core::callables::callable_signature::CallableTypeTemplate, String> {
+    use crate::core::callables::callable_signature::CallableTypeTemplate;
     Ok(match template {
         SnapshotCallableTypeTemplate::Concrete(ruby_type) => {
             CallableTypeTemplate::Concrete(restore_ruby_type(ruby_type, 1)?)

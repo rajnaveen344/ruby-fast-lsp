@@ -5,7 +5,7 @@
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType};
 use crate::engine::{AnalysisQuery, VariableTypeKind};
 use crate::indexer::{MethodReceiver, RubyDocument};
-use crate::inference::method::method_call_return_type;
+use crate::inference::method::return_type::method_call_return_type;
 
 pub struct ReceiverResolutionContext<'a, 'q> {
     pub query: Option<&'q AnalysisQuery<'a>>,

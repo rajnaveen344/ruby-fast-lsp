@@ -4,5 +4,3 @@
 
 pub mod literal;
 pub(crate) mod shape;
-
-pub use literal::LiteralAnalyzer;

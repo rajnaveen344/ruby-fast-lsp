@@ -1,7 +1,7 @@
 use ruby_analysis::core::{FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::MethodReceiver;
-use ruby_analysis::inference::method::rbs_method_signatures_for_type;
+use ruby_analysis::inference::method::return_type::rbs_method_signatures_for_type;
 use ruby_analysis::inference::rbs::{RbsMethodSignature, RbsSignatureParameter};
 use tower_lsp::lsp_types::{Position, Url};
 

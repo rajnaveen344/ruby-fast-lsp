@@ -531,7 +531,8 @@ impl FactCollector {
     pub(in crate::indexer::fact_collector) fn constant_callable_body_for_node(
         &self,
         node: &Node<'_>,
-    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+    ) -> Option<Result<crate::core::callables::callable_body::CallableBodySummary, UnknownReason>>
+    {
         let reference = crate::indexer::mixin_ref_from_node(node)?;
         let lexical_context = self.scope_tracker.get_ns_stack();
         let (constant, _) = self.resolve_constant_value_type_from(

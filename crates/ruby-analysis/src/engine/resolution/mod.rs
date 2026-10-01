@@ -24,8 +24,9 @@ pub(in crate::engine) use lookup_chain::{method_lookup_chain, node_kind};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::core::names::fqn_id::FqnId;
 use crate::core::{
-    FqnId, FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodFact, RubyConstant, RubyMethod,
+    FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodFact, RubyConstant, RubyMethod,
     RubyType, TextRange,
 };
 

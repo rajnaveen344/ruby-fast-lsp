@@ -2,12 +2,16 @@
 
 use std::collections::HashSet;
 
+use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::method_store::StoredMethodFactMatch;
+use crate::core::storage::reference_store::ReferenceCandidateStore;
+use crate::core::storage::reference_store::ReferenceStore;
+use crate::core::storage::symbol_store::SymbolStore;
+use crate::core::storage::type_store::TypeStore;
 use crate::core::{
-    DiagnosticFact, ExecutionContextFact, FqnId, FullyQualifiedName, MethodAvailability,
-    MethodFact, MethodVisibilityOverrideFact, ReferenceCandidateStore, ReferenceFact,
-    ReferenceStore, RubyMethod, SourceFileId, SymbolFact, SymbolStore, TypeFact, TypeResolution,
-    TypeStore, TypeSubject,
+    DiagnosticFact, ExecutionContextFact, FullyQualifiedName, MethodAvailability, MethodFact,
+    MethodVisibilityOverrideFact, ReferenceFact, RubyMethod, SourceFileId, SymbolFact, TypeFact,
+    TypeResolution, TypeSubject,
 };
 
 use super::AnalysisEngine;

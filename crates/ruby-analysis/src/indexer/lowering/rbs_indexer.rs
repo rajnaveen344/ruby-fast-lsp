@@ -698,17 +698,23 @@ end
         assert_eq!(signature.type_parameters, ["Input", "Output"]);
         assert_eq!(
             signature.block.parameters,
-            [crate::core::CallableTypeTemplate::Variable(
-                "Input".to_string()
-            )]
+            [
+                crate::core::callables::callable_signature::CallableTypeTemplate::Variable(
+                    "Input".to_string()
+                )
+            ]
         );
         assert_eq!(
             signature.block.return_type,
-            crate::core::CallableTypeTemplate::Variable("Output".to_string())
+            crate::core::callables::callable_signature::CallableTypeTemplate::Variable(
+                "Output".to_string()
+            )
         );
         assert_eq!(
             signature.return_type,
-            crate::core::CallableTypeTemplate::Variable("Output".to_string())
+            crate::core::callables::callable_signature::CallableTypeTemplate::Variable(
+                "Output".to_string()
+            )
         );
     }
 }

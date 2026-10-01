@@ -5,10 +5,11 @@ use std::collections::HashMap;
 
 use super::grouped_methods::grouped_method_targets;
 use super::{constant_name, MethodCallOutcomeCaches, MethodChainCompletenessCache};
+use crate::core::storage::reference_store::ConstLookup;
+use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
-    ConstLookup, ConstantPath, DiagnosticFact, FullyQualifiedName, MethodReferenceAccess,
-    ReferenceFact, RubyMethod, RubyType, SourceFileId, StoredReferenceCandidateKind,
-    TypeInferenceOutcome, UnknownReason,
+    ConstantPath, DiagnosticFact, FullyQualifiedName, MethodReferenceAccess, ReferenceFact,
+    RubyMethod, RubyType, SourceFileId, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
 use crate::engine::{AnalysisEngine, AnalysisQuery};

@@ -11,7 +11,9 @@ use crate::core::RubyType;
 use crate::inference::r#type::literal::LiteralAnalyzer;
 use crate::inference::type_tracker::{LocalReadType, TypeTracker};
 
-use crate::indexer::yard::{YardMethodDoc, YardParser, YardTypeConverter};
+use crate::indexer::yard::converter::YardTypeConverter;
+use crate::indexer::yard::parser::YardParser;
+use crate::indexer::yard::types::YardMethodDoc;
 
 use crate::indexer::fact_collector::inference::method_return::InferredMethodContext;
 use crate::indexer::fact_collector::FactCollector;

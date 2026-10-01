@@ -3,10 +3,11 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::core::storage::type_store::TypeStore;
 use crate::core::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
     FullyQualifiedName, GraphNodeKind, InferenceEvidence, InferenceTelemetry, RubyType,
-    SourceFileId, TextRange, TypeInferenceOutcome, TypeStore, TypeSubject, UnknownReason,
+    SourceFileId, TextRange, TypeInferenceOutcome, TypeSubject, UnknownReason,
 };
 
 use super::AnalysisEngine;
@@ -416,7 +417,8 @@ impl AnalysisEngine {
     pub(in crate::engine) fn constant_callable_body(
         &self,
         constant: &FullyQualifiedName,
-    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+    ) -> Option<Result<crate::core::callables::callable_body::CallableBodySummary, UnknownReason>>
+    {
         let mut summaries = self
             .inference_by_file
             .values()

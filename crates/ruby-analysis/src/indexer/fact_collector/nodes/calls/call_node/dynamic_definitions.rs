@@ -7,7 +7,7 @@ use crate::core::{
 use crate::indexer::mixin_ref_from_node;
 use ruby_prism::{CallNode, Node};
 
-use crate::indexer::yard::YardTypeConverter;
+use crate::indexer::yard::converter::YardTypeConverter;
 
 use super::names::{define_method_name_and_range, direct_attr_name_and_range};
 use crate::indexer::fact_collector::FactCollector;

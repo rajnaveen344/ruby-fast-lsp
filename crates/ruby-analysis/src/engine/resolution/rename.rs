@@ -4,9 +4,11 @@ use std::collections::HashSet;
 
 use super::lookup_chain::method_lookup_chain;
 use super::ConstantRenameTarget;
+use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
+use crate::core::storage::reference_store::StoredReferenceCandidateRef;
 use crate::core::{
-    FullyQualifiedName, GraphEdgeKind, RubyConstant, RubyMethod, SourceFileId,
-    StoredMethodReferenceCandidate, StoredReferenceCandidateRef, SymbolKind, TextRange,
+    FullyQualifiedName, GraphEdgeKind, RubyConstant, RubyMethod, SourceFileId, SymbolKind,
+    TextRange,
 };
 use crate::engine::queries::AnalysisQuery;
 
@@ -79,7 +81,7 @@ impl<'a> AnalysisQuery<'a> {
             if !candidate.range.contains_offset(file_id, byte_offset) {
                 continue;
             }
-            let crate::core::StoredReferenceCandidateKind::Method {
+            let crate::core::storage::reference_store::StoredReferenceCandidateKind::Method {
                 owner,
                 owner_kind,
                 method,

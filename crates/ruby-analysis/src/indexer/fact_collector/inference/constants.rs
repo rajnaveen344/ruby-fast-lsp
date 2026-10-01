@@ -9,7 +9,7 @@ use ruby_prism::*;
 pub(in crate::indexer::fact_collector) struct ConstantEvidence {
     pub(in crate::indexer::fact_collector) equations: Vec<ConstantTypeEquation>,
     pub(in crate::indexer::fact_collector) callable_bodies:
-        Vec<crate::core::ConstantCallableBodyFact>,
+        Vec<crate::core::callables::callable_body::ConstantCallableBodyFact>,
 }
 
 impl FactCollector {

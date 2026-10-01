@@ -8,10 +8,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use ruby_prism::Node;
 
-use crate::core::{
-    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
-    RubyMethod, RubyType, UnknownReason,
-};
+use crate::core::callables::callable_body::CallableBodyExpression;
+use crate::core::callables::callable_body::CallableBodyParameter;
+use crate::core::callables::callable_body::CallableBodyParameterKind;
+use crate::core::callables::callable_body::CallableBodySummary;
+use crate::core::{RubyMethod, RubyType, UnknownReason};
 use crate::inference::control_flow::{self, Exit, Reachability};
 use crate::inference::r#type::literal::{literal_key, LiteralAnalyzer};
 

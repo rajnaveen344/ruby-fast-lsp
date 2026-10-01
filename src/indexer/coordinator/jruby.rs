@@ -119,7 +119,7 @@ fn jruby_cache_root_for_project(
 ) -> Result<PathBuf> {
     let user_cache_root = match user_cache_root_override {
         Some(root) => root.to_path_buf(),
-        None => crate::utils::ruby_fast_lsp_user_cache_root()?,
+        None => crate::utils::cache::ruby_fast_lsp_user_cache_root()?,
     };
     let canonical_project_root = workspace_root.canonicalize().with_context(|| {
         format!(

@@ -1,10 +1,10 @@
 //! Higher-order call preparation from project signature facts with embedded RBS fallback.
 
 use super::embedded_callable::{prepare_rbs_higher_order_call, rbs_receiver_identity};
-use crate::core::{
-    CallableBlockTemplate, CallableSignature, CallableTypeTemplate, FullyQualifiedName, MethodFact,
-    MethodParamKind, RubyMethod, RubyType,
-};
+use crate::core::callables::callable_signature::CallableBlockTemplate;
+use crate::core::callables::callable_signature::CallableSignature;
+use crate::core::callables::callable_signature::CallableTypeTemplate;
+use crate::core::{FullyQualifiedName, MethodFact, MethodParamKind, RubyMethod, RubyType};
 use crate::engine::{AnalysisQuery, AnalysisQueryCache};
 use crate::inference::higher_order::{prepare_callable_set, PreparedCallableSet};
 

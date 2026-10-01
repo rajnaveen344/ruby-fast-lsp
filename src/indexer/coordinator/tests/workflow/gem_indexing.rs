@@ -43,7 +43,7 @@ async fn test_coordinator_gem_indexing_integration() {
     );
 
     // The gem indexing should not interfere with project file indexing
-    let project_files = crate::utils::collect_ruby_files(fixture.project_root());
+    let project_files = crate::utils::file_ops::collect_ruby_files(fixture.project_root());
     assert!(
         !project_files.is_empty(),
         "Project files should still be discoverable after gem indexing"

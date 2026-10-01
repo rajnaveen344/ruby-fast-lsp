@@ -8,10 +8,13 @@ use super::grouped_methods::grouped_method_targets;
 use super::{
     constant_name, MethodCallOutcomeCaches, MethodChainCompletenessCache, MethodReferenceCacheKey,
 };
+use crate::core::names::fqn_id::ConstLookupId;
+use crate::core::names::fqn_id::FqnId;
+use crate::core::storage::reference_store::ConstLookup;
+use crate::core::storage::reference_store::StoredReferenceCandidateRef;
 use crate::core::{
-    ConstLookup, ConstLookupId, ConstantPath, DiagnosticFact, FqnId, FullyQualifiedName,
-    MethodReferenceAccess, NamespaceKind, ReferenceFact, RubyMethod, RubyType,
-    StoredReferenceCandidateRef, TypeInferenceOutcome, UnknownReason,
+    ConstantPath, DiagnosticFact, FullyQualifiedName, MethodReferenceAccess, NamespaceKind,
+    ReferenceFact, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
 use crate::engine::state::{elapsed_ns, ResolvePassStats};

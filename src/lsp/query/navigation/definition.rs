@@ -7,14 +7,14 @@ use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::{FullyQualifiedName, SymbolKind};
 use ruby_analysis::engine::AnalysisQuery;
-use ruby_analysis::indexer::yard::YardParser;
+use ruby_analysis::indexer::yard::parser::YardParser;
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::lsp::query::analysis_location::{locations_for_ranges, non_empty_locations};
 use crate::lsp::query::EngineQuery;
 use crate::utils::lsp::{lsp_text_location, source_position};
-use crate::utils::position_to_offset;
+use crate::utils::parser::position_to_offset;
 
 impl EngineQuery {
     /// Find definitions for an identifier at the given position.

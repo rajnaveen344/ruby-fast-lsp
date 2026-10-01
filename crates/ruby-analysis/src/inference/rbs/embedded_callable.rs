@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::conversion::{rbs_type_to_class_name, substitute_rbs_edge_argument};
 use super::RBS_LOADER;
-use crate::core::{CallableSignature, RubyType};
+use crate::core::callables::callable_signature::CallableSignature;
+use crate::core::RubyType;
 use crate::inference::higher_order::{
     callable_signature_from_rbs, prepare_callable_set, PreparedCallableSet,
 };

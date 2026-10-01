@@ -5,7 +5,7 @@ use crate::engine::AnalysisQuery;
 use log::trace;
 use ruby_prism::CallNode;
 
-use crate::inference::method::method_call_return_type;
+use crate::inference::method::return_type::method_call_return_type;
 
 use super::names::direct_attr_name_and_range;
 use crate::indexer::fact_collector::FactCollector;

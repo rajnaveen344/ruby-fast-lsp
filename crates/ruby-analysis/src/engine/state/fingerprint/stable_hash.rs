@@ -2,12 +2,15 @@
 
 use std::hash::Hasher;
 
+use crate::core::callables::callable_body::CallableBodyExpression;
+use crate::core::callables::callable_body::CallableBodyParameterKind;
+use crate::core::callables::callable_body::CallableBodySummary;
+use crate::core::callables::callable_signature::CallableSignature;
+use crate::core::callables::callable_signature::CallableTypeTemplate;
 use crate::core::{
-    CallableBodyExpression, CallableBodyParameterKind, CallableBodySummary, CallableSignature,
-    CallableTypeTemplate, DiagnosticSeverity, ExecutionScopeMode, FullyQualifiedName,
-    GraphEdgeKind, GraphEdgeProvenance, GraphNodeKind, MethodAvailability, MethodParamKind,
-    MethodReferenceAccess, NamespaceKind, RubyMethod, RubyType, SourceKind, SymbolKind, TextRange,
-    TypeProvenance, TypeSubject,
+    DiagnosticSeverity, ExecutionScopeMode, FullyQualifiedName, GraphEdgeKind, GraphEdgeProvenance,
+    GraphNodeKind, MethodAvailability, MethodParamKind, MethodReferenceAccess, NamespaceKind,
+    RubyMethod, RubyType, SourceKind, SymbolKind, TextRange, TypeProvenance, TypeSubject,
 };
 
 use super::{SemanticExportFingerprint, SemanticResultFingerprint};
@@ -510,7 +513,7 @@ fn stable_callable_template(hasher: &mut StableExportHasher, template: &Callable
 
 pub(super) fn stable_forwarded_block_call(
     hasher: &mut StableExportHasher,
-    forwarded: Option<&crate::core::ForwardedBlockCall>,
+    forwarded: Option<&crate::core::callables::callable_signature::ForwardedBlockCall>,
 ) {
     match forwarded {
         Some(forwarded) => {
@@ -524,7 +527,7 @@ pub(super) fn stable_forwarded_block_call(
 
 pub(super) fn stable_direct_yield_call(
     hasher: &mut StableExportHasher,
-    direct: Option<&crate::core::DirectYieldCall>,
+    direct: Option<&crate::core::callables::callable_signature::DirectYieldCall>,
 ) {
     match direct {
         Some(direct) => {

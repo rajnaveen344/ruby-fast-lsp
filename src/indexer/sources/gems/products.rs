@@ -438,7 +438,7 @@ impl IndexerGem {
             if !lib_path.is_dir() {
                 continue;
             }
-            let mut ruby_files = utils::collect_ruby_files(lib_path);
+            let mut ruby_files = utils::file_ops::collect_ruby_files(lib_path);
             ruby_files.sort();
             for file_path in ruby_files {
                 let relative = file_path.strip_prefix(lib_path).with_context(|| {

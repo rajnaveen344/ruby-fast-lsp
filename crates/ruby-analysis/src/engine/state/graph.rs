@@ -1,10 +1,12 @@
 //! Semantic graph reads, constant path resolution, ancestry edges, method
 //! lookup chain caches, and retry of unresolved graph edges.
 
+use crate::core::storage::graph_store::StoredGraphEdgeFact;
+use crate::core::storage::graph_store::StoredSuperclassResolution;
+use crate::core::storage::graph_store::StoredUnresolvedGraphEdgeFact;
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, NamespaceKind,
-    RubyConstant, SourceFileId, StoredGraphEdgeFact, StoredSuperclassResolution,
-    StoredUnresolvedGraphEdgeFact, TextRange, UnresolvedGraphEdgeFact,
+    RubyConstant, SourceFileId, TextRange, UnresolvedGraphEdgeFact,
 };
 
 use super::AnalysisEngine;

@@ -222,8 +222,6 @@ pub mod rbs;
 pub mod r#type;
 pub mod type_tracker;
 
-pub use r#type::LiteralAnalyzer;
-
 #[cfg(test)]
 mod architecture_tests {
     use std::path::Path;

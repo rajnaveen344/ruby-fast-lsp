@@ -695,7 +695,7 @@ impl IndexerGem {
     fn cached_gem_extraction_context(&self, project_root: &Path) -> Result<(PathBuf, String)> {
         let cache_root = match &self.cached_gem_root_override {
             Some(root) => root.clone(),
-            None => crate::utils::ruby_fast_lsp_user_cache_root()?,
+            None => crate::utils::cache::ruby_fast_lsp_user_cache_root()?,
         };
         let canonical_project_root = project_root.canonicalize().with_context(|| {
             format!(

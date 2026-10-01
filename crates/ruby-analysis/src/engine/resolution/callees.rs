@@ -8,9 +8,10 @@ use super::lookup_chain::{
     method_lookup_chain, method_lookup_chain_has_unresolved_dependency_from_graph,
 };
 use super::{module_instance_receivers, namespace_target_exists, receiver_type_members};
+use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodReferenceAccess, ResolvedMethodCallee,
-    RubyMethod, RubyType, StoredMethodReferenceCandidate,
+    RubyMethod, RubyType,
 };
 use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
 use crate::engine::queries::definitions::DefinitionLookupChains;

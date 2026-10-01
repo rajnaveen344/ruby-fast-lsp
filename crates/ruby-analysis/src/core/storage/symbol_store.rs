@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::file_owned_index::place_appended_file_facts;
 use crate::core::storage::memory_estimate::{map_table_bytes, vec_payload_bytes};
-use crate::core::{FqnId, FullyQualifiedName, SourceFileId, TextRange};
+use crate::core::{FullyQualifiedName, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SymbolKind {
@@ -310,7 +311,8 @@ fn sort_symbol_ids_by_file(facts: &[Option<StoredSymbolFact>], ids: &mut [Symbol
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{FqnId, SourceFileId, TextRange};
+    use crate::core::names::fqn_id::FqnId;
+    use crate::core::{SourceFileId, TextRange};
 
     use super::*;
 

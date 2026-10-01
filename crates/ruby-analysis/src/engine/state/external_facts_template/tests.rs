@@ -1,13 +1,17 @@
 use super::type_codec::{restore_ruby_type, snapshot_ruby_type};
 use super::{ProjectNeutralFileFactsSnapshot, SnapshotCallableTypeTemplate};
+use crate::core::callables::callable_body::CallableBodyExpression;
+use crate::core::callables::callable_body::CallableBodyParameter;
+use crate::core::callables::callable_body::CallableBodyParameterKind;
+use crate::core::callables::callable_body::CallableBodySummary;
+use crate::core::callables::callable_body::ConstantCallableBodyFact;
 use crate::core::MethodVisibility;
 use crate::core::{
-    CallableBodyExpression, CallableBodyParameter, CallableBodyParameterKind, CallableBodySummary,
-    ConstantCallableBodyFact, DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName,
-    GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, InferenceEvidence, LiteralKey,
-    LiteralValue, MethodFact, MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType,
-    ShapeExactness, ShapeField, ShapeRest, ShapeStability, ShapeType, SourceFileId, SourceKind,
-    SymbolFact, SymbolKind, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
+    DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind,
+    GraphNodeFact, GraphNodeKind, InferenceEvidence, LiteralKey, LiteralValue, MethodFact,
+    MethodVisibilityOverrideFact, RubyConstant, RubyMethod, RubyType, ShapeExactness, ShapeField,
+    ShapeRest, ShapeStability, ShapeType, SourceFileId, SourceKind, SymbolFact, SymbolKind,
+    TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
 use crate::engine::{

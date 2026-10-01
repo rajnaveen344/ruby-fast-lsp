@@ -11,12 +11,12 @@ mod type_at_tests;
 
 use std::path::Path;
 
+use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::MethodVisibilityOverrideFact;
 use crate::core::{
     DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
     GraphNodeKind, MethodCalleeResolution, MethodFact, ReferenceFact, RubyType, SourceFileId,
-    StoredReferenceCandidateKind, SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject,
-    UnknownReason,
+    SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject, UnknownReason,
 };
 
 use crate::engine::{AnalysisEngine, SourceFile};
@@ -53,7 +53,8 @@ impl<'a> AnalysisQuery<'a> {
     pub(crate) fn constant_callable_body(
         &self,
         constant: &FullyQualifiedName,
-    ) -> Option<Result<crate::core::CallableBodySummary, UnknownReason>> {
+    ) -> Option<Result<crate::core::callables::callable_body::CallableBodySummary, UnknownReason>>
+    {
         self.engine.constant_callable_body(constant)
     }
 

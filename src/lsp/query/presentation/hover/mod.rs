@@ -11,7 +11,7 @@ use generators::HoverContext;
 pub use generators::HoverInfo;
 
 use crate::lsp::query::EngineQuery;
-use crate::utils::position_to_offset;
+use crate::utils::parser::position_to_offset;
 use ruby_analysis::indexer::{identifier_to_hover_target, HoverTarget};
 use tower_lsp::lsp_types::{Position, Url};
 
