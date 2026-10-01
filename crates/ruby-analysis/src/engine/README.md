@@ -15,6 +15,7 @@ Implementation folders are private to the engine.
 | `persist/fingerprint/` | Semantic export and result fingerprints that classify file replacements and key persistent caches |
 | `persist/external_facts_template/` | Project-neutral dependency fact templates and their snapshot codecs |
 | `state/tests/` | Engine state tests grouped by lifecycle, removal, fingerprints, inference outcomes, navigation, graph, caches, and constants |
+| `lookup/` | `lookup::method(view, MethodRequest)` and `method_cached`: one request (receiver, method, `ReceiverAccess`, wanted product) answered as `MethodAnswer::{Found, Ambiguous, Missing, Unknown}`. `Unknown` means an unknown lookup edge (unindexed receiver, unresolved ancestor, no proven product, or an unsupported want) and suppresses missing-method claims; only `Missing` proves absence. Answers are derived data and never enter fingerprints |
 | `resolution/` | Ruby lookup chains and MRO (`lookup_chain`), chain method facts and visibility (`chain_methods`), callees, signatures, method references, reference ranges, definitions, and rename policy |
 | `queries/` | Common reads and the `View` entry point |
 | `semantics.rs` | The read-only `Semantics` trait the fact collector and `TypeTracker` use for mid-walk reads, implemented for `View` and for the shared engine lock, which takes one short read guard per call and delegates to a `View` |

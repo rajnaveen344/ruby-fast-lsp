@@ -290,7 +290,7 @@ pub(super) fn method_lookup_chain_has_unresolved_dependency_cached(
     incomplete
 }
 
-pub(super) fn method_lookup_chain_has_unresolved_dependency_from_graph(
+pub(in crate::engine) fn method_lookup_chain_has_unresolved_dependency_from_graph(
     engine: &crate::engine::Project,
     owner: &FullyQualifiedName,
 ) -> bool {

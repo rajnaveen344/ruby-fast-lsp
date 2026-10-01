@@ -167,7 +167,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [ ] B4h. Remove the aliases; update the engine and crate READMEs.
 - [ ] B5. Add `lookup::method(view, MethodRequest) -> MethodAnswer` and replace
       the method-lookup variants with it.
-  - [ ] B5a. Add `engine/lookup/` with `MethodRequest { receiver, method,
+  - [x] B5a. Add `engine/lookup/` with `MethodRequest { receiver, method,
         access, want }` and `MethodAnswer { Found, Ambiguous, Missing,
         Unknown }`, delegating to the existing inner functions. Equality tests
         against the legacy functions per want × access × receiver.

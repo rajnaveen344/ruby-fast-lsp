@@ -114,19 +114,10 @@ impl<'a> View<'a> {
                 .collect::<Vec<_>>()
         } else {
             match candidate.access {
-                MethodReferenceAccess::InstanceMethodReflection => {
-                    let chain = method_lookup_chain(self.engine, &owner);
-                    method_callee_in_chain(
-                        self.engine,
-                        &chain,
-                        &candidate.method,
-                        MethodCalleeResolution::Exact,
-                        true,
-                        None,
-                    )
+                MethodReferenceAccess::InstanceMethodReflection => self
+                    .resolve_reflected_method_callee(&owner, &candidate.method)
                     .into_iter()
-                    .collect()
-                }
+                    .collect(),
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
                     .resolve_method_callees_inner(
                         &owner,
@@ -430,6 +421,24 @@ impl<'a> View<'a> {
         }
 
         Some(callees)
+    }
+
+    /// `instance_method(:name)` reflection: the exact winner on the
+    /// namespace's own chain, without dispatch to module includers.
+    pub(in crate::engine) fn resolve_reflected_method_callee(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<ResolvedMethodCallee> {
+        let chain = method_lookup_chain(self.engine, namespace_fqn);
+        method_callee_in_chain(
+            self.engine,
+            &chain,
+            method,
+            MethodCalleeResolution::Exact,
+            true,
+            None,
+        )
     }
 
     pub fn resolve_super_method_callee(

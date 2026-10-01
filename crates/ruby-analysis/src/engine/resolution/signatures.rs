@@ -93,7 +93,7 @@ impl<'a> View<'a> {
         )
     }
 
-    fn resolve_method_signature_facts_for_type_inner(
+    pub(in crate::engine) fn resolve_method_signature_facts_for_type_inner(
         &self,
         receiver_type: &RubyType,
         method: &RubyMethod,
@@ -141,7 +141,7 @@ impl<'a> View<'a> {
         all_facts
     }
 
-    fn resolve_method_signature_facts_maybe_cached(
+    pub(in crate::engine) fn resolve_method_signature_facts_maybe_cached(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
@@ -180,7 +180,7 @@ impl<'a> View<'a> {
         )
     }
 
-    fn resolve_method_signature_facts_inner(
+    pub(in crate::engine) fn resolve_method_signature_facts_inner(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,

@@ -19,7 +19,9 @@ pub(in crate::engine) use chain_methods::{
 pub(in crate::engine) use lookup_chain::method_lookup_chain_for_reference_cached;
 #[cfg(test)]
 pub(crate) use lookup_chain::method_lookup_chain_uncached_construction_count;
-pub(in crate::engine) use lookup_chain::{method_lookup_chain, node_kind};
+pub(in crate::engine) use lookup_chain::{
+    method_lookup_chain, method_lookup_chain_has_unresolved_dependency_from_graph, node_kind,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

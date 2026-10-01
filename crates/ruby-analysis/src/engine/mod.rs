@@ -15,6 +15,7 @@
 
 mod debug;
 mod diagnostics;
+pub mod lookup;
 mod persist;
 mod queries;
 mod resolution;
@@ -47,7 +48,8 @@ pub use queries::namespace_tree::types::{
 pub use queries::workspace_symbols::types::WorkspaceSymbolMatch;
 pub use queries::View;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
-pub(crate) use semantics::{ReceiverAccess, Semantics};
+pub use semantics::ReceiverAccess;
+pub(crate) use semantics::Semantics;
 pub use state::{
     AnalysisStat, Project, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
     SourceFileSnapshot,

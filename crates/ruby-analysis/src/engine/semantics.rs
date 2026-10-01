@@ -37,7 +37,7 @@ use parking_lot::RwLock;
 
 /// Which receiver methods a dispatched return lookup may see.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ReceiverAccess<'a> {
+pub enum ReceiverAccess<'a> {
     /// Implicit or `self` receivers: private methods are visible.
     Any,
     /// Explicit receivers seen from `caller`: protected methods of related
@@ -45,6 +45,18 @@ pub(crate) enum ReceiverAccess<'a> {
     Protected { caller: &'a FullyQualifiedName },
     /// Explicit receivers with no caller namespace: public methods only.
     Public,
+}
+
+impl<'a> ReceiverAccess<'a> {
+    /// The engine's visibility filter: whether private methods are visible,
+    /// and the caller namespace that protected methods are checked against.
+    pub(in crate::engine) fn visibility(self) -> (bool, Option<&'a FullyQualifiedName>) {
+        match self {
+            ReceiverAccess::Any => (true, None),
+            ReceiverAccess::Protected { caller } => (false, Some(caller)),
+            ReceiverAccess::Public => (false, None),
+        }
+    }
 }
 
 /// Local evidence from the walking file, consulted before the engine.

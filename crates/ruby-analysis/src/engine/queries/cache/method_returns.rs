@@ -12,6 +12,7 @@ use crate::engine::resolution::{
     chain_has_custom_method_missing, execution_context_application_targets, method_facts_in_chain,
     method_lookup_chain, method_missing_method, module_instance_receivers, namespace_target_exists,
 };
+use crate::engine::ReceiverAccess;
 
 use super::memo::{AnalysisQueryCache, MethodReturnQueryAccess, MethodReturnQueryKey};
 use super::thread_memo::thread_receiver_has_non_public;
@@ -291,6 +292,63 @@ impl<'a> View<'a> {
                 method,
                 caller_namespace_fqn,
             )
+        })
+    }
+
+    /// A return type through receiver dispatch with the given visibility.
+    pub(in crate::engine) fn method_return_type_for_receiver_access(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        access: ReceiverAccess<'_>,
+    ) -> Option<RubyType> {
+        let (allow_private, protected_caller) = access.visibility();
+        let mut seen = HashSet::new();
+        self.method_return_type_for_receiver_inner(
+            namespace_fqn,
+            method,
+            allow_private,
+            protected_caller,
+            &mut seen,
+        )
+    }
+
+    /// [`Self::method_return_type_for_receiver_access`] memoized in `cache`.
+    /// A protected lookup whose receiver chain has no private or protected
+    /// method of that name shares the public entry, so the caller namespace is
+    /// not part of the hot key.
+    pub(in crate::engine) fn method_return_type_for_receiver_memo(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        access: ReceiverAccess<'_>,
+        cache: &AnalysisQueryCache,
+    ) -> Option<RubyType> {
+        let identity = self.engine.query_cache_identity();
+        let key_access = match access {
+            ReceiverAccess::Any => MethodReturnQueryAccess::Private,
+            ReceiverAccess::Public => MethodReturnQueryAccess::Public,
+            ReceiverAccess::Protected { caller } => {
+                if !thread_receiver_has_non_public(identity, namespace_fqn, *method, || {
+                    self.receiver_method_has_non_public(namespace_fqn, method)
+                }) {
+                    return self.method_return_type_for_receiver_memo(
+                        namespace_fqn,
+                        method,
+                        ReceiverAccess::Public,
+                        cache,
+                    );
+                }
+                MethodReturnQueryAccess::Protected(caller.clone())
+            }
+        };
+        let key = MethodReturnQueryKey {
+            namespace: namespace_fqn.clone(),
+            method: *method,
+            access: key_access,
+        };
+        cache.method_return(identity, key, || {
+            self.method_return_type_for_receiver_access(namespace_fqn, method, access)
         })
     }
 
