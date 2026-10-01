@@ -110,7 +110,11 @@
       "properties": {
         "rubyFastLsp.logLevel": {
           "type": "string",
-          "enum": ["info", "debug", "trace"],
+          "enum": [
+            "info",
+            "debug",
+            "trace"
+          ],
           "default": "info",
           "description": "Log level for the LSP server output.",
           "enumDescriptions": [
@@ -244,7 +248,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.1",
     "vscode-html-languageservice": "^5.6.2",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12"
