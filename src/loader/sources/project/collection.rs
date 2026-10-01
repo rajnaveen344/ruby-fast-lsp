@@ -5,7 +5,7 @@ use super::ProjectFileInput;
 use super::RegisteredProjectFileInput;
 use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::LoadContext;
+use crate::loader::context::{LoadContext, LoadSink};
 use crate::loader::file_processor::ProjectFileCollectionTiming;
 use crate::server::RubyLanguageServer;
 use crate::utils;
@@ -64,7 +64,7 @@ impl IndexerProject {
     pub(crate) fn collect_remaining_project_facts(
         &mut self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<()> {
         invariant!(
             self.pending_project_navigation_files.is_none()
@@ -94,12 +94,11 @@ impl IndexerProject {
             &files,
             0,
             ctx,
-            server,
             true,
             Some(known_namespaces.clone()),
             Some(semantic_context_engine.clone()),
         )?;
-        self.record_processed_project_files(&files, server);
+        self.record_processed_project_files(&files, ctx.sink.as_ref());
         self.exhaustive_known_namespaces = None;
         invariant!(
             self.jruby_replay_known_namespaces
@@ -161,7 +160,7 @@ impl IndexerProject {
         &mut self,
         files: &[PathBuf],
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
         resolve_open_documents: bool,
     ) -> Result<()> {
         if files.is_empty() {
@@ -182,29 +181,24 @@ impl IndexerProject {
             files,
             0,
             ctx,
-            server,
             resolve_open_documents,
             Some(known_namespaces),
             Some(semantic_context_engine),
         )?;
-        self.record_processed_project_files(files, server);
+        self.record_processed_project_files(files, ctx.sink.as_ref());
         Ok(())
     }
 
-    pub(super) fn begin_project_file_progress(
-        &mut self,
-        total_files: usize,
-        server: &RubyLanguageServer,
-    ) {
+    pub(super) fn begin_project_file_progress(&mut self, total_files: usize, sink: &dyn LoadSink) {
         self.project_file_total = Some(u64::try_from(total_files).expect_invariant(
             "project file count exceeds u64",
             "a filesystem cannot contain that many paths",
             "inspect collect_project_files",
         ));
-        self.report_project_file_progress(server);
+        self.report_project_file_progress(sink);
     }
 
-    fn report_project_file_progress(&self, server: &RubyLanguageServer) {
+    fn report_project_file_progress(&self, sink: &dyn LoadSink) {
         let Some(total) = self.project_file_total else {
             return;
         };
@@ -218,7 +212,7 @@ impl IndexerProject {
         );
         self.project_file_completed
             .store(completed, Ordering::Relaxed);
-        server.report_project_indexing_progress(
+        sink.report_project_progress(
             &self.workspace_root,
             self.project_progress_generation,
             completed,
@@ -229,7 +223,7 @@ impl IndexerProject {
     pub(super) fn record_processed_project_files(
         &mut self,
         files: &[PathBuf],
-        server: &RubyLanguageServer,
+        sink: &dyn LoadSink,
     ) {
         for file in files {
             invariant!(
@@ -241,7 +235,7 @@ impl IndexerProject {
             );
         }
         if !files.is_empty() {
-            self.report_project_file_progress(server);
+            self.report_project_file_progress(sink);
         }
     }
 
@@ -298,7 +292,7 @@ impl IndexerProject {
         );
     }
 
-    pub(super) fn collect_signature_facts(&self, files: &[PathBuf], server: &RubyLanguageServer) {
+    pub(super) fn collect_signature_facts(&self, files: &[PathBuf], sink: &dyn LoadSink) {
         files.par_iter().for_each(|path| {
             let content = match std::fs::read_to_string(path) {
                 Ok(content) => content,
@@ -313,7 +307,7 @@ impl IndexerProject {
             };
             if let Err(error) = self
                 .file_processor
-                .collect_rbs_facts_as_deferred_resolution(&uri, &content, server)
+                .collect_rbs_facts_as_deferred_resolution(&uri, &content, sink)
             {
                 warn!(
                     "Failed to collect RBS signature facts {:?}: {}",
@@ -334,7 +328,6 @@ impl IndexerProject {
         files: &[PathBuf],
         priority_file_count: usize,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         resolve_open_documents: bool,
         known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
         semantic_context_engine: Option<Arc<parking_lot::RwLock<AnalysisEngine>>>,
@@ -355,7 +348,7 @@ impl IndexerProject {
                 self.workspace_root.display()
             )
         })?;
-        let analysis_engine = server.analysis_engine_for_uri(&project_uri);
+        let analysis_engine = ctx.sink.engine_for_uri(&project_uri);
         let uses_immutable_semantic_context = semantic_context_engine.is_some();
         let base_semantic_read_engine =
             semantic_context_engine.unwrap_or_else(|| analysis_engine.clone());
@@ -637,7 +630,7 @@ impl IndexerProject {
                 })?;
             if let Some(total) = project_file_total {
                 let completed = project_file_completed.fetch_add(1, Ordering::Relaxed) + 1;
-                server.report_project_indexing_progress(
+                ctx.sink.report_project_progress(
                     workspace_root,
                     project_progress_generation,
                     completed,
@@ -673,7 +666,7 @@ impl IndexerProject {
             let (path, source_snapshot, analysis, plan, hint, read, dependency_scan, file_timing) =
                 outcome?;
             #[cfg(test)]
-            server.indexing.schedule.checkpoint_blocking(
+            ctx.sink.test_schedule().checkpoint_blocking(
                 crate::loader::scheduling::test_schedule::Point::ProjectFactsCollected,
                 &path,
             );
@@ -686,7 +679,7 @@ impl IndexerProject {
                     analysis,
                 );
             #[cfg(test)]
-            server.indexing.schedule.checkpoint_blocking(
+            ctx.sink.test_schedule().checkpoint_blocking(
                 crate::loader::scheduling::test_schedule::Point::ProjectCommitAttempted,
                 &path,
             );
@@ -780,7 +773,7 @@ impl IndexerProject {
         }
 
         if resolve_open_documents {
-            self.resolve_open_project_files(ctx, server, &analysis_engine);
+            self.resolve_open_project_files(ctx, &analysis_engine);
         }
 
         Ok(())

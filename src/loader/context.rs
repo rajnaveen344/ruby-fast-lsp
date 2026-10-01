@@ -8,7 +8,9 @@
 //! publication) remain on the server.
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::config::RubyFastLspConfig;
-use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
+use crate::environment::extensions::{
+    ExtensionRegistryHandle, ProjectContextSeed, ProjectContextSnapshot,
+};
 use crate::environment::runtime::catalog::DiscoveredRuntime;
 use crate::invariant::ExpectInvariant;
 use crate::loader::cache::dependency_product::{
@@ -24,12 +26,13 @@ use crate::utils::single_flight::BoundedSingleFlightCache;
 use anyhow::Result;
 use log::warn;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::core::{SourceFileId, SourceKind};
+use ruby_analysis::engine::{AnalysisEngine, SourceFileSnapshot};
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::stats::StatsRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{Diagnostic, Url};
 
 /// Everything the loader reads from its owner, as cloneable shared handles.
 #[derive(Clone)]
@@ -345,4 +348,40 @@ pub(crate) trait LoadSink: Send + Sync {
     async fn refresh_require_diagnostics(&self, root: &Path);
     /// The navigation demand queue of the project at `root`.
     fn navigation_demands(&self, root: &Path) -> Option<NavigationDemandController>;
+    /// The root of the deepest project that owns `uri`.
+    fn project_root_for_uri(&self, uri: &Url) -> Option<PathBuf>;
+    /// Register or replace the source text of `uri` in its owning engine.
+    fn register_source(&self, uri: &Url, content: String, kind: SourceKind) -> SourceFileId;
+    /// The extension project context for `uri` read as `kind`.
+    fn extension_context_snapshot(
+        &self,
+        uri: &Url,
+        kind: SourceKind,
+    ) -> Option<ProjectContextSnapshot>;
+    /// Retain `document` as the processed document of `uri` and mark its
+    /// current version indexed.
+    fn mark_document_indexed(&self, uri: &Url, document: RubyDocument);
+    /// Report project file progress for the indexing run `generation`.
+    fn report_project_progress(
+        &self,
+        root: &Path,
+        generation: Option<u64>,
+        completed: u64,
+        total: u64,
+    );
+    /// The lock that orders semantic publication for `uri` with edits.
+    fn document_lock(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>>;
+    /// Append retained external linter results for `uri` that still match
+    /// `snapshot`; stale results are dropped.
+    fn append_external_linter_diagnostics(
+        &self,
+        uri: &Url,
+        snapshot: Option<SourceFileSnapshot>,
+        diagnostics: &mut Vec<Diagnostic>,
+    );
+    /// Queue a complete diagnostic projection for `uri`.
+    fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>);
+    /// Deterministic interleaving points for tests.
+    #[cfg(test)]
+    fn test_schedule(&self) -> Arc<crate::loader::scheduling::test_schedule::TestSchedule>;
 }

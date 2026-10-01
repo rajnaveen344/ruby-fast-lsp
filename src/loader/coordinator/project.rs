@@ -39,10 +39,9 @@ impl IndexingCoordinator {
         project_indexer
             .set_progress_generation(self.indexing_run.as_ref().map(|run| run.generation()));
         let frontier_demands = if let Some(run) = self.indexing_run.as_ref() {
-            let workspace = server
-                .list_workspaces()
-                .into_iter()
-                .find(|workspace| workspace.root_path == self.workspace_root)
+            let navigation_demands = ctx
+                .sink
+                .navigation_demands(&self.workspace_root)
                 .ok_or_else(|| {
                     anyhow!(
                         "Indexing generation {} was cancelled because project {} is no longer registered",
@@ -50,7 +49,7 @@ impl IndexingCoordinator {
                         self.workspace_root.display()
                     )
                 })?;
-            Some((workspace.navigation_demands.clone(), run.generation()))
+            Some((navigation_demands, run.generation()))
         } else {
             None
         };
@@ -150,19 +149,18 @@ impl IndexingCoordinator {
         .await?;
         self.project_indexer = Some(project_indexer);
         result?;
-        self.complete_processed_frontier_demands(server)?;
+        self.complete_processed_frontier_demands(ctx)?;
         Ok(())
     }
 
-    fn complete_processed_frontier_demands(&self, server: &RubyLanguageServer) -> Result<()> {
+    fn complete_processed_frontier_demands(&self, ctx: &LoadContext) -> Result<()> {
         let Some(run) = self.indexing_run.as_ref() else {
             return Ok(());
         };
         let generation = run.generation();
-        let workspace = server
-            .list_workspaces()
-            .into_iter()
-            .find(|workspace| workspace.root_path == self.workspace_root)
+        let navigation_demands = ctx
+            .sink
+            .navigation_demands(&self.workspace_root)
             .ok_or_else(|| {
                 anyhow!(
                     "Indexing generation {} was cancelled because project {} is no longer registered",
@@ -182,7 +180,7 @@ impl IndexingCoordinator {
         let completed_keys = priority_keys
             .into_iter()
             .filter(|key| {
-                workspace.navigation_demands.claim_if_requested(
+                navigation_demands.claim_if_requested(
                     generation,
                     crate::loader::scheduling::navigation_demand::NavigationDemandStage::Project,
                     key,
@@ -190,7 +188,7 @@ impl IndexingCoordinator {
             })
             .collect::<Vec<_>>();
         if !completed_keys.is_empty() {
-            workspace.navigation_demands.complete_keys(
+            navigation_demands.complete_keys(
                 generation,
                 crate::loader::scheduling::navigation_demand::NavigationDemandStage::Project,
                 &completed_keys,
@@ -241,18 +239,16 @@ impl IndexingCoordinator {
                 .await;
         };
         let generation = run.generation();
-        let workspace = server
-            .list_workspaces()
-            .into_iter()
-            .find(|workspace| workspace.root_path == self.workspace_root)
+        let demands = ctx
+            .sink
+            .navigation_demands(&self.workspace_root)
             .ok_or_else(|| {
                 anyhow!(
                     "Indexing generation {} was cancelled because project {} is no longer registered",
                     generation,
                     self.workspace_root.display()
                 )
-        })?;
-        let demands = workspace.navigation_demands.clone();
+            })?;
         let started = Instant::now();
         self.indexing_checkpoint(ctx)?;
         let mut project_indexer = self.project_indexer.take().expect_invariant(

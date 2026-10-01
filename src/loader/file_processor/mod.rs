@@ -202,9 +202,9 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
-        self.process_file_with_resolution(uri, content, ctx, server, FileResolution::Full)
+        self.process_file_with_resolution(uri, content, ctx, FileResolution::Full)
     }
 
     pub fn process_file_current_file_resolution(
@@ -212,9 +212,9 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
-        self.process_file_with_resolution(uri, content, ctx, server, FileResolution::CurrentFile)
+        self.process_file_with_resolution(uri, content, ctx, FileResolution::CurrentFile)
     }
 
     pub fn process_file_current_file_resolution_forced(
@@ -222,13 +222,12 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
         self.process_file_with_resolution_forced(
             uri,
             content,
             ctx,
-            server,
             FileResolution::CurrentFile,
             true,
         )
@@ -239,10 +238,9 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         resolution: FileResolution,
     ) -> Result<ProcessResult> {
-        self.process_file_with_resolution_forced(uri, content, ctx, server, resolution, false)
+        self.process_file_with_resolution_forced(uri, content, ctx, resolution, false)
     }
 
     fn process_file_with_resolution_forced(
@@ -250,7 +248,6 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         resolution: FileResolution,
         force_reindex: bool,
     ) -> Result<ProcessResult> {
@@ -269,12 +266,10 @@ impl FileProcessor {
             // Still parse for syntax diagnostics
             let analysis_source = analysis_source(uri, content);
             let parse_result = ruby_prism::parse(analysis_source.as_bytes());
-            let source_kind = self.analysis_source_kind_for_uri(server, uri);
-            let analysis_file_id = server.open_or_update_analysis_file_with_kind(
-                uri,
-                content.to_string(),
-                source_kind,
-            );
+            let source_kind = self.analysis_source_kind_for_uri(ctx.sink.as_ref(), uri);
+            let analysis_file_id = ctx
+                .sink
+                .register_source(uri, content.to_string(), source_kind);
             let doc = RubyDocument::with_analysis_file_id(
                 uri.clone(),
                 content.to_string(),
@@ -293,13 +288,14 @@ impl FileProcessor {
         let parse_start = Instant::now();
         // 1. Parse ONLY ONCE
         let analysis_source = analysis_source(uri, content);
-        let analysis_engine = server.analysis_engine_for_uri(uri);
+        let analysis_engine = ctx.sink.engine_for_uri(uri);
         self.ensure_jruby_navigation_inputs(content, &analysis_engine)?;
         let parse_result = ruby_prism::parse(analysis_source.as_bytes());
         let node = parse_result.node();
-        let source_kind = self.analysis_source_kind_for_uri(server, uri);
-        let analysis_file_id =
-            server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
+        let source_kind = self.analysis_source_kind_for_uri(ctx.sink.as_ref(), uri);
+        let analysis_file_id = ctx
+            .sink
+            .register_source(uri, content.to_string(), source_kind);
         let document_version = ctx
             .sources
             .open_document_version(uri)
@@ -353,7 +349,7 @@ impl FileProcessor {
         );
         let extensions_enabled = matches!(source_kind, SourceKind::Project | SourceKind::Excluded);
         let extension_project_context_snapshot = extensions_enabled
-            .then(|| server.extension_project_context_snapshot_for_uri(uri, source_kind))
+            .then(|| ctx.sink.extension_context_snapshot(uri, source_kind))
             .flatten();
         let extension_project_context = extension_project_context_snapshot
             .as_ref()
@@ -417,16 +413,8 @@ impl FileProcessor {
         let semantic_change =
             SemanticChange::classify(previous_export_fingerprint, current_export_fingerprint);
 
-        server.documents.insert(
-            uri.clone(),
-            Arc::new(parking_lot::RwLock::new(updated_document.clone())),
-        );
-
-        // Mark as indexed
-        if let Some(doc_arc) = server.documents.read().get(uri) {
-            let mut doc = doc_arc.write();
-            doc.indexed_version = Some(doc.version);
-        }
+        // Retain the processed document and mark its version indexed.
+        ctx.sink.mark_document_indexed(uri, updated_document);
 
         debug!("Processed file {:?}", uri);
         info!(

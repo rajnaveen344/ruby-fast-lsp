@@ -9,7 +9,7 @@ use super::{
 };
 use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::invariant::ExpectInvariant;
-use crate::server::RubyLanguageServer;
+use crate::loader::context::LoadSink;
 use anyhow::{anyhow, Context, Result};
 use log::debug;
 use ruby_analysis::core::{
@@ -75,23 +75,23 @@ impl FileProcessor {
     // Content-based Indexing (in-memory content)
     // ========================================================================
 
-    pub fn collect_file_facts(
+    pub(crate) fn collect_file_facts(
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        sink: &dyn LoadSink,
     ) -> Result<()> {
-        self.collect_file_facts_as(uri, content, server, SourceKind::Project)
+        self.collect_file_facts_as(uri, content, sink, SourceKind::Project)
     }
 
-    pub fn collect_file_facts_as(
+    pub(crate) fn collect_file_facts_as(
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        sink: &dyn LoadSink,
         source_kind: SourceKind,
     ) -> Result<()> {
-        let analysis_engine = server.analysis_engine_for_uri(uri);
+        let analysis_engine = sink.engine_for_uri(uri);
         self.collect_file_facts_as_with_resolution(
             uri,
             content,
@@ -105,14 +105,15 @@ impl FileProcessor {
         Ok(())
     }
 
-    pub fn collect_file_facts_as_deferred_resolution(
+    #[cfg(test)]
+    pub(crate) fn collect_file_facts_as_deferred_resolution(
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        sink: &dyn LoadSink,
         source_kind: SourceKind,
     ) -> Result<()> {
-        let analysis_engine = server.analysis_engine_for_uri(uri);
+        let analysis_engine = sink.engine_for_uri(uri);
         self.collect_file_facts_as_with_resolution(
             uri,
             content,
@@ -146,37 +147,34 @@ impl FileProcessor {
         Ok(())
     }
 
-    pub fn collect_rbs_facts_as_deferred_resolution(
+    pub(crate) fn collect_rbs_facts_as_deferred_resolution(
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        sink: &dyn LoadSink,
     ) -> Result<()> {
-        self.collect_rbs_facts_with_resolution(uri, content, server, FileResolution::Deferred)
+        self.collect_rbs_facts_with_resolution(uri, content, sink, FileResolution::Deferred)
     }
 
-    pub fn collect_rbs_facts(
+    pub(crate) fn collect_rbs_facts(
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        sink: &dyn LoadSink,
     ) -> Result<()> {
-        self.collect_rbs_facts_with_resolution(uri, content, server, FileResolution::Full)
+        self.collect_rbs_facts_with_resolution(uri, content, sink, FileResolution::Full)
     }
 
     fn collect_rbs_facts_with_resolution(
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        sink: &dyn LoadSink,
         resolution: FileResolution,
     ) -> Result<()> {
-        let analysis_engine = server.analysis_engine_for_uri(uri);
-        let analysis_file_id = server.open_or_update_analysis_file_with_kind(
-            uri,
-            content.to_string(),
-            SourceKind::Signature,
-        );
+        let analysis_engine = sink.engine_for_uri(uri);
+        let analysis_file_id =
+            sink.register_source(uri, content.to_string(), SourceKind::Signature);
         let facts = match ruby_analysis::indexer::index_rbs(analysis_file_id, content) {
             Ok(facts) => facts,
             Err(error) => {
@@ -734,13 +732,13 @@ impl FileProcessor {
 
     pub(super) fn analysis_source_kind_for_uri(
         &self,
-        server: &RubyLanguageServer,
+        sink: &dyn LoadSink,
         uri: &Url,
     ) -> SourceKind {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let analysis_engine = server.analysis_engine_for_uri(uri);
+        let analysis_engine = sink.engine_for_uri(uri);
         let engine = analysis_engine.read();
         engine
             .file_id(&path)

@@ -263,7 +263,7 @@ impl IndexingCoordinator {
             self.index_core_stubs(ctx, ruby_version).await?,
         ));
         let core_stub_dur = core_start.elapsed();
-        let priority_server = server.clone();
+        let priority_sink = ctx.sink.clone();
         let priority_sources = ctx.sources.clone();
         let priority_workspace_root = self.workspace_root.clone();
         let active_priority_keys = run_cpu_indexing_task(
@@ -275,7 +275,7 @@ impl IndexingCoordinator {
             move || {
                 open_project_constant_priority_keys(
                     priority_sources.as_ref(),
-                    &priority_server,
+                    priority_sink.as_ref(),
                     &priority_workspace_root,
                 )
             },
@@ -579,7 +579,7 @@ impl IndexingCoordinator {
         )
         .await?;
         let publish_start = Instant::now();
-        self.publish_open_project_diagnostics(ctx, server).await?;
+        self.publish_open_project_diagnostics(ctx).await?;
         let publish_dur = publish_start.elapsed();
 
         // Open consumers may have been analyzed before a closed definition

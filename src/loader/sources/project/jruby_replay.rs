@@ -168,7 +168,7 @@ impl IndexerProject {
         )?;
         let materialization_elapsed = materialization_started.elapsed();
         self.file_processor = file_processor;
-        self.resolve_open_project_files(ctx, server, &analysis_engine);
+        self.resolve_open_project_files(ctx, &analysis_engine);
         info!(
             "[PERF][JRuby project replay] project={} files={} fact_replacement={:?} \
              signature_classes={} implementation_classes={} materialization={:?} total={:?}",

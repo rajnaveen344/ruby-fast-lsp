@@ -2,7 +2,6 @@
 
 use super::IndexingCoordinator;
 use crate::loader::context::LoadContext;
-use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use ruby_analysis::core::{
     DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity, TextRange,
@@ -45,15 +44,11 @@ fn lsp_range_for_text_range_fast(file: &SourceFile, range: TextRange) -> Option<
 
 impl IndexingCoordinator {
     /// Publish a current, complete diagnostic projection for open project files.
-    pub(super) async fn publish_open_project_diagnostics(
-        &self,
-        ctx: &LoadContext,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub(super) async fn publish_open_project_diagnostics(&self, ctx: &LoadContext) -> Result<()> {
         self.indexing_checkpoint(ctx)?;
         let analysis_engine = self.analysis_engine(ctx);
         let mut open_uris = ctx.sources.open_uris();
-        open_uris.retain(|uri| Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(uri)));
+        open_uris.retain(|uri| Arc::ptr_eq(&analysis_engine, &ctx.sink.engine_for_uri(uri)));
         open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
 
         for uri in open_uris {
@@ -63,9 +58,8 @@ impl IndexingCoordinator {
                 .to_file_path()
                 .expect("coordinator diagnostics must target a file URI");
             #[cfg(test)]
-            server
-                .indexing
-                .schedule
+            ctx.sink
+                .test_schedule()
                 .checkpoint(
                     crate::loader::scheduling::test_schedule::Point::ColdDiagnosticsPending,
                     &publication_path,
@@ -76,10 +70,10 @@ impl IndexingCoordinator {
                 // Edits and close may complete while this producer waits. Read
                 // diagnostics only after acquiring the same document lock used
                 // by those handlers, and recheck the indexing generation then.
-                let semantic_lock = server.document_semantic_lock(&uri);
+                let semantic_lock = ctx.sink.document_lock(&uri);
                 let _semantic_guard = semantic_lock.lock().await;
                 self.indexing_checkpoint(ctx)?;
-                if !Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(&uri)) {
+                if !Arc::ptr_eq(&analysis_engine, &ctx.sink.engine_for_uri(&uri)) {
                     continue;
                 }
                 let Some(document) = ctx.sources.open_document(&uri) else {
@@ -109,7 +103,7 @@ impl IndexingCoordinator {
                         .iter()
                         .filter_map(|fact| diagnostic_from_fact_fast(file, fact)),
                 );
-                server.append_external_linter_diagnostics_for_snapshot(
+                ctx.sink.append_external_linter_diagnostics(
                     &uri,
                     engine.source_snapshot_for_path(&path),
                     &mut diagnostics,
@@ -118,12 +112,11 @@ impl IndexingCoordinator {
                 // Keep the engine read lock through the synchronous enqueue:
                 // cross-file resolution cannot invalidate this projection in
                 // between. Empty results must clear errors resolved at startup.
-                server.queue_diagnostics(uri, diagnostics);
+                ctx.sink.queue_diagnostics(uri, diagnostics);
             }
             #[cfg(test)]
-            server
-                .indexing
-                .schedule
+            ctx.sink
+                .test_schedule()
                 .checkpoint(
                     crate::loader::scheduling::test_schedule::Point::ColdDiagnosticsAttempted,
                     &publication_path,

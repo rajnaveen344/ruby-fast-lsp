@@ -2,17 +2,21 @@
 //! one loader write or lookup to the owning project's live server state.
 use super::Workspace;
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
-use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
+use crate::environment::extensions::{
+    ExtensionRegistryHandle, ProjectContextSeed, ProjectContextSnapshot,
+};
 use crate::loader::context::{IndexingRunState, LoadSink};
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::server::RubyLanguageServer;
 use parking_lot::RwLock;
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::core::{SourceFileId, SourceKind};
+use ruby_analysis::engine::{AnalysisEngine, SourceFileSnapshot};
+use ruby_analysis::indexer::RubyDocument;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{Diagnostic, Url};
 
 impl RubyLanguageServer {
     /// The registered project rooted exactly at `root`.
@@ -103,5 +107,63 @@ impl LoadSink for RubyLanguageServer {
     fn navigation_demands(&self, root: &Path) -> Option<NavigationDemandController> {
         self.project_at_root(root)
             .map(|workspace| workspace.navigation_demands)
+    }
+
+    fn project_root_for_uri(&self, uri: &Url) -> Option<PathBuf> {
+        self.workspace_for_uri(uri)
+            .map(|workspace| workspace.root_path)
+    }
+
+    fn register_source(&self, uri: &Url, content: String, kind: SourceKind) -> SourceFileId {
+        self.open_or_update_analysis_file_with_kind(uri, content, kind)
+    }
+
+    fn extension_context_snapshot(
+        &self,
+        uri: &Url,
+        kind: SourceKind,
+    ) -> Option<ProjectContextSnapshot> {
+        self.extension_project_context_snapshot_for_uri(uri, kind)
+    }
+
+    fn mark_document_indexed(&self, uri: &Url, document: RubyDocument) {
+        self.documents
+            .insert(uri.clone(), Arc::new(RwLock::new(document)));
+        if let Some(document) = self.documents.read().get(uri) {
+            let mut document = document.write();
+            document.indexed_version = Some(document.version);
+        }
+    }
+
+    fn report_project_progress(
+        &self,
+        root: &Path,
+        generation: Option<u64>,
+        completed: u64,
+        total: u64,
+    ) {
+        self.report_project_indexing_progress(root, generation, completed, total);
+    }
+
+    fn document_lock(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>> {
+        self.document_semantic_lock(uri)
+    }
+
+    fn append_external_linter_diagnostics(
+        &self,
+        uri: &Url,
+        snapshot: Option<SourceFileSnapshot>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        self.append_external_linter_diagnostics_for_snapshot(uri, snapshot, diagnostics);
+    }
+
+    fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
+        RubyLanguageServer::queue_diagnostics(self, uri, diagnostics);
+    }
+
+    #[cfg(test)]
+    fn test_schedule(&self) -> Arc<crate::loader::scheduling::test_schedule::TestSchedule> {
+        self.indexing.schedule.clone()
     }
 }

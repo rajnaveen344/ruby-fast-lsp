@@ -1,8 +1,7 @@
 //! Open-document constant demand used to prioritize project files and gems.
 
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::SourceReader;
-use crate::server::RubyLanguageServer;
+use crate::loader::context::{LoadSink, SourceReader};
 use ruby_prism::{ConstantPathNode, ConstantReadNode, Visit};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::path::Path;
@@ -93,15 +92,15 @@ pub(super) fn active_document_constant_priority_keys(source: &str) -> ActiveDocu
 
 pub(super) fn open_project_constant_priority_keys(
     sources: &dyn SourceReader,
-    server: &RubyLanguageServer,
+    sink: &dyn LoadSink,
     workspace_root: &Path,
 ) -> ActiveDocumentPriorityKeys {
     let mut priority_keys = ActiveDocumentPriorityKeys::default();
     sources.visit_open_documents(&mut |document| {
-        let Some(workspace) = server.workspace_for_uri(&document.uri) else {
+        let Some(project_root) = sink.project_root_for_uri(&document.uri) else {
             return;
         };
-        if workspace.root_path != workspace_root {
+        if project_root != workspace_root {
             return;
         }
         priority_keys.extend(active_document_constant_priority_keys(

@@ -62,7 +62,6 @@ impl IndexerProject {
     pub(super) fn initialize_project_collection_semantic_context(
         &mut self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         project_files: &[PathBuf],
     ) -> Result<()> {
         invariant!(
@@ -77,7 +76,7 @@ impl IndexerProject {
                 self.workspace_root.display()
             )
         })?;
-        let analysis_engine = server.analysis_engine_for_uri(&project_uri);
+        let analysis_engine = ctx.sink.engine_for_uri(&project_uri);
         if let Some(path) = project_files.first() {
             let uri = Url::from_file_path(path).map_err(|_| {
                 anyhow!(
@@ -197,7 +196,6 @@ impl IndexerProject {
     pub(super) fn resolve_open_project_files(
         &self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         analysis_engine: &Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) {
         let resolve_start = Instant::now();
@@ -206,8 +204,8 @@ impl IndexerProject {
             .open_uris()
             .iter()
             .filter_map(|uri| {
-                let workspace = server.workspace_for_uri(uri)?;
-                (workspace.root_path == self.workspace_root)
+                let project_root = ctx.sink.project_root_for_uri(uri)?;
+                (project_root == self.workspace_root)
                     .then(|| uri.to_file_path().ok())
                     .flatten()
             })

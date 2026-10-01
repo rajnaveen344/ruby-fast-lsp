@@ -139,7 +139,7 @@ impl IndexerProject {
         &mut self,
         demand_keys: &[String],
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<ProjectNavigationDemandSelection> {
         invariant!(
             self.pending_project_navigation_files.is_none()
@@ -192,10 +192,10 @@ impl IndexerProject {
             priority_file_count
         );
 
-        self.begin_project_file_progress(total_files, server);
+        self.begin_project_file_progress(total_files, ctx.sink.as_ref());
 
-        self.collect_signature_facts(&signature_files, server);
-        self.initialize_project_collection_semantic_context(ctx, server, &all_project_files)?;
+        self.collect_signature_facts(&signature_files, ctx.sink.as_ref());
+        self.initialize_project_collection_semantic_context(ctx, &all_project_files)?;
         let collection_known_namespaces =
             self.exhaustive_known_namespaces.clone().expect_invariant(
                 "project collection baseline has no namespace set after initialization",
@@ -211,12 +211,11 @@ impl IndexerProject {
             &selection.files,
             selection.files.len(),
             ctx,
-            server,
             true,
             Some(collection_known_namespaces),
             Some(collection_analysis_engine),
         )?;
-        self.record_processed_project_files(&selection.files, server);
+        self.record_processed_project_files(&selection.files, ctx.sink.as_ref());
         self.pending_project_navigation_files = Some(ruby_files);
         self.pending_project_files = Some(exhaustive_files);
 
@@ -254,7 +253,6 @@ impl IndexerProject {
             &ruby_files,
             ruby_files.len(),
             ctx,
-            server,
             true,
             Some(self.exhaustive_known_namespaces.clone().expect_invariant(
                 "active project frontier lost the generation-owned namespace baseline",
@@ -267,7 +265,7 @@ impl IndexerProject {
                 "retain the baseline through project completion",
             )),
         )?;
-        self.record_processed_project_files(&ruby_files, server);
+        self.record_processed_project_files(&ruby_files, ctx.sink.as_ref());
         self.refresh_exhaustive_semantic_context(server)?;
 
         info!(
