@@ -28,11 +28,17 @@ reference candidates, resolved references, and diagnostics.
 See [namespace indexing](../../docs/development/namespace-indexing.md) for how
 constant-path module and class definitions map to namespaces.
 
+## Contract
+
+The loader is a function of a `LoadContext` that writes through a `LoadSink`.
+It never sees the server: no loader entry point takes `RubyLanguageServer`,
+and non-test loader code has no `crate::server` import.
+
 ## Inputs
 
 The server builds a `LoadContext` for each whole-project load
 (`load_context_for_project`) and each interactive file pass
-(`load_context_for_uri`), and passes it next to itself to
+(`load_context_for_uri`), and passes it to
 `IndexingCoordinator::run_complete_indexing` and the `FileProcessor::process_file*`
 entry points. Its handles read live: configuration, published require roots,
 and open buffers are observed when the loader consults them. The loader reads
@@ -46,12 +52,19 @@ discovery, and open buffers only through this context.
 makes goes through it as one domain operation: engine and project routing,
 indexing run checks and phase transitions, progress, runtime, Ruby version,
 and JRuby provider selection, source registration, processed-document marks,
-require-root publication, navigation demand queues, extension registry and
-context, document locks, and diagnostic publication. The loader calls them in
-its own order, so the owner observes the same write sequence as before. Fact
-commits and resolution still run on the engine handle returned by
-`engine_for_uri`. The `server` parameter remains on entry points only as a
-pass-through until it is removed.
+require-root publication and require-diagnostic refresh, navigation demand
+queues, inlay-hint refresh, and extension registry and context. The loader
+calls them in its own order, so the owner observes the load's write sequence.
+Fact commits and resolution still run on the engine handle returned by
+`engine_for_uri`.
+
+After final resolution the loader calls `LoadSink::project_facts_ready`. The
+server then publishes a complete diagnostic projection (syntax, engine facts,
+and retained external linter results) for each open document that the
+project's engine owns, in URI order, under the document semantic lock. It
+stops once the indexing run is no longer current and returns that state; the
+loader turns it into the run's cancellation error. The loader composes no LSP
+diagnostics for publication.
 
 ## Current Flow
 
@@ -59,7 +72,7 @@ pass-through until it is removed.
 2. Collect facts from gems.
 3. Collect facts from stdlib.
 4. Collect facts from project files.
-5. Publish engine diagnostics.
+5. Resolve, then hand the project to the owner through `project_facts_ready`.
 
 `FactCollector` emits reference candidates during the same pass as definitions.
 The engine resolves candidates after each file update.

@@ -66,7 +66,7 @@ The loader is responsible for discovering Ruby files, parsing them, and feeding 
 
 #### Key Files:
 
-- `context.rs`: `LoadContext`, the server-built inputs passed next to the server to each project load and interactive file pass
+- `context.rs`: `LoadContext`, the server-built inputs passed to each project load and interactive file pass, and `LoadSink`, the trait through which the loader writes
 - `coordinator/`: Orchestrates workspace indexing
 - `file_processor/`: Parses one file, runs `FactCollector`, and composes its `FileAnalysis` (`compose.rs`)
 - `sources/project/`: Discovers and indexes project files
@@ -76,6 +76,7 @@ The loader is responsible for discovering Ruby files, parsing them, and feeding 
 #### Design Decisions:
 
 - Storage is owned by `ruby-analysis::engine`
+- The loader is a function of `LoadContext`: it writes only through `LoadSink` and never sees the server. Open-project diagnostics are published by the server from the `LoadSink::project_facts_ready` hook
 - `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass. Its ten private owners separate source/scope context, options, extensions, facts, flow, lookup inputs, and method/expression/constant evidence.
 - `FactCollector::finish()` returns an owned `FactCollectorOutput` holding a `FileAnalysis`; interactive and batch indexing share one composer, `compose_file_analysis`, which merges declarations, extension facts, and flow types and applies source policy before engine replacement. `traversal.rs` owns visit order, node modules own syntax handling, and responsibility modules own the shared helpers. See the [collector guide](../crates/ruby-analysis/src/indexer/fact_collector/README.md).
 - File discovery and parsing stay separate from engine query logic

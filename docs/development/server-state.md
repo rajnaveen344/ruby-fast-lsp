@@ -20,7 +20,7 @@ project, with a separate orphan engine for unowned documents.
 | `indexing` | Project scheduler, resource governor, and sequenced status publication. | [indexing.rs](../../src/server/indexing.rs) |
 | `products` | Runtime discovery and shared immutable dependency products. | [products.rs](../../src/server/products.rs) |
 | `extensions` | Extension registry and dynamic watcher registration lifecycle. | [extensions.rs](../../src/server/extensions.rs) |
-| `diagnostics` | Latest-per-URI outbound queue and exact-source retained linter output. | [diagnostics.rs](../../src/server/diagnostics.rs) |
+| `diagnostics` | Latest-per-URI outbound queue, exact-source retained linter output, and open-project diagnostic publication after a load. | [diagnostics.rs](../../src/server/diagnostics.rs) |
 | `file_changes` | Latest filesystem events and debounce generation. | [watched_files.rs](../../src/server/watched_files.rs) |
 | `namespace_tree` | Cached Ruby Index projection and debounced invalidation. | [namespace_tree.rs](../../src/server/namespace_tree.rs) |
 
@@ -28,6 +28,16 @@ No facade field is public outside the crate. Fields used by sibling modules
 are explicitly `pub(crate)`; server-owned fields are explicitly `pub(self)`.
 This keeps the declaration visually consistent without widening access. Separate
 executables use server operations instead of replacing internal state bags.
+
+The loader never sees the server. For each project load and interactive file
+pass the server builds a `LoadContext` of shared handles (configuration, require
+roots, open sources, products, governor) and passes only that. The loader writes
+through the context's `LoadSink`, which the server implements in the
+[load sink](../../src/server/projects/load_sink.rs) by delegating to the owners
+above. When a project's facts are resolved the loader calls
+`LoadSink::project_facts_ready`; the server then publishes diagnostics for the
+project's open documents from `diagnostics.rs` and reports whether the indexing
+run is still current.
 
 Separate executable targets use operations such as `configuration_snapshot()`,
 `configure_embedded()`, `register_indexing_run()`, and

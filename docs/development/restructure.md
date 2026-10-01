@@ -262,7 +262,7 @@ Delete this file when the last task is done. Git history keeps the record.
         updates `documents`. Only the seed commit stays inside, through
         `LoadSink::commit_seed`, until B3k. Profiler comparison, with didOpen
         p95 called out.
-  - [ ] C1g. Remove the `server` parameter from the loader. Publish
+  - [x] C1g. Remove the `server` parameter from the loader. Publish
         open-project diagnostics from `LoadSink::project_facts_ready` on the
         server side. Update `src/loader/README.md`, `src/ARCHITECTURE.md`, and
         `docs/development/server-state.md`.
