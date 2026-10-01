@@ -155,7 +155,7 @@ FAULTS = (
     ),
     Fault(
         "consumer-publication-missing", "Refresh semantic facts but suppress the dependency-open consumer publication.",
-        "src/lsp/capabilities/indexing.rs",
+        "src/lsp/capabilities/indexing/mod.rs",
         """                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
                 server.publish_diagnostics(uri, diagnostics).await;""",
         """                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);

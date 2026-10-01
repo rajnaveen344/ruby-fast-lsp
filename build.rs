@@ -14,7 +14,7 @@ const GEM_FACT_PRODUCER_TREES: &[&str] = &[
     "src/indexer/file_processor",
 ];
 const GEM_FACT_PRODUCER_FILES: &[&str] = &[
-    "src/environment/runtime/jruby/imports.rs",
+    "src/environment/runtime/jruby/imports/mod.rs",
     "src/environment/runtime/jruby/java_catalog.rs",
 ];
 
