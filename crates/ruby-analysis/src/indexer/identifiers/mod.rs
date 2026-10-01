@@ -334,9 +334,11 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_def_node(&mut self, node: &DefNode) {
-        self.process_def_node_entry(node);
+        let entered = self.process_def_node_entry(node);
         visit_def_node(self, node);
-        self.process_def_node_exit(node);
+        if entered {
+            self.process_def_node_exit(node);
+        }
     }
 
     fn visit_alias_method_node(&mut self, node: &AliasMethodNode) {

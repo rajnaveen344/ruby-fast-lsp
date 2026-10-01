@@ -507,3 +507,16 @@ fn test_constant_in_block() {
         _ => panic!("Expected Constant FQN, got {:?}", identifier),
     }
 }
+
+/// While a method name is being retyped the def has no valid name. The visitor
+/// skips that def and must not leave its scope stacks unbalanced.
+#[test]
+fn def_without_a_name_does_not_unbalance_scopes() {
+    let code = "class Item\n  def\n    @sku = sku\n  end\nend\n";
+    for line in 0..5 {
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, code.to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(line, 1));
+        visitor.visit(&ruby_prism::parse(code.as_bytes()).node());
+    }
+}

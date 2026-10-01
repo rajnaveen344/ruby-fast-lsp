@@ -7,9 +7,12 @@ use crate::indexer::{queries::syntax, Identifier, LVScopeKind, MethodReceiver};
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
-    pub fn process_def_node_entry(&mut self, node: &DefNode) {
+    /// Pushes the method's scopes and returns whether it did. A def that is
+    /// skipped here, such as one whose name is still being typed, must not be
+    /// exited.
+    pub fn process_def_node_entry(&mut self, node: &DefNode) -> bool {
         if self.is_result_set() || !self.is_position_in_location(&node.location()) {
-            return;
+            return false;
         }
 
         let (definition_namespace, namespace_kind) = match node.receiver() {
@@ -17,7 +20,7 @@ impl IdentifierVisitor {
             Some(receiver) if receiver.as_self_node().is_some() => {
                 let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
                 if receiver_kind != NamespaceKind::Singleton {
-                    return;
+                    return false;
                 }
                 (namespace, NamespaceKind::Singleton)
             }
@@ -37,7 +40,7 @@ impl IdentifierVisitor {
 
         if method.is_err() {
             warn!("Invalid method name: {}", name);
-            return;
+            return false;
         }
 
         let method = method.unwrap();
@@ -79,6 +82,7 @@ impl IdentifierVisitor {
                 Some(0),
             );
         }
+        true
     }
 
     pub fn process_def_node_exit(&mut self, node: &DefNode) {
