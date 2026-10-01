@@ -392,6 +392,7 @@ impl Files {
 
     pub(super) fn shrink_to_fit(&mut self) {
         self.ids_by_path.shrink_to_fit();
+        self.export_fingerprints.shrink_to_fit();
         self.files.shrink_to_fit();
         for file in self.files.values_mut() {
             file.path.shrink_to_fit();

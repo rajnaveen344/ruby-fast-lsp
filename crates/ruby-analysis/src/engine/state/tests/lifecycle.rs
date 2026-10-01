@@ -351,3 +351,96 @@ fn inference_telemetry_replaces_with_its_owning_file() {
         Some(&RubyType::string())
     );
 }
+
+fn declaration_side_facts(file_id: SourceFileId, index: usize) -> FileAnalysis {
+    use crate::core::{
+        ExecutionContextFact, ExecutionScopeMode, MethodVisibility, MethodVisibilityOverrideFact,
+    };
+
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::generated_owner(
+        GeneratedOwnerId::new(
+            "sample-extension",
+            &format!("file:///workspace/spec/sample_{index}_spec.rb"),
+            "block",
+        )
+        .unwrap(),
+    )]);
+    let widget = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    FileAnalysis {
+        method_visibility_overrides: vec![MethodVisibilityOverrideFact::new(
+            widget,
+            RubyMethod::new("render").unwrap(),
+            MethodVisibility::Private,
+            TextRange::new(file_id, 0, 6),
+        )],
+        execution_contexts: vec![ExecutionContextFact {
+            range: TextRange::new(file_id, 0, 12),
+            lexical_namespace: FullyQualifiedName::namespace(Vec::new()),
+            implicit_receiver: owner.clone(),
+            method_definition_owner: owner,
+            lexical_scope: ExecutionScopeMode::Preserve,
+            local_scope: ExecutionScopeMode::Preserve,
+            extension_id: "sample-extension".to_string(),
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn memory_stats_count_visibility_overrides_and_execution_contexts() {
+    let source = "describe do\nend\n";
+    let mut with_facts = Project::new();
+    let mut without_facts = Project::new();
+    let with_id = register_project_file(&mut with_facts, "spec/sample_0_spec.rb", source);
+    let without_id = register_project_file(&mut without_facts, "spec/sample_0_spec.rb", source);
+    with_facts.update(
+        with_id,
+        declaration_side_facts(with_id, 0),
+        ResolveMode::Immediate,
+    );
+    without_facts.update(without_id, FileAnalysis::default(), ResolveMode::Immediate);
+
+    assert!(
+        with_facts.estimated_memory_stats().total()
+            > without_facts.estimated_memory_stats().total(),
+        "visibility overrides and execution contexts must count toward the engine heap"
+    );
+}
+
+#[test]
+fn shrink_to_fit_compacts_visibility_overrides_and_execution_contexts() {
+    let source = "describe do\nend\n";
+    let mut engine = Project::new();
+    let file_ids = (0..64)
+        .map(|index| {
+            let path = format!("spec/sample_{index}_spec.rb");
+            let file_id = register_project_file(&mut engine, path, source);
+            let facts = declaration_side_facts(file_id, index);
+            engine.update(file_id, facts, ResolveMode::Deferred);
+            file_id
+        })
+        .collect::<Vec<_>>();
+    for file_id in &file_ids[1..] {
+        engine.update(*file_id, FileAnalysis::default(), ResolveMode::Deferred);
+    }
+    engine.resolve();
+    engine.shrink_to_fit();
+
+    let mut fresh = Project::new();
+    let fresh_id = register_project_file(&mut fresh, "spec/sample_0_spec.rb", source);
+    fresh.update(
+        fresh_id,
+        declaration_side_facts(fresh_id, 0),
+        ResolveMode::Immediate,
+    );
+
+    assert!(
+        engine.decls.method_visibility_overrides_heap_bytes()
+            <= fresh.decls.method_visibility_overrides_heap_bytes(),
+        "compaction must release emptied visibility-override capacity"
+    );
+    assert!(
+        engine.decls.execution_contexts_heap_bytes() <= fresh.decls.execution_contexts_heap_bytes(),
+        "compaction must release emptied execution-context capacity"
+    );
+}

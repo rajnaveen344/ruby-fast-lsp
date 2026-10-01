@@ -341,6 +341,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
         log_memory_bucket("files", memory.files, total);
         log_memory_bucket("symbols", memory.symbols, total);
         log_memory_bucket("methods", memory.methods, total);
+        log_memory_bucket("execution contexts", memory.execution_contexts, total);
         log_memory_bucket("types", memory.types, total);
         log_memory_bucket("reference candidates", memory.reference_candidates, total);
         log_memory_bucket("references", memory.references, total);

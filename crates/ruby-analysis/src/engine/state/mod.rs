@@ -103,6 +103,7 @@ pub struct AnalysisMemoryStats {
     pub files: usize,
     pub symbols: usize,
     pub methods: usize,
+    pub execution_contexts: usize,
     pub types: usize,
     pub reference_candidates: usize,
     pub references: usize,
@@ -119,6 +120,7 @@ impl AnalysisMemoryStats {
             + self.names
             + self.symbols
             + self.methods
+            + self.execution_contexts
             + self.types
             + self.reference_candidates
             + self.references
@@ -287,6 +289,7 @@ impl Project {
             files: self.estimated_file_store_heap_bytes(),
             symbols: self.decls.symbols_heap_bytes(),
             methods: self.decls.methods_heap_bytes(),
+            execution_contexts: self.decls.execution_contexts_heap_bytes(),
             types: self.types.facts_heap_bytes(),
             reference_candidates: self.uses.candidates_heap_bytes(),
             references: self.uses.resolved_heap_bytes(),

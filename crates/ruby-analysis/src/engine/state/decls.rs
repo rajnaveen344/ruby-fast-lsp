@@ -6,6 +6,9 @@ use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
 use crate::core::names::fqn_id::FqnId;
+use crate::core::storage::memory_estimate::{
+    fqn_heap_bytes, map_table_bytes, string_heap_bytes, vec_payload_bytes,
+};
 use crate::core::storage::method_store::{MethodStore, StoredMethodFact, StoredMethodFactMatch};
 use crate::core::storage::symbol_store::{StoredSymbolFact, SymbolStore};
 use crate::core::{
@@ -242,12 +245,46 @@ impl DeclIndex {
     }
 
     pub(in crate::engine) fn methods_heap_bytes(&self) -> usize {
-        self.methods.estimated_heap_bytes()
+        self.methods.estimated_heap_bytes() + self.method_visibility_overrides_heap_bytes()
+    }
+
+    pub(in crate::engine) fn method_visibility_overrides_heap_bytes(&self) -> usize {
+        vec_payload_bytes(&self.method_visibility_overrides)
+            + self
+                .method_visibility_overrides
+                .iter()
+                .map(|fact| fqn_heap_bytes(&fact.owner))
+                .sum::<usize>()
+    }
+
+    pub(in crate::engine) fn execution_contexts_heap_bytes(&self) -> usize {
+        map_table_bytes(&self.execution_contexts)
+            + self
+                .execution_contexts
+                .values()
+                .map(|contexts| {
+                    vec_payload_bytes(contexts)
+                        + contexts
+                            .iter()
+                            .map(|context| {
+                                fqn_heap_bytes(&context.lexical_namespace)
+                                    + fqn_heap_bytes(&context.implicit_receiver)
+                                    + fqn_heap_bytes(&context.method_definition_owner)
+                                    + string_heap_bytes(&context.extension_id)
+                            })
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
     }
 
     pub(in crate::engine) fn shrink_to_fit(&mut self) {
         self.symbols.shrink_to_fit();
         self.methods.shrink_to_fit();
+        self.method_visibility_overrides.shrink_to_fit();
+        self.execution_contexts.shrink_to_fit();
+        for contexts in self.execution_contexts.values_mut() {
+            contexts.shrink_to_fit();
+        }
     }
 }
 
