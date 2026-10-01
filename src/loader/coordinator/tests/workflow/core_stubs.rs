@@ -132,14 +132,11 @@ async fn core_template_binding_preserves_an_open_unsaved_document() {
     .await;
 
     let mut coordinator = IndexingCoordinator::new(project, RubyFastLspConfig::default());
-    coordinator.setup_file_processor(
-        &server.load_context_for_project(coordinator.workspace_root()),
-        &server,
-    );
+    coordinator
+        .setup_file_processor(&server.load_context_for_project(coordinator.workspace_root()));
     coordinator
         .index_core_stubs(
             &server.load_context_for_project(coordinator.workspace_root()),
-            &server,
             Some(RubyVersion::new(3, 0)),
         )
         .await
@@ -189,14 +186,11 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
 
     let mut clean_coordinator =
         IndexingCoordinator::new(clean_project, RubyFastLspConfig::default());
-    clean_coordinator.setup_file_processor(
-        &server.load_context_for_project(clean_coordinator.workspace_root()),
-        &server,
-    );
+    clean_coordinator
+        .setup_file_processor(&server.load_context_for_project(clean_coordinator.workspace_root()));
     let clean_seed = clean_coordinator
         .index_core_stubs(
             &server.load_context_for_project(clean_coordinator.workspace_root()),
-            &server,
             Some(RubyVersion::new(3, 0)),
         )
         .await
@@ -217,14 +211,11 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
     )
     .await;
     let mut live_coordinator = IndexingCoordinator::new(live_project, RubyFastLspConfig::default());
-    live_coordinator.setup_file_processor(
-        &server.load_context_for_project(live_coordinator.workspace_root()),
-        &server,
-    );
+    live_coordinator
+        .setup_file_processor(&server.load_context_for_project(live_coordinator.workspace_root()));
     let live_seed = live_coordinator
         .index_core_stubs(
             &server.load_context_for_project(live_coordinator.workspace_root()),
-            &server,
             Some(RubyVersion::new(3, 0)),
         )
         .await

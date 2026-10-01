@@ -1,11 +1,12 @@
 //! Ruby project ownership, longest-root routing, and external provenance.
 use super::RubyLanguageServer;
+mod load_sink;
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{ProjectContextSeed, ProjectContextSnapshot};
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{
-    LoadConfig, LoadContext, PublishedRequires, RequireContext, SourceReader,
+    LoadConfig, LoadContext, LoadSink, PublishedRequires, RequireContext, SourceReader,
 };
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingRun, ProjectIndexingStatus};
@@ -214,6 +215,7 @@ impl RubyLanguageServer {
             discovery: self.products.discovery(&resources),
             resources,
             sources: Arc::new(self.documents.clone()) as Arc<dyn SourceReader>,
+            sink: Arc::new(self.clone()) as Arc<dyn LoadSink>,
         }
     }
 }

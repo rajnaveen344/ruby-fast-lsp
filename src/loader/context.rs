@@ -8,6 +8,7 @@
 //! publication) remain on the server.
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::config::RubyFastLspConfig;
+use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
 use crate::environment::runtime::catalog::DiscoveredRuntime;
 use crate::invariant::ExpectInvariant;
 use crate::loader::cache::dependency_product::{
@@ -16,6 +17,7 @@ use crate::loader::cache::dependency_product::{
 use crate::loader::cache::persistent::PersistentDerivedProductCache;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::resources::IndexingResourceGovernor;
+use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::loader::sources::stdlib::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
 use crate::utils::single_flight::BoundedSingleFlightCache;
 use anyhow::Result;
@@ -37,6 +39,7 @@ pub struct LoadContext {
     pub resources: IndexingResourceGovernor,
     pub discovery: RuntimeDiscovery,
     pub sources: Arc<dyn SourceReader>,
+    pub(crate) sink: Arc<dyn LoadSink>,
 }
 
 /// Live view of the editor configuration. Each read observes the current
@@ -283,4 +286,48 @@ pub trait SourceReader: Send + Sync {
     fn open_document_version(&self, uri: &Url) -> Option<OpenDocumentVersion>;
     /// Visit every open buffer in URI order without copying it.
     fn visit_open_documents(&self, visit: &mut dyn FnMut(&RubyDocument));
+}
+
+/// Whether one indexing generation still owns its project.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IndexingRunState {
+    /// The generation is the project's live run.
+    Current,
+    /// A newer generation, a terminal phase, or cancellation replaced it.
+    Superseded,
+    /// The project root is no longer registered.
+    Unregistered,
+}
+
+/// Owner operations the loader performs while it loads a project or file.
+///
+/// Every method is one domain operation on the owner's live state; the sink
+/// never exposes a mutable store. The loader calls them in its own order, so
+/// the owner observes exactly the write sequence of the load.
+#[tower_lsp::async_trait]
+pub(crate) trait LoadSink: Send + Sync {
+    /// The isolated engine that owns `uri`; files outside every project use
+    /// the orphan engine.
+    fn engine_for_uri(&self, uri: &Url) -> Arc<RwLock<AnalysisEngine>>;
+    /// Whether `run` is still the live generation of the project at `root`.
+    fn indexing_run_state(&self, root: &Path, run: &IndexingRun) -> IndexingRunState;
+    /// Advance the status of the project at `root` to `phase` and publish it.
+    /// Nothing changes unless `generation` is still current.
+    async fn transition_indexing_phase(
+        &self,
+        root: &Path,
+        generation: u64,
+        phase: IndexingPhase,
+    ) -> IndexingRunState;
+    /// The extension registry new file processors run with.
+    fn extension_registry(&self) -> ExtensionRegistryHandle;
+    /// The extension context seed of the project at `root`.
+    fn extension_context_seed(&self, root: &Path) -> Option<Arc<RwLock<ProjectContextSeed>>>;
+    /// Record the runtime selected for the project at `root`.
+    fn select_runtime(&self, root: &Path, runtime: Option<SelectedRuntimeDescriptor>);
+    /// Record the Ruby version detected for the project at `root`.
+    fn set_ruby_version(&self, root: &Path, ruby_version: Option<String>);
+    /// Ask the client to refresh inlay hints when the project at `root` owns
+    /// an open document.
+    async fn refresh_inlay_hints(&self, root: &Path);
 }

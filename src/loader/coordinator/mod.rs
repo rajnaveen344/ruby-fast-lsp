@@ -5,7 +5,7 @@ use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::environment::runtime::jruby::classpath::ClasspathArtifact;
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::LoadContext;
+use crate::loader::context::{IndexingRunState, LoadContext};
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::gems::IndexerGem;
 use crate::loader::sources::project::IndexerProject;
@@ -109,7 +109,7 @@ pub struct IndexingCoordinator {
 impl IndexingCoordinator {
     fn analysis_engine(
         &self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
     ) -> Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>> {
         if let Some(engine) = &self.analysis_engine_override {
             return engine.clone();
@@ -119,7 +119,7 @@ impl IndexingCoordinator {
             "indexing only accepts filesystem workspace roots",
             "register a canonical filesystem project root before creating the coordinator",
         );
-        server.analysis_engine_for_uri(&uri)
+        ctx.sink.engine_for_uri(&uri)
     }
     /// Creates a new IndexingCoordinator for the given workspace.
     ///
@@ -211,21 +211,21 @@ impl IndexingCoordinator {
                 .project_navigation_reservation(self.workspace_root.clone()),
         );
         self.extension_registry
-            .get_or_insert_with(|| server.extensions.registry().clone());
+            .get_or_insert_with(|| ctx.sink.extension_registry());
         let start_time = Instant::now();
         let runtime_start = Instant::now();
-        self.indexing_checkpoint(server)?;
+        self.indexing_checkpoint(ctx)?;
 
-        self.resolve_effective_runtime(ctx, server).await?;
+        self.resolve_effective_runtime(ctx).await?;
         self.transition_indexing_status(
-            server,
+            ctx,
             crate::loader::scheduling::status::IndexingPhase::DiscoveringInputs,
         )
         .await?;
 
         // Step 1: Figure out which Ruby version we're using
         let ruby_version = self.detect_ruby_version_off_reactor(server).await?;
-        server.set_extension_project_ruby_version(
+        ctx.sink.set_ruby_version(
             &self.workspace_root,
             ruby_version.map(|version| version.to_string()),
         );
@@ -242,7 +242,7 @@ impl IndexingCoordinator {
         server.set_jruby_import_provider(&self.workspace_root, None);
         self.jruby_import_provider = None;
         self.jruby_runtime_archive = None;
-        self.setup_file_processor(ctx, server);
+        self.setup_file_processor(ctx);
         let runtime_selection_dur = runtime_start.elapsed();
 
         // Project facts, exact JRuby runtime metadata, and immutable dependency
@@ -253,14 +253,14 @@ impl IndexingCoordinator {
         crate::environment::runtime::jruby::imports::reset_jruby_call_host_probe();
 
         self.transition_indexing_status(
-            server,
+            ctx,
             crate::loader::scheduling::status::IndexingPhase::IndexingCore,
         )
         .await?;
 
         let core_start = Instant::now();
         let dependency_seed_engine = Arc::new(parking_lot::RwLock::new(
-            self.index_core_stubs(ctx, server, ruby_version).await?,
+            self.index_core_stubs(ctx, ruby_version).await?,
         ));
         let core_stub_dur = core_start.elapsed();
         let priority_server = server.clone();
@@ -311,7 +311,7 @@ impl IndexingCoordinator {
         let gem_indexer = self.new_gem_indexer();
         let startup_gem_root = self.workspace_root.clone();
         let startup_gem_cancellation = self.resource_cancellation();
-        let startup_gem_analysis_engine = self.analysis_engine(server);
+        let startup_gem_analysis_engine = self.analysis_engine(ctx);
         let startup_gem_priority_keys = active_priority_keys.dependency_roots.clone();
         let (_, startup_excluded_gems) =
             configured_gem_selection(Vec::new(), &self.config.indexing);
@@ -366,7 +366,7 @@ impl IndexingCoordinator {
             // remaining files wait until this join ends so they can overlap
             // locked gem construction on the cooperative partition.
             self.transition_indexing_status(
-                server,
+                ctx,
                 crate::loader::scheduling::status::IndexingPhase::IndexingProject,
             )
             .await?;
@@ -407,13 +407,13 @@ impl IndexingCoordinator {
                 .as_ref()
                 .map(|provider| provider.classpath_fingerprint().to_string()),
         );
-        self.setup_file_processor(ctx, server);
+        self.setup_file_processor(ctx);
 
         // JRuby ships the Ruby implementation of java_import/include_package
         // inside jruby.jar. Materialize only the bounded runtime source allowlist
         // so implementation navigation outranks compatibility declarations.
         let runtime_sources_start = Instant::now();
-        self.index_jruby_runtime_sources_off_reactor(ctx, server, dependency_seed_engine.clone())
+        self.index_jruby_runtime_sources_off_reactor(ctx, dependency_seed_engine.clone())
             .await?;
         let runtime_sources_dur = runtime_sources_start.elapsed();
         self.dependency_seed_engine = Some({
@@ -448,7 +448,7 @@ impl IndexingCoordinator {
         let gem_indexer = self.configure_discovered_gem_indexer(gem_indexer);
         let gem_workspace_root = self.workspace_root.clone();
         let gem_cancellation = self.resource_cancellation();
-        let gem_analysis_engine = self.analysis_engine(server);
+        let gem_analysis_engine = self.analysis_engine(ctx);
         let gem_priority_keys = self
             .project_indexer
             .as_ref()
@@ -496,12 +496,12 @@ impl IndexingCoordinator {
             &self.workspace_root,
         );
         self.transition_indexing_status(
-            server,
+            ctx,
             crate::loader::scheduling::status::IndexingPhase::ProjectNavigationReady,
         )
         .await?;
         self.transition_indexing_status(
-            server,
+            ctx,
             crate::loader::scheduling::status::IndexingPhase::IndexingDependencies,
         )
         .await?;
@@ -512,9 +512,8 @@ impl IndexingCoordinator {
 
         // Runtime stdlib still enters the same isolated engine before the
         // dependency-ready milestone and complete semantic diagnostics.
-        self.index_standard_library(ctx, server, &ruby_version)
-            .await?;
-        self.publish_dependency_require_paths(server)?;
+        self.index_standard_library(ctx, &ruby_version).await?;
+        self.publish_dependency_require_paths(ctx, server)?;
         if let Some(workspace) = server
             .list_workspaces()
             .into_iter()
@@ -524,7 +523,7 @@ impl IndexingCoordinator {
                 .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
                 .await;
         }
-        self.indexing_checkpoint(server)?;
+        self.indexing_checkpoint(ctx)?;
         let dependencies_dur = dependencies_start.elapsed();
 
         let facts_dur = facts_start.elapsed();
@@ -534,12 +533,12 @@ impl IndexingCoordinator {
         // Publish diagnostics to the client.
         info!("Publishing diagnostics");
         self.transition_indexing_status(
-            server,
+            ctx,
             crate::loader::scheduling::status::IndexingPhase::ResolvingSemantics,
         )
         .await?;
         let resolve_start = Instant::now();
-        let analysis_engine = self.analysis_engine(server);
+        let analysis_engine = self.analysis_engine(ctx);
         let resolve_project = self.workspace_root.clone();
         run_cpu_indexing_task(
             &ctx.resources,
@@ -581,12 +580,12 @@ impl IndexingCoordinator {
             }
         }
         self.transition_indexing_status(
-            server,
+            ctx,
             crate::loader::scheduling::status::IndexingPhase::DependencyNavigationReady,
         )
         .await?;
         self.transition_indexing_status(
-            server,
+            ctx,
             crate::loader::scheduling::status::IndexingPhase::PublishingDiagnostics,
         )
         .await?;
@@ -601,15 +600,13 @@ impl IndexingCoordinator {
         // Check the generation immediately before publishing that invalidation
         // so a superseded cold-index run cannot refresh the client with stale
         // semantic state.
-        self.indexing_checkpoint(server)?;
-        server
-            .refresh_inlay_hints_for_workspace(&self.workspace_root)
-            .await;
-        self.indexing_checkpoint(server)?;
+        self.indexing_checkpoint(ctx)?;
+        ctx.sink.refresh_inlay_hints(&self.workspace_root).await;
+        self.indexing_checkpoint(ctx)?;
 
         let total_dur = start_time.elapsed();
         info!("Complete indexing finished in {:?}", total_dur);
-        let analysis_engine = self.analysis_engine(server);
+        let analysis_engine = self.analysis_engine(ctx);
         run_cpu_indexing_task(
             &ctx.resources,
             Some(self.workspace_root.clone()),
@@ -622,7 +619,7 @@ impl IndexingCoordinator {
             },
         )
         .await?;
-        self.log_analysis_memory_stats(server);
+        self.log_analysis_memory_stats(ctx);
 
         self.last_timings = IndexingTimings {
             runtime: runtime_dur,
@@ -641,41 +638,21 @@ impl IndexingCoordinator {
 
     async fn transition_indexing_status(
         &self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         phase: crate::loader::scheduling::status::IndexingPhase,
     ) -> Result<()> {
         let Some(run) = &self.indexing_run else {
             return Ok(());
         };
-        self.indexing_checkpoint(server)?;
-        let workspace = server
-            .list_workspaces()
-            .into_iter()
-            .find(|workspace| workspace.root_path == self.workspace_root);
-        let workspace = workspace.ok_or_else(|| {
-            anyhow!(
-                "Indexing generation {} was cancelled because project {} is no longer registered",
-                run.generation(),
-                self.workspace_root.display()
-            )
-        })?;
-        if workspace
-            .indexing_status
-            .transition(run.generation(), phase, None, None)
-            .is_some()
-        {
-            server.publish_indexing_status().await;
-            Ok(())
-        } else {
-            Err(anyhow!(
-                "Indexing generation {} was superseded for project {}",
-                run.generation(),
-                self.workspace_root.display()
-            ))
-        }
+        self.indexing_checkpoint(ctx)?;
+        let state = ctx
+            .sink
+            .transition_indexing_phase(&self.workspace_root, run.generation(), phase)
+            .await;
+        self.run_state_result(run, state)
     }
 
-    fn indexing_checkpoint(&self, server: &RubyLanguageServer) -> Result<()> {
+    fn indexing_checkpoint(&self, ctx: &LoadContext) -> Result<()> {
         let Some(run) = &self.indexing_run else {
             return Ok(());
         };
@@ -686,32 +663,34 @@ impl IndexingCoordinator {
                 self.workspace_root.display()
             ));
         }
-        let workspace = server
-            .list_workspaces()
-            .into_iter()
-            .find(|workspace| workspace.root_path == self.workspace_root)
-            .ok_or_else(|| {
-                anyhow!(
-                    "Indexing generation {} was cancelled because project {} is no longer registered",
-                    run.generation(),
-                    self.workspace_root.display()
-                )
-            })?;
-        if !workspace.indexing_status.is_current_run(run) {
-            return Err(anyhow!(
+        self.run_state_result(run, ctx.sink.indexing_run_state(&self.workspace_root, run))
+    }
+
+    fn run_state_result(
+        &self,
+        run: &crate::loader::scheduling::status::IndexingRun,
+        state: IndexingRunState,
+    ) -> Result<()> {
+        match state {
+            IndexingRunState::Current => Ok(()),
+            IndexingRunState::Unregistered => Err(anyhow!(
+                "Indexing generation {} was cancelled because project {} is no longer registered",
+                run.generation(),
+                self.workspace_root.display()
+            )),
+            IndexingRunState::Superseded => Err(anyhow!(
                 "Indexing generation {} was superseded for project {}",
                 run.generation(),
                 self.workspace_root.display()
-            ));
+            )),
         }
-        Ok(())
     }
 
     /// Step 3: Set up the main indexing engine
-    fn setup_file_processor(&mut self, ctx: &LoadContext, server: &RubyLanguageServer) {
+    fn setup_file_processor(&mut self, ctx: &LoadContext) {
         let extension_registry = self
             .extension_registry
-            .get_or_insert_with(|| server.extensions.registry().clone())
+            .get_or_insert_with(|| ctx.sink.extension_registry())
             .clone();
         let processor = FileProcessor::with_extension_registry(extension_registry);
         let processor = self
@@ -731,8 +710,8 @@ impl IndexingCoordinator {
             require_dependency_roots,
         );
         self.file_processor = Some(
-            server
-                .extension_project_context_seed_for_root(&self.workspace_root)
+            ctx.sink
+                .extension_context_seed(&self.workspace_root)
                 .map(|seed| processor.clone().with_extension_project_context_seed(seed))
                 .unwrap_or(processor),
         );

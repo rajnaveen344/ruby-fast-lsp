@@ -29,7 +29,6 @@ use crate::loader::cache::persistent::{
 use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::gems::discover_locked_java_gem_roots;
-use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use rayon::prelude::*;
@@ -476,7 +475,6 @@ impl IndexingCoordinator {
     pub(super) async fn index_jruby_runtime_sources_off_reactor(
         &self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         dependency_seed_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
     ) -> Result<()> {
         let Some(artifact) = self.jruby_runtime_archive.clone() else {
@@ -494,7 +492,7 @@ impl IndexingCoordinator {
         );
         let workspace_root = self.workspace_root.clone();
         let user_cache_root_override = self.cache_root.clone();
-        let analysis_engine = self.analysis_engine(server);
+        let analysis_engine = self.analysis_engine(ctx);
         run_cpu_indexing_task(
             &ctx.resources,
             Some(self.workspace_root.clone()),

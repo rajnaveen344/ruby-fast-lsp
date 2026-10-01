@@ -254,7 +254,7 @@ impl IndexingCoordinator {
         })?;
         let demands = workspace.navigation_demands.clone();
         let started = Instant::now();
-        self.indexing_checkpoint(server)?;
+        self.indexing_checkpoint(ctx)?;
         let mut project_indexer = self.project_indexer.take().expect_invariant(
             "bounded project collection has no retained navigation frontier",
             "demands and batches mutate the IndexerProject that found the files",
@@ -425,7 +425,7 @@ impl IndexingCoordinator {
             providerless_batch_count,
             provider_aware_batch_count,
         ) = result?;
-        self.indexing_checkpoint(server)?;
+        self.indexing_checkpoint(ctx)?;
         info!(
             "[PERF][project batch stream] project={} files={} batches={} demanded_batches={} \
              providerless_batches={} provider_aware_batches={} total={:?}",

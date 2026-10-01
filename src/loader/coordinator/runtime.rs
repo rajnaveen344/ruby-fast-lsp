@@ -87,11 +87,7 @@ impl IndexingCoordinator {
         Ok(None)
     }
 
-    pub(super) async fn resolve_effective_runtime(
-        &mut self,
-        ctx: &LoadContext,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub(super) async fn resolve_effective_runtime(&mut self, ctx: &LoadContext) -> Result<()> {
         let root = self.workspace_root.to_string_lossy();
         self.effective_runtime = match self
             .config
@@ -106,7 +102,8 @@ impl IndexingCoordinator {
             }
             EffectiveRuntimeSelection::LegacyMriCompatibility { .. } => None,
         };
-        server.set_effective_runtime(&self.workspace_root, self.effective_runtime.clone());
+        ctx.sink
+            .select_runtime(&self.workspace_root, self.effective_runtime.clone());
         Ok(())
     }
 }

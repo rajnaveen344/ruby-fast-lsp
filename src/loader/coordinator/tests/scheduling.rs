@@ -277,7 +277,7 @@ async fn superseded_coordinator_cannot_advance_replacement_generation() {
     let replacement = workspace.indexing_status.begin_run();
     let result = old_coordinator
         .transition_indexing_status(
-            &server,
+            &server.load_context_for_project(&project),
             crate::loader::scheduling::status::IndexingPhase::IndexingProject,
         )
         .await;
@@ -304,7 +304,8 @@ fn removed_coordinator_keeps_detached_engine_instead_of_orphan_engine() {
 
     server.remove_workspace(&workspace.root_uri);
 
-    let selected = coordinator.analysis_engine(&server);
+    let selected =
+        coordinator.analysis_engine(&server.load_context_for_project(&workspace.root_path));
     assert!(Arc::ptr_eq(&selected, &workspace.analysis_engine));
     assert!(!Arc::ptr_eq(&selected, &server.orphan_engine()));
 }

@@ -78,10 +78,8 @@ async fn source_less_jruby_import_navigates_to_verified_decompiled_implementatio
     coordinator.set_cache_root(cache.clone());
     select_ruby_version(&mut coordinator, &server).await;
     coordinator.setup_jruby_import_provider().unwrap();
-    coordinator.setup_file_processor(
-        &server.load_context_for_project(coordinator.workspace_root()),
-        &server,
-    );
+    coordinator
+        .setup_file_processor(&server.load_context_for_project(coordinator.workspace_root()));
     let source = "java_import fixtures.RichFixture\n\
                       RICH = RichFixture.new(nil)\n\
                       VALUE = RICH.java_send(:combine, [java.lang.String, Java::int[]], 'x', [1])\n";

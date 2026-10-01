@@ -47,9 +47,10 @@ impl IndexingCoordinator {
     /// Retain Bundler/RubyGems require roots for goto and unresolved-require diagnostics.
     pub(super) fn publish_dependency_require_paths(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<()> {
-        self.indexing_checkpoint(server)?;
+        self.indexing_checkpoint(ctx)?;
         let mut paths = Vec::new();
         if let Some(gem_indexer) = self.gem_indexer.as_ref() {
             paths.extend(gem_indexer.get_gem_lib_paths());
@@ -63,7 +64,7 @@ impl IndexingCoordinator {
         });
         let index_started = Instant::now();
         let index = {
-            let analysis_engine = self.analysis_engine(server);
+            let analysis_engine = self.analysis_engine(ctx);
             let engine = analysis_engine.read();
             RequireFeatureIndex::build(&paths, Some(&engine))
         };
@@ -76,13 +77,13 @@ impl IndexingCoordinator {
             features,
             index_started.elapsed()
         );
-        self.indexing_checkpoint(server)?;
+        self.indexing_checkpoint(ctx)?;
         if let Some(workspace) = server
             .list_workspaces()
             .into_iter()
             .find(|workspace| workspace.root_path == self.workspace_root)
         {
-            if Arc::ptr_eq(&workspace.analysis_engine, &self.analysis_engine(server)) {
+            if Arc::ptr_eq(&workspace.analysis_engine, &self.analysis_engine(ctx)) {
                 workspace.set_dependency_require_resolution(paths.clone(), index.clone());
             }
         }
@@ -97,10 +98,9 @@ impl IndexingCoordinator {
     pub(super) async fn index_core_stubs(
         &self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         ruby_version: Option<RubyVersion>,
     ) -> Result<AnalysisEngine> {
-        let analysis_engine = self.analysis_engine(server);
+        let analysis_engine = self.analysis_engine(ctx);
         let extension_path = self.config.extension_path.clone();
         let key = format!(
             "core-stubs:{}:{ruby_version:?}:{}",
@@ -182,7 +182,6 @@ impl IndexingCoordinator {
     pub(super) async fn index_standard_library(
         &mut self,
         ctx: &LoadContext,
-        server: &RubyLanguageServer,
         ruby_version: &Option<RubyVersion>,
     ) -> Result<()> {
         let required_stdlib = self.get_required_stdlib_modules();
@@ -202,7 +201,7 @@ impl IndexingCoordinator {
         }
 
         stdlib_indexer.set_required_modules(required_stdlib);
-        let analysis_engine = self.analysis_engine(server);
+        let analysis_engine = self.analysis_engine(ctx);
         let (stdlib_indexer, result) = run_cpu_indexing_task(
             &ctx.resources,
             Some(self.workspace_root.clone()),

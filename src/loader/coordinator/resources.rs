@@ -2,10 +2,10 @@
 
 use super::IndexingCoordinator;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::loader::scheduling::resources::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
-use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::info;
 use ruby_analysis::engine::AnalysisStat;
@@ -129,8 +129,8 @@ pub(super) fn release_allocator_free_pages() {
 pub(super) fn release_allocator_free_pages() {}
 
 impl IndexingCoordinator {
-    pub(super) fn log_analysis_memory_stats(&self, server: &RubyLanguageServer) {
-        let analysis_engine = self.analysis_engine(server);
+    pub(super) fn log_analysis_memory_stats(&self, ctx: &LoadContext) {
+        let analysis_engine = self.analysis_engine(ctx);
         let engine = analysis_engine.read();
         let stats = engine.stats();
         let memory = engine.estimated_memory_stats();

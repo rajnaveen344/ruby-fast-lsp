@@ -16,7 +16,7 @@ project, with a separate orphan engine for unowned documents.
 | `client` | Outbound LSP notifications, registration, and refresh requests. | Protocol methods in `server.rs`. |
 | `config` | One shared accepted server configuration. | `environment/config/` and initialization handlers. |
 | `documents` | Open buffers, versions, document handles, and per-URI lifecycle locks. | [documents.rs](../../src/server/documents.rs) |
-| `projects` | Longest-root routing, isolated project engines, orphan engine, and retained external-document provenance. | [projects.rs](../../src/server/projects.rs) |
+| `projects` | Longest-root routing, isolated project engines, orphan engine, and retained external-document provenance. | [projects](../../src/server/projects/mod.rs), [load sink](../../src/server/projects/load_sink.rs) |
 | `indexing` | Project scheduler, resource governor, and sequenced status publication. | [indexing.rs](../../src/server/indexing.rs) |
 | `products` | Runtime discovery and shared immutable dependency products. | [products.rs](../../src/server/products.rs) |
 | `extensions` | Extension registry and dynamic watcher registration lifecycle. | [extensions.rs](../../src/server/extensions.rs) |

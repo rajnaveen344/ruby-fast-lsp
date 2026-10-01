@@ -50,14 +50,14 @@ impl IndexingCoordinator {
         ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<()> {
-        self.indexing_checkpoint(server)?;
-        let analysis_engine = self.analysis_engine(server);
+        self.indexing_checkpoint(ctx)?;
+        let analysis_engine = self.analysis_engine(ctx);
         let mut open_uris = ctx.sources.open_uris();
         open_uris.retain(|uri| Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(uri)));
         open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
 
         for uri in open_uris {
-            self.indexing_checkpoint(server)?;
+            self.indexing_checkpoint(ctx)?;
             #[cfg(test)]
             let publication_path = uri
                 .to_file_path()
@@ -78,7 +78,7 @@ impl IndexingCoordinator {
                 // by those handlers, and recheck the indexing generation then.
                 let semantic_lock = server.document_semantic_lock(&uri);
                 let _semantic_guard = semantic_lock.lock().await;
-                self.indexing_checkpoint(server)?;
+                self.indexing_checkpoint(ctx)?;
                 if !Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(&uri)) {
                     continue;
                 }
@@ -114,7 +114,7 @@ impl IndexingCoordinator {
                     engine.source_snapshot_for_path(&path),
                     &mut diagnostics,
                 );
-                self.indexing_checkpoint(server)?;
+                self.indexing_checkpoint(ctx)?;
                 // Keep the engine read lock through the synchronous enqueue:
                 // cross-file resolution cannot invalidate this projection in
                 // between. Empty results must clear errors resolved at startup.
