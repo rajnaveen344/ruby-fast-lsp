@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::{GraphEdgeKind, GraphNodeKind, MethodParamKind, SymbolKind, TypeSubject};
 
 fn file() -> SourceFileId {
     SourceFileId(1)
