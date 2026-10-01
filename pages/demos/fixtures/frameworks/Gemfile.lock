@@ -2,7 +2,7 @@ GEM
   remote: https://rubygems.org/
   specs:
     ast (2.4.3)
-    json (2.21.1)
+    json (2.21.2)
     language_server-protocol (3.17.0.6)
     lint_roller (1.1.0)
     minitest (5.20.0)
@@ -44,7 +44,7 @@ DEPENDENCIES
 CHECKSUMS
   ast (2.4.3)
   bundler (4.0.11) sha256=5bcec0fb78302e48d02ee46f10ee6e6942be647ba5b44a6d1ddfda9a240ce785
-  json (2.21.1)
+  json (2.21.2)
   language_server-protocol (3.17.0.6)
   lint_roller (1.1.0)
   minitest (5.20.0)
