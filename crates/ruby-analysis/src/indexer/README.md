@@ -7,7 +7,7 @@ composition into engine facts. Scheduling and publication stay outside indexer.
 | Area | Responsibility |
 | --- | --- |
 | `documents/` | Source text/offsets, ERB mapping, Ruby documents, scopes, and local variables |
-| `lowering/` | Declaration and RBS indexing plus compact callable/block fact construction |
+| `lowering/` | Declaration and RBS indexing plus forwarded-block fact construction; callable-literal lowering lives in `inference/callable_body/` |
 | `fact_collector/` | Stateful Prism traversal and body/reference/diagnostic evidence |
 | `identifiers/` | Position-based identifier discovery and identifier/receiver types |
 | `queries/` | Syntax-backed hover, receiver lookup, rename targets, symbols, lenses, selections, and token queries |

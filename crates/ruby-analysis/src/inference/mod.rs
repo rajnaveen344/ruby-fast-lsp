@@ -167,8 +167,9 @@
 //! block-result union variants. The solver never truncates a candidate set or
 //! union and never widens an incomplete result to `Object`.
 //!
-//! The internal `callable_body` module evaluates the one AST-free summary emitted during the
-//! indexer's ordinary Prism traversal. Direct `.call` and `&callable` bind
+//! The internal `callable_body` module lowers a static callable literal to one
+//! AST-free summary during the indexer's ordinary Prism traversal and evaluates
+//! that summary. Direct `.call` and `&callable` bind
 //! their proven inputs through that same evaluator. Local identities and
 //! aliases remain bounded flow state; only capture-free constant summaries
 //! become file-owned engine facts and persistent dependency products. Capture

@@ -110,7 +110,8 @@ impl FactCollector {
             &constant_path,
             &node.location(),
         );
-        if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
+        if let Ok(summary) = crate::inference::callable_body::lower_callable_literal(&node.value())
+        {
             if summary.is_capture_free() {
                 self.constants.callable_bodies.push(
                     crate::core::callables::callable_body::ConstantCallableBodyFact {

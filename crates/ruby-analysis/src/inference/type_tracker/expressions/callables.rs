@@ -46,7 +46,7 @@ impl TypeTracker {
         if self.environment.callables.is_empty() {
             return;
         }
-        if crate::indexer::is_static_callable_literal(value)
+        if crate::inference::callable_body::is_static_callable_literal(value)
             || value.as_local_variable_read_node().is_some()
         {
             return;
@@ -404,7 +404,7 @@ impl TypeTracker {
         &mut self,
         value: &Node,
     ) -> Option<crate::inference::higher_order::KnownProcType> {
-        crate::indexer::is_static_callable_literal(value).then(|| {
+        crate::inference::callable_body::is_static_callable_literal(value).then(|| {
             let outer_locals = self.environment.types.keys().cloned();
             crate::inference::higher_order::KnownProcType {
                 identity: u32::try_from(value.location().start_offset()).expect_invariant(
@@ -412,7 +412,7 @@ impl TypeTracker {
                     "analysis ranges already require u32 offsets",
                     "reject oversized source before callable lowering",
                 ),
-                summary: crate::indexer::lower_callable_literal_with_outer_locals(
+                summary: crate::inference::callable_body::lower_callable_literal_with_outer_locals(
                     value,
                     outer_locals,
                 ),

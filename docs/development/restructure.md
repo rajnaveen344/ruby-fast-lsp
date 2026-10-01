@@ -219,7 +219,7 @@ Delete this file when the last task is done. Git history keeps the record.
       one way: core ← inference ← indexer ← engine.
   - [x] B8a. Move `MethodReceiver` and `VariableTypeKind` to `core`.
   - [x] B8b. Move `inference/completion/` to `engine/queries/completion/`.
-  - [ ] B8c. Move callable-literal lowering helpers into inference.
+  - [x] B8c. Move callable-literal lowering helpers into inference.
   - [ ] B8d. Move `Semantics`, `ReceiverAccess`, and `LocalType` to
         `inference/semantics.rs`; the engine keeps the impls.
   - [ ] B8e. Inference takes `&dyn Semantics` instead of `AnalysisQuery`.

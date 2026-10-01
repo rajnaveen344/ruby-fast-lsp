@@ -2,7 +2,8 @@
 //!
 //! The evaluator is parser-free and workspace-free. Method dispatch is
 //! supplied by the caller and must delegate to `View`; shape reads
-//! reuse the canonical shape algebra directly.
+//! reuse the canonical shape algebra directly. `lowering` builds those
+//! summaries from an already parsed Prism callable literal.
 
 use crate::core::callables::callable_body::CallableBodyExpression;
 use crate::core::callables::callable_body::CallableBodyParameterKind;
@@ -12,6 +13,12 @@ use crate::core::{
     TypeInferenceOutcome, UnknownReason,
 };
 use crate::inference::r#type::shape as shape_reads;
+
+mod lowering;
+
+pub(crate) use lowering::{
+    is_static_callable_literal, lower_callable_literal, lower_callable_literal_with_outer_locals,
+};
 
 #[derive(Default)]
 struct CallableEvaluationBudget {
