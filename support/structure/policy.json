@@ -83,11 +83,6 @@
       "view_response_output.json"
     ]
   },
-  "legacy_lines": {
-    "src/indexer/coordinator/tests/jruby.rs": 1101,
-    "src/indexer/coordinator/tests/workflow.rs": 1270,
-    "src/indexer/sources/gems/tests.rs": 1344,
-    "src/indexer/sources/project/tests.rs": 1611
-  },
+  "legacy_lines": {},
   "exceptions": {}
 }
