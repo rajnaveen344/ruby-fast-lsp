@@ -66,6 +66,7 @@ The loader is responsible for discovering Ruby files, parsing them, and feeding 
 
 #### Key Files:
 
+- `context.rs`: `LoadContext`, the server-built inputs passed next to the server to each project load and interactive file pass
 - `coordinator/`: Orchestrates workspace indexing
 - `file_processor/`: Parses one file, runs `FactCollector`, and composes its `FileAnalysis` (`compose.rs`)
 - `sources/project/`: Discovers and indexes project files
@@ -117,7 +118,7 @@ adapters, analysis APIs, and editor-specific behavior.
 - `presentation/`: hover, inlay hints, code lenses, semantic tokens, document
   symbols, folding ranges, and selection ranges
 - `indexing/`, `debug.rs`: document lifecycle indexing (syntax diagnostics come
-  from `src/loader/syntax_diagnostics.rs`) and debug requests
+  from `src/loader/file_processor/syntax_diagnostics.rs`) and debug requests
 
 #### Design Decisions:
 

@@ -9,7 +9,7 @@ use crate::environment::config::{IndexingConfig, RubyFastLspConfig};
 use crate::invariant::ExpectInvariant;
 use crate::loader::coordinator::IndexingCoordinator;
 use crate::loader::file_processor::analysis_source;
-use crate::loader::syntax_diagnostics::generate_diagnostics;
+use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use crate::utils::file_ops::should_index_file;
 use anyhow::{anyhow, Context, Result};
@@ -295,7 +295,10 @@ impl CheckSession {
                 IndexingCoordinator::new(workspace.root_path.clone(), config.clone());
             coordinator.set_analysis_engine(workspace.analysis_engine.clone());
             coordinator
-                .run_complete_indexing(&server)
+                .run_complete_indexing(
+                    &server.load_context_for_project(coordinator.workspace_root()),
+                    &server,
+                )
                 .await
                 .with_context(|| {
                     format!(

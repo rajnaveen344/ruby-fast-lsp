@@ -4,6 +4,9 @@ use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{ProjectContextSeed, ProjectContextSnapshot};
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::{
+    LoadConfig, LoadContext, PublishedRequires, RequireContext, SourceReader,
+};
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingRun, ProjectIndexingStatus};
 use parking_lot::RwLock;
@@ -53,32 +56,6 @@ impl ProjectRuntimeState {
     }
 }
 
-#[derive(Clone)]
-struct DependencyRequireState {
-    paths: Arc<RwLock<Vec<PathBuf>>>,
-    index: Arc<RwLock<Arc<crate::loader::require_paths::RequireFeatureIndex>>>,
-}
-impl Default for DependencyRequireState {
-    fn default() -> Self {
-        Self {
-            paths: Arc::default(),
-            index: Arc::new(RwLock::new(Arc::new(
-                crate::loader::require_paths::RequireFeatureIndex::empty(),
-            ))),
-        }
-    }
-}
-impl DependencyRequireState {
-    fn replace(
-        &self,
-        paths: Vec<PathBuf>,
-        index: Arc<crate::loader::require_paths::RequireFeatureIndex>,
-    ) {
-        *self.paths.write() = paths;
-        *self.index.write() = index;
-    }
-}
-
 /// One Ruby project root. Files are routed to the workspace whose `root_path`
 /// is the longest prefix of the file's path. Each project owns an isolated
 /// analysis engine; external documents may retain one project's context.
@@ -91,7 +68,7 @@ pub struct Workspace {
     pub runtime: ProjectRuntimeState,
     pub(crate) extension_project_context_seed: Arc<RwLock<ProjectContextSeed>>,
     pub(crate) navigation_demands: NavigationDemandController,
-    requires: DependencyRequireState,
+    requires: PublishedRequires,
     workspace_folder_uris: Arc<RwLock<std::collections::HashSet<Url>>>,
 }
 
@@ -122,7 +99,7 @@ impl Workspace {
             runtime: ProjectRuntimeState::default(),
             extension_project_context_seed,
             navigation_demands: NavigationDemandController::default(),
-            requires: DependencyRequireState::default(),
+            requires: PublishedRequires::default(),
             workspace_folder_uris: Arc::new(RwLock::new(std::collections::HashSet::from([
                 workspace_folder_uri,
             ]))),
@@ -144,7 +121,7 @@ impl Workspace {
 
     /// Absolute gem/stdlib require roots retained after dependency indexing.
     pub fn dependency_require_paths(&self) -> Vec<PathBuf> {
-        self.requires.paths.read().clone()
+        self.requires.paths()
     }
 
     #[cfg(test)]
@@ -160,11 +137,11 @@ impl Workspace {
         &self,
     ) -> parking_lot::RwLockReadGuard<'_, Arc<crate::loader::require_paths::RequireFeatureIndex>>
     {
-        self.requires.index.read()
+        self.requires.feature_index_guard()
     }
 
     pub fn require_feature_index(&self) -> Arc<crate::loader::require_paths::RequireFeatureIndex> {
-        self.requires.index.read().clone()
+        self.requires.feature_index()
     }
 
     pub(crate) fn set_dependency_require_resolution(
@@ -199,6 +176,45 @@ impl ProjectRegistry {
 
     pub(super) fn orphan_engine(&self) -> &Arc<RwLock<AnalysisEngine>> {
         &self.orphan_engine
+    }
+}
+
+impl RubyLanguageServer {
+    /// Loader inputs for a whole-project load of the project rooted exactly
+    /// at `project_root`. An unregistered root reads empty require roots.
+    pub fn load_context_for_project(&self, project_root: &Path) -> LoadContext {
+        let published = self
+            .list_workspaces()
+            .into_iter()
+            .find(|workspace| workspace.root_path == project_root)
+            .map(|workspace| workspace.requires)
+            .unwrap_or_default();
+        self.load_context(RequireContext::new(
+            Some(project_root.to_path_buf()),
+            published,
+        ))
+    }
+
+    /// Loader inputs for one file pass, owned by the project whose root is the
+    /// longest prefix of `uri`. A file outside every project has no root.
+    pub fn load_context_for_uri(&self, uri: &Url) -> LoadContext {
+        let requires = match self.workspace_for_uri(uri) {
+            Some(workspace) => RequireContext::new(Some(workspace.root_path), workspace.requires),
+            None => RequireContext::new(None, PublishedRequires::default()),
+        };
+        self.load_context(requires)
+    }
+
+    fn load_context(&self, requires: RequireContext) -> LoadContext {
+        let resources = self.indexing.resources().clone();
+        LoadContext {
+            config: LoadConfig::new(self.config.clone()),
+            requires,
+            products: self.products.shared(),
+            discovery: self.products.discovery(&resources),
+            resources,
+            sources: Arc::new(self.documents.clone()) as Arc<dyn SourceReader>,
+        }
     }
 }
 

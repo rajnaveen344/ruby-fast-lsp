@@ -7,7 +7,7 @@
 //!
 //! - **`FileProcessor`**: Core struct for processing individual files
 //! - **`ProcessResult`**: Results of processing including diagnostics and affected URIs
-//! - **`get_unresolved_diagnostics`**: Generates diagnostics for unresolved constants/methods
+//! - **`syntax_diagnostics`**: Parser-derived diagnostics for one parsed file
 //!
 //! ## Usage
 //!
@@ -19,8 +19,8 @@ use crate::environment::runtime::jruby::imports::{
     JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
 };
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::loader::require_paths::RequireFeatureIndex;
-use crate::loader::syntax_diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use collection::{replace_analysis_facts_for_file, replace_file_analysis};
@@ -38,6 +38,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use syntax_diagnostics::generate_diagnostics;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
 mod collection;
@@ -46,6 +47,7 @@ mod extension_facts;
 mod extension_host;
 mod jruby_navigation;
 mod merge;
+pub mod syntax_diagnostics;
 
 /// Result of processing a file
 pub struct ProcessResult {
@@ -199,29 +201,33 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
-        self.process_file_with_resolution(uri, content, server, FileResolution::Full)
+        self.process_file_with_resolution(uri, content, ctx, server, FileResolution::Full)
     }
 
     pub fn process_file_current_file_resolution(
         &self,
         uri: &Url,
         content: &str,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
-        self.process_file_with_resolution(uri, content, server, FileResolution::CurrentFile)
+        self.process_file_with_resolution(uri, content, ctx, server, FileResolution::CurrentFile)
     }
 
     pub fn process_file_current_file_resolution_forced(
         &self,
         uri: &Url,
         content: &str,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
         self.process_file_with_resolution_forced(
             uri,
             content,
+            ctx,
             server,
             FileResolution::CurrentFile,
             true,
@@ -232,16 +238,18 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         resolution: FileResolution,
     ) -> Result<ProcessResult> {
-        self.process_file_with_resolution_forced(uri, content, server, resolution, false)
+        self.process_file_with_resolution_forced(uri, content, ctx, server, resolution, false)
     }
 
     fn process_file_with_resolution_forced(
         &self,
         uri: &Url,
         content: &str,
+        _ctx: &LoadContext,
         server: &RubyLanguageServer,
         resolution: FileResolution,
         force_reindex: bool,

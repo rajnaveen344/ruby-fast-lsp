@@ -5,6 +5,7 @@ use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::environment::runtime::jruby::classpath::ClasspathArtifact;
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::gems::IndexerGem;
 use crate::loader::sources::project::IndexerProject;
@@ -19,7 +20,7 @@ pub(crate) use priority::dependency_priority_key;
 use priority::open_project_constant_priority_keys;
 use resources::{release_allocator_free_pages, run_cpu_indexing_task, IndexingWorkClass};
 use ruby_analysis::engine::AnalysisEngine;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -123,6 +124,11 @@ impl IndexingCoordinator {
     /// Creates a new IndexingCoordinator for the given workspace.
     ///
     /// Call `run_complete_indexing()` to actually start the indexing process.
+    /// Root of the project this coordinator loads.
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
     pub fn new(workspace_root: PathBuf, config: RubyFastLspConfig) -> Self {
         Self {
             workspace_root,
@@ -189,7 +195,11 @@ impl IndexingCoordinator {
     /// 4. Scan project dependencies
     /// 5. Collect facts from gems, stdlib, then project files
     /// 6. Publish diagnostics
-    pub async fn run_complete_indexing(&mut self, server: &RubyLanguageServer) -> Result<()> {
+    pub async fn run_complete_indexing(
+        &mut self,
+        _ctx: &LoadContext,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
         info!("Starting complete indexing process");
         if self.cache_root.is_none() {
             self.set_cache_root(server.products.cache_root());

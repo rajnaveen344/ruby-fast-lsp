@@ -14,17 +14,17 @@
 //!
 //! ## Supporting Modules
 //!
-//! - **`inheritance_graph`**: Method resolution order, inheritance, and mixin handling
+//! - **`context`**: `LoadContext`, the owner-supplied inputs the loader reads
+//! - **`require_paths`**: Require-path resolution and unresolved-require diagnostics
 //! - **`version`**: Ruby version detection and management
 //! - **`scheduling`**: Work admission, the indexing queue, and progress status
 //! - **`cache`**: Persisted dependency products and their producer identity
-//! - **`syntax_diagnostics`**: Parser-derived diagnostics for one parsed file
 
 pub mod cache;
+pub mod context;
 pub mod coordinator;
 pub mod file_processor;
 pub mod require_paths;
 pub mod scheduling;
 pub mod sources;
-pub mod syntax_diagnostics;
 pub mod version;

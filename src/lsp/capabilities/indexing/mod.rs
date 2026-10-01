@@ -1,7 +1,7 @@
 use crate::invariant::ExpectInvariant;
 use crate::loader::coordinator::IndexingCoordinator;
+use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
 use crate::loader::file_processor::FileProcessor;
-use crate::loader::syntax_diagnostics::generate_diagnostics;
 use crate::lsp::linter::lint_document;
 use crate::lsp::query::EngineQuery;
 use crate::server::RubyLanguageServer;
@@ -77,10 +77,11 @@ async fn process_interactive_file(
             None,
             move || {
                 let start = Instant::now();
+                let ctx = server.load_context_for_uri(&uri);
                 let result = if current_file_resolution {
-                    indexer.process_file_current_file_resolution(&uri, &content, &server)
+                    indexer.process_file_current_file_resolution(&uri, &content, &ctx, &server)
                 } else {
-                    indexer.process_file(&uri, &content, &server)
+                    indexer.process_file(&uri, &content, &ctx, &server)
                 };
                 info!(
                     "[PERF][interactive] file={} mode={} elapsed={:?}",
@@ -135,7 +136,8 @@ async fn init_workspace_inner(
     if let Some(run) = run {
         coordinator.set_indexing_run(run);
     }
-    coordinator.run_complete_indexing(server).await?;
+    let ctx = server.load_context_for_project(coordinator.workspace_root());
+    coordinator.run_complete_indexing(&ctx, server).await?;
 
     Ok(coordinator.last_timings())
 }
@@ -302,7 +304,12 @@ async fn refresh_open_project_files_after_dependency_open(
     open_docs.sort_unstable_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
 
     for (uri, content) in open_docs {
-        match indexer.process_file_current_file_resolution_forced(&uri, &content, server) {
+        match indexer.process_file_current_file_resolution_forced(
+            &uri,
+            &content,
+            &server.load_context_for_uri(&uri),
+            server,
+        ) {
             Ok(result) => {
                 let mut diagnostics = result.diagnostics;
                 diagnostics.extend(
@@ -491,9 +498,12 @@ async fn refresh_bounded_open_diagnostics(
 
     let mut refreshed = 0;
     for (uri, content) in open_documents {
-        let Ok(result) =
-            indexer.process_file_current_file_resolution_forced(&uri, &content, server)
-        else {
+        let Ok(result) = indexer.process_file_current_file_resolution_forced(
+            &uri,
+            &content,
+            &server.load_context_for_uri(&uri),
+            server,
+        ) else {
             log::warn!("Failed to refresh open-file diagnostics for {}", uri.path());
             continue;
         };
@@ -818,9 +828,12 @@ fn refresh_open_project_files_for_dependency_engines(
     open_project_files.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
 
     for (uri, content) in open_project_files {
-        if let Err(error) =
-            processor.process_file_current_file_resolution_forced(&uri, &content, server)
-        {
+        if let Err(error) = processor.process_file_current_file_resolution_forced(
+            &uri,
+            &content,
+            &server.load_context_for_uri(&uri),
+            server,
+        ) {
             log::warn!(
                 "Failed to refresh open project consumer after dependency change: {}: {error}",
                 uri.path()

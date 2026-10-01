@@ -162,7 +162,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] C1b. Move `lsp::capabilities::diagnostics::generate_diagnostics`
         (syntax diagnostics) to `src/loader/syntax_diagnostics.rs`. This
         removes the two production loader → lsp edges.
-  - [ ] C1c. Add `src/loader/context.rs` with `LoadContext`, `LoadConfig`,
+  - [x] C1c. Add `src/loader/context.rs` with `LoadContext`, `LoadConfig`,
         `RequireContext`, `SharedProducts`, `SourceReader`, and
         `RuntimeDiscovery`. Build it in `init_workspace_inner` and in the
         interactive path from the server, and pass it next to `server`. No

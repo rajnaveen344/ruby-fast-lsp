@@ -1,5 +1,6 @@
 //! Open editor buffers and per-document lifecycle serialization.
 use super::RubyLanguageServer;
+use crate::loader::context::{OpenDocumentVersion, SourceReader};
 use crate::loader::file_processor::FileProcessor;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use ruby_analysis::core::SourceFileId;
@@ -76,6 +77,32 @@ impl OpenDocuments {
     }
 }
 
+/// Live loader view: each call observes the open buffers at that moment.
+impl SourceReader for OpenDocuments {
+    fn open_uris(&self) -> Vec<Url> {
+        self.read().keys().cloned().collect()
+    }
+    fn open_document(&self, uri: &Url) -> Option<RubyDocument> {
+        self.read().get(uri).map(|document| document.read().clone())
+    }
+    fn open_document_version(&self, uri: &Url) -> Option<OpenDocumentVersion> {
+        self.read().get(uri).map(|document| {
+            let document = document.read();
+            OpenDocumentVersion {
+                version: document.version,
+                indexed_version: document.indexed_version,
+            }
+        })
+    }
+    fn visit_open_documents(&self, visit: &mut dyn FnMut(&RubyDocument)) {
+        let mut documents = self.read().values().cloned().collect::<Vec<_>>();
+        documents.sort_by(|left, right| left.read().uri.cmp(&right.read().uri));
+        for document in documents {
+            visit(&document.read());
+        }
+    }
+}
+
 impl RubyLanguageServer {
     /// Store an embedded server's open buffer and run its current-file
     /// analysis pass without editor notifications or diagnostics publication.
@@ -96,7 +123,12 @@ impl RubyLanguageServer {
             }
         }
         FileProcessor::with_extension_registry(self.extensions.registry().clone())
-            .process_file_current_file_resolution(uri, content, self)
+            .process_file_current_file_resolution(
+                uri,
+                content,
+                &self.load_context_for_uri(uri),
+                self,
+            )
             .map(|_| ())
     }
 

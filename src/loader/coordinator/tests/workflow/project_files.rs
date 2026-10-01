@@ -47,7 +47,10 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
         IndexingCoordinator::new(temp_dir.path().to_path_buf(), RubyFastLspConfig::default());
     let server = create_test_server();
     coordinator
-        .run_complete_indexing(&server)
+        .run_complete_indexing(
+            &server.load_context_for_project(coordinator.workspace_root()),
+            &server,
+        )
         .await
         .expect("workspace indexing must succeed");
 
@@ -182,7 +185,12 @@ end
 
     // Measure indexing time
     let start = std::time::Instant::now();
-    let result = coordinator.run_complete_indexing(&server).await;
+    let result = coordinator
+        .run_complete_indexing(
+            &server.load_context_for_project(coordinator.workspace_root()),
+            &server,
+        )
+        .await;
     let duration = start.elapsed();
 
     assert!(
@@ -261,7 +269,13 @@ async fn cold_indexing_retains_but_does_not_publish_closed_file_diagnostics() {
     let mut coordinator =
         IndexingCoordinator::new(workspace.path().to_path_buf(), RubyFastLspConfig::default());
 
-    coordinator.run_complete_indexing(&server).await.unwrap();
+    coordinator
+        .run_complete_indexing(
+            &server.load_context_for_project(coordinator.workspace_root()),
+            &server,
+        )
+        .await
+        .unwrap();
 
     assert!(
         server

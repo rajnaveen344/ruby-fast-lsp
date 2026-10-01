@@ -1,4 +1,4 @@
-use crate::server::products::{CORE_ENGINE_CACHE_MAX_ENTRIES, CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES};
+use crate::loader::context::{CORE_ENGINE_CACHE_MAX_ENTRIES, CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES};
 use crate::utils::single_flight::SingleFlightStat;
 
 use crate::server::RubyLanguageServer;

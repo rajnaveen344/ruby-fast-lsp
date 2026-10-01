@@ -20,6 +20,7 @@ fn file_processor_reports_body_only_and_exported_api_changes() {
         .process_file_current_file_resolution_forced(
             &uri,
             "class User\n  def name\n    'A'\n  end\nend\n",
+            &server.load_context_for_uri(&uri),
             &server,
         )
         .unwrap();
@@ -29,6 +30,7 @@ fn file_processor_reports_body_only_and_exported_api_changes() {
         .process_file_current_file_resolution_forced(
             &uri,
             "class User\n  def name\n    'B'\n  end\nend\n",
+            &server.load_context_for_uri(&uri),
             &server,
         )
         .unwrap();
@@ -38,6 +40,7 @@ fn file_processor_reports_body_only_and_exported_api_changes() {
         .process_file_current_file_resolution_forced(
             &uri,
             "class User\n  def name(prefix)\n    prefix\n  end\nend\n",
+            &server.load_context_for_uri(&uri),
             &server,
         )
         .unwrap();
@@ -354,7 +357,12 @@ fn file_processor_handles_shebang_source_without_crashing() {
     let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nrequire File.expand_path('../config/application', __FILE__)\nExampleApp::Application.load_tasks\n";
 
     let result = processor
-        .process_file_current_file_resolution_forced(&uri, source, &server)
+        .process_file_current_file_resolution_forced(
+            &uri,
+            source,
+            &server.load_context_for_uri(&uri),
+            &server,
+        )
         .expect("shebang-bearing Ruby entry points must index successfully");
 
     assert_eq!(result.semantic_change, SemanticChange::InitialIndex);
@@ -370,15 +378,30 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
     let app = "class Base\n  include API\nend\n\nclass PlatformApp < Base\n  def route\n    get_images\n  end\nend\n";
 
     processor
-        .process_file_current_file_resolution_forced(&helpers_uri, helpers, &server)
+        .process_file_current_file_resolution_forced(
+            &helpers_uri,
+            helpers,
+            &server.load_context_for_uri(&helpers_uri),
+            &server,
+        )
         .unwrap();
     processor
-        .process_file_current_file_resolution_forced(&app_uri, app, &server)
+        .process_file_current_file_resolution_forced(
+            &app_uri,
+            app,
+            &server.load_context_for_uri(&app_uri),
+            &server,
+        )
         .unwrap();
     // Second pass mirrors didOpen-then-cold-index: the class constant already
     // carries a ClassReference from the first declaration of this same file.
     processor
-        .process_file_current_file_resolution_forced(&app_uri, app, &server)
+        .process_file_current_file_resolution_forced(
+            &app_uri,
+            app,
+            &server.load_context_for_uri(&app_uri),
+            &server,
+        )
         .unwrap();
 
     let platform_app =
@@ -413,6 +436,7 @@ fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
         .process_file_current_file_resolution_forced(
             &declaration_uri,
             "module Types\n  class Original\n  end\n  Alias = Original\nend\n",
+            &server.load_context_for_uri(&declaration_uri),
             &server,
         )
         .unwrap();
@@ -420,6 +444,7 @@ fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
         .process_file_current_file_resolution_forced(
             &reopening_uri,
             "module Types\n  class Alias\n    def from_other_file\n    end\n  end\nend\n",
+            &server.load_context_for_uri(&reopening_uri),
             &server,
         )
         .unwrap();

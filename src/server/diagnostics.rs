@@ -245,7 +245,9 @@ impl RubyLanguageServer {
                 let document = self.get_doc(&uri);
                 let mut diagnostics = document.as_ref().map(|document| {
                     let parse = document.parse();
-                    crate::loader::syntax_diagnostics::generate_diagnostics(&parse, document)
+                    crate::loader::file_processor::syntax_diagnostics::generate_diagnostics(
+                        &parse, document,
+                    )
                 });
                 // An initially closed file may have opened while collection
                 // waited. Open documents provide all static requires, including

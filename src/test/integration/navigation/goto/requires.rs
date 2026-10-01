@@ -93,8 +93,9 @@ async fn cold_runtime_require_roots_refresh_open_diagnostics_and_preserve_projec
         [0, 1, 2].into_iter().collect()
     );
 
+    let ctx = editor.server().load_context_for_project(&root);
     IndexingCoordinator::new(root, config)
-        .run_complete_indexing(editor.server())
+        .run_complete_indexing(&ctx, editor.server())
         .await
         .unwrap();
 
