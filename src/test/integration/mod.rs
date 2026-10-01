@@ -1,29 +1,15 @@
-//! Integration tests organized by feature.
+//! Integration tests grouped by the same feature families as
+//! `src/lsp/capabilities/` and `src/lsp/query/`.
 
-// Feature-based organization
-mod call_hierarchy;
-mod code_lens;
-mod completion;
+// Diagnostics publication and diagnostic kinds.
 mod diagnostics;
-mod document_highlights;
-mod erb;
-mod extensions;
-mod folding_range;
-mod formatting;
-mod goto;
-mod hover;
-mod implementation;
-mod inference;
-mod inlay_hints;
-mod mixins;
-mod references;
-mod rename;
-mod selection_ranges;
-mod signature_help;
-mod type_hierarchy;
-
-// Domain-specific (YARD type annotations)
-mod constants;
-
-// Multi-workspace routing
-mod workspaces;
+// Rename, completion, formatting, and signature help.
+mod editing;
+// Definition, references, hierarchies, and highlights.
+mod navigation;
+// Hover, inlay hints, code lenses, folding, and selection ranges.
+mod presentation;
+// Cross-cutting Ruby semantics: inference, constants, and mixins.
+mod semantics;
+// Source kinds and project ownership: ERB, extensions, and workspaces.
+mod sources;

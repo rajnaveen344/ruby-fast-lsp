@@ -116,7 +116,7 @@ completion. Editing the declaration replaces those types normally. An array
 with an unknown element does not prove that its block parameter is a Symbol;
 an unresolved constant alias remains Unknown until its declaration resolves.
 The neutral regressions live in
-`src/test/integration/constants/collection_receivers.rs`.
+`src/test/integration/semantics/constants/collection_receivers.rs`.
 
 The [accepted bounds and performance decision](../../support/performance/higher-order-call-inference-final-2026-08-12.json)
 records the original acceptance; current builds require their own validation.

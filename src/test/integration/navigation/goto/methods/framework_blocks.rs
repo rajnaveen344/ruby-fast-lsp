@@ -68,34 +68,34 @@ async fn goto_helper_method_with_unresolved_sinatra_superclass_and_nested_api() 
     editor
         .open(
             "router.rb",
-            include_str!("../../../fixtures/route_helpers/router.rb"),
+            include_str!("../../../../fixtures/route_helpers/router.rb"),
         )
         .await;
     editor
         .open(
             "support.rb",
-            include_str!("../../../fixtures/route_helpers/support.rb"),
+            include_str!("../../../../fixtures/route_helpers/support.rb"),
         )
         .await;
     editor
         .open(
             "catalog.rb",
-            include_str!("../../../fixtures/route_helpers/catalog.rb"),
+            include_str!("../../../../fixtures/route_helpers/catalog.rb"),
         )
         .await;
     editor
         .open(
             "api.rb",
-            include_str!("../../../fixtures/route_helpers/api.rb"),
+            include_str!("../../../../fixtures/route_helpers/api.rb"),
         )
         .await;
     editor
         .open(
             "base.rb",
-            include_str!("../../../fixtures/route_helpers/base.rb"),
+            include_str!("../../../../fixtures/route_helpers/base.rb"),
         )
         .await;
-    let api_app = include_str!("../../../fixtures/route_helpers/web_app.rb");
+    let api_app = include_str!("../../../../fixtures/route_helpers/web_app.rb");
     editor.open("web_app.rb", api_app).await;
     // Cold project indexing reprocesses already-open buffers. Re-apply the same
     // content so ClassReference-from-prior-declaration cannot drop the class node.

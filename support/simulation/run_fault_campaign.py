@@ -150,7 +150,7 @@ FAULTS = (
         "crates/ruby-analysis/src/indexer/fact_collector/nodes/calls/nil_call.rs",
         NIL_CALL_ANCHOR,
         NIL_CALL_ANCHOR + "\n        return;",
-        "test::integration::diagnostics::nil_call::nil_call_publication_survives_save_edit_and_reopen",
+        "test::integration::diagnostics::flow::nil_call::nil_call_publication_survives_save_edit_and_reopen",
         "nil-call publication must match the complete expected warning",
     ),
     Fault(

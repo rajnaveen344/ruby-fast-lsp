@@ -1,13 +1,9 @@
-//! Diagnostics tests organized by diagnostic kind.
+//! Diagnostics tests organized by the Ruby behaviour they check.
 
-mod bad_splat;
-mod expr_receiver_unresolved;
 mod external_linter;
-mod inconsistent_return;
-mod missing_kwarg;
-mod misspelled_method;
-mod nil_call;
-mod raise_non_exception;
-mod unknown_kwarg;
-mod unreachable_code;
-mod wrong_arity;
+// Statement flow: unreachable code, inconsistent returns, and nil receivers.
+mod flow;
+// Method calls: arity, keywords, misspellings, and unresolved receivers.
+mod method_calls;
+// Values with a provably wrong type for their operator (splat, raise).
+mod value_types;
