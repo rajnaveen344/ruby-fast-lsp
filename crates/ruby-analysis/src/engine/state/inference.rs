@@ -1,16 +1,15 @@
-//! Equation solving and the stored inference outcomes, expression types, and
-//! local-read types owned by each file.
+//! Equation solving and the inference evidence owned by each file.
 
 use crate::invariant::ExpectInvariant;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-use crate::core::storage::type_store::TypeStore;
 use crate::core::{
     ConstantTypeDependency, ConstantTypeEquation, ConstantTypeProjection, ConstantTypeTarget,
     FullyQualifiedName, GraphNodeKind, InferenceEvidence, InferenceTelemetry, RubyType,
     SourceFileId, TextRange, TypeInferenceOutcome, TypeSubject, UnknownReason,
 };
 
+use super::types::TypeInferenceOutcomeRef;
 use super::AnalysisEngine;
 use crate::engine::AnalysisQuery;
 use crate::inference::constant::{
@@ -85,40 +84,6 @@ pub(in crate::engine) fn resolve_constant_dependency_type(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StoredTypeInferenceOutcome {
-    Proven(crate::core::storage::type_store::RubyTypeId),
-    Unknown(UnknownReason),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::engine) enum TypeInferenceOutcomeRef<'a> {
-    Proven(&'a RubyType),
-    Unknown(UnknownReason),
-}
-
-impl StoredTypeInferenceOutcome {
-    pub(super) fn from_domain(types: &mut TypeStore, outcome: TypeInferenceOutcome) -> Self {
-        match outcome.unknown_reason() {
-            Some(reason) => Self::Unknown(reason),
-            None => Self::Proven(types.intern_ruby_type(
-                outcome.into_proven_type().expect_invariant(
-                    "call-expression outcome is neither proven nor Unknown",
-                    "TypeInferenceOutcome has exactly those two states",
-                    "build outcomes via TypeInferenceOutcome::proven or ::unknown",
-                ),
-            )),
-        }
-    }
-
-    fn as_ref<'a>(self, types: &'a TypeStore) -> TypeInferenceOutcomeRef<'a> {
-        match self {
-            Self::Proven(ruby_type) => TypeInferenceOutcomeRef::Proven(types.ruby_type(ruby_type)),
-            Self::Unknown(reason) => TypeInferenceOutcomeRef::Unknown(reason),
-        }
-    }
-}
-
 impl AnalysisEngine {
     pub(super) fn resolve_constant_type_equations(&mut self) -> bool {
         if !self.constant_type_equations_dirty {
@@ -165,7 +130,6 @@ impl AnalysisEngine {
             })
             .collect::<BTreeMap<_, _>>();
         let constant_facts = self
-            .facts
             .types
             .constant_type_facts()
             .map(|(constant, range, ruby_type)| ConstantFactInput {
@@ -184,7 +148,6 @@ impl AnalysisEngine {
             match target {
                 ConstantTypeTarget::Fact { subject, range } => {
                     let updated = self
-                        .facts
                         .types
                         .update_equation_target(&subject, range, ruby_type);
                     invariant!(
@@ -198,7 +161,6 @@ impl AnalysisEngine {
                 }
                 ConstantTypeTarget::LocalAssignment { name, range } => {
                     let updated = self
-                        .facts
                         .types
                         .update_local_assignment_equation_target(&name, range, ruby_type);
                     invariant!(
@@ -211,7 +173,7 @@ impl AnalysisEngine {
                     );
                 }
                 ConstantTypeTarget::LocalRead(range) => {
-                    self.update_constant_local_read(range, ruby_type);
+                    self.types.update_constant_local_read(range, ruby_type);
                 }
             }
         }
@@ -225,24 +187,6 @@ impl AnalysisEngine {
         }
         self.constant_type_equations_dirty = false;
         true
-    }
-
-    fn update_constant_local_read(&mut self, range: TextRange, ruby_type: RubyType) {
-        let mut reads = self
-            .local_read_types_by_file
-            .remove(&range.file_id)
-            .unwrap_or_default()
-            .into_vec();
-        reads.retain(|(existing, _)| *existing != range);
-        if ruby_type != RubyType::Unknown {
-            let ruby_type = self.facts.types.intern_ruby_type(ruby_type);
-            reads.push((range, ruby_type));
-        }
-        reads.sort_unstable_by_key(|(range, _)| *range);
-        if !reads.is_empty() {
-            self.local_read_types_by_file
-                .insert(range.file_id, reads.into_boxed_slice());
-        }
     }
 
     /// Solve the complete project-owned method-return equation graph once per
@@ -342,14 +286,12 @@ impl AnalysisEngine {
                     (method.clone(), outcome.clone())
                 })
                 .collect::<BTreeMap<_, _>>();
-            self.facts
-                .types
-                .update_inferred_method_return_types_in_file(
-                    *file_id,
-                    outcomes
-                        .iter()
-                        .map(|(method, outcome)| (method, outcome.clone().into_ruby_type())),
-                );
+            self.types.update_inferred_method_return_types_in_file(
+                *file_id,
+                outcomes
+                    .iter()
+                    .map(|(method, outcome)| (method, outcome.clone().into_ruby_type())),
+            );
             let evidence = self.inference_by_file.get_mut(file_id).expect_invariant(
                 "a method-equation owner disappeared before evidence replacement",
                 "resolution owns the engine write lock",
@@ -496,212 +438,6 @@ impl AnalysisEngine {
                     .ok()
                     .map(|index| evidence.expression_unknown_reasons[index].1)
             })
-    }
-
-    pub(in crate::engine) fn call_expression_outcomes_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Option<Vec<(TextRange, TypeInferenceOutcome)>> {
-        self.call_expression_outcome_views_in_file(file_id)
-            .map(|outcomes| {
-                outcomes
-                    .map(|(range, outcome)| {
-                        let outcome = match outcome {
-                            TypeInferenceOutcomeRef::Proven(ruby_type) => {
-                                TypeInferenceOutcome::proven(ruby_type.clone())
-                            }
-                            TypeInferenceOutcomeRef::Unknown(reason) => {
-                                TypeInferenceOutcome::unknown(reason)
-                            }
-                        };
-                        (range, outcome)
-                    })
-                    .collect()
-            })
-    }
-
-    pub(in crate::engine) fn call_expression_outcome_views_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Option<impl Iterator<Item = (TextRange, TypeInferenceOutcomeRef<'_>)>> {
-        self.call_expression_outcomes_by_file
-            .get(&file_id)
-            .map(|outcomes| {
-                outcomes
-                    .iter()
-                    .map(|(range, outcome)| (*range, outcome.as_ref(&self.facts.types)))
-            })
-    }
-
-    pub(in crate::engine) fn call_expression_outcome_at(
-        &self,
-        range: TextRange,
-    ) -> Option<TypeInferenceOutcomeRef<'_>> {
-        let outcomes = self.call_expression_outcomes_by_file.get(&range.file_id)?;
-        let index = outcomes
-            .binary_search_by_key(&range, |(outcome_range, _)| *outcome_range)
-            .ok()?;
-        Some(outcomes[index].1.as_ref(&self.facts.types))
-    }
-
-    pub(in crate::engine) fn local_read_types_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Option<Vec<(TextRange, RubyType)>> {
-        self.local_read_type_views_in_file(file_id).map(|reads| {
-            reads
-                .map(|(range, ruby_type)| (range, ruby_type.clone()))
-                .collect()
-        })
-    }
-
-    pub(in crate::engine) fn local_read_type_views_in_file(
-        &self,
-        file_id: SourceFileId,
-    ) -> Option<impl Iterator<Item = (TextRange, &RubyType)>> {
-        self.inference_by_file.get(&file_id)?;
-        let reads = self
-            .local_read_types_by_file
-            .get(&file_id)
-            .map_or(&[][..], Box::as_ref);
-        Some(
-            reads
-                .iter()
-                .map(|(range, ruby_type)| (*range, self.facts.types.ruby_type(*ruby_type))),
-        )
-    }
-
-    pub(in crate::engine) fn exact_local_read_type_at(
-        &self,
-        range: TextRange,
-    ) -> Option<&RubyType> {
-        self.inference_by_file.get(&range.file_id)?;
-        let reads = self.local_read_types_by_file.get(&range.file_id)?;
-        let index = reads
-            .binary_search_by_key(&range, |(candidate, _)| *candidate)
-            .ok()?;
-        Some(self.facts.types.ruby_type(reads[index].1))
-    }
-
-    pub(in crate::engine) fn local_read_type_at(
-        &self,
-        file_id: SourceFileId,
-        byte_offset: u32,
-    ) -> Option<&RubyType> {
-        self.inference_by_file.get(&file_id)?;
-        let reads = self.local_read_types_by_file.get(&file_id)?;
-        let upper = reads.partition_point(|(range, _)| range.start_byte <= byte_offset);
-        reads[..upper]
-            .iter()
-            .rev()
-            .find(|(range, _)| range.contains_offset(file_id, byte_offset))
-            .map(|(_, ruby_type)| self.facts.types.ruby_type(*ruby_type))
-    }
-
-    pub(in crate::engine) fn replace_resolved_call_expression_outcomes(
-        &mut self,
-        mut outcomes: HashMap<TextRange, TypeInferenceOutcome>,
-    ) {
-        // Sorting only the compact ranges avoids materializing a second
-        // Vec<(TextRange, TypeInferenceOutcome)> while the resolve map and the
-        // previous file-owned outcomes are both still live. Move each outcome
-        // out of the map only when its file is merged.
-        let mut ordered_ranges = outcomes.keys().copied().collect::<Vec<_>>();
-        ordered_ranges.sort_unstable();
-        let mut ordered_ranges = ordered_ranges.into_iter().peekable();
-        while let Some(first_range) = ordered_ranges.next() {
-            let file_id = first_range.file_id;
-            let first_outcome = StoredTypeInferenceOutcome::from_domain(
-                &mut self.facts.types,
-                outcomes.remove(&first_range).expect_invariant(
-                    "sorted call-expression range has no resolved outcome",
-                    "the range list is built directly from the owned outcome map",
-                    "remove each map entry exactly once while grouping by file",
-                ),
-            );
-            let mut incoming = vec![(first_range, first_outcome)];
-            while ordered_ranges
-                .peek()
-                .is_some_and(|range| range.file_id == file_id)
-            {
-                let range = ordered_ranges.next().expect_invariant(
-                    "a peeked call-expression range disappeared before consumption",
-                    "the local iterator is not shared",
-                    "keep grouping and consumption in one loop",
-                );
-                let outcome = StoredTypeInferenceOutcome::from_domain(
-                    &mut self.facts.types,
-                    outcomes.remove(&range).expect_invariant(
-                        "grouped call-expression range has no resolved outcome",
-                        "each sorted range must still own one map entry",
-                        "remove each map entry exactly once while grouping by file",
-                    ),
-                );
-                incoming.push((range, outcome));
-            }
-
-            self.inference_by_file.get(&file_id).expect_invariant(
-                "resolved call outcome belongs to a file without inference evidence",
-                "file facts are installed before their method candidates resolve",
-                "replace inference evidence atomically with reference candidates",
-            );
-            let mut existing = self
-                .call_expression_outcomes_by_file
-                .remove(&file_id)
-                .unwrap_or_default()
-                .into_vec()
-                .into_iter()
-                .peekable();
-            let mut incoming = incoming.into_iter().peekable();
-            let mut merged = Vec::with_capacity(existing.len() + incoming.len());
-            loop {
-                match (existing.peek(), incoming.peek()) {
-                    (Some((existing_range, _)), Some((incoming_range, _))) => {
-                        match existing_range.cmp(incoming_range) {
-                            std::cmp::Ordering::Less => merged.push(existing.next().expect_invariant(
-                                "a peeked existing call outcome disappeared before merge consumption",
-                                "the local iterator is not shared",
-                                "keep comparison and consumption atomic",
-                            )),
-                            std::cmp::Ordering::Equal => {
-                                existing.next().expect_invariant(
-                                    "an equal existing call outcome disappeared before replacement",
-                                    "the local iterator is not shared",
-                                    "keep comparison and consumption atomic",
-                                );
-                                merged.push(incoming.next().expect_invariant(
-                                    "an equal incoming call outcome disappeared before replacement",
-                                    "the local iterator is not shared",
-                                    "keep comparison and consumption atomic",
-                                ));
-                            }
-                            std::cmp::Ordering::Greater => merged.push(incoming.next().expect_invariant(
-                                "a peeked incoming call outcome disappeared before merge consumption",
-                                "the local iterator is not shared",
-                                "keep comparison and consumption atomic",
-                            )),
-                        }
-                    }
-                    (Some(_), None) => {
-                        merged.extend(existing);
-                        break;
-                    }
-                    (None, Some(_)) => {
-                        merged.extend(incoming);
-                        break;
-                    }
-                    (None, None) => break,
-                }
-            }
-            self.call_expression_outcomes_by_file
-                .insert(file_id, merged.into_boxed_slice());
-        }
-        invariant!(
-            outcomes.is_empty(),
-            what = "resolved call-expression outcomes remained after the complete sorted merge",
-            why = "every map key was copied into the ordered range list",
-            fix = "keep range collection and map ownership in the same merge operation",
-        );
     }
 
     pub(in crate::engine) fn expression_unknown_reasons_in_file(

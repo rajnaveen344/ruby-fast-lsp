@@ -120,7 +120,7 @@ Delete this file when the last task is done. Git history keeps the record.
         retry, and the method-lookup-chain caches with their invalidation.
         Route direct `engine.graph`/`engine.names` reads through component
         methods.
-  - [ ] B3h. Extract `TypeTable` (`engine/state/types.rs`): `TypeStore`, call
+  - [x] B3h. Extract `TypeTable` (`engine/state/types.rs`): `TypeStore`, call
         expression outcomes, local-read types, the outcome merge, and the
         target writers the solver uses. Delete `state/storage.rs`; memory
         stats and `shrink_to_fit` delegate per component. Profiler comparison.

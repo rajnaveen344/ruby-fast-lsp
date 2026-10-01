@@ -7,18 +7,19 @@ mod hierarchy;
 mod inference;
 mod lifecycle;
 mod names;
-mod storage;
+mod types;
 mod uses;
 
 pub(in crate::engine) use decls::EffectiveMethodFactMatch;
 pub use files::{SourceFile, SourceFileInput, SourceFileSnapshot};
-pub(in crate::engine) use inference::{resolve_constant_dependency_type, TypeInferenceOutcomeRef};
+pub(in crate::engine) use inference::resolve_constant_dependency_type;
+pub(in crate::engine) use types::TypeInferenceOutcomeRef;
 
 use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::core::{InferenceEvidence, SourceFileId, TextRange};
+use crate::core::{InferenceEvidence, SourceFileId};
 
 use crate::engine::diagnostics::Diagnostics;
 use crate::engine::AnalysisQuery;
@@ -26,9 +27,8 @@ use crate::stats::{self, StatsSnapshot};
 use decls::DeclIndex;
 use files::Files;
 use hierarchy::Hierarchy;
-use inference::StoredTypeInferenceOutcome;
 use names::Names;
-use storage::FactArena;
+use types::TypeTable;
 use uses::UseIndex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,16 +140,12 @@ pub struct AnalysisEngine {
     semantic_revision: u64,
     pub(in crate::engine) files: Files,
     pub(in crate::engine) names: Names,
-    pub(in crate::engine) facts: FactArena,
+    pub(in crate::engine) types: TypeTable,
     pub(in crate::engine) hierarchy: Hierarchy,
     pub(in crate::engine) uses: UseIndex,
     pub(in crate::engine) diagnostics: Diagnostics,
     pub(in crate::engine) decls: DeclIndex,
     inference_by_file: HashMap<SourceFileId, InferenceEvidence>,
-    call_expression_outcomes_by_file:
-        HashMap<SourceFileId, Box<[(TextRange, StoredTypeInferenceOutcome)]>>,
-    pub(in crate::engine) local_read_types_by_file:
-        HashMap<SourceFileId, Box<[(TextRange, crate::core::storage::type_store::RubyTypeId)]>>,
     method_return_equations_dirty: bool,
     constant_type_equations_dirty: bool,
     method_return_solution_spans_files: bool,
@@ -179,14 +175,12 @@ impl Default for AnalysisEngine {
             semantic_revision: 0,
             files: Files::default(),
             names: Names::default(),
-            facts: FactArena::default(),
+            types: TypeTable::default(),
             hierarchy: Hierarchy::default(),
             uses: UseIndex::default(),
             diagnostics: Diagnostics::default(),
             decls: DeclIndex::default(),
             inference_by_file: HashMap::new(),
-            call_expression_outcomes_by_file: HashMap::new(),
-            local_read_types_by_file: HashMap::new(),
             method_return_equations_dirty: false,
             constant_type_equations_dirty: false,
             method_return_solution_spans_files: false,
@@ -202,14 +196,12 @@ impl Clone for AnalysisEngine {
             semantic_revision: self.semantic_revision,
             files: self.files.clone(),
             names: self.names.clone(),
-            facts: self.facts.clone(),
+            types: self.types.clone(),
             hierarchy: self.hierarchy.clone(),
             uses: self.uses.clone(),
             diagnostics: self.diagnostics.clone(),
             decls: self.decls.clone(),
             inference_by_file: self.inference_by_file.clone(),
-            call_expression_outcomes_by_file: self.call_expression_outcomes_by_file.clone(),
-            local_read_types_by_file: self.local_read_types_by_file.clone(),
             method_return_equations_dirty: self.method_return_equations_dirty,
             constant_type_equations_dirty: self.constant_type_equations_dirty,
             method_return_solution_spans_files: self.method_return_solution_spans_files,
@@ -265,10 +257,7 @@ impl AnalysisEngine {
             AnalysisStat::References,
             stats::count(self.uses.resolved_count()),
         );
-        stats.set(
-            AnalysisStat::Types,
-            stats::count(self.facts.types.fact_count()),
-        );
+        stats.set(AnalysisStat::Types, stats::count(self.types.fact_count()));
         stats.set(
             AnalysisStat::DiagnosticCandidates,
             stats::count(self.diagnostics.candidate_count()),
@@ -298,7 +287,7 @@ impl AnalysisEngine {
             files: self.estimated_file_store_heap_bytes(),
             symbols: self.decls.symbols_heap_bytes(),
             methods: self.decls.methods_heap_bytes(),
-            types: self.facts.types.estimated_heap_bytes(),
+            types: self.types.facts_heap_bytes(),
             reference_candidates: self.uses.candidates_heap_bytes(),
             references: self.uses.resolved_heap_bytes(),
             diagnostics: self.diagnostics.resolved_heap_bytes(),
@@ -318,29 +307,18 @@ impl AnalysisEngine {
                 .values()
                 .map(InferenceEvidence::estimated_heap_bytes)
                 .sum::<usize>()
-            + self.call_expression_outcomes_by_file.capacity()
-                * (size_of::<SourceFileId>()
-                    + size_of::<Box<[(TextRange, StoredTypeInferenceOutcome)]>>()
-                    + 1)
-            + self
-                .call_expression_outcomes_by_file
-                .values()
-                .map(|outcomes| {
-                    outcomes.len() * size_of::<(TextRange, StoredTypeInferenceOutcome)>()
-                })
-                .sum::<usize>()
-            + self.local_read_types_by_file.capacity()
-                * (size_of::<SourceFileId>()
-                    + size_of::<Box<[(TextRange, crate::core::storage::type_store::RubyTypeId)]>>()
-                    + 1)
-            + self
-                .local_read_types_by_file
-                .values()
-                .map(|reads| {
-                    reads.len()
-                        * size_of::<(TextRange, crate::core::storage::type_store::RubyTypeId)>()
-                })
-                .sum::<usize>()
+            + self.types.file_outcomes_heap_bytes()
+    }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.files.shrink_to_fit();
+        self.names.shrink_to_fit();
+        self.decls.shrink_to_fit();
+        self.types.shrink_to_fit();
+        self.hierarchy.shrink_to_fit();
+        self.uses.shrink_to_fit();
+        self.diagnostics.shrink_to_fit();
+        self.inference_by_file.shrink_to_fit();
     }
 }
 

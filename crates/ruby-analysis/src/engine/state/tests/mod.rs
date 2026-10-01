@@ -8,7 +8,7 @@ use crate::core::{
 };
 
 use super::*;
-use crate::core::{SourceKind, TypeResolution};
+use crate::core::{SourceKind, TextRange, TypeResolution};
 use crate::engine::persist::fingerprint::SemanticChange;
 use crate::engine::resolution::{
     method_lookup_chain, method_lookup_chain_for_reference_cached,

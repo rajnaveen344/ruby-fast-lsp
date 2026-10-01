@@ -10,7 +10,7 @@ use crate::core::{
     TypeSubject,
 };
 
-use super::inference::{StoredTypeInferenceOutcome, TypeInferenceOutcomeRef};
+use super::types::TypeInferenceOutcomeRef;
 use super::{AnalysisEngine, ResolveMode, ResolveStat, SourceFileSnapshot};
 use crate::engine::persist::fingerprint::{SemanticChange, SemanticExportFingerprint};
 
@@ -168,7 +168,6 @@ impl AnalysisEngine {
             facts.method_visibility_overrides,
             facts.execution_contexts,
         );
-        self.facts.types.replace_file(file_id, facts.types);
         self.hierarchy.replace_file(
             &mut self.names,
             file_id,
@@ -183,36 +182,13 @@ impl AnalysisEngine {
             .replace_file(file_id, facts.diagnostic_candidates, facts.diagnostics);
         let call_expression_outcomes =
             std::mem::take(&mut facts.inference.call_expression_outcomes);
+        self.types.replace_file(
+            file_id,
+            facts.types,
+            call_expression_outcomes,
+            facts.local_read_types,
+        );
         self.inference_by_file.insert(file_id, facts.inference);
-        if call_expression_outcomes.is_empty() {
-            self.call_expression_outcomes_by_file.remove(&file_id);
-        } else {
-            let outcomes = call_expression_outcomes
-                .into_iter()
-                .map(|(range, outcome)| {
-                    (
-                        range,
-                        StoredTypeInferenceOutcome::from_domain(&mut self.facts.types, outcome),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .into_boxed_slice();
-            self.call_expression_outcomes_by_file
-                .insert(file_id, outcomes);
-        }
-        if facts.local_read_types.is_empty() {
-            self.local_read_types_by_file.remove(&file_id);
-        } else {
-            let local_read_types = facts
-                .local_read_types
-                .into_vec()
-                .into_iter()
-                .map(|(range, ruby_type)| (range, self.facts.types.intern_ruby_type(ruby_type)))
-                .collect::<Vec<_>>()
-                .into_boxed_slice();
-            self.local_read_types_by_file
-                .insert(file_id, local_read_types);
-        }
         self.method_return_equations_dirty |= equations_changed;
         self.constant_type_equations_dirty = self.inference_by_file.values().any(|evidence| {
             !evidence.constant_type_equations.is_empty()
@@ -226,7 +202,7 @@ impl AnalysisEngine {
 
     pub(super) fn refresh_retained_shape_telemetry(&mut self, file_id: SourceFileId) {
         let mut observed = InferenceTelemetry::default();
-        for ruby_type in self.facts.types.ruby_types_in_file(file_id) {
+        for ruby_type in self.types.ruby_types_in_file(file_id) {
             observed.observe_retained_type(ruby_type);
         }
         if let Some(reads) = self.local_read_type_views_in_file(file_id) {

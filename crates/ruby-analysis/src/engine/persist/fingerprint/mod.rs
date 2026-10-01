@@ -342,7 +342,7 @@ impl AnalysisEngine {
                 }),
             );
         }
-        for fact in self.facts.types.all_facts() {
+        for fact in self.types.store().all_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -462,15 +462,14 @@ impl AnalysisEngine {
                 );
             }
         }
-        for (file_id, reads) in &self.local_read_types_by_file {
-            for (range, ruby_type) in reads.as_ref() {
-                let ruby_type = self.facts.types.ruby_type(*ruby_type);
+        for (file_id, reads) in self.types.local_read_types_by_file() {
+            for (range, ruby_type) in reads {
                 push_component(
                     &mut components,
-                    *file_id,
+                    file_id,
                     export_hash(|hasher| {
                         stable_u8(hasher, 11);
-                        stable_range_offsets(hasher, *range);
+                        stable_range_offsets(hasher, range);
                         stable_ruby_type(hasher, ruby_type);
                     }),
                 );
@@ -581,8 +580,8 @@ impl AnalysisEngine {
                 })
             }));
         }
-        for (file_id, reads) in &self.local_read_types_by_file {
-            let output = &mut components.get_mut(file_id).unwrap_or_else(|| {
+        for (file_id, reads) in self.types.local_read_types_by_file() {
+            let output = &mut components.get_mut(&file_id).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "local-read fingerprint belongs to unknown file {:?}",
                     why = "flow evidence cannot outlive its registered source",
@@ -590,10 +589,10 @@ impl AnalysisEngine {
                     file_id,
                 )
             })[2];
-            output.extend(reads.iter().map(|(range, ruby_type)| {
+            output.extend(reads.map(|(range, ruby_type)| {
                 export_hash(|hasher| {
-                    stable_range_offsets(hasher, *range);
-                    stable_ruby_type(hasher, self.facts.types.ruby_type(*ruby_type));
+                    stable_range_offsets(hasher, range);
+                    stable_ruby_type(hasher, ruby_type);
                 })
             }));
         }
