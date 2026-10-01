@@ -467,17 +467,17 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
 
     assert!(matches!(
         engine
-            .query()
+            .view()
             .resolve_method_reference(&client, &RubyMethod::new("stub").unwrap()),
         crate::engine::resolution::MethodLookupResult::Ambiguous { .. }
     ));
     assert!(matches!(
         engine
-            .query()
+            .view()
             .resolve_method_reference(&client, &RubyMethod::new("to_s").unwrap()),
         crate::engine::resolution::MethodLookupResult::Unique(_)
     ));
-    match engine.query().resolve_method_reference(
+    match engine.view().resolve_method_reference(
         &client_instance,
         &RubyMethod::new("object_mixin_method").unwrap(),
     ) {
@@ -495,7 +495,7 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
         ),
     }
     assert!(matches!(
-        engine.query().resolve_method_reference(
+        engine.view().resolve_method_reference(
             &client_instance,
             &RubyMethod::new("direct_mixin_method").unwrap()
         ),
@@ -564,7 +564,7 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
         ResolveMode::Immediate,
     );
 
-    let query = engine.query();
+    let query = engine.view();
     assert_eq!(
         query
             .resolve_method_callees(&parent, &helper)
@@ -598,11 +598,11 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
 
     engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert!(engine
-        .query()
+        .view()
         .resolve_method_callees(&parent, &helper)
         .is_none());
     assert!(engine
-        .query()
+        .view()
         .resolve_method_callees(&child, &helper)
         .is_none());
 }
@@ -722,7 +722,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
         ResolveMode::Immediate,
     );
 
-    let query = engine.query();
+    let query = engine.view();
     let shared_callees = query
         .resolve_method_callees(&template, &shared)
         .expect("template-local helper must resolve");
@@ -762,7 +762,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
         ResolveMode::Immediate,
     );
     let one = engine
-        .query()
+        .view()
         .resolve_method_callees(&template, &consumer)
         .expect("remaining application helper must resolve");
     assert_eq!(one.len(), 1);
@@ -774,7 +774,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
         ResolveMode::Immediate,
     );
     let removed = engine
-        .query()
+        .view()
         .resolve_method_callees(&template, &consumer)
         .expect("known template must retain receiver-only fallback");
     assert_eq!(removed.len(), 1);
@@ -826,15 +826,15 @@ fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
     );
 
     assert_eq!(
-        engine.query().execution_context_at(file_id, 30),
+        engine.view().execution_context_at(file_id, 30),
         Some(&inner)
     );
     assert_eq!(
-        engine.query().execution_context_at(file_id, 12),
+        engine.view().execution_context_at(file_id, 12),
         Some(&outer)
     );
-    assert_eq!(engine.query().execution_context_at(file_id, 5), None);
+    assert_eq!(engine.view().execution_context_at(file_id, 5), None);
 
     engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-    assert_eq!(engine.query().execution_context_at(file_id, 30), None);
+    assert_eq!(engine.view().execution_context_at(file_id, 30), None);
 }

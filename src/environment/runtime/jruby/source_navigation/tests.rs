@@ -349,7 +349,7 @@ fn projects_only_metadata_verified_java_source_locations_into_engine_facts() {
             .collect::<Vec<_>>(),
         RubyMethod::new("combine").unwrap(),
     );
-    let methods = engine.query().methods_for_fqn(&combine);
+    let methods = engine.view().methods_for_fqn(&combine);
     assert_eq!(methods.len(), 1);
     assert_eq!(
         &source[usize::try_from(methods[0].name_range.start_byte).unwrap()
@@ -368,7 +368,7 @@ fn projects_only_metadata_verified_java_source_locations_into_engine_facts() {
         1,
         "Java implementation class declarations must use the canonical constant identity"
     );
-    assert!(engine.query().diagnostic_facts_in_file(file_id).is_empty());
+    assert!(engine.view().diagnostic_facts_in_file(file_id).is_empty());
 }
 
 #[test]

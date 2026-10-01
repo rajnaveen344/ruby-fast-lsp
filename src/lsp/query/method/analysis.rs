@@ -99,7 +99,7 @@ pub(super) fn find_method_definitions(
     protected_caller: Option<&FullyQualifiedName>,
 ) -> Option<Vec<Location>> {
     let engine = query.analysis_engine()?.read();
-    let analysis = engine.query();
+    let analysis = engine.view();
     let ranges = match receiver {
         MethodLookupReceiver::Namespace(owner) => {
             analysis.method_definition_ranges(owner, method, allow_private, protected_caller)

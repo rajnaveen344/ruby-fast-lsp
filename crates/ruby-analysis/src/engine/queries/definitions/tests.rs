@@ -62,7 +62,7 @@ fn definition_source_preference_is_shared_and_falls_back_after_removal() {
     let (owner, implementation) =
         declaration(&mut engine, "/z_record.rb", SourceKind::Gem, "Record");
     for expected in [implementation, stub, signature] {
-        let query = engine.query();
+        let query = engine.view();
         assert_eq!(
             query.constant_definition_ranges(&owner.namespace_parts(), &[]),
             vec![expected]
@@ -102,7 +102,7 @@ fn definition_source_preference_retains_a_different_receivers_signature() {
         declaration(&mut engine, "/z_record.rb", SourceKind::Project, "Record");
     let receiver = RubyType::union(vec![RubyType::Class(other), RubyType::Class(record)]);
     assert_eq!(
-        engine.query().method_definition_ranges_for_type(
+        engine.view().method_definition_ranges_for_type(
             &receiver,
             &RubyMethod::new("label").unwrap(),
             true,

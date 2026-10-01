@@ -12,7 +12,7 @@ fn constant_type_at(
     file_id: SourceFileId,
     byte_offset: u32,
 ) -> Option<RubyType> {
-    match engine.query().type_at(
+    match engine.view().type_at(
         &TypeSubject::Constant(constant.clone()),
         file_id,
         byte_offset,
@@ -74,7 +74,7 @@ fn file_scoped_queries_follow_replacement_without_losing_other_files() {
         constant_type_at(&engine, &constant, file_ids[1], 3),
         Some(RubyType::integer()),
     );
-    assert_eq!(engine.query().all_type_facts().len(), 1);
+    assert_eq!(engine.view().all_type_facts().len(), 1);
 }
 
 #[test]

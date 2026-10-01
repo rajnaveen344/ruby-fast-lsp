@@ -210,8 +210,15 @@ impl Project {
 }
 
 impl Project {
-    pub fn query(&self) -> View<'_> {
+    /// A read-only view of this project's current semantic state.
+    pub fn view(&self) -> View<'_> {
         View::new(self)
+    }
+
+    /// Former name of [`Project::view`]; removed once loader callers migrate.
+    #[inline]
+    pub fn query(&self) -> View<'_> {
+        self.view()
     }
 
     pub fn stats(&self) -> StatsSnapshot<AnalysisStat> {

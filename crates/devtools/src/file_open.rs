@@ -222,7 +222,7 @@ fn analysis_fact_count(server: &RubyLanguageServer) -> u64 {
             stats::count(engine.all_symbol_facts().len())
                 + stats::count(engine.all_method_facts().len())
                 + engine.stats().get(AnalysisStat::References)
-                + stats::count(engine.query().all_type_facts().len())
+                + stats::count(engine.view().all_type_facts().len())
         })
         .sum()
 }

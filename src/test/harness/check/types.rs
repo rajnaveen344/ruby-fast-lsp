@@ -183,7 +183,7 @@ fn latest_variable_type(
     subject_matches: impl Fn(&TypeSubject) -> bool,
 ) -> Option<RubyType> {
     engine
-        .query()
+        .view()
         .all_type_facts()
         .into_iter()
         .filter(|fact| fact.ruby_type != RubyType::Unknown && subject_matches(&fact.subject))

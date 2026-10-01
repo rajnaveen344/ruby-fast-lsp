@@ -146,7 +146,8 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B4b. Rename `replace_facts` to `update` and
         `replace_facts_if_source_snapshot` to `update_if_snapshot`; migrate
         callers.
-  - [ ] B4c. Add `Project::view()`; migrate `query()` callers and delete it.
+  - [x] B4c. Add `Project::view()`; migrate `query()` callers. `query()`
+        forwards to `view()` until the loader callers migrate (B4h).
   - [ ] B4d. `impl Semantics for View`; the `RwLock<Project>` impl takes a
         guard and delegates.
   - [ ] B4e. Move read-only methods from `Project` to `View`, one component

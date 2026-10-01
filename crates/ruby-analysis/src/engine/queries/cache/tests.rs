@@ -48,7 +48,7 @@ fn exact_call_receiver_type_keeps_unknown_and_union_proof_barriers() {
     let (mut engine, file_id, receiver, message, facts) = fixture();
     engine.update(file_id, facts.clone(), ResolveMode::Deferred);
     assert_eq!(
-        engine.query().exact_call_receiver_type(message, receiver),
+        engine.view().exact_call_receiver_type(message, receiver),
         Some(RubyType::nil_class())
     );
 
@@ -61,7 +61,7 @@ fn exact_call_receiver_type_keeps_unknown_and_union_proof_barriers() {
     };
     engine.update(file_id, unknown, ResolveMode::Deferred);
     assert_eq!(
-        engine.query().exact_call_receiver_type(message, receiver),
+        engine.view().exact_call_receiver_type(message, receiver),
         Some(RubyType::Unknown)
     );
 
@@ -75,7 +75,7 @@ fn exact_call_receiver_type_keeps_unknown_and_union_proof_barriers() {
         ResolveMode::Deferred,
     );
     assert_eq!(
-        engine.query().exact_call_receiver_type(message, receiver),
+        engine.view().exact_call_receiver_type(message, receiver),
         Some(union)
     );
 }
@@ -86,19 +86,19 @@ fn exact_call_receiver_type_rejects_other_message_and_receiver_ranges() {
     engine.update(file_id, facts, ResolveMode::Deferred);
     assert_eq!(
         engine
-            .query()
+            .view()
             .exact_call_receiver_type(TextRange::new(file_id, 2, 7), receiver),
         None
     );
     assert_eq!(
         engine
-            .query()
+            .view()
             .exact_call_receiver_type(TextRange::new(file_id, 3, 8), receiver),
         None
     );
     assert_eq!(
         engine
-            .query()
+            .view()
             .exact_call_receiver_type(message, TextRange::new(file_id, 0, 2)),
         None
     );

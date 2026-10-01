@@ -95,7 +95,7 @@ pub(crate) fn print_diagnostic_manifest(server: &RubyLanguageServer) -> anyhow::
     workspaces.sort_by(|left, right| left.root_path.cmp(&right.root_path));
     for workspace in workspaces {
         let engine = workspace.analysis_engine.read();
-        let query = engine.query();
+        let query = engine.view();
         let mut diagnostics = query
             .all_diagnostic_facts()
             .into_iter()

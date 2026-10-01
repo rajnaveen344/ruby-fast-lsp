@@ -128,7 +128,7 @@ pub(crate) fn analyzer_for_document(
     let byte_offset = document.position_to_analysis_offset(source_position(position));
     let context = engine
         .read()
-        .query()
+        .view()
         .execution_context_at(document.analysis_file_id(), byte_offset)
         .cloned();
     match context {

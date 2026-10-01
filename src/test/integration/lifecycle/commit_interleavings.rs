@@ -26,7 +26,7 @@ fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
     let path = uri.to_file_path().unwrap();
     let engine = editor.server().analysis_engine_for_uri(&uri);
     let snapshot = engine.read().source_snapshot_for_path(&path).unwrap();
-    let known = Arc::new(engine.read().query().known_namespace_fqns());
+    let known = Arc::new(engine.read().view().known_namespace_fqns());
     let facts = FileProcessor::new()
         .collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution(
             &uri,

@@ -76,7 +76,7 @@ fn union_method_completion_requires_every_receiver_member() {
         RubyType::Class(FullyQualifiedName::constant(beta.namespace_parts())),
     ]);
     let matches = engine
-        .query()
+        .view()
         .method_matches_for_type(&receiver, "", NamespaceKind::Instance);
 
     assert_eq!(matches.len(), 1);
@@ -87,7 +87,7 @@ fn union_method_completion_requires_every_receiver_member() {
         Some(RubyType::union([RubyType::integer(), RubyType::string()]))
     );
 
-    let query = engine.query();
+    let query = engine.view();
     let shared = RubyMethod::new("shared").unwrap();
     let exact_callees = query
         .resolve_protected_method_callees_for_type(&receiver, &shared, &alpha)
@@ -666,7 +666,7 @@ fn constant_rename_rejects_external_only_definition() {
     );
 
     assert!(engine
-        .query()
+        .view()
         .constant_rename_target(&[RubyConstant::new("User").unwrap()], &[])
         .is_none());
 }
@@ -737,31 +737,31 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
     );
 
     let callees = engine
-        .query()
+        .view()
         .resolve_method_callees(&owner, &method_name)
         .expect("method owner must resolve");
     assert_eq!(callees.len(), 1);
     assert_eq!(callees[0].definition_ranges, vec![implementation_range]);
     let signatures = engine
-        .query()
+        .view()
         .resolve_method_signature_facts(&owner, &method_name);
     assert_eq!(signatures.len(), 1);
     assert_eq!(signatures[0].range, signature_range);
     assert_eq!(signatures[0].return_type_label.as_deref(), Some("String"));
     assert_eq!(
         engine
-            .query()
+            .view()
             .method_return_type_for_receiver(&owner, &method_name),
         Some(RubyType::string())
     );
     assert_eq!(
-        engine.query().method_return_type_for_callee(&callees[0]),
+        engine.view().method_return_type_for_callee(&callees[0]),
         Some(RubyType::string()),
         "an already-resolved callee must expose its return type without another receiver lookup"
     );
     assert_eq!(
         engine
-            .query()
+            .view()
             .constant_definition_ranges(&[RubyConstant::new("Widget").unwrap()], &[],),
         vec![TextRange::new(implementation_file, 0, 37)]
     );
@@ -811,7 +811,7 @@ fn inherited_method_callee_keeps_the_defining_parent_owner() {
     );
 
     let callees = engine
-        .query()
+        .view()
         .resolve_method_callees(&child, &method)
         .expect("Child must resolve Parent#value through ordinary ancestry");
     assert_eq!(callees.len(), 1);
@@ -851,7 +851,7 @@ fn public_lookup_of_a_private_method_is_receiver_only() {
     );
 
     let private_callees = engine
-        .query()
+        .view()
         .resolve_method_callees(&owner, &method)
         .expect("private lookup must still see User#secret");
     assert_eq!(private_callees.len(), 1);
@@ -859,7 +859,7 @@ fn public_lookup_of_a_private_method_is_receiver_only() {
     assert_eq!(private_callees[0].definition_ranges, vec![definition_range]);
 
     let public_callees = engine
-        .query()
+        .view()
         .resolve_public_method_callees(&owner, &method)
         .expect("public lookup must retain the receiver when the method is private");
     assert_eq!(public_callees.len(), 1);

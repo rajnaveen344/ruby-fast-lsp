@@ -272,7 +272,7 @@ pub(crate) async fn run_type_inference_only(server: &RubyLanguageServer) {
             workspace
                 .analysis_engine
                 .read()
-                .query()
+                .view()
                 .all_type_facts()
                 .into_iter()
                 .filter(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))

@@ -72,7 +72,7 @@ let file_id = engine.register_file(SourceFileInput {
 let analysis = AnalysisIndexer::new(file_id).index_source(source);
 engine.update(file_id, analysis, ResolveMode::Immediate);
 
-assert_eq!(engine.query().symbol_facts_in_file(file_id).len(), 1);
+assert_eq!(engine.view().symbol_facts_in_file(file_id).len(), 1);
 
 // Replacing a file also removes its old semantic facts.
 let edited_id = engine.register_file(SourceFileInput {
@@ -82,7 +82,7 @@ let edited_id = engine.register_file(SourceFileInput {
 });
 assert_eq!(edited_id, file_id);
 engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-assert!(engine.query().symbol_facts_in_file(file_id).is_empty());
+assert!(engine.view().symbol_facts_in_file(file_id).is_empty());
 ```
 
 Use deferred replacement followed by one `engine.resolve()` for a batch. Delayed

@@ -54,21 +54,21 @@ fn expression_query_preserves_an_exact_unknown_proof_barrier() {
     );
 
     assert_eq!(
-        engine.query().expression_type_at(file_id, 2),
+        engine.view().expression_type_at(file_id, 2),
         Some(RubyType::Unknown),
         "an exact Unknown expression must stop adapters from borrowing another concrete type"
     );
     assert_eq!(
-        engine.query().expression_unknown_reason(range),
+        engine.view().expression_unknown_reason(range),
         Some(UnknownReason::NoReachingAssignment)
     );
     assert_eq!(
-        engine.query().expression_unknown_reason_at(file_id, 2),
+        engine.view().expression_unknown_reason_at(file_id, 2),
         Some(UnknownReason::NoReachingAssignment)
     );
 
     engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-    assert_eq!(engine.query().expression_unknown_reason(range), None);
+    assert_eq!(engine.view().expression_unknown_reason(range), None);
 }
 
 #[test]
@@ -89,14 +89,14 @@ fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
         ResolveMode::Immediate,
     );
 
-    assert_eq!(engine.query().expression_type_at(file_id, 2), None);
+    assert_eq!(engine.view().expression_type_at(file_id, 2), None);
     assert_eq!(
-        engine.query().expression_unknown_reason_at(file_id, 2),
+        engine.view().expression_unknown_reason_at(file_id, 2),
         Some(UnknownReason::UnresolvedAssignmentValue),
         "compact local-flow evidence must remain queryable without entering the general type store"
     );
     assert_eq!(
-        engine.query().expression_unknown_reasons_in_file(file_id),
+        engine.view().expression_unknown_reasons_in_file(file_id),
         Some(&[(range, UnknownReason::UnresolvedAssignmentValue)][..])
     );
 }
@@ -118,23 +118,23 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
     );
 
     assert_eq!(
-        engine.query().expression_type_at(file_id, 2),
+        engine.view().expression_type_at(file_id, 2),
         Some(RubyType::string())
     );
     assert_eq!(
-        engine.query().local_read_type_at(file_id, 2),
+        engine.view().local_read_type_at(file_id, 2),
         Some(RubyType::string())
     );
     assert_eq!(
-        engine.query().local_read_types_in_file(file_id),
+        engine.view().local_read_types_in_file(file_id),
         Some(vec![(range, RubyType::string())])
     );
     assert_ne!(engine.semantic_result_fingerprint(), empty_fingerprint);
 
     engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-    assert_eq!(engine.query().expression_type_at(file_id, 2), None);
+    assert_eq!(engine.view().expression_type_at(file_id, 2), None);
     assert_eq!(
-        engine.query().local_read_types_in_file(file_id),
+        engine.view().local_read_types_in_file(file_id),
         Some(Vec::new())
     );
 }
@@ -285,7 +285,7 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
         resolve_pass.get(ResolveStat::MethodVisibilityCacheEntries),
         1
     );
-    let query = engine.query();
+    let query = engine.view();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
         .expect("resolved calls must retain proof outcomes");
@@ -401,7 +401,7 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
         resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheEntries),
         1
     );
-    let query = engine.query();
+    let query = engine.view();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
         .expect("ambiguous resolved calls must retain proof outcomes");
@@ -497,7 +497,7 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
     assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverCandidates), 1);
     assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverProven), 1);
     assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverUnknown), 0);
-    let query = engine.query();
+    let query = engine.view();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
         .expect("nested calls must retain same-pass proof outcomes");
@@ -585,7 +585,7 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
 
     engine.resolve();
 
-    let query = engine.query();
+    let query = engine.view();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
         .expect("disjoint file-owned and resolved call outcomes must both remain");
@@ -772,13 +772,13 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
     );
 
     let callees = engine
-        .query()
+        .view()
         .resolve_method_callees(&owner, &method_name)
         .expect("reopened Service#value must resolve");
     assert_eq!(callees.len(), 1);
     invariant_eq!(
         engine
-            .query()
+            .view()
             .method_return_type_for_receiver(&owner, &method_name),
         None,
         what = "receiver return inference discarded an unresolved reopened method definition",
@@ -786,7 +786,7 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
         fix = "return Unknown/None unless every matching definition proves a return type",
     );
     invariant_eq!(
-        engine.query().method_return_type_for_callee(&callees[0]),
+        engine.view().method_return_type_for_callee(&callees[0]),
         None,
         what =
             "resolved-callee return inference discarded an unresolved reopened method definition",
@@ -895,7 +895,7 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
     );
     invariant_eq!(
         engine
-            .query()
+            .view()
             .method_return_type_for_receiver(&widget, &ghost),
         None,
         what = "Widget#ghost inherited BasicObject#method_missing's stub return",
@@ -904,7 +904,7 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
     );
     assert_eq!(
         engine
-            .query()
+            .view()
             .method_return_type_for_receiver(&dynamic, &ghost),
         Some(RubyType::integer()),
         "a project method_missing must still prove the fallback return"
@@ -938,12 +938,12 @@ fn expression_end_query_treats_exact_unknown_call_outcome_as_authoritative() {
     );
 
     assert_eq!(
-        engine.query().expression_type_ending_at(file_id, 14),
+        engine.view().expression_type_ending_at(file_id, 14),
         Some(RubyType::Unknown),
         "a call-level Unknown must prevent completion from using a stale expression fact"
     );
     assert_eq!(
-        engine.query().proven_expression_type_ending_at(file_id, 14),
+        engine.view().proven_expression_type_ending_at(file_id, 14),
         None,
         "proven-only consumers must omit the same exact Unknown"
     );

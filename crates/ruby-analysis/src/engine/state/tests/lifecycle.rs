@@ -94,7 +94,7 @@ fn stale_source_revision_cannot_replace_newer_file_facts() {
         None,
         "facts collected from a superseded source snapshot must be discarded"
     );
-    assert!(engine.query().namespace_exists(&utility));
+    assert!(engine.view().namespace_exists(&utility));
 }
 
 #[test]
@@ -129,16 +129,16 @@ fn namespace_existence_tracks_graph_node_replacement() {
         ResolveMode::Immediate,
     );
 
-    assert!(engine.query().namespace_exists(&user));
+    assert!(engine.view().namespace_exists(&user));
     assert!(!engine
-        .query()
+        .view()
         .namespace_exists(&FullyQualifiedName::namespace(vec![RubyConstant::new(
             "Missing"
         )
         .unwrap()])));
 
     engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-    assert!(!engine.query().namespace_exists(&user));
+    assert!(!engine.view().namespace_exists(&user));
 }
 
 #[test]

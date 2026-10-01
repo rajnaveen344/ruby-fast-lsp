@@ -130,7 +130,7 @@ async fn mixin_dispatch_unknown_override_does_not_reuse_default_type() {
             .server()
             .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
         let engine = engine.read();
-        engine.query().method_return_type_for_receiver(
+        engine.view().method_return_type_for_receiver(
             &FullyQualifiedName::namespace(vec![RubyConstant::new("Feature").unwrap()]),
             &RubyMethod::new("registry").unwrap(),
         )
