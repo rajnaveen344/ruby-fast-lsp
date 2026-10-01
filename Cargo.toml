@@ -140,6 +140,11 @@ simulation = []
 memory-profiling = []
 jemalloc = ["dep:tikv-jemallocator"]
 
+# Line tables keep file:line in panics and backtraces while cutting dev
+# build time and target size; optimized builds are release-only.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 opt-level = "z"
 strip = "symbols"
