@@ -141,14 +141,95 @@ Delete this file when the last task is done. Git history keeps the record.
   data in the same order (`state/tests/fingerprints.rs`).
 - [ ] B4. Reduce `AnalysisEngine` to `Project` with `update`, `remove`,
       `resolve`, and `view`.
+  - [ ] B4a. Rename `AnalysisEngine` to `Project` and `AnalysisQuery` to
+        `View`; keep `pub type` aliases in `engine/mod.rs` until C1 lands.
+  - [ ] B4b. Rename `replace_facts` to `update` and
+        `replace_facts_if_source_snapshot` to `update_if_snapshot`; migrate
+        callers.
+  - [ ] B4c. Add `Project::view()`; migrate `query()` callers and delete it.
+  - [ ] B4d. `impl Semantics for View`; the `RwLock<Project>` impl takes a
+        guard and delegates.
+  - [ ] B4e. Move read-only methods from `Project` to `View`, one component
+        per commit (files, decls, hierarchy, diagnostics, solver telemetry,
+        fingerprints).
+  - [ ] B4f. Add `Project::remove(file_id)` and `remove_if_snapshot`: drop
+        the file from every component, `Files` maps, and export fingerprints;
+        advance the revision; re-queue dependents. Ids are never reused. Tests
+        in `engine/state/tests/remove.rs`: removal equals never-added
+        fingerprints, stale snapshots rejected, re-register does not resurrect
+        facts, edges into the removed file become unresolved, unknown id is a
+        no-op.
+  - [ ] B4g. Replace clear-by-empty-facts with `remove` in the server
+        (`clear_file_facts_if_kind`, project collection, semantic context),
+        routed through `LoadSink` (after C1e). Server test: a deleted watched
+        file drops its diagnostics and references.
+  - [ ] B4h. Remove the aliases; update the engine and crate READMEs.
 - [ ] B5. Add `lookup::method(view, MethodRequest) -> MethodAnswer` and replace
       the method-lookup variants with it.
+  - [ ] B5a. Add `engine/lookup/` with `MethodRequest { receiver, method,
+        access, want }` and `MethodAnswer { Found, Ambiguous, Missing,
+        Unknown }`, delegating to the existing inner functions. Equality tests
+        against the legacy functions per want × access × receiver.
+  - [ ] B5b. Fold `MethodLookupResult` and `EffectiveMethodFactMatch` into
+        `MethodAnswer`.
+  - [ ] B5c. Make the public/protected/`_for_type`/`_cached` wrappers
+        one-liners over `lookup::method`; delete those with no callers.
+  - [ ] B5d. Make the return-type walk consume `MethodAnswer` instead of
+        `method_facts_in_chain`. Profiler comparison.
+  - [ ] B5e. Replace the three method memo maps with one keyed on
+        `MethodRequest`. Profiler comparison.
+  - [ ] B5f. Migrate server callers; delete the remaining legacy wrappers.
+  - [ ] B5g. Make `Semantics` method reads call `lookup::method`. Profiler
+        comparison.
+
+  Notes: `MethodAnswer::Unknown` carries the rule that unknown lookup edges
+  suppress missing-method claims (file pass, grouped methods, workspace pass,
+  rename). Answers are derived data and never enter fingerprints.
 - [ ] B6. Move `AnalysisQuery` methods to free functions over `View`, one
       feature at a time: definition, references, hover, completion, inlay
       hints, diagnostics.
+  - [ ] B6a. `EngineQuery::with_view` takes exactly one read guard per
+        request.
+  - [ ] B6b. Definition, implementation, and the shared method module.
+  - [ ] B6c. References and document highlights.
+  - [ ] B6d. Hover.
+  - [ ] B6e. Completion. Profiler comparison after B6b–e, including writer
+        wait time.
+  - [ ] B6f. Inlay hints, signature help, rename, hierarchies, code lens,
+        workspace symbols.
+  - [ ] B6g. Diagnostics projection takes `&View` (with B7d).
+  - [ ] B6h. Only `Project::view()` constructs views outside `engine/`.
+
+  Notes: B6 changes signatures and C3 moves files; never mix them in one
+  commit. Do B6 for a feature before its C3 move, or after it lands.
 - [ ] B7. Gather diagnostic policy into one module.
+  - [ ] B7a. `engine/diagnostics/policy.rs` absorbs `helpers.rs` and owns the
+        code constants and severities.
+  - [ ] B7b. Move the suppression predicates (incomplete chain, explicit
+        contract, dynamic mixin hook) into `policy.rs`; rename uses the same
+        predicate, with a test for fail-closed rename on an incomplete chain.
+  - [ ] B7c. The server imports the engine's `unresolved-require` code.
+  - [ ] B7d. One engine-to-LSP projection; delete the coordinator's fast copy
+        (keep the faster implementation). Measure open-project publish.
+  - [ ] B7e. One composition function for syntax, engine, and linter
+        diagnostics; replace the hand-assembled publish sites.
+  - [ ] B7f. Move composition with C3e; the linter stays a runner.
 - [ ] B8. Break the indexer ↔ inference ↔ engine cycle so dependencies point
-      one way.
+      one way: core ← inference ← indexer ← engine.
+  - [ ] B8a. Move `MethodReceiver` and `VariableTypeKind` to `core`.
+  - [ ] B8b. Move `inference/completion/` to `engine/queries/completion/`.
+  - [ ] B8c. Move callable-literal lowering helpers into inference.
+  - [ ] B8d. Move `Semantics`, `ReceiverAccess`, and `LocalType` to
+        `inference/semantics.rs`; the engine keeps the impls.
+  - [ ] B8e. Inference takes `&dyn Semantics` instead of `AnalysisQuery`.
+        Profiler comparison; use generics if dispatch costs show.
+  - [ ] B8f. The fact collector and receiver queries take `dyn Semantics`.
+        Profiler comparison.
+  - [ ] B8g. Architecture test: no upward `crate::` edges in non-test files.
+
+  Notes: `inference/` and `engine/diagnostics/` are full; B8b frees the slot
+  B8d needs. B4g, B7d–e, and B8f touch the loader, so they follow C1e; C1f
+  follows B8f.
 
 ## Phase C: server (`src/`)
 
