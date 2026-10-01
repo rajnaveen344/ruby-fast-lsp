@@ -16,7 +16,20 @@ feature tests are internal Rust tests in `integration/`; Cargo runs them with
 
 ## CLI test organization
 
-`cli/mod.rs` contains internal `CheckSession` and CLI/LSP parity tests.
+The library test suite holds internal `CheckSession` and CLI/LSP parity tests,
+grouped by the behaviour they cover:
+
+| Module | Covers |
+| --- | --- |
+| `cli/headless_check.rs` | Headless project loading, discovery, file scoping, and report contents |
+| `cli/diagnostic_parity.rs` | `check` diagnostics matching LSP published diagnostics |
+| `cli/callable_types.rs` | Method return, higher-order, and callable-body types |
+| `cli/value_types.rs` | Variable, expression, shape, constant, and nonlocal types |
+| `cli/flow_types.rs` | Flow-sensitive types across case paths, joins, and short-circuits |
+| `cli/rescue_flow.rs` | Rescue-entry flow types across receiver features and `check` |
+| `cli/call_resolution.rs` | Call-resolution proofs and Unknown reasons |
+| `cli/support.rs` | Shared hover-text and diagnostic-parity helpers |
+
 `cli/process.rs` launches the real `ruby-fast-lsp` executable and checks its exit
 code, stdout/stderr, and JSON report. Cargo.toml registers it as the separate
 `check_cli` integration-test target, supplying `CARGO_BIN_EXE_ruby-fast-lsp` even
