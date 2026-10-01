@@ -134,7 +134,7 @@ pub fn receiver_type_from_context(
         if let Some(inner_type) = inner_type {
             if method_name == "new" {
                 if let RubyType::ClassReference(fqn) = &inner_type {
-                    return Some(RubyType::Class(fqn.clone()));
+                    return crate::inference::method::constructor::seed_constructor_type(fqn);
                 }
             }
 
@@ -367,7 +367,7 @@ fn resolve_method_receiver_type(
             )?;
             if method_name == "new" {
                 if let RubyType::ClassReference(fqn) = &inner_type {
-                    return Some(RubyType::Class(fqn.clone()));
+                    return crate::inference::method::constructor::seed_constructor_type(fqn);
                 }
             }
             infer_method_call_return_type(query, &inner_type, method_name)

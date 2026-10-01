@@ -119,7 +119,14 @@ pub fn method_call_type_outcome_with_visibility(
 
     if method_name == "new" {
         if let RubyType::ClassReference(fqn) = receiver_type {
-            return TypeInferenceOutcome::proven(RubyType::Class(fqn.clone()));
+            let instance = RubyType::Class(fqn.clone());
+            return match query {
+                Some(query) => query.constructor_result(fqn).into_type_outcome(instance),
+                None => TypeInferenceOutcome::from_optional(
+                    super::constructor::seed_constructor_type(fqn),
+                    UnknownReason::UnresolvedMethodReturn,
+                ),
+            };
         }
     }
 

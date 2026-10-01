@@ -7,6 +7,7 @@ use ruby_prism::{DefNode, Node};
 
 use super::syntax::{constant_parts, constant_parts_and_absolute, constant_path_parts};
 use super::AnalysisIndexer;
+use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::r#type::literal::{infer_array_literal_type, infer_hash_literal_type};
 
 impl AnalysisIndexer {
@@ -105,10 +106,13 @@ impl AnalysisIndexer {
             if call.name().as_slice() == b"new" {
                 let receiver = call.receiver()?;
                 let (parts, absolute) = constant_parts_and_absolute(&receiver)?;
-                return self
-                    .resolve_constant_value_type_from(&parts, absolute, &self.namespace_stack)
-                    .and_then(|ruby_type| match ruby_type {
-                        RubyType::ClassReference(target) => Some(RubyType::Class(target)),
+                return match self.resolve_constant_value_type_from(
+                    &parts,
+                    absolute,
+                    &self.namespace_stack,
+                ) {
+                    Some(RubyType::ClassReference(target)) => seed_constructor_type(&target),
+                    Some(
                         RubyType::Class(_)
                         | RubyType::Module(_)
                         | RubyType::ModuleReference(_)
@@ -117,9 +121,10 @@ impl AnalysisIndexer {
                         | RubyType::Hash(_, _)
                         | RubyType::Shape(_)
                         | RubyType::Union(_)
-                        | RubyType::Unknown => None,
-                    })
-                    .or_else(|| literal_type(node));
+                        | RubyType::Unknown,
+                    )
+                    | None => literal_type(node),
+                };
             }
         }
 
@@ -160,7 +165,7 @@ pub(super) fn literal_type(node: &Node<'_>) -> Option<RubyType> {
         if call.name().as_slice() == b"new" {
             let receiver = call.receiver()?;
             let parts = constant_parts(&receiver)?;
-            return Some(RubyType::Class(FullyQualifiedName::constant(parts)));
+            return seed_constructor_type(&FullyQualifiedName::constant(parts));
         }
     }
     if let Some(read) = node.as_constant_read_node() {

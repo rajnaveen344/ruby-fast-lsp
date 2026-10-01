@@ -547,7 +547,8 @@ impl FactCollector {
             if call.name().as_slice() == b"new" {
                 if let Some(receiver) = call.receiver() {
                     if let Some(fqn) = self.constant_reference_type(&receiver) {
-                        return RubyType::Class(fqn);
+                        return crate::inference::method::constructor::seed_constructor_type(&fqn)
+                            .unwrap_or(RubyType::Unknown);
                     }
                 }
             }

@@ -71,13 +71,18 @@ impl FactCollector {
                 }
             };
 
-        let inference_failed = matches!(
-            receiver_info,
-            ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath
-        ) && inferred_expr_type
-            .as_ref()
-            .is_none_or(|ruby_type| *ruby_type == RubyType::Unknown)
-            && target_namespace == current_namespace;
+        // A constant receiver reports Unknown only when it names a value
+        // whose type is unproven; an unresolved constant keeps its namespace.
+        let inference_failed = match receiver_info {
+            ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
+                inferred_expr_type
+                    .as_ref()
+                    .is_none_or(|ruby_type| *ruby_type == RubyType::Unknown)
+                    && target_namespace == current_namespace
+            }
+            ReceiverInfo::ConstantReceiver(_) => inferred_expr_type == Some(RubyType::Unknown),
+            ReceiverInfo::NoReceiver | ReceiverInfo::SelfReceiver => false,
+        };
 
         let method = match RubyMethod::new(method_name) {
             Ok(method) => method,
@@ -92,6 +97,7 @@ impl FactCollector {
             .filter(|ruby_type| **ruby_type != RubyType::Unknown)
             .cloned()
             .or_else(|| match &receiver_info {
+                ReceiverInfo::ConstantReceiver(_) if inference_failed => None,
                 ReceiverInfo::ConstantReceiver(_) if !target_namespace.is_empty() => {
                     self.proven_namespace_receiver_type(&target_namespace)
                 }

@@ -20,7 +20,7 @@ pub(super) fn infer_method_call_return_type(
 
     if method_name == "new" {
         if let RubyType::ClassReference(fqn) = receiver_type {
-            return Some(RubyType::Class(fqn.clone()));
+            return crate::inference::method::constructor::seed_constructor_type(fqn);
         }
     }
 

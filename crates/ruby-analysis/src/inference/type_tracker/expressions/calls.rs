@@ -3,6 +3,7 @@ use crate::core::{
     UnknownReason,
 };
 use crate::engine::AnalysisQuery;
+use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::r#type::shape as shape_reads;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
@@ -64,13 +65,13 @@ impl TypeTracker {
                         String::from_utf8_lossy(const_read.name().as_slice()).to_string();
                     if let Ok(constant) = RubyConstant::new(&class_name) {
                         let fqn = FullyQualifiedName::constant(vec![constant]);
-                        return RubyType::Class(fqn);
+                        return seed_constructor_type(&fqn).unwrap_or(RubyType::Unknown);
                     }
                 }
                 // Handle namespaced constant like Foo::Bar.new
                 if let Some(const_path) = receiver.as_constant_path_node() {
                     if let Some(fqn) = Self::resolve_constant_path(&const_path) {
-                        return RubyType::Class(fqn);
+                        return seed_constructor_type(&fqn).unwrap_or(RubyType::Unknown);
                     }
                 }
             }

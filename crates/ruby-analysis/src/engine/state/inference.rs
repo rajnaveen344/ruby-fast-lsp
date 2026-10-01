@@ -14,6 +14,7 @@ use crate::engine::AnalysisQuery;
 use crate::inference::constant::{
     solve_constant_type_equations, ConstantFactInput, ResolvedConstantDependency,
 };
+use crate::inference::method::constructor::ConstructorResult;
 use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
 
 fn resolve_constant_dependency(
@@ -32,9 +33,10 @@ fn resolve_constant_dependency(
         ConstantTypeProjection::ConstructorInstance => {
             if let Some(value_type) = query.constant_value_type(&constant) {
                 return match value_type {
-                    RubyType::ClassReference(target) => Some(
-                        ResolvedConstantDependency::Projected(RubyType::Class(target)),
-                    ),
+                    RubyType::ClassReference(target) => {
+                        let instance = RubyType::Class(target.clone());
+                        constructed_dependency(query.constructor_result(&target), instance)
+                    }
                     RubyType::Class(_)
                     | RubyType::Module(_)
                     | RubyType::ModuleReference(_)
@@ -48,13 +50,27 @@ fn resolve_constant_dependency(
             }
             let namespace = FullyQualifiedName::namespace(constant.namespace_parts());
             match query.namespace_node_kind(&namespace) {
-                Some(GraphNodeKind::Class) => Some(ResolvedConstantDependency::Projected(
-                    RubyType::Class(constant),
-                )),
+                Some(GraphNodeKind::Class) => {
+                    let result = query.constructor_result(&constant);
+                    constructed_dependency(result, RubyType::Class(constant))
+                }
                 Some(GraphNodeKind::Module) | None => None,
             }
         }
     }
+}
+
+/// Project `Receiver.new` only when it proves a type. A declared factory
+/// without a proven result leaves the dependency incomplete, so its target
+/// stays Unknown instead of claiming an instance of the receiver.
+fn constructed_dependency(
+    result: ConstructorResult,
+    instance: RubyType,
+) -> Option<ResolvedConstantDependency> {
+    result
+        .into_type_outcome(instance)
+        .into_proven_type()
+        .map(ResolvedConstantDependency::Projected)
 }
 
 pub(in crate::engine) fn resolve_constant_dependency_type(

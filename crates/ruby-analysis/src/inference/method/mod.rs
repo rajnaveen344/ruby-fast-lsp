@@ -2,6 +2,7 @@
 //!
 //! This module handles method lookup, resolution, and signature extraction.
 
+pub mod constructor;
 pub(crate) mod recursive;
 pub mod return_type;
 pub mod signature;

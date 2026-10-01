@@ -78,6 +78,7 @@ impl FactCollector {
         let name = utf8_str(constant_read.name().as_slice());
         if let Ok(constant) = RubyConstant::new(name) {
             let mut lexical_namespace = current_namespace.to_vec();
+            let mut unproven_value_constant = false;
             let value_type = loop {
                 let mut parts = lexical_namespace.clone();
                 parts.push(constant.clone());
@@ -103,11 +104,18 @@ impl FactCollector {
                 if let Some(ruby_type) = self.direct_constant_value_type(&constant_fqn) {
                     break Some(ruby_type);
                 }
+                if self.direct_constant_has_value(&constant_fqn) {
+                    unproven_value_constant = true;
+                    break None;
+                }
                 if lexical_namespace.pop().is_none() {
                     break None;
                 }
             }
             .or_else(|| {
+                if unproven_value_constant {
+                    return None;
+                }
                 let engine = self.semantics.engine.read();
                 let query = AnalysisQuery::new(&engine);
                 query
@@ -140,6 +148,16 @@ impl FactCollector {
                     };
                     return (namespace, kind, value_type);
                 }
+            }
+            if unproven_value_constant {
+                // The constant holds an object whose type is not proven, such
+                // as a class built by a factory method. Its receiver is
+                // unknown, not the constant's own singleton namespace.
+                return (
+                    current_namespace.to_vec(),
+                    NamespaceKind::Instance,
+                    Some(RubyType::Unknown),
+                );
             }
             let mut receiver_namespace = current_namespace.to_vec();
             receiver_namespace.push(constant);

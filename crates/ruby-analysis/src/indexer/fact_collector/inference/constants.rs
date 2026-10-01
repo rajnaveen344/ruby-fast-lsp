@@ -185,6 +185,29 @@ impl FactCollector {
         }
     }
 
+    /// Whether this file assigns `constant_fqn` a value, including a value
+    /// whose type is not proven. Such a constant names an object rather than
+    /// a namespace, so it must not be reinterpreted as a class receiver.
+    pub(in crate::indexer::fact_collector) fn direct_constant_has_value(
+        &self,
+        constant_fqn: &FullyQualifiedName,
+    ) -> bool {
+        self.facts
+            .direct
+            .types
+            .iter()
+            .any(|fact| match &fact.subject {
+                TypeSubject::Constant(fqn) => fqn == constant_fqn,
+                TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => false,
+            })
+    }
+
     pub(in crate::indexer::fact_collector) fn const_get_target_parts(
         &self,
         call: &CallNode<'_>,

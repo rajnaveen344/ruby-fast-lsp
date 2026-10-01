@@ -90,7 +90,10 @@ impl FactCollector {
 
         if method_name == "new" {
             if let RubyType::ClassReference(fqn) = receiver_type {
-                return TypeInferenceOutcome::proven(RubyType::Class(fqn.clone()));
+                let engine = self.semantics.engine.read();
+                return AnalysisQuery::new(&engine)
+                    .constructor_result(fqn)
+                    .into_type_outcome(RubyType::Class(fqn.clone()));
             }
         }
 
