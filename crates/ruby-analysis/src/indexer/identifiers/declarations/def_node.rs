@@ -49,11 +49,10 @@ impl IdentifierVisitor {
             NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
         self.scope_tracker.push_scope_kind(scope_kind);
-        self.scope_tracker
-            .push_method_fqn(Some(FullyQualifiedName::method(
-                definition_namespace.clone(),
-                method,
-            )));
+        self.scope_tracker.push_method_fqn(
+            FullyQualifiedName::method(definition_namespace.clone(), method),
+            namespace_kind,
+        );
         self.scope_tracker.push_method_execution_context(
             definition_namespace.clone(),
             namespace_kind,

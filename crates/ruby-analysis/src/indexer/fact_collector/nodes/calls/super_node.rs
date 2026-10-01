@@ -39,7 +39,11 @@ impl FactCollector {
         location: &ruby_prism::Location,
         signature: MethodCallSignatureCandidate,
     ) {
-        let Some(FullyQualifiedName::Method(_, method)) = self.scope_tracker.current_method_fqn()
+        // `super` continues the lookup of the enclosing definition, so it
+        // starts from the side that stores that definition. A constructor is
+        // stored as singleton `new`, although its body runs on an instance.
+        let Some((FullyQualifiedName::Method(_, method), owner_kind)) =
+            self.scope_tracker.current_method()
         else {
             return;
         };
@@ -53,7 +57,7 @@ impl FactCollector {
             range,
             MethodReferenceCandidate {
                 owner: self.scope_tracker.get_ns_stack(),
-                owner_kind: self.scope_tracker.current_method_context(),
+                owner_kind,
                 method,
                 is_super: true,
                 access: MethodReferenceAccess::Normal,

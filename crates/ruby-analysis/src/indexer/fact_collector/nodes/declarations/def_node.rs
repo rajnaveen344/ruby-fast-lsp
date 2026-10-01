@@ -141,7 +141,8 @@ impl FactCollector {
         let namespace_parts = definition_namespace;
 
         let fqn = FullyQualifiedName::method(namespace_parts.clone(), method);
-        self.scope_tracker.push_method_fqn(Some(fqn.clone()));
+        self.scope_tracker
+            .push_method_fqn(fqn.clone(), actual_namespace_kind);
 
         // Owner FQN uses Namespace variant with kind to distinguish instance vs singleton methods
         let owner_fqn =

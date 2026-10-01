@@ -1,7 +1,8 @@
 //! Tag-driven assertions for inline fixtures.
 //!
 //! `check()` opens one fixture; `check_multi_file()` opens several and treats
-//! them as one scenario. Each tag kind has one runner; the runner compares the
+//! them as one scenario; `check_project()` writes them to disk and cold-indexes
+//! them as a workspace with bundled core. Each tag kind has one runner; the runner compares the
 //! production response exactly. See [`super::fixture`] for the tag syntax.
 //!
 //! | Tag | Position | Asserts |
@@ -25,7 +26,10 @@ mod diagnostics;
 mod hierarchy;
 mod navigation;
 mod presentation;
+mod project;
 mod types;
+
+pub use project::check_project;
 
 #[cfg(test)]
 mod tests;

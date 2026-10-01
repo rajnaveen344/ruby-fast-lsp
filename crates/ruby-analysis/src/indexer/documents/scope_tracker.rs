@@ -46,7 +46,9 @@ pub struct ScopeTracker {
     frames: Vec<ScopeFrame>,
     execution_context_stack: Vec<ExecutionContextFrame>,
     scope_kind_stack: Vec<LocalScopeKind>,
-    method_fqn_stack: Vec<Option<FullyQualifiedName>>,
+    /// Enclosing method definitions with the namespace side that owns each
+    /// stored definition. A constructor is stored as singleton `new`.
+    method_stack: Vec<(FullyQualifiedName, NamespaceKind)>,
     module_function_mode_stack: Vec<bool>,
     visibility_stack: Vec<MethodVisibility>,
 }
@@ -89,7 +91,7 @@ impl ScopeTracker {
             frames: Vec::new(),
             execution_context_stack: Vec::new(),
             scope_kind_stack: vec![LocalScopeKind::Constant],
-            method_fqn_stack: Vec::new(),
+            method_stack: Vec::new(),
             module_function_mode_stack: Vec::new(),
             visibility_stack: vec![MethodVisibility::Public],
         }
@@ -352,19 +354,32 @@ impl ScopeTracker {
         self.scope_kind_stack.pop();
     }
 
-    pub fn push_method_fqn(&mut self, fqn: Option<FullyQualifiedName>) {
-        self.method_fqn_stack.push(fqn);
+    /// Enter a method definition stored as `fqn` on the `owner_kind` side of
+    /// its namespace.
+    pub fn push_method_fqn(&mut self, fqn: FullyQualifiedName, owner_kind: NamespaceKind) {
+        assert!(
+            matches!(fqn, FullyQualifiedName::Method(..)),
+            "INVARIANT VIOLATED: method scope entered with non-method FQN {fqn:?}. \
+             This is a bug because `super` and caller identity read this stack as a method. \
+             Fix: push FullyQualifiedName::method for every def scope."
+        );
+        self.method_stack.push((fqn, owner_kind));
     }
 
     pub fn pop_method_fqn(&mut self) {
-        self.method_fqn_stack.pop();
+        self.method_stack.pop();
     }
 
     pub fn current_method_fqn(&self) -> Option<&FullyQualifiedName> {
-        self.method_fqn_stack
-            .iter()
-            .rev()
-            .find_map(|entry| entry.as_ref())
+        self.method_stack.last().map(|(fqn, _)| fqn)
+    }
+
+    /// The innermost enclosing method and the namespace side that stores its
+    /// definition. The side differs from the implicit receiver for a
+    /// constructor: `initialize` runs on an instance but is stored as
+    /// singleton `new`.
+    pub fn current_method(&self) -> Option<(&FullyQualifiedName, NamespaceKind)> {
+        self.method_stack.last().map(|(fqn, kind)| (fqn, *kind))
     }
 
     pub fn enable_module_function_mode(&mut self) {
@@ -685,14 +700,19 @@ mod tests {
         let name = RubyMethod::new("name").expect("test method must be valid");
         let fqn = FullyQualifiedName::method(vec![user], name);
 
-        tracker.push_method_fqn(None);
         assert_eq!(tracker.current_method_fqn(), None);
+        assert_eq!(tracker.current_method(), None);
 
-        tracker.push_method_fqn(Some(fqn.clone()));
+        tracker.push_method_fqn(fqn.clone(), NamespaceKind::Singleton);
         assert_eq!(tracker.current_method_fqn(), Some(&fqn));
+        assert_eq!(
+            tracker.current_method(),
+            Some((&fqn, NamespaceKind::Singleton))
+        );
 
         tracker.pop_method_fqn();
         assert_eq!(tracker.current_method_fqn(), None);
+        assert_eq!(tracker.current_method(), None);
     }
 
     #[test]
