@@ -78,6 +78,49 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] B3. Extract the `AnalysisEngine` components one at a time: `Files`,
       `Names`, `DeclIndex`, `Hierarchy`, `UseIndex`, `TypeTable`, `Solver`,
       `Diagnostics`. Each owns its impls in its own module.
+  - [ ] B3a. Move `engine/state/fingerprint/` and
+        `engine/state/external_facts_template/` to a new `engine/persist/` so
+        `engine/state/` has room for one module per component. No behavior
+        change.
+  - [ ] B3b. Extract `Names` (`engine/state/names.rs`): `NameRegistry`, its
+        test hooks, `fqn_for_id`, and `expand_interned_fqn`. Interned ids stay
+        `pub(in crate::engine)`; components that intern take `&mut Names`.
+  - [ ] B3c. Extract `Files` (`engine/state/files.rs`): source registry, file
+        id map, source files and line indexes, snapshot issuing, registration,
+        and the export fingerprint map. Delete `state/file_id_map.rs`.
+  - [ ] B3d. Extract `Diagnostics` (`engine/diagnostics/store.rs`): candidate
+        and resolved stores, candidate install, the unresolved-require swap,
+        and the resolved rebuild filter used by the workspace pass.
+  - [ ] B3e. Extract `UseIndex` (`engine/state/uses.rs`): reference candidate
+        and resolved stores, candidate interning, reference reads, and
+        take/restore of candidates for the workspace pass.
+  - [ ] B3f. Extract `DeclIndex` (rename `state/facts.rs` to `decls.rs`):
+        symbols, methods, visibility overrides, execution contexts, their
+        interning and expansion, and the effective-method reads.
+  - [ ] B3g. Extract `Hierarchy` (rename `state/graph.rs` to `hierarchy.rs`):
+        graph nodes and edges, constant path resolution, unresolved-edge
+        retry, and the method-lookup-chain caches with their invalidation.
+        Route direct `engine.graph`/`engine.names` reads through component
+        methods.
+  - [ ] B3h. Extract `TypeTable` (`engine/state/types.rs`): `TypeStore`, call
+        expression outcomes, local-read types, the outcome merge, and the
+        target writers the solver uses. Delete `state/storage.rs`; memory
+        stats and `shrink_to_fit` delegate per component. Profiler comparison.
+  - [ ] B3i. Extract `Solver` (rename `state/inference.rs` to `solver.rs`):
+        inference evidence, dirty flags, equation solving split into a
+        read-only plan step and an `apply` step that writes `TypeTable`.
+        Profiler comparison.
+  - [ ] B3j. Leave `state/lifecycle.rs` as orchestration over the components,
+        with `semantic_revision` and `query_cache_identity` on the engine.
+        Update `engine/README.md` and the analysis README.
+  - [ ] B3k. Add the read-only `Semantics` trait (`engine/semantics.rs`) for
+        mid-walk reads and switch the fact collector and `TypeTracker` to it
+        instead of `Arc<RwLock<AnalysisEngine>>`.
+
+  Notes: keep the single engine `RwLock`; lock granularity is C4. Every B3
+  commit changes the gem producer fingerprint in `build.rs`, which forces one
+  cold gem reindex; that is expected. Semantic fingerprints must hash the same
+  data in the same order (`state/tests/fingerprints.rs`).
 - [ ] B4. Reduce `AnalysisEngine` to `Project` with `update`, `remove`,
       `resolve`, and `view`.
 - [ ] B5. Add `lookup::method(view, MethodRequest) -> MethodAnswer` and replace
@@ -117,6 +160,18 @@ Delete this file when the last task is done. Git history keeps the record.
 
 Settle these before the task that needs them.
 
-- B3/D2: Can every engine query made in the middle of a walk become an
-  equation? If not, use a read-only `Semantics` trait as the fallback.
+- B3/D2 (settled): No. Constant types, dispatched method-return
+  dependencies, and chained receivers are already equations and stay so. Two
+  kinds of mid-walk reads cannot become equations without a new flow solver:
+  reads that decide which facts get emitted (namespace or singleton receiver,
+  `initialize` inside a class) and reads that feed local flow (RBS parameter
+  and return contracts, higher-order block parameters, callable constant
+  bodies, method returns through dispatch, `super`, and constructors). Options
+  were (A) turn everything into equations, which is the D2 rewrite and doubles
+  candidate facts for emission-shaping reads; (B) a read-only `Semantics` trait
+  for every mid-walk read; (C) a hybrid. Chosen: C. The walk reads through a
+  read-only `Semantics` trait (B3k), which `View` implements after B4 and which
+  also serves B8. Any new mid-walk read must become an equation or be added to
+  `Semantics` with a reason. D2 may move flow-feeding reads into equations one
+  at a time, each with a profiler comparison.
 - C4: Should readers take a read lock or an immutable snapshot?
