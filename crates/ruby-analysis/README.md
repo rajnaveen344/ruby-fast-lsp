@@ -5,10 +5,10 @@ root exposes four modules; import a concept from the module that owns it.
 
 | Module | Responsibility | Main entry points |
 | --- | --- | --- |
-| `core` | Names, source identities, byte ranges, types, and semantic facts | `RubyType`, `TextRange`, `SourceFileId`, `MethodFact` |
+| `core` | Names, source identities, byte ranges, types, semantic facts, and the per-file analysis value | `FileAnalysis`, `RubyType`, `TextRange`, `SourceFileId`, `MethodFact` |
 | `indexer` | Parse source and collect file-owned facts | `AnalysisIndexer`, `fact_collector::FactCollector`, `index_rbs` |
 | `inference` | Derive types from expressions, flow, calls, and signatures | `type_tracker::TypeTracker`, `method`, `rbs` |
-| `engine` | Own project state, resolve facts, and answer semantic queries | `AnalysisEngine`, `FileFacts`, `AnalysisQuery` |
+| `engine` | Own project state, resolve facts, and answer semantic queries | `AnalysisEngine`, `AnalysisQuery` |
 
 `RubyType` belongs to `core`, including when inference produces it. Engine
 stores, interned IDs, and stored representations are internal. Public consumers
@@ -41,13 +41,13 @@ and converts domain byte ranges to editor positions outside this library.
 This declaration-only example uses `AnalysisIndexer`. Full semantic collection
 also uses `FactCollector` for body inference, references, diagnostics, and
 extension hooks. After traversal, `FactCollector::finish()` returns an owned
-`CollectedFile`; the server composes it into the same `FileFacts`. See the
+`CollectedFile`; the server composes it into the same `FileAnalysis`. See the
 [collector guide](src/indexer/fact_collector/README.md) for its private state
 owners and traversal flow.
 
 ```rust
-use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
+use ruby_analysis::core::{FileAnalysis, SourceKind};
+use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
 use ruby_analysis::indexer::AnalysisIndexer;
 
 let mut engine = AnalysisEngine::new();
@@ -58,7 +58,7 @@ let file_id = engine.register_file(SourceFileInput {
     kind: SourceKind::Project,
 });
 let collected = AnalysisIndexer::new(file_id).index_source(source);
-engine.replace_facts(file_id, FileFacts {
+engine.replace_facts(file_id, FileAnalysis {
     symbols: collected.symbols,
     methods: collected.methods,
     method_visibility_overrides: collected.method_visibility_overrides,
@@ -66,7 +66,7 @@ engine.replace_facts(file_id, FileFacts {
     graph_edges: collected.graph_edges,
     unresolved_graph_edges: collected.unresolved_graph_edges,
     types: collected.types,
-    ..FileFacts::default()
+    ..FileAnalysis::default()
 }, ResolveMode::Immediate);
 
 assert_eq!(engine.query().symbol_facts_in_file(file_id).len(), 1);
@@ -78,7 +78,7 @@ let edited_id = engine.register_file(SourceFileInput {
     kind: SourceKind::Project,
 });
 assert_eq!(edited_id, file_id);
-engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
 assert!(engine.query().symbol_facts_in_file(file_id).is_empty());
 ```
 

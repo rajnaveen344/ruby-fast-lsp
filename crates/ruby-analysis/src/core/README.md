@@ -7,7 +7,7 @@ Implementation modules and stored representations remain crate-private.
 | Area | Responsibility |
 | --- | --- |
 | `names/` | Ruby names, namespaces, fully qualified names, and interned identities |
-| `source/` | Source ownership, coordinates, and lexical execution context |
+| `source/` | Source ownership, coordinates, lexical execution context, and `FileAnalysis`, the complete file-owned analysis output |
 | `types/` | Canonical Ruby values, structural shapes, and proof outcomes |
 | `callables/` | AST-free callable bodies and parameter/signature contracts |
 | `equations/` | Constant and method-return dependency equations |

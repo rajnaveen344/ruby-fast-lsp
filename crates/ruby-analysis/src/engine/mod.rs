@@ -1,7 +1,7 @@
 //! Editor-agnostic Ruby analysis engine.
 //!
 //! [`AnalysisEngine`] owns one project's semantic state. Callers register source,
-//! replace [`FileFacts`], and read domain results through [`AnalysisQuery`].
+//! replace a file's [`FileAnalysis`](crate::core::FileAnalysis), and read domain results through [`AnalysisQuery`].
 //!
 //! Resolution coordinates the constant and method-return equation solvers in
 //! [`crate::inference`], then stores their outcomes through the same file-owned

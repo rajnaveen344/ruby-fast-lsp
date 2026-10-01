@@ -22,6 +22,7 @@ pub use names::fully_qualified_name::{FqnParts, FullyQualifiedName, NamespaceKin
 pub use names::ruby_method::RubyMethod;
 pub use names::ruby_namespace::{GeneratedOwnerId, RubyConstant};
 pub use source::execution_context::{ExecutionContextFact, ExecutionScopeMode};
+pub use source::file_analysis::FileAnalysis;
 pub use source::source_file::{LibraryPackageId, SourceKind};
 pub use source::source_position::{SourcePosition, SourceRange};
 pub use storage::diagnostic_candidate_store::{

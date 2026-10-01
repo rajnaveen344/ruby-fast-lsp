@@ -11,11 +11,11 @@ use crate::core::storage::memory_estimate::{
     fqn_heap_bytes, ruby_type_heap_bytes, string_heap_bytes, type_subject_heap_bytes,
     vec_payload_bytes,
 };
+use crate::core::FileAnalysis;
 use crate::core::{
     FullyQualifiedName, MethodAvailability, RubyConstant, RubyType, SourceFileId, SymbolKind,
     TextRange, TypeSubject,
 };
-use crate::engine::FileFacts;
 use fact_codec::{restore_declaration_facts, snapshot_declaration_facts};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -34,7 +34,7 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub struct ProjectNeutralFileFactsTemplate {
     source_file_id: SourceFileId,
-    facts: FileFacts,
+    facts: FileAnalysis,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -447,7 +447,7 @@ impl std::error::Error for ProjectNeutralTemplateRejection {}
 impl ProjectNeutralFileFactsTemplate {
     pub fn try_new(
         source_file_id: SourceFileId,
-        mut facts: FileFacts,
+        mut facts: FileAnalysis,
     ) -> Result<Self, ProjectNeutralTemplateRejection> {
         retain_project_neutral_declaration_facts(&mut facts);
         if !facts.reference_candidates.is_empty()
@@ -502,7 +502,7 @@ impl ProjectNeutralFileFactsTemplate {
         })
     }
 
-    pub fn instantiate(&self, target_file_id: SourceFileId) -> FileFacts {
+    pub fn instantiate(&self, target_file_id: SourceFileId) -> FileAnalysis {
         let mut facts = self.facts.clone();
         rebind_all_ranges(&mut facts, self.source_file_id, target_file_id);
         facts
@@ -612,7 +612,7 @@ impl ProjectNeutralFileFactsTemplate {
     }
 }
 
-fn retain_project_neutral_declaration_facts(facts: &mut FileFacts) {
+fn retain_project_neutral_declaration_facts(facts: &mut FileAnalysis) {
     facts
         .symbols
         .retain(|fact| fact.kind != SymbolKind::LocalVariable);
@@ -679,7 +679,7 @@ fn type_subject_has_generated_owner(subject: &TypeSubject) -> bool {
     }
 }
 
-fn declaration_facts_have_generated_owner(facts: &FileFacts) -> bool {
+fn declaration_facts_have_generated_owner(facts: &FileAnalysis) -> bool {
     facts
         .symbols
         .iter()
@@ -744,7 +744,7 @@ fn validate_range(
     Ok(())
 }
 
-fn rebind_all_ranges(facts: &mut FileFacts, source: SourceFileId, target: SourceFileId) {
+fn rebind_all_ranges(facts: &mut FileAnalysis, source: SourceFileId, target: SourceFileId) {
     for fact in &mut facts.symbols {
         rebind_range(&mut fact.range, source, target);
         rebind_range(&mut fact.name_range, source, target);

@@ -6,16 +6,16 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::core::{
-    DiagnosticFact, ExecutionContextFact, InferenceTelemetry, RubyType, SourceFileId, SourceKind,
-    TypeProvenance, TypeSubject,
+    DiagnosticFact, ExecutionContextFact, FileAnalysis, InferenceTelemetry, RubyType, SourceFileId,
+    SourceKind, TypeProvenance, TypeSubject,
 };
 
 use super::fingerprint::{SemanticChange, SemanticExportFingerprint};
 use super::inference::{StoredTypeInferenceOutcome, TypeInferenceOutcomeRef};
 use super::storage::source_hash;
 use super::{
-    elapsed_ns, AnalysisEngine, FileFacts, ResolveMode, ResolvePassStats, SourceFile,
-    SourceFileInput, SourceFileSnapshot, SourceLineIndex,
+    elapsed_ns, AnalysisEngine, ResolveMode, ResolvePassStats, SourceFile, SourceFileInput,
+    SourceFileSnapshot, SourceLineIndex,
 };
 
 impl AnalysisEngine {
@@ -170,7 +170,7 @@ impl AnalysisEngine {
     pub fn replace_facts(
         &mut self,
         file_id: SourceFileId,
-        facts: FileFacts,
+        facts: FileAnalysis,
         mode: ResolveMode,
     ) -> SemanticChange {
         let fingerprint = SemanticExportFingerprint::from_facts(&facts);
@@ -191,7 +191,7 @@ impl AnalysisEngine {
     pub fn replace_facts_if_source_snapshot(
         &mut self,
         expected_snapshot: SourceFileSnapshot,
-        facts: FileFacts,
+        facts: FileAnalysis,
         mode: ResolveMode,
     ) -> Option<SemanticChange> {
         invariant_eq!(
@@ -260,7 +260,7 @@ impl AnalysisEngine {
 }
 
 impl AnalysisEngine {
-    fn replace_facts_deferred(&mut self, file_id: SourceFileId, mut facts: FileFacts) {
+    fn replace_facts_deferred(&mut self, file_id: SourceFileId, mut facts: FileAnalysis) {
         self.semantic_revision = self.semantic_revision.checked_add(1).expect_invariant(
             "analysis engine semantic revision exhausted u64",
             "cached queries require monotonic invalidation",
@@ -453,7 +453,7 @@ impl AnalysisEngine {
                 context.range.file_id,
                 file_id,
                 what = "execution context range belongs to a different file",
-                why = "FileFacts replacement must be file-local",
+                why = "FileAnalysis replacement must be file-local",
                 fix = "construct execution context ranges from the owning RubyDocument",
             );
             invariant!(

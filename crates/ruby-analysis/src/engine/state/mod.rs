@@ -23,9 +23,8 @@ use std::time::Instant;
 use crate::core::storage::graph_store::SemanticGraph;
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
-    DiagnosticCandidate, DiagnosticFact, ExecutionContextFact, FullyQualifiedName, GraphEdgeFact,
-    GraphNodeFact, InferenceEvidence, MethodFact, MethodVisibilityOverrideFact, ReferenceCandidate,
-    RubyType, SourceFileId, SourceKind, SymbolFact, TextRange, TypeFact, UnresolvedGraphEdgeFact,
+    ExecutionContextFact, FileAnalysis, FullyQualifiedName, InferenceEvidence,
+    MethodVisibilityOverrideFact, SourceFileId, SourceKind, TextRange,
 };
 
 use crate::engine::AnalysisQuery;
@@ -151,22 +150,8 @@ impl SourceFile {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct FileFacts {
-    pub symbols: Vec<SymbolFact>,
-    pub methods: Vec<MethodFact>,
-    pub method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
-    pub types: Vec<TypeFact>,
-    pub graph_nodes: Vec<GraphNodeFact>,
-    pub graph_edges: Vec<GraphEdgeFact>,
-    pub unresolved_graph_edges: Vec<UnresolvedGraphEdgeFact>,
-    pub reference_candidates: Vec<ReferenceCandidate>,
-    pub diagnostic_candidates: Vec<DiagnosticCandidate>,
-    pub diagnostics: Vec<DiagnosticFact>,
-    pub execution_contexts: Vec<ExecutionContextFact>,
-    pub inference: InferenceEvidence,
-    pub local_read_types: Box<[(TextRange, RubyType)]>,
-}
+/// Temporary name for [`FileAnalysis`] while callers move to the core type.
+pub type FileFacts = FileAnalysis;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFileInput {

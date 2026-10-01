@@ -17,16 +17,16 @@ use super::{
     SnapshotMethodParamKind, SnapshotMethodVisibility, SnapshotMethodVisibilityOverrideFact,
     SnapshotSymbolFact, SnapshotSymbolKind, SnapshotTypeFact, SnapshotUnresolvedGraphEdgeFact,
 };
+use crate::core::FileAnalysis;
 use crate::core::MethodVisibility;
 use crate::core::{
     GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodAvailability, MethodFact,
     MethodParamFact, MethodParamKind, MethodVisibilityOverrideFact, RubyMethod, SourceFileId,
     SymbolFact, SymbolKind, TypeFact, UnresolvedGraphEdgeFact,
 };
-use crate::engine::FileFacts;
 
 pub(super) fn snapshot_declaration_facts(
-    facts: &FileFacts,
+    facts: &FileAnalysis,
 ) -> Result<ProjectNeutralFileFactsSnapshot, String> {
     Ok(ProjectNeutralFileFactsSnapshot {
         symbols: facts
@@ -76,8 +76,8 @@ pub(super) fn snapshot_declaration_facts(
 pub(super) fn restore_declaration_facts(
     snapshot: ProjectNeutralFileFactsSnapshot,
     source_file_id: SourceFileId,
-) -> Result<FileFacts, String> {
-    let mut facts = FileFacts {
+) -> Result<FileAnalysis, String> {
+    let mut facts = FileAnalysis {
         symbols: snapshot
             .symbols
             .into_iter()
@@ -113,7 +113,7 @@ pub(super) fn restore_declaration_facts(
             .into_iter()
             .map(|fact| restore_unresolved_graph_edge(fact, source_file_id))
             .collect::<Result<_, _>>()?,
-        ..FileFacts::default()
+        ..FileAnalysis::default()
     };
     facts.inference.constant_callable_bodies = snapshot
         .constant_callable_bodies

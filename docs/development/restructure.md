@@ -44,7 +44,7 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] B1. Introduce `FileAnalysis` as the single per-file output. Keep it
       alongside `FileFacts`, `AnalysisIndex`, and `CollectedFile`, then remove
       those three.
-  - [ ] B1a. Move `engine::FileFacts` to `core::FileAnalysis`
+  - [x] B1a. Move `engine::FileFacts` to `core::FileAnalysis`
         (`core/source/file_analysis.rs`) with the same fields, and leave
         `FileFacts` as a temporary alias. Switch the engine internals
         (lifecycle, fingerprint, template, codec).

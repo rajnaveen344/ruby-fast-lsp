@@ -1,7 +1,7 @@
 # Analysis engine
 
-`mod.rs` preserves the public API: register source and replace `FileFacts` through
-`AnalysisEngine`, then read domain results through `AnalysisQuery`.
+`mod.rs` preserves the public API: register source and replace a file's
+`core::FileAnalysis` through `AnalysisEngine`, then read domain results through `AnalysisQuery`.
 Implementation folders are private to the engine.
 
 | Area | Responsibility |
