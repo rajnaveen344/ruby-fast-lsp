@@ -51,10 +51,11 @@ async fn identical_runtime_stdlib_paths_use_one_server_owned_probe() {
         java_home: None,
     };
     let server = RubyLanguageServer::default();
+    let ctx = server.load_context_for_project(fixture.path());
 
     let (first, second) = tokio::join!(
-        runtime_stdlib_paths_for_project(&server, &runtime),
-        runtime_stdlib_paths_for_project(&server, &runtime)
+        runtime_stdlib_paths_for_project(&ctx, &runtime),
+        runtime_stdlib_paths_for_project(&ctx, &runtime)
     );
     let expected = fs::canonicalize(runtime_stdlib).expect("runtime stdlib must canonicalize");
     assert_eq!(first.unwrap().paths(), &[expected.clone()]);

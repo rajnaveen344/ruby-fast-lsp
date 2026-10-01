@@ -2,7 +2,9 @@
 
 use super::IndexingCoordinator;
 use crate::invariant::ExpectInvariant;
-use crate::loader::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
+use crate::loader::scheduling::resources::{
+    IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
+};
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::info;
@@ -25,7 +27,7 @@ pub(super) enum IndexingWorkClass {
 }
 
 pub(super) async fn run_cpu_indexing_task<T, F>(
-    server: &RubyLanguageServer,
+    resources: &IndexingResourceGovernor,
     project_root: Option<PathBuf>,
     cancellation: Option<CancellationToken>,
     work_class: IndexingWorkClass,
@@ -36,7 +38,7 @@ where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    let policy = server.indexing.resources().policy();
+    let policy = resources.policy();
     let (cpu_lanes, transient_memory_bytes, io_slots, parallel, partitioned) = match work_class {
         IndexingWorkClass::LightCpu => (1, 16 * MIB, 0, false, false),
         IndexingWorkClass::Io => (1, 64 * MIB, 1, false, false),
@@ -53,10 +55,7 @@ where
                 "lane ownership needs the isolated project identity",
                 "pass the canonical project root for every project-parallel phase",
             );
-            let cpu_lanes = server
-                .indexing
-                .resources()
-                .project_parallel_cpu_lanes(project_root);
+            let cpu_lanes = resources.project_parallel_cpu_lanes(project_root);
             (
                 cpu_lanes,
                 256 * MIB,
@@ -84,21 +83,15 @@ where
         spec
     };
     if partitioned {
-        server
-            .indexing
-            .resources()
+        resources
             .run_partitioned_parallel_with_resources(label, spec, cancellation, task)
             .await
     } else if parallel {
-        server
-            .indexing
-            .resources()
+        resources
             .run_parallel_with_resources(label, spec, cancellation, task)
             .await
     } else {
-        server
-            .indexing
-            .resources()
+        resources
             .run_with_resources(label, spec, cancellation, task)
             .await
     }

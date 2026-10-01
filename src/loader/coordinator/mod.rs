@@ -202,16 +202,12 @@ impl IndexingCoordinator {
     ) -> Result<()> {
         info!("Starting complete indexing process");
         if self.cache_root.is_none() {
-            self.set_cache_root(server.products.cache_root());
+            self.set_cache_root(ctx.products.cache_root());
         }
-        server
-            .indexing
-            .resources()
+        ctx.resources
             .mark_project_navigation_pending_if_active(&self.workspace_root);
         let mut project_navigation_reservation = Some(
-            server
-                .indexing
-                .resources()
+            ctx.resources
                 .project_navigation_reservation(self.workspace_root.clone()),
         );
         self.extension_registry
@@ -264,13 +260,13 @@ impl IndexingCoordinator {
 
         let core_start = Instant::now();
         let dependency_seed_engine = Arc::new(parking_lot::RwLock::new(
-            self.index_core_stubs(server, ruby_version).await?,
+            self.index_core_stubs(ctx, server, ruby_version).await?,
         ));
         let core_stub_dur = core_start.elapsed();
         let priority_server = server.clone();
         let priority_workspace_root = self.workspace_root.clone();
         let active_priority_keys = run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::LightCpu,
@@ -293,7 +289,7 @@ impl IndexingCoordinator {
             }
             let started = Instant::now();
             let result = build_jruby_import_provider_off_reactor(
-                server,
+                ctx,
                 runtime_workspace_root,
                 runtime_config,
                 runtime_selection,
@@ -343,7 +339,7 @@ impl IndexingCoordinator {
         };
         let (project_frontier_release, project_frontier_wait) = tokio::sync::oneshot::channel();
         let startup_gem_indexing = Self::discover_and_bind_startup_priority_gems(
-            server,
+            ctx,
             startup_gem_root,
             startup_gem_cancellation,
             startup_gem_analysis_engine,
@@ -368,7 +364,7 @@ impl IndexingCoordinator {
             )
             .await?;
             let project_start = Instant::now();
-            self.collect_project_navigation_facts(server, project_priority_keys)
+            self.collect_project_navigation_facts(ctx, server, project_priority_keys)
                 .await?;
             project_frontier_wait.await.map_err(|_| {
                 anyhow!(
@@ -377,9 +373,7 @@ impl IndexingCoordinator {
                     self.workspace_root.display()
                 )
             })?;
-            server
-                .indexing
-                .resources()
+            ctx.resources
                 .mark_project_navigation_complete_if_active(&self.workspace_root);
             Ok::<Duration, anyhow::Error>(project_start.elapsed())
         };
@@ -412,7 +406,7 @@ impl IndexingCoordinator {
         // inside jruby.jar. Materialize only the bounded runtime source allowlist
         // so implementation navigation outranks compatibility declarations.
         let runtime_sources_start = Instant::now();
-        self.index_jruby_runtime_sources_off_reactor(server, dependency_seed_engine.clone())
+        self.index_jruby_runtime_sources_off_reactor(ctx, server, dependency_seed_engine.clone())
             .await?;
         let runtime_sources_dur = runtime_sources_start.elapsed();
         self.dependency_seed_engine = Some({
@@ -454,7 +448,7 @@ impl IndexingCoordinator {
             .map(IndexerProject::dependency_navigation_priority_keys)
             .unwrap_or_default();
         let gem_indexing = Self::index_configured_gems(
-            server,
+            ctx,
             gem_workspace_root,
             gem_cancellation,
             gem_analysis_engine,
@@ -464,7 +458,8 @@ impl IndexingCoordinator {
         );
         let remaining_project = async {
             let remaining_start = Instant::now();
-            self.collect_remaining_project_facts(server, None).await?;
+            self.collect_remaining_project_facts(ctx, server, None)
+                .await?;
             Ok::<Duration, anyhow::Error>(remaining_start.elapsed())
         };
         let (remaining_project_result, gem_indexing_result) =
@@ -476,7 +471,7 @@ impl IndexingCoordinator {
         let replay_dur = if provider_present {
             let replay_start = Instant::now();
             let replayed = self
-                .replay_jruby_catalog_sensitive_project_facts(server)
+                .replay_jruby_catalog_sensitive_project_facts(ctx, server)
                 .await?;
             info!(
                 "Replaced {} JRuby catalog-sensitive project file(s) after exact provider setup",
@@ -484,7 +479,7 @@ impl IndexingCoordinator {
             );
             replay_start.elapsed()
         } else {
-            self.discard_jruby_replay_semantic_context(server).await?;
+            self.discard_jruby_replay_semantic_context(ctx).await?;
             Duration::default()
         };
         project_dur += replay_dur;
@@ -510,7 +505,8 @@ impl IndexingCoordinator {
 
         // Runtime stdlib still enters the same isolated engine before the
         // dependency-ready milestone and complete semantic diagnostics.
-        self.index_standard_library(server, &ruby_version).await?;
+        self.index_standard_library(ctx, server, &ruby_version)
+            .await?;
         self.publish_dependency_require_paths(server)?;
         if let Some(workspace) = server
             .list_workspaces()
@@ -539,7 +535,7 @@ impl IndexingCoordinator {
         let analysis_engine = self.analysis_engine(server);
         let resolve_project = self.workspace_root.clone();
         run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::HeavyCpu,
@@ -608,7 +604,7 @@ impl IndexingCoordinator {
         info!("Complete indexing finished in {:?}", total_dur);
         let analysis_engine = self.analysis_engine(server);
         run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::HeavyCpu,

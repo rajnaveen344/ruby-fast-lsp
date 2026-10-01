@@ -26,6 +26,7 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::cache::persistent::{
     PersistentDerivedProductCache, PersistentJavaArtifactLookup,
 };
+use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::gems::discover_locked_java_gem_roots;
 use crate::server::RubyLanguageServer;
@@ -379,7 +380,7 @@ pub(super) fn build_jruby_import_provider(
 }
 
 pub(super) async fn build_jruby_import_provider_off_reactor(
-    server: &RubyLanguageServer,
+    ctx: &LoadContext,
     workspace_root: PathBuf,
     config: RubyFastLspConfig,
     effective_runtime: Option<SelectedRuntimeDescriptor>,
@@ -387,11 +388,11 @@ pub(super) async fn build_jruby_import_provider_off_reactor(
     cancellation: Option<CancellationToken>,
     work_class: IndexingWorkClass,
 ) -> Result<(Option<Arc<JrubyImportProvider>>, Option<ClasspathArtifact>)> {
-    let persistent_cache = server.products.persistent().clone();
-    let classpath_file_product_cache = server.products.classpath_files().clone();
-    let java_artifact_product_cache = server.products.java_artifacts().clone();
+    let persistent_cache = ctx.products.persistent().clone();
+    let classpath_file_product_cache = ctx.products.classpath_files().clone();
+    let java_artifact_product_cache = ctx.products.java_artifacts().clone();
     run_cpu_indexing_task(
-        server,
+        &ctx.resources,
         Some(workspace_root.clone()),
         cancellation,
         work_class,
@@ -474,6 +475,7 @@ impl IndexingCoordinator {
 
     pub(super) async fn index_jruby_runtime_sources_off_reactor(
         &self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         dependency_seed_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
     ) -> Result<()> {
@@ -494,7 +496,7 @@ impl IndexingCoordinator {
         let user_cache_root_override = self.cache_root.clone();
         let analysis_engine = self.analysis_engine(server);
         run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::HeavyIo,

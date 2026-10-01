@@ -137,7 +137,11 @@ async fn core_template_binding_preserves_an_open_unsaved_document() {
         &server,
     );
     coordinator
-        .index_core_stubs(&server, Some(RubyVersion::new(3, 0)))
+        .index_core_stubs(
+            &server.load_context_for_project(coordinator.workspace_root()),
+            &server,
+            Some(RubyVersion::new(3, 0)),
+        )
         .await
         .expect("core stubs must bind successfully");
 
@@ -190,7 +194,11 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
         &server,
     );
     let clean_seed = clean_coordinator
-        .index_core_stubs(&server, Some(RubyVersion::new(3, 0)))
+        .index_core_stubs(
+            &server.load_context_for_project(clean_coordinator.workspace_root()),
+            &server,
+            Some(RubyVersion::new(3, 0)),
+        )
         .await
         .expect("clean core seed must be prepared");
 
@@ -214,7 +222,11 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
         &server,
     );
     let live_seed = live_coordinator
-        .index_core_stubs(&server, Some(RubyVersion::new(3, 0)))
+        .index_core_stubs(
+            &server.load_context_for_project(live_coordinator.workspace_root()),
+            &server,
+            Some(RubyVersion::new(3, 0)),
+        )
         .await
         .expect("live-document core seed must be prepared");
 

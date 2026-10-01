@@ -8,9 +8,9 @@ use super::IndexingCoordinator;
 use crate::environment::config::IndexingConfig;
 use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::loader::sources::gems::IndexerGem;
 use crate::loader::version::ruby_version::RubyImplementation;
-use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use futures::stream::{self, StreamExt};
 use log::info;
@@ -131,7 +131,7 @@ impl IndexingCoordinator {
     }
 
     pub(super) async fn discover_and_bind_startup_priority_gems(
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         workspace_root: PathBuf,
         cancellation: Option<CancellationToken>,
         analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
@@ -151,7 +151,7 @@ impl IndexingCoordinator {
         // Explicit includedGems is selected later, after project collection.
         if priority_keys.is_empty() || !workspace_root.join("Gemfile").is_file() {
             let (gem_indexer, discovery, discovery_dur) = run_cpu_indexing_task(
-                server,
+                &ctx.resources,
                 Some(workspace_root),
                 cancellation,
                 IndexingWorkClass::ProjectCompanionIo,
@@ -171,7 +171,7 @@ impl IndexingCoordinator {
 
         let navigation_priority_keys = priority_keys.clone();
         let (mut gem_indexer, discovery, navigation_discovery_dur) = run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(workspace_root.clone()),
             cancellation.clone(),
             IndexingWorkClass::ProjectCompanionIo,
@@ -211,7 +211,7 @@ impl IndexingCoordinator {
                 ));
             }
             let (next_indexer, manifest, manifest_dur) = run_cpu_indexing_task(
-                server,
+                &ctx.resources,
                 Some(workspace_root.clone()),
                 cancellation.clone(),
                 IndexingWorkClass::HeavyIo,
@@ -234,7 +234,7 @@ impl IndexingCoordinator {
             let binding_started = Instant::now();
             let bound = gem_indexer
                 .bind_prepared_required_gem_with_shared_product(
-                    server,
+                    ctx,
                     analysis_engine.clone(),
                     manifest,
                     cancellation.clone(),
@@ -252,7 +252,7 @@ impl IndexingCoordinator {
         }
         if bound_priority_files > 0 {
             gem_indexer
-                .resolve_bound_required_gems(server, analysis_engine, cancellation.clone())
+                .resolve_bound_required_gems(ctx, analysis_engine, cancellation.clone())
                 .await?;
             if let Some((demands, generation)) = &navigation_demands {
                 for gem_name in &priority_names {
@@ -281,7 +281,7 @@ impl IndexingCoordinator {
         let _ = project_frontier_release.send(());
 
         let (gem_indexer, completion, exhaustive_discovery_dur) = run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(workspace_root),
             cancellation,
             IndexingWorkClass::ProjectCompanionIo,
@@ -308,7 +308,7 @@ impl IndexingCoordinator {
     /// `GEM_PRODUCT_LOAD_PREFETCH` decoded products are in flight, plus the
     /// product currently being inserted.
     pub(super) async fn index_configured_gems(
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         workspace_root: PathBuf,
         cancellation: Option<CancellationToken>,
         analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
@@ -321,7 +321,7 @@ impl IndexingCoordinator {
     ) -> Result<IndexerGem> {
         if gem_indexer.needs_unlocked_explicit_discovery() {
             let (next_indexer, discovery) = run_cpu_indexing_task(
-                server,
+                &ctx.resources,
                 Some(workspace_root.clone()),
                 cancellation.clone(),
                 IndexingWorkClass::HeavyIo,
@@ -342,7 +342,7 @@ impl IndexingCoordinator {
         let pipeline_started = Instant::now();
         let gem_indexer = Arc::new(gem_indexer);
         let producer_indexer = gem_indexer.clone();
-        let producer_server = server.clone();
+        let producer_ctx = ctx.clone();
         let producer_root = workspace_root.clone();
         let producer_cancellation = cancellation.clone();
         let (manifest_sender, manifest_receiver) = tokio::sync::mpsc::channel::<
@@ -397,7 +397,7 @@ impl IndexingCoordinator {
                 let worker_indexer = producer_indexer.clone();
                 let manifest_gem_name = gem_name.clone();
                 let preparation = run_cpu_indexing_task(
-                    &producer_server,
+                    &producer_ctx.resources,
                     Some(producer_root.clone()),
                     producer_cancellation.clone(),
                     IndexingWorkClass::HeavyIo,
@@ -470,7 +470,7 @@ impl IndexingCoordinator {
                     let (gem_name, manifest, matched_demand_keys) = item?;
                     let loading_started = Instant::now();
                     let loaded = indexer
-                        .load_prepared_required_gem_with_shared_product(server, manifest)
+                        .load_prepared_required_gem_with_shared_product(ctx, manifest)
                         .await?;
                     Ok::<_, anyhow::Error>((
                         gem_name,
@@ -488,7 +488,7 @@ impl IndexingCoordinator {
                 let binding_started = Instant::now();
                 let bound = consumer_indexer
                     .bind_loaded_required_gem_product(
-                        server,
+                        ctx,
                         analysis_engine.clone(),
                         loaded,
                         cancellation.clone(),
@@ -519,7 +519,7 @@ impl IndexingCoordinator {
                 if requested {
                     consumer_indexer
                         .resolve_bound_required_gems(
-                            server,
+                            ctx,
                             analysis_engine.clone(),
                             cancellation.clone(),
                         )

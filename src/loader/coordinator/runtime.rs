@@ -4,6 +4,7 @@ use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
 use crate::environment::config::runtime::{EffectiveRuntimeSelection, SelectedRuntimeDescriptor};
 use crate::environment::runtime::catalog::RuntimeImplementation;
+use crate::loader::context::LoadContext;
 use crate::loader::sources::stdlib::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
 use crate::loader::version::ruby_version::{RubyImplementation, RubyVersion};
 use crate::server::RubyLanguageServer;
@@ -12,19 +13,19 @@ use log::info;
 use std::time::Instant;
 
 pub(super) async fn runtime_stdlib_paths_for_project(
-    server: &RubyLanguageServer,
+    ctx: &LoadContext,
     runtime: &SelectedRuntimeDescriptor,
 ) -> Result<RuntimeStdlibPaths> {
     let key = RuntimeStdlibPathKey::new(&runtime.executable, runtime.java_home.as_deref())?;
     let producer_key = key.clone();
-    let producer_server = server.clone();
+    let producer_resources = ctx.resources.clone();
     let started = Instant::now();
-    let product = server
+    let product = ctx
         .products
         .stdlib_paths()
         .get_or_try_init(key, move || async move {
             run_cpu_indexing_task(
-                &producer_server,
+                &producer_resources,
                 None,
                 None,
                 IndexingWorkClass::Io,

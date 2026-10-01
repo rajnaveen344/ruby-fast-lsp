@@ -7,9 +7,9 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::cache::dependency_product::{
     GemDependencyFileTemplate, GemDependencyManifest, GemDependencyProduct, GemDependencySource,
 };
+use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
-use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
@@ -109,7 +109,7 @@ impl IndexerGem {
     #[cfg(test)]
     async fn index_prepared_required_gems_with_shared_product(
         &self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
         manifests: Vec<GemDependencyManifest>,
         cancellation: Option<CancellationToken>,
@@ -118,7 +118,7 @@ impl IndexerGem {
         for manifest in manifests {
             indexed_files.extend(
                 self.bind_prepared_required_gem_with_shared_product(
-                    server,
+                    ctx,
                     analysis_engine.clone(),
                     manifest,
                     cancellation.clone(),
@@ -127,7 +127,7 @@ impl IndexerGem {
             );
         }
         if !indexed_files.is_empty() {
-            self.resolve_bound_required_gems(server, analysis_engine, cancellation)
+            self.resolve_bound_required_gems(ctx, analysis_engine, cancellation)
                 .await?;
         }
         info!(
@@ -139,21 +139,21 @@ impl IndexerGem {
 
     pub(crate) async fn bind_prepared_required_gem_with_shared_product(
         &self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
         manifest: GemDependencyManifest,
         cancellation: Option<CancellationToken>,
     ) -> Result<Vec<Url>> {
         let loaded = self
-            .load_prepared_required_gem_with_shared_product(server, manifest)
+            .load_prepared_required_gem_with_shared_product(ctx, manifest)
             .await?;
-        self.bind_loaded_required_gem_product(server, analysis_engine, loaded, cancellation)
+        self.bind_loaded_required_gem_product(ctx, analysis_engine, loaded, cancellation)
             .await
     }
 
     pub(crate) async fn load_prepared_required_gem_with_shared_product(
         &self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         manifest: GemDependencyManifest,
     ) -> Result<LoadedGemDependencyProduct> {
         let processor = self.file_processor.clone().ok_or_else(|| {
@@ -171,8 +171,8 @@ impl IndexerGem {
         );
         let key = manifest.key().clone();
         let producer_manifest = manifest.clone();
-        let indexing_resources = server.indexing.resources().clone();
-        let persistent_cache = server.products.persistent().clone();
+        let indexing_resources = ctx.resources.clone();
+        let persistent_cache = ctx.products.persistent().clone();
         let lookup_spec = IndexingWorkSpec::new(
             Some(project_root.clone()),
             IndexingResourcePriority::Background,
@@ -190,7 +190,7 @@ impl IndexerGem {
         )
         .as_project_parallel();
         let producer_uses_shared_pool = producer_lanes == indexing_resources.policy().cpu_lanes();
-        let product = server
+        let product = ctx
             .products
             .gem_dependencies()
             .get_or_try_init(key, move || async move {
@@ -279,7 +279,7 @@ impl IndexerGem {
 
     pub(crate) async fn bind_loaded_required_gem_product(
         &self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
         loaded: LoadedGemDependencyProduct,
         cancellation: Option<CancellationToken>,
@@ -298,9 +298,8 @@ impl IndexerGem {
             GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
             0,
         );
-        let binding = match server
-            .indexing
-            .resources()
+        let binding = match ctx
+            .resources
             .run_with_resources(
                 "gem dependency product binding",
                 binding_spec,
@@ -314,18 +313,18 @@ impl IndexerGem {
             Ok(binding) => binding,
             Err(error) => {
                 crate::loader::cache::dependency_product::GemDependencyBinding::record_failure(
-                    server.products.gem_bindings(),
+                    ctx.products.gem_bindings(),
                 );
                 return Err(error);
             }
         };
-        binding.record_success(server.products.gem_bindings());
+        binding.record_success(ctx.products.gem_bindings());
         Ok(binding.uris)
     }
 
     pub(crate) async fn resolve_bound_required_gems(
         &self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
         cancellation: Option<CancellationToken>,
     ) -> Result<()> {
@@ -342,9 +341,7 @@ impl IndexerGem {
             GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
             0,
         );
-        server
-            .indexing
-            .resources()
+        ctx.resources
             .run_with_resources(
                 "gem dependency semantic resolution",
                 resolution_spec,
@@ -360,7 +357,7 @@ impl IndexerGem {
     #[cfg(test)]
     pub(super) async fn index_required_gems_with_shared_product(
         &self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) -> Result<Vec<Url>> {
         let seed = self
@@ -373,13 +370,8 @@ impl IndexerGem {
             })?
             .semantic_context_fingerprint();
         let manifests = self.required_gem_manifests(seed)?;
-        self.index_prepared_required_gems_with_shared_product(
-            server,
-            analysis_engine,
-            manifests,
-            None,
-        )
-        .await
+        self.index_prepared_required_gems_with_shared_product(ctx, analysis_engine, manifests, None)
+            .await
     }
 
     pub(crate) fn prepare_required_gem_manifest_blocking(

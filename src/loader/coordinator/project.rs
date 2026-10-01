@@ -5,6 +5,7 @@ use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::loader::sources::project::IndexerProject;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
@@ -24,6 +25,7 @@ impl IndexingCoordinator {
     /// Collect facts from project files (skips already-indexed files)
     pub(super) async fn collect_project_navigation_facts(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         priority_keys: ActiveDocumentPriorityKeys,
     ) -> Result<()> {
@@ -55,7 +57,7 @@ impl IndexingCoordinator {
         let worker_server = server.clone();
         let worker_root = self.workspace_root.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
-            server,
+&ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::ProjectParallelIo,
@@ -201,6 +203,7 @@ impl IndexingCoordinator {
 
     pub(super) async fn collect_remaining_project_facts(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         mut runtime_provider_ready_rx: Option<
             tokio::sync::oneshot::Receiver<Result<Option<Arc<JrubyImportProvider>>, String>>,
@@ -227,7 +230,11 @@ impl IndexingCoordinator {
                 None => None,
             };
             return self
-                .collect_remaining_project_facts_without_demands(server, exact_runtime_provider)
+                .collect_remaining_project_facts_without_demands(
+                    ctx,
+                    server,
+                    exact_runtime_provider,
+                )
                 .await;
         };
         let generation = run.generation();
@@ -256,7 +263,7 @@ impl IndexingCoordinator {
         let worker_cancellation = self.resource_cancellation();
         let loop_cancellation = worker_cancellation.clone();
         let (next_project_indexer, result) = run_cpu_indexing_task(
-            server,
+&ctx.resources,
             Some(self.workspace_root.clone()),
             worker_cancellation,
             IndexingWorkClass::ProjectParallelIo,
@@ -430,6 +437,7 @@ impl IndexingCoordinator {
 
     async fn collect_remaining_project_facts_without_demands(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         exact_runtime_provider: Option<Arc<JrubyImportProvider>>,
     ) -> Result<()> {
@@ -443,7 +451,7 @@ impl IndexingCoordinator {
         }
         let worker_server = server.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::ProjectParallelIo,
@@ -460,6 +468,7 @@ impl IndexingCoordinator {
 
     pub(super) async fn replay_jruby_catalog_sensitive_project_facts(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<usize> {
         let mut project_indexer = self.project_indexer.take().expect_invariant(
@@ -474,7 +483,7 @@ impl IndexingCoordinator {
         );
         let worker_server = server.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::ProjectParallelIo,
@@ -492,7 +501,7 @@ impl IndexingCoordinator {
 
     pub(super) async fn discard_jruby_replay_semantic_context(
         &mut self,
-        server: &RubyLanguageServer,
+        ctx: &LoadContext,
     ) -> Result<()> {
         let mut project_indexer = self.project_indexer.take().expect_invariant(
             "non-JRuby project completion has no retained project indexer",
@@ -500,7 +509,7 @@ impl IndexingCoordinator {
             "retain the IndexerProject until replay context is consumed or discarded",
         );
         let project_indexer = run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::LightCpu,

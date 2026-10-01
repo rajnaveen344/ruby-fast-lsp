@@ -3,6 +3,7 @@
 use super::resources::{run_cpu_indexing_task, IndexingWorkClass, MIB};
 use super::runtime::runtime_stdlib_paths_for_project;
 use super::IndexingCoordinator;
+use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
@@ -18,7 +19,7 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 async fn index_core_stubs_additively_off_reactor(
-    server: &RubyLanguageServer,
+    ctx: &LoadContext,
     project_root: PathBuf,
     cancellation: Option<CancellationToken>,
     analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
@@ -26,7 +27,7 @@ async fn index_core_stubs_additively_off_reactor(
     extension_path: Option<String>,
 ) -> Result<()> {
     run_cpu_indexing_task(
-        server,
+        &ctx.resources,
         Some(project_root),
         cancellation,
         IndexingWorkClass::ParallelIo,
@@ -95,6 +96,7 @@ impl IndexingCoordinator {
     /// Step 5: Index the Ruby standard library
     pub(super) async fn index_core_stubs(
         &self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         ruby_version: Option<RubyVersion>,
     ) -> Result<AnalysisEngine> {
@@ -105,7 +107,7 @@ impl IndexingCoordinator {
             env!("CARGO_PKG_VERSION"),
             extension_path.as_deref().unwrap_or("<development>")
         );
-        let indexing_resources = server.indexing.resources().clone();
+        let indexing_resources = ctx.resources.clone();
         let resource_policy = indexing_resources.policy();
         let resource_spec = IndexingWorkSpec::new(
             Some(self.workspace_root.clone()),
@@ -114,7 +116,7 @@ impl IndexingCoordinator {
             256 * MIB,
             1,
         );
-        let template = server
+        let template = ctx
             .products
             .core_templates()
             .get_or_try_init(key, move || async move {
@@ -165,7 +167,7 @@ impl IndexingCoordinator {
         // clone as the empty-engine fast path, and use the ordinary per-file
         // lifecycle when live facts appeared during preparation.
         index_core_stubs_additively_off_reactor(
-            server,
+            ctx,
             self.workspace_root.clone(),
             self.resource_cancellation(),
             analysis_engine,
@@ -179,6 +181,7 @@ impl IndexingCoordinator {
     /// Index runtime standard library modules after project declarations.
     pub(super) async fn index_standard_library(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         ruby_version: &Option<RubyVersion>,
     ) -> Result<()> {
@@ -195,13 +198,13 @@ impl IndexingCoordinator {
             stdlib_indexer
                 .set_selected_runtime(runtime.executable.clone(), runtime.java_home.clone());
             stdlib_indexer
-                .set_runtime_stdlib_paths(runtime_stdlib_paths_for_project(server, runtime).await?);
+                .set_runtime_stdlib_paths(runtime_stdlib_paths_for_project(ctx, runtime).await?);
         }
 
         stdlib_indexer.set_required_modules(required_stdlib);
         let analysis_engine = self.analysis_engine(server);
         let (stdlib_indexer, result) = run_cpu_indexing_task(
-            server,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::ParallelIo,

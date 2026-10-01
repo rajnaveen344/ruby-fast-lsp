@@ -59,7 +59,7 @@ async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource
         let started_tx = started_tx.clone();
         tokio::spawn(async move {
             run_cpu_indexing_task(
-                &server,
+                server.indexing.resources(),
                 Some(root),
                 None,
                 IndexingWorkClass::RuntimeCompanionParallelIo,
@@ -78,7 +78,7 @@ async fn jruby_runtime_companion_overlaps_the_active_project_with_exact_resource
         let root = root.clone();
         tokio::spawn(async move {
             run_cpu_indexing_task(
-                &server,
+                server.indexing.resources(),
                 Some(root),
                 None,
                 IndexingWorkClass::ProjectParallelIo,
@@ -136,7 +136,7 @@ async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
         let active_root = active_root.clone();
         tokio::spawn(async move {
             run_cpu_indexing_task(
-                &server,
+                server.indexing.resources(),
                 Some(active_root),
                 None,
                 IndexingWorkClass::RuntimeCompanionParallelIo,
@@ -157,7 +157,7 @@ async fn active_navigation_reservation_blocks_a_sibling_runtime_companion() {
         let server = server.clone();
         tokio::spawn(async move {
             run_cpu_indexing_task(
-                &server,
+                server.indexing.resources(),
                 Some(sibling_root),
                 None,
                 IndexingWorkClass::RuntimeCompanionParallelIo,

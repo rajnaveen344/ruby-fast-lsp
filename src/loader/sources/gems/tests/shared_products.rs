@@ -143,9 +143,10 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
     let first_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
     let second_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
 
+    let ctx = server.load_context_for_project(fixture.path());
     let (first_result, second_result) = tokio::join!(
-        first_indexer.index_required_gems_with_shared_product(&server, first_engine.clone()),
-        second_indexer.index_required_gems_with_shared_product(&server, second_engine.clone()),
+        first_indexer.index_required_gems_with_shared_product(&ctx, first_engine.clone()),
+        second_indexer.index_required_gems_with_shared_product(&ctx, second_engine.clone()),
     );
     assert_eq!(first_result.unwrap().len(), 1);
     assert_eq!(second_result.unwrap().len(), 1);
@@ -192,7 +193,10 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
     let third_engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
     assert_eq!(
         third_indexer
-            .index_required_gems_with_shared_product(&server, third_engine.clone())
+            .index_required_gems_with_shared_product(
+                &server.load_context_for_project(fixture.path()),
+                third_engine.clone()
+            )
             .await
             .unwrap()
             .len(),
@@ -279,7 +283,10 @@ async fn cold_active_gem_product_overlaps_the_jruby_runtime_companion() {
     let engine = Arc::new(parking_lot::RwLock::new(AnalysisEngine::new()));
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        indexer.index_required_gems_with_shared_product(&server, engine),
+        indexer.index_required_gems_with_shared_product(
+            &server.load_context_for_project(fixture.path()),
+            engine,
+        ),
     )
     .await;
     runtime_release_tx.send(()).unwrap();
