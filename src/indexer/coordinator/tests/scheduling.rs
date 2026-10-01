@@ -1,6 +1,7 @@
 //! Coordinator lifecycle, resource scheduling, and dependency priority.
 
 use super::*;
+use crate::utils::single_flight::SingleFlightStat;
 
 #[test]
 fn coordinator_construction_does_not_load_project_extensions() {
@@ -67,10 +68,10 @@ async fn identical_runtime_stdlib_paths_use_one_server_owned_probe() {
         "concurrent projects selecting the same immutable runtime must execute one probe"
     );
     let cache = server.products.stdlib_paths().snapshot();
-    assert_eq!(cache.lookups, 2);
-    assert_eq!(cache.producers, 1);
-    assert_eq!(cache.joined_flights, 1);
-    assert_eq!(cache.failures, 0);
+    assert_eq!(cache.get(SingleFlightStat::Lookups), 2);
+    assert_eq!(cache.get(SingleFlightStat::Producers), 1);
+    assert_eq!(cache.get(SingleFlightStat::JoinedFlights), 1);
+    assert_eq!(cache.get(SingleFlightStat::Failures), 0);
 }
 
 #[tokio::test(flavor = "current_thread")]

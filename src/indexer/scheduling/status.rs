@@ -1,5 +1,8 @@
+use crate::indexer::cache::persistent::PersistentProductStat;
 use crate::invariant::ExpectInvariant;
+use crate::utils::single_flight::SingleFlightStat;
 use parking_lot::Mutex;
+use ruby_analysis::stats::StatsSnapshot;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -120,6 +123,29 @@ pub struct IndexingSingleFlightReuseSnapshot {
     pub joined_flights: u64,
     pub producers: u64,
     pub failures: u64,
+}
+
+impl From<&StatsSnapshot<PersistentProductStat>> for IndexingPersistentProductReuseSnapshot {
+    fn from(stats: &StatsSnapshot<PersistentProductStat>) -> Self {
+        Self {
+            lookups: stats.get(PersistentProductStat::Lookups),
+            hits: stats.get(PersistentProductStat::Hits),
+            producers: stats.get(PersistentProductStat::Producers),
+            corruptions: stats.get(PersistentProductStat::Corruptions),
+        }
+    }
+}
+
+impl From<&StatsSnapshot<SingleFlightStat>> for IndexingSingleFlightReuseSnapshot {
+    fn from(stats: &StatsSnapshot<SingleFlightStat>) -> Self {
+        Self {
+            lookups: stats.get(SingleFlightStat::Lookups),
+            hits: stats.get(SingleFlightStat::Hits),
+            joined_flights: stats.get(SingleFlightStat::JoinedFlights),
+            producers: stats.get(SingleFlightStat::Producers),
+            failures: stats.get(SingleFlightStat::Failures),
+        }
+    }
 }
 
 /// Process-lifetime reuse evidence. These counters are intentionally not

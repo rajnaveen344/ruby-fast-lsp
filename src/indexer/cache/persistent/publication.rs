@@ -13,8 +13,8 @@ use super::compiled_wasm::{encode_compiled_wasm_payload, CompiledWasmProductKey}
 use super::envelope::encode_envelope;
 use super::{
     PersistentCompiledWasmReservation, PersistentDerivedProductReservation,
-    PersistentGemProductReservation, PersistentJavaArtifactReservation, MAX_COMPRESSED_ENTRY_BYTES,
-    TEMP_SEQUENCE,
+    PersistentGemProductReservation, PersistentJavaArtifactReservation, PersistentProductStat,
+    MAX_COMPRESSED_ENTRY_BYTES, TEMP_SEQUENCE,
 };
 
 impl PersistentGemProductReservation {
@@ -43,8 +43,7 @@ impl PersistentDerivedProductReservation {
         if product_cache_id != self.cache_id {
             self.cache
                 .counters(self.kind)
-                .publication_failures
-                .fetch_add(1, Ordering::Relaxed);
+                .increment(PersistentProductStat::PublicationFailures);
             return Err(anyhow!(
                 "persistent reservation identity does not match {} product",
                 self.kind.label()
@@ -54,16 +53,13 @@ impl PersistentDerivedProductReservation {
         if result.is_err() {
             self.cache
                 .counters(self.kind)
-                .publication_failures
-                .fetch_add(1, Ordering::Relaxed);
+                .increment(PersistentProductStat::PublicationFailures);
         }
         let write_bytes = result?;
         self.unlock()?;
         let counters = self.cache.counters(self.kind);
-        counters.publications.fetch_add(1, Ordering::Relaxed);
-        counters
-            .write_bytes
-            .fetch_add(write_bytes, Ordering::Relaxed);
+        counters.increment(PersistentProductStat::Publications);
+        counters.record(PersistentProductStat::WriteBytes, write_bytes);
         self.cache.record_publication_and_cleanup(write_bytes)?;
         Ok(())
     }

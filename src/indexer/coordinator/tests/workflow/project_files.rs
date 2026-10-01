@@ -1,6 +1,7 @@
 //! Project file discovery, RBS facts, scale, and cold diagnostics publication.
 
 use super::*;
+use ruby_analysis::engine::AnalysisStat;
 
 #[tokio::test]
 async fn test_coordinator_project_file_collection() {
@@ -267,7 +268,7 @@ async fn cold_indexing_retains_but_does_not_publish_closed_file_diagnostics() {
             .analysis_engine_for_uri(&uri)
             .read()
             .stats()
-            .diagnostics
+            .get(AnalysisStat::Diagnostics)
             > 0,
         "cold indexing must retain workspace diagnostics in the engine"
     );

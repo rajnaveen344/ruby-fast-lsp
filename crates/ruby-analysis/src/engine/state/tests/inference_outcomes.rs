@@ -1,6 +1,7 @@
 //! Expression outcomes, local reads, method returns, and resolve-pass outcome caches.
 
 use super::*;
+use crate::engine::ResolveStat;
 
 #[test]
 fn type_at_reads_engine_owned_store() {
@@ -181,9 +182,9 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
     engine.resolve();
 
     let resolve_pass = engine.last_resolve_stats();
-    assert_eq!(resolve_pass.constant_cache_misses, 1);
-    assert_eq!(resolve_pass.constant_cache_hits, 1);
-    assert_eq!(resolve_pass.constant_cache_unique_keys, 1);
+    assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheMisses), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheHits), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheUniqueKeys), 1);
     assert_eq!(engine.reference_facts_for(&user).len(), 2);
 }
 
@@ -272,12 +273,18 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
     engine.resolve();
 
     let resolve_pass = engine.last_resolve_stats();
-    assert_eq!(resolve_pass.method_return_cache_misses, 1);
-    assert_eq!(resolve_pass.method_return_cache_hits, 1);
-    assert_eq!(resolve_pass.method_return_cache_entries, 1);
-    assert_eq!(resolve_pass.method_visibility_cache_misses, 1);
-    assert_eq!(resolve_pass.method_visibility_cache_hits, 1);
-    assert_eq!(resolve_pass.method_visibility_cache_entries, 1);
+    assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheMisses), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheHits), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheEntries), 1);
+    assert_eq!(
+        resolve_pass.get(ResolveStat::MethodVisibilityCacheMisses),
+        1
+    );
+    assert_eq!(resolve_pass.get(ResolveStat::MethodVisibilityCacheHits), 1);
+    assert_eq!(
+        resolve_pass.get(ResolveStat::MethodVisibilityCacheEntries),
+        1
+    );
     let query = engine.query();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
@@ -382,9 +389,18 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
     engine.resolve();
 
     let resolve_pass = engine.last_resolve_stats();
-    assert_eq!(resolve_pass.ambiguous_method_return_cache_misses, 1);
-    assert_eq!(resolve_pass.ambiguous_method_return_cache_hits, 1);
-    assert_eq!(resolve_pass.ambiguous_method_return_cache_entries, 1);
+    assert_eq!(
+        resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheMisses),
+        1
+    );
+    assert_eq!(
+        resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheHits),
+        1
+    );
+    assert_eq!(
+        resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheEntries),
+        1
+    );
     let query = engine.query();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)
@@ -478,9 +494,9 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
     engine.resolve();
 
     let resolve_pass = engine.last_resolve_stats();
-    assert_eq!(resolve_pass.deferred_receiver_candidates, 1);
-    assert_eq!(resolve_pass.deferred_receiver_proven, 1);
-    assert_eq!(resolve_pass.deferred_receiver_unknown, 0);
+    assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverCandidates), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverProven), 1);
+    assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverUnknown), 0);
     let query = engine.query();
     let outcomes = query
         .call_expression_outcomes_in_file(ref_file)

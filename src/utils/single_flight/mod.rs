@@ -1,5 +1,6 @@
 use crate::invariant::ExpectInvariant;
 use parking_lot::{Condvar, Mutex};
+use ruby_analysis::stats::{self, StatsRegistry, StatsSnapshot};
 use std::collections::HashMap;
 use std::future::Future;
 use std::hash::Hash;
@@ -60,36 +61,27 @@ pub struct SingleFlightCache<K, V> {
     counters: Arc<SingleFlightCounters>,
 }
 
-#[derive(Debug, Default)]
-struct SingleFlightCounters {
-    lookups: AtomicU64,
-    hits: AtomicU64,
-    joined_flights: AtomicU64,
-    misses: AtomicU64,
-    producers: AtomicU64,
-    failures: AtomicU64,
-    evictions: AtomicU64,
-    producer_wall_ns: AtomicU64,
-    producer_max_wall_ns: AtomicU64,
-    consumer_wait_wall_ns: AtomicU64,
-    consumer_max_wait_wall_ns: AtomicU64,
+ruby_analysis::stat_set! {
+    /// Reuse statistics shared by every single-flight cache shape. `Entries`
+    /// and `RetainedWeightBytes` are gauges observed at snapshot time.
+    pub enum SingleFlightStat {
+        Entries = "entries",
+        RetainedWeightBytes = "retained_weight_bytes",
+        Lookups = "lookups",
+        Hits = "hits",
+        JoinedFlights = "joined_flights",
+        Misses = "misses",
+        Producers = "producers",
+        Failures = "failures",
+        Evictions = "evictions",
+        ProducerWallNs = "producer_wall_ns",
+        ProducerMaxWallNs = "producer_max_wall_ns": max,
+        ConsumerWaitWallNs = "consumer_wait_wall_ns",
+        ConsumerMaxWaitWallNs = "consumer_max_wait_wall_ns": max,
+    }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SingleFlightSnapshot {
-    pub entries: usize,
-    pub lookups: u64,
-    pub hits: u64,
-    pub joined_flights: u64,
-    pub misses: u64,
-    pub producers: u64,
-    pub failures: u64,
-    pub evictions: u64,
-    pub producer_wall_ns: u64,
-    pub producer_max_wall_ns: u64,
-    pub consumer_wait_wall_ns: u64,
-    pub consumer_max_wait_wall_ns: u64,
-}
+type SingleFlightCounters = StatsRegistry<SingleFlightStat>;
 
 impl<K, V> Clone for SingleFlightCache<K, V> {
     fn clone(&self) -> Self {
@@ -119,7 +111,7 @@ where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<V, String>> + Send + 'static,
     {
-        self.counters.lookups.fetch_add(1, Ordering::Relaxed);
+        self.counters.increment(SingleFlightStat::Lookups);
         let (cell, owns_producer) = {
             use std::collections::hash_map::Entry;
 
@@ -127,20 +119,20 @@ where
             match entries.entry(key.clone()) {
                 Entry::Occupied(entry) => {
                     if entry.get().get().is_some() {
-                        self.counters.hits.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::Hits);
                     } else {
-                        self.counters.joined_flights.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::JoinedFlights);
                     }
                     (entry.get().clone(), false)
                 }
                 Entry::Vacant(entry) => {
-                    self.counters.misses.fetch_add(1, Ordering::Relaxed);
+                    self.counters.increment(SingleFlightStat::Misses);
                     (entry.insert(Arc::new(FlightState::new())).clone(), true)
                 }
             }
         };
         if owns_producer {
-            self.counters.producers.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Producers);
             let producer_started = Instant::now();
             let producer_task = tokio::spawn(producer());
             let producer_cell = cell.clone();
@@ -154,9 +146,9 @@ where
                         "single-flight producer task failed: {error}"
                     ))),
                 };
-                counters.record_producer_wall(producer_started.elapsed());
+                record_producer_wall(&counters, producer_started.elapsed());
                 if result.is_err() {
-                    counters.failures.fetch_add(1, Ordering::Relaxed);
+                    counters.increment(SingleFlightStat::Failures);
                 }
                 producer_cell.complete(result);
                 if producer_cell.get().is_some_and(Result::is_err) {
@@ -172,8 +164,7 @@ where
         }
         let wait_started = Instant::now();
         let result = cell.wait().await;
-        self.counters
-            .record_consumer_wait_wall(wait_started.elapsed());
+        record_consumer_wait_wall(&self.counters, wait_started.elapsed());
         result.map_err(|error| error.as_ref().clone())
     }
 
@@ -185,24 +176,10 @@ where
         self.entries.lock().is_empty()
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
-        SingleFlightSnapshot {
-            entries: self.len(),
-            lookups: self.counters.lookups.load(Ordering::Relaxed),
-            hits: self.counters.hits.load(Ordering::Relaxed),
-            joined_flights: self.counters.joined_flights.load(Ordering::Relaxed),
-            misses: self.counters.misses.load(Ordering::Relaxed),
-            producers: self.counters.producers.load(Ordering::Relaxed),
-            failures: self.counters.failures.load(Ordering::Relaxed),
-            evictions: self.counters.evictions.load(Ordering::Relaxed),
-            producer_wall_ns: self.counters.producer_wall_ns.load(Ordering::Relaxed),
-            producer_max_wall_ns: self.counters.producer_max_wall_ns.load(Ordering::Relaxed),
-            consumer_wait_wall_ns: self.counters.consumer_wait_wall_ns.load(Ordering::Relaxed),
-            consumer_max_wait_wall_ns: self
-                .counters
-                .consumer_max_wait_wall_ns
-                .load(Ordering::Relaxed),
-        }
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
+        let mut snapshot = self.counters.snapshot();
+        snapshot.set(SingleFlightStat::Entries, stats::count(self.len()));
+        snapshot
     }
 }
 
@@ -281,7 +258,7 @@ where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<V, String>> + Send + 'static,
     {
-        self.counters.lookups.fetch_add(1, Ordering::Relaxed);
+        self.counters.increment(SingleFlightStat::Lookups);
         let (cell, owns_producer) = {
             use std::collections::hash_map::Entry;
 
@@ -289,14 +266,14 @@ where
             match entries.entry(key.clone()) {
                 Entry::Occupied(entry) => {
                     if entry.get().cell.get().is_some() {
-                        self.counters.hits.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::Hits);
                     } else {
-                        self.counters.joined_flights.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::JoinedFlights);
                     }
                     (entry.get().cell.clone(), false)
                 }
                 Entry::Vacant(entry) => {
-                    self.counters.misses.fetch_add(1, Ordering::Relaxed);
+                    self.counters.increment(SingleFlightStat::Misses);
                     let generation = self
                         .next_generation
                         .fetch_add(1, Ordering::AcqRel)
@@ -320,7 +297,7 @@ where
             }
         };
         if owns_producer {
-            self.counters.producers.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Producers);
             let producer_started = Instant::now();
             let producer_task = tokio::spawn(producer());
             let producer_cell = cell.clone();
@@ -333,11 +310,9 @@ where
                         "single-flight producer task failed: {error}"
                     ))),
                 };
-                cache
-                    .counters
-                    .record_producer_wall(producer_started.elapsed());
+                record_producer_wall(&cache.counters, producer_started.elapsed());
                 if result.is_err() {
-                    cache.counters.failures.fetch_add(1, Ordering::Relaxed);
+                    cache.counters.increment(SingleFlightStat::Failures);
                 }
                 producer_cell.complete(result);
                 if producer_cell.get().is_some_and(Result::is_err) {
@@ -355,8 +330,7 @@ where
         }
         let wait_started = Instant::now();
         let result = cell.wait().await;
-        self.counters
-            .record_consumer_wait_wall(wait_started.elapsed());
+        record_consumer_wait_wall(&self.counters, wait_started.elapsed());
         result.map_err(|error| error.as_ref().clone())
     }
 
@@ -377,24 +351,14 @@ where
         completed_weight(&entries, self.weight.as_ref())
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
-        SingleFlightSnapshot {
-            entries: self.len(),
-            lookups: self.counters.lookups.load(Ordering::Relaxed),
-            hits: self.counters.hits.load(Ordering::Relaxed),
-            joined_flights: self.counters.joined_flights.load(Ordering::Relaxed),
-            misses: self.counters.misses.load(Ordering::Relaxed),
-            producers: self.counters.producers.load(Ordering::Relaxed),
-            failures: self.counters.failures.load(Ordering::Relaxed),
-            evictions: self.counters.evictions.load(Ordering::Relaxed),
-            producer_wall_ns: self.counters.producer_wall_ns.load(Ordering::Relaxed),
-            producer_max_wall_ns: self.counters.producer_max_wall_ns.load(Ordering::Relaxed),
-            consumer_wait_wall_ns: self.counters.consumer_wait_wall_ns.load(Ordering::Relaxed),
-            consumer_max_wait_wall_ns: self
-                .counters
-                .consumer_max_wait_wall_ns
-                .load(Ordering::Relaxed),
-        }
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
+        let mut snapshot = self.counters.snapshot();
+        snapshot.set(SingleFlightStat::Entries, stats::count(self.len()));
+        snapshot.set(
+            SingleFlightStat::RetainedWeightBytes,
+            self.retained_weight(),
+        );
+        snapshot
     }
 
     fn evict_completed_to_limits(&self) {
@@ -418,7 +382,7 @@ where
                 break;
             };
             entries.remove(&oldest_key);
-            self.counters.evictions.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Evictions);
         }
     }
 }
@@ -565,7 +529,7 @@ where
     where
         F: FnOnce() -> Result<V, E>,
     {
-        self.counters.lookups.fetch_add(1, Ordering::Relaxed);
+        self.counters.increment(SingleFlightStat::Lookups);
         let (cell, owns_producer) = {
             use std::collections::hash_map::Entry;
 
@@ -573,14 +537,14 @@ where
             match entries.entry(key.clone()) {
                 Entry::Occupied(entry) => {
                     if entry.get().cell.is_completed_successfully() {
-                        self.counters.hits.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::Hits);
                     } else {
-                        self.counters.joined_flights.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::JoinedFlights);
                     }
                     (entry.get().cell.clone(), false)
                 }
                 Entry::Vacant(entry) => {
-                    self.counters.misses.fetch_add(1, Ordering::Relaxed);
+                    self.counters.increment(SingleFlightStat::Misses);
                     let generation = self
                         .next_generation
                         .fetch_add(1, Ordering::AcqRel)
@@ -601,24 +565,22 @@ where
         };
 
         if owns_producer {
-            self.counters.producers.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Producers);
             let producer_started = Instant::now();
             match catch_unwind(AssertUnwindSafe(producer)) {
                 Ok(result) => {
-                    self.counters
-                        .record_producer_wall(producer_started.elapsed());
+                    record_producer_wall(&self.counters, producer_started.elapsed());
                     let shared = result.map(Arc::new).map_err(Arc::new);
                     if shared.is_err() {
-                        self.counters.failures.fetch_add(1, Ordering::Relaxed);
+                        self.counters.increment(SingleFlightStat::Failures);
                         self.remove_if_owned(&key, &cell);
                     }
                     cell.complete(shared);
                     self.evict_completed_to_limits();
                 }
                 Err(payload) => {
-                    self.counters
-                        .record_producer_wall(producer_started.elapsed());
-                    self.counters.failures.fetch_add(1, Ordering::Relaxed);
+                    record_producer_wall(&self.counters, producer_started.elapsed());
+                    self.counters.increment(SingleFlightStat::Failures);
                     self.remove_if_owned(&key, &cell);
                     cell.complete_panicked();
                     resume_unwind(payload);
@@ -628,8 +590,7 @@ where
 
         let wait_started = Instant::now();
         let result = cell.wait();
-        self.counters
-            .record_consumer_wait_wall(wait_started.elapsed());
+        record_consumer_wait_wall(&self.counters, wait_started.elapsed());
         result
     }
 
@@ -650,24 +611,14 @@ where
         blocking_completed_weight(&entries, self.weight.as_ref())
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
-        SingleFlightSnapshot {
-            entries: self.len(),
-            lookups: self.counters.lookups.load(Ordering::Relaxed),
-            hits: self.counters.hits.load(Ordering::Relaxed),
-            joined_flights: self.counters.joined_flights.load(Ordering::Relaxed),
-            misses: self.counters.misses.load(Ordering::Relaxed),
-            producers: self.counters.producers.load(Ordering::Relaxed),
-            failures: self.counters.failures.load(Ordering::Relaxed),
-            evictions: self.counters.evictions.load(Ordering::Relaxed),
-            producer_wall_ns: self.counters.producer_wall_ns.load(Ordering::Relaxed),
-            producer_max_wall_ns: self.counters.producer_max_wall_ns.load(Ordering::Relaxed),
-            consumer_wait_wall_ns: self.counters.consumer_wait_wall_ns.load(Ordering::Relaxed),
-            consumer_max_wait_wall_ns: self
-                .counters
-                .consumer_max_wait_wall_ns
-                .load(Ordering::Relaxed),
-        }
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
+        let mut snapshot = self.counters.snapshot();
+        snapshot.set(SingleFlightStat::Entries, stats::count(self.len()));
+        snapshot.set(
+            SingleFlightStat::RetainedWeightBytes,
+            self.retained_weight(),
+        );
+        snapshot
     }
 
     fn remove_if_owned(&self, key: &K, cell: &Arc<BlockingFlightState<V, E>>) {
@@ -700,31 +651,19 @@ where
                 break;
             };
             entries.remove(&oldest_key);
-            self.counters.evictions.fetch_add(1, Ordering::Relaxed);
+            self.counters.increment(SingleFlightStat::Evictions);
         }
     }
 }
 
-impl SingleFlightCounters {
-    fn record_producer_wall(&self, elapsed: Duration) {
-        record_duration(&self.producer_wall_ns, &self.producer_max_wall_ns, elapsed);
-    }
-
-    fn record_consumer_wait_wall(&self, elapsed: Duration) {
-        record_duration(
-            &self.consumer_wait_wall_ns,
-            &self.consumer_max_wait_wall_ns,
-            elapsed,
-        );
-    }
+fn record_producer_wall(counters: &SingleFlightCounters, elapsed: Duration) {
+    counters.record_duration(SingleFlightStat::ProducerWallNs, elapsed);
+    counters.record_duration(SingleFlightStat::ProducerMaxWallNs, elapsed);
 }
 
-fn record_duration(total: &AtomicU64, maximum: &AtomicU64, elapsed: Duration) {
-    let nanoseconds = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
-    let _ = total.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        Some(current.saturating_add(nanoseconds))
-    });
-    maximum.fetch_max(nanoseconds, Ordering::Relaxed);
+fn record_consumer_wait_wall(counters: &SingleFlightCounters, elapsed: Duration) {
+    counters.record_duration(SingleFlightStat::ConsumerWaitWallNs, elapsed);
+    counters.record_duration(SingleFlightStat::ConsumerMaxWaitWallNs, elapsed);
 }
 
 fn completed_weight<K, V>(

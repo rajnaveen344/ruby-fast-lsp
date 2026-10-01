@@ -6,10 +6,10 @@ use crate::environment::runtime::jruby::java_catalog::{
 use crate::indexer::cache::dependency_product::{GemDependencyManifest, GemDependencyProduct};
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
+use ruby_analysis::stats::StatsSnapshot;
 use std::fs::File;
 use std::io::{ErrorKind, Read};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use super::compiled_wasm::{decode_compiled_wasm_payload, CompiledWasmProductKey};
@@ -22,7 +22,7 @@ use super::{
     PersistentDerivedProductReservation, PersistentGemProductLookup,
     PersistentGemProductReservation, PersistentJavaArtifactLookup,
     PersistentJavaArtifactReservation, PersistentProductCounters, PersistentProductKind,
-    PersistentProductSnapshot, MAX_COMPRESSED_ENTRY_BYTES,
+    PersistentProductStat, MAX_COMPRESSED_ENTRY_BYTES,
 };
 
 impl PersistentDerivedProductCache {
@@ -63,12 +63,12 @@ impl PersistentDerivedProductCache {
         }
     }
 
-    pub fn gem_product_snapshot(&self) -> PersistentProductSnapshot {
-        snapshot_counters(&self.inner.counters)
+    pub fn gem_product_snapshot(&self) -> StatsSnapshot<PersistentProductStat> {
+        self.inner.counters.snapshot()
     }
 
-    pub fn java_artifact_snapshot(&self) -> PersistentProductSnapshot {
-        snapshot_counters(&self.inner.java_artifact_counters)
+    pub fn java_artifact_snapshot(&self) -> StatsSnapshot<PersistentProductStat> {
+        self.inner.java_artifact_counters.snapshot()
     }
 
     pub fn lookup_compiled_wasm_or_reserve(
@@ -91,8 +91,8 @@ impl PersistentDerivedProductCache {
         }
     }
 
-    pub fn compiled_wasm_snapshot(&self) -> PersistentProductSnapshot {
-        snapshot_counters(&self.inner.compiled_wasm_counters)
+    pub fn compiled_wasm_snapshot(&self) -> StatsSnapshot<PersistentProductStat> {
+        self.inner.compiled_wasm_counters.snapshot()
     }
 
     pub fn invalidate_compiled_wasm(&self, key: &CompiledWasmProductKey) -> Result<bool> {
@@ -117,7 +117,7 @@ impl PersistentDerivedProductCache {
             }
         };
         if removed {
-            counters.corruptions.fetch_add(1, Ordering::Relaxed);
+            counters.increment(PersistentProductStat::Corruptions);
             *self.inner.accounting.lock() = CacheAccounting::default();
         }
         FileExt::unlock(&key_lock).context("unlocking rejected compiled Wasm key")?;
@@ -141,7 +141,7 @@ impl PersistentDerivedProductCache {
         decode: impl Fn(Vec<u8>) -> Result<T>,
     ) -> Result<PersistentDerivedProductLookup<T>> {
         let counters = self.counters(kind);
-        counters.lookups.fetch_add(1, Ordering::Relaxed);
+        counters.increment(PersistentProductStat::Lookups);
         self.ensure_accounting(kind)?;
         validate_cache_id(cache_id)?;
         let product_path = self.product_path(kind, cache_id);
@@ -159,7 +159,7 @@ impl PersistentDerivedProductCache {
                     kind.label(),
                     product_path.display()
                 );
-                counters.corruptions.fetch_add(1, Ordering::Relaxed);
+                counters.increment(PersistentProductStat::Corruptions);
             }
         }
 
@@ -193,7 +193,7 @@ impl PersistentDerivedProductCache {
             }
             DiskLookup::Corrupt(error) => {
                 if !initial_was_corrupt {
-                    counters.corruptions.fetch_add(1, Ordering::Relaxed);
+                    counters.increment(PersistentProductStat::Corruptions);
                 }
                 log::warn!(
                     "Removing corrupt persistent {} product {} under the ownership lock: {error:#}",
@@ -284,34 +284,13 @@ impl PersistentDerivedProductCache {
     }
 }
 
-fn snapshot_counters(counters: &PersistentProductCounters) -> PersistentProductSnapshot {
-    PersistentProductSnapshot {
-        lookups: counters.lookups.load(Ordering::Relaxed),
-        hits: counters.hits.load(Ordering::Relaxed),
-        misses: counters.misses.load(Ordering::Relaxed),
-        producers: counters.producers.load(Ordering::Relaxed),
-        corruptions: counters.corruptions.load(Ordering::Relaxed),
-        lock_waits: counters.lock_waits.load(Ordering::Relaxed),
-        publications: counters.publications.load(Ordering::Relaxed),
-        publication_failures: counters.publication_failures.load(Ordering::Relaxed),
-        evictions: counters.evictions.load(Ordering::Relaxed),
-        physical_read_bytes: counters.physical_read_bytes.load(Ordering::Relaxed),
-        logical_read_bytes: counters.logical_read_bytes.load(Ordering::Relaxed),
-        write_bytes: counters.write_bytes.load(Ordering::Relaxed),
-    }
-}
-
 fn record_hit(counters: &PersistentProductCounters, physical: u64, logical: u64) {
-    counters.hits.fetch_add(1, Ordering::Relaxed);
-    counters
-        .physical_read_bytes
-        .fetch_add(physical, Ordering::Relaxed);
-    counters
-        .logical_read_bytes
-        .fetch_add(logical, Ordering::Relaxed);
+    counters.increment(PersistentProductStat::Hits);
+    counters.record(PersistentProductStat::PhysicalReadBytes, physical);
+    counters.record(PersistentProductStat::LogicalReadBytes, logical);
 }
 
 fn record_reservation(counters: &PersistentProductCounters) {
-    counters.misses.fetch_add(1, Ordering::Relaxed);
-    counters.producers.fetch_add(1, Ordering::Relaxed);
+    counters.increment(PersistentProductStat::Misses);
+    counters.increment(PersistentProductStat::Producers);
 }

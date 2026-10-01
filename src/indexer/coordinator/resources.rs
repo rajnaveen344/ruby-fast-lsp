@@ -6,6 +6,7 @@ use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::info;
+use ruby_analysis::engine::AnalysisStat;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 
@@ -144,18 +145,18 @@ impl IndexingCoordinator {
 
         info!(
             "Analysis stats: files={}, source_bytes={}, symbols={}, methods={}, ref_candidates={}, refs={}, types={}, diagnostic_candidates={}, diagnostics={}, graph_nodes={}, graph_edges={}, unresolved_graph_edges={}",
-            stats.files,
-            stats.source_bytes,
-            stats.symbols,
-            stats.methods,
-            stats.reference_candidates,
-            stats.references,
-            stats.types,
-            stats.diagnostic_candidates,
-            stats.diagnostics,
-            stats.graph_nodes,
-            stats.graph_edges,
-            stats.unresolved_graph_edges
+            stats.get(AnalysisStat::Files),
+            stats.get(AnalysisStat::SourceBytes),
+            stats.get(AnalysisStat::Symbols),
+            stats.get(AnalysisStat::Methods),
+            stats.get(AnalysisStat::ReferenceCandidates),
+            stats.get(AnalysisStat::References),
+            stats.get(AnalysisStat::Types),
+            stats.get(AnalysisStat::DiagnosticCandidates),
+            stats.get(AnalysisStat::Diagnostics),
+            stats.get(AnalysisStat::GraphNodes),
+            stats.get(AnalysisStat::GraphEdges),
+            stats.get(AnalysisStat::UnresolvedGraphEdges)
         );
         info!("Estimated engine heap: {:.1} MB", bytes_to_mb(total));
         log_memory_bucket("names", memory.names, total);

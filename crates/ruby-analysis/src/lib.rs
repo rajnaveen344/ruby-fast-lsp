@@ -10,6 +10,7 @@ pub mod core;
 pub mod engine;
 pub mod indexer;
 pub mod inference;
+pub mod stats;
 
 #[cfg(test)]
 mod architecture_tests {

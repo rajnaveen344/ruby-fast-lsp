@@ -185,7 +185,9 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
         "analysis after pass: {} symbols, {} methods, {} refs",
         engine.all_symbol_facts().len(),
         engine.all_method_facts().len(),
-        engine.stats().references
+        engine
+            .stats()
+            .get(ruby_analysis::engine::AnalysisStat::References)
     );
 
     Ok(t)

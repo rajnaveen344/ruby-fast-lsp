@@ -5,11 +5,11 @@ use ruby_analysis::engine::{
     AnalysisEngine, ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate, ResolveMode,
     SemanticExportFingerprint, SourceFileInput,
 };
+use ruby_analysis::stats::{self, StatsRegistry};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::Url;
@@ -288,66 +288,45 @@ pub struct GemDependencyBinding {
     pub insertion_wall: Duration,
 }
 
-#[derive(Debug, Default)]
-pub struct GemDependencyBindingCounters {
-    attempts: AtomicU64,
-    successes: AtomicU64,
-    failures: AtomicU64,
-    files: AtomicU64,
-    validation_wall_ns: AtomicU64,
-    validation_max_wall_ns: AtomicU64,
-    insertion_wall_ns: AtomicU64,
-    insertion_max_wall_ns: AtomicU64,
+ruby_analysis::stat_set! {
+    /// Process-wide evidence for binding shared gem products into project engines.
+    pub enum GemBindingStat {
+        Attempts = "attempts",
+        Successes = "successes",
+        Failures = "failures",
+        Files = "files",
+        ValidationWallNs = "validation_wall_ns",
+        ValidationMaxWallNs = "validation_max_wall_ns": max,
+        InsertionWallNs = "insertion_wall_ns",
+        InsertionMaxWallNs = "insertion_max_wall_ns": max,
+    }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct GemDependencyBindingSnapshot {
-    pub attempts: u64,
-    pub successes: u64,
-    pub failures: u64,
-    pub files: u64,
-    pub validation_wall_ns: u64,
-    pub validation_max_wall_ns: u64,
-    pub insertion_wall_ns: u64,
-    pub insertion_max_wall_ns: u64,
-}
-
-impl GemDependencyBindingCounters {
-    pub fn record_success(&self, binding: &GemDependencyBinding) {
-        self.attempts.fetch_add(1, Ordering::Relaxed);
-        self.successes.fetch_add(1, Ordering::Relaxed);
-        self.files.fetch_add(
-            u64::try_from(binding.uris.len()).unwrap_or(u64::MAX),
-            Ordering::Relaxed,
-        );
-        record_duration(
-            &self.validation_wall_ns,
-            &self.validation_max_wall_ns,
-            binding.validation_wall,
-        );
-        record_duration(
-            &self.insertion_wall_ns,
-            &self.insertion_max_wall_ns,
-            binding.insertion_wall,
-        );
-    }
-
-    pub fn record_failure(&self) {
-        self.attempts.fetch_add(1, Ordering::Relaxed);
-        self.failures.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn snapshot(&self) -> GemDependencyBindingSnapshot {
-        GemDependencyBindingSnapshot {
-            attempts: self.attempts.load(Ordering::Relaxed),
-            successes: self.successes.load(Ordering::Relaxed),
-            failures: self.failures.load(Ordering::Relaxed),
-            files: self.files.load(Ordering::Relaxed),
-            validation_wall_ns: self.validation_wall_ns.load(Ordering::Relaxed),
-            validation_max_wall_ns: self.validation_max_wall_ns.load(Ordering::Relaxed),
-            insertion_wall_ns: self.insertion_wall_ns.load(Ordering::Relaxed),
-            insertion_max_wall_ns: self.insertion_max_wall_ns.load(Ordering::Relaxed),
+impl GemDependencyBinding {
+    pub fn record_success(&self, stats: &StatsRegistry<GemBindingStat>) {
+        stats.increment(GemBindingStat::Attempts);
+        stats.increment(GemBindingStat::Successes);
+        stats.record(GemBindingStat::Files, stats::count(self.uris.len()));
+        for (total, maximum, elapsed) in [
+            (
+                GemBindingStat::ValidationWallNs,
+                GemBindingStat::ValidationMaxWallNs,
+                self.validation_wall,
+            ),
+            (
+                GemBindingStat::InsertionWallNs,
+                GemBindingStat::InsertionMaxWallNs,
+                self.insertion_wall,
+            ),
+        ] {
+            stats.record_duration(total, elapsed);
+            stats.record_duration(maximum, elapsed);
         }
+    }
+
+    pub fn record_failure(stats: &StatsRegistry<GemBindingStat>) {
+        stats.increment(GemBindingStat::Attempts);
+        stats.increment(GemBindingStat::Failures);
     }
 }
 
@@ -635,14 +614,6 @@ impl GemDependencyProduct {
             insertion_wall: insertion_started.elapsed(),
         })
     }
-}
-
-fn record_duration(total: &AtomicU64, maximum: &AtomicU64, elapsed: Duration) {
-    let nanoseconds = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
-    let _ = total.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        Some(current.saturating_add(nanoseconds))
-    });
-    maximum.fetch_max(nanoseconds, Ordering::Relaxed);
 }
 
 fn hash_field(hasher: &mut Sha256, field: &[u8]) {

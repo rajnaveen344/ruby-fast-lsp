@@ -11,7 +11,8 @@ mod syntax;
 
 pub(crate) use call_host::log_jruby_call_host_probe;
 pub use call_host::{
-    jruby_call_host_probe_snapshot, reset_jruby_call_host_probe, JrubyCallHostProbeSnapshot,
+    jruby_call_host_handler_hits, jruby_call_host_probe_snapshot, reset_jruby_call_host_probe,
+    CallHostStat,
 };
 pub(crate) use java_types::ruby_type_for_jvm;
 pub use static_scan::{

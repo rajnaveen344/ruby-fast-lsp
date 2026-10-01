@@ -3,6 +3,7 @@
 use crate::environment::runtime::jruby::java_catalog::JavaArtifactProduct;
 use crate::indexer::cache::dependency_product::GemDependencyProduct;
 use parking_lot::Mutex;
+use ruby_analysis::stats::StatsRegistry;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
@@ -65,37 +66,25 @@ struct CacheAccounting {
     publications_since_scan: u64,
 }
 
-#[derive(Debug, Default)]
-struct PersistentProductCounters {
-    lookups: AtomicU64,
-    hits: AtomicU64,
-    misses: AtomicU64,
-    producers: AtomicU64,
-    corruptions: AtomicU64,
-    lock_waits: AtomicU64,
-    publications: AtomicU64,
-    publication_failures: AtomicU64,
-    evictions: AtomicU64,
-    physical_read_bytes: AtomicU64,
-    logical_read_bytes: AtomicU64,
-    write_bytes: AtomicU64,
+ruby_analysis::stat_set! {
+    /// Per-kind evidence for the shared on-disk product cache.
+    pub enum PersistentProductStat {
+        Lookups = "lookups",
+        Hits = "hits",
+        Misses = "misses",
+        Producers = "producers",
+        Corruptions = "corruptions",
+        LockWaits = "lock_waits",
+        Publications = "publications",
+        PublicationFailures = "publication_failures",
+        Evictions = "evictions",
+        PhysicalReadBytes = "physical_read_bytes",
+        LogicalReadBytes = "logical_read_bytes",
+        WriteBytes = "write_bytes",
+    }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PersistentProductSnapshot {
-    pub lookups: u64,
-    pub hits: u64,
-    pub misses: u64,
-    pub producers: u64,
-    pub corruptions: u64,
-    pub lock_waits: u64,
-    pub publications: u64,
-    pub publication_failures: u64,
-    pub evictions: u64,
-    pub physical_read_bytes: u64,
-    pub logical_read_bytes: u64,
-    pub write_bytes: u64,
-}
+type PersistentProductCounters = StatsRegistry<PersistentProductStat>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistentCacheSummary {

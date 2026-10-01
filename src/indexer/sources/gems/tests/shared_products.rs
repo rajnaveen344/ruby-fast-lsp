@@ -1,6 +1,8 @@
 //! Shared dependency products, single-flight provenance, and JRuby companion overlap.
 
 use super::*;
+use crate::indexer::cache::persistent::PersistentProductStat;
+use crate::utils::single_flight::SingleFlightStat;
 
 #[test]
 fn test_gem_indexer_creation() {
@@ -148,10 +150,13 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
     assert_eq!(first_result.unwrap().len(), 1);
     assert_eq!(second_result.unwrap().len(), 1);
     let cache = server.products.gem_dependencies().snapshot();
-    assert_eq!(cache.lookups, 2);
-    assert_eq!(cache.producers, 1);
-    assert_eq!(cache.hits + cache.joined_flights, 1);
-    assert_eq!(cache.entries, 0);
+    assert_eq!(cache.get(SingleFlightStat::Lookups), 2);
+    assert_eq!(cache.get(SingleFlightStat::Producers), 1);
+    assert_eq!(
+        cache.get(SingleFlightStat::Hits) + cache.get(SingleFlightStat::JoinedFlights),
+        1
+    );
+    assert_eq!(cache.get(SingleFlightStat::Entries), 0);
 
     let first_path = first_gem.join("lib/shared_widget.rb");
     let second_path = second_gem.join("lib/shared_widget.rb");
@@ -192,13 +197,16 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
         1
     );
     let after_sequential_consumer = server.products.gem_dependencies().snapshot();
-    assert_eq!(after_sequential_consumer.lookups, 3);
-    assert_eq!(after_sequential_consumer.producers, 2);
-    assert_eq!(after_sequential_consumer.entries, 0);
+    assert_eq!(after_sequential_consumer.get(SingleFlightStat::Lookups), 3);
+    assert_eq!(
+        after_sequential_consumer.get(SingleFlightStat::Producers),
+        2
+    );
+    assert_eq!(after_sequential_consumer.get(SingleFlightStat::Entries), 0);
     let persistent = server.products.persistent().gem_product_snapshot();
-    assert_eq!(persistent.producers, 1);
-    assert_eq!(persistent.publications, 1);
-    assert_eq!(persistent.hits, 1);
+    assert_eq!(persistent.get(PersistentProductStat::Producers), 1);
+    assert_eq!(persistent.get(PersistentProductStat::Publications), 1);
+    assert_eq!(persistent.get(PersistentProductStat::Hits), 1);
     assert_shared_dependency_semantics(
         &third_engine.read(),
         &third_gem.join("lib/shared_widget.rb"),

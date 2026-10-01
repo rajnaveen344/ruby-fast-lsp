@@ -1,4 +1,6 @@
 use super::*;
+use crate::environment::extensions::ExtensionStat;
+use crate::indexer::cache::persistent::PersistentProductStat;
 
 #[test]
 fn tracked_call_name_set_is_shared_arc_and_covers_rspec_without_ordinary_ruby_names() {
@@ -53,13 +55,16 @@ fn activation_failure_disables_extension_before_use() {
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].id, "activation-failure");
     assert_eq!(reports[0].status, "failed");
-    assert_eq!(reports[0].telemetry.guest_calls, 1);
-    assert_eq!(reports[0].telemetry.lifecycle_calls, 1);
-    assert_eq!(reports[0].telemetry.index_calls, 0);
-    assert_eq!(reports[0].telemetry.event_calls, 0);
-    assert_eq!(reports[0].telemetry.guest_failures, 1);
-    assert_eq!(reports[0].telemetry.disablements, 1);
-    assert!(reports[0].telemetry.max_guest_time_ns <= reports[0].telemetry.total_guest_time_ns);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::GuestCalls), 1);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::IndexCalls), 0);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::EventCalls), 0);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::GuestFailures), 1);
+    assert_eq!(reports[0].telemetry.get(ExtensionStat::Disablements), 1);
+    assert!(
+        reports[0].telemetry.get(ExtensionStat::MaxGuestTimeNs)
+            <= reports[0].telemetry.get(ExtensionStat::TotalGuestTimeNs)
+    );
     invariant!(
         reports[0]
             .last_error
@@ -87,11 +92,14 @@ fn resource_limit_failure_is_visible_in_extension_telemetry() {
 
     let report = &registry.status_reports()[0];
     assert_eq!(report.status, "failed");
-    assert_eq!(report.telemetry.lifecycle_calls, 1);
-    assert_eq!(report.telemetry.guest_failures, 1);
-    assert_eq!(report.telemetry.resource_limit_failures, 1);
-    assert_eq!(report.telemetry.guest_traps, 0);
-    assert_eq!(report.telemetry.disablements, 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::GuestFailures), 1);
+    assert_eq!(
+        report.telemetry.get(ExtensionStat::ResourceLimitFailures),
+        1
+    );
+    assert_eq!(report.telemetry.get(ExtensionStat::GuestTraps), 0);
+    assert_eq!(report.telemetry.get(ExtensionStat::Disablements), 1);
     assert!(report
         .last_error
         .as_deref()
@@ -114,11 +122,14 @@ fn guest_trap_is_visible_in_extension_telemetry() {
 
     let report = &registry.status_reports()[0];
     assert_eq!(report.status, "failed");
-    assert_eq!(report.telemetry.lifecycle_calls, 1);
-    assert_eq!(report.telemetry.guest_failures, 1);
-    assert_eq!(report.telemetry.guest_traps, 1);
-    assert_eq!(report.telemetry.resource_limit_failures, 0);
-    assert_eq!(report.telemetry.disablements, 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::GuestFailures), 1);
+    assert_eq!(report.telemetry.get(ExtensionStat::GuestTraps), 1);
+    assert_eq!(
+        report.telemetry.get(ExtensionStat::ResourceLimitFailures),
+        0
+    );
+    assert_eq!(report.telemetry.get(ExtensionStat::Disablements), 1);
     assert!(report
         .last_error
         .as_deref()
@@ -339,8 +350,18 @@ fn fresh_registry_process_reuses_exact_persistent_compiled_wasm() {
     let first_registry = ExtensionRegistryHandle::empty_with_cache(first_cache.clone());
     first_registry.configure_from_config(&config);
     assert_eq!(first_registry.status_reports()[0].status, "loaded");
-    assert_eq!(first_cache.compiled_wasm_snapshot().producers, 1);
-    assert_eq!(first_cache.compiled_wasm_snapshot().publications, 1);
+    assert_eq!(
+        first_cache
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Producers),
+        1
+    );
+    assert_eq!(
+        first_cache
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Publications),
+        1
+    );
     first_registry.shutdown();
     drop(first_registry);
     drop(first_cache);
@@ -349,8 +370,18 @@ fn fresh_registry_process_reuses_exact_persistent_compiled_wasm() {
     let second_registry = ExtensionRegistryHandle::empty_with_cache(second_cache.clone());
     second_registry.configure_from_config(&config);
     assert_eq!(second_registry.status_reports()[0].status, "loaded");
-    assert_eq!(second_cache.compiled_wasm_snapshot().hits, 1);
-    assert_eq!(second_cache.compiled_wasm_snapshot().producers, 0);
+    assert_eq!(
+        second_cache
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Hits),
+        1
+    );
+    assert_eq!(
+        second_cache
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Producers),
+        0
+    );
 }
 
 #[test]
@@ -382,10 +413,10 @@ fn valid_envelope_with_invalid_native_wasm_artifact_is_rebuilt() {
     });
     assert_eq!(registry.status_reports()[0].status, "loaded");
     let snapshot = recovering_cache.compiled_wasm_snapshot();
-    assert_eq!(snapshot.hits, 1);
-    assert_eq!(snapshot.corruptions, 1);
-    assert_eq!(snapshot.producers, 1);
-    assert_eq!(snapshot.publications, 1);
+    assert_eq!(snapshot.get(PersistentProductStat::Hits), 1);
+    assert_eq!(snapshot.get(PersistentProductStat::Corruptions), 1);
+    assert_eq!(snapshot.get(PersistentProductStat::Producers), 1);
+    assert_eq!(snapshot.get(PersistentProductStat::Publications), 1);
 }
 
 #[test]
@@ -813,19 +844,19 @@ fn telemetry_classifies_calls_failures_rejections_and_conflicts_without_dimensio
     telemetry.record_disablement();
 
     let report = telemetry.report(2);
-    assert_eq!(report.guest_calls, 3);
-    assert_eq!(report.lifecycle_calls, 1);
-    assert_eq!(report.index_calls, 1);
-    assert_eq!(report.event_calls, 1);
-    assert_eq!(report.guest_failures, 2);
-    assert_eq!(report.guest_traps, 1);
-    assert_eq!(report.resource_limit_failures, 2);
-    assert_eq!(report.rejected_outputs, 1);
-    assert_eq!(report.patch_conflicts, 1);
-    assert_eq!(report.disablements, 1);
-    assert_eq!(report.total_guest_time_ns, 15);
-    assert_eq!(report.max_guest_time_ns, 7);
-    assert_eq!(report.project_instances, 2);
+    assert_eq!(report.get(ExtensionStat::GuestCalls), 3);
+    assert_eq!(report.get(ExtensionStat::LifecycleCalls), 1);
+    assert_eq!(report.get(ExtensionStat::IndexCalls), 1);
+    assert_eq!(report.get(ExtensionStat::EventCalls), 1);
+    assert_eq!(report.get(ExtensionStat::GuestFailures), 2);
+    assert_eq!(report.get(ExtensionStat::GuestTraps), 1);
+    assert_eq!(report.get(ExtensionStat::ResourceLimitFailures), 2);
+    assert_eq!(report.get(ExtensionStat::RejectedOutputs), 1);
+    assert_eq!(report.get(ExtensionStat::PatchConflicts), 1);
+    assert_eq!(report.get(ExtensionStat::Disablements), 1);
+    assert_eq!(report.get(ExtensionStat::TotalGuestTimeNs), 15);
+    assert_eq!(report.get(ExtensionStat::MaxGuestTimeNs), 7);
+    assert_eq!(report.get(ExtensionStat::ProjectInstances), 2);
 
     let serialized = serde_json::to_value(&report)
         .expect("extension telemetry must remain serializable through the status contract");

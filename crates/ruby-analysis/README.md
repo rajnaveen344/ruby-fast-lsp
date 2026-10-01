@@ -1,7 +1,8 @@
 # Ruby analysis library
 
 Reusable Ruby semantics for the language server and standalone tools. The crate
-root exposes four modules; import a concept from the module that owns it.
+root exposes four semantic modules and a `stats` utility; import a concept from
+the module that owns it.
 
 | Module | Responsibility | Main entry points |
 | --- | --- | --- |
@@ -9,6 +10,7 @@ root exposes four modules; import a concept from the module that owns it.
 | `indexer` | Parse source and collect file-owned facts | `AnalysisIndexer`, `fact_collector::FactCollector`, `index_rbs` |
 | `inference` | Derive types from expressions, flow, calls, and signatures | `type_tracker::TypeTracker`, `method`, `rbs` |
 | `engine` | Own project state, resolve facts, and answer semantic queries | `AnalysisEngine`, `AnalysisQuery` |
+| `stats` | Named counters and timers for profiler, log, and test evidence | `stat_set!`, `StatsRegistry`, `StatsSnapshot` |
 
 `RubyType` belongs to `core`, including when inference produces it. Engine
 stores, interned IDs, and stored representations are internal. Public consumers
@@ -117,6 +119,17 @@ fn inspect(reference: &ReferenceFact) {
     let internal_caller = reference.caller;
 }
 ```
+
+## Statistics
+
+Every measured counter or timer, in this crate and in the server, belongs to a
+`stat_set!` enum: each variant has a stable report name and a merge rule (sum,
+or `max` for peaks). Owners record into a private atomic `StatsRegistry`, or
+fill a `StatsSnapshot` directly for one pass. Readers only see the detached
+`StatsSnapshot`: `get` one value, `merge` snapshots across projects, `iter` in
+declaration order for logs, or serialize it as a name-to-value map for profiler
+JSON and wire reports. Statistics are evidence only and never steer analysis.
+Add a stat only when a profiler field, log line, or test reads it.
 
 ## Extending the library
 

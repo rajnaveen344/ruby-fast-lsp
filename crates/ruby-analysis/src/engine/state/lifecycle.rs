@@ -1,6 +1,7 @@
 //! Source registration, file-owned fact replacement, and resolve passes.
 
 use crate::invariant::ExpectInvariant;
+use crate::stats::StatsSnapshot;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -14,8 +15,8 @@ use super::fingerprint::{SemanticChange, SemanticExportFingerprint};
 use super::inference::{StoredTypeInferenceOutcome, TypeInferenceOutcomeRef};
 use super::storage::source_hash;
 use super::{
-    elapsed_ns, AnalysisEngine, ResolveMode, ResolvePassStats, SourceFile, SourceFileInput,
-    SourceFileSnapshot, SourceLineIndex,
+    AnalysisEngine, ResolveMode, ResolveStat, SourceFile, SourceFileInput, SourceFileSnapshot,
+    SourceLineIndex,
 };
 
 impl AnalysisEngine {
@@ -212,19 +213,21 @@ impl AnalysisEngine {
     }
 
     pub fn resolve(&mut self) {
-        let mut stats = ResolvePassStats::default();
+        let mut stats = StatsSnapshot::default();
         let graph_retry_started = Instant::now();
         self.retry_unresolved_graph_edges();
-        stats.graph_retry_ns = elapsed_ns(graph_retry_started);
+        stats.record_duration(ResolveStat::GraphRetryNs, graph_retry_started.elapsed());
         self.resolve_constant_type_equations();
-        stats.method_return_equation_solve_runs =
-            usize::from(self.resolve_method_return_equations());
+        stats.record(
+            ResolveStat::MethodReturnEquationSolveRuns,
+            u64::from(self.resolve_method_return_equations()),
+        );
         self.resolve_reference_candidates(&mut stats);
         self.last_resolve_pass = stats;
     }
 
     /// Profiler evidence for the most recent full `resolve()` pass.
-    pub fn last_resolve_stats(&self) -> &ResolvePassStats {
+    pub fn last_resolve_stats(&self) -> &StatsSnapshot<ResolveStat> {
         &self.last_resolve_pass
     }
 

@@ -4,6 +4,7 @@ use super::{
     ClasspathError, ClasspathFileProductCache, ClasspathInputs, ClasspathLimits,
     UnresolvedCoordinate,
 };
+use crate::utils::single_flight::SingleFlightStat;
 use std::fs;
 use std::io::{Cursor, Write};
 use std::path::Path;
@@ -108,10 +109,13 @@ fn reuses_exact_file_products_without_merging_project_classpaths() {
         discover_project_classpath_with_cache(&left_inputs, ClasspathLimits::default(), &cache)
             .expect("left cached classpath must be discovered");
     let after_left = cache.snapshot();
-    assert!(after_left.lookups > 0);
-    assert_eq!(after_left.producers, after_left.lookups);
-    assert_eq!(after_left.hits, 0);
-    assert_eq!(after_left.joined_flights, 0);
+    assert!(after_left.get(SingleFlightStat::Lookups) > 0);
+    assert_eq!(
+        after_left.get(SingleFlightStat::Producers),
+        after_left.get(SingleFlightStat::Lookups)
+    );
+    assert_eq!(after_left.get(SingleFlightStat::Hits), 0);
+    assert_eq!(after_left.get(SingleFlightStat::JoinedFlights), 0);
 
     let right =
         discover_project_classpath_with_cache(&right_inputs, ClasspathLimits::default(), &cache)
@@ -121,10 +125,12 @@ fn reuses_exact_file_products_without_merging_project_classpaths() {
     assert_ne!(left.project_root, right.project_root);
     assert_ne!(left.fingerprint_sha256, right.fingerprint_sha256);
     assert!(
-        after_right.hits >= 5,
+        after_right.get(SingleFlightStat::Hits) >= 5,
         "expected shared runtime/JDK/Maven reuse"
     );
-    assert!(after_right.producers < after_right.lookups);
+    assert!(
+        after_right.get(SingleFlightStat::Producers) < after_right.get(SingleFlightStat::Lookups)
+    );
     assert!(left
         .artifacts
         .iter()
@@ -172,9 +178,15 @@ fn concurrent_identical_discovery_has_one_producer_per_file_identity() {
     let snapshot = cache.snapshot();
 
     assert_eq!(left, right);
-    assert!(snapshot.producers > 0);
-    assert_eq!(snapshot.lookups, snapshot.producers * 2);
-    assert_eq!(snapshot.hits + snapshot.joined_flights, snapshot.producers);
+    assert!(snapshot.get(SingleFlightStat::Producers) > 0);
+    assert_eq!(
+        snapshot.get(SingleFlightStat::Lookups),
+        snapshot.get(SingleFlightStat::Producers) * 2
+    );
+    assert_eq!(
+        snapshot.get(SingleFlightStat::Hits) + snapshot.get(SingleFlightStat::JoinedFlights),
+        snapshot.get(SingleFlightStat::Producers)
+    );
 }
 
 #[test]
@@ -210,8 +222,11 @@ fn changed_files_miss_the_cache_and_hit_paths_still_enforce_consumer_limits() {
         .clone();
 
     assert_ne!(first_fingerprint, second_fingerprint);
-    assert_eq!(after_second.producers, after_first.producers + 1);
-    assert!(after_second.hits > after_first.hits);
+    assert_eq!(
+        after_second.get(SingleFlightStat::Producers),
+        after_first.get(SingleFlightStat::Producers) + 1
+    );
+    assert!(after_second.get(SingleFlightStat::Hits) > after_first.get(SingleFlightStat::Hits));
 
     let mut restrictive = ClasspathLimits::default();
     restrictive.max_total_bytes = 1;
@@ -231,9 +246,9 @@ fn file_product_retention_obeys_entry_and_weight_bounds() {
         .expect("bounded cached classpath must be discovered");
     let snapshot = cache.snapshot();
 
-    assert!(snapshot.entries <= 2);
+    assert!(snapshot.get(SingleFlightStat::Entries) <= 2);
     assert!(cache.retained_weight_bytes() <= 1_200);
-    assert!(snapshot.evictions > 0);
+    assert!(snapshot.get(SingleFlightStat::Evictions) > 0);
 }
 
 #[test]

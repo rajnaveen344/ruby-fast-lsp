@@ -5,10 +5,14 @@ use crate::environment::runtime::catalog::{
     DiscoveredRuntime, ProjectRuntimeStatus, RuntimeCatalog, RuntimeDiscoverParams, RuntimeStatus,
     RuntimeStatusParams,
 };
+use crate::indexer::cache::dependency_product::GemBindingStat;
+use crate::indexer::cache::persistent::PersistentProductStat;
 use crate::invariant::ExpectInvariant;
+use crate::utils::single_flight::SingleFlightStat;
 use anyhow::Result;
 use log::warn;
 use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::stats::{StatsRegistry, StatsSnapshot};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -57,25 +61,18 @@ fn new_runtime_stdlib_path_cache() -> crate::utils::single_flight::BoundedSingle
     )
 }
 
-/// Detached counters and estimated retained bytes for one immutable-product cache.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RetainedProductSnapshot {
-    pub reuse: crate::utils::single_flight::SingleFlightSnapshot,
-    pub retained_weight_bytes: u64,
-}
-
 /// Detached process-wide telemetry. This view owns no caches or project facts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeProductSnapshot {
-    pub core_templates: RetainedProductSnapshot,
-    pub stdlib_paths: RetainedProductSnapshot,
-    pub gem_dependencies: RetainedProductSnapshot,
-    pub classpath_files: RetainedProductSnapshot,
-    pub java_artifacts: RetainedProductSnapshot,
-    pub persistent_gems: crate::indexer::cache::persistent::PersistentProductSnapshot,
-    pub persistent_java: crate::indexer::cache::persistent::PersistentProductSnapshot,
-    pub compiled_wasm: crate::indexer::cache::persistent::PersistentProductSnapshot,
-    pub gem_bindings: crate::indexer::cache::dependency_product::GemDependencyBindingSnapshot,
+    pub core_templates: StatsSnapshot<SingleFlightStat>,
+    pub stdlib_paths: StatsSnapshot<SingleFlightStat>,
+    pub gem_dependencies: StatsSnapshot<SingleFlightStat>,
+    pub classpath_files: StatsSnapshot<SingleFlightStat>,
+    pub java_artifacts: StatsSnapshot<SingleFlightStat>,
+    pub persistent_gems: StatsSnapshot<PersistentProductStat>,
+    pub persistent_java: StatsSnapshot<PersistentProductStat>,
+    pub compiled_wasm: StatsSnapshot<PersistentProductStat>,
+    pub gem_bindings: StatsSnapshot<GemBindingStat>,
 }
 
 #[derive(Clone)]
@@ -93,31 +90,16 @@ pub(crate) struct RuntimeProducts {
     classpath_files: crate::environment::runtime::jruby::classpath::ClasspathFileProductCache,
     java_artifacts: crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache,
     persistent: crate::indexer::cache::persistent::PersistentDerivedProductCache,
-    gem_bindings: Arc<crate::indexer::cache::dependency_product::GemDependencyBindingCounters>,
+    gem_bindings: Arc<StatsRegistry<GemBindingStat>>,
 }
 impl RuntimeProducts {
     fn snapshot(&self) -> RuntimeProductSnapshot {
         RuntimeProductSnapshot {
-            core_templates: RetainedProductSnapshot {
-                reuse: self.core_templates.snapshot(),
-                retained_weight_bytes: self.core_templates.retained_weight(),
-            },
-            stdlib_paths: RetainedProductSnapshot {
-                reuse: self.stdlib_paths.snapshot(),
-                retained_weight_bytes: self.stdlib_paths.retained_weight(),
-            },
-            gem_dependencies: RetainedProductSnapshot {
-                reuse: self.gem_dependencies.snapshot(),
-                retained_weight_bytes: self.gem_dependencies.retained_weight(),
-            },
-            classpath_files: RetainedProductSnapshot {
-                reuse: self.classpath_files.snapshot(),
-                retained_weight_bytes: self.classpath_files.retained_weight_bytes(),
-            },
-            java_artifacts: RetainedProductSnapshot {
-                reuse: self.java_artifacts.snapshot(),
-                retained_weight_bytes: self.java_artifacts.retained_weight_bytes(),
-            },
+            core_templates: self.core_templates.snapshot(),
+            stdlib_paths: self.stdlib_paths.snapshot(),
+            gem_dependencies: self.gem_dependencies.snapshot(),
+            classpath_files: self.classpath_files.snapshot(),
+            java_artifacts: self.java_artifacts.snapshot(),
             persistent_gems: self.persistent.gem_product_snapshot(),
             persistent_java: self.persistent.java_artifact_snapshot(),
             compiled_wasm: self.persistent.compiled_wasm_snapshot(),
@@ -173,9 +155,7 @@ impl RuntimeProducts {
     ) -> &crate::indexer::cache::persistent::PersistentDerivedProductCache {
         &self.persistent
     }
-    pub(crate) fn gem_bindings(
-        &self,
-    ) -> &Arc<crate::indexer::cache::dependency_product::GemDependencyBindingCounters> {
+    pub(crate) fn gem_bindings(&self) -> &StatsRegistry<GemBindingStat> {
         &self.gem_bindings
     }
 
@@ -191,9 +171,7 @@ impl RubyLanguageServer {
         self.products.snapshot()
     }
 
-    pub fn compiled_wasm_cache_snapshot(
-        &self,
-    ) -> crate::indexer::cache::persistent::PersistentProductSnapshot {
+    pub fn compiled_wasm_cache_snapshot(&self) -> StatsSnapshot<PersistentProductStat> {
         self.products.persistent().compiled_wasm_snapshot()
     }
 

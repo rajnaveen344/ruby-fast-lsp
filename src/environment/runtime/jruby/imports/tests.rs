@@ -760,7 +760,7 @@ fn package_preflight_materializes_signatures_but_only_referenced_implementations
 fn call_host_probe_attributes_seed_and_import_handlers() {
     reset_jruby_call_host_probe();
     let before = jruby_call_host_probe_snapshot();
-    assert_eq!(before.entries, 0);
+    assert_eq!(before.get(CallHostStat::Entries), 0);
 
     let provider = Arc::new(JrubyImportProvider::new(catalog(&["java/lang/String"])));
     let _ = collect_with_provider(
@@ -771,23 +771,25 @@ fn call_host_probe_attributes_seed_and_import_handlers() {
     );
     let after = jruby_call_host_probe_snapshot();
     assert!(
-        after.entries >= 2,
+        after.get(CallHostStat::Entries) >= 2,
         "java_import and String.new must enter the call host: {after:?}"
     );
     assert!(
-        after.seed_ns > 0 && after.import_ns > 0 && after.java_ctor_ns > 0,
+        after.get(CallHostStat::Seed) > 0
+            && after.get(CallHostStat::Import) > 0
+            && after.get(CallHostStat::JavaCtor) > 0,
         "probe must record seed, import, and constructor handler hits: {after:?}"
     );
     assert!(
-        after.seed_catalog_hits >= 1,
+        after.get(CallHostStat::SeedCatalogHits) >= 1,
         "java.lang.String must count as a seed catalog hit: {after:?}"
     );
     assert!(
-        after.java_ctor_inferred >= 1,
+        after.get(CallHostStat::JavaCtorInferred) >= 1,
         "String.new on a Java proxy must count as an inferred constructor: {after:?}"
     );
     assert!(
-        after.total_handler_ns() > 0,
+        jruby_call_host_handler_hits(&after) > 0,
         "handler hits must sum to a positive total: {after:?}"
     );
 }

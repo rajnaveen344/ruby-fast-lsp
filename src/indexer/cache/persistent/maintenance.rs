@@ -3,13 +3,12 @@
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
 use std::io::ErrorKind;
-use std::sync::atomic::Ordering;
 
 use super::layout::{product_kind_for_path, scan_product_entries};
 use super::locks::{acquire_lock, try_acquire_lock};
 use super::{
     CacheAccounting, PersistentCacheSummary, PersistentDerivedProductCache, PersistentProductKind,
-    RESCAN_PUBLICATION_INTERVAL,
+    PersistentProductStat, RESCAN_PUBLICATION_INTERVAL,
 };
 
 impl PersistentDerivedProductCache {
@@ -140,8 +139,7 @@ impl PersistentDerivedProductCache {
                         anyhow!("persistent cache eviction entry accounting underflowed")
                     })?;
                     self.counters(product_kind_for_path(&entry.path))
-                        .evictions
-                        .fetch_add(1, Ordering::Relaxed);
+                        .increment(PersistentProductStat::Evictions);
                 }
                 Err(error) if error.kind() == ErrorKind::NotFound => {}
                 Err(error) => {

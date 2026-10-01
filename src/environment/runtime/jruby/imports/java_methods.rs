@@ -1,7 +1,7 @@
 //! Java method selection for `java_alias`, `java_send`/`java_method`
 //! dispatch, and proxy constructors.
 
-use super::call_host::CALL_HOST_JAVA_CTOR_INFERRED;
+use super::call_host::{CallHostStat, CALL_HOST_STATS};
 use super::java_types::{display_java_signature, ruby_type_for_jvm};
 use super::syntax::static_symbol_or_string;
 use super::JrubyImportProvider;
@@ -18,7 +18,6 @@ use ruby_fast_lsp_jvm_metadata::{
 };
 use ruby_prism::{CallNode, Node};
 use std::collections::{BTreeSet, VecDeque};
-use std::sync::atomic::Ordering;
 
 const MAX_JAVA_HIERARCHY_TYPES: usize = 4_096;
 
@@ -393,7 +392,7 @@ impl JrubyImportProvider {
         else {
             return;
         };
-        CALL_HOST_JAVA_CTOR_INFERRED.fetch_add(1, Ordering::Relaxed);
+        CALL_HOST_STATS.increment(CallHostStat::JavaCtorInferred);
         visitor.direct_push_expression_type(
             &node.as_node(),
             RubyType::Class(proxy),

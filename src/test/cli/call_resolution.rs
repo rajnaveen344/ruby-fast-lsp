@@ -4,6 +4,7 @@ use super::support::hover_text;
 use crate::lsp::check::{CheckSession, CheckTypeOutcome, CheckTypeSubjectKind};
 use crate::test::harness::FakeEditor;
 use ruby_analysis::core::UnknownReason;
+use ruby_analysis::engine::ResolveStat;
 
 #[tokio::test]
 async fn unresolved_chained_call_reason_matches_cli_and_lsp_without_an_inlay() {
@@ -287,7 +288,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         analysis_engine
             .read()
             .last_resolve_stats()
-            .method_return_equation_solve_runs,
+            .get(ResolveStat::MethodReturnEquationSolveRuns),
         0,
         "an unchanged equation edit must reuse the existing project solution"
     );
@@ -308,7 +309,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
         analysis_engine
             .read()
             .last_resolve_stats()
-            .method_return_equation_solve_runs,
+            .get(ResolveStat::MethodReturnEquationSolveRuns),
         1,
         "a changed recursive base must run exactly one project equation solve"
     );

@@ -4,10 +4,11 @@ use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use super::{PersistentProductCounters, LOCK_RETRY_INTERVAL, LOCK_WAIT_TIMEOUT};
+use super::{
+    PersistentProductCounters, PersistentProductStat, LOCK_RETRY_INTERVAL, LOCK_WAIT_TIMEOUT,
+};
 
 pub(super) fn open_private_lock_file(path: &Path) -> Result<File> {
     let parent = path
@@ -57,7 +58,7 @@ pub(super) fn acquire_lock(
         match try_acquire_lock(file, exclusive)? {
             true => {
                 if waited {
-                    counters.lock_waits.fetch_add(1, Ordering::Relaxed);
+                    counters.increment(PersistentProductStat::LockWaits);
                 }
                 return Ok(());
             }

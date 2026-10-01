@@ -3,8 +3,7 @@ use super::RubyLanguageServer;
 use crate::indexer::scheduling::resources::IndexingResourceGovernor;
 use crate::indexer::scheduling::scheduler::IndexingScheduler;
 use crate::indexer::scheduling::status::{
-    IndexingAggregateSnapshot, IndexingPersistentProductReuseSnapshot, IndexingPhase,
-    IndexingReuseSnapshot, IndexingSingleFlightReuseSnapshot, IndexingStatusNotification,
+    IndexingAggregateSnapshot, IndexingPhase, IndexingReuseSnapshot, IndexingStatusNotification,
     IndexingStatusParams, IndexingStatusSnapshot,
 };
 use crate::invariant::ExpectInvariant;
@@ -290,56 +289,18 @@ impl RubyLanguageServer {
                 | IndexingPhase::PublishingDiagnostics => {}
             }
         }
-        let persistent_gem_products = self.products.persistent().gem_product_snapshot();
-        let persistent_java_artifacts = self.products.persistent().java_artifact_snapshot();
-        let persistent_compiled_wasm = self.products.persistent().compiled_wasm_snapshot();
-        let gem_single_flight = self.products.gem_dependencies().snapshot();
-        let classpath_file_single_flight = self.products.classpath_files().snapshot();
-        let java_artifact_single_flight = self.products.java_artifacts().snapshot();
+        let persistent = self.products.persistent();
         IndexingStatusSnapshot {
             sequence: self.indexing.status.sequence.load(Ordering::Acquire),
             projects,
             aggregate,
             reuse: IndexingReuseSnapshot {
-                persistent_gem_products: IndexingPersistentProductReuseSnapshot {
-                    lookups: persistent_gem_products.lookups,
-                    hits: persistent_gem_products.hits,
-                    producers: persistent_gem_products.producers,
-                    corruptions: persistent_gem_products.corruptions,
-                },
-                persistent_java_artifacts: IndexingPersistentProductReuseSnapshot {
-                    lookups: persistent_java_artifacts.lookups,
-                    hits: persistent_java_artifacts.hits,
-                    producers: persistent_java_artifacts.producers,
-                    corruptions: persistent_java_artifacts.corruptions,
-                },
-                persistent_compiled_wasm: IndexingPersistentProductReuseSnapshot {
-                    lookups: persistent_compiled_wasm.lookups,
-                    hits: persistent_compiled_wasm.hits,
-                    producers: persistent_compiled_wasm.producers,
-                    corruptions: persistent_compiled_wasm.corruptions,
-                },
-                gem_single_flight: IndexingSingleFlightReuseSnapshot {
-                    lookups: gem_single_flight.lookups,
-                    hits: gem_single_flight.hits,
-                    joined_flights: gem_single_flight.joined_flights,
-                    producers: gem_single_flight.producers,
-                    failures: gem_single_flight.failures,
-                },
-                classpath_file_single_flight: IndexingSingleFlightReuseSnapshot {
-                    lookups: classpath_file_single_flight.lookups,
-                    hits: classpath_file_single_flight.hits,
-                    joined_flights: classpath_file_single_flight.joined_flights,
-                    producers: classpath_file_single_flight.producers,
-                    failures: classpath_file_single_flight.failures,
-                },
-                java_artifact_single_flight: IndexingSingleFlightReuseSnapshot {
-                    lookups: java_artifact_single_flight.lookups,
-                    hits: java_artifact_single_flight.hits,
-                    joined_flights: java_artifact_single_flight.joined_flights,
-                    producers: java_artifact_single_flight.producers,
-                    failures: java_artifact_single_flight.failures,
-                },
+                persistent_gem_products: (&persistent.gem_product_snapshot()).into(),
+                persistent_java_artifacts: (&persistent.java_artifact_snapshot()).into(),
+                persistent_compiled_wasm: (&persistent.compiled_wasm_snapshot()).into(),
+                gem_single_flight: (&self.products.gem_dependencies().snapshot()).into(),
+                classpath_file_single_flight: (&self.products.classpath_files().snapshot()).into(),
+                java_artifact_single_flight: (&self.products.java_artifacts().snapshot()).into(),
             },
         }
     }

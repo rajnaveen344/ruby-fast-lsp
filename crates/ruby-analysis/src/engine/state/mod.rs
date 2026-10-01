@@ -18,7 +18,6 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 
 use crate::core::storage::graph_store::SemanticGraph;
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
@@ -28,6 +27,7 @@ use crate::core::{
 };
 
 use crate::engine::AnalysisQuery;
+use crate::stats::{self, StatsSnapshot};
 use fingerprint::SemanticExportFingerprint;
 use inference::StoredTypeInferenceOutcome;
 use parking_lot::Mutex;
@@ -166,74 +166,67 @@ pub enum ResolveMode {
     Deferred,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct AnalysisStats {
-    pub files: usize,
-    pub source_bytes: usize,
-    pub symbols: usize,
-    pub methods: usize,
-    pub reference_candidates: usize,
-    pub constant_reference_candidates: usize,
-    pub method_reference_candidates: usize,
-    pub resolved_reference_candidates: usize,
-    pub references: usize,
-    pub types: usize,
-    pub diagnostic_candidates: usize,
-    pub diagnostics: usize,
-    pub graph_nodes: usize,
-    pub graph_edges: usize,
-    pub unresolved_graph_edges: usize,
+crate::stat_set! {
+    /// Fact counts observed in one engine at snapshot time.
+    pub enum AnalysisStat {
+        Files = "files",
+        SourceBytes = "source_bytes",
+        Symbols = "symbols",
+        Methods = "methods",
+        ReferenceCandidates = "reference_candidates",
+        ConstantReferenceCandidates = "constant_reference_candidates",
+        MethodReferenceCandidates = "method_reference_candidates",
+        ResolvedReferenceCandidates = "resolved_reference_candidates",
+        References = "references",
+        Types = "types",
+        DiagnosticCandidates = "diagnostic_candidates",
+        Diagnostics = "diagnostics",
+        GraphNodes = "graph_nodes",
+        GraphEdges = "graph_edges",
+        UnresolvedGraphEdges = "unresolved_graph_edges",
+    }
 }
 
-/// Measurement counters for the most recent full `AnalysisEngine::resolve` pass.
-///
-/// These are process-local profiler evidence only. They must not change semantic
-/// resolution policy, diagnostic emission, or project ownership.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ResolvePassStats {
-    pub method_return_equation_solve_runs: usize,
-    pub graph_retry_ns: u64,
-    pub diagnostic_seed_ns: u64,
-    pub constant_candidates_ns: u64,
-    pub method_candidates_ns: u64,
-    pub sort_all_ns: u64,
-    pub diagnostic_rebuild_ns: u64,
-    pub constant_cache_hits: usize,
-    pub constant_cache_misses: usize,
-    pub constant_cache_unique_keys: usize,
-    pub method_cache_hits: usize,
-    pub method_cache_misses: usize,
-    pub method_cache_unique_keys: usize,
-    pub method_lookup_chain_cache_entries: usize,
-    pub method_namespace_exists_cache_entries: usize,
-    pub method_suggestion_cache_entries: usize,
-    pub incomplete_method_chain_cache_entries: usize,
-    /// Method candidates whose explicit receiver is another call expression
-    /// and therefore must wait for an earlier call outcome in source order.
-    pub deferred_receiver_candidates: usize,
-    /// Deferred receiver candidates whose inner call produced a concrete type.
-    pub deferred_receiver_proven: usize,
-    /// Deferred receiver candidates whose inner call remained Unknown.
-    pub deferred_receiver_unknown: usize,
-    pub method_return_cache_hits: usize,
-    pub method_return_cache_misses: usize,
-    pub method_return_cache_entries: usize,
-    pub method_visibility_cache_hits: usize,
-    pub method_visibility_cache_misses: usize,
-    pub method_visibility_cache_entries: usize,
-    pub ambiguous_method_return_cache_hits: usize,
-    pub ambiguous_method_return_cache_misses: usize,
-    pub ambiguous_method_return_cache_entries: usize,
-}
-
-pub(in crate::engine) fn elapsed_ns(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_nanos()).unwrap_or_else(|_| {
-        unreachable_invariant!(
-            what = "resolve-pass elapsed nanoseconds overflowed u64",
-            why = "one resolution pass cannot exceed u64::MAX nanoseconds",
-            fix = "inspect hung resolve instrumentation or widen the counter type",
-        )
-    })
+crate::stat_set! {
+    /// Measurement counters for the most recent full `AnalysisEngine::resolve` pass.
+    ///
+    /// These are process-local profiler evidence only. They must not change semantic
+    /// resolution policy, diagnostic emission, or project ownership.
+    pub enum ResolveStat {
+        MethodReturnEquationSolveRuns = "method_return_equation_solve_runs",
+        GraphRetryNs = "graph_retry_ns",
+        DiagnosticSeedNs = "diagnostic_seed_ns",
+        ConstantCandidatesNs = "constant_candidates_ns",
+        MethodCandidatesNs = "method_candidates_ns",
+        SortAllNs = "sort_all_ns",
+        DiagnosticRebuildNs = "diagnostic_rebuild_ns",
+        ConstantCacheHits = "constant_cache_hits",
+        ConstantCacheMisses = "constant_cache_misses",
+        ConstantCacheUniqueKeys = "constant_cache_unique_keys",
+        MethodCacheHits = "method_cache_hits",
+        MethodCacheMisses = "method_cache_misses",
+        MethodCacheUniqueKeys = "method_cache_unique_keys",
+        MethodLookupChainCacheEntries = "method_lookup_chain_cache_entries",
+        MethodNamespaceExistsCacheEntries = "method_namespace_exists_cache_entries",
+        MethodSuggestionCacheEntries = "method_suggestion_cache_entries",
+        IncompleteMethodChainCacheEntries = "incomplete_method_chain_cache_entries",
+        /// Method candidates whose explicit receiver is another call expression
+        /// and therefore must wait for an earlier call outcome in source order.
+        DeferredReceiverCandidates = "deferred_receiver_candidates",
+        /// Deferred receiver candidates whose inner call produced a concrete type.
+        DeferredReceiverProven = "deferred_receiver_proven",
+        /// Deferred receiver candidates whose inner call remained Unknown.
+        DeferredReceiverUnknown = "deferred_receiver_unknown",
+        MethodReturnCacheHits = "method_return_cache_hits",
+        MethodReturnCacheMisses = "method_return_cache_misses",
+        MethodReturnCacheEntries = "method_return_cache_entries",
+        MethodVisibilityCacheHits = "method_visibility_cache_hits",
+        MethodVisibilityCacheMisses = "method_visibility_cache_misses",
+        MethodVisibilityCacheEntries = "method_visibility_cache_entries",
+        AmbiguousMethodReturnCacheHits = "ambiguous_method_return_cache_hits",
+        AmbiguousMethodReturnCacheMisses = "ambiguous_method_return_cache_misses",
+        AmbiguousMethodReturnCacheEntries = "ambiguous_method_return_cache_entries",
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -292,7 +285,7 @@ pub struct AnalysisEngine {
     semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
     top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
     universal_object_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
-    last_resolve_pass: ResolvePassStats,
+    last_resolve_pass: StatsSnapshot<ResolveStat>,
 }
 
 static NEXT_ANALYSIS_ENGINE_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -332,7 +325,7 @@ impl Default for AnalysisEngine {
             semantic_export_fingerprints: HashMap::new(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
             universal_object_method_lookup_chain_cache: Mutex::new(None),
-            last_resolve_pass: ResolvePassStats::default(),
+            last_resolve_pass: StatsSnapshot::default(),
         }
     }
 }
@@ -358,7 +351,7 @@ impl Clone for AnalysisEngine {
             semantic_export_fingerprints: self.semantic_export_fingerprints.clone(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
             universal_object_method_lookup_chain_cache: Mutex::new(None),
-            last_resolve_pass: ResolvePassStats::default(),
+            last_resolve_pass: StatsSnapshot::default(),
         }
     }
 }
@@ -374,30 +367,73 @@ impl AnalysisEngine {
         AnalysisQuery::new(self)
     }
 
-    pub fn stats(&self) -> AnalysisStats {
+    pub fn stats(&self) -> StatsSnapshot<AnalysisStat> {
         let reference_candidate_stats = self.facts.references.candidates.stats();
-        AnalysisStats {
-            files: self.sources.files.len(),
-            source_bytes: self
-                .sources
-                .files
-                .values()
-                .map(|file| file.line_index.len())
-                .sum(),
-            symbols: self.facts.definitions.symbols.fact_count(),
-            methods: self.facts.definitions.methods.fact_count(),
-            reference_candidates: self.facts.references.candidates.candidate_count(),
-            constant_reference_candidates: reference_candidate_stats.constants,
-            method_reference_candidates: reference_candidate_stats.methods,
-            resolved_reference_candidates: reference_candidate_stats.resolved,
-            references: self.facts.references.resolved.fact_count(),
-            types: self.facts.types.fact_count(),
-            diagnostic_candidates: self.facts.diagnostics.candidates.candidate_count(),
-            diagnostics: self.facts.diagnostics.resolved.fact_count(),
-            graph_nodes: self.graph.node_count(),
-            graph_edges: self.graph.edge_count(),
-            unresolved_graph_edges: self.graph.unresolved_edges().len(),
-        }
+        let mut stats = StatsSnapshot::default();
+        stats.set(AnalysisStat::Files, stats::count(self.sources.files.len()));
+        stats.set(
+            AnalysisStat::SourceBytes,
+            stats::count(
+                self.sources
+                    .files
+                    .values()
+                    .map(|file| file.line_index.len())
+                    .sum(),
+            ),
+        );
+        stats.set(
+            AnalysisStat::Symbols,
+            stats::count(self.facts.definitions.symbols.fact_count()),
+        );
+        stats.set(
+            AnalysisStat::Methods,
+            stats::count(self.facts.definitions.methods.fact_count()),
+        );
+        stats.set(
+            AnalysisStat::ReferenceCandidates,
+            stats::count(self.facts.references.candidates.candidate_count()),
+        );
+        stats.set(
+            AnalysisStat::ConstantReferenceCandidates,
+            stats::count(reference_candidate_stats.constants),
+        );
+        stats.set(
+            AnalysisStat::MethodReferenceCandidates,
+            stats::count(reference_candidate_stats.methods),
+        );
+        stats.set(
+            AnalysisStat::ResolvedReferenceCandidates,
+            stats::count(reference_candidate_stats.resolved),
+        );
+        stats.set(
+            AnalysisStat::References,
+            stats::count(self.facts.references.resolved.fact_count()),
+        );
+        stats.set(
+            AnalysisStat::Types,
+            stats::count(self.facts.types.fact_count()),
+        );
+        stats.set(
+            AnalysisStat::DiagnosticCandidates,
+            stats::count(self.facts.diagnostics.candidates.candidate_count()),
+        );
+        stats.set(
+            AnalysisStat::Diagnostics,
+            stats::count(self.facts.diagnostics.resolved.fact_count()),
+        );
+        stats.set(
+            AnalysisStat::GraphNodes,
+            stats::count(self.graph.node_count()),
+        );
+        stats.set(
+            AnalysisStat::GraphEdges,
+            stats::count(self.graph.edge_count()),
+        );
+        stats.set(
+            AnalysisStat::UnresolvedGraphEdges,
+            stats::count(self.graph.unresolved_edges().len()),
+        );
+        stats
     }
 
     pub fn estimated_memory_stats(&self) -> AnalysisMemoryStats {

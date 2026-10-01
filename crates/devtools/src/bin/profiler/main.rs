@@ -64,7 +64,7 @@ use tower_lsp::lsp_types::Url;
 
 use crate::benchmark::{print_production_measurements, run_production_benchmark};
 use crate::cli::{parse_args, Phase};
-use crate::indexing_summary::duration_ms;
+use crate::indexing_summary::{duration_ms, stats_json_without};
 use crate::navigation_probes::{
     prepare_live_definition_probes, sample_definitions, sample_open_file_diagnostics,
     sample_references,
@@ -73,6 +73,7 @@ use crate::reports::{print_diagnostic_manifest, print_semantic_export_manifest, 
 use crate::workspace_indexing::{
     configure_server, run_full_indexing, run_indexing_only, run_type_inference_only,
 };
+use ruby_fast_lsp::indexer::cache::persistent::PersistentProductStat;
 
 // Conditionally use dhat for memory profiling
 #[cfg(feature = "memory-profiling")]
@@ -168,22 +169,22 @@ fn main() -> anyhow::Result<()> {
             config.config_path.as_ref(),
             config.extension_path.as_ref(),
         );
-        let extension_cache = server.compiled_wasm_cache_snapshot();
         println!(
             "{}",
             serde_json::json!({
                 "extension_load_timing": {
                     "elapsed_ms": duration_ms(extension_load),
                     "loaded": server.extension_status_reports().len(),
-                    "persistent_products": {
-                        "lookups": extension_cache.lookups,
-                        "hits": extension_cache.hits,
-                        "producers": extension_cache.producers,
-                        "corruptions": extension_cache.corruptions,
-                        "physical_read_bytes": extension_cache.physical_read_bytes,
-                        "logical_read_bytes": extension_cache.logical_read_bytes,
-                        "write_bytes": extension_cache.write_bytes,
-                    }
+                    "persistent_products": stats_json_without(
+                        &server.compiled_wasm_cache_snapshot(),
+                        &[
+                            PersistentProductStat::Misses,
+                            PersistentProductStat::LockWaits,
+                            PersistentProductStat::Publications,
+                            PersistentProductStat::PublicationFailures,
+                            PersistentProductStat::Evictions,
+                        ],
+                    ),
                 }
             })
         );

@@ -2117,6 +2117,7 @@ dependencies = [
  "ruby-fast-lsp-extension-api",
  "ruby-prism",
  "serde",
+ "serde_json",
  "smallvec",
  "unicode-ident",
  "url",

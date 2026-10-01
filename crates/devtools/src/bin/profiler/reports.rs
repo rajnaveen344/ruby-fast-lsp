@@ -5,6 +5,7 @@ use ruby_analysis::core::{
     DiagnosticCandidate, DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
     MethodFact, ReferenceCandidate, ReferenceFact, SourceKind, SymbolFact, TypeFact,
 };
+use ruby_analysis::engine::{AnalysisStat, ResolveStat};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use sha2::{Digest, Sha256};
 
@@ -240,60 +241,69 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
         let engine = workspace.analysis_engine.read();
         let stats = engine.stats();
         info!("=== ANALYSIS STATS: {} ===", workspace.root_path.display());
-        info!("Files: {}", stats.files);
-        info!("Source bytes indexed: {}", stats.source_bytes);
-        info!("Symbols: {}", stats.symbols);
-        info!("Methods: {}", stats.methods);
-        info!("Reference candidates: {}", stats.reference_candidates);
+        info!("Files: {}", stats.get(AnalysisStat::Files));
+        info!(
+            "Source bytes indexed: {}",
+            stats.get(AnalysisStat::SourceBytes)
+        );
+        info!("Symbols: {}", stats.get(AnalysisStat::Symbols));
+        info!("Methods: {}", stats.get(AnalysisStat::Methods));
+        info!(
+            "Reference candidates: {}",
+            stats.get(AnalysisStat::ReferenceCandidates)
+        );
         info!(
             "Reference candidates by kind: constants={}, methods={}, resolved={}",
-            stats.constant_reference_candidates,
-            stats.method_reference_candidates,
-            stats.resolved_reference_candidates
+            stats.get(AnalysisStat::ConstantReferenceCandidates),
+            stats.get(AnalysisStat::MethodReferenceCandidates),
+            stats.get(AnalysisStat::ResolvedReferenceCandidates)
         );
         let resolve_pass = engine.last_resolve_stats();
         info!(
             "Resolve pass ns: graph_retry={}, diagnostic_seed={}, constants={}, methods={}, sort_all={}, diagnostic_rebuild={}",
-            resolve_pass.graph_retry_ns,
-            resolve_pass.diagnostic_seed_ns,
-            resolve_pass.constant_candidates_ns,
-            resolve_pass.method_candidates_ns,
-            resolve_pass.sort_all_ns,
-            resolve_pass.diagnostic_rebuild_ns
+            resolve_pass.get(ResolveStat::GraphRetryNs),
+            resolve_pass.get(ResolveStat::DiagnosticSeedNs),
+            resolve_pass.get(ResolveStat::ConstantCandidatesNs),
+            resolve_pass.get(ResolveStat::MethodCandidatesNs),
+            resolve_pass.get(ResolveStat::SortAllNs),
+            resolve_pass.get(ResolveStat::DiagnosticRebuildNs)
         );
         info!(
             "Resolve caches: constant hits/misses/unique={}/{}/{}, method hits/misses/unique={}/{}/{}, chain={}, namespace_exists={}, suggestion={}, incomplete_chain={}",
-            resolve_pass.constant_cache_hits,
-            resolve_pass.constant_cache_misses,
-            resolve_pass.constant_cache_unique_keys,
-            resolve_pass.method_cache_hits,
-            resolve_pass.method_cache_misses,
-            resolve_pass.method_cache_unique_keys,
-            resolve_pass.method_lookup_chain_cache_entries,
-            resolve_pass.method_namespace_exists_cache_entries,
-            resolve_pass.method_suggestion_cache_entries,
-            resolve_pass.incomplete_method_chain_cache_entries
+            resolve_pass.get(ResolveStat::ConstantCacheHits),
+            resolve_pass.get(ResolveStat::ConstantCacheMisses),
+            resolve_pass.get(ResolveStat::ConstantCacheUniqueKeys),
+            resolve_pass.get(ResolveStat::MethodCacheHits),
+            resolve_pass.get(ResolveStat::MethodCacheMisses),
+            resolve_pass.get(ResolveStat::MethodCacheUniqueKeys),
+            resolve_pass.get(ResolveStat::MethodLookupChainCacheEntries),
+            resolve_pass.get(ResolveStat::MethodNamespaceExistsCacheEntries),
+            resolve_pass.get(ResolveStat::MethodSuggestionCacheEntries),
+            resolve_pass.get(ResolveStat::IncompleteMethodChainCacheEntries)
         );
         info!(
             "Deferred call receivers: candidates={}, proven={}, unknown={}",
-            resolve_pass.deferred_receiver_candidates,
-            resolve_pass.deferred_receiver_proven,
-            resolve_pass.deferred_receiver_unknown
+            resolve_pass.get(ResolveStat::DeferredReceiverCandidates),
+            resolve_pass.get(ResolveStat::DeferredReceiverProven),
+            resolve_pass.get(ResolveStat::DeferredReceiverUnknown)
         );
         info!(
             "Call outcome caches: return hits/misses/entries={}/{}/{}, visibility hits/misses/entries={}/{}/{}, ambiguous return hits/misses/entries={}/{}/{}",
-            resolve_pass.method_return_cache_hits,
-            resolve_pass.method_return_cache_misses,
-            resolve_pass.method_return_cache_entries,
-            resolve_pass.method_visibility_cache_hits,
-            resolve_pass.method_visibility_cache_misses,
-            resolve_pass.method_visibility_cache_entries,
-            resolve_pass.ambiguous_method_return_cache_hits,
-            resolve_pass.ambiguous_method_return_cache_misses,
-            resolve_pass.ambiguous_method_return_cache_entries
+            resolve_pass.get(ResolveStat::MethodReturnCacheHits),
+            resolve_pass.get(ResolveStat::MethodReturnCacheMisses),
+            resolve_pass.get(ResolveStat::MethodReturnCacheEntries),
+            resolve_pass.get(ResolveStat::MethodVisibilityCacheHits),
+            resolve_pass.get(ResolveStat::MethodVisibilityCacheMisses),
+            resolve_pass.get(ResolveStat::MethodVisibilityCacheEntries),
+            resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheHits),
+            resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheMisses),
+            resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheEntries)
         );
-        info!("Resolved references: {}", stats.references);
-        info!("Type facts: {}", stats.types);
+        info!(
+            "Resolved references: {}",
+            stats.get(AnalysisStat::References)
+        );
+        info!("Type facts: {}", stats.get(AnalysisStat::Types));
         let inference = engine.inference_telemetry();
         info!(
             "Shape proof telemetry: occurrences={}, fields_total={}, fields_max={}, depth_max={}, unions={}, union_variants_total={}, union_variants_max={}, aliases_max={}, invalidated_unknowns={}, bound_unknowns={}",
@@ -308,11 +318,17 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
             inference.shape_invalidated_outcomes,
             inference.shape_bound_exceeded_outcomes,
         );
-        info!("Diagnostic candidates: {}", stats.diagnostic_candidates);
-        info!("Diagnostics: {}", stats.diagnostics);
-        info!("Graph nodes: {}", stats.graph_nodes);
-        info!("Graph edges: {}", stats.graph_edges);
-        info!("Unresolved graph edges: {}", stats.unresolved_graph_edges);
+        info!(
+            "Diagnostic candidates: {}",
+            stats.get(AnalysisStat::DiagnosticCandidates)
+        );
+        info!("Diagnostics: {}", stats.get(AnalysisStat::Diagnostics));
+        info!("Graph nodes: {}", stats.get(AnalysisStat::GraphNodes));
+        info!("Graph edges: {}", stats.get(AnalysisStat::GraphEdges));
+        info!(
+            "Unresolved graph edges: {}",
+            stats.get(AnalysisStat::UnresolvedGraphEdges)
+        );
 
         let memory = engine.estimated_memory_stats();
         let total = memory.total();

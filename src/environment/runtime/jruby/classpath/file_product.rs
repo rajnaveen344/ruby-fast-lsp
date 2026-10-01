@@ -1,7 +1,8 @@
 //! Process-shared, identity-checked fingerprints and manifest descriptors for classpath files.
 
 use crate::invariant::ExpectInvariant;
-use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightSnapshot};
+use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightStat};
+use ruby_analysis::stats::StatsSnapshot;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, Metadata};
 use std::io::Read;
@@ -96,7 +97,7 @@ impl ClasspathFileProductCache {
         }
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
         self.inner.snapshot()
     }
 

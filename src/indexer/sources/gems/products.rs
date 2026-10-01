@@ -316,11 +316,13 @@ impl IndexerGem {
         {
             Ok(binding) => binding,
             Err(error) => {
-                server.products.gem_bindings().record_failure();
+                crate::indexer::cache::dependency_product::GemDependencyBinding::record_failure(
+                    server.products.gem_bindings(),
+                );
                 return Err(error);
             }
         };
-        server.products.gem_bindings().record_success(&binding);
+        binding.record_success(server.products.gem_bindings());
         Ok(binding.uris)
     }
 

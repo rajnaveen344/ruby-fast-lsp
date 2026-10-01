@@ -1,6 +1,8 @@
 //! Cached Java artifact metadata, classpath winner order, and JDK release features.
 
 use super::*;
+use crate::indexer::cache::persistent::PersistentProductStat;
+use crate::utils::single_flight::SingleFlightStat;
 
 #[test]
 fn cached_java_artifact_metadata_is_reused_without_cross_project_path_leakage() {
@@ -66,12 +68,22 @@ fn cached_java_artifact_metadata_is_reused_without_cross_project_path_leakage() 
     )
     .unwrap();
 
-    assert_eq!(cache.java_artifact_snapshot().producers, 1);
-    assert_eq!(cache.java_artifact_snapshot().hits, 0);
-    assert_eq!(process_cache.snapshot().lookups, 2);
-    assert_eq!(process_cache.snapshot().producers, 1);
-    assert_eq!(process_cache.snapshot().hits, 1);
-    assert_eq!(process_cache.snapshot().entries, 1);
+    assert_eq!(
+        cache
+            .java_artifact_snapshot()
+            .get(PersistentProductStat::Producers),
+        1
+    );
+    assert_eq!(
+        cache
+            .java_artifact_snapshot()
+            .get(PersistentProductStat::Hits),
+        0
+    );
+    assert_eq!(process_cache.snapshot().get(SingleFlightStat::Lookups), 2);
+    assert_eq!(process_cache.snapshot().get(SingleFlightStat::Producers), 1);
+    assert_eq!(process_cache.snapshot().get(SingleFlightStat::Hits), 1);
+    assert_eq!(process_cache.snapshot().get(SingleFlightStat::Entries), 1);
     assert!(process_cache.retained_weight_bytes() > 0);
     assert!(process_cache.retained_weight_bytes() <= 1024 * 1024);
     assert_eq!(
@@ -159,7 +171,12 @@ fn parallel_cached_java_products_preserve_classpath_winner_order() {
             shadowed: shadowed.path,
         }]
     );
-    assert_eq!(cache.java_artifact_snapshot().producers, 2);
+    assert_eq!(
+        cache
+            .java_artifact_snapshot()
+            .get(PersistentProductStat::Producers),
+        2
+    );
 }
 
 #[test]

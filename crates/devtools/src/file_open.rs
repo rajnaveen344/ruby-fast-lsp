@@ -2,6 +2,8 @@
 //! The caller must install the DHAT allocator and start its heap profiler.
 
 use log::{info, LevelFilter};
+use ruby_analysis::engine::AnalysisStat;
+use ruby_analysis::stats;
 use ruby_fast_lsp::lsp::capabilities::indexing;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::env;
@@ -211,16 +213,16 @@ pub fn run() {
     });
 }
 
-fn analysis_fact_count(server: &RubyLanguageServer) -> usize {
+fn analysis_fact_count(server: &RubyLanguageServer) -> u64 {
     server
         .analysis_engines()
         .into_iter()
         .map(|analysis_engine| {
             let engine = analysis_engine.read();
-            engine.all_symbol_facts().len()
-                + engine.all_method_facts().len()
-                + engine.stats().references
-                + engine.query().all_type_facts().len()
+            stats::count(engine.all_symbol_facts().len())
+                + stats::count(engine.all_method_facts().len())
+                + engine.stats().get(AnalysisStat::References)
+                + stats::count(engine.query().all_type_facts().len())
         })
         .sum()
 }

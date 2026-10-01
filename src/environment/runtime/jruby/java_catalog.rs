@@ -1,7 +1,8 @@
 use super::classpath::{ArtifactKind, ClasspathArtifact, ProjectClasspath};
 use crate::invariant::ExpectInvariant;
-use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightSnapshot};
+use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightStat};
 use anyhow::{anyhow, Context, Result as AnyResult};
+use ruby_analysis::stats::StatsSnapshot;
 use ruby_fast_lsp_jvm_metadata::{
     parse_archive, ArchiveKind, ArchiveLimits, ArchiveMetadata, ClassFile,
     ARCHIVE_PRODUCT_SEMANTIC_VERSION,
@@ -107,7 +108,7 @@ impl JavaArtifactProductCache {
         self.inner.get_or_try_init(key, producer)
     }
 
-    pub fn snapshot(&self) -> SingleFlightSnapshot {
+    pub fn snapshot(&self) -> StatsSnapshot<SingleFlightStat> {
         self.inner.snapshot()
     }
 
@@ -787,9 +788,9 @@ mod tests {
                 .expect("bounded Java artifact product must build");
         }
 
-        assert_eq!(cache.snapshot().entries, 1);
-        assert_eq!(cache.snapshot().producers, 2);
-        assert_eq!(cache.snapshot().evictions, 1);
+        assert_eq!(cache.snapshot().get(SingleFlightStat::Entries), 1);
+        assert_eq!(cache.snapshot().get(SingleFlightStat::Producers), 2);
+        assert_eq!(cache.snapshot().get(SingleFlightStat::Evictions), 1);
         assert!(cache.retained_weight_bytes() > 0);
         assert!(cache.retained_weight_bytes() <= 1024 * 1024);
 
@@ -803,8 +804,14 @@ mod tests {
             })
             .expect("an overweight product must still serve its current consumer");
         assert!(product.estimated_weight_bytes() > 1);
-        assert_eq!(overweight_cache.snapshot().entries, 0);
-        assert_eq!(overweight_cache.snapshot().evictions, 1);
+        assert_eq!(
+            overweight_cache.snapshot().get(SingleFlightStat::Entries),
+            0
+        );
+        assert_eq!(
+            overweight_cache.snapshot().get(SingleFlightStat::Evictions),
+            1
+        );
         assert_eq!(overweight_cache.retained_weight_bytes(), 0);
     }
 }

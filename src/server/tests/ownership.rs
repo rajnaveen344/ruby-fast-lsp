@@ -1,4 +1,5 @@
 use crate::server::products::{CORE_ENGINE_CACHE_MAX_ENTRIES, CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES};
+use crate::utils::single_flight::SingleFlightStat;
 
 use crate::server::RubyLanguageServer;
 use ruby_analysis::engine::AnalysisEngine;
@@ -70,11 +71,15 @@ async fn core_engine_template_retention_is_bounded_by_entries_and_estimated_heap
 
     let products = server.runtime_product_snapshot();
     assert!(
-        products.core_templates.reuse.entries <= CORE_ENGINE_CACHE_MAX_ENTRIES,
+        products.core_templates.get(SingleFlightStat::Entries)
+            <= ruby_analysis::stats::count(CORE_ENGINE_CACHE_MAX_ENTRIES),
         "completed core templates must evict to the server-owned entry bound"
     );
     assert!(
-        products.core_templates.retained_weight_bytes <= CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES,
+        products
+            .core_templates
+            .get(SingleFlightStat::RetainedWeightBytes)
+            <= CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES,
         "completed core templates must remain within the server-owned estimated-heap bound"
     );
 }
@@ -104,9 +109,9 @@ async fn server_ownership_clones_reuse_products_with_one_ordinary_cache_root() {
         .unwrap();
     assert!(Arc::ptr_eq(&first, &second));
     let products = server.runtime_product_snapshot();
-    assert_eq!(products.core_templates.reuse.lookups, 2);
-    assert_eq!(products.core_templates.reuse.producers, 1);
-    assert_eq!(products.core_templates.reuse.hits, 1);
+    assert_eq!(products.core_templates.get(SingleFlightStat::Lookups), 2);
+    assert_eq!(products.core_templates.get(SingleFlightStat::Producers), 1);
+    assert_eq!(products.core_templates.get(SingleFlightStat::Hits), 1);
     assert_eq!(clone.runtime_product_snapshot(), products);
 }
 

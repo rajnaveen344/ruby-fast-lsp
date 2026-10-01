@@ -1,3 +1,4 @@
+use ruby_fast_lsp::environment::extensions::ExtensionStat;
 use ruby_fast_lsp_test_harness::FakeEditor;
 use tempfile::TempDir;
 
@@ -360,7 +361,7 @@ end
 
     assert_eq!(sinatra.status, "loaded");
     assert!(
-        sinatra.telemetry.emitted_execution_contexts >= 2,
+        sinatra.telemetry.get(ExtensionStat::EmittedExecutionContexts) >= 2,
         "Sinatra 2 helpers and routes must be modeled by the extension, not the generic syntactic fallback: {sinatra:?}"
     );
 }

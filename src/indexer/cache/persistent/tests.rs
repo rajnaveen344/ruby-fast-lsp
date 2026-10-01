@@ -1,4 +1,5 @@
 use super::envelope::decode_envelope;
+use super::PersistentProductStat;
 use super::{
     CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
     PersistentGemProductLookup, PersistentJavaArtifactLookup, PersistentProductKind,
@@ -198,8 +199,18 @@ fn fresh_cache_load_rebinds_exact_path_and_corruption_recovers() {
         second_engine.file(definition.file_id).unwrap().path,
         second_path
     );
-    assert_eq!(second_cache.gem_product_snapshot().hits, 1);
-    assert_eq!(second_cache.gem_product_snapshot().producers, 0);
+    assert_eq!(
+        second_cache
+            .gem_product_snapshot()
+            .get(PersistentProductStat::Hits),
+        1
+    );
+    assert_eq!(
+        second_cache
+            .gem_product_snapshot()
+            .get(PersistentProductStat::Producers),
+        0
+    );
 
     std::fs::write(
         second_cache.product_path_for_tests(&second_manifest),
@@ -214,7 +225,12 @@ fn fresh_cache_load_rebinds_exact_path_and_corruption_recovers() {
     else {
         panic!("a corrupt product must reserve one deterministic rebuild");
     };
-    assert_eq!(recovering_cache.gem_product_snapshot().corruptions, 1);
+    assert_eq!(
+        recovering_cache
+            .gem_product_snapshot()
+            .get(PersistentProductStat::Corruptions),
+        1
+    );
     rebuild.publish(&first_product).unwrap();
     assert!(matches!(
         recovering_cache
@@ -288,7 +304,12 @@ fn obsolete_gem_products_are_never_selected_across_semantic_input_changes() {
                 "a changed source, lock closure, core/runtime semantic seed, or classpath must never select the old product"
             );
     }
-    assert_eq!(cache.gem_product_snapshot().hits, 1);
+    assert_eq!(
+        cache
+            .gem_product_snapshot()
+            .get(PersistentProductStat::Hits),
+        1
+    );
     assert_eq!(
         cache.summary().unwrap().entries,
         1,
@@ -321,7 +342,12 @@ fn fresh_java_artifact_cache_loads_exact_metadata_and_recovers_corruption() {
         panic!("a fresh cache instance must load Java artifact metadata");
     };
     assert_eq!(hit.cache_id(), key.cache_id());
-    assert_eq!(second_cache.java_artifact_snapshot().hits, 1);
+    assert_eq!(
+        second_cache
+            .java_artifact_snapshot()
+            .get(PersistentProductStat::Hits),
+        1
+    );
     assert_eq!(second_cache.summary().unwrap().entries, 1);
 
     let product_path =
@@ -335,7 +361,12 @@ fn fresh_java_artifact_cache_loads_exact_metadata_and_recovers_corruption() {
     else {
         panic!("corrupt Java metadata must reserve one deterministic rebuild");
     };
-    assert_eq!(recovering_cache.java_artifact_snapshot().corruptions, 1);
+    assert_eq!(
+        recovering_cache
+            .java_artifact_snapshot()
+            .get(PersistentProductStat::Corruptions),
+        1
+    );
     rebuild.publish(&product).unwrap();
     assert!(matches!(
         recovering_cache
@@ -427,7 +458,12 @@ fn compiled_wasm_cache_validates_source_compiler_payload_and_corruption() {
         panic!("a fresh cache instance must load the exact compiled Wasm artifact");
     };
     assert_eq!(hit.as_slice(), artifact);
-    assert_eq!(second.compiled_wasm_snapshot().hits, 1);
+    assert_eq!(
+        second
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Hits),
+        1
+    );
 
     let changed_source = CompiledWasmProductKey::new(b"\0asm changed extension bytes", 17);
     assert!(matches!(
@@ -453,7 +489,12 @@ fn compiled_wasm_cache_validates_source_compiler_payload_and_corruption() {
     else {
         panic!("a corrupt compiled Wasm artifact must reserve one deterministic rebuild");
     };
-    assert_eq!(recovering.compiled_wasm_snapshot().corruptions, 1);
+    assert_eq!(
+        recovering
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Corruptions),
+        1
+    );
     rebuild.publish(&key, &artifact).unwrap();
 }
 
@@ -544,10 +585,30 @@ fn cross_instance_lock_admits_one_publisher() {
         waiter.join().unwrap(),
         PersistentGemProductLookup::Hit(_)
     ));
-    assert_eq!(first.gem_product_snapshot().producers, 1);
-    assert_eq!(second.gem_product_snapshot().producers, 0);
-    assert_eq!(second.gem_product_snapshot().hits, 1);
-    assert_eq!(second.gem_product_snapshot().lock_waits, 1);
+    assert_eq!(
+        first
+            .gem_product_snapshot()
+            .get(PersistentProductStat::Producers),
+        1
+    );
+    assert_eq!(
+        second
+            .gem_product_snapshot()
+            .get(PersistentProductStat::Producers),
+        0
+    );
+    assert_eq!(
+        second
+            .gem_product_snapshot()
+            .get(PersistentProductStat::Hits),
+        1
+    );
+    assert_eq!(
+        second
+            .gem_product_snapshot()
+            .get(PersistentProductStat::LockWaits),
+        1
+    );
 }
 
 #[test]
@@ -583,10 +644,30 @@ fn cross_instance_compiled_wasm_lock_admits_one_publisher() {
         panic!("the compiled Wasm waiter must reuse the first publisher's artifact");
     };
     assert_eq!(hit.as_slice(), artifact);
-    assert_eq!(first.compiled_wasm_snapshot().producers, 1);
-    assert_eq!(second.compiled_wasm_snapshot().producers, 0);
-    assert_eq!(second.compiled_wasm_snapshot().hits, 1);
-    assert_eq!(second.compiled_wasm_snapshot().lock_waits, 1);
+    assert_eq!(
+        first
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Producers),
+        1
+    );
+    assert_eq!(
+        second
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Producers),
+        0
+    );
+    assert_eq!(
+        second
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::Hits),
+        1
+    );
+    assert_eq!(
+        second
+            .compiled_wasm_snapshot()
+            .get(PersistentProductStat::LockWaits),
+        1
+    );
 }
 
 #[test]
@@ -621,7 +702,12 @@ fn bounded_cleanup_and_clear_touch_only_owned_products() {
     let summary = cache.summary().unwrap();
     assert_eq!(summary.entries, 1);
     assert!(summary.bytes > 0);
-    assert_eq!(cache.gem_product_snapshot().evictions, 1);
+    assert_eq!(
+        cache
+            .gem_product_snapshot()
+            .get(PersistentProductStat::Evictions),
+        1
+    );
     assert!(matches!(
         cache.lookup_or_reserve(&second_manifest).unwrap(),
         PersistentGemProductLookup::Hit(_)

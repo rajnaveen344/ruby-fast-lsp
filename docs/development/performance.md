@@ -38,6 +38,11 @@ workspace explicitly (an absolute path also works):
   --benchmark-iterations 100 > target/performance/queries.log 2>&1
 ```
 
+Counters and timers in the report come from `ruby_analysis::stats` snapshots
+(see the [analysis library guide](../../crates/ruby-analysis/README.md#statistics));
+the profiler merges per-project snapshots and serializes them under their stat
+names, so a new stat in a serialized set appears without new plumbing.
+
 Use `--help` for focused definition/reference probes, diagnostic and semantic
 export manifests, and explicit resource settings. Query probe coordinates are
 zero-based LSP positions. Private workspaces may be inspected read-only; publish

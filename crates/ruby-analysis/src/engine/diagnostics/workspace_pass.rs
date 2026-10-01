@@ -18,11 +18,15 @@ use crate::core::{
     ReferenceFact, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
-use crate::engine::state::{elapsed_ns, ResolvePassStats};
+use crate::engine::state::ResolveStat;
 use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::stats::{self, StatsSnapshot};
 
 impl AnalysisEngine {
-    pub(in crate::engine) fn resolve_reference_candidates(&mut self, stats: &mut ResolvePassStats) {
+    pub(in crate::engine) fn resolve_reference_candidates(
+        &mut self,
+        stats: &mut StatsSnapshot<ResolveStat>,
+    ) {
         let mut candidate_file_ids = self.facts.references.candidates.file_ids();
         for file_id in self.facts.diagnostics.candidates.file_ids() {
             if !candidate_file_ids.contains(&file_id) {
@@ -32,7 +36,10 @@ impl AnalysisEngine {
 
         let diagnostic_seed_started = Instant::now();
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
-        stats.diagnostic_seed_ns = elapsed_ns(diagnostic_seed_started);
+        stats.record_duration(
+            ResolveStat::DiagnosticSeedNs,
+            diagnostic_seed_started.elapsed(),
+        );
         let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
         let mut method_fact_cache: HashMap<(MethodReferenceCacheKey, bool), MethodLookupResult> =
             HashMap::new();
@@ -69,20 +76,10 @@ impl AnalysisEngine {
                     );
                     let target = if let Some(target) = constant_target_cache.get(&candidate.lookup)
                     {
-                        stats.constant_cache_hits =
-                            stats.constant_cache_hits.checked_add(1).expect_invariant(
-                                "constant resolve-cache hit counter overflowed usize",
-                                "one resolve pass cannot exceed addressable memory operations",
-                                "inspect corrupt resolve instrumentation",
-                            );
+                        stats.increment(ResolveStat::ConstantCacheHits);
                         *target
                     } else {
-                        stats.constant_cache_misses =
-                            stats.constant_cache_misses.checked_add(1).expect_invariant(
-                                "constant resolve-cache miss counter overflowed usize",
-                                "one resolve pass cannot exceed addressable memory operations",
-                                "inspect corrupt resolve instrumentation",
-                            );
+                        stats.increment(ResolveStat::ConstantCacheMisses);
                         let target = self
                             .resolve_constant_reference(
                                 &parts,
@@ -136,32 +133,11 @@ impl AnalysisEngine {
                             .flatten()
                     });
                     if deferred_receiver_range.is_some() {
-                        stats.deferred_receiver_candidates = stats
-                            .deferred_receiver_candidates
-                            .checked_add(1)
-                            .expect_invariant(
-                                "deferred-receiver candidate counter overflowed usize",
-                                "one resolve pass cannot contain more candidates than addressable memory",
-                                "inspect corrupt reference-candidate storage",
-                            );
+                        stats.increment(ResolveStat::DeferredReceiverCandidates);
                         if effective_receiver_type.is_some() {
-                            stats.deferred_receiver_proven = stats
-                                .deferred_receiver_proven
-                                .checked_add(1)
-                                .expect_invariant(
-                                    "proven deferred-receiver counter overflowed usize",
-                                    "proven receivers are a subset of addressable candidates",
-                                    "inspect corrupt resolve instrumentation",
-                                );
+                            stats.increment(ResolveStat::DeferredReceiverProven);
                         } else {
-                            stats.deferred_receiver_unknown = stats
-                                .deferred_receiver_unknown
-                                .checked_add(1)
-                                .expect_invariant(
-                                    "Unknown deferred-receiver counter overflowed usize",
-                                    "unknown receivers are a subset of addressable candidates",
-                                    "inspect corrupt resolve instrumentation",
-                                );
+                            stats.increment(ResolveStat::DeferredReceiverUnknown);
                         }
                     }
                     if deferred_receiver_range.is_some() && effective_receiver_type.is_none() {
@@ -316,19 +292,9 @@ impl AnalysisEngine {
                         }
                     });
                     if cached {
-                        stats.method_cache_hits =
-                            stats.method_cache_hits.checked_add(1).expect_invariant(
-                                "method resolve-cache hit counter overflowed usize",
-                                "one resolve pass cannot exceed addressable memory operations",
-                                "inspect corrupt resolve instrumentation",
-                            );
+                        stats.increment(ResolveStat::MethodCacheHits);
                     } else {
-                        stats.method_cache_misses =
-                            stats.method_cache_misses.checked_add(1).expect_invariant(
-                                "method resolve-cache miss counter overflowed usize",
-                                "one resolve pass cannot exceed addressable memory operations",
-                                "inspect corrupt resolve instrumentation",
-                            );
+                        stats.increment(ResolveStat::MethodCacheMisses);
                     }
                     let mut fact = fact.clone();
                     if candidate.access == MethodReferenceAccess::Normal
@@ -479,22 +445,70 @@ impl AnalysisEngine {
         // one-shot per-arm Instant split was removed (it inflated production A/B).
         // The detailed constant-vs-method split remains in
         // support/performance/resolve-pass-cache-cardinality-2026-08-01.json.
-        stats.method_candidates_ns = elapsed_ns(candidate_loop_started);
-        stats.constant_cache_unique_keys = constant_target_cache.len();
-        stats.method_cache_unique_keys = method_fact_cache.len();
-        stats.method_lookup_chain_cache_entries = method_lookup_chain_cache.len();
-        stats.method_namespace_exists_cache_entries = method_namespace_exists_cache.len();
-        stats.method_suggestion_cache_entries = method_suggestion_cache.len();
-        stats.incomplete_method_chain_cache_entries = method_chain_completeness_cache.results.len();
-        stats.method_return_cache_hits = call_outcome_caches.return_hits;
-        stats.method_return_cache_misses = call_outcome_caches.return_misses;
-        stats.method_return_cache_entries = call_outcome_caches.returns.len();
-        stats.method_visibility_cache_hits = call_outcome_caches.visibility_hits;
-        stats.method_visibility_cache_misses = call_outcome_caches.visibility_misses;
-        stats.method_visibility_cache_entries = call_outcome_caches.visibilities.len();
-        stats.ambiguous_method_return_cache_hits = call_outcome_caches.ambiguous_return_hits;
-        stats.ambiguous_method_return_cache_misses = call_outcome_caches.ambiguous_return_misses;
-        stats.ambiguous_method_return_cache_entries = call_outcome_caches.ambiguous_returns.len();
+        stats.record_duration(
+            ResolveStat::MethodCandidatesNs,
+            candidate_loop_started.elapsed(),
+        );
+        stats.set(
+            ResolveStat::ConstantCacheUniqueKeys,
+            stats::count(constant_target_cache.len()),
+        );
+        stats.set(
+            ResolveStat::MethodCacheUniqueKeys,
+            stats::count(method_fact_cache.len()),
+        );
+        stats.set(
+            ResolveStat::MethodLookupChainCacheEntries,
+            stats::count(method_lookup_chain_cache.len()),
+        );
+        stats.set(
+            ResolveStat::MethodNamespaceExistsCacheEntries,
+            stats::count(method_namespace_exists_cache.len()),
+        );
+        stats.set(
+            ResolveStat::MethodSuggestionCacheEntries,
+            stats::count(method_suggestion_cache.len()),
+        );
+        stats.set(
+            ResolveStat::IncompleteMethodChainCacheEntries,
+            stats::count(method_chain_completeness_cache.results.len()),
+        );
+        stats.set(
+            ResolveStat::MethodReturnCacheHits,
+            stats::count(call_outcome_caches.return_hits),
+        );
+        stats.set(
+            ResolveStat::MethodReturnCacheMisses,
+            stats::count(call_outcome_caches.return_misses),
+        );
+        stats.set(
+            ResolveStat::MethodReturnCacheEntries,
+            stats::count(call_outcome_caches.returns.len()),
+        );
+        stats.set(
+            ResolveStat::MethodVisibilityCacheHits,
+            stats::count(call_outcome_caches.visibility_hits),
+        );
+        stats.set(
+            ResolveStat::MethodVisibilityCacheMisses,
+            stats::count(call_outcome_caches.visibility_misses),
+        );
+        stats.set(
+            ResolveStat::MethodVisibilityCacheEntries,
+            stats::count(call_outcome_caches.visibilities.len()),
+        );
+        stats.set(
+            ResolveStat::AmbiguousMethodReturnCacheHits,
+            stats::count(call_outcome_caches.ambiguous_return_hits),
+        );
+        stats.set(
+            ResolveStat::AmbiguousMethodReturnCacheMisses,
+            stats::count(call_outcome_caches.ambiguous_return_misses),
+        );
+        stats.set(
+            ResolveStat::AmbiguousMethodReturnCacheEntries,
+            stats::count(call_outcome_caches.ambiguous_returns.len()),
+        );
 
         // These caches are complete once the candidate loop ends. Release
         // them before merging call outcomes into retained inference evidence;
@@ -512,7 +526,7 @@ impl AnalysisEngine {
         self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
         let sort_started = Instant::now();
         self.facts.references.resolved.sort_all();
-        stats.sort_all_ns = elapsed_ns(sort_started);
+        stats.record_duration(ResolveStat::SortAllNs, sort_started.elapsed());
 
         let diagnostic_rebuild_started = Instant::now();
         for file_id in candidate_file_ids {
@@ -538,7 +552,10 @@ impl AnalysisEngine {
                 .resolved
                 .replace_file(file_id, diagnostics);
         }
-        stats.diagnostic_rebuild_ns = elapsed_ns(diagnostic_rebuild_started);
+        stats.record_duration(
+            ResolveStat::DiagnosticRebuildNs,
+            diagnostic_rebuild_started.elapsed(),
+        );
     }
 }
 

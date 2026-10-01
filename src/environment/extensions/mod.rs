@@ -17,7 +17,7 @@ pub(crate) use project_context::{
 pub use registry::handle::ExtensionRegistryHandle;
 pub(crate) use registry::state::ExtensionApplicabilitySnapshot;
 pub use registry::status::{
-    ExtensionStatusParams, ExtensionStatusReport, ExtensionStatusResponse, ExtensionTelemetryReport,
+    ExtensionStat, ExtensionStatusParams, ExtensionStatusReport, ExtensionStatusResponse,
 };
 
 use std::path::Path;
