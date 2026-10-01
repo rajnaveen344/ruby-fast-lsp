@@ -142,21 +142,6 @@
       "type_hierarchy.rs",
       "workspace_symbols.rs"
     ],
-    "src/indexer": [
-      "NAMESPACE_INDEXING.md",
-      "README.md",
-      "coordinator.rs",
-      "file_processor.rs",
-      "indexer_gem.rs",
-      "indexer_project.rs",
-      "indexer_stdlib.rs",
-      "interner.rs",
-      "mod.rs",
-      "project_roots.rs",
-      "require_paths.rs",
-      "test_schedule.rs",
-      "version"
-    ],
     "src/query": [
       "README.md",
       "analysis_location.rs",

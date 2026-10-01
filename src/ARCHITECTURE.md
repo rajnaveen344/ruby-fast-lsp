@@ -66,11 +66,11 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 
 #### Key Files:
 
-- `coordinator.rs`: Orchestrates workspace indexing
-- `file_processor.rs`: Parses one file and runs `FactCollector`
-- `indexer_project.rs`: Discovers and indexes project files
-- `indexer_gem.rs`: Discovers and indexes gem files
-- `indexer_stdlib.rs`: Discovers and indexes stdlib files
+- `coordinator/`: Orchestrates workspace indexing
+- `file_processor/`: Parses one file and runs `FactCollector`
+- `sources/project/`: Discovers and indexes project files
+- `sources/gems/`: Discovers and indexes gem files
+- `sources/stdlib/`: Discovers and indexes stdlib files
 
 #### Design Decisions:
 

@@ -8,11 +8,19 @@ reference candidates, resolved references, and diagnostics.
 
 ## Main Pieces
 
-- `coordinator.rs`: workspace indexing orchestration
-- `file_processor.rs`: parse one file and run `FactCollector`
-- `indexer_project.rs`: project file discovery and dependency scan
-- `indexer_stdlib.rs`: standard library file discovery
-- `indexer_gem.rs`: gem file discovery
+- `coordinator/`: workspace indexing orchestration, scheduling priority,
+  runtime selection, JRuby companions, and resource admission
+- `file_processor/`: parse one file and run `FactCollector`, merge collected
+  facts, and convert extension-produced facts
+- `require_paths/`: require-path resolution
+- `sources/project/`: project root discovery, project file discovery,
+  navigation-demand collection, and dependency scan
+- `sources/stdlib/`: standard library file discovery and exact runtime load paths
+- `sources/gems/`: gem discovery, lockfile selection, vendor cache extraction,
+  and shared gem dependency products
+
+See [namespace indexing](../../docs/development/namespace-indexing.md) for how
+constant-path module and class definitions map to namespaces.
 
 ## Current Flow
 
