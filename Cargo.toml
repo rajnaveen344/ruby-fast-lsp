@@ -145,7 +145,10 @@ jemalloc = ["dep:tikv-jemallocator"]
 [profile.dev]
 debug = "line-tables-only"
 
+# Speed over size: against "z", opt-level 3 cut cold indexing 25%, CPU 38%,
+# and edit/query latency 37-50% on the profiler workload, for a ~39% larger
+# server binary.
 [profile.release]
-opt-level = "z"
+opt-level = 3
 strip = "symbols"
 debug = 0
