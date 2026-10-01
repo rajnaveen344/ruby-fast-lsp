@@ -16,6 +16,7 @@ use crate::loader::cache::dependency_product::{
 };
 use crate::loader::cache::persistent::PersistentDerivedProductCache;
 use crate::loader::require_paths::RequireFeatureIndex;
+use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::resources::IndexingResourceGovernor;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::loader::sources::stdlib::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
@@ -342,4 +343,6 @@ pub(crate) trait LoadSink: Send + Sync {
     /// Re-resolve unresolved-require diagnostics of the project at `root`
     /// against its published require roots.
     async fn refresh_require_diagnostics(&self, root: &Path);
+    /// The navigation demand queue of the project at `root`.
+    fn navigation_demands(&self, root: &Path) -> Option<NavigationDemandController>;
 }

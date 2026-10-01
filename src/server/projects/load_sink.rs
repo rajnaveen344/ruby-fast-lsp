@@ -5,6 +5,7 @@ use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
 use crate::loader::context::{IndexingRunState, LoadSink};
 use crate::loader::require_paths::RequireFeatureIndex;
+use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::server::RubyLanguageServer;
 use parking_lot::RwLock;
@@ -97,5 +98,10 @@ impl LoadSink for RubyLanguageServer {
             self.refresh_unresolved_require_diagnostics_for_workspace(&workspace)
                 .await;
         }
+    }
+
+    fn navigation_demands(&self, root: &Path) -> Option<NavigationDemandController> {
+        self.project_at_root(root)
+            .map(|workspace| workspace.navigation_demands)
     }
 }

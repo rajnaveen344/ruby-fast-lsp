@@ -316,16 +316,15 @@ impl IndexingCoordinator {
         let (_, startup_excluded_gems) =
             configured_gem_selection(Vec::new(), &self.config.indexing);
         let dependency_navigation_demands = self.indexing_run.as_ref().map(|run| {
-            let workspace = server
-                .list_workspaces()
-                .into_iter()
-                .find(|workspace| workspace.root_path == self.workspace_root)
+            let navigation_demands = ctx
+                .sink
+                .navigation_demands(&self.workspace_root)
                 .expect_invariant(
                     "active indexing run has no registered workspace while preparing dependency navigation",
                     "the generation checkpoint already proved exact workspace ownership",
                     "keep workspace removal and coordinator cancellation atomic",
                 );
-            (workspace.navigation_demands, run.generation())
+            (navigation_demands, run.generation())
         });
         let startup_dependency_seed = {
             let dependency_seed = dependency_seed_engine.read();
@@ -562,12 +561,8 @@ impl IndexingCoordinator {
         .await?;
         let resolve_dur = resolve_start.elapsed();
         if let Some(run) = &self.indexing_run {
-            if let Some(workspace) = server
-                .list_workspaces()
-                .into_iter()
-                .find(|workspace| workspace.root_path == self.workspace_root)
-            {
-                workspace.navigation_demands.complete_stage(
+            if let Some(navigation_demands) = ctx.sink.navigation_demands(&self.workspace_root) {
+                navigation_demands.complete_stage(
                     run.generation(),
                     crate::loader::scheduling::navigation_demand::NavigationDemandStage::Dependency,
                 );
