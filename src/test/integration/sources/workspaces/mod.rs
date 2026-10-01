@@ -4,6 +4,7 @@
 //! the workspace whose root path is the longest prefix of the file's URI;
 //! files outside any workspace fall through to orphan analysis state.
 
+mod cold_open;
 mod dynamic;
 mod multi_root;
 mod orphan;

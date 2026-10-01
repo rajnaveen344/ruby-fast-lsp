@@ -145,13 +145,10 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let _semantic_guard = semantic_lock.lock().await;
     let content = params.text_document.text.clone();
     let existing_kind = analysis_file_kind(server, &uri);
-    let indexed_content_matches = existing_kind == Some(SourceKind::Project)
-        && indexed_disk_content_matches(server, &uri, &content);
     let source_kind = existing_kind.unwrap_or_else(|| source_kind_for_new_open_file(server, &uri));
-    let skip_processing = existing_kind
-        .map(|kind| kind.is_dependency_source())
-        .unwrap_or(false)
-        || indexed_content_matches;
+    // Facts from cold indexing do not carry the open document's local
+    // variable scopes, so every project file is analyzed again when opened.
+    let skip_processing = existing_kind.is_some_and(|kind| kind.is_dependency_source());
     let register_start = Instant::now();
     let analysis_file_id =
         server.open_or_update_analysis_file_with_kind(&uri, content.clone(), source_kind);
@@ -188,7 +185,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
             let document = server
                 .documents.read()
                 .get(&uri)
-                .expect("INVARIANT VIOLATED: didOpen syntax-only path lost the document inserted into the cache. This is a bug because unchanged indexed files still require an open RubyDocument. Fix: keep cache insertion before skip processing.")
+                .expect("INVARIANT VIOLATED: didOpen syntax-only path lost the document inserted into the cache. This is a bug because skipped dependency files still require an open RubyDocument. Fix: keep cache insertion before skip processing.")
                 .read()
                 .clone();
             let parse_result = document.parse();
@@ -197,23 +194,9 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         } else {
             Vec::new()
         };
-        if indexed_content_matches {
-            server
-                .documents.read()
-                .get(&uri)
-                .expect("INVARIANT VIOLATED: unchanged didOpen document disappeared before indexed-version update. This is a bug because semantic facts were intentionally reused. Fix: keep the open document cached through didOpen.")
-                .write()
-                .indexed_version = Some(params.text_document.version);
-        }
-        let mode = if indexed_content_matches {
-            "unchanged-index-reuse"
-        } else {
-            "known-external-skip"
-        };
         info!(
-            "[PERF][interactive] file={} mode={} elapsed={:?}",
+            "[PERF][interactive] file={} mode=known-external-skip elapsed={:?}",
             uri.path(),
-            mode,
             process_start.elapsed()
         );
         (std::collections::HashSet::new(), diagnostics)
@@ -283,20 +266,6 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         affected_count,
         affected_elapsed
     );
-}
-
-fn indexed_disk_content_matches(server: &RubyLanguageServer, uri: &Url, content: &str) -> bool {
-    let Ok(path) = uri.to_file_path() else {
-        return false;
-    };
-    if !std::fs::read_to_string(&path).is_ok_and(|disk_content| disk_content == content) {
-        return false;
-    }
-    let analysis_engine = server.analysis_engine_for_uri(uri);
-    let engine = analysis_engine.read();
-    engine
-        .file_id(&path)
-        .is_some_and(|file_id| engine.file_content_matches(file_id, content))
 }
 
 async fn refresh_open_project_files_after_dependency_open(

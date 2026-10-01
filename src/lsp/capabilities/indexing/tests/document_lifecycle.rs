@@ -320,67 +320,6 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
 }
 
 #[tokio::test]
-async fn did_open_reuses_cold_project_facts_when_buffer_matches_indexed_content() {
-    let server = RubyLanguageServer::default();
-    let workspace_dir = tempfile::tempdir().expect("temporary workspace must be created");
-    let workspace_uri = Url::from_directory_path(workspace_dir.path())
-        .expect("temporary workspace path must convert to URI");
-    let workspace = server.add_workspace(workspace_uri);
-    let path = workspace_dir.path().join("user.rb");
-    let uri = Url::from_file_path(&path).expect("test path must convert to URI");
-    let content = "class User\nend\n";
-    std::fs::write(&path, content).expect("cold-indexed test file must be written to disk");
-    let file_id = workspace
-        .analysis_engine
-        .write()
-        .register_file(SourceFileInput {
-            path,
-            content: content.to_string(),
-            kind: SourceKind::Project,
-        });
-    let user = RubyConstant::new("User").expect("test constant must be valid");
-    let generated =
-        RubyMethod::new("generated_by_extension").expect("test method name must be valid");
-    let owner = FullyQualifiedName::namespace(vec![user]);
-    let fqn = FullyQualifiedName::method(vec![user], generated);
-    workspace.analysis_engine.write().replace_facts(
-        file_id,
-        FileFacts {
-            methods: vec![MethodFact::new(
-                fqn.clone(),
-                owner,
-                TextRange::new(file_id, 0, 5),
-            )],
-            ..Default::default()
-        },
-        ResolveMode::Deferred,
-    );
-
-    handle_did_open(
-        &server,
-        DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "ruby".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        },
-    )
-    .await;
-
-    assert!(
-            workspace
-                .analysis_engine
-                .read()
-                .all_method_facts()
-                .iter()
-                .any(|fact| fact.fqn == fqn),
-            "unchanged didOpen must preserve cold-index and extension facts instead of traversing again"
-        );
-}
-
-#[tokio::test]
 async fn did_change_updates_analysis_engine_source() {
     let server = RubyLanguageServer::default();
     let uri = crate::test::harness::fixture_uri("/tmp/user.rb");
