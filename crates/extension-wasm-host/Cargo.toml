@@ -9,7 +9,7 @@ description = "Wasm extension host for Ruby Fast LSP"
 anyhow = "1.0.75"
 ruby-fast-lsp-extension-api = { path = "../extension-api" }
 serde_json = "1.0.107"
-wasmtime = { version = "43.0.2", default-features = false, features = [
+wasmtime = { version = "44.0.3", default-features = false, features = [
     "anyhow",
     "cranelift",
     "gc",
@@ -17,7 +17,7 @@ wasmtime = { version = "43.0.2", default-features = false, features = [
     "runtime",
     "std",
 ] }
-wasmtime-wasi = { version = "43.0.2", default-features = false, features = [
+wasmtime-wasi = { version = "44.0.3", default-features = false, features = [
     "p1",
 ] }
 
