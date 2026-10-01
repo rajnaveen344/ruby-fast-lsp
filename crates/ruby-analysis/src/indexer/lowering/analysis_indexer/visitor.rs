@@ -42,16 +42,7 @@ use crate::indexer::yard::{YardMethodDoc, YardParser};
 impl Visit<'_> for AnalysisIndexer {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {
         let lexical_context = self.namespace_stack.clone();
-        let syntactic_fqn =
-            constant_parts_and_absolute(&node.constant_path()).map(|(parts, absolute)| {
-                if absolute {
-                    FullyQualifiedName::namespace(parts)
-                } else {
-                    let mut probe = lexical_context.clone();
-                    probe.extend(parts);
-                    FullyQualifiedName::namespace(probe)
-                }
-            });
+        let syntactic_fqn = syntactic_namespace(&node.constant_path(), &lexical_context);
         let mut reopened_target = constant_parts_and_absolute(&node.constant_path())
             .and_then(|(parts, absolute)| {
                 self.resolve_declaration_constant_value_type_from(
@@ -184,7 +175,8 @@ impl Visit<'_> for AnalysisIndexer {
 
     fn visit_module_node(&mut self, node: &ModuleNode<'_>) {
         let lexical_context = self.namespace_stack.clone();
-        let reopened_target = constant_parts_and_absolute(&node.constant_path())
+        let syntactic_fqn = syntactic_namespace(&node.constant_path(), &lexical_context);
+        let mut reopened_target = constant_parts_and_absolute(&node.constant_path())
             .and_then(|(parts, absolute)| {
                 self.resolve_declaration_constant_value_type_from(
                     &parts,
@@ -204,6 +196,9 @@ impl Visit<'_> for AnalysisIndexer {
                 | RubyType::Union(_)
                 | RubyType::Unknown => None,
             });
+        if syntactic_fqn.as_ref() == reopened_target.as_ref() {
+            reopened_target = None;
+        }
         let (parts, previous_namespace) = if let Some(target) = &reopened_target {
             let parts = target.namespace_parts().to_vec();
             assert!(
@@ -762,4 +757,22 @@ impl Visit<'_> for AnalysisIndexer {
         self.push_global_variable_fact(node.name().as_slice(), node.name_loc());
         visit_global_variable_operator_write_node(self, node);
     }
+}
+
+/// The namespace a class or module declaration names before any alias is
+/// followed. A constant whose value is this same namespace is an ordinary
+/// reopening, not an alias, so the declaration still owns its facts.
+fn syntactic_namespace(
+    path: &ruby_prism::Node<'_>,
+    lexical_context: &[RubyConstant],
+) -> Option<FullyQualifiedName> {
+    constant_parts_and_absolute(path).map(|(parts, absolute)| {
+        if absolute {
+            FullyQualifiedName::namespace(parts)
+        } else {
+            let mut probe = lexical_context.to_vec();
+            probe.extend(parts);
+            FullyQualifiedName::namespace(probe)
+        }
+    })
 }
