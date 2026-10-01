@@ -13,9 +13,7 @@ const REQUEST_EVERY_KEYSTROKES: usize = 4;
 /// Diagnostics the server reports on the built-in corpus although the corpus
 /// runs cleanly under Ruby. Each entry is a false positive to fix. When one is
 /// fixed, delete its line; the check fails until the list matches exactly.
-const KNOWN_FALSE_POSITIVES: &[&str] = &[
-    "lib/inventory/stock.rb:61:20 unresolved-method: Unresolved method `label` on `NilClass`",
-];
+const KNOWN_FALSE_POSITIVES: &[&str] = &[];
 
 /// A fresh session on a new copy of the corpus with `session`'s buffers open.
 async fn fresh_copy<'a>(

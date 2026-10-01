@@ -136,6 +136,9 @@ pub struct MethodReferenceDiagnostics {
     pub receiver_type: Option<Box<RubyType>>,
     pub diagnose_unresolved: bool,
     pub allow_unindexed_owner: bool,
+    /// The call uses `&.`: a nil receiver skips dispatch and the call yields
+    /// nil, so only the non-nil part of `receiver_type` is resolved.
+    pub safe_navigation: bool,
     /// Present only when this reference is an invocation with a statically
     /// known call shape. Method objects, aliases, and other references are not
     /// zero-argument calls and therefore retain `None`.

@@ -623,6 +623,16 @@ impl TypeInferenceOutcome {
         }
     }
 
+    /// Add nil as an alternative of a proven result. A safe-navigation call
+    /// whose receiver may be nil yields nil on that branch; Unknown keeps its
+    /// reason because the dispatched branch is still unproven.
+    pub fn with_nil_alternative(self) -> Self {
+        match self.state {
+            TypeInferenceState::Proven(ruby_type) => Self::proven(ruby_type.make_nilable()),
+            TypeInferenceState::Unknown(reason) => Self::unknown(reason),
+        }
+    }
+
     pub fn proven_type(&self) -> Option<&RubyType> {
         match &self.state {
             TypeInferenceState::Proven(ruby_type) => Some(ruby_type),

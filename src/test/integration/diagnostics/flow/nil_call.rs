@@ -195,3 +195,16 @@ x = "hello"
     )
     .await;
 }
+
+#[tokio::test]
+async fn safe_navigation_on_a_nil_local_is_not_a_nil_call() {
+    // `&.` never sends the message to nil, so neither the call nor the chained
+    // safe call on its nil result is a nil call or a missing method.
+    check(
+        r#"
+x = nil
+x&.<warn none>upcase</warn>&.<warn none>reverse</warn>
+"#,
+    )
+    .await;
+}

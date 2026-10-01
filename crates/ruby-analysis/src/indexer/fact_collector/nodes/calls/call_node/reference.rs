@@ -123,6 +123,17 @@ impl FactCollector {
                     )
                 })
             });
+        // `&.` sends no message to nil: only the non-nil receiver is
+        // dispatched, and a nil branch contributes nil to the call result.
+        let safe_navigation = node.is_safe_navigation();
+        let (dispatch_receiver_type, nil_skips_dispatch) = match receiver_type.clone() {
+            Some(ruby_type) if safe_navigation => match ruby_type.safe_navigation_dispatch() {
+                Some((receiver, nil_skips_dispatch)) => (Some(receiver), nil_skips_dispatch),
+                None => (None, true),
+            },
+            receiver_type => (receiver_type, false),
+        };
+        let receiver_is_only_nil = nil_skips_dispatch && dispatch_receiver_type.is_none();
         let receiver_expression_range = matches!(
             receiver_info,
             ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath
@@ -190,7 +201,9 @@ impl FactCollector {
                 | None => UnknownReason::UnknownReceiver,
             };
             Some(TypeInferenceOutcome::unknown(reason))
-        } else if let Some(receiver_type) = receiver_type.as_ref() {
+        } else if receiver_is_only_nil {
+            Some(TypeInferenceOutcome::proven(RubyType::nil_class()))
+        } else if let Some(receiver_type) = dispatch_receiver_type.as_ref() {
             if method_name == "freeze" {
                 Some(TypeInferenceOutcome::proven(receiver_type.clone()))
             } else if let Some(outcome) = self.shape_call_outcome(node, receiver_type) {
@@ -257,6 +270,11 @@ impl FactCollector {
                 UnknownReason::UnknownReceiver,
             ))
         };
+        let immediate_outcome = if nil_skips_dispatch {
+            immediate_outcome.map(TypeInferenceOutcome::with_nil_alternative)
+        } else {
+            immediate_outcome
+        };
         let defer_call_outcome = immediate_outcome.is_none();
         if let Some(outcome) = immediate_outcome {
             self.record_immediate_call_outcome(call_range, outcome);
@@ -308,6 +326,7 @@ impl FactCollector {
                             && !rbs_resolves_method
                             && !matches!(receiver_info, ReceiverInfo::SelfReceiver),
                         allow_unindexed_owner: rbs_receiver_class_exists,
+                        safe_navigation,
                         signature: Some(signature),
                     },
                 },

@@ -69,6 +69,7 @@ fn explicit_method_call_candidate(
                 receiver_type: None,
                 diagnose_unresolved: true,
                 allow_unindexed_owner: false,
+                safe_navigation: false,
                 signature: Some(crate::core::MethodCallSignatureCandidate::default()),
             },
         },

@@ -398,6 +398,22 @@ impl RubyType {
         }
     }
 
+    /// Split the receiver of a safe-navigation (`&.`) call.
+    ///
+    /// `&.` sends no message to nil. `None` means the receiver is only nil, so
+    /// nothing is dispatched and the call yields nil. Otherwise this returns
+    /// the receiver that is dispatched and whether a nil branch skips dispatch
+    /// and contributes nil to the call result.
+    pub fn safe_navigation_dispatch(self) -> Option<(RubyType, bool)> {
+        if !self.is_nilable() {
+            return Some((self, false));
+        }
+        match self.remove_nil() {
+            RubyType::Unknown => None,
+            receiver => Some((receiver, true)),
+        }
+    }
+
     /// Remove nil from this type
     pub fn remove_nil(self) -> RubyType {
         match self {

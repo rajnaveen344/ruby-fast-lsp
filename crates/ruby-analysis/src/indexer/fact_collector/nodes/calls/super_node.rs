@@ -71,6 +71,7 @@ impl FactCollector {
                     receiver_type: None,
                     diagnose_unresolved: self.options.diagnostics_enabled,
                     allow_unindexed_owner: false,
+                    safe_navigation: false,
                     signature: Some(signature),
                 },
             },

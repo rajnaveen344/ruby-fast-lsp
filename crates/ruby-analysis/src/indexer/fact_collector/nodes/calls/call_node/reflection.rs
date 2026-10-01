@@ -122,6 +122,7 @@ impl FactCollector {
                     receiver_type: None,
                     diagnose_unresolved: false,
                     allow_unindexed_owner: false,
+                    safe_navigation: false,
                     signature: None,
                 },
             },

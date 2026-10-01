@@ -39,6 +39,7 @@ fn fixture() -> (
                     receiver_type: Some(Box::new(RubyType::nil_class())),
                     diagnose_unresolved: true,
                     allow_unindexed_owner: false,
+                    safe_navigation: false,
                     signature: None,
                 },
             },

@@ -794,3 +794,48 @@ count.<warn code="unresolved-method">nope_integer</warn>
     )
     .await;
 }
+
+/// `&.` never sends the message to `nil`, so the nil branch of a receiver
+/// cannot make the method unresolved.
+#[tokio::test]
+async fn safe_navigation_does_not_dispatch_on_a_nil_receiver() {
+    check(
+        r#"
+class Shelf
+  def initialize
+    @bags = {}
+  end
+
+  def label_for(key)
+    @bags[key]&.<warn none>label</warn>
+  end
+end
+
+skipped<type label="NilClass" kind="var"> = nil&.<warn none>label</warn>
+"#,
+    )
+    .await;
+}
+
+/// The non-nil branches of a safe-navigation receiver are still checked.
+#[tokio::test]
+async fn safe_navigation_checks_the_non_nil_receiver() {
+    check(
+        r#"
+class Bag
+  def label
+    "bag"
+  end
+end
+
+def pick(flag)
+  bag = flag ? Bag.new : nil
+  bag&.<warn none>label</warn>
+end
+
+Bag.new&.<warn none>label</warn>
+Bag.new&.<warn code="unresolved-method">missing</warn>
+"#,
+    )
+    .await;
+}

@@ -163,6 +163,20 @@ impl AnalysisEngine {
                         }
                         continue;
                     }
+                    let safe_navigation = candidate
+                        .diagnostics
+                        .as_deref()
+                        .is_some_and(|diagnostics| diagnostics.safe_navigation);
+                    let Some((effective_receiver_type, nil_skips_dispatch)) =
+                        Self::safe_navigation_receiver(
+                            &mut resolved_call_outcomes,
+                            candidate.call_expression_range,
+                            safe_navigation,
+                            effective_receiver_type,
+                        )
+                    else {
+                        continue;
+                    };
                     let grouped_receiver_type = effective_receiver_type
                         .as_ref()
                         .filter(|ruby_type| matches!(ruby_type, RubyType::Union(_)))
@@ -195,7 +209,7 @@ impl AnalysisEngine {
                                 );
                             }
                             if let Some(expression_range) = candidate.call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     self.call_expression_outcome_from_grouped_resolution(
@@ -203,6 +217,7 @@ impl AnalysisEngine {
                                         candidate.method,
                                         &mut call_outcome_caches,
                                     ),
+                                    nil_skips_dispatch,
                                 );
                             }
                         } else if let Some(diagnostics) = candidate.diagnostics.as_deref() {
@@ -215,12 +230,13 @@ impl AnalysisEngine {
                                 &mut unresolved_constants,
                             );
                             if let Some(expression_range) = candidate.call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     TypeInferenceOutcome::unknown(
                                         UnknownReason::UnresolvedMethodReturn,
                                     ),
+                                    nil_skips_dispatch,
                                 );
                             }
                         }
@@ -237,10 +253,11 @@ impl AnalysisEngine {
                             self.proven_receiver_namespace(receiver_type, allow_unindexed_owner)
                         else {
                             if let Some(expression_range) = candidate.call_expression_range {
-                                Self::insert_resolved_call_outcome(
+                                Self::insert_dispatched_call_outcome(
                                     &mut resolved_call_outcomes,
                                     expression_range,
                                     TypeInferenceOutcome::unknown(UnknownReason::UnknownReceiver),
+                                    nil_skips_dispatch,
                                 );
                             }
                             continue;
@@ -321,10 +338,11 @@ impl AnalysisEngine {
                             &fact,
                             &mut call_outcome_caches,
                         );
-                        Self::insert_resolved_call_outcome(
+                        Self::insert_dispatched_call_outcome(
                             &mut resolved_call_outcomes,
                             expression_range,
                             outcome,
+                            nil_skips_dispatch,
                         );
                     }
                     if let Some((owner, resolved_method, fact)) = fact.reference_parts() {

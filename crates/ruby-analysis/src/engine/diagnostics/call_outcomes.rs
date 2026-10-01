@@ -96,6 +96,54 @@ impl AnalysisEngine {
         );
     }
 
+    /// Split the receiver of a `&.` dispatch before resolution.
+    ///
+    /// Returns `None` when the receiver is only nil: no message is sent, so
+    /// the call is recorded as proven nil and must be neither resolved nor
+    /// diagnosed. Otherwise returns the receiver to dispatch on and whether a
+    /// nil branch skips dispatch, which `insert_dispatched_call_outcome` adds
+    /// to the call result.
+    pub(super) fn safe_navigation_receiver(
+        outcomes: &mut HashMap<TextRange, TypeInferenceOutcome>,
+        call_expression_range: Option<TextRange>,
+        safe_navigation: bool,
+        receiver_type: Option<RubyType>,
+    ) -> Option<(Option<RubyType>, bool)> {
+        match receiver_type {
+            Some(ruby_type) if safe_navigation => match ruby_type.safe_navigation_dispatch() {
+                Some((receiver, nil_skips_dispatch)) => Some((Some(receiver), nil_skips_dispatch)),
+                None => {
+                    if let Some(range) = call_expression_range {
+                        Self::insert_resolved_call_outcome(
+                            outcomes,
+                            range,
+                            TypeInferenceOutcome::proven(RubyType::nil_class()),
+                        );
+                    }
+                    None
+                }
+            },
+            receiver_type => Some((receiver_type, false)),
+        }
+    }
+
+    /// Record a dispatched call's outcome. A safe-navigation call whose
+    /// receiver may be nil also yields nil, so `a&.b.c` dispatches `c` on that
+    /// nil alternative exactly as Ruby does.
+    pub(super) fn insert_dispatched_call_outcome(
+        outcomes: &mut HashMap<TextRange, TypeInferenceOutcome>,
+        range: TextRange,
+        outcome: TypeInferenceOutcome,
+        nil_skips_dispatch: bool,
+    ) {
+        let outcome = if nil_skips_dispatch {
+            outcome.with_nil_alternative()
+        } else {
+            outcome
+        };
+        Self::insert_resolved_call_outcome(outcomes, range, outcome);
+    }
+
     pub(super) fn call_expression_outcome_from_grouped_resolution(
         &self,
         callees: &[ResolvedMethodCallee],
