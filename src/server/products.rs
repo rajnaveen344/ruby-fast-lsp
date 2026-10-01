@@ -1,6 +1,5 @@
 //! Process-wide immutable products. Projects bind results into isolated engines.
 use super::RubyLanguageServer;
-use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::runtime::catalog::{
     DiscoveredRuntime, ProjectRuntimeStatus, RuntimeCatalog, RuntimeDiscoverParams, RuntimeStatus,
     RuntimeStatusParams,
@@ -12,7 +11,6 @@ use crate::loader::cache::persistent::PersistentProductStat;
 use crate::loader::context::{RuntimeDiscovery, SharedProducts};
 use crate::loader::scheduling::resources::IndexingResourceGovernor;
 use crate::utils::single_flight::SingleFlightStat;
-use anyhow::Result;
 use ruby_analysis::stats::StatsSnapshot;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -120,16 +118,6 @@ impl RubyLanguageServer {
                 "each test server must own one immutable discovery snapshot",
                 "create a fresh RubyLanguageServer per runtime test",
             );
-    }
-
-    pub(crate) async fn resolve_auto_runtime(
-        &self,
-        project_root: &std::path::Path,
-    ) -> Result<Option<SelectedRuntimeDescriptor>> {
-        self.products
-            .discovery(self.indexing.resources())
-            .resolve_auto_runtime(project_root)
-            .await
     }
 
     pub async fn handle_runtime_status(

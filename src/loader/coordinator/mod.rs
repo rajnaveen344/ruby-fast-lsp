@@ -216,7 +216,7 @@ impl IndexingCoordinator {
         let runtime_start = Instant::now();
         self.indexing_checkpoint(server)?;
 
-        self.resolve_effective_runtime(server).await?;
+        self.resolve_effective_runtime(ctx, server).await?;
         self.transition_indexing_status(
             server,
             crate::loader::scheduling::status::IndexingPhase::DiscoveringInputs,

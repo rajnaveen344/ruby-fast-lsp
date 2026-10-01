@@ -45,7 +45,10 @@ async fn select_ruby_version(
     server: &RubyLanguageServer,
 ) -> Option<RubyVersion> {
     coordinator
-        .resolve_effective_runtime(server)
+        .resolve_effective_runtime(
+            &server.load_context_for_project(coordinator.workspace_root()),
+            server,
+        )
         .await
         .expect("fixture runtime selection must resolve");
     coordinator

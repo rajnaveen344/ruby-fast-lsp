@@ -178,6 +178,8 @@ async fn auto_runtime_resolves_exact_project_marker_through_server_catalog() {
     }]);
 
     let resolved = language_server
+        .load_context_for_project(&admin)
+        .discovery
         .resolve_auto_runtime(&admin)
         .await
         .unwrap()

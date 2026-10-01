@@ -49,7 +49,10 @@ async fn unavailable_auto_runtime_uses_conservative_core_fallback() {
     let mut coordinator =
         IndexingCoordinator::new(fixture.project_root().clone(), RubyFastLspConfig::default());
     coordinator
-        .resolve_effective_runtime(&server)
+        .resolve_effective_runtime(
+            &server.load_context_for_project(coordinator.workspace_root()),
+            &server,
+        )
         .await
         .unwrap();
     assert!(coordinator.effective_runtime.is_none());
@@ -98,7 +101,10 @@ async fn auto_runtime_marker_becomes_the_exact_effective_runtime() {
         IndexingCoordinator::new(fixture.project_root().clone(), RubyFastLspConfig::default());
 
     coordinator
-        .resolve_effective_runtime(&server)
+        .resolve_effective_runtime(
+            &server.load_context_for_project(coordinator.workspace_root()),
+            &server,
+        )
         .await
         .unwrap();
     assert_eq!(
