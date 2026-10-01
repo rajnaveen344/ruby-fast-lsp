@@ -167,10 +167,8 @@
   "legacy_lines": {
     "crates/jvm-metadata/src/classfile/mod.rs": 1230,
     "crates/rbs-parser/src/visitor.rs": 1178,
-    "crates/ruby-analysis/src/core/storage/type_store/mod.rs": 1023,
     "crates/ruby-analysis/src/indexer/fact_collector/tests.rs": 1050,
     "crates/ruby-analysis/src/indexer/queries/tests.rs": 2271,
-    "crates/ruby-analysis/src/inference/completion.rs": 1030,
     "editors/vscode/vsix/extension.js": 2021,
     "src/bin/profiler/main.rs": 2959,
     "src/environment/runtime/jruby/classpath/mod.rs": 1187,
@@ -178,7 +176,6 @@
     "src/indexer/cache/persistent/mod.rs": 1236,
     "src/indexer/coordinator/tests/jruby.rs": 1101,
     "src/indexer/coordinator/tests/workflow.rs": 1270,
-    "src/indexer/scheduling/resources/mod.rs": 1001,
     "src/indexer/sources/gems/tests.rs": 1344,
     "src/indexer/sources/project/tests.rs": 1611,
     "src/server/tests.rs": 1032,
