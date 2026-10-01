@@ -14,7 +14,6 @@ const REQUEST_EVERY_KEYSTROKES: usize = 4;
 /// runs cleanly under Ruby. Each entry is a false positive to fix. When one is
 /// fixed, delete its line; the check fails until the list matches exactly.
 const KNOWN_FALSE_POSITIVES: &[&str] = &[
-    "lib/inventory/stock.rb:47:7 wrong-arity: Wrong number of arguments for `select` (expected 1..4, got 0)",
     "lib/inventory/stock.rb:61:20 unresolved-method: Unresolved method `label` on `NilClass`",
 ];
 

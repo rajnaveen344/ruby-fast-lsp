@@ -52,7 +52,20 @@ impl FactCollector {
             },
         ));
 
+        // `alias` defines the new name on the current definition side. The
+        // declaration indexer records it for project files; template-only
+        // collection (bundled core, dependencies) keeps only these direct
+        // facts, so the alias must be declared here too or an ancestor's
+        // aliased method disappears from lookup.
         let namespace_parts = self.scope_tracker.get_ns_stack();
+        self.direct_push_method_fact_with_visibility(
+            namespace_parts.clone(),
+            self.scope_tracker.current_macro_definition_context(),
+            new_method,
+            self.direct_range(&node.location()),
+            self.scope_tracker.current_visibility(),
+        );
+
         let old_fqn = FullyQualifiedName::method(namespace_parts.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(namespace_parts, new_method);
         let old_subject = TypeSubject::MethodReturn(old_fqn);
