@@ -1,22 +1,16 @@
-//! Source and name registries, the fact arena, conversion between domain facts
+//! The source registry, the fact arena, conversion between domain facts
 //! and their interned stored representations, and storage compaction.
 
 use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::mem::size_of;
 use std::path::Path;
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::core::names::fqn_id::ConstLookupId;
-use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::diagnostic_candidate_store::DiagnosticCandidateStore;
 use crate::core::storage::diagnostic_store::DiagnosticStore;
 use crate::core::storage::graph_store::StoredGraphEdgeFact;
 use crate::core::storage::graph_store::StoredGraphNodeFact;
 use crate::core::storage::graph_store::StoredUnresolvedGraphEdgeFact;
-use crate::core::storage::memory_estimate::fqn_heap_bytes;
 use crate::core::storage::method_store::MethodStore;
 use crate::core::storage::method_store::StoredMethodFact;
 use crate::core::storage::reference_store::ConstLookup;
@@ -28,117 +22,16 @@ use crate::core::storage::symbol_store::SymbolStore;
 use crate::core::storage::type_store::TypeStore;
 use crate::core::{
     ConstantPath, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, ReferenceCandidate,
-    ReferenceCandidateKind, RubyConstant, SourceFileId, SymbolFact, TextRange,
-    UnresolvedGraphEdgeFact,
+    ReferenceCandidateKind, SourceFileId, SymbolFact, TextRange, UnresolvedGraphEdgeFact,
 };
 
 use super::{AnalysisEngine, SourceFile};
 use crate::engine::FileIdMap;
-use indexmap::IndexSet;
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct SourceRegistry {
     pub(in crate::engine) ids: FileIdMap,
     pub(in crate::engine) files: HashMap<SourceFileId, SourceFile>,
-}
-
-#[derive(Debug, Default)]
-pub(in crate::engine) struct NameRegistry {
-    state: NameRegistryState,
-    #[cfg(test)]
-    fqn_lookup_count: AtomicUsize,
-}
-
-impl Clone for NameRegistry {
-    fn clone(&self) -> Self {
-        Self {
-            state: self.state.clone(),
-            #[cfg(test)]
-            fqn_lookup_count: AtomicUsize::new(self.fqn_lookup_count.load(Ordering::Relaxed)),
-        }
-    }
-}
-
-impl NameRegistry {
-    pub(in crate::engine) fn intern_fqn(&mut self, fqn: FullyQualifiedName) -> FqnId {
-        let state = &mut self.state;
-        let (index, _) = state.fqns.insert_full(fqn);
-        FqnId(u32::try_from(index).expect_invariant(
-            "FQN interner exceeded u32 ids",
-            "FqnId stores u32",
-            "widen FqnId before interning more than u32::MAX names",
-        ))
-    }
-
-    pub(in crate::engine) fn fqn_id(&self, fqn: &FullyQualifiedName) -> Option<FqnId> {
-        #[cfg(test)]
-        self.fqn_lookup_count.fetch_add(1, Ordering::Relaxed);
-        self.state.fqns.get_index_of(fqn).map(|index| {
-            FqnId(u32::try_from(index).expect_invariant(
-                "FQN interner returned an index above u32",
-                "every inserted index is validated before becoming an FqnId",
-                "widen FqnId and its insertion boundary together",
-            ))
-        })
-    }
-
-    pub(in crate::engine) fn fqn(&self, id: FqnId) -> Option<&FullyQualifiedName> {
-        self.state.fqns.get_index(id.0 as usize)
-    }
-
-    #[cfg(test)]
-    pub(super) fn reset_fqn_lookup_count_for_test(&self) {
-        self.fqn_lookup_count.store(0, Ordering::Relaxed);
-    }
-
-    #[cfg(test)]
-    pub(super) fn fqn_lookup_count_for_test(&self) -> usize {
-        self.fqn_lookup_count.load(Ordering::Relaxed)
-    }
-
-    pub(in crate::engine) fn intern_const_lookup(&mut self, lookup: ConstLookup) -> ConstLookupId {
-        let state = &mut self.state;
-        let (index, _) = state.const_lookups.insert_full(lookup);
-        ConstLookupId(u32::try_from(index).expect_invariant(
-            "constant lookup interner exceeded u32 ids",
-            "ConstLookupId stores u32",
-            "widen ConstLookupId before interning more than u32::MAX lookups",
-        ))
-    }
-
-    pub(in crate::engine) fn const_lookup(&self, id: ConstLookupId) -> Option<&ConstLookup> {
-        self.state.const_lookups.get_index(id.0 as usize)
-    }
-
-    pub(super) fn estimated_heap_bytes(&self) -> usize {
-        let state = &self.state;
-        state.fqns.capacity() * (size_of::<FullyQualifiedName>() + size_of::<usize>() + 1)
-            + state.fqns.iter().map(fqn_heap_bytes).sum::<usize>()
-            + state.const_lookups.capacity() * (size_of::<ConstLookup>() + size_of::<usize>() + 1)
-            + state
-                .const_lookups
-                .iter()
-                .map(const_lookup_heap_bytes)
-                .sum::<usize>()
-    }
-}
-
-fn constant_path_heap_bytes(path: &ConstantPath) -> usize {
-    if path.spilled() {
-        path.capacity() * size_of::<RubyConstant>()
-    } else {
-        0
-    }
-}
-
-fn const_lookup_heap_bytes(lookup: &ConstLookup) -> usize {
-    constant_path_heap_bytes(&lookup.path)
-}
-
-#[derive(Debug, Clone, Default)]
-struct NameRegistryState {
-    fqns: IndexSet<FullyQualifiedName>,
-    const_lookups: IndexSet<ConstLookup>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -179,8 +72,7 @@ impl AnalysisEngine {
             file.line_index.shrink_to_fit();
         }
 
-        self.names.state.fqns.shrink_to_fit();
-        self.names.state.const_lookups.shrink_to_fit();
+        self.names.shrink_to_fit();
 
         self.facts.definitions.symbols.shrink_to_fit();
         self.facts.definitions.methods.shrink_to_fit();
@@ -214,25 +106,6 @@ impl AnalysisEngine {
 impl AnalysisEngine {
     pub fn files(&self) -> impl Iterator<Item = &SourceFile> {
         self.sources.files.values()
-    }
-}
-
-impl AnalysisEngine {
-    pub(crate) fn fqn_for_id(&self, id: FqnId) -> Option<&FullyQualifiedName> {
-        self.names.fqn(id)
-    }
-}
-
-impl AnalysisEngine {
-    pub(in crate::engine) fn expand_interned_fqn(&self, id: FqnId) -> FullyQualifiedName {
-        self.names
-            .fqn(id)
-            .expect_invariant(
-                "graph edge points to missing FQN id",
-                "graph edges must only store interned FQN ids",
-                "intern graph edge FQNs before inserting facts",
-            )
-            .clone()
     }
 }
 
@@ -472,8 +345,8 @@ impl AnalysisEngine {
 
     pub(super) fn expand_graph_edge_fact(&self, fact: StoredGraphEdgeFact) -> GraphEdgeFact {
         GraphEdgeFact::new(
-            self.expand_interned_fqn(fact.source),
-            self.expand_interned_fqn(fact.target),
+            self.names.expand_interned_fqn(fact.source),
+            self.names.expand_interned_fqn(fact.target),
             fact.kind,
             fact.range,
         )

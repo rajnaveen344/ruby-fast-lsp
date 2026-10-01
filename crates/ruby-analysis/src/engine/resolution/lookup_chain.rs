@@ -331,7 +331,7 @@ pub(super) fn method_lookup_chain_has_unresolved_dependency_from_graph(
             engine
                 .graph_ancestry_edges_from(&current)
                 .into_iter()
-                .map(|edge| engine.expand_interned_fqn(edge.target)),
+                .map(|edge| engine.names.expand_interned_fqn(edge.target)),
         );
     }
 
@@ -553,7 +553,7 @@ fn build_mro(
         .filter(&edge_is_allowed)
         .collect::<Vec<_>>();
     for edge in prepends.iter().rev() {
-        let target = engine.expand_interned_fqn(edge.target);
+        let target = engine.names.expand_interned_fqn(edge.target);
         build_mro(
             engine,
             &target,
@@ -571,7 +571,7 @@ fn build_mro(
         .filter(&edge_is_allowed)
         .collect::<Vec<_>>();
     for edge in includes.iter().rev() {
-        let target = engine.expand_interned_fqn(edge.target);
+        let target = engine.names.expand_interned_fqn(edge.target);
         build_mro(
             engine,
             &target,
@@ -586,7 +586,7 @@ fn build_mro(
         .filter(&edge_is_allowed)
         .collect::<Vec<_>>();
     for edge in included_hook_extends.iter().rev() {
-        let target = engine.expand_interned_fqn(edge.target);
+        let target = engine.names.expand_interned_fqn(edge.target);
         build_mro(
             engine,
             &target,
@@ -600,7 +600,7 @@ fn build_mro(
         .proven_superclass_stored_edge(fqn)
         .filter(&edge_is_allowed)
     {
-        let target = engine.expand_interned_fqn(superclass.target);
+        let target = engine.names.expand_interned_fqn(superclass.target);
         build_mro(
             engine,
             &target,
@@ -650,7 +650,7 @@ fn included_hook_extend_edges(
         .chain(engine.graph_stored_edges_from_kind(&instance_fqn, GraphEdgeKind::Prepend))
         .filter(|edge| !language_owned_only || method_lookup_edge_is_language_owned(engine, edge))
     {
-        let mixin = engine.expand_interned_fqn(edge.target);
+        let mixin = engine.names.expand_interned_fqn(edge.target);
         hook_edges.extend(
             engine
                 .graph_stored_edges_from_kind(&mixin, GraphEdgeKind::Extend)

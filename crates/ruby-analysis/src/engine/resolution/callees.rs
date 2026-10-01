@@ -74,7 +74,7 @@ impl<'a> AnalysisQuery<'a> {
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
                         .caller
-                        .and_then(|caller| self.engine.fqn_for_id(caller))
+                        .and_then(|caller| self.engine.names.fqn(caller))
                         .and_then(|caller| {
                             let mut owners = self
                                 .engine
@@ -139,7 +139,7 @@ impl<'a> AnalysisQuery<'a> {
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
                         .caller
-                        .and_then(|caller| self.engine.fqn_for_id(caller))
+                        .and_then(|caller| self.engine.names.fqn(caller))
                         .and_then(|caller| {
                             let mut owners = self
                                 .engine

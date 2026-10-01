@@ -301,7 +301,7 @@ impl<'a> AnalysisQuery<'a> {
                     .reference_store()
                     .targets_for_exact_range(candidate.range)
                     .into_iter()
-                    .filter_map(|target| self.engine.fqn_for_id(target))
+                    .filter_map(|target| self.engine.names.fqn(target))
                     .any(|target| {
                         matches!(
                             target,

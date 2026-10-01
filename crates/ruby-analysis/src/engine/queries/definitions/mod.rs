@@ -97,7 +97,7 @@ impl AnalysisQuery<'_> {
             .flat_map(|candidate| match candidate.kind {
                 StoredReferenceCandidateKind::Resolved { target, .. } => vec![self
                     .engine
-                    .fqn_for_id(target)
+                    .names.fqn(target)
                     .expect_invariant(
                         "resolved reference points to a missing target FQN",
                         "resolved candidates hold only interned target ids",

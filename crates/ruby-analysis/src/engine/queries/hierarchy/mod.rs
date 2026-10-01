@@ -44,7 +44,7 @@ impl<'a> AnalysisQuery<'a> {
             let Some(caller_id) = fact.caller else {
                 continue;
             };
-            let Some(caller) = self.engine.fqn_for_id(caller_id) else {
+            let Some(caller) = self.engine.names.fqn(caller_id) else {
                 continue;
             };
             push_grouped_text_range(&mut grouped, caller.clone(), fact.range);
@@ -71,7 +71,7 @@ impl<'a> AnalysisQuery<'a> {
             if fact.caller != Some(method_id) {
                 continue;
             }
-            let Some(target) = self.engine.fqn_for_id(target_id) else {
+            let Some(target) = self.engine.names.fqn(target_id) else {
                 continue;
             };
             push_grouped_text_range(&mut grouped, target.clone(), fact.range);

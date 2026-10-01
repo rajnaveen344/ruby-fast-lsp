@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn name_registry_interns_one_owned_identity_with_stable_ids() {
-    let mut names = NameRegistry::default();
+    let mut names = Names::default();
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let account = FullyQualifiedName::namespace(vec![RubyConstant::new("Account").unwrap()]);
 

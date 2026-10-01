@@ -131,7 +131,7 @@ impl<'a> AnalysisQuery<'a> {
             .symbol_store()
             .known_namespace_fqns()
             .into_iter()
-            .filter_map(|id| self.engine.fqn_for_id(id).cloned())
+            .filter_map(|id| self.engine.names.fqn(id).cloned())
             .collect()
     }
 }

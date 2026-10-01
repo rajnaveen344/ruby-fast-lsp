@@ -239,7 +239,7 @@ impl AnalysisEngine {
                     CachedMethodVisibility::Protected(visibility_owner) => caller
                         .and_then(|caller| self.call_expression_caller_namespace(caller))
                         .and_then(|caller| {
-                            let visibility_owner = self.fqn_for_id(visibility_owner).expect_invariant(
+                            let visibility_owner = self.names.fqn(visibility_owner).expect_invariant(
                                 "cached protected visibility owner disappeared from the name registry",
                                 "resolve-local cache entries reference the immutable engine name registry",
                                 "discard visibility caches before mutating engine names",
@@ -434,7 +434,7 @@ impl AnalysisEngine {
                 owner_ids
                     .iter()
                     .map(|owner_id| {
-                        self.fqn_for_id(*owner_id)
+                        self.names.fqn(*owner_id)
                             .expect_invariant(
                                 "call-expression lookup-chain owner ID is absent from the name registry",
                                 "the resolution-local cache contains only IDs from that registry",
@@ -473,7 +473,7 @@ impl AnalysisEngine {
         &self,
         caller: FqnId,
     ) -> Option<FullyQualifiedName> {
-        let caller = self.fqn_for_id(caller)?;
+        let caller = self.names.fqn(caller)?;
         let mut owners = self
             .method_facts_for(caller)
             .into_iter()

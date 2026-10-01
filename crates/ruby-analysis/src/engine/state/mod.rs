@@ -6,6 +6,7 @@ pub(in crate::engine) mod file_id_map;
 mod graph;
 mod inference;
 mod lifecycle;
+mod names;
 mod storage;
 
 use crate::invariant::ExpectInvariant;
@@ -28,8 +29,9 @@ use crate::engine::persist::fingerprint::SemanticExportFingerprint;
 use crate::engine::AnalysisQuery;
 use crate::stats::{self, StatsSnapshot};
 use inference::StoredTypeInferenceOutcome;
+use names::Names;
 use parking_lot::Mutex;
-use storage::{FactArena, NameRegistry, SourceRegistry};
+use storage::{FactArena, SourceRegistry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
@@ -264,7 +266,7 @@ pub struct AnalysisEngine {
     semantic_revision: u64,
     next_source_revision: u64,
     pub(in crate::engine) sources: SourceRegistry,
-    pub(in crate::engine) names: NameRegistry,
+    pub(in crate::engine) names: Names,
     pub(in crate::engine) facts: FactArena,
     pub(in crate::engine) graph: SemanticGraph,
     pub(in crate::engine) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
@@ -307,7 +309,7 @@ impl Default for AnalysisEngine {
             semantic_revision: 0,
             next_source_revision: 0,
             sources: SourceRegistry::default(),
-            names: NameRegistry::default(),
+            names: Names::default(),
             facts: FactArena::default(),
             graph: SemanticGraph::default(),
             method_visibility_overrides: Vec::new(),

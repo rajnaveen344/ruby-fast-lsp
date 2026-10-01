@@ -17,7 +17,7 @@ pub(in crate::engine) fn execution_context_application_targets(
     let mut targets = engine
         .graph_stored_edges_from_kind(template, GraphEdgeKind::ExecutionContextApplication)
         .into_iter()
-        .map(|edge| engine.expand_interned_fqn(edge.target))
+        .map(|edge| engine.names.expand_interned_fqn(edge.target))
         .collect::<Vec<_>>();
     targets.sort_by_key(ToString::to_string);
     targets.dedup();

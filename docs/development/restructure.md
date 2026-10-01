@@ -100,7 +100,7 @@ Delete this file when the last task is done. Git history keeps the record.
         `engine/state/external_facts_template/` to a new `engine/persist/` so
         `engine/state/` has room for one module per component. No behavior
         change.
-  - [ ] B3b. Extract `Names` (`engine/state/names.rs`): `NameRegistry`, its
+  - [x] B3b. Extract `Names` (`engine/state/names.rs`): `NameRegistry`, its
         test hooks, `fqn_for_id`, and `expand_interned_fqn`. Interned ids stay
         `pub(in crate::engine)`; components that intern take `&mut Names`.
   - [ ] B3c. Extract `Files` (`engine/state/files.rs`): source registry, file

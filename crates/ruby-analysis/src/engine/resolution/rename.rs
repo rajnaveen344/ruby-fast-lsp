@@ -239,7 +239,7 @@ impl<'a> AnalysisQuery<'a> {
                 {
                     let targets = self.method_candidate_rename_identities(candidate);
                     let caller_is_target = candidate.caller.is_some_and(|caller| {
-                        self.engine.fqn_for_id(caller).is_some_and(|caller| {
+                        self.engine.names.fqn(caller).is_some_and(|caller| {
                             matches!(
                                 caller,
                                 FullyQualifiedName::Method(parts, method)
@@ -276,7 +276,7 @@ impl<'a> AnalysisQuery<'a> {
                     }
                 }
                 StoredReferenceCandidateRef::Resolved(candidate) => {
-                    let Some(target) = self.engine.fqn_for_id(candidate.target) else {
+                    let Some(target) = self.engine.names.fqn(candidate.target) else {
                         unreachable_invariant!(
                             what = "resolved rename candidate points to a missing FQN",
                             why = "resolved candidates retain interned targets",
@@ -386,7 +386,7 @@ impl<'a> AnalysisQuery<'a> {
                 self.engine
                     .graph_ancestry_edges_from(&current)
                     .into_iter()
-                    .map(|edge| self.engine.expand_interned_fqn(edge.target)),
+                    .map(|edge| self.engine.names.expand_interned_fqn(edge.target)),
             );
         }
         false
