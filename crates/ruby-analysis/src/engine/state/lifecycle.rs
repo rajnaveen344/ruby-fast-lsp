@@ -184,11 +184,8 @@ impl AnalysisEngine {
         self.graph
             .replace_file(file_id, graph_nodes, graph_edges, unresolved_graph_edges);
 
-        let reference_candidates = self.intern_reference_candidates(facts.reference_candidates);
-        self.facts
-            .references
-            .candidates
-            .replace_file(file_id, reference_candidates);
+        self.uses
+            .replace_candidates(&mut self.names, file_id, facts.reference_candidates);
         self.diagnostics
             .replace_file(file_id, facts.diagnostic_candidates, facts.diagnostics);
         let call_expression_outcomes =

@@ -25,7 +25,8 @@ impl<'a> AnalysisQuery<'a> {
         let mut proven_type = None;
         for candidate in self
             .engine
-            .reference_candidate_store()
+            .uses
+            .candidates()
             .method_candidates_at_exact_range(message_range)
         {
             let Some(diagnostics) = candidate.diagnostics.as_deref() else {

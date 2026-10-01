@@ -121,7 +121,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn references_in_file(&self, file_id: SourceFileId) -> Vec<ReferenceFact> {
-        self.engine.reference_store().facts_in_file(file_id)
+        self.engine.uses.resolved().facts_in_file(file_id)
     }
 
     /// A module call's references follow its proven concrete receiver identity.
@@ -160,7 +160,8 @@ impl<'a> AnalysisQuery<'a> {
             .collect::<Vec<_>>();
         for candidate in self
             .engine
-            .reference_candidate_store()
+            .uses
+            .candidates()
             .method_candidates_in_file(file_id)
             .filter(|candidate| candidate.method == method)
         {
@@ -189,11 +190,7 @@ impl<'a> AnalysisQuery<'a> {
         byte_offset: u32,
     ) -> Option<crate::engine::MethodLookupResult> {
         let mut lookups = Vec::new();
-        for candidate in self
-            .engine
-            .reference_candidate_store()
-            .candidates_in_file(file_id)
-        {
+        for candidate in self.engine.uses.candidates().candidates_in_file(file_id) {
             if !candidate.range.contains_offset(file_id, byte_offset) {
                 continue;
             }
@@ -238,10 +235,7 @@ impl<'a> AnalysisQuery<'a> {
         byte_offset: u32,
         exact_target_proven: bool,
     ) -> bool {
-        let candidates = self
-            .engine
-            .reference_candidate_store()
-            .candidates_in_file(file_id);
+        let candidates = self.engine.uses.candidates().candidates_in_file(file_id);
         let exact_non_method_reference = exact_target_proven
             && candidates.iter().any(|candidate| {
                 candidate.range.contains_offset(file_id, byte_offset)
@@ -267,7 +261,8 @@ impl<'a> AnalysisQuery<'a> {
         };
         let candidate_barrier = self
             .engine
-            .reference_candidate_store()
+            .uses
+            .candidates()
             .candidates_in_file(file_id)
             .iter()
             .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))
@@ -298,7 +293,8 @@ impl<'a> AnalysisQuery<'a> {
                 });
                 let resolved_to_fallback = self
                     .engine
-                    .reference_store()
+                    .uses
+                    .resolved()
                     .targets_for_exact_range(candidate.range)
                     .into_iter()
                     .filter_map(|target| self.engine.names.fqn(target))

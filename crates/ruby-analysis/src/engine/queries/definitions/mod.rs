@@ -41,7 +41,8 @@ impl AnalysisQuery<'_> {
         let mut candidates = Vec::new();
         for candidate in self
             .engine
-            .reference_candidate_store()
+            .uses
+            .candidates()
             .candidates_in_file(file_id)
             .into_iter()
             .filter(|candidate| candidate.range.contains_offset(file_id, byte_offset))

@@ -164,7 +164,8 @@ impl<'a> AnalysisQuery<'a> {
         }
         for candidate in self
             .engine
-            .reference_candidate_store()
+            .uses
+            .candidates()
             .method_candidates_named(*method)
         {
             let resolves_to_target = self

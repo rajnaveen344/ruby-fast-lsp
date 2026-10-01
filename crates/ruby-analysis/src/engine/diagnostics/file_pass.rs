@@ -20,7 +20,7 @@ impl AnalysisEngine {
         &mut self,
         file_id: SourceFileId,
     ) {
-        let reference_candidates = self.facts.references.candidates.candidates_in_file(file_id);
+        let reference_candidates = self.uses.candidates().candidates_in_file(file_id);
         let mut unresolved =
             HashMap::from([(file_id, self.resolve_diagnostic_candidates_in_file(file_id))]);
         let mut method_fact_cache: HashMap<
@@ -384,10 +384,7 @@ impl AnalysisEngine {
             }
         }
 
-        self.facts
-            .references
-            .resolved
-            .replace_file(file_id, resolved_refs);
+        self.uses.replace_resolved_file(file_id, resolved_refs);
         self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
         self.diagnostics
             .rebuild_resolved(file_id, unresolved.remove(&file_id).unwrap_or_default());

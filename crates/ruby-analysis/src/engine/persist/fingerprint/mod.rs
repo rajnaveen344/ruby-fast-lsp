@@ -400,7 +400,7 @@ impl AnalysisEngine {
                 }),
             );
         }
-        for (target, fact) in self.facts.references.resolved.iter_facts_with_targets() {
+        for (target, fact) in self.uses.resolved().iter_facts_with_targets() {
             let target = self.names.fqn(target).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "resolved reference target {:?} has no interned FQN",
@@ -525,7 +525,7 @@ impl AnalysisEngine {
             .map(|file_id| (file_id, [Vec::new(), Vec::new(), Vec::new()]))
             .collect::<HashMap<_, _>>();
 
-        for (target, fact) in self.facts.references.resolved.iter_facts_with_targets() {
+        for (target, fact) in self.uses.resolved().iter_facts_with_targets() {
             let target = self.names.fqn(target).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "per-file reference fingerprint target {:?} has no interned FQN",

@@ -8,6 +8,7 @@ mod inference;
 mod lifecycle;
 mod names;
 mod storage;
+mod uses;
 
 pub(in crate::engine) use facts::EffectiveMethodFactMatch;
 pub use files::{SourceFile, SourceFileInput, SourceFileSnapshot};
@@ -32,6 +33,7 @@ use inference::StoredTypeInferenceOutcome;
 use names::Names;
 use parking_lot::Mutex;
 use storage::FactArena;
+use uses::UseIndex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolveMode {
@@ -144,6 +146,7 @@ pub struct AnalysisEngine {
     pub(in crate::engine) names: Names,
     pub(in crate::engine) facts: FactArena,
     pub(in crate::engine) graph: SemanticGraph,
+    pub(in crate::engine) uses: UseIndex,
     pub(in crate::engine) diagnostics: Diagnostics,
     pub(in crate::engine) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
     pub(in crate::engine) execution_contexts: HashMap<SourceFileId, Vec<ExecutionContextFact>>,
@@ -185,6 +188,7 @@ impl Default for AnalysisEngine {
             names: Names::default(),
             facts: FactArena::default(),
             graph: SemanticGraph::default(),
+            uses: UseIndex::default(),
             diagnostics: Diagnostics::default(),
             method_visibility_overrides: Vec::new(),
             execution_contexts: HashMap::new(),
@@ -210,6 +214,7 @@ impl Clone for AnalysisEngine {
             names: self.names.clone(),
             facts: self.facts.clone(),
             graph: self.graph.clone(),
+            uses: self.uses.clone(),
             diagnostics: self.diagnostics.clone(),
             method_visibility_overrides: self.method_visibility_overrides.clone(),
             execution_contexts: self.execution_contexts.clone(),
@@ -238,7 +243,7 @@ impl AnalysisEngine {
     }
 
     pub fn stats(&self) -> StatsSnapshot<AnalysisStat> {
-        let reference_candidate_stats = self.facts.references.candidates.stats();
+        let reference_candidate_stats = self.uses.candidate_stats();
         let mut stats = StatsSnapshot::default();
         stats.set(AnalysisStat::Files, stats::count(self.files.len()));
         stats.set(
@@ -255,7 +260,7 @@ impl AnalysisEngine {
         );
         stats.set(
             AnalysisStat::ReferenceCandidates,
-            stats::count(self.facts.references.candidates.candidate_count()),
+            stats::count(self.uses.candidate_count()),
         );
         stats.set(
             AnalysisStat::ConstantReferenceCandidates,
@@ -271,7 +276,7 @@ impl AnalysisEngine {
         );
         stats.set(
             AnalysisStat::References,
-            stats::count(self.facts.references.resolved.fact_count()),
+            stats::count(self.uses.resolved_count()),
         );
         stats.set(
             AnalysisStat::Types,
@@ -307,8 +312,8 @@ impl AnalysisEngine {
             symbols: self.facts.definitions.symbols.estimated_heap_bytes(),
             methods: self.facts.definitions.methods.estimated_heap_bytes(),
             types: self.facts.types.estimated_heap_bytes(),
-            reference_candidates: self.facts.references.candidates.estimated_heap_bytes(),
-            references: self.facts.references.resolved.estimated_heap_bytes(),
+            reference_candidates: self.uses.candidates_heap_bytes(),
+            references: self.uses.resolved_heap_bytes(),
             diagnostics: self.diagnostics.resolved_heap_bytes(),
             diagnostic_candidates: self.diagnostics.candidates_heap_bytes(),
             graph: self.graph.estimated_heap_bytes(),

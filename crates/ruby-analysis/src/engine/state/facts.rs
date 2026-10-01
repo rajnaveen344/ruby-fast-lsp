@@ -4,8 +4,6 @@ use std::collections::HashSet;
 
 use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::method_store::StoredMethodFactMatch;
-use crate::core::storage::reference_store::ReferenceCandidateStore;
-use crate::core::storage::reference_store::ReferenceStore;
 use crate::core::storage::symbol_store::SymbolStore;
 use crate::core::storage::type_store::TypeStore;
 use crate::core::{
@@ -82,10 +80,7 @@ impl AnalysisEngine {
     }
 
     pub fn reference_facts_for(&self, target: &FullyQualifiedName) -> &[ReferenceFact] {
-        let Some(target_id) = self.names.fqn_id(target) else {
-            return &[];
-        };
-        self.facts.references.resolved.facts_for(target_id)
+        self.uses.facts_for(&self.names, target)
     }
 }
 
@@ -284,20 +279,12 @@ impl AnalysisEngine {
 }
 
 impl AnalysisEngine {
-    pub(crate) fn reference_store(&self) -> &ReferenceStore {
-        &self.facts.references.resolved
-    }
-
     pub(crate) fn symbol_store(&self) -> &SymbolStore {
         &self.facts.definitions.symbols
     }
 
     pub(crate) fn type_store(&self) -> &TypeStore {
         &self.facts.types
-    }
-
-    pub(crate) fn reference_candidate_store(&self) -> &ReferenceCandidateStore {
-        &self.facts.references.candidates
     }
 }
 

@@ -9,15 +9,12 @@ use crate::core::storage::graph_store::StoredUnresolvedGraphEdgeFact;
 use crate::core::storage::method_store::MethodStore;
 use crate::core::storage::method_store::StoredMethodFact;
 use crate::core::storage::reference_store::ConstLookup;
-use crate::core::storage::reference_store::ReferenceCandidateStore;
-use crate::core::storage::reference_store::ReferenceStore;
-use crate::core::storage::reference_store::StoredReferenceCandidate;
 use crate::core::storage::symbol_store::StoredSymbolFact;
 use crate::core::storage::symbol_store::SymbolStore;
 use crate::core::storage::type_store::TypeStore;
 use crate::core::{
-    ConstantPath, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, ReferenceCandidate,
-    ReferenceCandidateKind, SymbolFact, UnresolvedGraphEdgeFact,
+    ConstantPath, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, SymbolFact,
+    UnresolvedGraphEdgeFact,
 };
 
 use super::AnalysisEngine;
@@ -25,7 +22,6 @@ use super::AnalysisEngine;
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct FactArena {
     pub(in crate::engine) definitions: DefinitionFacts,
-    pub(in crate::engine) references: ReferenceFacts,
     pub(in crate::engine) types: TypeStore,
 }
 
@@ -33,12 +29,6 @@ pub(in crate::engine) struct FactArena {
 pub(in crate::engine) struct DefinitionFacts {
     pub(in crate::engine) symbols: SymbolStore,
     pub(in crate::engine) methods: MethodStore,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(in crate::engine) struct ReferenceFacts {
-    pub(in crate::engine) candidates: ReferenceCandidateStore,
-    pub(in crate::engine) resolved: ReferenceStore,
 }
 
 impl AnalysisEngine {
@@ -50,8 +40,7 @@ impl AnalysisEngine {
         self.facts.definitions.methods.shrink_to_fit();
         self.facts.types.shrink_to_fit();
         self.graph.shrink_to_fit();
-        self.facts.references.candidates.shrink_to_fit();
-        self.facts.references.resolved.shrink_to_fit();
+        self.uses.shrink_to_fit();
         self.diagnostics.shrink_to_fit();
         self.inference_by_file.shrink_to_fit();
         self.call_expression_outcomes_by_file.shrink_to_fit();
@@ -60,65 +49,6 @@ impl AnalysisEngine {
 }
 
 impl AnalysisEngine {
-    pub(super) fn intern_reference_candidates(
-        &mut self,
-        candidates: Vec<ReferenceCandidate>,
-    ) -> Vec<StoredReferenceCandidate> {
-        candidates
-            .into_iter()
-            .map(|candidate| match candidate.kind {
-                ReferenceCandidateKind::Constant {
-                    parts,
-                    current_namespace,
-                } => {
-                    let context = self
-                        .names
-                        .intern_fqn(FullyQualifiedName::namespace(current_namespace));
-                    let lookup = self
-                        .names
-                        .intern_const_lookup(ConstLookup::new(parts, false, context));
-                    StoredReferenceCandidate::constant(candidate.range, lookup)
-                }
-                ReferenceCandidateKind::Method {
-                    owner,
-                    owner_kind,
-                    method,
-                    is_super,
-                    access,
-                    caller,
-                    call_expression_range,
-                    preferred_definition_range,
-                    diagnostics,
-                } => {
-                    let root = self
-                        .names
-                        .intern_fqn(FullyQualifiedName::namespace(Vec::new()));
-                    let owner = self
-                        .names
-                        .intern_const_lookup(ConstLookup::new(owner, true, root));
-                    let caller = caller.map(|caller| self.names.intern_fqn(caller));
-                    StoredReferenceCandidate::method(
-                        candidate.range,
-                        owner,
-                        owner_kind,
-                        method,
-                        is_super,
-                        access,
-                        caller,
-                        call_expression_range,
-                        preferred_definition_range,
-                        diagnostics,
-                    )
-                }
-                ReferenceCandidateKind::Resolved { target, caller } => {
-                    let target = self.names.intern_fqn(target);
-                    let caller = caller.map(|caller| self.names.intern_fqn(caller));
-                    StoredReferenceCandidate::resolved(candidate.range, target, caller)
-                }
-            })
-            .collect()
-    }
-
     pub(super) fn intern_symbol_facts(&mut self, facts: Vec<SymbolFact>) -> Vec<StoredSymbolFact> {
         facts
             .into_iter()

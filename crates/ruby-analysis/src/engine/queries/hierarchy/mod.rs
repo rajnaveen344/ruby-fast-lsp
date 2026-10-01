@@ -67,7 +67,7 @@ impl<'a> AnalysisQuery<'a> {
         let Some(method_id) = self.engine.names.fqn_id(method_fqn) else {
             return Vec::new();
         };
-        for (target_id, fact) in self.engine.reference_store().iter_facts_with_targets() {
+        for (target_id, fact) in self.engine.uses.resolved().iter_facts_with_targets() {
             if fact.caller != Some(method_id) {
                 continue;
             }

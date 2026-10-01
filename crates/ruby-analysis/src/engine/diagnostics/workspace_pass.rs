@@ -27,7 +27,7 @@ impl AnalysisEngine {
         &mut self,
         stats: &mut StatsSnapshot<ResolveStat>,
     ) {
-        let mut candidate_file_ids = self.facts.references.candidates.file_ids();
+        let mut candidate_file_ids = self.uses.candidate_file_ids();
         for file_id in self.diagnostics.candidate_file_ids() {
             if !candidate_file_ids.contains(&file_id) {
                 candidate_file_ids.push(file_id);
@@ -40,7 +40,7 @@ impl AnalysisEngine {
             ResolveStat::DiagnosticSeedNs,
             diagnostic_seed_started.elapsed(),
         );
-        let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
+        let reference_candidate_store = self.uses.take_candidates();
         let mut method_fact_cache: HashMap<(MethodReferenceCacheKey, bool), MethodLookupResult> =
             HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
@@ -52,12 +52,12 @@ impl AnalysisEngine {
         let mut method_chain_completeness_cache = MethodChainCompletenessCache::default();
         let mut resolved_call_outcomes = HashMap::new();
         let mut call_outcome_caches = MethodCallOutcomeCaches::default();
-        self.facts.references.resolved.clear();
+        self.uses.clear_resolved();
         let candidate_loop_started = Instant::now();
         for candidate in reference_candidate_store.iter_candidates() {
             match candidate {
                 StoredReferenceCandidateRef::Resolved(candidate) => {
-                    self.facts.references.resolved.add(
+                    self.uses.add_resolved(
                         candidate.target,
                         ReferenceFact::new(candidate.range, candidate.caller),
                     );
@@ -94,10 +94,8 @@ impl AnalysisEngine {
                         target
                     };
                     if let Some(target) = target {
-                        self.facts
-                            .references
-                            .resolved
-                            .add(target, ReferenceFact::new(candidate.range, None));
+                        self.uses
+                            .add_resolved(target, ReferenceFact::new(candidate.range, None));
                     } else {
                         unresolved_constants
                             .entry(candidate.range.file_id)
@@ -178,7 +176,7 @@ impl AnalysisEngine {
                             let targets = grouped_method_targets(&callees, candidate.method);
                             for target in targets {
                                 let target = self.names.intern_fqn(target);
-                                self.facts.references.resolved.add(
+                                self.uses.add_resolved(
                                     target,
                                     ReferenceFact::method(
                                         candidate.range,
@@ -330,7 +328,7 @@ impl AnalysisEngine {
                         let target =
                             FullyQualifiedName::method(owner.namespace_parts(), resolved_method);
                         let target = self.names.intern_fqn(target);
-                        self.facts.references.resolved.add(
+                        self.uses.add_resolved(
                             target,
                             ReferenceFact::method(
                                 candidate.range,
@@ -377,7 +375,7 @@ impl AnalysisEngine {
                             candidate.method,
                         );
                         let target = self.names.intern_fqn(target);
-                        self.facts.references.resolved.add(
+                        self.uses.add_resolved(
                             target,
                             ReferenceFact::method(
                                 candidate.range,
@@ -522,10 +520,10 @@ impl AnalysisEngine {
         drop(method_chain_completeness_cache);
         drop(call_outcome_caches);
 
-        self.facts.references.candidates = reference_candidate_store;
+        self.uses.restore_candidates(reference_candidate_store);
         self.replace_resolved_call_expression_outcomes(resolved_call_outcomes);
         let sort_started = Instant::now();
-        self.facts.references.resolved.sort_all();
+        self.uses.sort_resolved();
         stats.record_duration(ResolveStat::SortAllNs, sort_started.elapsed());
 
         let diagnostic_rebuild_started = Instant::now();

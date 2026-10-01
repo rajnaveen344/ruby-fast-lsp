@@ -74,11 +74,7 @@ impl<'a> AnalysisQuery<'a> {
             })
             .collect::<Vec<_>>();
 
-        for candidate in self
-            .engine
-            .reference_candidate_store()
-            .candidates_in_file(file_id)
-        {
+        for candidate in self.engine.uses.candidates().candidates_in_file(file_id) {
             if !candidate.range.contains_offset(file_id, byte_offset) {
                 continue;
             }
@@ -232,7 +228,7 @@ impl<'a> AnalysisQuery<'a> {
                 .map(|fact| fact.range),
         );
 
-        for candidate in self.engine.reference_candidate_store().iter_candidates() {
+        for candidate in self.engine.uses.candidates().iter_candidates() {
             match candidate {
                 StoredReferenceCandidateRef::Method(candidate)
                     if candidate.method == identity.method =>
