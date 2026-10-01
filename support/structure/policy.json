@@ -171,7 +171,6 @@
     "crates/ruby-analysis/src/indexer/fact_collector/tests.rs": 1050,
     "crates/ruby-analysis/src/indexer/queries/tests.rs": 2271,
     "crates/ruby-analysis/src/inference/completion.rs": 1030,
-    "crates/ruby-analysis/src/inference/rbs/mod.rs": 1523,
     "editors/vscode/vsix/extension.js": 2021,
     "src/bin/profiler/main.rs": 2959,
     "src/environment/runtime/jruby/classpath/mod.rs": 1187,

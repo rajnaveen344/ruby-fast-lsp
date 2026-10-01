@@ -1,4 +1,8 @@
+use super::catalog::rbs_method_name_catalog;
+use super::embedded_callable::prepare_rbs_higher_order_call;
 use super::*;
+use crate::core::RubyType;
+use rbs_parser::RbsType;
 
 #[test]
 fn test_rbs_loader_initialized() {
