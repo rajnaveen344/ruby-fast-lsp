@@ -153,7 +153,7 @@ impl FactCollector {
                 name: param_name.to_string(),
             })
             .map(|subject| {
-                self.facts.types.type_at(
+                self.facts.flow_types.type_at(
                     &subject,
                     self.document.analysis_file_id(),
                     text_range.start_byte,

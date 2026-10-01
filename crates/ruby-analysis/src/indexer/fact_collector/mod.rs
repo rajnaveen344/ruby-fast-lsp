@@ -18,7 +18,7 @@ mod traversal;
 #[cfg(test)]
 mod tests;
 
-pub use collection::facts::CollectedFile;
+pub use collection::facts::FactCollectorOutput;
 pub use context::extensions::{
     BlockExecutionContext, FactCollectorExtensionHost, NullFactCollectorExtensionHost,
 };

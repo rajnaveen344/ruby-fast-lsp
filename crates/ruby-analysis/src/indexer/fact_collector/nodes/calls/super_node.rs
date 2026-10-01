@@ -54,28 +54,31 @@ impl FactCollector {
             "keep current_method_fqn populated only from RubyMethod values",
         );
         let range = self.text_range_from_prism_location(location, "super method reference");
-        self.facts.references.push(ReferenceCandidate::method(
-            range,
-            MethodReferenceCandidate {
-                owner: self.scope_tracker.get_ns_stack(),
-                owner_kind,
-                method,
-                is_super: true,
-                access: MethodReferenceAccess::Normal,
-                caller: self.scope_tracker.current_method_fqn().cloned(),
-                call_expression_range: None,
-                preferred_definition_range: None,
-                diagnostics: MethodReferenceDiagnostics {
-                    diagnostic_range: range,
-                    receiver_label: Some("super".to_string()),
-                    receiver_expression_range: None,
-                    receiver_type: None,
-                    diagnose_unresolved: self.options.diagnostics_enabled,
-                    allow_unindexed_owner: false,
-                    safe_navigation: false,
-                    signature: Some(signature),
+        self.facts
+            .analysis
+            .reference_candidates
+            .push(ReferenceCandidate::method(
+                range,
+                MethodReferenceCandidate {
+                    owner: self.scope_tracker.get_ns_stack(),
+                    owner_kind,
+                    method,
+                    is_super: true,
+                    access: MethodReferenceAccess::Normal,
+                    caller: self.scope_tracker.current_method_fqn().cloned(),
+                    call_expression_range: None,
+                    preferred_definition_range: None,
+                    diagnostics: MethodReferenceDiagnostics {
+                        diagnostic_range: range,
+                        receiver_label: Some("super".to_string()),
+                        receiver_expression_range: None,
+                        receiver_type: None,
+                        diagnose_unresolved: self.options.diagnostics_enabled,
+                        allow_unindexed_owner: false,
+                        safe_navigation: false,
+                        signature: Some(signature),
+                    },
                 },
-            },
-        ));
+            ));
     }
 }

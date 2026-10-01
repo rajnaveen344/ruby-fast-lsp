@@ -52,7 +52,7 @@ Delete this file when the last task is done. Git history keeps the record.
         type the collector's direct facts as `FileAnalysis`. Delete
         `AnalysisIndex`, `file_analysis_facts_from_index`, and the RBS and
         stdlib field-copy blocks.
-  - [ ] B1c. Give the collector one `FileAnalysis`. `finish()` returns
+  - [x] B1c. Give the collector one `FileAnalysis`. `finish()` returns
         `FactCollectorOutput { analysis, flow_types, extension_patches,
         document }`. Delete `CollectedFile`. Add
         `FileAnalysis::replace_declarations`.

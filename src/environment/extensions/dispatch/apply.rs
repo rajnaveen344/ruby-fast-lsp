@@ -220,8 +220,7 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
                     TypeProvenance::Extension,
                 );
                 visitor.add_type_fact(type_fact.clone());
-                if inferred_return_type.is_some()
-                    && !visitor.direct_facts().types.contains(&type_fact)
+                if inferred_return_type.is_some() && !visitor.analysis().types.contains(&type_fact)
                 {
                     visitor.add_direct_type_fact(type_fact);
                 }

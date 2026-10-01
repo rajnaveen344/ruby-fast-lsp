@@ -36,11 +36,14 @@ impl FactCollector {
             };
             let fqn = FullyQualifiedName::method(namespace.clone(), method);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
-            self.facts.direct.symbols.push(crate::core::SymbolFact::new(
-                fqn.clone(),
-                crate::core::SymbolKind::Method,
-                range,
-            ));
+            self.facts
+                .analysis
+                .symbols
+                .push(crate::core::SymbolFact::new(
+                    fqn.clone(),
+                    crate::core::SymbolKind::Method,
+                    range,
+                ));
             self.push_direct_method_fact(MethodFact::with_delegate_receiver(
                 fqn,
                 owner,
@@ -71,7 +74,7 @@ impl FactCollector {
                     "keep delegate method validation single-sourced",
                 ),
             );
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::MethodReturn(delegated_fqn),
                 return_type,
                 range,
@@ -105,11 +108,14 @@ impl FactCollector {
             };
             let fqn = FullyQualifiedName::method(namespace.clone(), method);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
-            self.facts.direct.symbols.push(crate::core::SymbolFact::new(
-                fqn.clone(),
-                crate::core::SymbolKind::Method,
-                range,
-            ));
+            self.facts
+                .analysis
+                .symbols
+                .push(crate::core::SymbolFact::new(
+                    fqn.clone(),
+                    crate::core::SymbolKind::Method,
+                    range,
+                ));
             self.push_direct_method_fact(MethodFact::with_delegate_receiver(
                 fqn.clone(),
                 owner,
@@ -130,7 +136,7 @@ impl FactCollector {
             let Some(return_type) = return_type else {
                 continue;
             };
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::MethodReturn(fqn),
                 return_type,
                 range,

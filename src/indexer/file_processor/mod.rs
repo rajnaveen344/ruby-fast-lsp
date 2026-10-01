@@ -383,35 +383,28 @@ impl FileProcessor {
         visitor.visit(&node);
         let visitor_elapsed = visitor_start.elapsed();
 
-        let collected = visitor.finish();
-        let extension_index_patches = collected.extension_patches;
-        let updated_document = collected.document;
-        let local_read_types = collected.local_read_types;
-        let mut inference = collected.inference;
+        let output = visitor.finish();
+        let updated_document = output.document;
+        let mut analysis = output.analysis;
         if !source_kind.contributes_project_diagnostics() {
-            inference.method_return_outcomes.clear();
-            inference.method_return_equations.clear();
+            analysis.inference.method_return_outcomes.clear();
+            analysis.inference.method_return_equations.clear();
         }
-        let mut direct_facts = direct_facts_seed;
-        merge_execution_context_direct_facts(&collected.direct_facts, &mut direct_facts);
-        merge_runtime_direct_facts(&collected.direct_facts, &mut direct_facts);
+        let collected_declarations = analysis.replace_declarations(direct_facts_seed);
+        merge_execution_context_direct_facts(&collected_declarations, &mut analysis);
+        merge_runtime_direct_facts(&collected_declarations, &mut analysis);
         add_extension_analysis_facts(
             &analysis_engine,
             &updated_document,
-            &extension_index_patches,
+            &output.extension_patches,
             extension_project_context.as_ref(),
-            &mut direct_facts,
+            &mut analysis,
         );
-        let symbol_facts = direct_facts.symbols;
-        let method_facts = direct_facts.methods;
-        let mut type_facts = direct_facts.types;
-        merge_collected_type_facts(collected.type_facts, &mut type_facts);
+        merge_collected_type_facts(output.flow_types, &mut analysis.types);
         let replace_start = Instant::now();
-        let mut file_diagnostics = if source_kind.contributes_project_diagnostics() {
-            collected.diagnostics
-        } else {
-            Vec::new()
-        };
+        if !source_kind.contributes_references() {
+            analysis.reference_candidates = Vec::new();
+        }
         if source_kind.contributes_project_diagnostics() {
             let current_path = uri
                 .to_file_path()
@@ -430,7 +423,7 @@ impl FileProcessor {
                     .to_vec();
                 let feature_index = server.require_feature_index_for_uri(uri);
                 let engine = analysis_engine.read();
-                file_diagnostics.extend(unresolved_require_diagnostics(
+                analysis.diagnostics.extend(unresolved_require_diagnostics(
                     content,
                     analysis_file_id,
                     &current_path,
@@ -440,33 +433,14 @@ impl FileProcessor {
                     Some(&engine),
                 ));
             }
+        } else {
+            analysis.diagnostic_candidates = Vec::new();
+            analysis.diagnostics = Vec::new();
         }
         replace_file_analysis(
             &analysis_engine,
             updated_document.analysis_file_id(),
-            FileFacts {
-                symbols: symbol_facts,
-                methods: method_facts,
-                method_visibility_overrides: direct_facts.method_visibility_overrides,
-                types: type_facts,
-                graph_nodes: direct_facts.graph_nodes,
-                graph_edges: direct_facts.graph_edges,
-                unresolved_graph_edges: direct_facts.unresolved_graph_edges,
-                reference_candidates: if source_kind.contributes_references() {
-                    collected.reference_candidates
-                } else {
-                    Vec::new()
-                },
-                diagnostic_candidates: if source_kind.contributes_project_diagnostics() {
-                    collected.diagnostic_candidates
-                } else {
-                    Vec::new()
-                },
-                diagnostics: file_diagnostics,
-                execution_contexts: collected.execution_contexts,
-                inference,
-                local_read_types,
-            },
+            analysis,
             resolution,
         );
         let replace_elapsed = replace_start.elapsed();

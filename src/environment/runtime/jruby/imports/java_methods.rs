@@ -599,7 +599,7 @@ fn current_runtime_proxy(visitor: &FactCollector) -> Option<FullyQualifiedName> 
         visitor.scope_tracker().get_ns_stack(),
     ));
     let direct = visitor
-        .direct_facts()
+        .analysis()
         .types
         .iter()
         .rev()

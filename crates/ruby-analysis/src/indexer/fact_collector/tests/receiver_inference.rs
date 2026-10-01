@@ -128,7 +128,8 @@ fn local_receiver_inference_uses_the_active_lexical_scope() {
     let method_owner = |name: &str| {
         collector
             .facts
-            .references
+            .analysis
+            .reference_candidates
             .iter()
             .find_map(|candidate| match &candidate.kind {
                 crate::core::ReferenceCandidateKind::Method { owner, method, .. }
@@ -176,18 +177,23 @@ fn ordinary_block_records_unknown_for_an_implicit_receiver() {
     let label_start = u32::try_from(source.rfind("label").unwrap()).unwrap();
     let label_range = TextRange::new(file_id, label_start, label_start + 5);
     assert!(
-        collector.facts.references.iter().all(|candidate| {
-            !matches!(
-                &candidate.kind,
-                crate::core::ReferenceCandidateKind::Method {
-                    method,
-                    call_expression_range,
-                    ..
-                } if method.as_str() == "label" && *call_expression_range == Some(label_range)
-            )
-        }),
+        collector
+            .facts
+            .analysis
+            .reference_candidates
+            .iter()
+            .all(|candidate| {
+                !matches!(
+                    &candidate.kind,
+                    crate::core::ReferenceCandidateKind::Method {
+                        method,
+                        call_expression_range,
+                        ..
+                    } if method.as_str() == "label" && *call_expression_range == Some(label_range)
+                )
+            }),
         "an unproven implicit receiver retained a deferred method candidate: {:?}",
-        collector.facts.references
+        collector.facts.analysis.reference_candidates
     );
     assert_eq!(
         collector
@@ -328,7 +334,8 @@ fn terminal_unknown_receiver_does_not_retain_the_rest_of_a_call_chain() {
 
     let retained = collector
         .facts
-        .references
+        .analysis
+        .reference_candidates
         .iter()
         .filter_map(|candidate| match &candidate.kind {
             crate::core::ReferenceCandidateKind::Method { method, .. }
@@ -367,7 +374,8 @@ fn potentially_provable_nested_calls_are_retained_inner_first() {
 
     let retained = collector
         .facts
-        .references
+        .analysis
+        .reference_candidates
         .iter()
         .filter_map(|candidate| match &candidate.kind {
             crate::core::ReferenceCandidateKind::Method {
@@ -410,7 +418,8 @@ fn local_receiver_inference_does_not_borrow_an_assignment_from_another_method() 
 
     let save_owners = collector
         .facts
-        .references
+        .analysis
+        .reference_candidates
         .iter()
         .filter_map(|candidate| match &candidate.kind {
             crate::core::ReferenceCandidateKind::Method { owner, method, .. }

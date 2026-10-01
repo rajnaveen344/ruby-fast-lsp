@@ -94,29 +94,32 @@ impl FactCollector {
         };
 
         if let Some((_old_name, old_range)) = define_method_name_and_range(self, node, 1) {
-            self.facts.references.push(ReferenceCandidate::method(
-                old_range,
-                crate::core::MethodReferenceCandidate {
-                    owner: self.scope_tracker.get_ns_stack(),
-                    owner_kind: self.scope_tracker.current_macro_definition_context(),
-                    method: old_method,
-                    is_super: false,
-                    access: MethodReferenceAccess::Normal,
-                    caller: self.scope_tracker.current_method_fqn().cloned(),
-                    call_expression_range: None,
-                    preferred_definition_range: None,
-                    diagnostics: crate::core::MethodReferenceDiagnostics {
-                        diagnostic_range: old_range,
-                        receiver_label: None,
-                        receiver_expression_range: None,
-                        receiver_type: None,
-                        diagnose_unresolved: false,
-                        allow_unindexed_owner: false,
-                        safe_navigation: false,
-                        signature: None,
+            self.facts
+                .analysis
+                .reference_candidates
+                .push(ReferenceCandidate::method(
+                    old_range,
+                    crate::core::MethodReferenceCandidate {
+                        owner: self.scope_tracker.get_ns_stack(),
+                        owner_kind: self.scope_tracker.current_macro_definition_context(),
+                        method: old_method,
+                        is_super: false,
+                        access: MethodReferenceAccess::Normal,
+                        caller: self.scope_tracker.current_method_fqn().cloned(),
+                        call_expression_range: None,
+                        preferred_definition_range: None,
+                        diagnostics: crate::core::MethodReferenceDiagnostics {
+                            diagnostic_range: old_range,
+                            receiver_label: None,
+                            receiver_expression_range: None,
+                            receiver_type: None,
+                            diagnose_unresolved: false,
+                            allow_unindexed_owner: false,
+                            safe_navigation: false,
+                            signature: None,
+                        },
                     },
-                },
-            ));
+                ));
         }
 
         let namespace = self.scope_tracker.get_ns_stack();
@@ -140,10 +143,16 @@ impl FactCollector {
             ),
         );
         let old_subject = TypeSubject::MethodReturn(old_fqn);
-        let Some(old_type) = self.facts.types.facts_for(&old_subject).into_iter().next() else {
+        let Some(old_type) = self
+            .facts
+            .flow_types
+            .facts_for(&old_subject)
+            .into_iter()
+            .next()
+        else {
             return;
         };
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::MethodReturn(new_fqn),
             old_type.ruby_type,
             range,
@@ -269,7 +278,7 @@ impl FactCollector {
                 FullyQualifiedName::namespace_with_kind(namespace.clone(), NamespaceKind::Instance);
             let range = self
                 .facts
-                .direct
+                .analysis
                 .methods
                 .iter()
                 .find(|fact| fact.fqn == fqn && fact.owner == instance_owner)

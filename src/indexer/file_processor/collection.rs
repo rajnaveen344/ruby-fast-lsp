@@ -672,71 +672,49 @@ impl FileProcessor {
         let visitor_started = Instant::now();
         fact_collector.visit(&node);
         let visitor_elapsed = visitor_started.elapsed();
-        let collected = fact_collector.finish();
-        let local_read_types = collected.local_read_types;
-        let mut inference = collected.inference;
+        let output = fact_collector.finish();
+        let mut file_facts = output.analysis;
         if !source_kind.contributes_project_diagnostics() {
-            inference.method_return_outcomes.clear();
-            inference.method_return_equations.clear();
+            file_facts.inference.method_return_outcomes.clear();
+            file_facts.inference.method_return_equations.clear();
         }
 
         let assembly_started = Instant::now();
-        let mut direct_facts = if resolve_references {
-            direct_facts_seed
-        } else {
-            collected.direct_facts.clone()
-        };
         if resolve_references {
-            merge_execution_context_direct_facts(&collected.direct_facts, &mut direct_facts);
-            merge_runtime_direct_facts(&collected.direct_facts, &mut direct_facts);
+            let collected_declarations = file_facts.replace_declarations(direct_facts_seed);
+            merge_execution_context_direct_facts(&collected_declarations, &mut file_facts);
+            merge_runtime_direct_facts(&collected_declarations, &mut file_facts);
         }
         add_extension_analysis_facts(
             &analysis_engine,
             &document,
-            &collected.extension_patches,
+            &output.extension_patches,
             extension_project_context.as_ref(),
-            &mut direct_facts,
+            &mut file_facts,
         );
-        merge_collected_type_facts(collected.type_facts, &mut direct_facts.types);
-        let reference_candidates = if source_kind.contributes_references() {
-            collected.reference_candidates
-        } else {
-            Vec::new()
-        };
-        let (diagnostic_candidates, diagnostics) = if source_kind.contributes_project_diagnostics()
-        {
-            let mut diagnostics = collected.diagnostics;
+        merge_collected_type_facts(output.flow_types, &mut file_facts.types);
+        if !source_kind.contributes_references() {
+            file_facts.reference_candidates = Vec::new();
+        }
+        if source_kind.contributes_project_diagnostics() {
             if let Some(project_root) = self.require_project_root.as_ref() {
                 let engine = analysis_engine.read();
-                diagnostics.extend(unresolved_require_diagnostics(
-                    document.content.as_str(),
-                    analysis_file_id,
-                    &require_current_path,
-                    project_root,
-                    &self.require_load_paths,
-                    &self.require_feature_index,
-                    Some(&engine),
-                ));
+                file_facts
+                    .diagnostics
+                    .extend(unresolved_require_diagnostics(
+                        document.content.as_str(),
+                        analysis_file_id,
+                        &require_current_path,
+                        project_root,
+                        &self.require_load_paths,
+                        &self.require_feature_index,
+                        Some(&engine),
+                    ));
             }
-            (collected.diagnostic_candidates, diagnostics)
         } else {
-            (Vec::new(), Vec::new())
-        };
-        let file_facts = FileFacts {
-            symbols: direct_facts.symbols,
-            methods: direct_facts.methods,
-            method_visibility_overrides: direct_facts.method_visibility_overrides,
-            types: direct_facts.types,
-            graph_nodes: direct_facts.graph_nodes,
-            graph_edges: direct_facts.graph_edges,
-            unresolved_graph_edges: direct_facts.unresolved_graph_edges,
-            reference_candidates,
-            diagnostic_candidates,
-            diagnostics,
-            execution_contexts: collected.execution_contexts,
-            inference,
-            local_read_types,
-        };
+            file_facts.diagnostic_candidates = Vec::new();
+            file_facts.diagnostics = Vec::new();
+        }
         let assembly_elapsed = assembly_started.elapsed();
         let replacement_started = Instant::now();
         let template = if capture_project_neutral_template {

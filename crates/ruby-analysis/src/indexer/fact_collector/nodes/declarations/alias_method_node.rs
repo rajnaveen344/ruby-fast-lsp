@@ -29,29 +29,32 @@ impl FactCollector {
             .value_loc()
             .unwrap_or_else(|| old_symbol.location());
         let old_range = self.direct_range(&old_location);
-        self.facts.references.push(ReferenceCandidate::method(
-            old_range,
-            MethodReferenceCandidate {
-                owner: self.scope_tracker.get_ns_stack(),
-                owner_kind: self.scope_tracker.current_macro_definition_context(),
-                method: old_method,
-                is_super: false,
-                access: MethodReferenceAccess::Normal,
-                caller: self.scope_tracker.current_method_fqn().cloned(),
-                call_expression_range: None,
-                preferred_definition_range: None,
-                diagnostics: MethodReferenceDiagnostics {
-                    diagnostic_range: old_range,
-                    receiver_label: None,
-                    receiver_expression_range: None,
-                    receiver_type: None,
-                    diagnose_unresolved: false,
-                    allow_unindexed_owner: false,
-                    safe_navigation: false,
-                    signature: None,
+        self.facts
+            .analysis
+            .reference_candidates
+            .push(ReferenceCandidate::method(
+                old_range,
+                MethodReferenceCandidate {
+                    owner: self.scope_tracker.get_ns_stack(),
+                    owner_kind: self.scope_tracker.current_macro_definition_context(),
+                    method: old_method,
+                    is_super: false,
+                    access: MethodReferenceAccess::Normal,
+                    caller: self.scope_tracker.current_method_fqn().cloned(),
+                    call_expression_range: None,
+                    preferred_definition_range: None,
+                    diagnostics: MethodReferenceDiagnostics {
+                        diagnostic_range: old_range,
+                        receiver_label: None,
+                        receiver_expression_range: None,
+                        receiver_type: None,
+                        diagnose_unresolved: false,
+                        allow_unindexed_owner: false,
+                        safe_navigation: false,
+                        signature: None,
+                    },
                 },
-            },
-        ));
+            ));
 
         // `alias` defines the new name on the current definition side. The
         // declaration indexer records it for project files; template-only
@@ -70,11 +73,17 @@ impl FactCollector {
         let old_fqn = FullyQualifiedName::method(namespace_parts.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(namespace_parts, new_method);
         let old_subject = TypeSubject::MethodReturn(old_fqn);
-        let Some(old_type) = self.facts.types.facts_for(&old_subject).into_iter().next() else {
+        let Some(old_type) = self
+            .facts
+            .flow_types
+            .facts_for(&old_subject)
+            .into_iter()
+            .next()
+        else {
             return;
         };
 
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::MethodReturn(new_fqn),
             old_type.ruby_type,
             self.direct_range(&node.location()),

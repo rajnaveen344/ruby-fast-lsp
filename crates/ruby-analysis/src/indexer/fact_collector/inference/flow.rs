@@ -62,7 +62,7 @@ impl FactCollector {
             "ruby-analysis::core TypeSubject::Local stores u32 scope ids",
             "widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes",
         );
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Local {
                 scope_id,
                 name: param_name.to_string(),
@@ -227,7 +227,7 @@ impl FactCollector {
         byte_offset: u32,
         matches_subject: impl Fn(&TypeSubject) -> bool,
     ) -> TypeInferenceOutcome {
-        match self.facts.types.named_type_in_file_before_matching(
+        match self.facts.flow_types.named_type_in_file_before_matching(
             self.document.analysis_file_id(),
             byte_offset,
             |subject, range| {

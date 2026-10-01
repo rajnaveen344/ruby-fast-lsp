@@ -74,7 +74,7 @@ pub(super) fn apply_execution_context(
             GraphNodeFact::new(instance_fqn.clone(), graph_kind, range),
             GraphNodeFact::new(singleton_fqn, graph_kind, range),
         ] {
-            if !visitor.direct_facts().graph_nodes.contains(&node) {
+            if !visitor.analysis().graph_nodes.contains(&node) {
                 visitor.add_graph_node_fact(node);
             }
         }

@@ -42,7 +42,8 @@ This declaration-only example uses `AnalysisIndexer`, which returns a
 `FileAnalysis` holding only declaration facts. Full semantic collection
 also uses `FactCollector` for body inference, references, diagnostics, and
 extension hooks. After traversal, `FactCollector::finish()` returns an owned
-`CollectedFile`; the server composes it into the same `FileAnalysis`. See the
+`FactCollectorOutput` whose `analysis` is a `FileAnalysis`; the server merges
+its declaration seed, extension facts, and flow types into that value. See the
 [collector guide](src/indexer/fact_collector/README.md) for its private state
 owners and traversal flow.
 

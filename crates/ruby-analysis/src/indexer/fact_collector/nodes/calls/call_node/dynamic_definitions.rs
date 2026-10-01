@@ -204,7 +204,7 @@ impl FactCollector {
             return;
         }
         let return_type = YardTypeConverter::convert_multiple(&all_return_types);
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::MethodReturn(FullyQualifiedName::method(namespace, method)),
             return_type,
             range,
@@ -234,7 +234,7 @@ impl FactCollector {
         let subject = TypeSubject::MethodReturn(FullyQualifiedName::method(namespace, method));
         if self
             .facts
-            .types
+            .flow_types
             .facts_for(&subject)
             .iter()
             .any(|fact| fact.range == range)
@@ -245,7 +245,7 @@ impl FactCollector {
             return;
         };
         let fact = TypeFact::new(subject, return_type, range, TypeProvenance::Inferred);
-        self.facts.types.add(fact.clone());
-        self.facts.direct.types.push(fact);
+        self.facts.flow_types.add(fact.clone());
+        self.facts.analysis.types.push(fact);
     }
 }

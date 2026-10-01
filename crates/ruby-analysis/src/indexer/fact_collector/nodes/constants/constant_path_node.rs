@@ -18,11 +18,14 @@ impl FactCollector {
 
         let range =
             self.text_range_from_prism_location(&node.location(), "constant path reference");
-        self.facts.references.push(ReferenceCandidate::constant(
-            range,
-            namespaces,
-            self.scope_tracker.get_ns_stack(),
-        ));
+        self.facts
+            .analysis
+            .reference_candidates
+            .push(ReferenceCandidate::constant(
+                range,
+                namespaces,
+                self.scope_tracker.get_ns_stack(),
+            ));
     }
 
     pub(in crate::indexer::fact_collector) fn process_constant_path_node_exit(

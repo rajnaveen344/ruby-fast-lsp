@@ -86,7 +86,7 @@ impl FactCollector {
         let definition_fqn = FullyQualifiedName::namespace(definition_namespace.clone());
         let direct_definition_kinds = self
             .facts
-            .direct
+            .analysis
             .graph_nodes
             .iter()
             .filter(|fact| fact.fqn == definition_fqn)
@@ -231,7 +231,7 @@ impl FactCollector {
             let definition_range = self.direct_range(&full_location);
             for fact in self
                 .facts
-                .direct
+                .analysis
                 .methods
                 .iter_mut()
                 .filter(|fact| fact.fqn == fqn && fact.range == definition_range)
@@ -245,7 +245,7 @@ impl FactCollector {
             let definition_range = self.direct_range(&full_location);
             for fact in self
                 .facts
-                .direct
+                .analysis
                 .methods
                 .iter_mut()
                 .filter(|fact| fact.fqn == fqn && fact.range == definition_range)
@@ -461,7 +461,7 @@ impl FactCollector {
         }
 
         if let Some(return_type) = &return_type {
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::MethodReturn(fqn.clone()),
                 return_type.clone(),
                 self.document.prism_location_to_text_range(&full_location),
@@ -472,7 +472,7 @@ impl FactCollector {
             if *param_type == RubyType::Unknown {
                 continue;
             }
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 TypeSubject::Parameter {
                     method: fqn.clone(),
                     name: param_name.clone(),
@@ -651,7 +651,7 @@ impl FactCollector {
             .entry(pending.namespace_parts)
             .or_default()
             .push(equation);
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::MethodReturn(pending.fqn),
             immediate.into_ruby_type(),
             pending.definition_range,
@@ -849,7 +849,7 @@ impl FactCollector {
         &self,
     ) -> std::collections::HashMap<FullyQualifiedName, RubyType> {
         self.facts
-            .types
+            .flow_types
             .method_return_types()
             .map(|(fqn, ruby_type)| (fqn.clone(), ruby_type.clone()))
             .collect()
@@ -871,7 +871,7 @@ impl FactCollector {
         &self,
     ) -> std::collections::HashMap<FullyQualifiedName, FullyQualifiedName> {
         self.facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .filter(|edge| edge.kind == GraphEdgeKind::Superclass)

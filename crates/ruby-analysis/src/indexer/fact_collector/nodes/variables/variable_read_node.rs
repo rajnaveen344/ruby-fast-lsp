@@ -24,7 +24,7 @@ impl FactCollector {
         }
         let ruby_type = outcome.into_ruby_type();
 
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Expression(range),
             ruby_type,
             range,

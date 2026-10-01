@@ -1,8 +1,8 @@
 use crate::core::storage::type_store::TypeStore;
 use crate::core::{
-    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ExecutionContextFact, FileAnalysis,
-    GraphEdgeFact, GraphNodeFact, InferenceEvidence, ReferenceCandidate, RubyType, SymbolFact,
-    TextRange, TypeFact, TypeSubject,
+    DiagnosticFact, DiagnosticSeverity, ExecutionContextFact, FileAnalysis, GraphEdgeFact,
+    GraphNodeFact, InferenceEvidence, ReferenceCandidate, SymbolFact, TextRange, TypeFact,
+    TypeSubject,
 };
 use crate::indexer::fact_collector::FactCollector;
 use crate::indexer::RubyDocument;
@@ -11,12 +11,13 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub(in crate::indexer::fact_collector) struct CollectedFacts {
-    pub(in crate::indexer::fact_collector) diagnostics: Vec<DiagnosticFact>,
-    pub(in crate::indexer::fact_collector) types: TypeStore,
-    pub(in crate::indexer::fact_collector) references: Vec<ReferenceCandidate>,
-    pub(in crate::indexer::fact_collector) diagnostic_candidates: Vec<DiagnosticCandidate>,
-    pub(in crate::indexer::fact_collector) direct: FileAnalysis,
-    /// Append-only range index into `direct.types` for expression facts.
+    /// Every file-owned fact this pass produces; `finish()` adds the inference
+    /// evidence and local read types before handing it to the caller.
+    pub(in crate::indexer::fact_collector) analysis: FileAnalysis,
+    /// Flow and extension type facts. They stay separate from the declaration
+    /// types in `analysis` until the file processor merges them by slot.
+    pub(in crate::indexer::fact_collector) flow_types: TypeStore,
+    /// Append-only range index into `analysis.types` for expression facts.
     ///
     /// Recursive receiver inference consults expressions frequently while a
     /// file is being traversed. Retaining compact vector indexes avoids an
@@ -25,83 +26,75 @@ pub(in crate::indexer::fact_collector) struct CollectedFacts {
     pub(in crate::indexer::fact_collector) expression_indexes:
         HashMap<TextRange, smallvec::SmallVec<[usize; 1]>>,
     pub(in crate::indexer::fact_collector) extension_patches: Vec<IndexPatch>,
-    pub(in crate::indexer::fact_collector) execution_contexts: Vec<ExecutionContextFact>,
 }
 
 /// Completed output of one file traversal, ready for source-specific composition.
 ///
 /// This owns facts and the updated document, never mutable engine stores or
-/// traversal stacks. The file processor applies source policy and merges its
-/// declaration seed before replacing the file through the analysis engine.
-pub struct CollectedFile {
-    pub document: RubyDocument,
-    pub direct_facts: FileAnalysis,
-    pub type_facts: Vec<TypeFact>,
-    pub reference_candidates: Vec<ReferenceCandidate>,
-    pub diagnostic_candidates: Vec<DiagnosticCandidate>,
-    pub diagnostics: Vec<DiagnosticFact>,
+/// traversal stacks. The file processor applies source policy, merges its
+/// declaration seed, extension patches, and flow types into `analysis`, and
+/// then replaces the file through the analysis engine.
+pub struct FactCollectorOutput {
+    pub analysis: FileAnalysis,
+    pub flow_types: Vec<TypeFact>,
     pub extension_patches: Vec<IndexPatch>,
-    pub execution_contexts: Vec<ExecutionContextFact>,
-    pub inference: InferenceEvidence,
-    pub local_read_types: Box<[(TextRange, RubyType)]>,
+    pub document: RubyDocument,
 }
 
 impl FactCollector {
     /// Consume this pass after traversal. Collection and solving are performed
     /// by the ordinary visitor; finishing only packages their existing output.
-    pub fn finish(self) -> CollectedFile {
+    pub fn finish(self) -> FactCollectorOutput {
         let local_read_types = self.local_read_type_evidence();
         let inference = self.inference_evidence();
-        let type_facts = self.type_facts();
-        CollectedFile {
-            document: self.document,
-            direct_facts: self.facts.direct,
-            type_facts,
-            reference_candidates: self.facts.references,
-            diagnostic_candidates: self.facts.diagnostic_candidates,
-            diagnostics: self.facts.diagnostics,
+        let flow_types = self.type_facts();
+        let mut analysis = self.facts.analysis;
+        analysis.inference = inference;
+        analysis.local_read_types = local_read_types;
+        FactCollectorOutput {
+            analysis,
+            flow_types,
             extension_patches: self.facts.extension_patches,
-            execution_contexts: self.facts.execution_contexts,
-            inference,
-            local_read_types,
+            document: self.document,
         }
     }
 
-    pub fn direct_facts(&self) -> &FileAnalysis {
-        &self.facts.direct
+    /// File-owned facts collected so far in this pass.
+    pub fn analysis(&self) -> &FileAnalysis {
+        &self.facts.analysis
     }
 
     pub fn reference_candidates(&self) -> &[ReferenceCandidate] {
-        &self.facts.references
+        &self.facts.analysis.reference_candidates
     }
 
     pub fn diagnostics(&self) -> &[DiagnosticFact] {
-        &self.facts.diagnostics
+        &self.facts.analysis.diagnostics
     }
 
     pub fn add_symbol_fact(&mut self, fact: SymbolFact) {
-        self.facts.direct.symbols.push(fact);
+        self.facts.analysis.symbols.push(fact);
     }
 
     pub fn add_graph_node_fact(&mut self, fact: GraphNodeFact) {
-        self.facts.direct.graph_nodes.push(fact);
+        self.facts.analysis.graph_nodes.push(fact);
     }
 
     pub fn add_graph_edge_fact(&mut self, fact: GraphEdgeFact) {
-        self.facts.direct.graph_edges.push(fact);
+        self.facts.analysis.graph_edges.push(fact);
     }
 
     /// Retain a type fact for direct composition without changing its provenance.
     pub fn add_direct_type_fact(&mut self, fact: TypeFact) {
-        self.facts.direct.types.push(fact);
+        self.facts.analysis.types.push(fact);
     }
 
     pub fn add_reference_candidate(&mut self, candidate: ReferenceCandidate) {
-        self.facts.references.push(candidate);
+        self.facts.analysis.reference_candidates.push(candidate);
     }
 
     pub fn add_execution_context_fact(&mut self, fact: ExecutionContextFact) {
-        self.facts.execution_contexts.push(fact);
+        self.facts.analysis.execution_contexts.push(fact);
     }
 
     pub fn record_extension_patch(&mut self, patch: IndexPatch) {
@@ -111,17 +104,17 @@ impl FactCollector {
     /// Record a type fact emitted by an extension or runtime during this file pass.
     /// The caller also retains any direct fact needed for final file composition.
     pub fn add_type_fact(&mut self, fact: TypeFact) {
-        self.facts.types.add(fact);
+        self.facts.flow_types.add(fact);
     }
 
     /// Collected type facts in the same order used for file composition.
     pub fn type_facts(&self) -> Vec<TypeFact> {
-        self.facts.types.all_facts()
+        self.facts.flow_types.all_facts()
     }
 
     /// Collected facts for one subject, preserving their source order.
     pub fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
-        self.facts.types.facts_for(subject)
+        self.facts.flow_types.facts_for(subject)
     }
 
     pub fn push_warning_diagnostic(
@@ -133,7 +126,7 @@ impl FactCollector {
         if !self.options.diagnostics_enabled {
             return;
         }
-        self.facts.diagnostics.push(DiagnosticFact::new(
+        self.facts.analysis.diagnostics.push(DiagnosticFact::new(
             range,
             DiagnosticSeverity::Warning,
             code,
@@ -145,7 +138,7 @@ impl FactCollector {
         if !self.options.diagnostics_enabled {
             return;
         }
-        self.facts.diagnostics.push(DiagnosticFact::new(
+        self.facts.analysis.diagnostics.push(DiagnosticFact::new(
             range,
             DiagnosticSeverity::Error,
             code,
@@ -157,7 +150,8 @@ impl FactCollector {
     pub fn inference_evidence(&self) -> InferenceEvidence {
         let mut deferred_call_ranges = self
             .facts
-            .references
+            .analysis
+            .reference_candidates
             .iter()
             .filter_map(|candidate| match &candidate.kind {
                 crate::core::ReferenceCandidateKind::Method {

@@ -87,7 +87,7 @@ impl FactCollector {
                 let namespace_fqn = FullyQualifiedName::namespace(constant_fqn.namespace_parts());
                 let is_namespace = self
                     .facts
-                    .direct
+                    .analysis
                     .graph_nodes
                     .iter()
                     .any(|fact| fact.fqn == namespace_fqn)
@@ -355,7 +355,7 @@ impl FactCollector {
         let namespace = FullyQualifiedName::namespace(namespace_parts.to_vec());
         let kind = self
             .facts
-            .direct
+            .analysis
             .graph_nodes
             .iter()
             .filter(|fact| fact.fqn == namespace)

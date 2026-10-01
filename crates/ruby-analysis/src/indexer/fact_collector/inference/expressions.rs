@@ -59,7 +59,7 @@ impl FactCollector {
             .into_iter()
             .flatten()
             .any(|index| {
-                self.facts.direct
+                self.facts.analysis
                     .types
                     .get(*index)
                     .expect_invariant(
@@ -74,7 +74,7 @@ impl FactCollector {
             return;
         }
         let fact = TypeFact::new(TypeSubject::Expression(range), ruby_type, range, provenance);
-        self.facts.types.add(fact.clone());
+        self.facts.flow_types.add(fact.clone());
         self.push_direct_expression_fact(fact);
     }
 
@@ -625,7 +625,7 @@ impl FactCollector {
             range,
             TypeProvenance::Inferred,
         );
-        self.facts.types.add(fact.clone());
+        self.facts.flow_types.add(fact.clone());
         self.push_direct_expression_fact(fact);
     }
 
@@ -635,7 +635,7 @@ impl FactCollector {
         proof_kind: &str,
     ) {
         let mut suppressed_candidates = 0usize;
-        for candidate in &mut self.facts.references {
+        for candidate in &mut self.facts.analysis.reference_candidates {
             let crate::core::ReferenceCandidateKind::Method {
                 call_expression_range,
                 ..

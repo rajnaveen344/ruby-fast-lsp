@@ -129,7 +129,7 @@ fn qualified_class_superclass_uses_predeclaration_lexical_context() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .any(|edge| edge.kind == GraphEdgeKind::Superclass
@@ -140,7 +140,7 @@ fn qualified_class_superclass_uses_predeclaration_lexical_context() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .all(|edge| edge.kind != GraphEdgeKind::Superclass
@@ -190,12 +190,12 @@ fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
     collector.visit(&parse.node());
 
     assert!(
-            collector.facts.direct
+            collector.facts.analysis
                 .graph_nodes
                 .iter()
                 .any(|fact| fact.fqn == platform_app && fact.kind == GraphNodeKind::Class),
             "recollecting class PlatformApp while its ClassReference remains visible must still emit the class graph node; nodes={:?}",
-            collector.facts.direct
+            collector.facts.analysis
                 .graph_nodes
                 .iter()
                 .map(|fact| fact.fqn.to_string())
@@ -204,13 +204,13 @@ fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .any(|edge| { edge.kind == GraphEdgeKind::Superclass && edge.source == platform_app })
             || collector
                 .facts
-                .direct
+                .analysis
                 .unresolved_graph_edges
                 .iter()
                 .any(|edge| {
@@ -248,7 +248,7 @@ fn class_reopening_through_a_constant_alias_keeps_the_original_owner_identity() 
 
     let method = collector
         .facts
-        .direct
+        .analysis
         .methods
         .iter()
         .find(|fact| fact.fqn.name() == "from_alias")
@@ -262,7 +262,7 @@ fn class_reopening_through_a_constant_alias_keeps_the_original_owner_identity() 
         "class Alias must reopen the class object stored in Alias"
     );
     assert!(
-        collector.facts.direct.graph_nodes.iter().all(|fact| {
+        collector.facts.analysis.graph_nodes.iter().all(|fact| {
             fact.fqn
                 != FullyQualifiedName::namespace(vec![
                     RubyConstant::new("Types").unwrap(),
@@ -311,7 +311,7 @@ fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
         FullyQualifiedName::namespace(vec![RubyConstant::new("StringScanner").unwrap()]);
     let method = collector
         .facts
-        .direct
+        .analysis
         .methods
         .iter()
         .find(|fact| fact.fqn.name() == "wrapped_string")
@@ -324,7 +324,7 @@ fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .any(|edge| edge.kind == GraphEdgeKind::Superclass
@@ -335,7 +335,7 @@ fn explicit_subclass_does_not_reopen_an_alias_as_its_own_superclass() {
     assert!(
         collector
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .all(|edge| edge.kind != GraphEdgeKind::Superclass
@@ -393,6 +393,7 @@ fn local_graph_edge_validation_rejects_cycles_and_conflicting_superclasses() {
     assert_eq!(
         collector
             .facts
+            .analysis
             .diagnostics
             .iter()
             .map(|diagnostic| diagnostic.code.as_str())
@@ -400,7 +401,7 @@ fn local_graph_edge_validation_rejects_cycles_and_conflicting_superclasses() {
         vec!["cyclic-inheritance", "conflicting-superclass"]
     );
     assert_eq!(
-        collector.facts.direct.graph_edges.len(),
+        collector.facts.analysis.graph_edges.len(),
         2,
         "only the two valid ancestry edges may become same-pass semantic input"
     );

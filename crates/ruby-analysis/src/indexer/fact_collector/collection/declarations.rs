@@ -46,7 +46,7 @@ impl FactCollector {
         name_range: TextRange,
     ) {
         self.semantics.known_namespaces.insert(fqn.clone());
-        self.facts.direct.symbols.push(
+        self.facts.analysis.symbols.push(
             SymbolFact::new(
                 fqn.clone(),
                 match kind {
@@ -58,11 +58,11 @@ impl FactCollector {
             .with_name_range(name_range),
         );
         self.facts
-            .direct
+            .analysis
             .graph_nodes
             .push(GraphNodeFact::new(fqn.clone(), kind, range));
         let constant_fqn = FullyQualifiedName::constant(fqn.namespace_parts());
-        self.facts.direct.types.push(TypeFact::new(
+        self.facts.analysis.types.push(TypeFact::new(
             TypeSubject::Constant(constant_fqn.clone()),
             match kind {
                 GraphNodeKind::Class => RubyType::ClassReference(constant_fqn.clone()),
@@ -81,7 +81,7 @@ impl FactCollector {
             .known_namespaces
             .insert(singleton_fqn.clone());
         self.facts
-            .direct
+            .analysis
             .graph_nodes
             .push(GraphNodeFact::new(singleton_fqn, kind, range));
     }
@@ -220,7 +220,7 @@ impl FactCollector {
         range: TextRange,
     ) {
         let Some(target) = self.direct_resolve_namespace(parts, absolute) else {
-            self.facts.direct.unresolved_graph_edges.push(
+            self.facts.analysis.unresolved_graph_edges.push(
                 UnresolvedGraphEdgeFact::new(
                     source,
                     parts.to_vec(),
@@ -262,7 +262,7 @@ impl FactCollector {
     ) -> bool {
         if self
             .facts
-            .direct
+            .analysis
             .graph_edges
             .iter()
             .any(|edge| edge.source == source && edge.target == target && edge.kind == kind)
@@ -273,7 +273,7 @@ impl FactCollector {
         if kind == GraphEdgeKind::Superclass {
             if let Some(existing) = self
                 .facts
-                .direct
+                .analysis
                 .graph_edges
                 .iter()
                 .find(|edge| edge.source == source && edge.kind == GraphEdgeKind::Superclass)
@@ -302,7 +302,7 @@ impl FactCollector {
         }
 
         self.facts
-            .direct
+            .analysis
             .graph_edges
             .push(GraphEdgeFact::new(source, target, kind, range).with_provenance(provenance));
         true
@@ -324,7 +324,7 @@ impl FactCollector {
             }
             pending.extend(
                 self.facts
-                    .direct
+                    .analysis
                     .graph_edges
                     .iter()
                     .filter(|edge| edge.source == current && ancestry_edge_kind(edge.kind))
@@ -407,7 +407,7 @@ impl FactCollector {
     ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
-        self.facts.direct.symbols.push(
+        self.facts.analysis.symbols.push(
             SymbolFact::new(fqn.clone(), SymbolKind::Method, range).with_name_range(name_range),
         );
         self.push_direct_method_fact(
@@ -430,7 +430,7 @@ impl FactCollector {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
         self.facts
-            .direct
+            .analysis
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.push_direct_method_fact(
@@ -453,7 +453,7 @@ impl FactCollector {
             self.scope_tracker.current_macro_definition_context(),
         );
         self.facts
-            .direct
+            .analysis
             .method_visibility_overrides
             .push(MethodVisibilityOverrideFact::new(
                 owner.clone(),
@@ -462,7 +462,7 @@ impl FactCollector {
                 range,
             ));
         let mut changed_direct_fact = false;
-        for fact in &mut self.facts.direct.methods {
+        for fact in &mut self.facts.analysis.methods {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 continue;
             };
@@ -479,7 +479,7 @@ impl FactCollector {
 
     pub(in crate::indexer::fact_collector) fn push_direct_method_fact(&mut self, fact: MethodFact) {
         let fqn = fact.fqn.clone();
-        self.facts.direct.methods.push(fact);
+        self.facts.analysis.methods.push(fact);
         self.refresh_local_public_method_candidate(&fqn);
     }
 
@@ -489,7 +489,7 @@ impl FactCollector {
     ) {
         let mut matching = self
             .facts
-            .direct
+            .analysis
             .methods
             .iter()
             .filter(|fact| &fact.fqn == fqn)
@@ -519,7 +519,7 @@ impl FactCollector {
         location: &ruby_prism::Location<'_>,
     ) {
         self.facts
-            .direct
+            .analysis
             .symbols
             .push(SymbolFact::new(fqn, kind, self.direct_range(location)));
     }
@@ -545,7 +545,7 @@ impl FactCollector {
         if ruby_type == RubyType::Unknown && !matches!(subject, TypeSubject::Constant(_)) {
             return;
         }
-        self.facts.direct.types.push(TypeFact::new(
+        self.facts.analysis.types.push(TypeFact::new(
             subject,
             ruby_type,
             self.direct_range(location),
@@ -572,8 +572,8 @@ impl FactCollector {
             fix = "construct both ranges from the same Prism node location",
         );
         let range = *subject_range;
-        let index = self.facts.direct.types.len();
-        self.facts.direct.types.push(fact);
+        let index = self.facts.analysis.types.len();
+        self.facts.analysis.types.push(fact);
         self.facts
             .expression_indexes
             .entry(range)
@@ -591,10 +591,10 @@ impl FactCollector {
             .iter()
             .rev()
             .find_map(|index| {
-                let fact = self.facts.direct.types.get(*index).expect_invariant(
+                let fact = self.facts.analysis.types.get(*index).expect_invariant(
                     "the direct expression index points outside the fact vector",
                     "direct facts are never removed during collection",
-                    "record each index after appending its fact; never reorder direct_facts.types",
+                    "record each index after appending its fact; never reorder analysis.types",
                 );
                 invariant!(
                     matches!(&fact.subject, TypeSubject::Expression(subject_range) if *subject_range == range)

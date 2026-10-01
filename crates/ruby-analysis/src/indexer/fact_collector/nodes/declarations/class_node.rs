@@ -120,7 +120,7 @@ impl FactCollector {
                     );
                 }
             } else {
-                self.facts.direct.unresolved_graph_edges.push(
+                self.facts.analysis.unresolved_graph_edges.push(
                     crate::core::UnresolvedGraphEdgeFact::new(
                         fqn.clone(),
                         superclass_ref.parts,

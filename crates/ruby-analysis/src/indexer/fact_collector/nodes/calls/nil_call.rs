@@ -23,6 +23,7 @@ impl FactCollector {
             return;
         };
         self.facts
+            .analysis
             .diagnostic_candidates
             .push(DiagnosticCandidate::new(
                 self.document.prism_location_to_text_range(&message),

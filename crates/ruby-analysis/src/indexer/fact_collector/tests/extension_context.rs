@@ -93,6 +93,7 @@ fn nested_extension_calls_preserve_parent_context_and_handled_decisions() {
 
     let collected = collector.finish();
     let methods = collected
+        .analysis
         .reference_candidates
         .iter()
         .filter_map(|candidate| match &candidate.kind {
@@ -113,8 +114,8 @@ fn nested_extension_calls_preserve_parent_context_and_handled_decisions() {
         methods.contains(&"after"),
         "extension context must not leak into the next statement"
     );
-    assert_eq!(collected.diagnostics.len(), 1);
-    assert_eq!(collected.diagnostics[0].code, "extension-leaf");
+    assert_eq!(collected.analysis.diagnostics.len(), 1);
+    assert_eq!(collected.analysis.diagnostics[0].code, "extension-leaf");
 }
 
 impl FactCollectorExtensionHost for SyntheticExecutionContextHost {
@@ -159,7 +160,7 @@ fn attr_macros_use_the_method_definition_context_in_direct_facts() {
     let owner_for = |name: &str| {
         collector
             .facts
-            .direct
+            .analysis
             .methods
             .iter()
             .find(|fact| fact.fqn.name() == name)
@@ -210,14 +211,14 @@ fn extension_context_rehomes_block_method_without_changing_lexical_namespace() {
 
     let helper = collector
         .facts
-        .direct
+        .analysis
         .methods
         .iter()
         .find(|fact| fact.fqn.name() == "helper")
         .expect("helper definition must be collected");
     assert_eq!(helper.owner.namespace_parts(), vec![owner]);
     assert!(
-        collector.facts.direct.methods.iter().all(|fact| {
+        collector.facts.analysis.methods.iter().all(|fact| {
             fact.fqn.name() != "helper"
                 || fact.owner.namespace_parts() != vec![RubyConstant::new("Lexical").unwrap()]
         }),

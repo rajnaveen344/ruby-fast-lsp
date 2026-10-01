@@ -104,7 +104,7 @@ impl FactCollector {
         let namespace_fqn = FullyQualifiedName::namespace(parts.clone());
         if let Some(kind) = self
             .facts
-            .direct
+            .analysis
             .graph_nodes
             .iter()
             .filter(|fact| fact.fqn == namespace_fqn)
@@ -137,7 +137,7 @@ impl FactCollector {
     ) -> Option<RubyType> {
         let direct = self
             .facts
-            .direct
+            .analysis
             .types
             .iter()
             .filter(|fact| match &fact.subject {
@@ -162,7 +162,7 @@ impl FactCollector {
         let subject = TypeSubject::Constant(constant_fqn.clone());
         let stored = self
             .facts
-            .types
+            .flow_types
             .latest_non_unknown_type_with_range(&subject);
 
         match (direct, stored) {
@@ -193,7 +193,7 @@ impl FactCollector {
         constant_fqn: &FullyQualifiedName,
     ) -> bool {
         self.facts
-            .direct
+            .analysis
             .types
             .iter()
             .any(|fact| match &fact.subject {

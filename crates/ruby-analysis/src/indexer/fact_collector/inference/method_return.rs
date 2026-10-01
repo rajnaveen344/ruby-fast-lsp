@@ -166,7 +166,7 @@ impl FactCollector {
     }
 
     fn local_method_return_type(&self, method_fqn: &FullyQualifiedName) -> Option<RubyType> {
-        match self.facts.types.type_at(
+        match self.facts.flow_types.type_at(
             &TypeSubject::MethodReturn(method_fqn.clone()),
             self.document.analysis_file_id(),
             u32::MAX,
@@ -192,7 +192,7 @@ impl FactCollector {
         while visited.insert(current.clone()) {
             let mut parents = self
                 .facts
-                .direct
+                .analysis
                 .graph_edges
                 .iter()
                 .filter(|edge| edge.source == current && edge.kind == GraphEdgeKind::Superclass)
@@ -246,7 +246,7 @@ impl FactCollector {
         allow_private: bool,
         caller_namespace: &FullyQualifiedName,
     ) -> bool {
-        self.facts.direct.methods.iter().any(|fact| {
+        self.facts.analysis.methods.iter().any(|fact| {
             &fact.fqn == method_fqn
                 && fact.owner.namespace_parts() == owner.namespace_parts()
                 && fact.owner.namespace_kind() == owner.namespace_kind()
@@ -278,7 +278,7 @@ impl FactCollector {
         };
         let mut overrides = self
             .facts
-            .direct
+            .analysis
             .method_visibility_overrides
             .iter()
             .filter(|override_fact| {
@@ -439,7 +439,7 @@ impl FactCollector {
         let solved = solve_result.outcomes;
         let file_id = self.document.analysis_file_id();
         self.facts
-            .types
+            .flow_types
             .update_inferred_method_return_types_in_file(
                 file_id,
                 solved

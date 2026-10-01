@@ -312,31 +312,34 @@ impl FactCollector {
             let rbs_receiver_class_exists = inferred_expr_type
                 .as_ref()
                 .is_some_and(rbs_class_exists_for_type);
-            self.facts.references.push(ReferenceCandidate::method(
-                message_range,
-                crate::core::MethodReferenceCandidate {
-                    owner: target_namespace,
-                    owner_kind: namespace_kind,
-                    method,
-                    is_super: false,
-                    access,
-                    caller: self.scope_tracker.current_method_fqn().cloned(),
-                    call_expression_range: defer_call_outcome.then_some(call_range),
-                    preferred_definition_range: None,
-                    diagnostics: crate::core::MethodReferenceDiagnostics {
-                        diagnostic_range: message_range,
-                        receiver_label,
-                        receiver_expression_range,
-                        receiver_type: receiver_type.clone().map(Box::new),
-                        diagnose_unresolved: self.options.diagnostics_enabled
-                            && !rbs_resolves_method
-                            && !matches!(receiver_info, ReceiverInfo::SelfReceiver),
-                        allow_unindexed_owner: rbs_receiver_class_exists,
-                        safe_navigation,
-                        signature: Some(signature),
+            self.facts
+                .analysis
+                .reference_candidates
+                .push(ReferenceCandidate::method(
+                    message_range,
+                    crate::core::MethodReferenceCandidate {
+                        owner: target_namespace,
+                        owner_kind: namespace_kind,
+                        method,
+                        is_super: false,
+                        access,
+                        caller: self.scope_tracker.current_method_fqn().cloned(),
+                        call_expression_range: defer_call_outcome.then_some(call_range),
+                        preferred_definition_range: None,
+                        diagnostics: crate::core::MethodReferenceDiagnostics {
+                            diagnostic_range: message_range,
+                            receiver_label,
+                            receiver_expression_range,
+                            receiver_type: receiver_type.clone().map(Box::new),
+                            diagnose_unresolved: self.options.diagnostics_enabled
+                                && !rbs_resolves_method
+                                && !matches!(receiver_info, ReceiverInfo::SelfReceiver),
+                            allow_unindexed_owner: rbs_receiver_class_exists,
+                            safe_navigation,
+                            signature: Some(signature),
+                        },
                     },
-                },
-            ));
+                ));
             if defer_call_outcome {
                 invariant!(
                     self.expressions.deferred_calls.insert(call_range),
@@ -349,14 +352,14 @@ impl FactCollector {
 
         if self.options.diagnostics_enabled && method_name == "raise" && node.receiver().is_none() {
             if let Some(candidate) = self.raise_non_exception_candidate(node) {
-                self.facts.diagnostic_candidates.push(candidate);
+                self.facts.analysis.diagnostic_candidates.push(candidate);
             }
         }
 
         if self.options.diagnostics_enabled {
             for entry in super::super::bad_splat::check(node, &self.document) {
                 let candidate = self.bad_splat_candidate(entry);
-                self.facts.diagnostic_candidates.push(candidate);
+                self.facts.analysis.diagnostic_candidates.push(candidate);
             }
         }
     }

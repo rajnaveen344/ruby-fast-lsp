@@ -127,7 +127,7 @@ impl FactCollector {
             name: variable_name.clone(),
         };
         if inferred_type == RubyType::Unknown && constant_dependency.is_some() {
-            self.facts.direct.types.push(TypeFact::new(
+            self.facts.analysis.types.push(TypeFact::new(
                 root_subject.clone(),
                 RubyType::Unknown,
                 self.document.prism_location_to_text_range(&name_loc),
@@ -153,7 +153,7 @@ impl FactCollector {
                 scope_id,
                 name: variable_name.clone(),
             };
-            self.facts.types.add(TypeFact::new(
+            self.facts.flow_types.add(TypeFact::new(
                 subject,
                 inferred_type.clone(),
                 self.document.prism_location_to_text_range(&name_loc),

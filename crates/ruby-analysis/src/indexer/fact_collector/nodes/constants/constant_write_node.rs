@@ -31,7 +31,7 @@ impl FactCollector {
         full_location: &Location<'_>,
         name_location: &Location<'_>,
     ) {
-        self.facts.direct.symbols.push(
+        self.facts.analysis.symbols.push(
             SymbolFact::new(fqn, SymbolKind::Constant, self.direct_range(full_location))
                 .with_name_range(self.direct_range(name_location)),
         );
@@ -54,7 +54,7 @@ impl FactCollector {
             name_location,
             provenance,
         );
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Constant(fqn.clone()),
             inferred_type,
             full_range,
@@ -79,7 +79,7 @@ impl FactCollector {
             name_location,
             provenance,
         );
-        self.facts.types.add(TypeFact::new(
+        self.facts.flow_types.add(TypeFact::new(
             TypeSubject::Constant(fqn),
             inferred_type,
             self.document.prism_location_to_text_range(full_location),
