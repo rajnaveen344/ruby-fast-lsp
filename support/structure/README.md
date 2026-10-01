@@ -32,12 +32,9 @@ evaluate the semantic justification. An exception and legacy debt are separate
 concepts and cannot be combined for the same folder.
 
 Source files (`.rs`, `.py`, `.js`, `.mjs`, `.ts`, `.sh`, `.rb`) inside the
-audited roots are limited to 1,000 lines, tests included. Files that were
-already larger have a line-count ceiling under `legacy_lines`, including files in
-the strict `ruby-analysis` tree. A legacy file may shrink but must not grow past
-its ceiling; once it is split below the limit or removed, delete its allowance.
-Lower a ceiling when a refactor shrinks a file substantially. Do not raise a
-ceiling to admit new work; split the file by responsibility instead.
+audited roots are limited to 1,000 lines, tests included. No file currently
+has a ceiling under `legacy_lines`. Do not add one to admit new work; split the
+file by responsibility instead.
 
 Grouping decisions remain a code-review responsibility. This check cannot tell
 whether a name is meaningful or whether unrelated code was merged into one file
