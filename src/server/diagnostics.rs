@@ -2,13 +2,19 @@
 use super::projects::ProjectRegistry;
 use super::{RubyLanguageServer, Workspace};
 use crate::invariant::ExpectInvariant;
-use crate::loader::scheduling::status::IndexingPhase;
+use crate::loader::context::{IndexingRunState, LoadSink, SourceReader};
+use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use log::{info, warn};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
+use ruby_analysis::core::{
+    DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity, TextRange,
+};
+use ruby_analysis::engine::{AnalysisEngine, SourceFile};
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tower_lsp::lsp_types::{Diagnostic, Url};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 use tower_lsp::Client;
 
 #[derive(Debug, Default)]
@@ -346,6 +352,147 @@ impl RubyLanguageServer {
             "[PERF][unresolved-require refresh] project={} open_files={} closed_files={} elapsed={:?}",
             project_root.display(), open_files, closed_files, refresh_started.elapsed()
         );
+    }
+}
+
+fn diagnostic_from_fact_fast(file: &SourceFile, fact: &DiagnosticFact) -> Option<Diagnostic> {
+    Some(Diagnostic {
+        range: lsp_range_for_text_range_fast(file, fact.range)?,
+        severity: Some(lsp_diagnostic_severity(fact.severity)),
+        code: Some(NumberOrString::String(fact.code.clone())),
+        code_description: None,
+        source: Some("ruby-fast-lsp".to_string()),
+        message: fact.message.clone(),
+        related_information: None,
+        tags: None,
+        data: None,
+    })
+}
+
+fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSeverity {
+    match severity {
+        AnalysisDiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
+        AnalysisDiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+        AnalysisDiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
+        AnalysisDiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
+    }
+}
+
+fn lsp_range_for_text_range_fast(file: &SourceFile, range: TextRange) -> Option<Range> {
+    let (start_line, start_character) = file.byte_offset_to_line_character(range.start_byte)?;
+    let (end_line, end_character) = file.byte_offset_to_line_character(range.end_byte)?;
+    Some(Range::new(
+        Position::new(start_line, start_character),
+        Position::new(end_line, end_character),
+    ))
+}
+
+impl RubyLanguageServer {
+    /// Publish a current, complete diagnostic projection for every open
+    /// document that `engine`, the engine of the project at `root`, owns.
+    ///
+    /// Documents publish in URI order. Each projection is read under the
+    /// document's semantic lock and enqueued while the engine read lock is
+    /// held, so edits and cross-file resolution cannot interleave. Stops with
+    /// the run's state as soon as `run` is no longer current; a load without
+    /// a run publishes unconditionally.
+    pub(super) async fn publish_project_facts_diagnostics(
+        &self,
+        root: &Path,
+        engine: &Arc<RwLock<AnalysisEngine>>,
+        run: Option<&IndexingRun>,
+    ) -> IndexingRunState {
+        let run_state = || {
+            run.map_or(IndexingRunState::Current, |run| {
+                LoadSink::indexing_run_state(self, root, run)
+            })
+        };
+        let mut open_uris = self.documents.open_uris();
+        open_uris.retain(|uri| Arc::ptr_eq(engine, &self.analysis_engine_for_uri(uri)));
+        open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
+
+        for uri in open_uris {
+            let state = run_state();
+            if state != IndexingRunState::Current {
+                return state;
+            }
+            #[cfg(test)]
+            let publication_path = uri
+                .to_file_path()
+                .expect("coordinator diagnostics must target a file URI");
+            #[cfg(test)]
+            self.indexing
+                .schedule
+                .checkpoint(
+                    crate::loader::scheduling::test_schedule::Point::ColdDiagnosticsPending,
+                    &publication_path,
+                )
+                .await;
+
+            {
+                // Edits and close may complete while this producer waits. Read
+                // diagnostics only after acquiring the same document lock used
+                // by those handlers, and recheck the indexing generation then.
+                let semantic_lock = self.document_semantic_lock(&uri);
+                let _semantic_guard = semantic_lock.lock().await;
+                let state = run_state();
+                if state != IndexingRunState::Current {
+                    return state;
+                }
+                if !Arc::ptr_eq(engine, &self.analysis_engine_for_uri(&uri)) {
+                    continue;
+                }
+                let Some(document) = self.documents.open_document(&uri) else {
+                    continue;
+                };
+                let Ok(path) = uri.to_file_path() else {
+                    continue;
+                };
+                let mut diagnostics = {
+                    let parse = document.parse();
+                    crate::loader::file_processor::syntax_diagnostics::generate_diagnostics(
+                        &parse, &document,
+                    )
+                };
+                let engine = engine.read();
+                let Some(file) = engine.file_id(&path).and_then(|id| engine.file(id)) else {
+                    continue;
+                };
+                if !file.kind.contributes_project_diagnostics()
+                    || !engine.file_content_matches(file.id, &document.content)
+                {
+                    continue;
+                }
+                diagnostics.extend(
+                    engine
+                        .diagnostic_facts_in_file(file.id)
+                        .iter()
+                        .filter_map(|fact| diagnostic_from_fact_fast(file, fact)),
+                );
+                self.append_external_linter_diagnostics_for_snapshot(
+                    &uri,
+                    engine.source_snapshot_for_path(&path),
+                    &mut diagnostics,
+                );
+                let state = run_state();
+                if state != IndexingRunState::Current {
+                    return state;
+                }
+                // Keep the engine read lock through the synchronous enqueue:
+                // cross-file resolution cannot invalidate this projection in
+                // between. Empty results must clear errors resolved at startup.
+                self.queue_diagnostics(uri, diagnostics);
+            }
+            #[cfg(test)]
+            self.indexing
+                .schedule
+                .checkpoint(
+                    crate::loader::scheduling::test_schedule::Point::ColdDiagnosticsAttempted,
+                    &publication_path,
+                )
+                .await;
+        }
+        IndexingRunState::Current
     }
 }
 

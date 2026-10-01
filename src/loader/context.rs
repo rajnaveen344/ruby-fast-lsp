@@ -5,7 +5,7 @@
 //! require roots, and open buffers are read live at the moment the loader
 //! consults them, exactly as reads through the server were. Writes and owner
 //! lookups (source registration, document version marks, runtime selections,
-//! status, progress, publication) go through [`LoadSink`].
+//! status, progress, and the facts-ready publication hook) go through [`LoadSink`].
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::{
@@ -28,12 +28,12 @@ use anyhow::Result;
 use log::warn;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use ruby_analysis::core::{SourceFileId, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, SourceFileSnapshot};
+use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::stats::StatsRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tower_lsp::lsp_types::{Diagnostic, Url};
+use tower_lsp::lsp_types::Url;
 
 /// Everything the loader reads from its owner, as cloneable shared handles.
 #[derive(Clone)]
@@ -370,18 +370,16 @@ pub(crate) trait LoadSink: Send + Sync {
         completed: u64,
         total: u64,
     );
-    /// The lock that orders semantic publication for `uri` with edits.
-    fn document_lock(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>>;
-    /// Append retained external linter results for `uri` that still match
-    /// `snapshot`; stale results are dropped.
-    fn append_external_linter_diagnostics(
+    /// Final resolution of the project at `root` completed in `engine`:
+    /// publish a complete diagnostic projection for each open document that
+    /// engine owns. Publication stops as soon as `run` is no longer current
+    /// and returns that state; a load without a run publishes every document.
+    async fn project_facts_ready(
         &self,
-        uri: &Url,
-        snapshot: Option<SourceFileSnapshot>,
-        diagnostics: &mut Vec<Diagnostic>,
-    );
-    /// Queue a complete diagnostic projection for `uri`.
-    fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>);
+        root: &Path,
+        engine: &Arc<RwLock<AnalysisEngine>>,
+        run: Option<&IndexingRun>,
+    ) -> IndexingRunState;
     /// Withdraw the JRuby classpath fingerprint and import provider of the
     /// project at `root`, in that order, before a new run builds them.
     fn clear_jruby_import_provider(&self, root: &Path);

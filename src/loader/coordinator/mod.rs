@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tower_lsp::lsp_types::Url;
 
-mod diagnostics;
 mod gems;
 mod jruby;
 mod priority;
@@ -569,7 +568,7 @@ impl IndexingCoordinator {
         )
         .await?;
         let publish_start = Instant::now();
-        self.publish_open_project_diagnostics(ctx).await?;
+        self.announce_project_facts_ready(ctx).await?;
         let publish_dur = publish_start.elapsed();
 
         // Open consumers may have been analyzed before a closed definition
@@ -629,6 +628,35 @@ impl IndexingCoordinator {
             .transition_indexing_phase(&self.workspace_root, run.generation(), phase)
             .await;
         self.run_state_result(run, state)
+    }
+
+    /// Hand the resolved project to its owner, which publishes open-document
+    /// diagnostics. The owner stops once this run is no longer current.
+    async fn announce_project_facts_ready(&self, ctx: &LoadContext) -> Result<()> {
+        self.indexing_checkpoint(ctx)?;
+        let analysis_engine = self.analysis_engine(ctx);
+        let state = ctx
+            .sink
+            .project_facts_ready(
+                &self.workspace_root,
+                &analysis_engine,
+                self.indexing_run.as_ref(),
+            )
+            .await;
+        match (&self.indexing_run, state) {
+            (_, IndexingRunState::Current) => Ok(()),
+            (Some(run), state) => {
+                // Report cancellation ahead of the owner's generic state.
+                self.indexing_checkpoint(ctx)?;
+                self.run_state_result(run, state)
+            }
+            (None, state) => unreachable_invariant!(
+                what = "the owner stopped a run-less load's diagnostics as {:?}",
+                why = "only an indexing run can stop being current",
+                fix = "publish every open document when no run is supplied",
+                state,
+            ),
+        }
     }
 
     fn indexing_checkpoint(&self, ctx: &LoadContext) -> Result<()> {

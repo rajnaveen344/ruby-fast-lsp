@@ -13,11 +13,11 @@ use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::server::RubyLanguageServer;
 use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, SourceFileSnapshot};
+use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::RubyDocument;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tower_lsp::lsp_types::{Diagnostic, Url};
+use tower_lsp::lsp_types::Url;
 
 impl RubyLanguageServer {
     /// The registered project rooted exactly at `root`.
@@ -146,21 +146,14 @@ impl LoadSink for RubyLanguageServer {
         self.report_project_indexing_progress(root, generation, completed, total);
     }
 
-    fn document_lock(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>> {
-        self.document_semantic_lock(uri)
-    }
-
-    fn append_external_linter_diagnostics(
+    async fn project_facts_ready(
         &self,
-        uri: &Url,
-        snapshot: Option<SourceFileSnapshot>,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        self.append_external_linter_diagnostics_for_snapshot(uri, snapshot, diagnostics);
-    }
-
-    fn queue_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
-        RubyLanguageServer::queue_diagnostics(self, uri, diagnostics);
+        root: &Path,
+        engine: &Arc<RwLock<AnalysisEngine>>,
+        run: Option<&IndexingRun>,
+    ) -> IndexingRunState {
+        self.publish_project_facts_diagnostics(root, engine, run)
+            .await
     }
 
     fn clear_jruby_import_provider(&self, root: &Path) {
