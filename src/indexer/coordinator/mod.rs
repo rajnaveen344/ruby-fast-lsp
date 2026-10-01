@@ -2,10 +2,10 @@ use crate::config::runtime::{EffectiveRuntimeSelection, SelectedRuntimeDescripto
 use crate::config::{IndexingConfig, RubyFastLspConfig};
 use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::file_processor::FileProcessor;
-use crate::indexer::indexer_gem::{discover_locked_java_gem_roots, IndexerGem};
-use crate::indexer::indexer_project::IndexerProject;
-use crate::indexer::indexer_stdlib::{IndexerStdlib, RuntimeStdlibPathKey, RuntimeStdlibPaths};
 use crate::indexer::require_paths::RequireFeatureIndex;
+use crate::indexer::sources::gems::{discover_locked_java_gem_roots, IndexerGem};
+use crate::indexer::sources::project::IndexerProject;
+use crate::indexer::sources::stdlib::{IndexerStdlib, RuntimeStdlibPathKey, RuntimeStdlibPaths};
 
 use crate::indexer::version::ruby_version::{RubyImplementation, RubyVersion};
 #[cfg(test)]
@@ -3175,7 +3175,7 @@ mod coordinator_integration_tests {
     #[test]
     fn cached_java_artifact_metadata_is_reused_without_cross_project_path_leakage() {
         let fixture = TempDir::new().unwrap();
-        let digits = include_str!("../../crates/jvm-metadata/fixtures/minimal_class.hex")
+        let digits = include_str!("../../../crates/jvm-metadata/fixtures/minimal_class.hex")
             .bytes()
             .filter(|byte| !byte.is_ascii_whitespace())
             .collect::<Vec<_>>();
@@ -3268,7 +3268,7 @@ mod coordinator_integration_tests {
     #[test]
     fn parallel_cached_java_products_preserve_classpath_winner_order() {
         let fixture = TempDir::new().unwrap();
-        let digits = include_str!("../../crates/jvm-metadata/fixtures/minimal_class.hex")
+        let digits = include_str!("../../../crates/jvm-metadata/fixtures/minimal_class.hex")
             .bytes()
             .filter(|byte| !byte.is_ascii_whitespace())
             .collect::<Vec<_>>();
@@ -3931,7 +3931,7 @@ mod coordinator_integration_tests {
             .expect("real JDK java executable must live below JAVA_HOME/bin")
             .to_path_buf();
         let rich_class = decode_hex(include_str!(
-            "../../crates/jvm-metadata/fixtures/rich_fixture.class.hex"
+            "../../../crates/jvm-metadata/fixtures/rich_fixture.class.hex"
         ));
         write_jar(
             &root.join("lib/rich.jar"),
@@ -4047,7 +4047,7 @@ mod coordinator_integration_tests {
         fs::write(jruby_home.join("bin/jruby"), b"fixture").unwrap();
         fs::write(java_home.join("release"), "JAVA_VERSION=\"17.0.12\"\n").unwrap();
         let demo_class = decode_hex(include_str!(
-            "../../crates/jvm-metadata/fixtures/minimal_class.hex"
+            "../../../crates/jvm-metadata/fixtures/minimal_class.hex"
         ));
         write_jar(
             &root.join("lib/runtime.jar"),
@@ -4055,7 +4055,7 @@ mod coordinator_integration_tests {
             &demo_class,
         );
         let rich_class = decode_hex(include_str!(
-            "../../crates/jvm-metadata/fixtures/rich_fixture.class.hex"
+            "../../../crates/jvm-metadata/fixtures/rich_fixture.class.hex"
         ));
         write_jar(
             &root.join("lib/rich.jar"),
@@ -4063,7 +4063,7 @@ mod coordinator_integration_tests {
             &rich_class,
         );
         let rich_source =
-            include_str!("../../crates/jvm-metadata/fixtures/sources/RichFixture.java");
+            include_str!("../../../crates/jvm-metadata/fixtures/sources/RichFixture.java");
         write_jar(
             &root.join("lib/rich-sources.jar"),
             "fixtures/RichFixture.java",
@@ -4425,13 +4425,14 @@ mod coordinator_integration_tests {
             &root.join("lib/rich.jar"),
             "fixtures/RichFixture.class",
             &decode_hex(include_str!(
-                "../../crates/jvm-metadata/fixtures/rich_fixture.class.hex"
+                "../../../crates/jvm-metadata/fixtures/rich_fixture.class.hex"
             )),
         );
         write_jar(
             &root.join("lib/rich-sources.jar"),
             "fixtures/RichFixture.java",
-            include_str!("../../crates/jvm-metadata/fixtures/sources/RichFixture.java").as_bytes(),
+            include_str!("../../../crates/jvm-metadata/fixtures/sources/RichFixture.java")
+                .as_bytes(),
         );
 
         let root_string = format!("{}/", root.to_string_lossy());

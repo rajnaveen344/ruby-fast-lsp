@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::Url;
 
 fn new_orphan_analysis_engine() -> Arc<RwLock<AnalysisEngine>> {
     let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
-    crate::indexer::indexer_stdlib::IndexerStdlib::new(
+    crate::indexer::sources::stdlib::IndexerStdlib::new(
         crate::indexer::file_processor::FileProcessor::new(),
         None,
     )
@@ -428,7 +428,7 @@ impl RubyLanguageServer {
             )
         })?;
         let explicit_roots = self.config.lock().indexing.project_roots.clone();
-        let roots = crate::indexer::project_roots::discover_project_roots_with_explicit(
+        let roots = crate::indexer::sources::project::roots::discover_project_roots_with_explicit(
             &folder_path,
             &explicit_roots,
         )?;

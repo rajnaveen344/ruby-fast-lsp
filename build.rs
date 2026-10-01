@@ -11,9 +11,9 @@ const GEM_FACT_PRODUCER_TREES: &[&str] = &[
     "crates/ruby-analysis/src",
     "crates/rbs-parser/src",
     "crates/rbs-parser/rbs_types",
+    "src/indexer/file_processor",
 ];
 const GEM_FACT_PRODUCER_FILES: &[&str] = &[
-    "src/indexer/file_processor.rs",
     "src/runtime/jruby/imports.rs",
     "src/runtime/jruby/java_catalog.rs",
 ];

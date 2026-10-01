@@ -920,7 +920,7 @@ mod tests {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "indexer::indexer_stdlib::tests::bundled_jruby_core_seed_is_cross_process_stable",
+                "indexer::sources::stdlib::tests::bundled_jruby_core_seed_is_cross_process_stable",
                 "--nocapture",
             ])
             .env(CHILD_ENV, "1")

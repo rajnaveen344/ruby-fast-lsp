@@ -42,13 +42,13 @@ fn new_gem_dependency_cache() -> crate::single_flight::BoundedSingleFlightCache<
 }
 
 fn new_runtime_stdlib_path_cache() -> crate::single_flight::BoundedSingleFlightCache<
-    crate::indexer::indexer_stdlib::RuntimeStdlibPathKey,
-    crate::indexer::indexer_stdlib::RuntimeStdlibPaths,
+    crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
+    crate::indexer::sources::stdlib::RuntimeStdlibPaths,
 > {
     crate::single_flight::BoundedSingleFlightCache::new(
         RUNTIME_STDLIB_PATH_CACHE_MAX_ENTRIES,
         RUNTIME_STDLIB_PATH_CACHE_MAX_WEIGHT_BYTES,
-        crate::indexer::indexer_stdlib::RuntimeStdlibPaths::estimated_weight_bytes,
+        crate::indexer::sources::stdlib::RuntimeStdlibPaths::estimated_weight_bytes,
     )
 }
 
@@ -78,8 +78,8 @@ pub(crate) struct RuntimeProducts {
     pub(super) discovered_runtimes: Arc<tokio::sync::OnceCell<Vec<DiscoveredRuntime>>>,
     core_templates: crate::single_flight::BoundedSingleFlightCache<String, AnalysisEngine>,
     stdlib_paths: crate::single_flight::BoundedSingleFlightCache<
-        crate::indexer::indexer_stdlib::RuntimeStdlibPathKey,
-        crate::indexer::indexer_stdlib::RuntimeStdlibPaths,
+        crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
+        crate::indexer::sources::stdlib::RuntimeStdlibPaths,
     >,
     gem_dependencies: crate::single_flight::BoundedSingleFlightCache<
         crate::dependency_product::GemDependencyProductKey,
@@ -140,8 +140,8 @@ impl RuntimeProducts {
     pub(crate) fn stdlib_paths(
         &self,
     ) -> &crate::single_flight::BoundedSingleFlightCache<
-        crate::indexer::indexer_stdlib::RuntimeStdlibPathKey,
-        crate::indexer::indexer_stdlib::RuntimeStdlibPaths,
+        crate::indexer::sources::stdlib::RuntimeStdlibPathKey,
+        crate::indexer::sources::stdlib::RuntimeStdlibPaths,
     > {
         &self.stdlib_paths
     }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 pub(crate) const MAX_PENDING_NAVIGATION_DEMAND_KEYS: usize =
-    crate::indexer::indexer_project::MAX_PROJECT_NAVIGATION_DEMAND_KEYS;
+    crate::indexer::sources::project::MAX_PROJECT_NAVIGATION_DEMAND_KEYS;
 
 pub(crate) fn normalize_navigation_key(name: &str) -> String {
     name.chars()

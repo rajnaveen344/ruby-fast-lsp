@@ -8,9 +8,9 @@
 //! - **analysis engine**: The central fact graph storing indexed information
 //! - **`file_processor`**: Shared file processing logic (parsing, visitors, diagnostics)
 //! - **`coordinator`**: Orchestrates complete fact collection and diagnostics
-//! - **`indexer_project`**: Handles project-specific file discovery and indexing
-//! - **`indexer_stdlib`**: Handles Ruby standard library indexing
-//! - **`indexer_gem`**: Handles gem discovery and indexing
+//! - **`sources::project`**: Handles project-specific file discovery and indexing
+//! - **`sources::stdlib`**: Handles Ruby standard library indexing
+//! - **`sources::gems`**: Handles gem discovery and indexing
 //!
 //! ## Supporting Modules
 //!
@@ -19,12 +19,9 @@
 
 pub mod coordinator;
 pub mod file_processor;
-pub mod indexer_gem;
-pub mod indexer_project;
-pub mod indexer_stdlib;
 pub mod interner;
-pub mod project_roots;
 pub mod require_paths;
+pub mod sources;
 
 #[cfg(test)]
 pub(crate) mod test_schedule;

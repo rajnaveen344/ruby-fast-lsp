@@ -18,6 +18,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::Url;
 
+pub mod roots;
+
 pub(crate) const MAX_PROJECT_NAVIGATION_DEMAND_KEYS: usize = 16;
 const MAX_PROJECT_NAVIGATION_CANDIDATES_PER_KEY: usize = 8;
 const MAX_PROJECT_NAVIGATION_DEMAND_FILES: usize = 64;
