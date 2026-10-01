@@ -240,3 +240,12 @@ async fn goto_keyword_rest_and_block_parameter_definitions() {
     check("def run(**<def>options</def>)\n  optio$0ns\nend\n").await;
     check("def run(&<def>callback</def>)\n  callba$0ck\nend\n").await;
 }
+
+/// Definition ranges cover the name, not the `*` sigil or the default value.
+#[tokio::test]
+async fn goto_optional_and_rest_parameter_definitions_cover_only_names() {
+    check("def run(<def>opt</def> = 1)\n  op$0t\nend\n").await;
+    check("def run(*<def>rest</def>)\n  res$0t\nend\n").await;
+    check("[1].each do |<def>item</def> = 0|\n  ite$0m\nend\n").await;
+    check("[1].each do |*<def>items</def>|\n  item$0s\nend\n").await;
+}

@@ -20,19 +20,17 @@ impl IdentifierVisitor {
 
         for optional in node.optionals().iter() {
             if let Some(param) = optional.as_optional_parameter_node() {
-                // A cursor in the default value belongs to that expression, so
-                // constants there are resolved by their own visitors.
-                if !self.is_position_in_location(&param.value().location())
-                    && self.is_position_in_location(&param.location())
-                {
+                // Match only the name; a cursor in the default value belongs to
+                // that expression's own visitors.
+                if self.is_position_in_location(&param.name_loc()) {
                     self.set_parameter_definition(param.name().as_slice());
                 }
             }
         }
 
         if let Some(param) = node.rest().and_then(|rest| rest.as_rest_parameter_node()) {
-            if let Some(name) = param.name() {
-                if self.is_position_in_location(&param.location()) {
+            if let (Some(name), Some(name_loc)) = (param.name(), param.name_loc()) {
+                if self.is_position_in_location(&name_loc) {
                     self.set_parameter_definition(name.as_slice());
                 }
             }

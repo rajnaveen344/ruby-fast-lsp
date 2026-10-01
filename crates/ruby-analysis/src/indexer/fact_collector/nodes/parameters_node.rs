@@ -40,12 +40,9 @@ impl FactCollector {
         for optional in optionals.iter() {
             if let Some(param) = optional.as_optional_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                self.add_parameter_to_index(&param_name, &param.location());
-                self.assign_current_block_parameter_type(
-                    &param_name,
-                    &param.location(),
-                    positional_index,
-                );
+                let name_loc = param.name_loc();
+                self.add_parameter_to_index(&param_name, &name_loc);
+                self.assign_current_block_parameter_type(&param_name, &name_loc, positional_index);
                 positional_index += 1;
             }
         }
@@ -53,12 +50,12 @@ impl FactCollector {
         // Process rest parameter
         if let Some(rest) = node.rest() {
             if let Some(param) = rest.as_rest_parameter_node() {
-                if let Some(name) = param.name() {
+                if let (Some(name), Some(name_loc)) = (param.name(), param.name_loc()) {
                     let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
-                    self.add_parameter_to_index(&param_name, &param.location());
+                    self.add_parameter_to_index(&param_name, &name_loc);
                     self.assign_current_block_parameter_type(
                         &param_name,
-                        &param.location(),
+                        &name_loc,
                         positional_index,
                     );
                     positional_index += 1;

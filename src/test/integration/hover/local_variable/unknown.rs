@@ -42,3 +42,11 @@ end
     )
     .await;
 }
+
+/// A default value is only used when the caller omits the argument, so it does
+/// not prove the parameter type.
+#[tokio::test]
+async fn parameter_default_value_does_not_prove_the_parameter_type() {
+    check("def run(opt = 1)\n  op<hover label=\"?\">t\nend\n").await;
+    check("def run(key: 1)\n  ke<hover label=\"?\">y\nend\n").await;
+}

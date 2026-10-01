@@ -381,3 +381,10 @@ end
     )
     .await;
 }
+
+/// Renaming optional and rest parameters edits only their names.
+#[tokio::test]
+async fn rename_optional_and_rest_parameters() {
+    check("def run(<rename to=\"limit\">opt</rename> = 1)\n  <rename>opt</rename>\nend\n").await;
+    check("def run(*<rename to=\"values\">rest</rename>)\n  <rename>rest</rename>\nend\n").await;
+}
