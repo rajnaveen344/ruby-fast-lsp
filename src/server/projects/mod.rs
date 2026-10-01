@@ -593,7 +593,7 @@ impl ProjectRegistry {
             }
             let mut engine = analysis_engine.write();
             if let Some(file_id) = engine.file_id(&path) {
-                engine.replace_facts(
+                engine.update(
                     file_id,
                     ruby_analysis::core::FileAnalysis::default(),
                     ruby_analysis::engine::ResolveMode::Immediate,

@@ -324,7 +324,7 @@ declarations, and exact semantic targets. The domain contract expresses:
 The host must validate the context before entering the block. The fact
 collector pushes it for the block traversal and pops it on every exit path.
 Accepted declarations, mixins, references, and graph edges still become
-ordinary per-file facts and enter the engine only through `replace_facts`.
+ordinary per-file facts and enter the engine only through `update`.
 Extensions do not perform method lookup or mutate scope trackers directly.
 
 Source-scoped owner identity is stable for the same extension, source file, and

@@ -255,7 +255,7 @@ fn rebound_templates_preserve_navigation_without_sharing_file_identity() {
         content: "class CachedWidget; end".to_string(),
         kind: SourceKind::Gem,
     });
-    first.replace_facts(
+    first.update(
         first_file,
         template.instantiate(first_file),
         ResolveMode::Immediate,
@@ -272,7 +272,7 @@ fn rebound_templates_preserve_navigation_without_sharing_file_identity() {
         content: "class CachedWidget; end".to_string(),
         kind: SourceKind::Gem,
     });
-    second.replace_facts(
+    second.update(
         second_file,
         template.instantiate(second_file),
         ResolveMode::Immediate,

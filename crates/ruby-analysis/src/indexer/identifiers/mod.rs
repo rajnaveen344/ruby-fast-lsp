@@ -461,7 +461,7 @@ impl Visit<'_> for IdentifierVisitor {
             let implicit_kind = context.implicit_receiver.namespace_kind().expect_invariant(
                 "execution implicit receiver is not a namespace",
                 "engine ingestion validates execution targets",
-                "keep ExecutionContextFact namespace validation in replace_facts",
+                "keep ExecutionContextFact namespace validation in update",
             );
             let definition_kind = context
                 .method_definition_owner
@@ -469,7 +469,7 @@ impl Visit<'_> for IdentifierVisitor {
                 .expect_invariant(
                     "execution method owner is not a namespace",
                     "engine ingestion validates execution targets",
-                    "keep ExecutionContextFact namespace validation in replace_facts",
+                    "keep ExecutionContextFact namespace validation in update",
                 );
             self.scope_tracker.push_block_execution_context(
                 context.implicit_receiver.namespace_parts(),

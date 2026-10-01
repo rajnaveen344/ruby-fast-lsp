@@ -46,7 +46,7 @@ fn fixture() -> (Project, SourceFileId, TextRange, TextRange, FileAnalysis) {
 #[test]
 fn exact_call_receiver_type_keeps_unknown_and_union_proof_barriers() {
     let (mut engine, file_id, receiver, message, facts) = fixture();
-    engine.replace_facts(file_id, facts.clone(), ResolveMode::Deferred);
+    engine.update(file_id, facts.clone(), ResolveMode::Deferred);
     assert_eq!(
         engine.query().exact_call_receiver_type(message, receiver),
         Some(RubyType::nil_class())
@@ -59,14 +59,14 @@ fn exact_call_receiver_type_keeps_unknown_and_union_proof_barriers() {
         },
         ..facts.clone()
     };
-    engine.replace_facts(file_id, unknown, ResolveMode::Deferred);
+    engine.update(file_id, unknown, ResolveMode::Deferred);
     assert_eq!(
         engine.query().exact_call_receiver_type(message, receiver),
         Some(RubyType::Unknown)
     );
 
     let union = RubyType::union(vec![RubyType::nil_class(), RubyType::string()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             local_read_types: vec![(receiver, union.clone())].into_boxed_slice(),
@@ -83,7 +83,7 @@ fn exact_call_receiver_type_keeps_unknown_and_union_proof_barriers() {
 #[test]
 fn exact_call_receiver_type_rejects_other_message_and_receiver_ranges() {
     let (mut engine, file_id, receiver, message, facts) = fixture();
-    engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+    engine.update(file_id, facts, ResolveMode::Deferred);
     assert_eq!(
         engine
             .query()

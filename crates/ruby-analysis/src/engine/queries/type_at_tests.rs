@@ -36,7 +36,7 @@ fn file_scoped_queries_follow_replacement_without_losing_other_files() {
             content: source.into(),
             kind: crate::core::SourceKind::Project,
         });
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 types: vec![TypeFact::new(
@@ -67,7 +67,7 @@ fn file_scoped_queries_follow_replacement_without_losing_other_files() {
         kind: crate::core::SourceKind::Project,
     });
     assert_eq!(edited_id, file_ids[0]);
-    engine.replace_facts(edited_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(edited_id, FileAnalysis::default(), ResolveMode::Immediate);
 
     assert_eq!(constant_type_at(&engine, &constant, edited_id, 3), None,);
     assert_eq!(
@@ -93,7 +93,7 @@ fn query_uses_domain_byte_offsets_without_source_or_protocol_coordinates() {
         range,
         TypeProvenance::Inferred,
     );
-    engine.replace_facts(
+    engine.update(
         file_id,
         crate::core::FileAnalysis {
             types: vec![fact],

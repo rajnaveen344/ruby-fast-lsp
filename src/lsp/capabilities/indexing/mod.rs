@@ -870,7 +870,7 @@ fn clear_file_facts_if_kind(
         content: String::new(),
         kind: expected_kind,
     });
-    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     true
 }
 

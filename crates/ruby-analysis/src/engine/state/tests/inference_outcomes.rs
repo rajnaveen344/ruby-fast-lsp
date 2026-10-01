@@ -9,7 +9,7 @@ fn type_at_reads_engine_owned_store() {
     let file_id = register_project_file(&mut engine, "app/user.rb", "A = 1");
     let subject = constant_subject("A");
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             types: vec![TypeFact::new(
@@ -35,7 +35,7 @@ fn expression_query_preserves_an_exact_unknown_proof_barrier() {
     let file_id = register_project_file(&mut engine, "app/user.rb", "@value");
     let range = engine.text_range(file_id, 0, 6);
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             types: vec![TypeFact::new(
@@ -67,7 +67,7 @@ fn expression_query_preserves_an_exact_unknown_proof_barrier() {
         Some(UnknownReason::NoReachingAssignment)
     );
 
-    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(engine.query().expression_unknown_reason(range), None);
 }
 
@@ -77,7 +77,7 @@ fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
     let file_id = register_project_file(&mut engine, "app/user.rb", "value");
     let range = engine.text_range(file_id, 0, 5);
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             inference: InferenceEvidence {
@@ -108,7 +108,7 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
     let range = engine.text_range(file_id, 0, 5);
     let empty_fingerprint = engine.semantic_result_fingerprint();
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             local_read_types: vec![(range, RubyType::string())].into_boxed_slice(),
@@ -131,7 +131,7 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
     );
     assert_ne!(engine.semantic_result_fingerprint(), empty_fingerprint);
 
-    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(engine.query().expression_type_at(file_id, 2), None);
     assert_eq!(
         engine.query().local_read_types_in_file(file_id),
@@ -147,7 +147,7 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
     let second_ref = register_project_file(&mut engine, "app/second.rb", "User");
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -165,7 +165,7 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
         ResolveMode::Deferred,
     );
     for file_id in [first_ref, second_ref] {
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 reference_candidates: vec![ReferenceCandidate::constant(
@@ -205,7 +205,7 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
     let method_fqn = FullyQualifiedName::method(user.namespace_parts(), method);
     let method_range = TextRange::new(def_file, 12, 28);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -261,7 +261,7 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
             )
         })
         .collect();
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: candidates,
@@ -320,7 +320,7 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
         (first_def, TextRange::new(first_def, 12, 28)),
         (second_def, TextRange::new(second_def, 12, 33)),
     ] {
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
@@ -377,7 +377,7 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
             )
         })
         .collect();
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: candidates,
@@ -431,7 +431,7 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
     let child_def = TextRange::new(def_file, 12, 30);
     let name_def = TextRange::new(def_file, 32, 50);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -465,7 +465,7 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
     let inner_call = TextRange::new(ref_file, 0, 10);
     let outer_call = TextRange::new(ref_file, 0, 15);
     let missing_owner = vec![RubyConstant::new("MissingOwner").unwrap()];
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: vec![
@@ -537,7 +537,7 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
     let kept_range = TextRange::new(ref_file, 0, 6);
     let name_call = TextRange::new(ref_file, 7, 16);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -560,7 +560,7 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             inference: InferenceEvidence {
@@ -620,7 +620,7 @@ fn duplicate_call_expression_range_is_an_invariant_violation() {
     let method_range = TextRange::new(def_file, 12, 28);
     let call_range = TextRange::new(ref_file, 0, 9);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -643,7 +643,7 @@ fn duplicate_call_expression_range_is_an_invariant_violation() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: vec![
@@ -681,7 +681,7 @@ fn resolve_files_materializes_only_selected_open_document_candidates() {
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
 
     for file_id in [first_ref, second_ref] {
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 reference_candidates: vec![ReferenceCandidate::constant(
@@ -694,7 +694,7 @@ fn resolve_files_materializes_only_selected_open_document_candidates() {
             ResolveMode::Deferred,
         );
     }
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -738,7 +738,7 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
     let known_range = TextRange::new(known_file, 16, 35);
     let unresolved_range = TextRange::new(unresolved_file, 16, 42);
 
-    engine.replace_facts(
+    engine.update(
         known_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -757,7 +757,7 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         unresolved_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -819,7 +819,7 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
     let stub_method = FullyQualifiedName::method(basic_object.namespace_parts(), method_missing);
     let dynamic_method = FullyQualifiedName::method(dynamic.namespace_parts(), method_missing);
 
-    engine.replace_facts(
+    engine.update(
         stub_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -842,7 +842,7 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         project_file,
         FileAnalysis {
             graph_nodes: vec![
@@ -916,7 +916,7 @@ fn expression_end_query_treats_exact_unknown_call_outcome_as_authoritative() {
     let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "consumer.rb", "payload[:name]\n");
     let range = TextRange::new(file_id, 0, 14);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             types: vec![TypeFact::new(

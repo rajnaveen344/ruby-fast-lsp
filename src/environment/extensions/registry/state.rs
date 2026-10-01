@@ -392,7 +392,7 @@ impl ExtensionRegistry {
                 facts.methods.push(MethodFact::new(fqn, owner, range));
             }
         }
-        engine_guard.replace_facts(file_id, facts, ResolveMode::Deferred);
+        engine_guard.update(file_id, facts, ResolveMode::Deferred);
         drop(engine_guard);
         if !seeded_engines.iter().any(|seeded| {
             seeded

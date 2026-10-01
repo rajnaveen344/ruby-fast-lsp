@@ -274,7 +274,7 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
     let kernel = RubyConstant::new("Kernel").expect("test constant must be valid");
     let puts = RubyMethod::new("puts").expect("test method must be valid");
     let puts_fqn = FullyQualifiedName::method(vec![kernel], puts);
-    server.orphan_engine().write().replace_facts(
+    server.orphan_engine().write().update(
         file_id,
         FileAnalysis {
             methods: vec![MethodFact::new(

@@ -21,7 +21,7 @@ fn union_method_completion_requires_every_receiver_member() {
     let beta_shared = FullyQualifiedName::method(beta.namespace_parts(), shared);
     let range = crate::core::TextRange::new(file_id, 0, 1);
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![
@@ -139,7 +139,7 @@ fn method_rename_rejects_external_definition_even_with_exact_name_range() {
         crate::core::NamespaceKind::Instance,
     );
     let method = RubyMethod::new("name").unwrap();
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             methods: vec![MethodFact::new(
@@ -169,7 +169,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
     let user_name = RubyConstant::new("User").unwrap();
     let user = FullyQualifiedName::namespace(vec![user_name]);
 
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
@@ -188,7 +188,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
         .iter()
         .any(|fact| fact.code == "unresolved-constant"));
 
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -224,7 +224,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
     let user_range = TextRange::new(user_file, 0, 10);
     let account_range = TextRange::new(account_file, 0, 13);
 
-    engine.replace_facts(
+    engine.update(
         user_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(user.clone(), SymbolKind::Class, user_range)],
@@ -232,7 +232,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         account_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -245,7 +245,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
         ResolveMode::Immediate,
     );
     let reference_range = TextRange::new(source_file, 7, 12);
-    engine.replace_facts(
+    engine.update(
         source_file,
         FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::resolved(
@@ -263,7 +263,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
         vec![user_range]
     );
 
-    engine.replace_facts(
+    engine.update(
         source_file,
         FileAnalysis {
             reference_candidates: vec![
@@ -301,7 +301,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
     let method_range = TextRange::new(model_file, 20, 49);
     let reference_range = TextRange::new(callback_file, 13, 31);
 
-    engine.replace_facts(
+    engine.update(
         model_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -319,7 +319,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         callback_file,
         FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method_target(
@@ -347,7 +347,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
         "exact callback target must participate in ordinary method references"
     );
 
-    engine.replace_facts(
+    engine.update(
         callback_file,
         FileAnalysis::default(),
         ResolveMode::Immediate,
@@ -390,7 +390,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
     let signature_range = TextRange::new(signature_file, 0, 19);
     let int_range = TextRange::new(implementation_file, 0, 47);
     let string_range = TextRange::new(implementation_file, 48, 87);
-    engine.replace_facts(
+    engine.update(
         signature_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -410,7 +410,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         implementation_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -441,7 +441,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
         ResolveMode::Immediate,
     );
     let reference_range = TextRange::new(source_file, 16, 20);
-    engine.replace_facts(
+    engine.update(
         source_file,
         FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method(
@@ -478,7 +478,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
         "a verified JVM overload range must outrank same-named methods and signatures"
     );
 
-    engine.replace_facts(
+    engine.update(
         implementation_file,
         FileAnalysis::default(),
         ResolveMode::Immediate,
@@ -512,7 +512,7 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
     );
     let import_range = TextRange::new(import_file, 12, 41);
     let implementation_range = TextRange::new(implementation_file, 0, 23);
-    engine.replace_facts(
+    engine.update(
         import_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -530,7 +530,7 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         implementation_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -562,7 +562,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
     let method = RubyMethod::new("name").unwrap();
     let method_fqn = FullyQualifiedName::method(user.namespace_parts(), method);
 
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -574,7 +574,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::method(
@@ -611,7 +611,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         .iter()
         .any(|fact| fact.code == "unresolved-method"));
 
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -653,7 +653,7 @@ fn constant_rename_rejects_external_only_definition() {
         kind: SourceKind::Gem,
     });
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             symbols: vec![
@@ -690,7 +690,7 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
     let signature_range = TextRange::new(signature_file, 15, 39);
     let implementation_range = TextRange::new(implementation_file, 15, 32);
 
-    engine.replace_facts(
+    engine.update(
         signature_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -717,7 +717,7 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
         },
         ResolveMode::Deferred,
     );
-    engine.replace_facts(
+    engine.update(
         implementation_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -779,7 +779,7 @@ fn inherited_method_callee_keeps_the_defining_parent_owner() {
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     let method = RubyMethod::new("value").unwrap();
     let definition_range = TextRange::new(file_id, 15, 31);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![
@@ -831,7 +831,7 @@ fn public_lookup_of_a_private_method_is_receiver_only() {
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let method = RubyMethod::new("secret").unwrap();
     let definition_range = TextRange::new(file_id, 13, 24);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(

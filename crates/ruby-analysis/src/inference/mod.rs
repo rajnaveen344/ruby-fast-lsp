@@ -128,7 +128,7 @@
 //! - bounding loop and recursive solving rather than depending on traversal
 //!   luck;
 //! - storing evidence with its owning file and removing it through the same
-//!   `register_file -> replace_facts -> resolve` lifecycle as other facts; and
+//!   `register_file -> update -> resolve` lifecycle as other facts; and
 //! - reusing compact bindings/equations instead of reparsing or walking Prism
 //!   once per consumer.
 //!

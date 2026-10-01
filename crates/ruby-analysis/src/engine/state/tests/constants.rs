@@ -8,7 +8,7 @@ fn namespace_target_exists_accepts_interned_instance_without_a_sibling_declarati
     let file_id = register_project_file(&mut engine, "lib/user.rb", "class User; end\n");
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -35,7 +35,7 @@ fn namespace_target_exists_accepts_singleton_when_instance_is_absent() {
     let instance = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let singleton =
         FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -61,7 +61,7 @@ fn namespace_target_exists_accepts_a_value_constant_without_a_namespace_node() {
     let file_id = register_project_file(&mut engine, "lib/status.rb", "STATUS = 1\n");
     let constant = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
     let as_namespace = FullyQualifiedName::namespace(vec![RubyConstant::new("STATUS").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -87,7 +87,7 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
     let def_file = register_project_file(&mut engine, "lib/status.rb", "STATUS = 1\n");
     let ref_file = register_project_file(&mut engine, "lib/use_status.rb", "STATUS\n");
     let status = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -99,7 +99,7 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
@@ -142,7 +142,7 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
         RubyConstant::new("Outer").unwrap(),
         RubyConstant::new("C").unwrap(),
     ]);
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             symbols: vec![
@@ -184,7 +184,7 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(
@@ -222,7 +222,7 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
         RubyConstant::new("Outer").unwrap(),
         RubyConstant::new("C").unwrap(),
     ]);
-    engine.replace_facts(
+    engine.update(
         def_file,
         FileAnalysis {
             symbols: vec![
@@ -254,7 +254,7 @@ fn constant_reference_walks_out_to_an_outer_value_constant() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         ref_file,
         FileAnalysis {
             reference_candidates: vec![ReferenceCandidate::constant(

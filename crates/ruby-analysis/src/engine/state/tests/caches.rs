@@ -29,7 +29,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
         )],
         ..Default::default()
     };
-    engine.replace_facts(file_id, facts(RubyType::string()), ResolveMode::Immediate);
+    engine.update(file_id, facts(RubyType::string()), ResolveMode::Immediate);
     let cache = AnalysisQueryCache::default();
 
     assert_eq!(
@@ -51,7 +51,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
     );
     assert_eq!(cache.valid_entry_counts_for_test(), (1, 1, 0));
 
-    engine.replace_facts(file_id, facts(RubyType::integer()), ResolveMode::Immediate);
+    engine.update(file_id, facts(RubyType::integer()), ResolveMode::Immediate);
     assert_eq!(
         engine
             .query()
@@ -89,7 +89,7 @@ fn thread_local_method_return_cache_reuses_across_per_source_caches() {
     let method_name = RubyMethod::new("value").unwrap();
     let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
     let range = TextRange::new(file_id, 15, 34);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -148,7 +148,7 @@ fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
     let count_fqn = FullyQualifiedName::method(owner.namespace_parts(), count);
     let value_range = TextRange::new(file_id, 15, 34);
     let count_range = TextRange::new(file_id, 37, 50);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -216,7 +216,7 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
     let method_name = RubyMethod::new("value").unwrap();
     let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
     let range = TextRange::new(file_id, 15, 34);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -286,7 +286,7 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
     let child_method = FullyQualifiedName::method(child.namespace_parts(), method_name);
     let parent_range = TextRange::new(file_id, 15, 36);
     let child_range = TextRange::new(file_id, 70, 84);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![
@@ -361,7 +361,7 @@ fn resolved_method_callee_cache_is_bounded_per_source_collection() {
     let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/widget.rb", "class Widget; end\n");
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -412,7 +412,7 @@ fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
         methods: vec![MethodFact::new(method.clone(), owner.clone(), range)],
         ..Default::default()
     };
-    engine.replace_facts(file_id, facts(first_range), ResolveMode::Immediate);
+    engine.update(file_id, facts(first_range), ResolveMode::Immediate);
     let cache = AnalysisQueryCache::default();
 
     let uncached = engine
@@ -426,7 +426,7 @@ fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
     assert_eq!(uncached[0].range, first_range);
     assert_eq!(cache.valid_entry_counts_for_test(), (0, 0, 1));
 
-    engine.replace_facts(file_id, facts(second_range), ResolveMode::Immediate);
+    engine.update(file_id, facts(second_range), ResolveMode::Immediate);
     let replaced =
         engine
             .query()
@@ -448,7 +448,7 @@ fn method_signature_fact_cache_is_bounded_per_source_collection() {
     let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/widget.rb", "class Widget; end\n");
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -488,7 +488,7 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     let method = RubyMethod::new("value").unwrap();
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![
@@ -534,7 +534,7 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
         .is_some());
     assert_eq!(engine.valid_method_lookup_chain_cache_len_for_test(), 1);
 
-    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(
         engine.valid_method_lookup_chain_cache_len_for_test(),
         0,
@@ -552,7 +552,7 @@ fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
     );
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![
@@ -589,7 +589,7 @@ fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
         "repeated lookup of one owner must reuse the constructed MRO for the current engine identity"
     );
 
-    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     let after_replace = method_lookup_chain_uncached_construction_count();
     let replaced = method_lookup_chain(&engine, &child);
     assert!(
@@ -613,7 +613,7 @@ fn method_reference_chain_cache_returns_the_stored_chain_by_borrow() {
     );
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![
@@ -666,7 +666,7 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     let first = RubyMethod::new("first").unwrap();
     let second = RubyMethod::new("second").unwrap();
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![
@@ -759,7 +759,7 @@ fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
     );
     let method = RubyMethod::new("any_instance").unwrap();
     let range = TextRange::new(file_id, 0, 75);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![

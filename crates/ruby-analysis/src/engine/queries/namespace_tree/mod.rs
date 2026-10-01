@@ -621,7 +621,7 @@ mod tests {
         });
         let user = FullyQualifiedName::namespace(vec![constant("User")]);
         let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
-        engine.replace_facts(
+        engine.update(
             user_file,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
@@ -639,7 +639,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        engine.replace_facts(
+        engine.update(
             auth_file,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
@@ -699,7 +699,7 @@ mod tests {
         let user = FullyQualifiedName::namespace(vec![constant("User")]);
         let string = FullyQualifiedName::namespace(vec![constant("String")]);
         let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
-        engine.replace_facts(
+        engine.update(
             user_file,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
@@ -711,7 +711,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        engine.replace_facts(
+        engine.update(
             string_file,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
@@ -723,7 +723,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        engine.replace_facts(
+        engine.update(
             auth_file,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
@@ -768,7 +768,7 @@ mod tests {
             LibraryPackageId::new("activesupport", "7.1.0"),
         );
         let string = FullyQualifiedName::namespace(vec![constant("String")]);
-        engine.replace_facts(
+        engine.update(
             stub_string,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
@@ -780,7 +780,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        engine.replace_facts(
+        engine.update(
             as_string,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(
@@ -823,7 +823,7 @@ mod tests {
             constant("Platform"),
             constant("API"),
         ]);
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 graph_nodes: vec![
@@ -868,7 +868,7 @@ mod tests {
             GeneratedOwnerId::new("rspec-ruby", "file:///tmp/user_spec.rb", "group:0:0")
                 .expect("test generated owner identity must be valid"),
         )]);
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 graph_nodes: vec![GraphNodeFact::new(

@@ -20,7 +20,7 @@ fn declaration(
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new(name).unwrap()]);
     let range = TextRange::new(file, 0, source.len() as u32);
     let method = RubyMethod::new("label").unwrap();
-    engine.replace_facts(
+    engine.update(
         file,
         FileAnalysis {
             symbols: vec![
@@ -85,7 +85,7 @@ fn definition_source_preference_is_shared_and_falls_back_after_removal() {
             query.method_definition_ranges(&owner, &RubyMethod::new("label").unwrap(), true, None),
             Some(vec![expected])
         );
-        engine.replace_facts(
+        engine.update(
             expected.file_id,
             FileAnalysis::default(),
             ResolveMode::Immediate,

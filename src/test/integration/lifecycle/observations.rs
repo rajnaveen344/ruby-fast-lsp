@@ -70,7 +70,7 @@ async fn diagnostic_observation_cannot_repair_missing_semantic_facts() {
         .unwrap()
         .read()
         .clone();
-    engine.write().replace_facts(
+    engine.write().update(
         document.analysis_file_id(),
         FileAnalysis::default(),
         ResolveMode::Immediate,
@@ -124,7 +124,7 @@ async fn tagged_diagnostic_observation_cannot_repair_missing_semantic_facts() {
         .unwrap()
         .read()
         .clone();
-    engine.write().replace_facts(
+    engine.write().update(
         document.analysis_file_id(),
         FileAnalysis::default(),
         ResolveMode::Immediate,
@@ -198,7 +198,7 @@ async fn opening_another_project_cannot_rebuild_or_publish_this_projects_state()
         .unwrap()
         .read()
         .clone();
-    engine.write().replace_facts(
+    engine.write().update(
         document.analysis_file_id(),
         FileAnalysis::default(),
         ResolveMode::Immediate,

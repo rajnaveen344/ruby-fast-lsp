@@ -374,7 +374,7 @@ product has three distinct layers:
 3. **Project binding** in `src/loader`: register the requesting project's exact
    source path/content/kind, instantiate every template with that engine's file
    ID, validate provenance and source precedence, then use the ordinary
-   `AnalysisEngine::replace_facts` lifecycle.
+   `AnalysisEngine::update` lifecycle.
 
 `ProjectNeutralFileFactsTemplate` is the first engine primitive for this
 boundary. It accepts only ranges owned by one template source and rejects
@@ -758,7 +758,7 @@ Capabilities use the Query Engine as their primary data service:
 - The Indexer builds an in-memory index for fast lookups
 - Document changes trigger targeted reindexing
 - Analysis is performed on-demand rather than eagerly
-- `AnalysisEngine::replace_facts` records a deterministic per-file semantic
+- `AnalysisEngine::update` records a deterministic per-file semantic
   export fingerprint and reports initial, body-only, or exported-API change.
 - Shared symbol/type subject indexes retain deterministic `(SourceFileId,
   range...)` ordering without re-sorting an existing bucket for every file.

@@ -291,7 +291,7 @@ mod tests {
             kind: SourceKind::Project,
         });
         let user = RubyConstant::new("User").expect("test constant must be valid");
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 symbols: vec![
@@ -350,7 +350,7 @@ mod tests {
             content: "class ExternalGem\nend".into(),
             kind: SourceKind::Gem,
         });
-        engine.replace_facts(
+        engine.update(
             gem_file,
             FileAnalysis {
                 symbols: vec![SymbolFact::new(
@@ -382,7 +382,7 @@ mod tests {
             GeneratedOwnerId::new("rspec-ruby", "file:///tmp/user_spec.rb", "group:0:0")
                 .expect("test generated owner identity must be valid"),
         );
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 symbols: vec![SymbolFact::new(

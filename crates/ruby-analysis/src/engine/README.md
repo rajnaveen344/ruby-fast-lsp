@@ -4,7 +4,7 @@
 `core::FileAnalysis` through `Project`, then read domain results through
 `View`. `AnalysisEngine` and `AnalysisQuery` remain as type aliases of
 `Project` and `View` until the remaining callers migrate. The engine has no
-per-file type of its own; `replace_facts` takes the core value.
+per-file type of its own; `update` takes the core value.
 Implementation folders are private to the engine.
 
 | Area | Responsibility |

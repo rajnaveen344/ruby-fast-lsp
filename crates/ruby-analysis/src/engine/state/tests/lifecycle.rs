@@ -72,7 +72,7 @@ fn stale_source_revision_cannot_replace_newer_file_facts() {
     );
 
     let utility = FullyQualifiedName::namespace(vec![RubyConstant::new("Utility").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -86,7 +86,7 @@ fn stale_source_revision_cannot_replace_newer_file_facts() {
     );
 
     assert_eq!(
-        engine.replace_facts_if_source_snapshot(
+        engine.update_if_snapshot(
             stale_snapshot,
             FileAnalysis::default(),
             ResolveMode::Immediate,
@@ -116,7 +116,7 @@ fn namespace_existence_tracks_graph_node_replacement() {
     let file_id = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -137,7 +137,7 @@ fn namespace_existence_tracks_graph_node_replacement() {
         )
         .unwrap()])));
 
-    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert!(!engine.query().namespace_exists(&user));
 }
 
@@ -147,7 +147,7 @@ fn replace_facts_removes_stale_type_facts() {
     let file_id = register_project_file(&mut engine, "app/user.rb", "A = 1");
     let subject = constant_subject("A");
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             types: vec![TypeFact::new(
@@ -160,7 +160,7 @@ fn replace_facts_removes_stale_type_facts() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             types: vec![TypeFact::new(
@@ -190,7 +190,7 @@ fn replace_facts_removes_stale_symbol_facts() {
     let file_id = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -202,7 +202,7 @@ fn replace_facts_removes_stale_symbol_facts() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -226,7 +226,7 @@ fn rejects_type_fact_for_unknown_file() {
     let mut engine = Project::new();
     let subject = constant_subject("A");
 
-    engine.replace_facts(
+    engine.update(
         SourceFileId(99),
         FileAnalysis {
             types: vec![TypeFact::new(
@@ -291,7 +291,7 @@ fn inference_telemetry_replaces_with_its_owning_file() {
     recursive.recursive_methods = 1;
     recursive.solver_iterations = 1;
 
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             inference: InferenceEvidence {
@@ -320,7 +320,7 @@ fn inference_telemetry_replaces_with_its_owning_file() {
     let concrete = TypeInferenceOutcome::proven(RubyType::string());
     let mut proven = InferenceTelemetry::default();
     proven.observe_method_return(&concrete);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             inference: InferenceEvidence {

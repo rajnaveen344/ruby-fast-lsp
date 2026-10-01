@@ -164,7 +164,7 @@ fn class_reindex_against_existing_class_reference_still_emits_graph_node() {
         FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
     let constant = FullyQualifiedName::constant(vec![RubyConstant::new("PlatformApp").unwrap()]);
     // Prior didOpen / earlier pass left the ordinary class ClassReference in the engine.
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(

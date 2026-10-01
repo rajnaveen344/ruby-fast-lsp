@@ -143,7 +143,7 @@ Delete this file when the last task is done. Git history keeps the record.
       `resolve`, and `view`.
   - [x] B4a. Rename `AnalysisEngine` to `Project` and `AnalysisQuery` to
         `View`; keep `pub type` aliases in `engine/mod.rs` until C1 lands.
-  - [ ] B4b. Rename `replace_facts` to `update` and
+  - [x] B4b. Rename `replace_facts` to `update` and
         `replace_facts_if_source_snapshot` to `update_if_snapshot`; migrate
         callers.
   - [ ] B4c. Add `Project::view()`; migrate `query()` callers and delete it.

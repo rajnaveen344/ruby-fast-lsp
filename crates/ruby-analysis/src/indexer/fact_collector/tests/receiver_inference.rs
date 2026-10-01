@@ -216,7 +216,7 @@ fn nested_value_constant_receiver_preserves_its_proven_type() {
         kind: SourceKind::Signature,
     });
     let argv = FullyQualifiedName::constant(vec![RubyConstant::new("ARGV").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         core_file_id,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -295,7 +295,7 @@ fn immediate_hash_literal_keeps_established_generic_read_methods() {
             "an immediate Hash literal has no pre-existing alias and may retain its established generic Hash read result"
         );
 
-    engine.write().replace_facts(
+    engine.write().update(
         file_id,
         FileAnalysis {
             inference: collector.inference_evidence(),

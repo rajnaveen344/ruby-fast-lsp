@@ -238,7 +238,7 @@ impl Project {
             .map(|(file_id, fingerprint)| {
                 let source = self.files.get(*file_id).expect_invariant(
                     "semantic export fingerprint has no registered source file",
-                    "replace_facts validates every file id before recording semantic state",
+                    "update validates every file id before recording semantic state",
                     "remove fingerprints through the same file lifecycle as source registration",
                 );
                 export_hash(|hasher| {

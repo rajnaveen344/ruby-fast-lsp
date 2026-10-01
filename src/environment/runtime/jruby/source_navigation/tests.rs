@@ -337,7 +337,7 @@ fn projects_only_metadata_verified_java_source_locations_into_engine_facts() {
         content: source.to_string(),
         kind: SourceKind::External,
     });
-    engine.replace_facts(
+    engine.update(
         file_id,
         java_source_navigation_facts(&class, &location, file_id),
         ResolveMode::Immediate,

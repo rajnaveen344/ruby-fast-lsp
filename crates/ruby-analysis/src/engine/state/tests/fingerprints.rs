@@ -20,18 +20,18 @@ fn semantic_export_fingerprint_distinguishes_body_and_api_edits() {
     };
 
     assert_eq!(
-        engine.replace_facts(file_id, facts(Vec::new(), 0), ResolveMode::Immediate),
+        engine.update(file_id, facts(Vec::new(), 0), ResolveMode::Immediate),
         SemanticChange::InitialIndex
     );
 
     register_project_file(&mut engine, "app/user.rb", "\n\ndef name; 'B'; end");
     assert_eq!(
-        engine.replace_facts(file_id, facts(Vec::new(), 2), ResolveMode::Immediate),
+        engine.update(file_id, facts(Vec::new(), 2), ResolveMode::Immediate),
         SemanticChange::BodyOnly
     );
 
     assert_eq!(
-        engine.replace_facts(
+        engine.update(
             file_id,
             facts(vec!["prefix".to_string()], 2),
             ResolveMode::Immediate,
@@ -51,7 +51,7 @@ fn semantic_context_fingerprint_is_path_independent_but_kind_and_fact_sensitive(
         });
         let owner = FullyQualifiedName::try_from("Shared").unwrap();
         let method = RubyMethod::new(method_name).unwrap();
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 methods: vec![MethodFact::new(
@@ -109,7 +109,7 @@ fn semantic_result_fingerprint_is_file_id_independent_and_reference_sensitive() 
         };
         let alpha = FullyQualifiedName::constant(vec![RubyConstant::new("Alpha").unwrap()]);
         let beta = FullyQualifiedName::constant(vec![RubyConstant::new("Beta").unwrap()]);
-        engine.replace_facts(
+        engine.update(
             definitions_file,
             FileAnalysis {
                 symbols: vec![
@@ -133,7 +133,7 @@ fn semantic_result_fingerprint_is_file_id_independent_and_reference_sensitive() 
             "Beta" => beta,
             other => panic!("unexpected semantic fingerprint fixture target {other}"),
         };
-        engine.replace_facts(
+        engine.update(
             call_file,
             FileAnalysis {
                 reference_candidates: vec![ReferenceCandidate::resolved(
@@ -187,7 +187,7 @@ fn semantic_context_fingerprint_is_cross_process_stable() {
         });
         let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
         let method = RubyMethod::new("call").unwrap();
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 symbols: vec![SymbolFact::new(

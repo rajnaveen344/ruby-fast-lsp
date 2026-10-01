@@ -70,7 +70,7 @@ let file_id = engine.register_file(SourceFileInput {
     kind: SourceKind::Project,
 });
 let analysis = AnalysisIndexer::new(file_id).index_source(source);
-engine.replace_facts(file_id, analysis, ResolveMode::Immediate);
+engine.update(file_id, analysis, ResolveMode::Immediate);
 
 assert_eq!(engine.query().symbol_facts_in_file(file_id).len(), 1);
 
@@ -81,13 +81,13 @@ let edited_id = engine.register_file(SourceFileInput {
     kind: SourceKind::Project,
 });
 assert_eq!(edited_id, file_id);
-engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
 assert!(engine.query().symbol_facts_in_file(file_id).is_empty());
 ```
 
 Use deferred replacement followed by one `engine.resolve()` for a batch. Delayed
 background producers must retain `SourceFileSnapshot` and use
-`replace_facts_if_source_snapshot`; an obsolete producer cannot replace newer
+`update_if_snapshot`; an obsolete producer cannot replace newer
 source facts.
 
 `AnalysisQuery` reads an engine snapshot, including file-scoped type facts

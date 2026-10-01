@@ -14,7 +14,9 @@ use super::{Project, ResolveMode, ResolveStat, SourceFileSnapshot};
 use crate::engine::persist::fingerprint::{SemanticChange, SemanticExportFingerprint};
 
 impl Project {
-    pub fn replace_facts(
+    /// Replace one file's facts with `facts`, then resolve now or defer to a
+    /// later `resolve()` according to `mode`.
+    pub fn update(
         &mut self,
         file_id: SourceFileId,
         facts: FileAnalysis,
@@ -33,7 +35,7 @@ impl Project {
 
     /// Commit facts only while the source snapshot used to collect them is
     /// still current. A mismatch is an expected concurrent-edit outcome.
-    pub fn replace_facts_if_source_snapshot(
+    pub fn update_if_snapshot(
         &mut self,
         expected_snapshot: SourceFileSnapshot,
         facts: FileAnalysis,
@@ -49,7 +51,30 @@ impl Project {
         if !self.files.is_current(expected_snapshot) {
             return None;
         }
-        Some(self.replace_facts(expected_snapshot.file_id, facts, mode))
+        Some(self.update(expected_snapshot.file_id, facts, mode))
+    }
+
+    /// Former name of [`Project::update`]; removed once loader callers migrate.
+    #[inline]
+    pub fn replace_facts(
+        &mut self,
+        file_id: SourceFileId,
+        facts: FileAnalysis,
+        mode: ResolveMode,
+    ) -> SemanticChange {
+        self.update(file_id, facts, mode)
+    }
+
+    /// Former name of [`Project::update_if_snapshot`]; removed once loader
+    /// callers migrate.
+    #[inline]
+    pub fn replace_facts_if_source_snapshot(
+        &mut self,
+        expected_snapshot: SourceFileSnapshot,
+        facts: FileAnalysis,
+        mode: ResolveMode,
+    ) -> Option<SemanticChange> {
+        self.update_if_snapshot(expected_snapshot, facts, mode)
     }
 
     pub fn resolve(&mut self) {

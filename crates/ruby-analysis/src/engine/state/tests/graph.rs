@@ -10,7 +10,7 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
 
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let auth = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         user_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -32,7 +32,7 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
     );
     assert_eq!(engine.unresolved_graph_edges().len(), 1);
 
-    engine.replace_facts(
+    engine.update(
         auth_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -62,7 +62,7 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let child_singleton = child.to_singleton_namespace().unwrap();
     let parent_singleton = parent.to_singleton_namespace().unwrap();
-    engine.replace_facts(
+    engine.update(
         child_file,
         FileAnalysis {
             graph_nodes: vec![
@@ -91,7 +91,7 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
     );
     assert_eq!(engine.unresolved_graph_edges().len(), 1);
 
-    engine.replace_facts(
+    engine.update(
         parent_file,
         FileAnalysis {
             graph_nodes: vec![
@@ -126,7 +126,7 @@ fn explicit_superclass_outranks_reopened_implicit_object_fact() {
     let object = FullyQualifiedName::namespace(vec![RubyConstant::new("Object").unwrap()]);
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let range = TextRange::new(file_id, 0, 16);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -177,7 +177,7 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
     let pending_singleton = pending.to_singleton_namespace().unwrap();
     let optional_singleton = optional.to_singleton_namespace().unwrap();
     let standard_singleton = standard.to_singleton_namespace().unwrap();
-    engine.replace_facts(
+    engine.update(
         class_file,
         FileAnalysis {
             graph_nodes: vec![
@@ -220,7 +220,7 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
     );
     assert!(engine.proven_superclass_edge(&pending).is_none());
 
-    engine.replace_facts(
+    engine.update(
         target_file,
         FileAnalysis {
             graph_nodes: vec![
@@ -262,7 +262,7 @@ fn later_include_wins_mro_when_facts_are_inserted_out_of_range_order() {
     let early = FullyQualifiedName::namespace(vec![RubyConstant::new("Early").unwrap()]);
     let late = FullyQualifiedName::namespace(vec![RubyConstant::new("Late").unwrap()]);
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![
@@ -317,7 +317,7 @@ fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
     let file_id = register_project_file(&mut engine, "lib/edge.rb", "class Parent\nend\n");
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -383,7 +383,7 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
     );
     let project_range = TextRange::new(project_file, 0, 45);
     let stub_range = TextRange::new(stub_file, 0, 34);
-    engine.replace_facts(
+    engine.update(
         project_file,
         FileAnalysis {
             graph_nodes: vec![
@@ -444,7 +444,7 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
         },
         ResolveMode::Immediate,
     );
-    engine.replace_facts(
+    engine.update(
         stub_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -527,7 +527,7 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
     let helper = RubyMethod::new("helper").expect("test method must be valid");
     let helper_fqn = FullyQualifiedName::method(parent.namespace_parts(), helper);
     let helper_range = TextRange::new(file_id, 1, 7);
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             symbols: vec![SymbolFact::new(
@@ -596,7 +596,7 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
         .constant_rename_target(&parent.namespace_parts(), &[])
         .is_none());
 
-    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert!(engine
         .query()
         .resolve_method_callees(&parent, &helper)
@@ -635,7 +635,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
     let shared_range = TextRange::new(template_file, 0, 13);
     let first_range = TextRange::new(applications_file, 0, 15);
     let second_range = TextRange::new(applications_file, 16, 31);
-    engine.replace_facts(
+    engine.update(
         template_file,
         FileAnalysis {
             graph_nodes: vec![GraphNodeFact::new(
@@ -716,7 +716,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
             ..Default::default()
         }
     };
-    engine.replace_facts(
+    engine.update(
         applications_file,
         application_facts(true),
         ResolveMode::Immediate,
@@ -756,7 +756,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
     ));
     drop(query);
 
-    engine.replace_facts(
+    engine.update(
         applications_file,
         application_facts(false),
         ResolveMode::Immediate,
@@ -768,7 +768,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
     assert_eq!(one.len(), 1);
     assert_eq!(one[0].definition_ranges, vec![first_range]);
 
-    engine.replace_facts(
+    engine.update(
         applications_file,
         FileAnalysis::default(),
         ResolveMode::Immediate,
@@ -816,7 +816,7 @@ fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
         local_scope: ExecutionScopeMode::Preserve,
         extension_id: "rspec-ruby".to_string(),
     };
-    engine.replace_facts(
+    engine.update(
         file_id,
         FileAnalysis {
             execution_contexts: vec![outer.clone(), inner.clone()],
@@ -835,6 +835,6 @@ fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
     );
     assert_eq!(engine.query().execution_context_at(file_id, 5), None);
 
-    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
+    engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(engine.query().execution_context_at(file_id, 30), None);
 }

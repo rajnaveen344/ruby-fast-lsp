@@ -96,7 +96,7 @@ mod tests {
         );
 
         let user = RubyConstant::new("User").expect("test constant must be valid");
-        engine.replace_facts(
+        engine.update(
             file_id,
             FileAnalysis {
                 symbols: vec![
