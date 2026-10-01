@@ -116,8 +116,8 @@ adapters, analysis APIs, and editor-specific behavior.
   rename, code actions, and formatting
 - `presentation/`: hover, inlay hints, code lenses, semantic tokens, document
   symbols, folding ranges, and selection ranges
-- `diagnostics.rs`, `indexing/`, `debug.rs`: diagnostic generation, document
-  lifecycle indexing, and debug requests
+- `indexing/`, `debug.rs`: document lifecycle indexing (syntax diagnostics come
+  from `src/loader/syntax_diagnostics.rs`) and debug requests
 
 #### Design Decisions:
 

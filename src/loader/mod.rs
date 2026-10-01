@@ -18,6 +18,7 @@
 //! - **`version`**: Ruby version detection and management
 //! - **`scheduling`**: Work admission, the indexing queue, and progress status
 //! - **`cache`**: Persisted dependency products and their producer identity
+//! - **`syntax_diagnostics`**: Parser-derived diagnostics for one parsed file
 
 pub mod cache;
 pub mod coordinator;
@@ -25,4 +26,5 @@ pub mod file_processor;
 pub mod require_paths;
 pub mod scheduling;
 pub mod sources;
+pub mod syntax_diagnostics;
 pub mod version;

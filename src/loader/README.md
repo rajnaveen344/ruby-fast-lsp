@@ -13,6 +13,8 @@ reference candidates, resolved references, and diagnostics.
 - `file_processor/`: parse one file and run `FactCollector`, merge collected
   facts, and convert extension-produced facts
 - `require_paths/`: require-path resolution
+- `syntax_diagnostics.rs`: parser syntax, unreachable-code, and
+  inconsistent-return diagnostics for one parsed file
 - `sources/project/`: project root discovery, project file discovery,
   navigation-demand collection, and dependency scan
 - `sources/stdlib/`: standard library file discovery and exact runtime load paths

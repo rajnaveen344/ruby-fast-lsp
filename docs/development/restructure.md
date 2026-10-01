@@ -159,7 +159,7 @@ Delete this file when the last task is done. Git history keeps the record.
         `ruby_analysis::indexer`), `build.rs` `GEM_FACT_PRODUCER_TREES`,
         `crates/devtools`, `src/main.rs`, and the guides that name the folder.
         The gem producer fingerprint changes, so expect one cold gem reindex.
-  - [ ] C1b. Move `lsp::capabilities::diagnostics::generate_diagnostics`
+  - [x] C1b. Move `lsp::capabilities::diagnostics::generate_diagnostics`
         (syntax diagnostics) to `src/loader/syntax_diagnostics.rs`. This
         removes the two production loader → lsp edges.
   - [ ] C1c. Add `src/loader/context.rs` with `LoadContext`, `LoadConfig`,

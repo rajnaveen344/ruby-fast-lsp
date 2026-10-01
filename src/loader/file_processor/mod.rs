@@ -20,7 +20,7 @@ use crate::environment::runtime::jruby::imports::{
 };
 use crate::invariant::ExpectInvariant;
 use crate::loader::require_paths::RequireFeatureIndex;
-use crate::lsp::capabilities::diagnostics::generate_diagnostics;
+use crate::loader::syntax_diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use collection::{replace_analysis_facts_for_file, replace_file_analysis};

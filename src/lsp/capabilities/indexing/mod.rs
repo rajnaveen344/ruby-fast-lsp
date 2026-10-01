@@ -1,7 +1,7 @@
 use crate::invariant::ExpectInvariant;
 use crate::loader::coordinator::IndexingCoordinator;
 use crate::loader::file_processor::FileProcessor;
-use crate::lsp::capabilities::diagnostics::generate_diagnostics;
+use crate::loader::syntax_diagnostics::generate_diagnostics;
 use crate::lsp::linter::lint_document;
 use crate::lsp::query::EngineQuery;
 use crate::server::RubyLanguageServer;

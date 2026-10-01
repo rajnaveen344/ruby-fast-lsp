@@ -1,4 +1,4 @@
-//! Diagnostics capability — syntax diagnostics from the parser.
+//! Syntax diagnostics produced from the parser while loading a file.
 //!
 //! AST-only diagnostics (syntax errors/warnings) live here.
 //! Index-dependent diagnostics (unresolved entries, YARD issues) are in the query layer.

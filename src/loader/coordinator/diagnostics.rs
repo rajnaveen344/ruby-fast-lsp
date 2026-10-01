@@ -88,7 +88,7 @@ impl IndexingCoordinator {
                 };
                 let mut diagnostics = {
                     let parse = document.parse();
-                    crate::lsp::capabilities::diagnostics::generate_diagnostics(&parse, &document)
+                    crate::loader::syntax_diagnostics::generate_diagnostics(&parse, &document)
                 };
                 let engine = analysis_engine.read();
                 let Some(file) = engine.file_id(&path).and_then(|id| engine.file(id)) else {

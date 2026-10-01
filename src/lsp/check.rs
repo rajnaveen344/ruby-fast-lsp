@@ -9,7 +9,7 @@ use crate::environment::config::{IndexingConfig, RubyFastLspConfig};
 use crate::invariant::ExpectInvariant;
 use crate::loader::coordinator::IndexingCoordinator;
 use crate::loader::file_processor::analysis_source;
-use crate::lsp::capabilities::diagnostics::generate_diagnostics;
+use crate::loader::syntax_diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use crate::utils::file_ops::should_index_file;
 use anyhow::{anyhow, Context, Result};
