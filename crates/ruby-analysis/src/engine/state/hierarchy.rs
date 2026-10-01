@@ -174,6 +174,17 @@ impl Hierarchy {
         }
     }
 
+    /// Drop one file's nodes, edges, and unresolved edges. Edges from other
+    /// files that resolved to nodes only this file defined become unresolved.
+    pub(in crate::engine) fn remove_file(&mut self, file_id: SourceFileId) {
+        let defined_nodes = self.graph.defines_nodes_in(file_id);
+        self.graph.remove_file(file_id);
+        self.retried.forget_file(file_id);
+        if defined_nodes {
+            self.unresolve_edges_to_lost_targets();
+        }
+    }
+
     /// Return retried edges to unresolved when their target no longer has
     /// any node definition. Retry resolves only against graph nodes, so a
     /// target without definitions can no longer justify the edge.

@@ -56,6 +56,16 @@ impl DeclIndex {
         self.replace_execution_contexts(file_id, execution_contexts);
     }
 
+    /// Drop one file's symbols, methods, visibility overrides, and execution
+    /// contexts.
+    pub(in crate::engine) fn remove_file(&mut self, file_id: SourceFileId) {
+        self.symbols.remove_file(file_id);
+        self.methods.remove_file(file_id);
+        self.method_visibility_overrides
+            .retain(|fact| fact.range.file_id != file_id);
+        self.execution_contexts.remove(&file_id);
+    }
+
     fn replace_execution_contexts(
         &mut self,
         file_id: SourceFileId,

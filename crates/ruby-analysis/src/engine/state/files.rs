@@ -348,6 +348,25 @@ impl Files {
         self.get(snapshot.file_id).map(|file| file.revision) == Some(snapshot.revision)
     }
 
+    /// Forget one registered file: its source, path mapping, and export
+    /// fingerprint. The id is never reissued, so snapshots of the removed
+    /// file stay stale. Returns false for an unknown id.
+    pub(super) fn remove(&mut self, file_id: SourceFileId) -> bool {
+        let Some(file) = self.files.remove(&file_id) else {
+            return false;
+        };
+        let removed_path = self.ids_by_path.remove(&normalize_path(&file.path));
+        invariant_eq!(
+            removed_path,
+            Some(file_id),
+            what = "removed source file was not mapped from its own path",
+            why = "registration maps each file's normalized path to its id",
+            fix = "keep ids_by_path and files updated together",
+        );
+        self.export_fingerprints.remove(&file_id);
+        true
+    }
+
     pub(super) fn record_export_fingerprint(
         &mut self,
         file_id: SourceFileId,

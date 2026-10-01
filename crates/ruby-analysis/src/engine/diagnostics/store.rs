@@ -42,6 +42,12 @@ impl Diagnostics {
         self.resolved.replace_file(file_id, diagnostics);
     }
 
+    /// Drop one file's diagnostic candidates and resolved diagnostics.
+    pub(in crate::engine) fn remove_file(&mut self, file_id: SourceFileId) {
+        self.candidates.remove_file(file_id);
+        self.resolved.remove_file(file_id);
+    }
+
     /// Swap one file's `unresolved-require` diagnostics, keeping all others.
     pub(in crate::engine) fn replace_unresolved_require(
         &mut self,

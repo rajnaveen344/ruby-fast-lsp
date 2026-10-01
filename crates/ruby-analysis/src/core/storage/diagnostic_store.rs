@@ -72,6 +72,10 @@ impl DiagnosticStore {
         self.facts.len()
     }
 
+    pub fn remove_file(&mut self, file_id: SourceFileId) {
+        self.facts.remove(file_id);
+    }
+
     pub fn replace_file(
         &mut self,
         file_id: SourceFileId,

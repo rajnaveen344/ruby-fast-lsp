@@ -26,6 +26,7 @@ mod graph;
 mod inference_outcomes;
 mod lifecycle;
 mod navigation;
+mod remove;
 
 fn constant_subject(name: &str) -> TypeSubject {
     TypeSubject::Constant(FullyQualifiedName::constant(vec![

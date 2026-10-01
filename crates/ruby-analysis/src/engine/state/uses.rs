@@ -30,6 +30,13 @@ impl UseIndex {
         self.candidates.replace_file(file_id, candidates);
     }
 
+    /// Drop one file's reference candidates and the resolved references
+    /// located in it.
+    pub(in crate::engine) fn remove_file(&mut self, file_id: SourceFileId) {
+        self.candidates.remove_file(file_id);
+        self.resolved.remove_file(file_id);
+    }
+
     pub(in crate::engine) fn candidates(&self) -> &ReferenceCandidateStore {
         &self.candidates
     }

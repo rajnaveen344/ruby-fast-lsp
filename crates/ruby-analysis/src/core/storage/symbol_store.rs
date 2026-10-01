@@ -135,14 +135,18 @@ impl SymbolStore {
         self.facts.rows_in_file(file_id).copied().collect()
     }
 
+    pub fn remove_file(&mut self, file_id: SourceFileId) {
+        self.facts.remove_file(file_id, |arena, stale| {
+            self.facts_by_fqn.unlink(stale.fqn, file_id, arena)
+        });
+    }
+
     pub fn replace_file(
         &mut self,
         file_id: SourceFileId,
         facts: impl IntoIterator<Item = StoredSymbolFact>,
     ) {
-        self.facts.remove_file(file_id, |arena, stale| {
-            self.facts_by_fqn.unlink(stale.fqn, file_id, arena)
-        });
+        self.remove_file(file_id);
         let ids = self.facts.insert_file(file_id, facts, by_range);
         self.facts_by_fqn.link(
             file_id,

@@ -177,6 +177,21 @@ impl Solver {
     ) {
         self.evidence_by_file.insert(file_id, evidence);
         self.method_return_equations_dirty |= equations_changed;
+        self.refresh_constant_type_equations_dirty();
+    }
+
+    /// Drop one file's inference evidence. Its method-return equations, if
+    /// any, leave the solution, which marks method returns for re-solving
+    /// exactly as replacing the file with empty evidence would.
+    pub(in crate::engine) fn remove_file(&mut self, file_id: SourceFileId) {
+        let Some(previous) = self.evidence_by_file.remove(&file_id) else {
+            return;
+        };
+        self.method_return_equations_dirty |= !previous.method_return_equations.is_empty();
+        self.refresh_constant_type_equations_dirty();
+    }
+
+    fn refresh_constant_type_equations_dirty(&mut self) {
         self.constant_type_equations_dirty = self.evidence_by_file.values().any(|evidence| {
             !evidence.constant_type_equations.is_empty()
                 || evidence

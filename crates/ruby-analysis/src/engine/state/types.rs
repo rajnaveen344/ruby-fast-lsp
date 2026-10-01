@@ -133,6 +133,14 @@ impl TypeTable {
         }
     }
 
+    /// Drop one file's type facts, call-expression outcomes, and proven
+    /// local-read types.
+    pub(in crate::engine) fn remove_file(&mut self, file_id: SourceFileId) {
+        self.store.remove_file(file_id);
+        self.call_expression_outcomes_by_file.remove(&file_id);
+        self.local_read_types_by_file.remove(&file_id);
+    }
+
     pub(in crate::engine) fn call_expression_outcome_views_in_file(
         &self,
         file_id: SourceFileId,

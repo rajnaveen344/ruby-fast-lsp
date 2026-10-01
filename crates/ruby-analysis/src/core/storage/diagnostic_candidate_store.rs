@@ -63,6 +63,10 @@ pub struct DiagnosticCandidateStore {
 }
 
 impl DiagnosticCandidateStore {
+    pub fn remove_file(&mut self, file_id: SourceFileId) {
+        self.candidates.remove(file_id);
+    }
+
     pub fn replace_file(
         &mut self,
         file_id: SourceFileId,

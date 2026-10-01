@@ -408,6 +408,12 @@ fn by_range<T>(range: impl Fn(&T) -> TextRange) -> impl Fn(&T, &T) -> std::cmp::
 }
 
 impl ReferenceCandidateStore {
+    pub fn remove_file(&mut self, file_id: SourceFileId) {
+        self.constants.remove(file_id);
+        self.methods.remove(file_id);
+        self.resolved.remove(file_id);
+    }
+
     pub fn replace_file(
         &mut self,
         file_id: SourceFileId,

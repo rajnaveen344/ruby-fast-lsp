@@ -1,6 +1,6 @@
-//! Orchestration over the engine components: file-owned fact replacement
-//! and resolve passes. Each component owns its own state; this module only
-//! fixes the order in which they are written.
+//! Orchestration over the engine components: file-owned fact replacement,
+//! file removal, and resolve passes. Each component owns its own state; this
+//! module only fixes the order in which they are written.
 
 use crate::invariant::ExpectInvariant;
 use crate::stats::StatsSnapshot;
@@ -52,6 +52,54 @@ impl Project {
             return None;
         }
         Some(self.update(expected_snapshot.file_id, facts, mode))
+    }
+
+    /// Remove one file and every fact it owns, then resolve now or defer to a
+    /// later `resolve()` according to `mode`. Edges that other files resolved
+    /// to declarations only this file defined become unresolved, and the
+    /// next resolve re-derives references and diagnostics without it. The id
+    /// is never reissued. Returns false, without changing the semantic
+    /// revision, when `file_id` is not registered.
+    pub fn remove(&mut self, file_id: SourceFileId, mode: ResolveMode) -> bool {
+        if self.files.get(file_id).is_none() {
+            return false;
+        }
+        self.advance_semantic_revision();
+        self.hierarchy.invalidate_method_lookup_chains();
+        self.decls.remove_file(file_id);
+        self.hierarchy.remove_file(file_id);
+        self.uses.remove_file(file_id);
+        self.diagnostics.remove_file(file_id);
+        self.types.remove_file(file_id);
+        self.solver.remove_file(file_id);
+        let removed = self.files.remove(file_id);
+        invariant!(
+            removed,
+            what = "a registered file disappeared while its facts were removed",
+            why = "removal holds the only engine write borrow",
+            fix = "keep file removal inside one Project::remove call",
+        );
+        match mode {
+            ResolveMode::Immediate => self.resolve(),
+            ResolveMode::Deferred => {}
+        }
+        true
+    }
+
+    /// Remove a file only while `snapshot` is still its current revision. A
+    /// mismatch is an expected concurrent-edit outcome and returns false.
+    pub fn remove_if_snapshot(&mut self, snapshot: SourceFileSnapshot, mode: ResolveMode) -> bool {
+        invariant_eq!(
+            snapshot.engine_instance_id,
+            self.instance_id,
+            what = "file removal received a source snapshot from another analysis engine",
+            why = "isolated projects cannot share mutable source lifecycle identity",
+            fix = "remove files through the same engine that issued the snapshot",
+        );
+        if !self.files.is_current(snapshot) {
+            return false;
+        }
+        self.remove(snapshot.file_id, mode)
     }
 
     /// Former name of [`Project::update`]; removed once loader callers migrate.

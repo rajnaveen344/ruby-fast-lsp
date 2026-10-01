@@ -153,7 +153,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [ ] B4e. Move read-only methods from `Project` to `View`, one component
         per commit (files, decls, hierarchy, diagnostics, solver telemetry,
         fingerprints).
-  - [ ] B4f. Add `Project::remove(file_id)` and `remove_if_snapshot`: drop
+  - [x] B4f. Add `Project::remove(file_id)` and `remove_if_snapshot`: drop
         the file from every component, `Files` maps, and export fingerprints;
         advance the revision; re-queue dependents. Ids are never reused. Tests
         in `engine/state/tests/remove.rs`: removal equals never-added

@@ -51,6 +51,11 @@ impl<T> FileOwned<T> {
         self.files.values().map(Vec::len).sum()
     }
 
+    /// Drop every row of one file. Returns the rows it removed.
+    pub fn remove(&mut self, file_id: SourceFileId) -> Option<Vec<T>> {
+        self.files.remove(&file_id)
+    }
+
     /// Table and row storage, plus each row's own heap from `row_heap_bytes`.
     pub fn estimated_heap_bytes(&self, row_heap_bytes: impl Fn(&T) -> usize) -> usize {
         map_table_bytes(&self.files)

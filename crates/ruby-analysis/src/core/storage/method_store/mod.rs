@@ -500,11 +500,7 @@ impl MethodStore {
         self.facts.rows_in_file(file_id).cloned().collect()
     }
 
-    pub fn replace_file(
-        &mut self,
-        file_id: SourceFileId,
-        facts: impl IntoIterator<Item = StoredMethodFact>,
-    ) {
+    pub fn remove_file(&mut self, file_id: SourceFileId) {
         self.facts.remove_file(file_id, |arena, stale| {
             self.facts_by_fqn.unlink(stale.fqn, file_id, arena);
             self.facts_by_owner.unlink(stale.owner, file_id, arena);
@@ -513,6 +509,14 @@ impl MethodStore {
                     .unlink((stale.owner, method), file_id, arena);
             }
         });
+    }
+
+    pub fn replace_file(
+        &mut self,
+        file_id: SourceFileId,
+        facts: impl IntoIterator<Item = StoredMethodFact>,
+    ) {
+        self.remove_file(file_id);
         let ids = self.facts.insert_file(file_id, facts, by_range);
         let facts = &self.facts;
         self.facts_by_fqn.link(
