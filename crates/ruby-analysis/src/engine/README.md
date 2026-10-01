@@ -8,7 +8,7 @@ Implementation folders are private to the engine.
 
 | Area | Responsibility |
 | --- | --- |
-| `state/` | `AnalysisEngine` ownership, the `Names` interner for FQNs and constant lookups (`names`), the source registry, fact arena, and fact interning (`storage`), file replacement and resolve passes (`lifecycle`), fact reads (`facts`), graph reads and lookup caches (`graph`), and stored inference outcomes (`inference`) |
+| `state/` | `AnalysisEngine` ownership, the `Names` interner for FQNs and constant lookups (`names`), the `Files` registry of sources, file ids, line indexes, revision snapshots, and export fingerprints (`files`), the fact arena and fact interning (`storage`), file replacement and resolve passes (`lifecycle`), fact reads (`facts`), graph reads and lookup caches (`graph`), and stored inference outcomes (`inference`) |
 | `persist/fingerprint/` | Semantic export and result fingerprints that classify file replacements and key persistent caches |
 | `persist/external_facts_template/` | Project-neutral dependency fact templates and their snapshot codecs |
 | `state/tests/` | Engine state tests grouped by lifecycle, fingerprints, inference outcomes, navigation, graph, caches, and constants |

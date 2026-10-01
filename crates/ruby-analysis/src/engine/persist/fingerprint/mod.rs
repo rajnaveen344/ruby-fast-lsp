@@ -221,7 +221,7 @@ impl AnalysisEngine {
         &self,
         file_id: SourceFileId,
     ) -> Option<SemanticExportFingerprint> {
-        self.semantic_export_fingerprints.get(&file_id).copied()
+        self.files.export_fingerprint(file_id)
     }
 
     /// Stable semantic identity for an immutable dependency seed.
@@ -233,10 +233,10 @@ impl AnalysisEngine {
     /// signatures.
     pub fn semantic_context_fingerprint(&self) -> SemanticExportFingerprint {
         let mut file_fingerprints = self
-            .semantic_export_fingerprints
-            .iter()
+            .files
+            .export_fingerprints()
             .map(|(file_id, fingerprint)| {
-                let source = self.sources.files.get(file_id).expect_invariant(
+                let source = self.files.get(*file_id).expect_invariant(
                     "semantic export fingerprint has no registered source file",
                     "replace_facts validates every file id before recording semantic state",
                     "remove fingerprints through the same file lifecycle as source registration",
@@ -282,10 +282,8 @@ impl AnalysisEngine {
         }
 
         let mut components = self
-            .sources
             .files
-            .keys()
-            .copied()
+            .ids()
             .map(|file_id| (file_id, Vec::new()))
             .collect::<HashMap<_, _>>();
 
@@ -482,7 +480,7 @@ impl AnalysisEngine {
         components
             .into_iter()
             .map(|(file_id, mut facts)| {
-                let source = self.sources.files.get(&file_id).expect_invariant(
+                let source = self.files.get(file_id).expect_invariant(
                     "semantic result component owner has no registered source file",
                     "the component map is seeded exclusively from registered sources",
                     "keep source removal and semantic fact removal atomic",
@@ -522,10 +520,8 @@ impl AnalysisEngine {
             })
         };
         let mut components = self
-            .sources
             .files
-            .keys()
-            .copied()
+            .ids()
             .map(|file_id| (file_id, [Vec::new(), Vec::new(), Vec::new()]))
             .collect::<HashMap<_, _>>();
 

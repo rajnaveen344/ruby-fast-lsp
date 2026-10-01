@@ -41,7 +41,6 @@ pub use queries::namespace_tree::types::{
 pub use queries::workspace_symbols::types::WorkspaceSymbolMatch;
 pub use queries::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
-pub use state::file_id_map::FileIdMap;
 pub use state::{
     AnalysisEngine, AnalysisStat, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
     SourceFileSnapshot,

@@ -2,160 +2,35 @@
 //! passes, and the engine-owned reads that queries build on.
 
 mod facts;
-pub(in crate::engine) mod file_id_map;
+mod files;
 mod graph;
 mod inference;
 mod lifecycle;
 mod names;
 mod storage;
 
-use crate::invariant::ExpectInvariant;
 pub(in crate::engine) use facts::EffectiveMethodFactMatch;
+pub use files::{SourceFile, SourceFileInput, SourceFileSnapshot};
 pub(in crate::engine) use inference::{resolve_constant_dependency_type, TypeInferenceOutcomeRef};
 
 use std::collections::HashMap;
 use std::mem::size_of;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::storage::graph_store::SemanticGraph;
 use crate::core::storage::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
     ExecutionContextFact, FullyQualifiedName, InferenceEvidence, MethodVisibilityOverrideFact,
-    SourceFileId, SourceKind, TextRange,
+    SourceFileId, TextRange,
 };
 
-use crate::engine::persist::fingerprint::SemanticExportFingerprint;
 use crate::engine::AnalysisQuery;
 use crate::stats::{self, StatsSnapshot};
+use files::Files;
 use inference::StoredTypeInferenceOutcome;
 use names::Names;
 use parking_lot::Mutex;
-use storage::{FactArena, SourceRegistry};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceFile {
-    pub id: SourceFileId,
-    pub path: PathBuf,
-    pub source: Option<String>,
-    pub line_index: SourceLineIndex,
-    pub content_hash: u64,
-    pub kind: SourceKind,
-    revision: u64,
-    /// Present for `SourceKind::Gem` files bound from a locked package.
-    pub library_package: Option<crate::core::LibraryPackageId>,
-}
-
-/// Opaque identity of one registered file snapshot in one engine.
-///
-/// Keeping the engine, file, and revision identities together prevents a fact
-/// batch from accidentally validating against another file or cloned engine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SourceFileSnapshot {
-    engine_instance_id: u64,
-    file_id: SourceFileId,
-    revision: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SourceLineIndex {
-    line_offsets: Vec<u32>,
-    len: u32,
-    ascii: bool,
-}
-
-impl SourceLineIndex {
-    fn new(source: &str) -> Self {
-        let len = u32::try_from(source.len()).expect_invariant(
-            "source file byte length exceeded u32",
-            "every analysis TextRange and SourceFileId-relative byte offset is represented as u32",
-            "reject or segment files larger than u32::MAX before registration",
-        );
-        let mut line_offsets = vec![0];
-        for (idx, byte) in source.bytes().enumerate() {
-            if byte == b'\n' {
-                line_offsets.push(u32::try_from(idx + 1).expect_invariant(
-                    "source line offset exceeded u32 after the complete source length fit u32",
-                    "a position within a bounded source cannot exceed its length",
-                    "keep source length validation before line-index construction",
-                ));
-            }
-        }
-        if line_offsets.last() != Some(&len) {
-            line_offsets.push(len);
-        }
-        Self {
-            line_offsets,
-            len,
-            ascii: source.is_ascii(),
-        }
-    }
-
-    pub fn line_offsets(&self) -> &[u32] {
-        &self.line_offsets
-    }
-
-    pub fn len(&self) -> usize {
-        self.len as usize
-    }
-
-    pub fn is_ascii(&self) -> bool {
-        self.ascii
-    }
-
-    fn shrink_to_fit(&mut self) {
-        self.line_offsets.shrink_to_fit();
-    }
-}
-
-impl SourceFile {
-    pub fn source_text(&self) -> Option<&str> {
-        self.source.as_deref()
-    }
-
-    pub fn byte_offset_to_line_character(&self, byte_offset: u32) -> Option<(u32, u32)> {
-        let target = byte_offset;
-        if target > self.line_index.len {
-            return None;
-        }
-        let line_index = match self.line_index.line_offsets.binary_search(&target) {
-            Ok(exact) => exact,
-            Err(after) => after.saturating_sub(1),
-        };
-        let line_start = *self.line_index.line_offsets.get(line_index)?;
-        let character = if self.line_index.ascii {
-            target.checked_sub(line_start)?
-        } else {
-            let source = self.source.as_deref()?;
-            let target = target as usize;
-            let line_start = line_start as usize;
-            if !source.is_char_boundary(target) {
-                return None;
-            }
-            source[line_start..target]
-                .chars()
-                .map(char::len_utf16)
-                .sum::<usize>()
-                .try_into()
-                .ok()?
-        };
-        Some((
-            u32::try_from(line_index).expect_invariant(
-                "source line index exceeded u32",
-                "LSP positions require u32 lines",
-                "reject or segment files with more than u32::MAX lines",
-            ),
-            character,
-        ))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceFileInput {
-    pub path: PathBuf,
-    pub content: String,
-    pub kind: SourceKind,
-}
+use storage::FactArena;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolveMode {
@@ -264,8 +139,7 @@ impl AnalysisMemoryStats {
 pub struct AnalysisEngine {
     instance_id: u64,
     semantic_revision: u64,
-    next_source_revision: u64,
-    pub(in crate::engine) sources: SourceRegistry,
+    pub(in crate::engine) files: Files,
     pub(in crate::engine) names: Names,
     pub(in crate::engine) facts: FactArena,
     pub(in crate::engine) graph: SemanticGraph,
@@ -279,8 +153,6 @@ pub struct AnalysisEngine {
     method_return_equations_dirty: bool,
     constant_type_equations_dirty: bool,
     method_return_solution_spans_files: bool,
-    pub(in crate::engine) semantic_export_fingerprints:
-        HashMap<SourceFileId, SemanticExportFingerprint>,
     top_level_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
     universal_object_method_lookup_chain_cache: Mutex<Option<Vec<FullyQualifiedName>>>,
     last_resolve_pass: StatsSnapshot<ResolveStat>,
@@ -307,8 +179,7 @@ impl Default for AnalysisEngine {
         Self {
             instance_id: next_analysis_engine_instance_id(),
             semantic_revision: 0,
-            next_source_revision: 0,
-            sources: SourceRegistry::default(),
+            files: Files::default(),
             names: Names::default(),
             facts: FactArena::default(),
             graph: SemanticGraph::default(),
@@ -320,7 +191,6 @@ impl Default for AnalysisEngine {
             method_return_equations_dirty: false,
             constant_type_equations_dirty: false,
             method_return_solution_spans_files: false,
-            semantic_export_fingerprints: HashMap::new(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
             universal_object_method_lookup_chain_cache: Mutex::new(None),
             last_resolve_pass: StatsSnapshot::default(),
@@ -333,8 +203,7 @@ impl Clone for AnalysisEngine {
         Self {
             instance_id: next_analysis_engine_instance_id(),
             semantic_revision: self.semantic_revision,
-            next_source_revision: self.next_source_revision,
-            sources: self.sources.clone(),
+            files: self.files.clone(),
             names: self.names.clone(),
             facts: self.facts.clone(),
             graph: self.graph.clone(),
@@ -346,7 +215,6 @@ impl Clone for AnalysisEngine {
             method_return_equations_dirty: self.method_return_equations_dirty,
             constant_type_equations_dirty: self.constant_type_equations_dirty,
             method_return_solution_spans_files: self.method_return_solution_spans_files,
-            semantic_export_fingerprints: self.semantic_export_fingerprints.clone(),
             top_level_method_lookup_chain_cache: Mutex::new(None),
             universal_object_method_lookup_chain_cache: Mutex::new(None),
             last_resolve_pass: StatsSnapshot::default(),
@@ -368,16 +236,10 @@ impl AnalysisEngine {
     pub fn stats(&self) -> StatsSnapshot<AnalysisStat> {
         let reference_candidate_stats = self.facts.references.candidates.stats();
         let mut stats = StatsSnapshot::default();
-        stats.set(AnalysisStat::Files, stats::count(self.sources.files.len()));
+        stats.set(AnalysisStat::Files, stats::count(self.files.len()));
         stats.set(
             AnalysisStat::SourceBytes,
-            stats::count(
-                self.sources
-                    .files
-                    .values()
-                    .map(|file| file.line_index.len())
-                    .sum(),
-            ),
+            stats::count(self.files.source_bytes()),
         );
         stats.set(
             AnalysisStat::Symbols,
@@ -469,21 +331,7 @@ impl AnalysisEngine {
     }
 
     fn estimated_file_store_heap_bytes(&self) -> usize {
-        self.sources.ids.estimated_heap_bytes()
-            + self.sources.files.capacity()
-                * (size_of::<SourceFileId>() + size_of::<SourceFile>() + 1)
-            + self
-                .sources
-                .files
-                .values()
-                .map(|file| {
-                    file.path.as_os_str().len()
-                        + file.source.as_ref().map(String::capacity).unwrap_or(0)
-                        + vec_payload_bytes(&file.line_index.line_offsets)
-                })
-                .sum::<usize>()
-            + self.semantic_export_fingerprints.capacity()
-                * (size_of::<SourceFileId>() + size_of::<SemanticExportFingerprint>() + 1)
+        self.files.estimated_heap_bytes()
             + self.inference_by_file.capacity()
                 * (size_of::<SourceFileId>() + size_of::<InferenceEvidence>() + 1)
             + self

@@ -103,7 +103,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B3b. Extract `Names` (`engine/state/names.rs`): `NameRegistry`, its
         test hooks, `fqn_for_id`, and `expand_interned_fqn`. Interned ids stay
         `pub(in crate::engine)`; components that intern take `&mut Names`.
-  - [ ] B3c. Extract `Files` (`engine/state/files.rs`): source registry, file
+  - [x] B3c. Extract `Files` (`engine/state/files.rs`): source registry, file
         id map, source files and line indexes, snapshot issuing, registration,
         and the export fingerprint map. Delete `state/file_id_map.rs`.
   - [ ] B3d. Extract `Diagnostics` (`engine/diagnostics/store.rs`): candidate

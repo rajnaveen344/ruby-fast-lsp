@@ -1,10 +1,7 @@
-//! The source registry, the fact arena, conversion between domain facts
-//! and their interned stored representations, and storage compaction.
+//! The fact arena, conversion between domain facts and their interned stored
+//! representations, and storage compaction.
 
 use crate::invariant::ExpectInvariant;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-use std::path::Path;
 
 use crate::core::storage::diagnostic_candidate_store::DiagnosticCandidateStore;
 use crate::core::storage::diagnostic_store::DiagnosticStore;
@@ -22,17 +19,10 @@ use crate::core::storage::symbol_store::SymbolStore;
 use crate::core::storage::type_store::TypeStore;
 use crate::core::{
     ConstantPath, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, ReferenceCandidate,
-    ReferenceCandidateKind, SourceFileId, SymbolFact, TextRange, UnresolvedGraphEdgeFact,
+    ReferenceCandidateKind, SymbolFact, UnresolvedGraphEdgeFact,
 };
 
-use super::{AnalysisEngine, SourceFile};
-use crate::engine::FileIdMap;
-
-#[derive(Debug, Clone, Default)]
-pub(in crate::engine) struct SourceRegistry {
-    pub(in crate::engine) ids: FileIdMap,
-    pub(in crate::engine) files: HashMap<SourceFileId, SourceFile>,
-}
+use super::AnalysisEngine;
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct FactArena {
@@ -62,16 +52,7 @@ pub(in crate::engine) struct DiagnosticFacts {
 
 impl AnalysisEngine {
     pub fn shrink_to_fit(&mut self) {
-        self.sources.ids.shrink_to_fit();
-        self.sources.files.shrink_to_fit();
-        for file in self.sources.files.values_mut() {
-            file.path.shrink_to_fit();
-            if let Some(source) = &mut file.source {
-                source.shrink_to_fit();
-            }
-            file.line_index.shrink_to_fit();
-        }
-
+        self.files.shrink_to_fit();
         self.names.shrink_to_fit();
 
         self.facts.definitions.symbols.shrink_to_fit();
@@ -89,46 +70,6 @@ impl AnalysisEngine {
 }
 
 impl AnalysisEngine {
-    pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
-        self.sources.ids.get(path)
-    }
-
-    pub fn file(&self, id: SourceFileId) -> Option<&SourceFile> {
-        self.sources.files.get(&id)
-    }
-
-    pub fn file_content_matches(&self, id: SourceFileId, content: &str) -> bool {
-        self.file(id)
-            .is_some_and(|file| file.content_hash == source_hash(content))
-    }
-}
-
-impl AnalysisEngine {
-    pub fn files(&self) -> impl Iterator<Item = &SourceFile> {
-        self.sources.files.values()
-    }
-}
-
-impl AnalysisEngine {
-    pub fn file_count(&self) -> usize {
-        self.sources.files.len()
-    }
-
-    pub fn text_range(&self, file_id: SourceFileId, start_byte: u32, end_byte: u32) -> TextRange {
-        self.assert_known_file_id(file_id, "TextRange requested for unknown source file id");
-        TextRange::new(file_id, start_byte, end_byte)
-    }
-
-    pub(super) fn assert_known_file_id(&self, file_id: SourceFileId, message: &str) {
-        invariant!(
-            self.sources.files.contains_key(&file_id),
-            what = "{message}",
-            why = "analysis facts and ranges must only reference registered files",
-            fix = "call AnalysisEngine::register_file before adding file facts",
-            message = message,
-        );
-    }
-
     pub(super) fn intern_reference_candidates(
         &mut self,
         candidates: Vec<ReferenceCandidate>,
@@ -390,10 +331,4 @@ impl AnalysisEngine {
         )
         .with_provenance(fact.provenance)
     }
-}
-
-pub(super) fn source_hash(source: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    hasher.finish()
 }

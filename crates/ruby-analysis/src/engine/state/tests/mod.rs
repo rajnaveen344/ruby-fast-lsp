@@ -8,7 +8,7 @@ use crate::core::{
 };
 
 use super::*;
-use crate::core::TypeResolution;
+use crate::core::{SourceKind, TypeResolution};
 use crate::engine::persist::fingerprint::SemanticChange;
 use crate::engine::resolution::{
     method_lookup_chain, method_lookup_chain_for_reference_cached,
@@ -17,6 +17,7 @@ use crate::engine::resolution::{
 };
 use crate::engine::AnalysisQueryCache;
 use crate::engine::ConstantLookupRequest;
+use std::path::PathBuf;
 
 mod caches;
 mod constants;

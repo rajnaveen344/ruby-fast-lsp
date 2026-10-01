@@ -1,173 +1,20 @@
-//! Source registration, file-owned fact replacement, and resolve passes.
+//! File-owned fact replacement and resolve passes.
 
 use crate::invariant::ExpectInvariant;
 use crate::stats::StatsSnapshot;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::core::{
     DiagnosticFact, ExecutionContextFact, FileAnalysis, InferenceTelemetry, RubyType, SourceFileId,
-    SourceKind, TypeProvenance, TypeSubject,
+    TypeProvenance, TypeSubject,
 };
 
 use super::inference::{StoredTypeInferenceOutcome, TypeInferenceOutcomeRef};
-use super::storage::source_hash;
-use super::{
-    AnalysisEngine, ResolveMode, ResolveStat, SourceFile, SourceFileInput, SourceFileSnapshot,
-    SourceLineIndex,
-};
+use super::{AnalysisEngine, ResolveMode, ResolveStat, SourceFileSnapshot};
 use crate::engine::persist::fingerprint::{SemanticChange, SemanticExportFingerprint};
 
 impl AnalysisEngine {
-    pub fn register_file(&mut self, file: SourceFileInput) -> SourceFileId {
-        let line_index = SourceLineIndex::new(&file.content);
-        let content_hash = source_hash(&file.content);
-        let source = if line_index.is_ascii() {
-            None
-        } else {
-            Some(file.content)
-        };
-        self.register_indexed_file(file.path, file.kind, line_index, content_hash, source, None)
-    }
-
-    /// Register a locked gem source with explicit package identity for library-tree grouping.
-    pub fn register_gem_file(
-        &mut self,
-        file: SourceFileInput,
-        package: crate::core::LibraryPackageId,
-    ) -> SourceFileId {
-        invariant!(
-            file.kind == SourceKind::Gem,
-            what = "register_gem_file received SourceKind::{:?}",
-            why = "only Gem sources carry locked package identity",
-            fix = "use register_file for non-gem sources or pass SourceKind::Gem",
-            file.kind,
-        );
-        let line_index = SourceLineIndex::new(&file.content);
-        let content_hash = source_hash(&file.content);
-        let source = if line_index.is_ascii() {
-            None
-        } else {
-            Some(file.content)
-        };
-        self.register_indexed_file(
-            file.path,
-            file.kind,
-            line_index,
-            content_hash,
-            source,
-            Some(package),
-        )
-    }
-
-    /// Register source whose caller retains the owned buffer. ASCII files need
-    /// only their line index and content hash after collection; non-ASCII files
-    /// retain one engine-owned copy for exact UTF-16 conversion.
-    pub fn register_file_borrowed(
-        &mut self,
-        path: PathBuf,
-        content: &str,
-        kind: SourceKind,
-    ) -> SourceFileId {
-        let line_index = SourceLineIndex::new(content);
-        let content_hash = source_hash(content);
-        let source = if line_index.is_ascii() {
-            None
-        } else {
-            Some(content.to_string())
-        };
-        self.register_indexed_file(path, kind, line_index, content_hash, source, None)
-    }
-
-    fn register_indexed_file(
-        &mut self,
-        path: PathBuf,
-        kind: SourceKind,
-        line_index: SourceLineIndex,
-        content_hash: u64,
-        source: Option<String>,
-        library_package: Option<crate::core::LibraryPackageId>,
-    ) -> SourceFileId {
-        let id = self.sources.ids.get_or_insert(&path);
-        if self.sources.files.get(&id).is_some_and(|existing| {
-            existing.path == path
-                && existing.kind == kind
-                && existing.line_index == line_index
-                && existing.content_hash == content_hash
-                && existing.source == source
-                && existing.library_package == library_package
-        }) {
-            return id;
-        }
-        self.next_source_revision = self.next_source_revision.checked_add(1).expect_invariant(
-            "analysis engine source revision exhausted u64",
-            "stale background commits need monotonic source identity",
-            "widen the source snapshot revision",
-        );
-        self.sources.files.insert(
-            id,
-            SourceFile {
-                id,
-                path: path.components().collect(),
-                source,
-                line_index,
-                content_hash,
-                kind,
-                revision: self.next_source_revision,
-                library_package,
-            },
-        );
-        id
-    }
-
-    pub fn source_snapshot_for_path(&self, path: impl AsRef<Path>) -> Option<SourceFileSnapshot> {
-        let file_id = self.file_id(path)?;
-        let file = self.file(file_id)?;
-        Some(SourceFileSnapshot {
-            engine_instance_id: self.instance_id,
-            file_id,
-            revision: file.revision,
-        })
-    }
-
-    /// Register a source only if no newer registration occurred after the
-    /// caller captured `expected_snapshot`.
-    pub fn register_file_borrowed_if_snapshot(
-        &mut self,
-        path: PathBuf,
-        content: &str,
-        kind: SourceKind,
-        expected_snapshot: Option<SourceFileSnapshot>,
-    ) -> Option<SourceFileSnapshot> {
-        if let Some(expected) = expected_snapshot {
-            invariant_eq!(
-                expected.engine_instance_id,
-                self.instance_id,
-                what = "conditional source registration received a snapshot from another analysis engine",
-                why = "source revisions are engine-local lifecycle identities",
-                fix = "capture and commit the snapshot through the same isolated project engine",
-            );
-        }
-        if self.source_snapshot_for_path(&path) != expected_snapshot {
-            return None;
-        }
-        let file_id = self.register_file_borrowed(path, content, kind);
-        let file = self.file(file_id).unwrap_or_else(|| {
-            unreachable_invariant!(
-                what = "conditional source registration lost file id {:?}",
-                why = "registration and revision capture occur under one engine write borrow",
-                fix = "keep SourceRegistry insertion atomic",
-                file_id,
-            )
-        });
-        Some(SourceFileSnapshot {
-            engine_instance_id: self.instance_id,
-            file_id,
-            revision: file.revision,
-        })
-    }
-
     pub fn replace_facts(
         &mut self,
         file_id: SourceFileId,
@@ -175,9 +22,7 @@ impl AnalysisEngine {
         mode: ResolveMode,
     ) -> SemanticChange {
         let fingerprint = SemanticExportFingerprint::from_facts(&facts);
-        let previous = self
-            .semantic_export_fingerprints
-            .insert(file_id, fingerprint);
+        let previous = self.files.record_export_fingerprint(file_id, fingerprint);
         let change = SemanticChange::classify(previous, fingerprint);
         self.replace_facts_deferred(file_id, facts);
         match mode {
@@ -202,11 +47,7 @@ impl AnalysisEngine {
             why = "isolated projects cannot share mutable source lifecycle identity",
             fix = "commit collected facts through the same engine that issued the snapshot",
         );
-        if self
-            .file(expected_snapshot.file_id)
-            .map(|file| file.revision)
-            != Some(expected_snapshot.revision)
-        {
+        if !self.files.is_current(expected_snapshot) {
             return None;
         }
         Some(self.replace_facts(expected_snapshot.file_id, facts, mode))
@@ -238,7 +79,7 @@ impl AnalysisEngine {
     pub fn resolve_files(&mut self, file_ids: &[SourceFileId]) {
         let mut unique = HashSet::with_capacity(file_ids.len());
         for file_id in file_ids {
-            self.assert_known_file_id(
+            self.files.assert_known(
                 *file_id,
                 "selected-file resolve references unknown source file id",
             );
@@ -271,7 +112,8 @@ impl AnalysisEngine {
         );
         *self.top_level_method_lookup_chain_cache.get_mut() = None;
         *self.universal_object_method_lookup_chain_cache.get_mut() = None;
-        self.assert_known_file_id(file_id, "file analysis references unknown source file id");
+        self.files
+            .assert_known(file_id, "file analysis references unknown source file id");
         for (range, ruby_type) in facts.local_read_types.as_ref() {
             invariant_eq!(
                 range.file_id,
@@ -516,11 +358,7 @@ impl AnalysisEngine {
             why = "isolated projects cannot share mutable diagnostic ownership",
             fix = "commit through the engine that issued the snapshot",
         );
-        if self
-            .file(expected_snapshot.file_id)
-            .map(|file| file.revision)
-            != Some(expected_snapshot.revision)
-        {
+        if !self.files.is_current(expected_snapshot) {
             return false;
         }
         let file_id = expected_snapshot.file_id;
