@@ -9,15 +9,31 @@ fn rust_example_package_dir() -> std::path::PathBuf {
     workspace_root.join("extensions/example-rust")
 }
 
+/// The example guest is built on demand, not committed. CI builds it and sets
+/// `RUBY_FAST_LSP_REQUIRE_EXAMPLE_WASM=1`, which turns a missing artifact into
+/// a failure instead of a skip.
+fn example_artifact_available(artifact: &std::path::Path) -> bool {
+    if artifact.exists() {
+        return true;
+    }
+    assert_ne!(
+        std::env::var_os("RUBY_FAST_LSP_REQUIRE_EXAMPLE_WASM").as_deref(),
+        Some(std::ffi::OsStr::new("1")),
+        "the example Rust guest is required but missing at {}; build it with extensions/example-rust/build-and-test.sh",
+        artifact.display()
+    );
+    eprintln!(
+        "skipping actual Rust Wasm test; build extensions/example-rust/build-and-test.sh to run it"
+    );
+    false
+}
+
 #[tokio::test]
 async fn typed_rust_wasm_guest_uses_public_execution_context_contract() {
     let package = rust_example_package_dir();
     let artifact =
         package.join("target/wasm32-wasip1/release/ruby_fast_lsp_example_rust_extension.wasm");
-    if !artifact.exists() {
-        eprintln!(
-            "skipping actual Rust Wasm black-box test; run extensions/example-rust/build-and-test.sh"
-        );
+    if !example_artifact_available(&artifact) {
         return;
     }
     let workspace = TempDir::new().expect("Rust guest workspace must be created");
@@ -138,10 +154,7 @@ async fn typed_rust_wasm_manifest_fails_closed_for_unsupported_locked_version() 
     let package = rust_example_package_dir();
     let artifact =
         package.join("target/wasm32-wasip1/release/ruby_fast_lsp_example_rust_extension.wasm");
-    if !artifact.exists() {
-        eprintln!(
-            "skipping actual Rust Wasm applicability test; run extensions/example-rust/build-and-test.sh"
-        );
+    if !example_artifact_available(&artifact) {
         return;
     }
     let workspace = TempDir::new().expect("unsupported Rust guest workspace must be created");

@@ -68,12 +68,10 @@ end
 
 #[tokio::test]
 async fn packaged_cucumber_world_connects_cross_file_steps_hooks_and_modules() {
-    if !cucumber_artifact_exists() {
-        eprintln!(
-            "skipping actual Cucumber Rust Wasm test; run extensions/cucumber-rust/build-and-test.sh"
-        );
-        return;
-    }
+    assert!(
+        cucumber_artifact_exists(),
+        "the committed guest artifact is missing; rebuild it with extensions/cucumber-rust/build-and-test.sh"
+    );
     let (workspace, mut editor) = cucumber_editor("11.1.1").await;
     open_cucumber_dsl(&mut editor, &workspace).await;
     let support = workspace_file(&workspace, "features/support/world.rb");
@@ -182,12 +180,10 @@ extend Cucumber::Glue::Dsl
 
 #[tokio::test]
 async fn packaged_cucumber_world_factory_preserves_ordinary_lexical_scope() {
-    if !cucumber_artifact_exists() {
-        eprintln!(
-            "skipping actual Cucumber Rust Wasm test; run extensions/cucumber-rust/build-and-test.sh"
-        );
-        return;
-    }
+    assert!(
+        cucumber_artifact_exists(),
+        "the committed guest artifact is missing; rebuild it with extensions/cucumber-rust/build-and-test.sh"
+    );
     let (workspace, mut editor) = cucumber_editor("11.1.1").await;
     open_cucumber_dsl(&mut editor, &workspace).await;
     let support = workspace_file(&workspace, "features/support/factory.rb");
@@ -216,12 +212,10 @@ end
 
 #[tokio::test]
 async fn packaged_cucumber_manifest_fails_closed_for_unsupported_version() {
-    if !cucumber_artifact_exists() {
-        eprintln!(
-            "skipping actual Cucumber Rust Wasm test; run extensions/cucumber-rust/build-and-test.sh"
-        );
-        return;
-    }
+    assert!(
+        cucumber_artifact_exists(),
+        "the committed guest artifact is missing; rebuild it with extensions/cucumber-rust/build-and-test.sh"
+    );
     let (workspace, mut editor) = cucumber_editor("12.0.0").await;
     open_cucumber_dsl(&mut editor, &workspace).await;
     let steps = workspace_file(&workspace, "features/steps.rb");

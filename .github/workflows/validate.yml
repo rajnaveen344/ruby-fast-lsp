@@ -20,6 +20,7 @@ jobs:
         with:
           python-version: '3.12'
       - uses: dtolnay/rust-toolchain@stable
+      - run: rustup target add wasm32-wasip1
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -27,6 +28,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
       - run: npm ci --prefix editors/vscode/vsix
       - run: node editors/scripts/release_checks.js correctness
       - uses: actions/upload-artifact@v5

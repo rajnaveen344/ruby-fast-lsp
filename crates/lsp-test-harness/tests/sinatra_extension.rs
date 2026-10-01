@@ -144,12 +144,10 @@ end
 
 #[tokio::test]
 async fn packaged_sinatra_rust_wasm_models_modular_request_and_helper_scopes() {
-    if !sinatra_artifact_exists() {
-        eprintln!(
-            "skipping actual Sinatra Rust Wasm test; run extensions/sinatra-rust/build-and-test.sh"
-        );
-        return;
-    }
+    assert!(
+        sinatra_artifact_exists(),
+        "the committed guest artifact is missing; rebuild it with extensions/sinatra-rust/build-and-test.sh"
+    );
     let (workspace, mut editor) = sinatra_editor("4.2.1").await;
     open_sinatra_namespaces(&mut editor, &workspace).await;
     let app = workspace_file(&workspace, "app.rb");
@@ -253,12 +251,10 @@ end
 
 #[tokio::test]
 async fn packaged_sinatra_rust_wasm_supports_sinatra_2_cross_file_request_scope() {
-    if !sinatra_artifact_exists() {
-        eprintln!(
-            "skipping actual Sinatra Rust Wasm test; run extensions/sinatra-rust/build-and-test.sh"
-        );
-        return;
-    }
+    assert!(
+        sinatra_artifact_exists(),
+        "the committed guest artifact is missing; rebuild it with extensions/sinatra-rust/build-and-test.sh"
+    );
     let workspace = TempDir::new().expect("Sinatra workspace must be created");
     std::fs::create_dir(workspace.path().join("lib"))
         .expect("Sinatra source directory must be created");
@@ -371,12 +367,10 @@ end
 
 #[tokio::test]
 async fn packaged_sinatra_rust_wasm_models_classic_application_scope() {
-    if !sinatra_artifact_exists() {
-        eprintln!(
-            "skipping actual Sinatra Rust Wasm test; run extensions/sinatra-rust/build-and-test.sh"
-        );
-        return;
-    }
+    assert!(
+        sinatra_artifact_exists(),
+        "the committed guest artifact is missing; rebuild it with extensions/sinatra-rust/build-and-test.sh"
+    );
     let (workspace, mut editor) = sinatra_editor("4.2.1").await;
     open_sinatra_namespaces(&mut editor, &workspace).await;
     let app = workspace_file(&workspace, "classic.rb");
@@ -420,12 +414,10 @@ end
 
 #[tokio::test]
 async fn packaged_sinatra_rust_wasm_includes_helper_modules_in_request_scope() {
-    if !sinatra_artifact_exists() {
-        eprintln!(
-            "skipping actual Sinatra Rust Wasm test; run extensions/sinatra-rust/build-and-test.sh"
-        );
-        return;
-    }
+    assert!(
+        sinatra_artifact_exists(),
+        "the committed guest artifact is missing; rebuild it with extensions/sinatra-rust/build-and-test.sh"
+    );
     let (workspace, mut editor) = sinatra_editor("4.2.1").await;
     open_sinatra_namespaces(&mut editor, &workspace).await;
     let app = workspace_file(&workspace, "helper_module.rb");
@@ -459,12 +451,10 @@ end
 
 #[tokio::test]
 async fn packaged_sinatra_manifest_fails_closed_for_unsupported_version() {
-    if !sinatra_artifact_exists() {
-        eprintln!(
-            "skipping actual Sinatra Rust Wasm applicability test; run extensions/sinatra-rust/build-and-test.sh"
-        );
-        return;
-    }
+    assert!(
+        sinatra_artifact_exists(),
+        "the committed guest artifact is missing; rebuild it with extensions/sinatra-rust/build-and-test.sh"
+    );
     let (workspace, mut editor) = sinatra_editor("5.0.0").await;
     open_sinatra_namespaces(&mut editor, &workspace).await;
     let app = workspace_file(&workspace, "unsupported.rb");

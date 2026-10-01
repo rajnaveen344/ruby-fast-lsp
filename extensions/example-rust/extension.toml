@@ -5,7 +5,7 @@ abi_version = 1
 server_version = ">=0.2.6, <0.4.0"
 runtime = "wasm"
 wasm = "target/wasm32-wasip1/release/ruby_fast_lsp_example_rust_extension.wasm"
-checksum_sha256 = "6a45645724f08e297ca657aa1144eabb171b626192ec9cb0479cc1c177742c60"
+checksum_sha256 = "949ebee96d05c00529ce7cb7c951b1a58cfac1a4a76f92896d9eb7611c909b10"
 capabilities = ["index.call", "document_symbol", "code_lens"]
 permissions = []
 
