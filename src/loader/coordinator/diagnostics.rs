@@ -1,6 +1,7 @@
 //! Publication of open-document diagnostics from current engine facts.
 
 use super::IndexingCoordinator;
+use crate::loader::context::LoadContext;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use ruby_analysis::core::{
@@ -46,11 +47,12 @@ impl IndexingCoordinator {
     /// Publish a current, complete diagnostic projection for open project files.
     pub(super) async fn publish_open_project_diagnostics(
         &self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<()> {
         self.indexing_checkpoint(server)?;
         let analysis_engine = self.analysis_engine(server);
-        let mut open_uris = server.documents.read().keys().cloned().collect::<Vec<_>>();
+        let mut open_uris = ctx.sources.open_uris();
         open_uris.retain(|uri| Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(uri)));
         open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
 
@@ -80,7 +82,7 @@ impl IndexingCoordinator {
                 if !Arc::ptr_eq(&analysis_engine, &server.analysis_engine_for_uri(&uri)) {
                     continue;
                 }
-                let Some(document) = server.get_doc(&uri) else {
+                let Some(document) = ctx.sources.open_document(&uri) else {
                     continue;
                 };
                 let Ok(path) = uri.to_file_path() else {

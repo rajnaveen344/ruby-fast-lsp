@@ -55,9 +55,10 @@ impl IndexingCoordinator {
             None
         };
         let worker_server = server.clone();
+        let worker_ctx = ctx.clone();
         let worker_root = self.workspace_root.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
-&ctx.resources,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             self.resource_cancellation(),
             IndexingWorkClass::ProjectParallelIo,
@@ -79,6 +80,7 @@ impl IndexingCoordinator {
                 let result = project_indexer
                     .collect_initial_project_navigation_demand_facts(
                         &initial_demand_keys,
+                        &worker_ctx,
                         &worker_server,
                     )
                     .and_then(|selection| {
@@ -99,7 +101,7 @@ impl IndexingCoordinator {
                                 );
                             }
                         }
-                        project_indexer.finish_project_navigation_facts(&worker_server)
+                        project_indexer.finish_project_navigation_facts(&worker_ctx, &worker_server)
                     })
                     .and_then(|()| {
                         let Some((demands, generation)) = frontier_demands.as_ref() else {
@@ -113,6 +115,7 @@ impl IndexingCoordinator {
                         let demanded_file_count = selection.files.len();
                         project_indexer.collect_project_file_batch(
                             &selection.files,
+                            &worker_ctx,
                             &worker_server,
                             true,
                         )?;
@@ -258,12 +261,13 @@ impl IndexingCoordinator {
             "retain the frontier IndexerProject across every batch",
         );
         let worker_server = server.clone();
+        let worker_ctx = ctx.clone();
         let worker_demands = demands.clone();
         let worker_root = self.workspace_root.clone();
         let worker_cancellation = self.resource_cancellation();
         let loop_cancellation = worker_cancellation.clone();
         let (next_project_indexer, result) = run_cpu_indexing_task(
-&ctx.resources,
+            &ctx.resources,
             Some(self.workspace_root.clone()),
             worker_cancellation,
             IndexingWorkClass::ProjectParallelIo,
@@ -339,6 +343,7 @@ impl IndexingCoordinator {
                         let remaining = project_indexer.remaining_project_file_count();
                         project_indexer.collect_project_file_batch(
                             &files,
+                            &worker_ctx,
                             &worker_server,
                             demanded || remaining == 0,
                         )?;
@@ -450,6 +455,7 @@ impl IndexingCoordinator {
             project_indexer.install_jruby_import_provider(provider);
         }
         let worker_server = server.clone();
+        let worker_ctx = ctx.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
             &ctx.resources,
             Some(self.workspace_root.clone()),
@@ -457,7 +463,8 @@ impl IndexingCoordinator {
             IndexingWorkClass::ProjectParallelIo,
             "exhaustive project fact collection",
             move || {
-                let result = project_indexer.collect_remaining_project_facts(&worker_server);
+                let result =
+                    project_indexer.collect_remaining_project_facts(&worker_ctx, &worker_server);
                 (project_indexer, result)
             },
         )
@@ -482,6 +489,7 @@ impl IndexingCoordinator {
             "rebuild the processor with the completed provider before replay",
         );
         let worker_server = server.clone();
+        let worker_ctx = ctx.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
             &ctx.resources,
             Some(self.workspace_root.clone()),
@@ -489,8 +497,11 @@ impl IndexingCoordinator {
             IndexingWorkClass::ProjectParallelIo,
             "JRuby catalog-sensitive project replay",
             move || {
-                let result = project_indexer
-                    .replay_jruby_catalog_sensitive_files(file_processor, &worker_server);
+                let result = project_indexer.replay_jruby_catalog_sensitive_files(
+                    file_processor,
+                    &worker_ctx,
+                    &worker_server,
+                );
                 (project_indexer, result)
             },
         )

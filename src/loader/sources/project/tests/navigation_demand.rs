@@ -95,7 +95,12 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
     );
     indexer.set_navigation_priority_keys(HashSet::from(["user".to_string()]), HashSet::new());
 
-    indexer.collect_project_navigation_facts(&server).unwrap();
+    indexer
+        .collect_project_navigation_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
 
     let user = ruby_analysis::core::RubyConstant::new("User").unwrap();
     let report = ruby_analysis::core::RubyConstant::new("Report").unwrap();
@@ -116,7 +121,12 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
         );
     }
 
-    indexer.collect_remaining_project_facts(&server).unwrap();
+    indexer
+        .collect_remaining_project_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
 
     let engine = workspace_state.analysis_engine.read();
     assert!(
@@ -144,7 +154,11 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
     indexer.set_navigation_priority_keys(HashSet::from(["report".to_string()]), HashSet::new());
 
     let selection = indexer
-        .collect_initial_project_navigation_demand_facts(&["accountrecord".to_string()], &server)
+        .collect_initial_project_navigation_demand_facts(
+            &["accountrecord".to_string()],
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
         .unwrap();
 
     assert_eq!(selection.completed_keys, vec!["accountrecord".to_string()]);
@@ -168,7 +182,12 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
         );
     }
 
-    indexer.finish_project_navigation_facts(&server).unwrap();
+    indexer
+        .finish_project_navigation_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
     let engine = workspace_state.analysis_engine.read();
     assert!(
         !AnalysisQuery::new(&engine)
@@ -195,7 +214,12 @@ fn navigation_demand_completes_when_the_frontier_already_processed_its_file() {
     indexer
         .set_navigation_priority_keys(HashSet::from(["accountrecord".to_string()]), HashSet::new());
 
-    indexer.collect_project_navigation_facts(&server).unwrap();
+    indexer
+        .collect_project_navigation_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
     let selection = indexer.take_navigation_demand_files(&["accountrecord".to_string()]);
 
     assert!(

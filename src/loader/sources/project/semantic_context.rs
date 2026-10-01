@@ -2,6 +2,7 @@
 
 use super::IndexerProject;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::info;
@@ -60,6 +61,7 @@ impl IndexerProject {
 
     pub(super) fn initialize_project_collection_semantic_context(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         project_files: &[PathBuf],
     ) -> Result<()> {
@@ -118,7 +120,7 @@ impl IndexerProject {
             let outcomes = project_files
                 .par_iter()
                 .map(|path| -> Result<(PathBuf, Option<FileAnalysis>)> {
-                    let (content, _) = Self::read_authoritative_project_source(server, path)
+                    let (content, _) = Self::read_authoritative_project_source(ctx, path)
                         .with_context(|| {
                             format!(
                                 "failed to read project semantic seed source {}",
@@ -194,14 +196,15 @@ impl IndexerProject {
 
     pub(super) fn resolve_open_project_files(
         &self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         analysis_engine: &Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) {
         let resolve_start = Instant::now();
-        let mut open_project_paths = server
-            .documents
-            .read()
-            .keys()
+        let mut open_project_paths = ctx
+            .sources
+            .open_uris()
+            .iter()
             .filter_map(|uri| {
                 let workspace = server.workspace_for_uri(uri)?;
                 (workspace.root_path == self.workspace_root)

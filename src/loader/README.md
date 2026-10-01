@@ -35,7 +35,11 @@ The server builds a `LoadContext` for each whole-project load
 (`load_context_for_uri`), and passes it next to itself to
 `IndexingCoordinator::run_complete_indexing` and the `FileProcessor::process_file*`
 entry points. Its handles read live: configuration, published require roots,
-and open buffers are observed when the loader consults them. Writes stay on
+and open buffers are observed when the loader consults them. The loader reads
+configuration, require roots, shared products, the resource governor, runtime
+discovery, and open buffers only through this context; it still asks the
+server for project routing (`analysis_engine_for_uri`, `workspace_for_uri`,
+`list_workspaces`), extension context, and per-document locks. Writes stay on
 the server.
 
 ## Current Flow

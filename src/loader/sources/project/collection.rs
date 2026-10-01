@@ -5,6 +5,7 @@ use super::ProjectFileInput;
 use super::RegisteredProjectFileInput;
 use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::loader::file_processor::ProjectFileCollectionTiming;
 use crate::server::RubyLanguageServer;
 use crate::utils;
@@ -51,13 +52,18 @@ where
 
 impl IndexerProject {
     /// Collect facts from project files and track dependencies
-    pub fn collect_project_facts(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        self.collect_project_navigation_facts(server)?;
-        self.collect_remaining_project_facts(server)
+    pub fn collect_project_facts(
+        &mut self,
+        ctx: &LoadContext,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
+        self.collect_project_navigation_facts(ctx, server)?;
+        self.collect_remaining_project_facts(ctx, server)
     }
 
     pub(crate) fn collect_remaining_project_facts(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<()> {
         invariant!(
@@ -87,6 +93,7 @@ impl IndexerProject {
         self.collect_facts_and_track_dependencies(
             &files,
             0,
+            ctx,
             server,
             true,
             Some(known_namespaces.clone()),
@@ -153,6 +160,7 @@ impl IndexerProject {
     pub(crate) fn collect_project_file_batch(
         &mut self,
         files: &[PathBuf],
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         resolve_open_documents: bool,
     ) -> Result<()> {
@@ -173,6 +181,7 @@ impl IndexerProject {
         self.collect_facts_and_track_dependencies(
             files,
             0,
+            ctx,
             server,
             resolve_open_documents,
             Some(known_namespaces),
@@ -324,6 +333,7 @@ impl IndexerProject {
         &mut self,
         files: &[PathBuf],
         priority_file_count: usize,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
         resolve_open_documents: bool,
         known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
@@ -354,8 +364,7 @@ impl IndexerProject {
         let read_file = |file_path: &PathBuf| -> Result<ProjectFileInput> {
             let expected_snapshot = analysis_engine.read().source_snapshot_for_path(file_path);
             let read_started = Instant::now();
-            let (content, open_document) =
-                Self::read_authoritative_project_source(server, file_path)?;
+            let (content, open_document) = Self::read_authoritative_project_source(ctx, file_path)?;
             let read_elapsed = read_started.elapsed();
             let dependency_started = Instant::now();
             Self::extract_and_track_dependencies(&content, required_stdlib_ref, required_gems_ref);
@@ -771,7 +780,7 @@ impl IndexerProject {
         }
 
         if resolve_open_documents {
-            self.resolve_open_project_files(server, &analysis_engine);
+            self.resolve_open_project_files(ctx, server, &analysis_engine);
         }
 
         Ok(())

@@ -256,13 +256,9 @@ impl FileProcessor {
     ) -> Result<ProcessResult> {
         // Check if this version was already indexed - skip expensive re-indexing if unchanged
         let already_indexed = !force_reindex && {
-            let docs = server.documents.read();
-            if let Some(doc_arc) = docs.get(uri) {
-                let doc = doc_arc.read();
-                doc.indexed_version == Some(doc.version)
-            } else {
-                false
-            }
+            ctx.sources
+                .open_document_version(uri)
+                .is_some_and(|document| document.indexed_version == Some(document.version))
         };
 
         if already_indexed {
@@ -304,11 +300,10 @@ impl FileProcessor {
         let source_kind = self.analysis_source_kind_for_uri(server, uri);
         let analysis_file_id =
             server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
-        let document_version = server
-            .documents
-            .read()
-            .get(uri)
-            .map(|document| document.read().version)
+        let document_version = ctx
+            .sources
+            .open_document_version(uri)
+            .map(|document| document.version)
             .unwrap_or(0);
         let document = RubyDocument::with_analysis_file_id(
             uri.clone(),

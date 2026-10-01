@@ -167,7 +167,7 @@ Delete this file when the last task is done. Git history keeps the record.
         `RuntimeDiscovery`. Build it in `init_workspace_inner` and in the
         interactive path from the server, and pass it next to `server`. No
         reads move yet.
-  - [ ] C1d. Switch reads from `server` to `ctx`, one area per commit: config
+  - [x] C1d. Switch reads from `server` to `ctx`, one area per commit: config
         and require roots (delete `RequireDiagnosticRoots::Server`), products
         and the governor, runtime discovery, open buffers through
         `SourceReader`.

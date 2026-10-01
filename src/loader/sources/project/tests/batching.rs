@@ -114,7 +114,11 @@ fn project_indexing_status_reports_completed_files_against_a_stable_total() {
     indexer.set_navigation_priority_keys(HashSet::from(["alpha".to_string()]), HashSet::new());
 
     indexer
-        .collect_initial_project_navigation_demand_facts(&[], &server)
+        .collect_initial_project_navigation_demand_facts(
+            &[],
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
         .unwrap();
     let discovered = workspace_state.indexing_status.snapshot();
     assert_eq!(discovered.total, Some(4));
@@ -124,12 +128,22 @@ fn project_indexing_status_reports_completed_files_against_a_stable_total() {
         "file discovery must publish a stable denominator before the first batch"
     );
 
-    indexer.finish_project_navigation_facts(&server).unwrap();
+    indexer
+        .finish_project_navigation_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
     let after_frontier = workspace_state.indexing_status.snapshot();
     assert_eq!(after_frontier.total, Some(4));
     assert_eq!(after_frontier.completed, Some(1));
 
-    indexer.collect_remaining_project_facts(&server).unwrap();
+    indexer
+        .collect_remaining_project_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
     let after_all = workspace_state.indexing_status.snapshot();
     assert_eq!(after_all.total, Some(4));
     assert_eq!(after_all.completed, Some(4));
@@ -162,17 +176,32 @@ fn exhaustive_batches_share_one_immutable_pre_collection_namespace_context() {
         IndexingConfig::default(),
     );
     indexer.set_navigation_priority_keys(HashSet::from(["seed".to_string()]), HashSet::new());
-    indexer.collect_project_navigation_facts(&server).unwrap();
+    indexer
+        .collect_project_navigation_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
 
     let parent_batch = indexer.take_next_remaining_project_files(1);
     assert_eq!(parent_batch, vec![parent_path]);
     indexer
-        .collect_project_file_batch(&parent_batch, &server, false)
+        .collect_project_file_batch(
+            &parent_batch,
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+            false,
+        )
         .unwrap();
     let child_batch = indexer.take_next_remaining_project_files(1);
     assert_eq!(child_batch, vec![child_path.clone()]);
     indexer
-        .collect_project_file_batch(&child_batch, &server, false)
+        .collect_project_file_batch(
+            &child_batch,
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+            false,
+        )
         .unwrap();
 
     let child = ruby_analysis::core::FullyQualifiedName::namespace(vec![
@@ -227,7 +256,12 @@ fn exhaustive_semantics_do_not_depend_on_batch_boundaries() {
             IndexingConfig::default(),
         );
         indexer.set_navigation_priority_keys(HashSet::from(["seed".to_string()]), HashSet::new());
-        indexer.collect_project_navigation_facts(&server).unwrap();
+        indexer
+            .collect_project_navigation_facts(
+                &server.load_context_for_project(indexer.workspace_root()),
+                &server,
+            )
+            .unwrap();
 
         rayon::ThreadPoolBuilder::new()
             .num_threads(1)
@@ -237,7 +271,12 @@ fn exhaustive_semantics_do_not_depend_on_batch_boundaries() {
                 while indexer.remaining_project_file_count() > 0 {
                     let batch = indexer.take_next_remaining_project_files(batch_size);
                     indexer
-                        .collect_project_file_batch(&batch, &server, false)
+                        .collect_project_file_batch(
+                            &batch,
+                            &server.load_context_for_project(indexer.workspace_root()),
+                            &server,
+                            false,
+                        )
                         .unwrap();
                 }
             });
@@ -286,12 +325,22 @@ fn parallel_batch_collection_has_a_stable_semantic_result() {
             IndexingConfig::default(),
         );
         indexer.set_navigation_priority_keys(HashSet::from(["seed".to_string()]), HashSet::new());
-        indexer.collect_project_navigation_facts(&server).unwrap();
+        indexer
+            .collect_project_navigation_facts(
+                &server.load_context_for_project(indexer.workspace_root()),
+                &server,
+            )
+            .unwrap();
 
         let batch = indexer.take_next_remaining_project_files(64);
         assert_eq!(batch.len(), 32);
         indexer
-            .collect_project_file_batch(&batch, &server, true)
+            .collect_project_file_batch(
+                &batch,
+                &server.load_context_for_project(indexer.workspace_root()),
+                &server,
+                true,
+            )
             .unwrap();
         indexer.finish_remaining_project_facts();
         workspace_state.analysis_engine.write().resolve();

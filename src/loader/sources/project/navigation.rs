@@ -5,6 +5,7 @@ use super::ProjectNavigationDemandSelection;
 use super::MAX_PROJECT_NAVIGATION_DEMAND_KEYS;
 use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::Result;
@@ -121,21 +122,23 @@ pub(super) fn project_file_matches_navigation_key(path: &Path, key: &str) -> boo
 impl IndexerProject {
     pub(crate) fn collect_project_navigation_facts(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<()> {
-        let selection = self.collect_initial_project_navigation_demand_facts(&[], server)?;
+        let selection = self.collect_initial_project_navigation_demand_facts(&[], ctx, server)?;
         invariant!(
             selection == ProjectNavigationDemandSelection::default(),
             what = "an empty project-demand frontier produced a non-empty selection",
             why = "demand selection must be driven only by normalized queued keys",
             fix = "inspect the initial project frontier partitioning",
         );
-        self.finish_project_navigation_facts(server)
+        self.finish_project_navigation_facts(ctx, server)
     }
 
     pub(crate) fn collect_initial_project_navigation_demand_facts(
         &mut self,
         demand_keys: &[String],
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<ProjectNavigationDemandSelection> {
         invariant!(
@@ -192,7 +195,7 @@ impl IndexerProject {
         self.begin_project_file_progress(total_files, server);
 
         self.collect_signature_facts(&signature_files, server);
-        self.initialize_project_collection_semantic_context(server, &all_project_files)?;
+        self.initialize_project_collection_semantic_context(ctx, server, &all_project_files)?;
         let collection_known_namespaces =
             self.exhaustive_known_namespaces.clone().expect_invariant(
                 "project collection baseline has no namespace set after initialization",
@@ -207,6 +210,7 @@ impl IndexerProject {
         self.collect_facts_and_track_dependencies(
             &selection.files,
             selection.files.len(),
+            ctx,
             server,
             true,
             Some(collection_known_namespaces),
@@ -230,6 +234,7 @@ impl IndexerProject {
 
     pub(crate) fn finish_project_navigation_facts(
         &mut self,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<()> {
         let start_time = self.project_navigation_started_at.take().expect_invariant(
@@ -248,6 +253,7 @@ impl IndexerProject {
         self.collect_facts_and_track_dependencies(
             &ruby_files,
             ruby_files.len(),
+            ctx,
             server,
             true,
             Some(self.exhaustive_known_namespaces.clone().expect_invariant(

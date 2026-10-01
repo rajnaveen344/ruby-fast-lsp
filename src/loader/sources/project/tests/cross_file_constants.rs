@@ -114,8 +114,18 @@ end
     );
     indexer
         .set_navigation_priority_keys(HashSet::from(["firstconsumer".to_string()]), HashSet::new());
-    indexer.collect_project_navigation_facts(&server).unwrap();
-    indexer.collect_remaining_project_facts(&server).unwrap();
+    indexer
+        .collect_project_navigation_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
+    indexer
+        .collect_remaining_project_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
     workspace_state.analysis_engine.write().resolve();
 
     let engine = workspace_state.analysis_engine.read();
@@ -287,8 +297,18 @@ end
         IndexingConfig::default(),
     );
     indexer.set_navigation_priority_keys(HashSet::from(["consumer".to_string()]), HashSet::new());
-    indexer.collect_project_navigation_facts(&server).unwrap();
-    indexer.collect_remaining_project_facts(&server).unwrap();
+    indexer
+        .collect_project_navigation_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
+    indexer
+        .collect_remaining_project_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
     workspace_state.analysis_engine.write().resolve();
 
     let engine = workspace_state.analysis_engine.read();

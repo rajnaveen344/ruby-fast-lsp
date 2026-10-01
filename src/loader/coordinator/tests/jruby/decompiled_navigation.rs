@@ -96,7 +96,12 @@ async fn source_less_jruby_import_navigates_to_verified_decompiled_implementatio
             .clone(),
         coordinator.config.indexing.clone(),
     );
-    project_indexer.collect_project_facts(&server).unwrap();
+    project_indexer
+        .collect_project_facts(
+            &server.load_context_for_project(project_indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
     let uri = Url::from_file_path(&source_path).unwrap();
     coordinator
         .file_processor

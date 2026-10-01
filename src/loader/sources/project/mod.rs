@@ -2,8 +2,8 @@ use crate::environment::config::IndexingConfig;
 use crate::environment::runtime::jruby::imports::{
     JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
 };
+use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
-use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use navigation::project_file_matches_navigation_key;
 use parking_lot::Mutex;
@@ -73,17 +73,14 @@ pub struct IndexerProject {
 }
 
 impl IndexerProject {
-    fn read_authoritative_project_source(
-        server: &RubyLanguageServer,
-        path: &Path,
-    ) -> Result<(String, bool)> {
+    fn read_authoritative_project_source(ctx: &LoadContext, path: &Path) -> Result<(String, bool)> {
         let uri = Url::from_file_path(path).map_err(|_| {
             anyhow!(
                 "project source path is not a valid file URI: {}",
                 path.display()
             )
         })?;
-        if let Some(document) = server.get_doc(&uri) {
+        if let Some(document) = ctx.sources.open_document(&uri) {
             return Ok((document.content, true));
         }
         let content = std::fs::read_to_string(path)

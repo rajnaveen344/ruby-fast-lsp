@@ -264,6 +264,7 @@ impl IndexingCoordinator {
         ));
         let core_stub_dur = core_start.elapsed();
         let priority_server = server.clone();
+        let priority_sources = ctx.sources.clone();
         let priority_workspace_root = self.workspace_root.clone();
         let active_priority_keys = run_cpu_indexing_task(
             &ctx.resources,
@@ -271,7 +272,13 @@ impl IndexingCoordinator {
             self.resource_cancellation(),
             IndexingWorkClass::LightCpu,
             "active document dependency frontier",
-            move || open_project_constant_priority_keys(&priority_server, &priority_workspace_root),
+            move || {
+                open_project_constant_priority_keys(
+                    priority_sources.as_ref(),
+                    &priority_server,
+                    &priority_workspace_root,
+                )
+            },
         )
         .await?;
 
@@ -584,7 +591,7 @@ impl IndexingCoordinator {
         )
         .await?;
         let publish_start = Instant::now();
-        self.publish_open_project_diagnostics(server).await?;
+        self.publish_open_project_diagnostics(ctx, server).await?;
         let publish_dur = publish_start.elapsed();
 
         // Open consumers may have been analyzed before a closed definition

@@ -3,6 +3,7 @@
 use super::IndexerProject;
 use crate::environment::runtime::jruby::imports::{JrubyImportProvider, StaticJavaNavigationPlan};
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
@@ -28,6 +29,7 @@ impl IndexerProject {
     pub(crate) fn replay_jruby_catalog_sensitive_files(
         &mut self,
         file_processor: FileProcessor,
+        ctx: &LoadContext,
         server: &RubyLanguageServer,
     ) -> Result<usize> {
         let provider = file_processor
@@ -67,7 +69,7 @@ impl IndexerProject {
                     StaticJavaNavigationPlan,
                 )>> {
                     let (content, open_document) =
-                        Self::read_authoritative_project_source(server, file_path).with_context(|| {
+                        Self::read_authoritative_project_source(ctx, file_path).with_context(|| {
                         format!(
                             "failed to reread JRuby catalog-sensitive project source {}",
                             file_path.display()
@@ -166,7 +168,7 @@ impl IndexerProject {
         )?;
         let materialization_elapsed = materialization_started.elapsed();
         self.file_processor = file_processor;
-        self.resolve_open_project_files(server, &analysis_engine);
+        self.resolve_open_project_files(ctx, server, &analysis_engine);
         info!(
             "[PERF][JRuby project replay] project={} files={} fact_replacement={:?} \
              signature_classes={} implementation_classes={} materialization={:?} total={:?}",

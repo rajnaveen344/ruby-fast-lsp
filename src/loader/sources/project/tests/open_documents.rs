@@ -61,7 +61,12 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
         FileProcessor::new(),
         IndexingConfig::default(),
     );
-    indexer.collect_project_facts(&server).unwrap();
+    indexer
+        .collect_project_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
 
     let engine = workspace.analysis_engine.read();
     let open_file = engine.file_id(&open_path).unwrap();
@@ -132,7 +137,12 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
         FileProcessor::new(),
         IndexingConfig::default(),
     );
-    indexer.collect_project_facts(&server).unwrap();
+    indexer
+        .collect_project_facts(
+            &server.load_context_for_project(indexer.workspace_root()),
+            &server,
+        )
+        .unwrap();
     workspace_state.analysis_engine.write().resolve();
 
     let engine = workspace_state.analysis_engine.read();
@@ -176,7 +186,12 @@ fn cold_project_result_is_independent_of_a_prior_identical_file_pass() {
             FileProcessor::new(),
             IndexingConfig::default(),
         );
-        indexer.collect_project_facts(&server).unwrap();
+        indexer
+            .collect_project_facts(
+                &server.load_context_for_project(indexer.workspace_root()),
+                &server,
+            )
+            .unwrap();
         workspace_state.analysis_engine.write().resolve();
         let fingerprint = workspace_state
             .analysis_engine
