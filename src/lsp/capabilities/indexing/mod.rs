@@ -6,8 +6,9 @@ use crate::lsp::linter::lint_document;
 use crate::lsp::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use crate::utils::file_ops::ProjectFilePolicy;
+use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
+use ruby_analysis::engine::{ResolveMode, SourceFileInput};
 
 use log::{debug, info};
 use std::path::Path;
@@ -856,7 +857,7 @@ fn clear_file_facts_if_kind(
         content: String::new(),
         kind: expected_kind,
     });
-    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    engine.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     true
 }
 

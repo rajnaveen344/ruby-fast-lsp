@@ -133,7 +133,7 @@ fn main() -> Result<()> {
         processor.replace_collected_project_file_facts_as_deferred_resolution(
             &path,
             &analysis_engine,
-            collected.file_facts,
+            collected.analysis,
         );
         let replacement_elapsed = replacement_started.elapsed();
 

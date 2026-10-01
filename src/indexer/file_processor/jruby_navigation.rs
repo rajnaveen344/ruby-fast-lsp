@@ -8,8 +8,9 @@ use crate::environment::runtime::jruby::source_navigation::java_source_navigatio
 use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
+use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::{FullyQualifiedName, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, FileFacts, SourceFileInput};
+use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, SourceFileInput};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -248,7 +249,7 @@ impl FileProcessor {
                 let query = AnalysisQuery::new(&engine);
                 (
                     file_id,
-                    FileFacts {
+                    FileAnalysis {
                         symbols: query.symbol_facts_in_file(file_id),
                         methods: query.method_facts_in_file(file_id),
                         method_visibility_overrides: query
@@ -257,7 +258,7 @@ impl FileProcessor {
                         graph_nodes: query.graph_nodes_in_file(file_id),
                         graph_edges: query.graph_edges_in_file(file_id),
                         diagnostics: query.diagnostic_facts_in_file(file_id),
-                        ..FileFacts::default()
+                        ..FileAnalysis::default()
                     },
                 )
             };

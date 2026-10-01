@@ -4,7 +4,7 @@ use super::compose::{ExtensionDocument, FileComposition, RequireDiagnosticRoots}
 use super::merge::{collect_direct_facts, collect_known_namespaces};
 use super::FileProcessor;
 use super::{
-    analysis_source, CollectedFileFactsOutput, CollectedProjectFileFacts, FileResolution,
+    analysis_source, CollectedFileAnalysisOutput, CollectedProjectAnalysis, FileResolution,
     ProjectFileCollectionTiming,
 };
 use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
@@ -12,11 +12,12 @@ use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::debug;
+use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::{
     FullyQualifiedName, SourceKind, SymbolKind as AnalysisSymbolKind, TypeSubject,
 };
 use ruby_analysis::engine::{
-    AnalysisEngine, FileFacts, ProjectNeutralFileFactsTemplate, ResolveMode, SemanticChange,
+    AnalysisEngine, ProjectNeutralFileFactsTemplate, ResolveMode, SemanticChange,
 };
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::AnalysisIndexer;
@@ -55,7 +56,7 @@ pub(super) fn replace_analysis_facts_for_file(
 pub(super) fn replace_file_analysis(
     analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
     file_id: ruby_analysis::core::SourceFileId,
-    facts: FileFacts,
+    facts: FileAnalysis,
     resolution: FileResolution,
 ) -> SemanticChange {
     let mut engine = analysis_engine.write();
@@ -183,7 +184,7 @@ impl FileProcessor {
                 replace_file_analysis(
                     &analysis_engine,
                     analysis_file_id,
-                    FileFacts::default(),
+                    FileAnalysis::default(),
                     resolution,
                 );
                 return Err(anyhow::anyhow!(
@@ -223,7 +224,7 @@ impl FileProcessor {
         content: String,
         analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
-    ) -> Result<CollectedProjectFileFacts> {
+    ) -> Result<CollectedProjectAnalysis> {
         let output = self.collect_file_facts_as_with_resolution_output_owned(
             uri,
             content,
@@ -236,11 +237,11 @@ impl FileProcessor {
             true,
             true,
         )?;
-        Ok(CollectedProjectFileFacts {
-            file_facts: output.retained_file_facts.expect_invariant(
+        Ok(CollectedProjectAnalysis {
+            analysis: output.retained_analysis.expect_invariant(
                 "project batch collection did not retain its file-owned facts",
                 "batch workers return facts without touching the shared engine",
-                "keep retained_file_facts on for the project batch path",
+                "keep retained_analysis on for the project batch path",
             ),
             jruby_navigation_plan: output.jruby_navigation_plan,
             jruby_source_hint: output.jruby_source_hint,
@@ -261,7 +262,7 @@ impl FileProcessor {
         content: &str,
         analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
         known_namespaces: &HashSet<FullyQualifiedName>,
-    ) -> Option<FileFacts> {
+    ) -> Option<FileAnalysis> {
         let extension_namespace_seed = self.requires_extension_namespace_seed(uri);
         // The direct collector emits value-constant symbols only for Prism's
         // constant write nodes, whose assignment token contains '='. This is
@@ -312,10 +313,10 @@ impl FileProcessor {
             .into_iter()
             .filter(|fact| matches!(&fact.subject, TypeSubject::Constant(fqn) if constants.contains(fqn)))
             .collect();
-        let mut facts = FileFacts {
+        let mut facts = FileAnalysis {
             symbols,
             types,
-            ..FileFacts::default()
+            ..FileAnalysis::default()
         };
         if extension_namespace_seed {
             facts.methods = direct.methods;
@@ -359,7 +360,7 @@ impl FileProcessor {
         &self,
         path: &Path,
         analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
-        facts: FileFacts,
+        facts: FileAnalysis,
     ) {
         let file_id = analysis_engine.read().file_id(path).unwrap_or_else(|| {
             unreachable_invariant!(
@@ -377,7 +378,7 @@ impl FileProcessor {
         path: &Path,
         analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
         source_snapshot: ruby_analysis::engine::SourceFileSnapshot,
-        facts: FileFacts,
+        facts: FileAnalysis,
     ) -> bool {
         let mut engine = analysis_engine.write();
         if engine.source_snapshot_for_path(path) != Some(source_snapshot) {
@@ -489,7 +490,7 @@ impl FileProcessor {
         capture_project_neutral_template: bool,
         insert_collected_facts: bool,
         collect_jruby_navigation_plan: bool,
-    ) -> Result<CollectedFileFactsOutput> {
+    ) -> Result<CollectedFileAnalysisOutput> {
         self.collect_file_facts_as_with_resolution_output_owned(
             uri,
             content.to_string(),
@@ -516,7 +517,7 @@ impl FileProcessor {
         insert_collected_facts: bool,
         collect_jruby_navigation_plan: bool,
         retain_collected_facts: bool,
-    ) -> Result<CollectedFileFactsOutput> {
+    ) -> Result<CollectedFileAnalysisOutput> {
         let collection_started = Instant::now();
         invariant!(
             insert_collected_facts
@@ -666,7 +667,7 @@ impl FileProcessor {
         fact_collector.visit(&node);
         let visitor_elapsed = visitor_started.elapsed();
         let assembly_started = Instant::now();
-        let (file_facts, _) = self.compose_file_analysis(
+        let (analysis, _) = self.compose_file_analysis(
             FileComposition {
                 uri,
                 content: document.content.as_str(),
@@ -684,7 +685,7 @@ impl FileProcessor {
         let replacement_started = Instant::now();
         let template = if capture_project_neutral_template {
             Some(
-                ProjectNeutralFileFactsTemplate::try_new(analysis_file_id, file_facts.clone())
+                ProjectNeutralFileFactsTemplate::try_new(analysis_file_id, analysis.clone())
                     .with_context(|| {
                         format!(
                             "facts for {} are not safe for project-neutral dependency reuse",
@@ -695,14 +696,14 @@ impl FileProcessor {
         } else {
             None
         };
-        let retained_file_facts = if retain_collected_facts {
-            Some(file_facts)
+        let retained_analysis = if retain_collected_facts {
+            Some(analysis)
         } else {
             if insert_collected_facts {
                 replace_file_analysis(
                     &analysis_engine,
                     analysis_file_id,
-                    file_facts,
+                    analysis,
                     if resolve_references {
                         FileResolution::Full
                     } else {
@@ -714,9 +715,9 @@ impl FileProcessor {
         };
         let replacement_elapsed = replacement_started.elapsed();
         debug!("Collected facts for {:?}", uri);
-        Ok(CollectedFileFactsOutput {
+        Ok(CollectedFileAnalysisOutput {
             project_neutral_template: template,
-            retained_file_facts,
+            retained_analysis,
             jruby_navigation_plan,
             jruby_source_hint,
             timing: ProjectFileCollectionTiming {

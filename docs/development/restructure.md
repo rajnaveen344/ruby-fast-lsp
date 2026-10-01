@@ -59,7 +59,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B1d. Merge the two server assembly paths (`process_file` and the
         batch collection path) into one `compose_file_analysis`, with a
         profiler run before and after.
-  - [ ] B1e. Move the remaining server producers and wrappers (JRuby source
+  - [x] B1e. Move the remaining server producers and wrappers (JRuby source
         navigation, extension seed file, project batch and retained facts) to
         `FileAnalysis`.
   - [ ] B1f. Delete the `FileFacts` alias and update the analysis, engine, and

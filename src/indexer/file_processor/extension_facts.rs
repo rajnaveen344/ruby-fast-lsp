@@ -152,7 +152,7 @@ pub(super) fn add_extension_analysis_facts(
             }
             IndexPatch::AddReference(_) => {
                 // Resolved reference candidates are applied to FactCollector during
-                // extension call traversal and flow through FileFacts separately
+                // extension call traversal and flow through FileAnalysis separately
                 // from direct parser/index facts.
             }
             IndexPatch::DefineMethod(method) => {

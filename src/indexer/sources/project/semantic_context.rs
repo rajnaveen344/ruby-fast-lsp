@@ -6,8 +6,9 @@ use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::info;
 use rayon::prelude::*;
+use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::{FileFacts, ResolveMode};
+use ruby_analysis::engine::ResolveMode;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -104,7 +105,7 @@ impl IndexerProject {
             .map(|file| file.id)
             .collect::<Vec<_>>();
         for file_id in stale_project_file_ids {
-            snapshot.replace_facts(file_id, FileFacts::default(), ResolveMode::Deferred);
+            snapshot.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Deferred);
         }
         let semantic_context = Arc::new(parking_lot::RwLock::new(snapshot));
         let baseline_known_namespaces = Arc::new({
@@ -116,7 +117,7 @@ impl IndexerProject {
             let semantic_seed_started = Instant::now();
             let outcomes = project_files
                 .par_iter()
-                .map(|path| -> Result<(PathBuf, Option<FileFacts>)> {
+                .map(|path| -> Result<(PathBuf, Option<FileAnalysis>)> {
                     let (content, _) = Self::read_authoritative_project_source(server, path)
                         .with_context(|| {
                             format!(

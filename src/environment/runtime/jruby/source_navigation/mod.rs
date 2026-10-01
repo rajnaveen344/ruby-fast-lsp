@@ -5,13 +5,13 @@ use super::{
 };
 use crate::invariant::ExpectInvariant;
 use parking_lot::{Mutex, MutexGuard};
+use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::MethodVisibility;
 use ruby_analysis::core::{
     FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind, NamespaceKind, RubyConstant,
     RubyMethod, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance,
     TypeSubject,
 };
-use ruby_analysis::engine::FileFacts;
 use ruby_fast_lsp_jruby_support::JavaClassName;
 use ruby_fast_lsp_jvm_metadata::{
     locate_java_source_declarations, parse_field_descriptor, parse_method_descriptor, ClassFile,
@@ -493,7 +493,7 @@ pub fn java_source_navigation_facts(
     class: &ClassFile,
     location: &JavaSourceClassLocation,
     file_id: SourceFileId,
-) -> FileFacts {
+) -> FileAnalysis {
     java_source_navigation_facts_with_declaration(class, location, file_id, true)
 }
 
@@ -502,7 +502,7 @@ pub fn java_source_navigation_facts_with_declaration(
     location: &JavaSourceClassLocation,
     file_id: SourceFileId,
     include_class_declaration: bool,
-) -> FileFacts {
+) -> FileAnalysis {
     invariant_eq!(
         class.name,
         location.internal_name,
@@ -533,7 +533,7 @@ pub fn java_source_navigation_facts_with_declaration(
         ClassKind::Interface | ClassKind::Annotation | ClassKind::Module => SymbolKind::Module,
         ClassKind::Class | ClassKind::Enum | ClassKind::Record => SymbolKind::Class,
     };
-    let mut facts = FileFacts::default();
+    let mut facts = FileAnalysis::default();
     if include_class_declaration {
         facts.symbols.push(
             SymbolFact::new(owner.clone(), symbol_kind, declaration_range)

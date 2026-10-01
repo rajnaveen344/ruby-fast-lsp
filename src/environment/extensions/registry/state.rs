@@ -3,11 +3,12 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{Mutex, RwLock};
+use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::{
     FullyQualifiedName, GraphNodeFact, MethodFact, NamespaceKind, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange,
 };
-use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
+use ruby_analysis::engine::{ResolveMode, SourceFileInput};
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_fast_lsp_extension_api::Extension;
@@ -357,7 +358,7 @@ impl ExtensionRegistry {
             kind: SourceKind::Stub,
         });
         let range = TextRange::new(file_id, 0, 0);
-        let mut facts = FileFacts::default();
+        let mut facts = FileAnalysis::default();
         for extension in &self.extensions {
             if !extension.is_loaded() || !extension.applies_to(project) {
                 continue;

@@ -579,7 +579,7 @@ impl ProjectRegistry {
             if let Some(file_id) = engine.file_id(&path) {
                 engine.replace_facts(
                     file_id,
-                    ruby_analysis::engine::FileFacts::default(),
+                    ruby_analysis::core::FileAnalysis::default(),
                     ruby_analysis::engine::ResolveMode::Immediate,
                 );
             }

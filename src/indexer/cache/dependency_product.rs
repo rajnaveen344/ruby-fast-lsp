@@ -665,11 +665,12 @@ fn validate_logical_path(logical_path: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ruby_analysis::core::FileAnalysis;
     use ruby_analysis::core::{
         FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId, SymbolFact,
         SymbolKind, TextRange,
     };
-    use ruby_analysis::engine::{AnalysisQuery, FileFacts, ProjectNeutralFileFactsTemplate};
+    use ruby_analysis::engine::{AnalysisQuery, ProjectNeutralFileFactsTemplate};
 
     fn empty_seed() -> SemanticExportFingerprint {
         AnalysisEngine::new().semantic_context_fingerprint()
@@ -693,10 +694,10 @@ mod tests {
         let fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
         ProjectNeutralFileFactsTemplate::try_new(
             file_id,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![SymbolFact::new(fqn.clone(), SymbolKind::Class, range)],
                 graph_nodes: vec![GraphNodeFact::new(fqn, GraphNodeKind::Class, range)],
-                ..FileFacts::default()
+                ..FileAnalysis::default()
             },
         )
         .unwrap()
@@ -742,9 +743,9 @@ mod tests {
         let seed_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Seed").unwrap()]);
         seed_engine.replace_facts(
             seed_file,
-            FileFacts {
+            FileAnalysis {
                 symbols: vec![SymbolFact::new(seed_fqn, SymbolKind::Class, seed_range)],
-                ..FileFacts::default()
+                ..FileAnalysis::default()
             },
             ResolveMode::Deferred,
         );

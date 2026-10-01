@@ -63,7 +63,7 @@ impl IndexerProject {
                 |file_path| -> Result<Option<(
                     PathBuf,
                     SourceFileSnapshot,
-                    ruby_analysis::engine::FileFacts,
+                    ruby_analysis::core::FileAnalysis,
                     StaticJavaNavigationPlan,
                 )>> {
                     let (content, open_document) =
@@ -121,7 +121,7 @@ impl IndexerProject {
                     Ok(Some((
                         file_path.clone(),
                         source_snapshot,
-                        collected.file_facts,
+                        collected.analysis,
                         collected.jruby_navigation_plan,
                     )))
                 },
@@ -129,7 +129,7 @@ impl IndexerProject {
             .collect::<Vec<_>>();
         let mut plan = StaticJavaNavigationPlan::default();
         for outcome in outcomes {
-            let Some((path, source_snapshot, file_facts, file_plan)) = outcome? else {
+            let Some((path, source_snapshot, analysis, file_plan)) = outcome? else {
                 continue;
             };
             let committed = file_processor
@@ -137,7 +137,7 @@ impl IndexerProject {
                     &path,
                     &analysis_engine,
                     source_snapshot,
-                    file_facts,
+                    analysis,
                 );
             if !committed {
                 info!(

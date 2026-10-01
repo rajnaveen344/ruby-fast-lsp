@@ -11,8 +11,9 @@ use crate::utils;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use rayon::prelude::*;
+use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::{FullyQualifiedName, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, FileFacts, ResolveMode, SourceFileSnapshot};
+use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileSnapshot};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -432,7 +433,7 @@ impl IndexerProject {
                     engine.file_id(&input.path).unwrap(),
                     semantic_id,
                     what = "immutable semantic context assigned a different file id for {}",
-                    why = "retained FileFacts ranges must be valid in the live engine",
+                    why = "retained FileAnalysis ranges must be valid in the live engine",
                     fix = "pre-register the tail in identical order in both engines",
                     input.path.display(),
                 );
@@ -506,7 +507,7 @@ impl IndexerProject {
                 let mut snapshot = engine.clone();
                 drop(engine);
                 for file_id in stale_file_ids {
-                    snapshot.replace_facts(file_id, FileFacts::default(), ResolveMode::Deferred);
+                    snapshot.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Deferred);
                 }
                 Arc::new(parking_lot::RwLock::new(snapshot))
             }
@@ -535,25 +536,23 @@ impl IndexerProject {
         if requires_direct_semantic_seed {
             let semantic_seed_outcomes = registered_inputs
                 .par_iter()
-                .map(
-                    |registered| -> Result<(PathBuf, Option<ruby_analysis::engine::FileFacts>)> {
-                        let uri = Url::from_file_path(&registered.input.path).map_err(|_| {
-                            anyhow!(
-                                "project source path is not a valid file URI: {}",
-                                registered.input.path.display()
-                            )
-                        })?;
-                        Ok((
-                            registered.input.path.clone(),
-                            file_processor_ref.collect_project_direct_semantic_seed(
-                                &uri,
-                                &registered.input.content,
-                                &semantic_read_engine,
-                                baseline_known_namespaces.as_ref(),
-                            ),
-                        ))
-                    },
-                )
+                .map(|registered| -> Result<(PathBuf, Option<FileAnalysis>)> {
+                    let uri = Url::from_file_path(&registered.input.path).map_err(|_| {
+                        anyhow!(
+                            "project source path is not a valid file URI: {}",
+                            registered.input.path.display()
+                        )
+                    })?;
+                    Ok((
+                        registered.input.path.clone(),
+                        file_processor_ref.collect_project_direct_semantic_seed(
+                            &uri,
+                            &registered.input.content,
+                            &semantic_read_engine,
+                            baseline_known_namespaces.as_ref(),
+                        ),
+                    ))
+                })
                 .collect::<Vec<_>>();
             let mut engine = semantic_read_engine.write();
             let mut seeded = false;
@@ -594,7 +593,7 @@ impl IndexerProject {
         let collect_file = |registered: RegisteredProjectFileInput| -> Result<(
             PathBuf,
             SourceFileSnapshot,
-            ruby_analysis::engine::FileFacts,
+            FileAnalysis,
             StaticJavaNavigationPlan,
             StaticJavaSourceHint,
             std::time::Duration,
@@ -640,7 +639,7 @@ impl IndexerProject {
             Ok((
                 file_path.clone(),
                 registered.source_snapshot,
-                collected.file_facts,
+                collected.analysis,
                 collected.jruby_navigation_plan,
                 collected.jruby_source_hint,
                 read_elapsed,
@@ -663,7 +662,7 @@ impl IndexerProject {
         timing.total += batch_registration_elapsed;
         timing.registration += batch_registration_elapsed;
         for outcome in outcomes {
-            let (path, source_snapshot, file_facts, plan, hint, read, dependency_scan, file_timing) =
+            let (path, source_snapshot, analysis, plan, hint, read, dependency_scan, file_timing) =
                 outcome?;
             #[cfg(test)]
             server.indexing.schedule.checkpoint_blocking(
@@ -676,7 +675,7 @@ impl IndexerProject {
                     &path,
                     &analysis_engine,
                     source_snapshot,
-                    file_facts,
+                    analysis,
                 );
             #[cfg(test)]
             server.indexing.schedule.checkpoint_blocking(

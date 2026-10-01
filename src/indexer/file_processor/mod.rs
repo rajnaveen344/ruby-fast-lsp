@@ -27,8 +27,9 @@ use collection::{replace_analysis_facts_for_file, replace_file_analysis};
 use compose::{ExtensionDocument, FileComposition, RequireDiagnosticRoots};
 use log::{debug, info};
 use merge::collect_direct_facts;
+use ruby_analysis::core::FileAnalysis;
 use ruby_analysis::core::{FullyQualifiedName, SourceKind};
-use ruby_analysis::engine::{FileFacts, ProjectNeutralFileFactsTemplate, SemanticChange};
+use ruby_analysis::engine::{ProjectNeutralFileFactsTemplate, SemanticChange};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{is_erb_path, mask_erb};
@@ -57,9 +58,9 @@ pub struct ProcessResult {
     pub semantic_change: SemanticChange,
 }
 
-struct CollectedFileFactsOutput {
+struct CollectedFileAnalysisOutput {
     project_neutral_template: Option<ProjectNeutralFileFactsTemplate>,
-    retained_file_facts: Option<FileFacts>,
+    retained_analysis: Option<FileAnalysis>,
     jruby_navigation_plan: StaticJavaNavigationPlan,
     jruby_source_hint: StaticJavaSourceHint,
     timing: ProjectFileCollectionTiming,
@@ -77,8 +78,8 @@ pub struct ProjectFileCollectionTiming {
     pub replacement: Duration,
 }
 
-pub struct CollectedProjectFileFacts {
-    pub file_facts: FileFacts,
+pub struct CollectedProjectAnalysis {
+    pub analysis: FileAnalysis,
     pub jruby_navigation_plan: StaticJavaNavigationPlan,
     pub jruby_source_hint: StaticJavaSourceHint,
     pub timing: ProjectFileCollectionTiming,
@@ -321,7 +322,7 @@ impl FileProcessor {
             let semantic_change = replace_file_analysis(
                 &analysis_engine,
                 analysis_file_id,
-                FileFacts::default(),
+                FileAnalysis::default(),
                 resolution,
             );
             return Ok(ProcessResult {
