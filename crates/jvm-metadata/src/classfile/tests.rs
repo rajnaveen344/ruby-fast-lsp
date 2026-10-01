@@ -1,3 +1,4 @@
+use super::constant_pool::decode_modified_utf8;
 use super::*;
 
 fn decode_hex(source: &str) -> Vec<u8> {

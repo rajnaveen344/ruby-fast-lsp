@@ -165,8 +165,6 @@
     ]
   },
   "legacy_lines": {
-    "crates/jvm-metadata/src/classfile/mod.rs": 1230,
-    "crates/rbs-parser/src/visitor.rs": 1178,
     "crates/ruby-analysis/src/indexer/fact_collector/tests.rs": 1050,
     "crates/ruby-analysis/src/indexer/queries/tests.rs": 2271,
     "editors/vscode/vsix/extension.js": 2021,
