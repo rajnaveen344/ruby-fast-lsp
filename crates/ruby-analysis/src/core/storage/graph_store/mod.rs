@@ -543,6 +543,16 @@ impl SemanticGraph {
             .collect()
     }
 
+    pub fn unresolved_edge_count(&self) -> usize {
+        self.unresolved_by_file.values().map(Vec::len).sum()
+    }
+
+    pub fn has_unresolved_edges(&self) -> bool {
+        self.unresolved_by_file
+            .values()
+            .any(|edges| !edges.is_empty())
+    }
+
     pub fn take_unresolved_edges(&mut self) -> Vec<StoredUnresolvedGraphEdgeFact> {
         let pending = std::mem::take(&mut self.unresolved_by_file);
         self.unresolved_explicit_superclasses_by_source.clear();

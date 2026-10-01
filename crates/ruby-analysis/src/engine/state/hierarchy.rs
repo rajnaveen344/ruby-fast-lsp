@@ -158,7 +158,7 @@ impl Hierarchy {
         names: &mut Names,
         decls: &DeclIndex,
     ) {
-        if self.graph.unresolved_edges().is_empty() {
+        if !self.graph.has_unresolved_edges() {
             return;
         }
 
@@ -323,7 +323,7 @@ impl Hierarchy {
     }
 
     pub(in crate::engine) fn unresolved_edge_count(&self) -> usize {
-        self.graph.unresolved_edges().len()
+        self.graph.unresolved_edge_count()
     }
 
     pub(in crate::engine) fn graph_heap_bytes(&self) -> usize {

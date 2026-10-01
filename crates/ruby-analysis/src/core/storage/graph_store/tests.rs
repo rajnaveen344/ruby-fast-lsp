@@ -131,9 +131,13 @@ fn unresolved_explicit_superclass_source_index_tracks_take_and_reinsert() {
     let mut store = SemanticGraph::default();
     store.add_unresolved_edge(unresolved);
     assert!(store.has_unresolved_explicit_superclass(source));
+    assert!(store.has_unresolved_edges());
+    assert_eq!(store.unresolved_edge_count(), 1);
 
     assert_eq!(store.take_unresolved_edges(), vec![unresolved]);
     assert!(!store.has_unresolved_explicit_superclass(source));
+    assert!(!store.has_unresolved_edges());
+    assert_eq!(store.unresolved_edge_count(), 0);
 
     store.add_unresolved_edge(unresolved);
     store.replace_file(file_id, [], [], []);
