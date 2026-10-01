@@ -5,14 +5,9 @@
 //! observations against the model oracle.
 
 mod consistency;
-mod dependency_refresh;
-mod interleavings;
 mod oracle_controls;
-mod production_schedules;
 mod runner;
 mod tests;
-
-mod contracts;
 pub(crate) use crate::simulation::*;
 pub(crate) use crate::simulation::{graph, oracle, project, ruby_gen, seeded};
 pub use runner::*;

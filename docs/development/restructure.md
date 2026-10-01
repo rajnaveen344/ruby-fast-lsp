@@ -25,7 +25,7 @@ Delete this file when the last task is done. Git history keeps the record.
 - [x] A1. Add a robustness harness over real Ruby sources. It checks for no
       panics, that incremental edits match a fresh index, that open order does
       not matter, and that clean code has no diagnostics.
-- [ ] A2. Move the handwritten lifecycle and schedule cases out of the simulator
+- [x] A2. Move the handwritten lifecycle and schedule cases out of the simulator
       into `src/test/integration/`.
 - [ ] A3. Delete the simulator binary, its generator and oracle, the
       simulation build identity in `build.rs`, and the simulation guide and

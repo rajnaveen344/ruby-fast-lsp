@@ -38,7 +38,7 @@ SCOPES = (
     "rust-toolchain.toml", "extensions", "editors", "support", "tests", "AGENTS.md",
 )
 EXCLUDED_PARTS = {".git", ".codex", "pages", "node_modules", "target", ".cache", "__pycache__"}
-EXACT_TEST = "test::simulation::contracts::exact::exact_method_results_and_rename_edits_survive_edit_recovery"
+EXACT_TEST = "test::integration::lifecycle::exact_results::exact_method_results_and_rename_edits_survive_edit_recovery"
 IDENTITY_TEST = "simulation::build_identity::tests::seed_artifact_retains_the_exact_compiled_build_identity"
 DEFINITION_ANCHOR = """    let locations = query.find_definitions_at_position(&uri, position, &content)?;
     Some(GotoDefinitionResponse::Array(locations))"""
@@ -160,7 +160,7 @@ FAULTS = (
                 server.publish_diagnostics(uri, diagnostics).await;""",
         """                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
                 let _ = (uri, diagnostics); // Isolated fault: omit consumer publication.""",
-        "test::simulation::contracts::observations::late_definition_open_clears_published_unresolved_constant",
+        "test::integration::lifecycle::observations::late_definition_open_clears_published_unresolved_constant",
         "opening a late definition must publish the resolved consumer diagnostics",
     ),
     Fault(
@@ -171,7 +171,7 @@ FAULTS = (
         let Some(file_id) = engine.file_id(path) else { return false; };
         engine.replace_facts(file_id, facts, ResolveMode::Deferred);
         true""",
-        "test::simulation::production_schedules::real_coordinator_rejects_cold_facts_after_a_startup_edit",
+        "test::integration::lifecycle::coordinator_schedules::real_coordinator_rejects_cold_facts_after_a_startup_edit",
         "a delayed cold commit must preserve the exact new method definition",
     ),
 )

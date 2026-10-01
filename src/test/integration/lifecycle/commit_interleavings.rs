@@ -33,7 +33,7 @@ fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
             engine.clone(),
             known,
         )
-        .expect("simulation background collection must succeed")
+        .expect("controlled background collection must succeed")
         .file_facts;
     assert_eq!(
         engine.read().source_snapshot_for_path(&path),

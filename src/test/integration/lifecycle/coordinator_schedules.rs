@@ -232,7 +232,7 @@ async fn dropped_schedule_controller_releases_its_worker() {
     drop(pause);
     tokio::time::timeout(Duration::from_secs(5), worker)
         .await
-        .expect("a failed or cancelled simulation must release its blocked worker")
+        .expect("a failed or cancelled schedule must release its blocked worker")
         .expect("controller drop must not panic the worker");
 }
 

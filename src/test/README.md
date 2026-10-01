@@ -8,7 +8,7 @@ feature tests are internal Rust tests in `integration/`; Cargo runs them with
 | --- | --- |
 | One indexed Ruby snippet | `harness::check()` with inline tags |
 | Static cross-file behavior | `harness::check_multi_file()` |
-| Open/edit/save/close, reindexing, or delayed work | `harness::FakeEditor` |
+| Open/edit/save/close, reindexing, or delayed work | `harness::FakeEditor`; schedule-gated cases live in `integration/lifecycle/` |
 | Pure graph, inference, parser, or contract behavior | A focused unit test beside the owning code |
 | Public LSP initialization / extension integration | [crates/lsp-test-harness](../../crates/lsp-test-harness/) |
 | Real CLI exit code and serialized output | [cli/process.rs](cli/process.rs) |

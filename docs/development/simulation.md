@@ -27,9 +27,11 @@ compiling test-only server fields.
 | `support/seeded/`, `support/regression_seeds.txt` | Bounded generated scripts and retained failure seeds |
 | `tests/` | Generated-project fixtures, coverage buckets, and feature tests |
 | `consistency.rs` | Compare incremental results with a fresh analysis |
-| `contracts/exact.rs`, `contracts/observations.rs` | Complete response/lifecycle contracts and observer controls |
-| `production_schedules.rs`, `dependency_refresh.rs`, `interleavings.rs` | Deterministically pause real work around edits, commits, and publication |
 | `support/build_identity/` | Source/build/executable identity retained with replay evidence |
+
+Handwritten lifecycle contracts, observer controls, and deterministic schedules
+around edits, commits, dependency refresh, and publication live in
+[src/test/integration/lifecycle/](../../src/test/integration/lifecycle/mod.rs).
 
 The model and production engine must remain independent. Fresh/incremental
 agreement tests consistency, but both engines can agree on the same wrong answer.

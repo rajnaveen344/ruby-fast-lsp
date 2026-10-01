@@ -28,7 +28,7 @@ async fn diagnostic_observation_retains_published_output_and_empty_clears() {
     let published = vec![Diagnostic {
         range: Range::new(Position::new(0, 0), Position::new(0, 5)),
         severity: Some(DiagnosticSeverity::WARNING),
-        source: Some("simulation-observation-control".into()),
+        source: Some("lifecycle-observation-control".into()),
         message: "Deliberately retained publication; observing must not replace it".into(),
         ..Diagnostic::default()
     }];
