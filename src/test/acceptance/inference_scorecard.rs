@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::test::harness::{check, check_multi_file, FakeEditor};
 
-const SCORECARD_SOURCE: &str = include_str!("../../support/type_inference/scorecard.toml");
+const SCORECARD_SOURCE: &str = include_str!("../../../support/type_inference/scorecard.toml");
 
 #[derive(Debug, Deserialize)]
 struct Scorecard {

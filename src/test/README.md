@@ -13,6 +13,8 @@ feature tests are internal Rust tests in `integration/`; Cargo runs them with
 | Public LSP initialization / extension integration | [crates/lsp-test-harness](../../crates/lsp-test-harness/) |
 | Real CLI exit code and serialized output | [cli/process.rs](cli/process.rs) |
 | Generated semantic/edit scenarios and controlled schedules | [simulation guide](../../docs/development/simulation.md) |
+| No panics, edit/fresh-index agreement, open-order independence, clean code over real Ruby | [robustness/](robustness/mod.rs), corpus in `fixtures/robustness/` |
+| Inference scorecard and real-project precision | [acceptance/](acceptance/mod.rs) |
 
 ## CLI test organization
 

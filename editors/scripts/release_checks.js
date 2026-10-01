@@ -101,8 +101,8 @@ function main() {
     ['editor', 'node', ['--test', ...fs.readdirSync(path.join(root, 'editors/vscode/vsix/test')).filter(f => f.endsWith('.test.js')).sort().map(f => `editors/vscode/vsix/test/${f}`)]],
     ['packaging', 'node', ['--test', ...fs.readdirSync(path.join(root, 'editors/scripts/test')).filter(f => f.endsWith('.test.js')).sort().map(f => `editors/scripts/test/${f}`)]],
     // Already enforced by the workspace run; repeat explicitly to retain each JSON report.
-    ['inference-acceptance', 'cargo', ['test', '--locked', '-p', 'ruby-fast-lsp', '--lib', 'test::inference_scorecard::report_m0_scorecard', '--', '--exact', '--nocapture']],
-    ['real-project-precision', 'cargo', ['test', '--locked', '-p', 'ruby-fast-lsp', '--lib', 'test::real_project_precision::report_real_project_precision', '--', '--exact', '--nocapture']],
+    ['inference-acceptance', 'cargo', ['test', '--locked', '-p', 'ruby-fast-lsp', '--lib', 'test::acceptance::inference_scorecard::report_m0_scorecard', '--', '--exact', '--nocapture']],
+    ['real-project-precision', 'cargo', ['test', '--locked', '-p', 'ruby-fast-lsp', '--lib', 'test::acceptance::real_project_precision::report_real_project_precision', '--', '--exact', '--nocapture']],
   ] : [
     ['ruby-oracle-controls', 'python3', ['support/simulation/run_oracle_controls.py']],
     ['simulation', 'cargo', ['test', '--locked', '--release', '-p', 'ruby-fast-lsp', '--lib', 'simulation::', '--', '--nocapture']],

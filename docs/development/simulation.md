@@ -6,6 +6,10 @@ It tests more than crashes: navigation, selected types/diagnostics, stale state,
 project isolation, and recovery. Its coverage is limited to the modeled forms
 and observations; a passing run is not a percentage of Ruby feature coverage.
 
+Real Ruby sources are covered separately by the
+[robustness harness](../../src/test/robustness/mod.rs), which runs in the
+ordinary library suite and compares the server with itself.
+
 ## Architecture
 
 Source lives under [src/test/simulation/](../../src/test/simulation/). The

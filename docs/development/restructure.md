@@ -22,7 +22,7 @@ Delete this file when the last task is done. Git history keeps the record.
 
 ## Phase A: remove weight without changing the design
 
-- [ ] A1. Add a robustness harness over real Ruby sources. It checks for no
+- [x] A1. Add a robustness harness over real Ruby sources. It checks for no
       panics, that incremental edits match a fresh index, that open order does
       not matter, and that clean code has no diagnostics.
 - [ ] A2. Move the handwritten lifecycle and schedule cases out of the simulator

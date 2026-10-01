@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::test::harness::{check, check_multi_file};
 
 const CORPUS_SOURCE: &str =
-    include_str!("../../support/type_inference/real_project_precision.toml");
+    include_str!("../../../support/type_inference/real_project_precision.toml");
 
 #[derive(Debug, Deserialize)]
 struct Corpus {
