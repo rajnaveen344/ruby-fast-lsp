@@ -321,11 +321,6 @@ impl FakeEditor {
         self.server.last_published_diagnostics(&uri)
     }
 
-    /// Consume the editor and return the underlying server.
-    pub fn into_server(self) -> RubyLanguageServer {
-        self.server
-    }
-
     // ─── Editing Helpers ───────────────────────────────────────────────
 
     /// Insert text at a 0-indexed position, triggering a `did_change`.
@@ -780,20 +775,6 @@ impl FakeEditor {
             filename,
             errors.len(),
             errors.iter().map(|e| describe(e)).collect::<Vec<_>>()
-        );
-    }
-
-    /// Assert exact total diagnostic count for the file (all severities).
-    pub async fn assert_diag_count(&self, filename: &str, expected: usize) {
-        let diags = self.diagnostics(filename).await;
-        assert_eq!(
-            diags.len(),
-            expected,
-            "Expected {} diagnostics in '{}', got {}: {:?}",
-            expected,
-            filename,
-            diags.len(),
-            diags.iter().map(describe).collect::<Vec<_>>()
         );
     }
 

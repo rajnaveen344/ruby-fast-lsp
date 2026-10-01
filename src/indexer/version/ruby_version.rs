@@ -174,17 +174,6 @@ impl RubyVersion {
         }
     }
 
-    /// Get the MRI-compatible version for core stubs selection
-    pub fn get_mri_compatible_version(&self) -> (u8, u8) {
-        match self.implementation {
-            RubyImplementation::Mri => (self.major, self.minor),
-            RubyImplementation::JRuby | RubyImplementation::TruffleRuby => {
-                // For JRuby and TruffleRuby, the version should already be mapped to MRI-compatible
-                (self.major, self.minor)
-            }
-        }
-    }
-
     /// Convert to tuple for easier handling
     pub fn to_tuple(self) -> (u8, u8) {
         (self.major, self.minor)

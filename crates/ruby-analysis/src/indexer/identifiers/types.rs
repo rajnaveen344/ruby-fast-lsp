@@ -36,11 +36,6 @@ pub enum MethodReceiver {
 }
 
 impl MethodReceiver {
-    /// Returns true if this is a constant receiver (class method call)
-    pub fn is_constant(&self) -> bool {
-        matches!(self, MethodReceiver::Constant(_))
-    }
-
     /// Returns the variable name if this is a variable receiver
     pub fn variable_name(&self) -> Option<&str> {
         match self {
@@ -56,17 +51,6 @@ impl MethodReceiver {
     pub fn constant_path(&self) -> Option<&[RubyConstant]> {
         match self {
             MethodReceiver::Constant(path) => Some(path),
-            _ => None,
-        }
-    }
-
-    /// Returns the method call info if this is a method call receiver
-    pub fn method_call_info(&self) -> Option<(&MethodReceiver, &str)> {
-        match self {
-            MethodReceiver::MethodCall {
-                inner_receiver,
-                method_name,
-            } => Some((inner_receiver, method_name)),
             _ => None,
         }
     }

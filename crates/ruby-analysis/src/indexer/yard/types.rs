@@ -282,14 +282,6 @@ impl YardMethodDoc {
         self.params.iter().find(|p| p.name == name)?.format_type()
     }
 
-    /// Get options for a specific parameter (hash)
-    pub fn get_options_for_param(&self, param_name: &str) -> Vec<&YardOption> {
-        self.options
-            .iter()
-            .filter(|o| o.param_name == param_name)
-            .collect()
-    }
-
     /// Get the formatted return type string for inlay hints
     /// Returns None if no return type is documented
     pub fn format_return_type(&self) -> Option<String> {
@@ -316,11 +308,6 @@ impl YardMethodDoc {
                     .join(" | ")
             )
         })
-    }
-
-    /// Get the return description (from first @return tag)
-    pub fn get_return_description(&self) -> Option<&String> {
-        self.returns.first().and_then(|r| r.description.as_ref())
     }
 
     /// Format as a method signature hint (for inlay hints)

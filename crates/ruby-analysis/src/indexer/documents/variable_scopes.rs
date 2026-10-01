@@ -115,16 +115,6 @@ impl VariableScopes {
         id
     }
 
-    /// Navigate into an existing child scope matching the given range.
-    /// Used by the FactCollector to track scope context for variable references.
-    pub fn enter_child_scope(&mut self, range: TextRange) {
-        if let Some(current) = self.current {
-            if let Some(child_id) = self.find_child_scope_by_range(current, range) {
-                self.current = Some(child_id);
-            }
-        }
-    }
-
     /// Exit the current scope (called when exiting method, block, etc.)
     pub fn exit_scope(&mut self) {
         if let Some(current) = self.current {
@@ -132,16 +122,6 @@ impl VariableScopes {
                 self.current = node.parent;
             }
         }
-    }
-
-    /// Check if current scope can access variables from parent (not a hard boundary)
-    pub fn can_access_outer_vars(&self) -> bool {
-        if let Some(current) = self.current {
-            if let Some(node) = self.scopes.get(current) {
-                return !node.kind.is_hard_scope_boundary();
-            }
-        }
-        false
     }
 
     /// Define a new variable in the current scope
@@ -233,24 +213,6 @@ impl VariableScopes {
 
         // Variable not found - don't create a capture for undefined variables
         None
-    }
-
-    /// Record a read location for a variable at a specific scope
-    pub fn record_read(&mut self, scope_id: LVScopeId, var_index: usize, location: TextRange) {
-        if let Some(scope) = self.scopes.get_mut(scope_id) {
-            if let Some(var) = scope.local_variables.get_mut(var_index) {
-                var.read_locations.push(location);
-            }
-        }
-    }
-
-    /// Record a write location for a variable at a specific scope
-    pub fn record_write(&mut self, scope_id: LVScopeId, var_index: usize, location: TextRange) {
-        if let Some(scope) = self.scopes.get_mut(scope_id) {
-            if let Some(var) = scope.local_variables.get_mut(var_index) {
-                var.write_locations.push(location);
-            }
-        }
     }
 
     /// Find all rename targets for a variable by name, starting from a given scope
@@ -396,17 +358,6 @@ impl VariableScopes {
     /// Get a scope's kind
     pub fn scope_kind(&self, scope_id: LVScopeId) -> Option<LVScopeKind> {
         self.scopes.get(scope_id).map(|s| s.kind)
-    }
-
-    /// Get all local variable definitions across all scopes
-    pub fn get_all_definitions(&self) -> Vec<(LVScopeId, &VariableNode)> {
-        let mut results = Vec::new();
-        for scope in &self.scopes {
-            for var in &scope.local_variables {
-                results.push((scope.id, var));
-            }
-        }
-        results
     }
 
     /// Find a local variable definition by name in a scope or parent scopes
@@ -660,38 +611,6 @@ impl VariableScopes {
         }
 
         None
-    }
-
-    /// Get the total number of scopes in the tree.
-    pub fn scope_count(&self) -> usize {
-        self.scopes.len()
-    }
-
-    /// Debug dump of the entire tree for diagnostics.
-    pub fn debug_dump(&self) -> String {
-        let mut out = String::new();
-        for scope in &self.scopes {
-            out.push_str(&format!(
-                "Scope {} (kind={:?}, range={:?}-{:?}, vars=[",
-                scope.id, scope.kind, scope.range.start_byte, scope.range.end_byte
-            ));
-            for (i, var) in scope.local_variables.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                out.push_str(&format!(
-                    "{}(def={:?}, types={:?})",
-                    var.name,
-                    var.definition_location,
-                    var.type_assignments
-                        .iter()
-                        .map(|t| format!("{:?}@{:?}", t.ruby_type, t.range.start_byte))
-                        .collect::<Vec<_>>()
-                ));
-            }
-            out.push_str("])\n");
-        }
-        out
     }
 
     /// Get all visible variables from a scope (walking up the chain respecting boundaries).

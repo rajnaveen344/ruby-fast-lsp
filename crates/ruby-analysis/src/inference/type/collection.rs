@@ -195,15 +195,6 @@ impl CollectionAnalyzer {
             array_info.element_types.iter().cloned(),
         ))
     }
-
-    /// Get the inferred structured hash type without widening or dropping
-    /// unresolved keys or values.
-    pub fn get_hash_type(&self, hash_info: &HashTypeInfo) -> RubyType {
-        RubyType::Hash(
-            RubyType::canonical_union_members(hash_info.key_types.iter().cloned()),
-            RubyType::canonical_union_members(hash_info.value_types.iter().cloned()),
-        )
-    }
 }
 
 #[cfg(test)]

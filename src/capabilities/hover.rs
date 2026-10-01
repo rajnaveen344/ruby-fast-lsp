@@ -11,9 +11,7 @@
 
 use std::path::PathBuf;
 
-use tower_lsp::lsp_types::{
-    Hover, HoverContents, HoverParams, HoverProviderCapability, MarkupContent, MarkupKind,
-};
+use tower_lsp::lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, MarkupKind};
 
 use crate::capabilities::definitions::require_string_lsp_range;
 use crate::indexer::require_paths::{
@@ -22,11 +20,6 @@ use crate::indexer::require_paths::{
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::source_position;
-
-/// Return the hover capability.
-pub fn get_hover_capability() -> HoverProviderCapability {
-    HoverProviderCapability::Simple(true)
-}
 
 /// Handle hover request using the unified EngineQuery layer.
 pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> Option<Hover> {

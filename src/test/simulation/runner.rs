@@ -1,6 +1,6 @@
 use super::graph::{MethodTarget, NamespaceKind};
 use super::oracle::OracleState;
-use super::project::{EditOp, EditStep, ExpectedCheck, SyntheticProject};
+use super::project::{EditStep, ExpectedCheck, SyntheticProject};
 use super::ruby_gen::{
     CallSite, NamespaceDefSite, NamespaceRefSite, ProjectRender, SourcePos, TypeAssertKind,
 };
@@ -1887,25 +1887,7 @@ mod consistency_controls {
     }
 }
 
-impl EditStep {
-    pub fn touches_target(&self, target: &MethodTarget) -> bool {
-        self.ops.iter().any(|op| match op {
-            EditOp::DeleteMethod(op_target) | EditOp::RestoreMethod(op_target) => {
-                op_target == target
-            }
-            EditOp::DeleteConstant(_)
-            | EditOp::RestoreConstant(_)
-            | EditOp::DeleteNamespace(_)
-            | EditOp::RestoreNamespace(_)
-            | EditOp::RemoveInclude { .. }
-            | EditOp::AddInclude { .. }
-            | EditOp::RemovePrepend { .. }
-            | EditOp::AddPrepend { .. }
-            | EditOp::ChangeSuperclass { .. }
-            | EditOp::ClearSuperclass { .. } => false,
-        })
-    }
-}
+impl EditStep {}
 
 fn location_matches(loc: &Location, pos: &SourcePos) -> bool {
     loc.uri == crate::test::harness::fixture_uri(&pos.file) && loc.range.start.line == pos.line

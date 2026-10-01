@@ -26,15 +26,6 @@ impl FactCollector {
         self
     }
 
-    /// Skip local-read proof-failure evidence when the owning source is an
-    /// immutable dependency. Local scopes are still collected for semantic
-    /// traversal, but dependency-local hover evidence is not retained by the
-    /// engine and must not add work to cold indexing.
-    pub fn without_local_read_unknown_reasons(mut self) -> Self {
-        self.options.record_local_read_unknown_reasons = false;
-        self
-    }
-
     pub fn without_expression_receiver_inference(mut self) -> Self {
         self.options.infer_expression_receivers = false;
         self

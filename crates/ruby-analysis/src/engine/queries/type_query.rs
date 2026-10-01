@@ -25,18 +25,6 @@ impl<'a> TypeQuery<'a> {
         }
     }
 
-    /// Get the value type for a constant assignment.
-    ///
-    /// Returns no value when this file has no fact for the constant.
-    pub fn get_constant_type(&self, fqn: &FullyQualifiedName) -> Option<RubyType> {
-        self.query
-            .type_facts_for(&TypeSubject::Constant(fqn.clone()))
-            .iter()
-            .filter(|fact| fact.range.file_id == self.source_file_id)
-            .next_back()
-            .map(|fact| fact.ruby_type.clone())
-    }
-
     pub fn get_constant_type_at(
         &self,
         fqn: &FullyQualifiedName,

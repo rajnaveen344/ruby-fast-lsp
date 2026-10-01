@@ -69,50 +69,6 @@ impl RubyVersionDetector {
         None
     }
 
-    /// Get all available Ruby versions from version managers
-    pub fn get_available_versions(&self) -> Vec<RubyVersion> {
-        let mut versions = Vec::new();
-
-        // Get versions from rbenv
-        if let Ok(output) = std::process::Command::new("rbenv")
-            .args(["versions", "--bare"])
-            .output()
-        {
-            if output.status.success() {
-                let versions_output = String::from_utf8_lossy(&output.stdout);
-                for line in versions_output.lines() {
-                    if let Some(version) = RubyVersion::from_full_version(line.trim()) {
-                        if !versions.contains(&version) {
-                            versions.push(version);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Get versions from rvm
-        if let Ok(output) = std::process::Command::new("rvm")
-            .args(["list", "strings"])
-            .output()
-        {
-            if output.status.success() {
-                let versions_output = String::from_utf8_lossy(&output.stdout);
-                for line in versions_output.lines() {
-                    if let Some(version_str) = line.trim().strip_prefix("ruby-") {
-                        if let Some(version) = RubyVersion::from_full_version(version_str) {
-                            if !versions.contains(&version) {
-                                versions.push(version);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        versions.sort();
-        versions
-    }
-
     // ========================================================================
     // Detection Methods
     // ========================================================================

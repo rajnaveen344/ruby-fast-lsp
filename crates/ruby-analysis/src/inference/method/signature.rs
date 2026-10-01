@@ -115,20 +115,6 @@ impl Parameter {
         }
     }
 
-    /// Create a new double splat parameter (**kwargs)
-    pub fn new_double_splat(name: String, value_type: RubyType) -> Self {
-        Self {
-            name,
-            param_type: RubyType::hash_of(RubyType::symbol(), value_type),
-            required: false,
-            has_default: false,
-            keyword: false,
-            splat: false,
-            double_splat: true,
-            block: false,
-        }
-    }
-
     /// Create a new block parameter (&block)
     pub fn new_block(name: String) -> Self {
         Self {
@@ -168,12 +154,6 @@ impl MethodSignature {
         self
     }
 
-    /// Mark as class method
-    pub fn as_class_method(mut self) -> Self {
-        self.class_method = true;
-        self
-    }
-
     /// Mark as accepting block
     pub fn accepts_block(mut self) -> Self {
         self.accepts_block = true;
@@ -196,19 +176,9 @@ impl MethodSignature {
             .collect()
     }
 
-    /// Get keyword parameters
-    pub fn keyword_parameters(&self) -> Vec<&Parameter> {
-        self.parameters.iter().filter(|p| p.keyword).collect()
-    }
-
     /// Get splat parameter if any
     pub fn splat_parameter(&self) -> Option<&Parameter> {
         self.parameters.iter().find(|p| p.splat)
-    }
-
-    /// Get double splat parameter if any
-    pub fn double_splat_parameter(&self) -> Option<&Parameter> {
-        self.parameters.iter().find(|p| p.double_splat)
     }
 
     /// Get block parameter if any
@@ -349,26 +319,6 @@ impl MethodSignatureContext {
                 .filter(|sig| sig.name == method_name)
                 .collect(),
         }
-    }
-
-    /// Get all method signatures for a class
-    pub fn get_class_methods(
-        &self,
-        class_name: &str,
-    ) -> (Vec<&MethodSignature>, Vec<&MethodSignature>) {
-        let instance_methods = self
-            .instance_methods
-            .get(class_name)
-            .map(|methods| methods.iter().collect())
-            .unwrap_or_default();
-
-        let class_methods = self
-            .class_methods
-            .get(class_name)
-            .map(|methods| methods.iter().collect())
-            .unwrap_or_default();
-
-        (instance_methods, class_methods)
     }
 
     /// Merge with another method signature context

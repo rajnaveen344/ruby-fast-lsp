@@ -8,14 +8,6 @@ use super::analysis_location::location_for_range;
 use super::EngineQuery;
 
 impl EngineQuery {
-    pub fn has_analysis_symbols(&self) -> bool {
-        let Some(engine) = self.analysis_engine() else {
-            return false;
-        };
-        let engine = engine.read();
-        AnalysisQuery::new(&engine).has_symbols()
-    }
-
     pub fn get_top_level_symbols(&self) -> Vec<SymbolInformation> {
         let engine_ref = self.analysis_engine().expect(
             "INVARIANT VIOLATED: workspace symbols query requires an analysis engine. \

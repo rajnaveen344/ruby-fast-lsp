@@ -303,12 +303,6 @@ impl RubyFastLspConfig {
         paths
     }
 
-    /// Get the core stubs path for the detected Ruby version
-    pub fn get_core_stubs_path_for_version(&self, ruby_version: (u8, u8)) -> Option<PathBuf> {
-        self.get_core_stubs_path_internal(ruby_version)
-            .map(PathBuf::from)
-    }
-
     /// Internal method to get core stubs path
     pub fn get_core_stubs_path_internal(&self, ruby_version: (u8, u8)) -> Option<String> {
         // Use extension path if available
@@ -329,12 +323,5 @@ impl RubyFastLspConfig {
             }
         }
         None
-    }
-
-    /// Get the core stubs path for the detected Ruby version (deprecated - use get_index_paths instead)
-    #[deprecated(note = "Use get_index_paths instead for automatic path discovery")]
-    pub fn get_core_stubs_path(&self, ruby_version: (u8, u8)) -> Option<String> {
-        // Delegate to the internal method for consistency
-        self.get_core_stubs_path_internal(ruby_version)
     }
 }

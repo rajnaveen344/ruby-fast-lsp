@@ -45,17 +45,6 @@ impl Loader {
         Ok(loader)
     }
 
-    /// Create a new loader with both core and stdlib types pre-loaded
-    ///
-    /// This loads type definitions for Ruby core classes and standard library
-    /// modules. These are embedded in the binary at compile time.
-    pub fn with_stdlib_types() -> Result<Self, LoadError> {
-        let mut loader = Self::new();
-        loader.load_embedded_core()?;
-        loader.load_embedded_stdlib()?;
-        Ok(loader)
-    }
-
     /// Load embedded Ruby core type definitions
     ///
     /// Loads type definitions for classes like String, Integer, Array, Hash,
@@ -93,30 +82,6 @@ impl Loader {
     }
 
     // Legacy methods for backward compatibility with file-based loading
-
-    /// Load bundled Ruby core type definitions from disk (legacy)
-    #[deprecated(note = "Use load_embedded_core() instead")]
-    pub fn load_bundled_core(&mut self) -> Result<usize, LoadError> {
-        self.load_embedded_core()
-    }
-
-    /// Load bundled Ruby stdlib type definitions from disk (legacy)
-    #[deprecated(note = "Use load_embedded_stdlib() instead")]
-    pub fn load_bundled_stdlib(&mut self) -> Result<usize, LoadError> {
-        self.load_embedded_stdlib()
-    }
-
-    /// Check if bundled core types are available (legacy)
-    #[deprecated(note = "Use has_embedded_core() instead")]
-    pub fn has_bundled_core() -> bool {
-        Self::has_embedded_core()
-    }
-
-    /// Check if bundled stdlib types are available (legacy)
-    #[deprecated(note = "Use has_embedded_stdlib() instead")]
-    pub fn has_bundled_stdlib() -> bool {
-        Self::has_embedded_stdlib()
-    }
 
     /// Load RBS files from a directory recursively
     pub fn load_directory(&mut self, path: &Path) -> Result<usize, LoadError> {
@@ -265,22 +230,6 @@ impl Loader {
         }
     }
 
-    /// Look up an interface by name
-    pub fn get_interface(&self, name: &str) -> Option<&InterfaceDecl> {
-        match self.declarations.get(name)? {
-            Declaration::Interface(interface) => Some(interface),
-            _ => None,
-        }
-    }
-
-    /// Look up a type alias by name
-    pub fn get_type_alias(&self, name: &str) -> Option<&TypeAliasDecl> {
-        match self.declarations.get(name)? {
-            Declaration::TypeAlias(alias) => Some(alias),
-            _ => None,
-        }
-    }
-
     /// Look up an instance method by class name and method name
     pub fn get_instance_method(&self, class_name: &str, method_name: &str) -> Option<&MethodDecl> {
         let key = format!("{}#{}", class_name, method_name);
@@ -334,11 +283,6 @@ impl Loader {
                 None
             }
         })
-    }
-
-    /// Get the number of loaded files
-    pub fn loaded_file_count(&self) -> usize {
-        self.loaded_files.len()
     }
 
     /// Get the number of indexed declarations

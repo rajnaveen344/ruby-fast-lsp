@@ -1653,11 +1653,6 @@ impl IndexerProject {
         self.required_gems.lock().iter().cloned().collect()
     }
 
-    /// Check if a specific stdlib module is required
-    pub fn requires_stdlib(&self, module_name: &str) -> bool {
-        self.required_stdlib.lock().contains(module_name)
-    }
-
     /// Check if a specific gem is required
     pub fn requires_gem(&self, gem_name: &str) -> bool {
         self.required_gems.lock().contains(gem_name)

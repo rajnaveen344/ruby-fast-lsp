@@ -8,7 +8,6 @@
 use anyhow::Result;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::path::{Path, PathBuf};
-use tower_lsp::lsp_types::Url;
 use walkdir::{DirEntry, WalkDir};
 
 use crate::config::IndexingConfig;
@@ -293,19 +292,6 @@ fn collect_ruby_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
 // ============================================================================
 // File Processing Helpers
 // ============================================================================
-
-/// Convert a file path to a URI
-pub fn path_to_uri(path: &Path) -> Result<Url> {
-    Url::from_file_path(path)
-        .map_err(|_| anyhow::anyhow!("Failed to convert path to URI: {:?}", path))
-}
-
-/// Read file content asynchronously
-pub async fn read_file_async(path: &Path) -> Result<String> {
-    tokio::fs::read_to_string(path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))
-}
 
 // ============================================================================
 // Tests
