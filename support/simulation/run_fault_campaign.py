@@ -165,7 +165,7 @@ FAULTS = (
     ),
     Fault(
         "cold-source-guards-bypassed", "Bypass both snapshot guards and replace existing-file facts with the delayed cold result.",
-        "src/indexer/file_processor.rs", GUARD_ANCHOR,
+        "src/indexer/file_processor/collection.rs", GUARD_ANCHOR,
         """        let _ = source_snapshot;
         let mut engine = analysis_engine.write();
         let Some(file_id) = engine.file_id(path) else { return false; };
