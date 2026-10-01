@@ -15,7 +15,7 @@ Implementation folders are private to the engine.
 | `state/tests/` | Engine state tests grouped by lifecycle, fingerprints, inference outcomes, navigation, graph, caches, and constants |
 | `resolution/` | Ruby lookup chains and MRO (`lookup_chain`), chain method facts and visibility (`chain_methods`), callees, signatures, method references, reference ranges, definitions, and rename policy |
 | `queries/` | Common reads and the `View` entry point |
-| `semantics.rs` | The read-only `Semantics` trait the fact collector and `TypeTracker` use for mid-walk reads, implemented for the shared engine lock with one short read guard per call |
+| `semantics.rs` | The read-only `Semantics` trait the fact collector and `TypeTracker` use for mid-walk reads, implemented for `View` and for the shared engine lock, which takes one short read guard per call and delegates to a `View` |
 | `queries/cache/` | Per-source and thread-local method lookup memos (`memo`, `thread_memo`), and expression, binding, namespace/constant, and method-return type queries |
 | `queries/definitions/` | Definition source selection and partial ordering from participating Ruby lookup chains |
 | `queries/lookup/` | Constant/method matching and hover lookup results |

@@ -148,7 +148,7 @@ Delete this file when the last task is done. Git history keeps the record.
         callers.
   - [x] B4c. Add `Project::view()`; migrate `query()` callers. `query()`
         forwards to `view()` until the loader callers migrate (B4h).
-  - [ ] B4d. `impl Semantics for View`; the `RwLock<Project>` impl takes a
+  - [x] B4d. `impl Semantics for View`; the `RwLock<Project>` impl takes a
         guard and delegates.
   - [ ] B4e. Move read-only methods from `Project` to `View`, one component
         per commit (files, decls, hierarchy, diagnostics, solver telemetry,

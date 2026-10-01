@@ -14,9 +14,11 @@
 //! Any new mid-walk read must become an equation or be added to `Semantics`
 //! with a reason.
 //!
-//! Each method answers one question and returns plain domain values. The
-//! shared engine implementation takes a short read guard per call and never
-//! holds one across the walk, so writers on other files are not stalled. Reads
+//! Each method answers one question and returns plain domain values. [`View`]
+//! implements every read over one consistent project state. The shared
+//! engine implementation takes a short read guard per call, delegates to a
+//! `View` of the guarded state, and never holds a guard across the walk, so
+//! writers on other files are not stalled. Reads
 //! that a walk site performs together under one guard are one method here; a
 //! `local` callback lets such a method consult the walking file's own facts at
 //! the same point in the sequence as before. The walk never writes the engine.
@@ -211,16 +213,14 @@ pub(crate) trait Semantics: Send + Sync {
     fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool;
 }
 
-/// The shared project engine: each read takes its own short read guard.
-impl Semantics for RwLock<Project> {
+/// One consistent view of the project: every read sees the same state.
+impl Semantics for View<'_> {
     fn has_graph_node(&self, namespace: &FullyQualifiedName) -> bool {
-        let engine = self.read();
-        View::new(&engine).has_graph_node(namespace)
+        View::has_graph_node(self, namespace)
     }
 
     fn namespace_node_kind(&self, namespace: &FullyQualifiedName) -> Option<GraphNodeKind> {
-        let engine = self.read();
-        View::new(&engine).namespace_node_kind(namespace)
+        View::namespace_node_kind(self, namespace)
     }
 
     fn resolve_constant_in_context(
@@ -228,13 +228,11 @@ impl Semantics for RwLock<Project> {
         parts: &[RubyConstant],
         lexical_context: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let engine = self.read();
-        View::new(&engine).resolve_constant_in_context(parts, lexical_context)
+        View::resolve_constant_in_context(self, parts, lexical_context)
     }
 
     fn type_namespace(&self, ruby_type: &RubyType) -> Option<FullyQualifiedName> {
-        let engine = self.read();
-        View::new(&engine).type_to_namespace(ruby_type)
+        self.type_to_namespace(ruby_type)
     }
 
     fn extension_call_callees(
@@ -245,11 +243,9 @@ impl Semantics for RwLock<Project> {
         namespace_kind: NamespaceKind,
         cache: &AnalysisQueryCache,
     ) -> Vec<ResolvedMethodCallee> {
-        let engine = self.read();
-        let query = View::new(&engine);
         let namespace_fqn = match receiver {
             MethodReceiver::Constant(path) => {
-                query.resolve_constant_receiver(path, current_namespace)
+                self.resolve_constant_receiver(path, current_namespace)
             }
             MethodReceiver::None | MethodReceiver::SelfReceiver | MethodReceiver::Super => {
                 FullyQualifiedName::namespace_with_kind(current_namespace.to_vec(), namespace_kind)
@@ -262,17 +258,16 @@ impl Semantics for RwLock<Project> {
             | MethodReceiver::MethodCall { .. }
             | MethodReceiver::Literal(_) => return Vec::new(),
         };
-        query
-            .resolve_method_callees_cached(&namespace_fqn, method, cache)
+        self.resolve_method_callees_cached(&namespace_fqn, method, cache)
             .unwrap_or_default()
     }
 
     fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
-        self.read().type_facts_for(subject)
+        self.engine.type_facts_for(subject)
     }
 
     fn method_fqns_in_file(&self, file_id: SourceFileId) -> Vec<FullyQualifiedName> {
-        self.read()
+        self.engine
             .method_facts_in_file(file_id)
             .into_iter()
             .map(|fact| fact.fqn)
@@ -284,11 +279,9 @@ impl Semantics for RwLock<Project> {
         candidates: &[FullyQualifiedName],
         local: LocalType<'_>,
     ) -> Option<(FullyQualifiedName, RubyType)> {
-        let engine = self.read();
-        let query = View::new(&engine);
         candidates.iter().find_map(|constant| {
             local(constant)
-                .or_else(|| query.constant_value_type(constant))
+                .or_else(|| self.constant_value_type(constant))
                 .map(|ruby_type| (constant.clone(), ruby_type))
         })
     }
@@ -298,16 +291,12 @@ impl Semantics for RwLock<Project> {
         constant: &FullyQualifiedName,
         path: &[RubyConstant],
     ) -> Option<RubyType> {
-        let engine = self.read();
-        let query = View::new(&engine);
-        query
-            .constant_value_type(constant)
-            .or_else(|| query.constant_reference_type(path))
+        self.constant_value_type(constant)
+            .or_else(|| View::constant_reference_type(self, path))
     }
 
     fn constant_reference_type(&self, path: &[RubyConstant]) -> Option<RubyType> {
-        let engine = self.read();
-        View::new(&engine).constant_reference_type(path)
+        View::constant_reference_type(self, path)
     }
 
     fn resolved_constant_value_type(
@@ -315,12 +304,9 @@ impl Semantics for RwLock<Project> {
         name: &RubyConstant,
         current_namespace: &[RubyConstant],
     ) -> Option<RubyType> {
-        let engine = self.read();
-        let query = View::new(&engine);
-        query
-            .resolve_constant_in_context(std::slice::from_ref(name), current_namespace)
+        View::resolve_constant_in_context(self, std::slice::from_ref(name), current_namespace)
             .and_then(|resolved| {
-                query.constant_value_type(&FullyQualifiedName::constant(resolved.namespace_parts()))
+                self.constant_value_type(&FullyQualifiedName::constant(resolved.namespace_parts()))
             })
     }
 
@@ -330,20 +316,16 @@ impl Semantics for RwLock<Project> {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<RubyType> {
-        let engine = self.read();
-        let query = View::new(&engine);
-        let constant = contextual_constant(&query, parts, absolute, lexical_context)?;
-        query
-            .constant_value_type(&constant)
-            .or_else(|| query.constant_reference_type(constant.namespace_parts_slice()))
+        let constant = contextual_constant(self, parts, absolute, lexical_context)?;
+        self.constant_value_type(&constant)
+            .or_else(|| View::constant_reference_type(self, constant.namespace_parts_slice()))
     }
 
     fn constant_callable_body(
         &self,
         constant: &FullyQualifiedName,
     ) -> Option<Result<CallableBodySummary, UnknownReason>> {
-        let engine = self.read();
-        View::new(&engine).constant_callable_body(constant)
+        View::constant_callable_body(self, constant)
     }
 
     fn constant_callable_body_in_context(
@@ -352,20 +334,16 @@ impl Semantics for RwLock<Project> {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<Result<CallableBodySummary, UnknownReason>> {
-        let engine = self.read();
-        let query = View::new(&engine);
-        let constant = contextual_constant(&query, parts, absolute, lexical_context)?;
-        query.constant_callable_body(&constant)
+        let constant = contextual_constant(self, parts, absolute, lexical_context)?;
+        View::constant_callable_body(self, &constant)
     }
 
     fn constant_dependency_type(&self, dependency: &ConstantTypeDependency) -> Option<RubyType> {
-        let engine = self.read();
-        View::new(&engine).constant_dependency_type(dependency)
+        View::constant_dependency_type(self, dependency)
     }
 
     fn constructor_result(&self, class: &FullyQualifiedName) -> ConstructorResult {
-        let engine = self.read();
-        View::new(&engine).constructor_result(class)
+        View::constructor_result(self, class)
     }
 
     fn prepare_higher_order_call(
@@ -376,10 +354,8 @@ impl Semantics for RwLock<Project> {
         method_name: &str,
         argument_types: &[RubyType],
     ) -> Result<PreparedCallableSet, UnknownReason> {
-        let engine = self.read();
-        let query = View::new(&engine);
         crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
-            Some(&query),
+            Some(self),
             cache,
             receiver_type,
             Some(implicit_namespace),
@@ -395,23 +371,21 @@ impl Semantics for RwLock<Project> {
         access: ReceiverAccess<'_>,
         cache: Option<&AnalysisQueryCache>,
     ) -> Option<RubyType> {
-        let engine = self.read();
-        let query = View::new(&engine);
         match (access, cache) {
-            (ReceiverAccess::Any, None) => query.method_return_type_for_receiver(receiver, method),
+            (ReceiverAccess::Any, None) => self.method_return_type_for_receiver(receiver, method),
             (ReceiverAccess::Any, Some(cache)) => {
-                query.method_return_type_for_receiver_cached(receiver, method, cache)
+                self.method_return_type_for_receiver_cached(receiver, method, cache)
             }
             (ReceiverAccess::Protected { caller }, None) => {
-                query.method_return_type_for_protected_receiver(receiver, method, caller)
+                self.method_return_type_for_protected_receiver(receiver, method, caller)
             }
-            (ReceiverAccess::Protected { caller }, Some(cache)) => query
+            (ReceiverAccess::Protected { caller }, Some(cache)) => self
                 .method_return_type_for_protected_receiver_cached(receiver, method, caller, cache),
             (ReceiverAccess::Public, None) => {
-                query.method_return_type_for_public_receiver(receiver, method)
+                self.method_return_type_for_public_receiver(receiver, method)
             }
             (ReceiverAccess::Public, Some(cache)) => {
-                query.method_return_type_for_public_receiver_cached(receiver, method, cache)
+                self.method_return_type_for_public_receiver_cached(receiver, method, cache)
             }
         }
     }
@@ -421,9 +395,7 @@ impl Semantics for RwLock<Project> {
         receiver_type: &RubyType,
         method_name: &str,
     ) -> Option<RubyType> {
-        let engine = self.read();
-        let query = View::new(&engine);
-        method_call_return_type(Some(&query), receiver_type, method_name)
+        method_call_return_type(Some(self), receiver_type, method_name)
     }
 
     fn rbs_parameter_contract_types(
@@ -432,11 +404,9 @@ impl Semantics for RwLock<Project> {
         owner: &FullyQualifiedName,
         parameter_names: &[&str],
     ) -> Vec<Option<RubyType>> {
-        let engine = self.read();
-        let query = View::new(&engine);
         parameter_names
             .iter()
-            .map(|name| query.rbs_parameter_contract_type(method, owner, name))
+            .map(|name| self.rbs_parameter_contract_type(method, owner, name))
             .collect()
     }
 
@@ -445,8 +415,7 @@ impl Semantics for RwLock<Project> {
         method: &FullyQualifiedName,
         owner: &FullyQualifiedName,
     ) -> Option<RubyType> {
-        let engine = self.read();
-        View::new(&engine).rbs_return_contract_type(method, owner)
+        View::rbs_return_contract_type(self, method, owner)
     }
 
     fn super_method_return_type(
@@ -455,16 +424,201 @@ impl Semantics for RwLock<Project> {
         method: &RubyMethod,
         local: LocalType<'_>,
     ) -> Option<RubyType> {
-        let engine = self.read();
-        let query = View::new(&engine);
-        let callee = query.resolve_super_method_callee(namespace, method)?;
+        let callee = self.resolve_super_method_callee(namespace, method)?;
         let super_method =
             FullyQualifiedName::method(callee.owner.namespace_parts(), method.clone());
-        local(&super_method).or_else(|| query.method_return_type_for_callee(&callee))
+        local(&super_method).or_else(|| self.method_return_type_for_callee(&callee))
     }
 
     fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool {
-        self.read().has_method_return_equation(method)
+        self.engine.has_method_return_equation(method)
+    }
+}
+
+/// The shared project engine: each read takes its own short read guard and
+/// delegates to a [`View`] of the guarded state.
+impl Semantics for RwLock<Project> {
+    fn has_graph_node(&self, namespace: &FullyQualifiedName) -> bool {
+        Semantics::has_graph_node(&self.read().view(), namespace)
+    }
+
+    fn namespace_node_kind(&self, namespace: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        Semantics::namespace_node_kind(&self.read().view(), namespace)
+    }
+
+    fn resolve_constant_in_context(
+        &self,
+        parts: &[RubyConstant],
+        lexical_context: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
+        Semantics::resolve_constant_in_context(&self.read().view(), parts, lexical_context)
+    }
+
+    fn type_namespace(&self, ruby_type: &RubyType) -> Option<FullyQualifiedName> {
+        Semantics::type_namespace(&self.read().view(), ruby_type)
+    }
+
+    fn extension_call_callees(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+        current_namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        cache: &AnalysisQueryCache,
+    ) -> Vec<ResolvedMethodCallee> {
+        Semantics::extension_call_callees(
+            &self.read().view(),
+            receiver,
+            method,
+            current_namespace,
+            namespace_kind,
+            cache,
+        )
+    }
+
+    fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
+        Semantics::type_facts_for(&self.read().view(), subject)
+    }
+
+    fn method_fqns_in_file(&self, file_id: SourceFileId) -> Vec<FullyQualifiedName> {
+        Semantics::method_fqns_in_file(&self.read().view(), file_id)
+    }
+
+    fn first_constant_value_type(
+        &self,
+        candidates: &[FullyQualifiedName],
+        local: LocalType<'_>,
+    ) -> Option<(FullyQualifiedName, RubyType)> {
+        Semantics::first_constant_value_type(&self.read().view(), candidates, local)
+    }
+
+    fn constant_value_or_reference_type(
+        &self,
+        constant: &FullyQualifiedName,
+        path: &[RubyConstant],
+    ) -> Option<RubyType> {
+        Semantics::constant_value_or_reference_type(&self.read().view(), constant, path)
+    }
+
+    fn constant_reference_type(&self, path: &[RubyConstant]) -> Option<RubyType> {
+        Semantics::constant_reference_type(&self.read().view(), path)
+    }
+
+    fn resolved_constant_value_type(
+        &self,
+        name: &RubyConstant,
+        current_namespace: &[RubyConstant],
+    ) -> Option<RubyType> {
+        Semantics::resolved_constant_value_type(&self.read().view(), name, current_namespace)
+    }
+
+    fn constant_value_type_in_context(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<RubyType> {
+        Semantics::constant_value_type_in_context(
+            &self.read().view(),
+            parts,
+            absolute,
+            lexical_context,
+        )
+    }
+
+    fn constant_callable_body(
+        &self,
+        constant: &FullyQualifiedName,
+    ) -> Option<Result<CallableBodySummary, UnknownReason>> {
+        Semantics::constant_callable_body(&self.read().view(), constant)
+    }
+
+    fn constant_callable_body_in_context(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+        lexical_context: &[RubyConstant],
+    ) -> Option<Result<CallableBodySummary, UnknownReason>> {
+        Semantics::constant_callable_body_in_context(
+            &self.read().view(),
+            parts,
+            absolute,
+            lexical_context,
+        )
+    }
+
+    fn constant_dependency_type(&self, dependency: &ConstantTypeDependency) -> Option<RubyType> {
+        Semantics::constant_dependency_type(&self.read().view(), dependency)
+    }
+
+    fn constructor_result(&self, class: &FullyQualifiedName) -> ConstructorResult {
+        Semantics::constructor_result(&self.read().view(), class)
+    }
+
+    fn prepare_higher_order_call(
+        &self,
+        cache: Option<&AnalysisQueryCache>,
+        receiver_type: Option<&RubyType>,
+        implicit_namespace: &FullyQualifiedName,
+        method_name: &str,
+        argument_types: &[RubyType],
+    ) -> Result<PreparedCallableSet, UnknownReason> {
+        Semantics::prepare_higher_order_call(
+            &self.read().view(),
+            cache,
+            receiver_type,
+            implicit_namespace,
+            method_name,
+            argument_types,
+        )
+    }
+
+    fn receiver_method_return_type(
+        &self,
+        receiver: &FullyQualifiedName,
+        method: &RubyMethod,
+        access: ReceiverAccess<'_>,
+        cache: Option<&AnalysisQueryCache>,
+    ) -> Option<RubyType> {
+        Semantics::receiver_method_return_type(&self.read().view(), receiver, method, access, cache)
+    }
+
+    fn method_call_return_type(
+        &self,
+        receiver_type: &RubyType,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        Semantics::method_call_return_type(&self.read().view(), receiver_type, method_name)
+    }
+
+    fn rbs_parameter_contract_types(
+        &self,
+        method: &FullyQualifiedName,
+        owner: &FullyQualifiedName,
+        parameter_names: &[&str],
+    ) -> Vec<Option<RubyType>> {
+        Semantics::rbs_parameter_contract_types(&self.read().view(), method, owner, parameter_names)
+    }
+
+    fn rbs_return_contract_type(
+        &self,
+        method: &FullyQualifiedName,
+        owner: &FullyQualifiedName,
+    ) -> Option<RubyType> {
+        Semantics::rbs_return_contract_type(&self.read().view(), method, owner)
+    }
+
+    fn super_method_return_type(
+        &self,
+        namespace: &FullyQualifiedName,
+        method: &RubyMethod,
+        local: LocalType<'_>,
+    ) -> Option<RubyType> {
+        Semantics::super_method_return_type(&self.read().view(), namespace, method, local)
+    }
+
+    fn has_method_return_equation(&self, method: &FullyQualifiedName) -> bool {
+        Semantics::has_method_return_equation(&self.read().view(), method)
     }
 }
 
