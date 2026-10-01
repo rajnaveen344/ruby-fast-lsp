@@ -220,7 +220,7 @@ mod tests {
     fn compiled_manifest_covers_workspace_sources_and_excludes_outside_scope() {
         let files = compiled::SIMULATION_SOURCE_FILES;
         for required in [
-            "src/test/simulation/support/seeded.rs",
+            "src/test/simulation/support/seeded/mod.rs",
             "src/server/mod.rs",
             "crates/ruby-analysis/src/indexer/fact_collector/nodes/calls/nil_call.rs",
             "Cargo.lock",

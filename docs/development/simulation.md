@@ -17,10 +17,11 @@ compiling test-only server fields.
 | Part | Responsibility |
 | --- | --- |
 | `support/project.rs`, `support/graph.rs` | Independent model of namespaces, methods, edges, and edits |
-| `support/ruby_gen.rs` | Ruby source plus exact token/source mapping for modeled sites |
+| `support/ruby_gen/` | Ruby source plus exact token/source mapping for modeled sites |
 | `support/oracle.rs` | Expected behavior from the model, independent of production results |
-| `runner.rs`, `support/engine_runner.rs` | Exercise the LSP-handler harness or analysis engine and compare observations |
-| `support/seeded.rs`, `support/regression_seeds.txt` | Bounded generated scripts and retained failure seeds |
+| `runner/`, `support/engine_runner.rs` | Exercise the LSP-handler harness or analysis engine and compare observations |
+| `support/seeded/`, `support/regression_seeds.txt` | Bounded generated scripts and retained failure seeds |
+| `tests/` | Generated-project fixtures, coverage buckets, and feature tests |
 | `consistency.rs` | Compare incremental results with a fresh analysis |
 | `contracts/exact.rs`, `contracts/observations.rs` | Complete response/lifecycle contracts and observer controls |
 | `production_schedules.rs`, `dependency_refresh.rs`, `interleavings.rs` | Deterministically pause real work around edits, commits, and publication |
@@ -34,7 +35,7 @@ a single executed path still does not prove static-analysis completeness.
 The generated model covers namespace/method relationships, supported constant
 and method navigation, selected references and type observations, and selected
 diagnostics. Method navigation checks complete target sets and independent
-semantic precedence constraints. Coverage buckets in `tests.rs` require modeled
+semantic precedence constraints. Coverage buckets in `tests/coverage.rs` require modeled
 forms, including implicit module dispatch. Unsupported sites are recorded as
 coverage gaps, never silently turned into successful assertions.
 
@@ -63,7 +64,7 @@ A new handwritten regression does not automatically teach the generator that fea
    observer. Add an isolated production mutation to the fault inventory when
    claiming that the simulator detects that class of defect.
 
-Use `contracts/exact.rs` as a complete-output example and `support/seeded.rs`'s module-dispatch
+Use `contracts/exact.rs` as a complete-output example and `support/seeded/scenario.rs`'s module-dispatch
 scenario as an example of expanding generated semantics. The
 [test guide](../../src/test/README.md) explains the production-handler versus
 transport boundary.

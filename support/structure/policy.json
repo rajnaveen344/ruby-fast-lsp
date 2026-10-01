@@ -168,11 +168,7 @@
     "src/test/harness/fake_editor.rs": 1040,
     "src/test/integration/goto/methods.rs": 1725,
     "src/test/integration/hover/call_node/with_receiver.rs": 1180,
-    "src/test/integration/references/methods.rs": 1245,
-    "src/test/simulation/runner.rs": 1970,
-    "src/test/simulation/support/ruby_gen.rs": 1764,
-    "src/test/simulation/support/seeded.rs": 1544,
-    "src/test/simulation/tests.rs": 2552
+    "src/test/integration/references/methods.rs": 1245
   },
   "exceptions": {}
 }
