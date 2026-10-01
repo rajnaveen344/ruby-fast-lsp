@@ -513,16 +513,10 @@ impl IndexingCoordinator {
         // Runtime stdlib still enters the same isolated engine before the
         // dependency-ready milestone and complete semantic diagnostics.
         self.index_standard_library(ctx, &ruby_version).await?;
-        self.publish_dependency_require_paths(ctx, server)?;
-        if let Some(workspace) = server
-            .list_workspaces()
-            .into_iter()
-            .find(|workspace| workspace.root_path == self.workspace_root)
-        {
-            server
-                .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
-                .await;
-        }
+        self.publish_dependency_require_paths(ctx)?;
+        ctx.sink
+            .refresh_require_diagnostics(&self.workspace_root)
+            .await;
         self.indexing_checkpoint(ctx)?;
         let dependencies_dur = dependencies_start.elapsed();
 

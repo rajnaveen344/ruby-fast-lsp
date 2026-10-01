@@ -9,7 +9,6 @@ use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
 use crate::loader::sources::stdlib::IndexerStdlib;
 use crate::loader::version::ruby_version::RubyVersion;
-use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::info;
 use ruby_analysis::engine::AnalysisEngine;
@@ -45,11 +44,7 @@ async fn index_core_stubs_additively_off_reactor(
 
 impl IndexingCoordinator {
     /// Retain Bundler/RubyGems require roots for goto and unresolved-require diagnostics.
-    pub(super) fn publish_dependency_require_paths(
-        &mut self,
-        ctx: &LoadContext,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub(super) fn publish_dependency_require_paths(&mut self, ctx: &LoadContext) -> Result<()> {
         self.indexing_checkpoint(ctx)?;
         let mut paths = Vec::new();
         if let Some(gem_indexer) = self.gem_indexer.as_ref() {
@@ -78,15 +73,12 @@ impl IndexingCoordinator {
             index_started.elapsed()
         );
         self.indexing_checkpoint(ctx)?;
-        if let Some(workspace) = server
-            .list_workspaces()
-            .into_iter()
-            .find(|workspace| workspace.root_path == self.workspace_root)
-        {
-            if Arc::ptr_eq(&workspace.analysis_engine, &self.analysis_engine(ctx)) {
-                workspace.set_dependency_require_resolution(paths.clone(), index.clone());
-            }
-        }
+        ctx.sink.publish_require_roots(
+            &self.workspace_root,
+            &self.analysis_engine(ctx),
+            paths.clone(),
+            index.clone(),
+        );
         if let Some(processor) = self.file_processor.as_mut() {
             processor.set_require_dependency_roots(paths);
             processor.set_require_feature_index(index);

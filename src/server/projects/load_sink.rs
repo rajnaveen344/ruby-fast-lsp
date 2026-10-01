@@ -4,11 +4,12 @@ use super::Workspace;
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
 use crate::loader::context::{IndexingRunState, LoadSink};
+use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::server::RubyLanguageServer;
 use parking_lot::RwLock;
 use ruby_analysis::engine::AnalysisEngine;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
@@ -75,5 +76,26 @@ impl LoadSink for RubyLanguageServer {
 
     async fn refresh_inlay_hints(&self, root: &Path) {
         self.refresh_inlay_hints_for_workspace(root).await;
+    }
+
+    fn publish_require_roots(
+        &self,
+        root: &Path,
+        engine: &Arc<RwLock<AnalysisEngine>>,
+        paths: Vec<PathBuf>,
+        index: Arc<RequireFeatureIndex>,
+    ) {
+        if let Some(workspace) = self.project_at_root(root) {
+            if Arc::ptr_eq(&workspace.analysis_engine, engine) {
+                workspace.set_dependency_require_resolution(paths, index);
+            }
+        }
+    }
+
+    async fn refresh_require_diagnostics(&self, root: &Path) {
+        if let Some(workspace) = self.project_at_root(root) {
+            self.refresh_unresolved_require_diagnostics_for_workspace(&workspace)
+                .await;
+        }
     }
 }

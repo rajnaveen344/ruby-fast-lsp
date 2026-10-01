@@ -330,4 +330,16 @@ pub(crate) trait LoadSink: Send + Sync {
     /// Ask the client to refresh inlay hints when the project at `root` owns
     /// an open document.
     async fn refresh_inlay_hints(&self, root: &Path);
+    /// Publish the dependency require roots and feature index of the project
+    /// at `root`, only while `engine` is still that project's engine.
+    fn publish_require_roots(
+        &self,
+        root: &Path,
+        engine: &Arc<RwLock<AnalysisEngine>>,
+        paths: Vec<PathBuf>,
+        index: Arc<RequireFeatureIndex>,
+    );
+    /// Re-resolve unresolved-require diagnostics of the project at `root`
+    /// against its published require roots.
+    async fn refresh_require_diagnostics(&self, root: &Path);
 }
