@@ -51,7 +51,7 @@ async fn test_multi_def_different_literal_types() {
             "impl_a.rb",
             r#"
 class Service
-  def get_val<type label="Integer | String" kind="return">ue
+  def get_val<type label="(Integer | String)" kind="return">ue
     42
   end
 end

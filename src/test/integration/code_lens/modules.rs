@@ -11,7 +11,7 @@ use crate::test::harness::check;
 async fn include_shows_code_lens() {
     check(
         r#"
-module MyModule <lens title="include">
+module MyModule <lens title="1 include">
 end
 
 class MyClass
@@ -27,7 +27,7 @@ end
 async fn prepend_shows_code_lens() {
     check(
         r#"
-module MyModule <lens title="prepend">
+module MyModule <lens title="1 prepend">
 end
 
 class MyClass
@@ -43,7 +43,7 @@ end
 async fn extend_shows_code_lens() {
     check(
         r#"
-module MyModule <lens title="extend">
+module MyModule <lens title="1 extend">
 end
 
 class MyClass
@@ -77,7 +77,7 @@ async fn nested_module_include() {
     check(
         r#"
 module Outer
-  module Inner <lens title="include">
+  module Inner <lens title="1 include">
   end
 end
 
@@ -94,7 +94,7 @@ end
 async fn multiple_mixin_types() {
     check(
         r#"
-module MyModule <lens title="include"> <lens title="extend"> <lens title="prepend"> <lens title="class">
+module MyModule <lens title="1 include"> <lens title="1 extend"> <lens title="1 prepend"> <lens title="2 classes">
 end
 
 class MyClass
@@ -122,7 +122,7 @@ end
 async fn transitive_module_usage() {
     check(
         r#"
-module A <lens title="include"> <lens title="class">
+module A <lens title="1 include"> <lens title="1 class">
 end
 
 module B

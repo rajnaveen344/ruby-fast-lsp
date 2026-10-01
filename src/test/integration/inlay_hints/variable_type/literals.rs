@@ -24,13 +24,13 @@ async fn symbol_literal() {
 
 #[tokio::test]
 async fn array_literal() {
-    check(r#"x<hint label="Array"> = [1, 2, 3]"#).await;
+    check(r#"x<hint label="Array<Integer>"> = [1, 2, 3]"#).await;
 }
 
 #[tokio::test]
 async fn hash_literal() {
     check(
-        r#"x<hint label="Hash"> = { a: 1 }
+        r#"x<hint label="Hash<Symbol, Integer>"> = { a: 1 }
 x<hover label="{ a: Integer }">
 "#,
     )

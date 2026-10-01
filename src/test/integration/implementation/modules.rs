@@ -276,7 +276,7 @@ end</impl>
 async fn class_with_no_subclasses() {
     check(
         r#"
-class Leaf$0
+class Leaf$0<impl none>
 end
 "#,
     )
@@ -375,7 +375,7 @@ async fn method_with_no_overrides() {
     check(
         r#"
 class Base
-  def unique_method$0; end
+  def unique_method$0<impl none>; end
 end
 
 class Child < Base

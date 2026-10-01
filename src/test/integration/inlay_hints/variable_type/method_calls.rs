@@ -13,7 +13,7 @@ async fn implicit_self_method() {
         r#"
 class Inventory
   # @return [Hash]
-  def get_details<hint label="-> Hash">
+  def get_details<hint label=" -> Hash<Symbol, String>">
     { status: "active" }
   end
 
@@ -34,7 +34,7 @@ async fn included_module_method() {
         r#"
 module Fetchable
   # @return [Hash]
-  def fetch_data<hint label="-> Hash">
+  def fetch_data<hint label=" -> Hash<?, ?>">
     {}
   end
 end
@@ -42,8 +42,8 @@ end
 class DataService
   include Fetchable
 
-  def process<hint label=" -> Hash">
-    data<hint label=": Hash"> = fetch_data
+  def process<hint label=" -> Hash<?, ?>">
+    data<hint label=": Hash<?, ?>"> = fetch_data
     data
   end
 end
@@ -83,7 +83,7 @@ async fn protected_same_family_explicit_receiver_result_type() {
         r#"
 class Vault
   # @return [String]
-  def semi_secret<hint label="-> String">
+  def semi_secret<hint label=" -> String">
     "token"
   end
   protected :semi_secret
@@ -106,7 +106,7 @@ module SharedSecret
   private
 
   # @return [String]
-  def hidden<hint label="-> String">
+  def hidden<hint label=" -> String">
     "hidden"
   end
 end
@@ -128,7 +128,7 @@ async fn protected_mixin_visibility_override_same_family_result_type() {
         r#"
 module SharedSecret
   # @return [String]
-  def hidden<hint label="-> String">
+  def hidden<hint label=" -> String">
     "hidden"
   end
 end
@@ -154,13 +154,13 @@ async fn parent_class_method() {
         r#"
 class BaseService
   # @return [Array]
-  def fetch_all<hint label="-> Array">
+  def fetch_all<hint label=" -> Array<?>">
     []
   end
 end
 
 class UserService < BaseService
-  def get_users<hint label=" -> Array">
+  def get_users<hint label=" -> Array<?>">
     users<hint label=": Array"> = fetch_all
     users
   end
@@ -194,7 +194,7 @@ async fn module_context() {
         r#"
 module Utils
   # @return [Integer]
-  def helper<hint label="-> Integer">
+  def helper<hint label=" -> Integer">
     42
   end
 
@@ -238,7 +238,7 @@ async fn chained_method_call() {
         r#"
 class Builder
   # @return [Product]
-  def build<hint label="-> Product">
+  def build<hint label=" -> Product">
     Product.new
   end
 end

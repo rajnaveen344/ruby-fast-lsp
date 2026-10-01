@@ -68,7 +68,8 @@ use tower_lsp::LanguageServer;
 use crate::capabilities::indexing;
 use crate::server::RubyLanguageServer;
 
-use super::check::{run_checks_on_fixture, strip_all_markers};
+use super::check::{run_fixture_checks, FixtureFile};
+use super::fixture::{parse_fixture, strip_markers};
 
 /// A stateful editor simulation for testing LSP lifecycle scenarios.
 ///
@@ -281,28 +282,23 @@ impl FakeEditor {
                 filename
             )
         });
-
-        let fixture_content = strip_all_markers(fixture);
-
-        // Verify fixture content matches current buffer (catches test authoring bugs)
-        assert_eq!(
-            buffer_content.trim(),
-            fixture_content.trim(),
-            "Fixture content doesn't match buffer for '{}'. \
-             The clean content from the fixture must match what was passed to open() or set().\n\
-             Buffer:\n{}\n\nFixture (cleaned):\n{}",
-            filename,
-            buffer_content,
-            fixture_content
+        let fixture = parse_fixture(fixture);
+        assert!(
+            *buffer_content == fixture.source,
+            "fixture for '{filename}' does not match the open buffer; marker positions would be wrong.\n\
+             Buffer:\n{buffer_content}\n\nFixture (cleaned):\n{}",
+            fixture.source
         );
-
-        let uri = Self::filename_to_uri(filename);
-        run_checks_on_fixture(&self.server, &uri, buffer_content, fixture, None).await;
+        let file = FixtureFile {
+            uri: Self::filename_to_uri(filename),
+            fixture,
+        };
+        run_fixture_checks(&self.server, std::slice::from_ref(&file)).await;
     }
 
     /// Open the marker-bearing fixture and immediately run its assertions.
     pub async fn open_and_check_fixture(&mut self, filename: &str, fixture: &str) {
-        let content = strip_all_markers(fixture);
+        let content = strip_markers(fixture);
         self.open(filename, &content).await;
         self.check(filename, fixture).await;
     }
@@ -310,7 +306,7 @@ impl FakeEditor {
     /// Replace an open buffer with a marker-bearing fixture through didChange,
     /// then run the assertions against the new semantic generation.
     pub async fn set_and_check_fixture(&mut self, filename: &str, fixture: &str) {
-        let content = strip_all_markers(fixture);
+        let content = strip_markers(fixture);
         self.set(filename, &content).await;
         self.check(filename, fixture).await;
     }

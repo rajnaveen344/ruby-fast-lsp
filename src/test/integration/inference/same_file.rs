@@ -40,7 +40,7 @@ async fn test_infer_array_literal() {
     check(
         r#"
 class Foo
-  def ite<type label="Array">ms
+  def ite<type label="Array<Integer>">ms
     [1, 2, 3]
   end
 end
@@ -197,8 +197,7 @@ class Cycle
   end
 end
 
-Cycle.new.left.$0
-<complete excludes="upcase,abs">
+Cycle.new.left.$0<complete excludes="upcase,abs">
 "#,
         )
         .await;

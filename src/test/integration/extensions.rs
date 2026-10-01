@@ -57,7 +57,7 @@ module RSpec
 end
 
 RSpec.describe User do
-  subject! { User.new }
+  <def>subject! { User.new }</def>
 
   it "uses subject helper" do
     sub$0ject

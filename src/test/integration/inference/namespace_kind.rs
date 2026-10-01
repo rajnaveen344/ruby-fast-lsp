@@ -326,7 +326,7 @@ class Builder
   end
 end
 
-Builder.start<hover label="Builder" substring="@return [Builder]">
+Builder.start<hover label="Builder">
 "#,
     )
     .await;

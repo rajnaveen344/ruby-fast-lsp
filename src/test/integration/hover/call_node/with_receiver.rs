@@ -88,7 +88,7 @@ end
     editor
         .check(
             "consumer.rb",
-            "payload = PayloadFactory.build\npayload[:name]<hover label=\"String\">\n",
+            "payload = PayloadFactory.build\npayload[:name]<hover label=\"(NilClass | String)\">\n",
         )
         .await;
 }

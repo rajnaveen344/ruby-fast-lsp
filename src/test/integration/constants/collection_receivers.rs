@@ -1,7 +1,7 @@
 //! Value-constant collection receivers must preserve their element types.
 
 use crate::capabilities::indexing::init_workspace_for_run;
-use crate::test::harness::{check_multi_file, extract_tags_with_attributes, FakeEditor};
+use crate::test::harness::{check_multi_file, strip_markers, FakeEditor};
 use std::time::Duration;
 use tower_lsp::lsp_types::Url;
 
@@ -73,7 +73,7 @@ async fn cold_symbol_array_block_completion_uses_the_element_type() {
 }
 
 fn clean(fixture: &str) -> String {
-    extract_tags_with_attributes(fixture, &["hint", "warn", "hover"]).1
+    strip_markers(fixture)
 }
 
 pub(super) async fn cold_editor(

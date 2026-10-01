@@ -68,7 +68,7 @@ async fn test_hash_literal_returns_shape_type() {
     check(
         r#"
 class A
-  def get_hash<hint label=" -> Hash">
+  def get_hash<hint label=" -> Hash<Symbol, Integer>">
     { a: 1, b: 2 }
   end
 end

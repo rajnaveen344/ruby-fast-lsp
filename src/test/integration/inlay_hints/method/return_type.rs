@@ -15,7 +15,7 @@ async fn yard_return_type() {
         r#"
 class Greeter
   # @return [String] the greeting
-  def greet<hint label="-> String">; "hello"; end
+  def greet<hint label=" -> String">; "hello"; end
 end
 "#,
     )
@@ -191,7 +191,7 @@ class Calculator
   end
 
   # @return [String]
-  def greet<hint label="-> String">
+  def greet<hint label=" -> String">
     "hello"
   end
 

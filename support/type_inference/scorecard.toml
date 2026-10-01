@@ -548,7 +548,7 @@ rationale = "All reopened method definitions across files contribute to one exha
 path = "first.rb"
 fixture = '''
 class Service
-  def val<type label="Integer | String" kind="return">ue
+  def val<type label="(Integer | String)" kind="return">ue
     1
   end
 end
@@ -1869,7 +1869,7 @@ module M
 end
 
 include M
-value<hover label="Integer | String">
+value<hover label="(Integer | String)">
 '''
 
 [[cases]]
@@ -1892,7 +1892,7 @@ class Choice
   def value; end
 end
 
-Choice.new.value<hover label="Integer | String">
+Choice.new.value<hover label="(Integer | String)">
 '''
 
 [[cases]]

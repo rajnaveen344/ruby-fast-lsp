@@ -48,9 +48,24 @@ and compare filesystem paths as paths, including when checking suffixes.
 Inline fixtures use `$0` for the cursor and tags such as `<def>`, `<ref>`,
 `<type>`, `<err>`, `<warn>`, `<hint label="...">`, and
 `<complete items="..." excludes="...">`. The
-[harness module](harness/mod.rs), [tag parser](harness/fixture.rs), and
-[assertion runner](harness/check.rs) define the actual syntax. Prefer an existing
-nearby feature test over inventing a new fixture convention.
+[tag parser](harness/fixture.rs) and [assertion runners](harness/check/mod.rs)
+define the syntax; the runner table lists what each tag asserts. Assertions are
+exact:
+
+- Location tags (`<def>`, `<ref>`, `<impl>`, `<incoming>`, `<outgoing>`,
+  `<rename>`) must equal the complete result set, and may live in any file of a
+  `check_multi_file` scenario. `<impl none>` (likewise for the others) asserts
+  an empty result.
+- Types, completion labels, lens titles, and hierarchy names compare exactly.
+  A hint label may omit its `: `/` -> ` prefix, and `tooltip` is checked when
+  given. Hover `label` must be a whole type or line; use `contains` only for
+  free text such as documentation.
+- A fixture must assert something, `$0` must be used by a cursor tag, and an
+  unknown tag, attribute, or `kind` fails the test.
+- Positions are UTF-16, as in LSP, so non-ASCII fixtures need no special care.
+- `FakeEditor::check` requires the cleaned fixture to equal the open buffer.
+
+Prefer an existing nearby feature test over inventing a new fixture convention.
 
 ```sh
 cargo test --locked --lib test_name

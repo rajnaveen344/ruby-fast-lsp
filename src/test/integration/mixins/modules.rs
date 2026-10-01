@@ -11,6 +11,7 @@ use crate::test::harness::check;
 async fn test_include_with_shadowed_constant_does_not_panic() {
     check(
         r#"
+<err none>
 module Bar
 end
 
@@ -21,6 +22,7 @@ Foo = "not a class"
 class Foo
   include Bar
 end
+</err>
 "#,
     )
     .await;
@@ -31,6 +33,7 @@ end
 async fn test_include_inside_method_does_not_panic() {
     check(
         r#"
+<err none>
 module Bar
 end
 
@@ -39,6 +42,7 @@ class Foo
     include Bar
   end
 end
+</err>
 "#,
     )
     .await;
@@ -49,6 +53,7 @@ end
 async fn test_extend_inside_method_does_not_panic() {
     check(
         r#"
+<err none>
 module Bar
 end
 
@@ -57,6 +62,7 @@ class Foo
     extend Bar
   end
 end
+</err>
 "#,
     )
     .await;
@@ -67,6 +73,7 @@ end
 async fn test_prepend_inside_method_does_not_panic() {
     check(
         r#"
+<err none>
 module Bar
 end
 
@@ -75,6 +82,7 @@ class Foo
     prepend Bar
   end
 end
+</err>
 "#,
     )
     .await;
@@ -86,7 +94,7 @@ async fn test_mixins_at_class_level() {
     check(
         r#"
 module Mixin
-  def helper; end
+  <def>def helper; end</def>
 end
 
 class MyClass
@@ -94,6 +102,9 @@ class MyClass
   extend Mixin
   prepend Mixin
 end
+
+MyClass.new.helper$0
+MyClass.helper
 "#,
     )
     .await;

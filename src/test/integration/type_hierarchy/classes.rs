@@ -41,7 +41,7 @@ end
 module Swimmable
 end
 
-<th supertypes="Walkable,Swimmable">
+<th supertypes="Walkable,Swimmable,Object">
 class Duck$0
   include Walkable
   include Swimmable
@@ -99,7 +99,7 @@ async fn test_supertypes_with_prepend() {
 module Logging
 end
 
-<th supertypes="Logging">
+<th supertypes="Logging,Object">
 class Service$0
   prepend Logging
 end
@@ -117,7 +117,7 @@ async fn test_supertypes_with_extend() {
 module ClassMethods
 end
 
-<th supertypes="ClassMethods">
+<th supertypes="ClassMethods,Object">
 class User$0
   extend ClassMethods
 end
@@ -247,7 +247,7 @@ end
 module Enumerable
 end
 
-<th supertypes="Comparable" subtypes="Car">
+<th supertypes="Comparable,Object" subtypes="Car">
 class Vehicle$0
   include Comparable
 end
@@ -265,12 +265,12 @@ end
 // Edge Cases
 // ============================================================================
 
-/// Test class with no supertypes (root class)
+/// A class without an explicit superclass inherits from Object.
 #[tokio::test]
-async fn test_no_supertypes() {
+async fn test_implicit_object_superclass() {
     check(
         r#"
-<th supertypes="">
+<th supertypes="Object">
 class BaseClass$0
 end
 </th>
@@ -388,11 +388,21 @@ end
 #[cfg(test)]
 mod cross_file_tests {
     use crate::capabilities::type_hierarchy;
-    use crate::test::harness::setup_with_multi_file_fixture;
+    use crate::test::harness::{fixture_uri, FakeEditor};
     use tower_lsp::lsp_types::{
         PartialResultParams, Position, TextDocumentIdentifier, TextDocumentPositionParams,
         TypeHierarchyPrepareParams, TypeHierarchySupertypesParams, WorkDoneProgressParams,
     };
+
+    /// Open every file through the editor lifecycle and return their URIs.
+    async fn open_files(files: &[(&str, &str)]) -> (FakeEditor, Vec<tower_lsp::lsp_types::Url>) {
+        let mut editor = FakeEditor::new().await;
+        for (name, content) in files {
+            editor.open(name, content).await;
+        }
+        let uris = files.iter().map(|(name, _)| fixture_uri(name)).collect();
+        (editor, uris)
+    }
 
     /// Helper to find a class/module by searching through lines
     async fn find_type_at_name(
@@ -463,7 +473,8 @@ end
 "#,
         );
 
-        let (server, uris) = setup_with_multi_file_fixture(&[file1, file2]).await;
+        let (editor, uris) = open_files(&[file1, file2]).await;
+        let server = editor.server();
 
         // Find MyClass
         let item = find_type_at_name(&server, &uris[0], file1_content, "MyClass").await;
@@ -543,7 +554,8 @@ end
 "#,
         );
 
-        let (server, uris) = setup_with_multi_file_fixture(&[file1, file2]).await;
+        let (editor, uris) = open_files(&[file1, file2]).await;
+        let server = editor.server();
 
         // Find API module
         let item = find_type_at_name(&server, &uris[0], file1_content, "API").await;
@@ -615,7 +627,8 @@ end
 "#,
         );
 
-        let (server, uris) = setup_with_multi_file_fixture(&[file1, file2]).await;
+        let (editor, uris) = open_files(&[file1, file2]).await;
+        let server = editor.server();
 
         // Find Widget
         let item = find_type_at_name(&server, &uris[0], file1_content, "Widget").await;
@@ -687,7 +700,8 @@ end
 "#;
         let file1 = ("controller.rb", file1_content);
 
-        let (server, uris) = setup_with_multi_file_fixture(&[file1]).await;
+        let (editor, uris) = open_files(&[file1]).await;
+        let server = editor.server();
 
         // Find MyController
         let item = find_type_at_name(&server, &uris[0], file1_content, "MyController").await;
@@ -744,7 +758,8 @@ end
 "#;
         let file1 = ("test.rb", file1_content);
 
-        let (server, uris) = setup_with_multi_file_fixture(&[file1]).await;
+        let (editor, uris) = open_files(&[file1]).await;
+        let server = editor.server();
 
         // Find Child
         let item = find_type_at_name(&server, &uris[0], file1_content, "Child").await;

@@ -292,11 +292,8 @@ product.use$0
     .await;
 }
 
-/// Negative test: This SHOULD FAIL if type filtering is working.
-/// We mark `Other#process` as the expected definition, but the receiver type
-/// should be `Inner`, so `Inner#process` should be found instead.
+/// The chain receiver type selects `Inner#process`, not the same-named `Other#process`.
 #[tokio::test]
-#[should_panic(expected = "Expected definition at")]
 async fn goto_method_chain_rejects_wrong_type() {
     check(
         r#"
@@ -308,15 +305,15 @@ class Wrapper
 end
 
 class Inner
-  def process
+  <def>def process
     "inner result"
-  end
+  end</def>
 end
 
 class Other
-  <def>def process
+  def process
     "other result"
-  end</def>
+  end
 end
 
 obj = Wrapper.new

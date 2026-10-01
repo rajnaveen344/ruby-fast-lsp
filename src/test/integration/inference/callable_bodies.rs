@@ -90,7 +90,7 @@ async fn local_lambda_reads_a_proven_same_scope_capture() {
         r#"
 prefix = "item"
 decorate = ->(row) { { tag: prefix, value: row[:value] } }
-result<hint label="Hash"> = decorate.call({ value: 1 })
+result<hint label="Hash<Symbol, (Integer | String)>"> = decorate.call({ value: 1 })
 result<hover label="{ tag: String, value: Integer }">
 "#,
     )
@@ -139,7 +139,7 @@ async fn cross_file_callable_constants_retain_definition_navigation() {
             "callable_definition.rb",
             r#"
 module CallableDefinition
-  <def>CONVERT</def> = ->(value) { value.to_s }
+  <def>CONVERT = ->(value) { value.to_s }</def>
 end
 "#,
         ),

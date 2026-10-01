@@ -1,36 +1,14 @@
 //! Compact inline labels retain complete semantic types in their tooltips.
 
-use crate::test::harness::{
-    extract_tags_with_attributes, get_hint_label, get_hint_tooltip, FakeEditor,
-};
+use crate::test::harness::{strip_markers, FakeEditor};
 
+/// Hint tags assert both the compact label and the complete tooltip type.
 async fn assert_presentation(editor: &FakeEditor, file: &str, fixture: &str) {
     editor.check(file, fixture).await;
-    let (tags, _) = extract_tags_with_attributes(fixture, &["hint", "hover"]);
-    let hints = editor.inlay_hints(file).await;
-    for tag in tags.into_iter().filter(|tag| tag.kind == "hint") {
-        let matching = hints
-            .iter()
-            .filter(|hint| hint.position == tag.range.start)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            matching.len(),
-            1,
-            "expected one hint at {:?}",
-            tag.range.start
-        );
-        let hint = matching[0];
-        assert_eq!(get_hint_label(hint), tag.attributes["label"]);
-        assert_eq!(
-            get_hint_tooltip(hint),
-            Some(tag.attributes["tooltip"].as_str()),
-            "tooltip must retain the complete type"
-        );
-    }
 }
 
 async fn open_fixture(editor: &mut FakeEditor, file: &str, fixture: &str) {
-    let (_, clean) = extract_tags_with_attributes(fixture, &["hint", "hover"]);
+    let clean = strip_markers(fixture);
     editor.open(file, &clean).await;
 }
 
@@ -60,7 +38,7 @@ class Measurements
 }
 ```"> = { north: 1.5, east: 2.5, west: 3.5 }
     end
-    result<hover label="north: Float">
+    result<hover label="({ } | { east: Float, north: Float, west: Float })">
   end
 end
 rows<hint label=": Array<Hash<Symbol, Integer>>" tooltip="```ruby
@@ -112,19 +90,19 @@ async fn compact_inlay_shape_tooltips_refresh_after_edits() {
   count: Integer
 }
 ```"> = { count: 1 }
-result<hover label="count: Integer">
+result<hover label="{ count: Integer }">
 "#;
     let after = r#"result<hint label=": Hash<Symbol, String>" tooltip="```ruby
 {
   label: String
 }
 ```"> = { label: "ready" }
-result<hover label="label: String">
+result<hover label="{ label: String }">
 "#;
     let mut editor = FakeEditor::new().await;
     open_fixture(&mut editor, "values.rb", before).await;
     assert_presentation(&editor, "values.rb", before).await;
-    let (_, clean) = extract_tags_with_attributes(after, &["hint", "hover"]);
+    let clean = strip_markers(after);
     editor.set("values.rb", &clean).await;
     assert_presentation(&editor, "values.rb", after).await;
     editor.close("values.rb").await;

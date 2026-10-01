@@ -1,393 +1,572 @@
-//! Core fixture utilities - marker extraction and server setup.
+//! Inline fixture parsing: the `$0` cursor and `<tag attr="...">` markers.
+//!
+//! Positions are LSP positions: zero-based lines and UTF-16 columns in the
+//! clean source. Every tag is validated against [`TagKind::spec`], so a typo in
+//! a tag or attribute name fails the test instead of silently checking nothing.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use tower_lsp::lsp_types::{
-    DidOpenTextDocumentParams, InitializeParams, Position, Range, TextDocumentItem, Url,
-};
-use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::{Position, Range};
 
-use crate::capabilities::indexing;
-use crate::server::RubyLanguageServer;
-
-/// Cursor marker indicating where the LSP action should be triggered.
+/// Cursor marker indicating where a cursor-based request is issued.
 pub const CURSOR_MARKER: &str = "$0";
 
-/// Parsed inline fixture with all markers extracted.
-#[derive(Debug)]
-pub struct InlineFixture {
-    /// The clean source code with all markers removed.
-    pub content: String,
-    /// The cursor position (from $0 marker).
-    pub cursor: Position,
-    /// Expected definition ranges (from <def>...</def> markers).
-    pub def_ranges: Vec<Range>,
-    /// Expected reference ranges (from <ref>...</ref> markers).
-    pub ref_ranges: Vec<Range>,
-    /// Expected type string (from <type>...</type> marker).
-    pub expected_type: Option<String>,
+/// Every assertion tag understood by `check()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TagKind {
+    Def,
+    Ref,
+    Impl,
+    Incoming,
+    Outgoing,
+    Rename,
+    Type,
+    Hint,
+    Lens,
+    Hover,
+    Err,
+    Warn,
+    Th,
+    Complete,
 }
 
-/// Parse an inline fixture string, extracting all markers.
-pub fn parse_fixture(text: &str) -> InlineFixture {
-    let (cursor, text_no_cursor) = extract_cursor(text);
-    let (def_ranges, text_no_defs) = extract_tags(&text_no_cursor, "def");
-    let (ref_ranges, text_no_refs) = extract_tags(&text_no_defs, "ref");
-    let (expected_type, content) = extract_type_tag(&text_no_refs);
+/// Whether a tag wraps text, marks a point, or may do either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shape {
+    /// `<tag>text</tag>`.
+    Range,
+    /// `<tag attr="...">`.
+    Point,
+    /// Closed tags wrap text; unclosed tags mark a point.
+    Either,
+}
 
-    InlineFixture {
-        content,
-        cursor,
-        def_ranges,
-        ref_ranges,
-        expected_type,
+/// Static description of one tag kind.
+pub struct TagSpec {
+    pub kind: TagKind,
+    pub name: &'static str,
+    shape: Shape,
+    /// Attributes the tag accepts.
+    attributes: &'static [&'static str],
+    /// Attributes every non-`none` tag must have.
+    required: &'static [&'static str],
+    /// Shape of `<tag none>`, if the tag accepts the `none` keyword: a range
+    /// for scoped absence, or a point for "the request returns nothing".
+    none_shape: Option<Shape>,
+    /// Whether the check issues its request at the fixture cursor.
+    pub needs_cursor: bool,
+}
+
+const SPECS: &[TagSpec] = &[
+    location_spec(TagKind::Def, "def"),
+    location_spec(TagKind::Ref, "ref"),
+    location_spec(TagKind::Impl, "impl"),
+    location_spec(TagKind::Incoming, "incoming"),
+    location_spec(TagKind::Outgoing, "outgoing"),
+    TagSpec {
+        kind: TagKind::Rename,
+        name: "rename",
+        shape: Shape::Range,
+        attributes: &["to"],
+        required: &[],
+        none_shape: None,
+        needs_cursor: false,
+    },
+    TagSpec {
+        kind: TagKind::Type,
+        name: "type",
+        shape: Shape::Point,
+        attributes: &["label", "kind"],
+        required: &["label"],
+        none_shape: None,
+        needs_cursor: false,
+    },
+    TagSpec {
+        kind: TagKind::Hint,
+        name: "hint",
+        shape: Shape::Point,
+        attributes: &["label", "tooltip"],
+        required: &["label"],
+        none_shape: Some(Shape::Range),
+        needs_cursor: false,
+    },
+    TagSpec {
+        kind: TagKind::Lens,
+        name: "lens",
+        shape: Shape::Point,
+        attributes: &["title"],
+        required: &["title"],
+        none_shape: Some(Shape::Range),
+        needs_cursor: false,
+    },
+    TagSpec {
+        kind: TagKind::Hover,
+        name: "hover",
+        shape: Shape::Point,
+        attributes: &["label", "contains"],
+        required: &[],
+        none_shape: None,
+        needs_cursor: false,
+    },
+    TagSpec {
+        kind: TagKind::Err,
+        name: "err",
+        shape: Shape::Range,
+        attributes: &["code", "message"],
+        required: &[],
+        none_shape: Some(Shape::Range),
+        needs_cursor: false,
+    },
+    TagSpec {
+        kind: TagKind::Warn,
+        name: "warn",
+        shape: Shape::Range,
+        attributes: &["code", "message"],
+        required: &[],
+        none_shape: Some(Shape::Range),
+        needs_cursor: false,
+    },
+    TagSpec {
+        kind: TagKind::Th,
+        name: "th",
+        shape: Shape::Either,
+        attributes: &["supertypes", "subtypes"],
+        required: &[],
+        none_shape: None,
+        needs_cursor: true,
+    },
+    TagSpec {
+        kind: TagKind::Complete,
+        name: "complete",
+        shape: Shape::Point,
+        attributes: &["items", "excludes"],
+        required: &[],
+        none_shape: None,
+        needs_cursor: true,
+    },
+];
+
+const fn location_spec(kind: TagKind, name: &'static str) -> TagSpec {
+    TagSpec {
+        kind,
+        name,
+        shape: Shape::Range,
+        attributes: &[],
+        required: &[],
+        none_shape: Some(Shape::Point),
+        needs_cursor: true,
     }
 }
 
-/// Extracts the cursor position from text.
-pub fn extract_cursor(text: &str) -> (Position, String) {
-    let cursor_byte_pos = text
-        .find(CURSOR_MARKER)
-        .expect("Text should contain cursor marker '$0'");
-
-    let mut clean_text = String::with_capacity(text.len() - CURSOR_MARKER.len());
-    clean_text.push_str(&text[..cursor_byte_pos]);
-    clean_text.push_str(&text[cursor_byte_pos + CURSOR_MARKER.len()..]);
-
-    let before_cursor = &text[..cursor_byte_pos];
-    let line = before_cursor.matches('\n').count() as u32;
-    let last_newline = before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let character = (cursor_byte_pos - last_newline) as u32;
-
-    (Position { line, character }, clean_text)
-}
-
-/// Extracts all ranges marked with `<tag>...</tag>` pairs.
-pub fn extract_tags(text: &str, tag: &str) -> (Vec<Range>, String) {
-    let open_tag = format!("<{}>", tag);
-    let close_tag = format!("</{}>", tag);
-
-    let mut ranges = Vec::new();
-    let mut clean_text = String::with_capacity(text.len());
-    let mut remaining = text;
-    let mut current_line = 0u32;
-    let mut current_char = 0u32;
-
-    while !remaining.is_empty() {
-        if let Some(open_pos) = remaining.find(&open_tag) {
-            let before = &remaining[..open_pos];
-            clean_text.push_str(before);
-
-            for ch in before.chars() {
-                if ch == '\n' {
-                    current_line += 1;
-                    current_char = 0;
-                } else {
-                    current_char += 1;
-                }
-            }
-
-            let start_pos = Position {
-                line: current_line,
-                character: current_char,
-            };
-
-            remaining = &remaining[open_pos + open_tag.len()..];
-
-            if let Some(close_pos) = remaining.find(&close_tag) {
-                let content = &remaining[..close_pos];
-                clean_text.push_str(content);
-
-                for ch in content.chars() {
-                    if ch == '\n' {
-                        current_line += 1;
-                        current_char = 0;
-                    } else {
-                        current_char += 1;
-                    }
-                }
-
-                ranges.push(Range {
-                    start: start_pos,
-                    end: Position {
-                        line: current_line,
-                        character: current_char,
-                    },
-                });
-
-                remaining = &remaining[close_pos + close_tag.len()..];
-            } else {
-                panic!("Unmatched <{}> tag", tag);
-            }
-        } else {
-            clean_text.push_str(remaining);
-            break;
-        }
+impl TagKind {
+    pub fn spec(self) -> &'static TagSpec {
+        SPECS
+            .iter()
+            .find(|spec| spec.kind == self)
+            .expect("INVARIANT VIOLATED: TagKind has no TagSpec. This is a bug because every tag kind must be parseable. Fix: add the kind to SPECS.")
     }
 
-    (ranges, clean_text)
-}
-
-/// Extract type from <type>...</type> marker
-fn extract_type_tag(text: &str) -> (Option<String>, String) {
-    let open_tag = "<type>";
-    let close_tag = "</type>";
-
-    if let Some(open_pos) = text.find(open_tag) {
-        let after_open = &text[open_pos + open_tag.len()..];
-        if let Some(close_pos) = after_open.find(close_tag) {
-            let type_str = after_open[..close_pos].to_string();
-            let mut clean = String::with_capacity(text.len());
-            clean.push_str(&text[..open_pos]);
-            clean.push_str(&after_open[close_pos + close_tag.len()..]);
-            return (Some(type_str), clean);
-        }
+    fn from_name(name: &str) -> Option<Self> {
+        SPECS
+            .iter()
+            .find(|spec| spec.name == name)
+            .map(|spec| spec.kind)
     }
-    (None, text.to_string())
 }
 
-/// Represents a tagged range with optional attributes.
+/// One parsed assertion tag.
 #[derive(Debug, Clone)]
 pub struct Tag {
-    pub kind: String,
+    pub kind: TagKind,
     pub range: Range,
-    pub attributes: HashMap<String, String>,
+    pub attributes: BTreeMap<String, String>,
+    /// `<tag none>`: assert the absence of results inside the range.
+    pub none: bool,
 }
 
 impl Tag {
-    pub fn message(&self) -> Option<String> {
-        self.attributes.get("message").cloned()
-    }
-
-    /// Check if this tag asserts "none" (e.g., `<err none>` means expect 0 errors)
-    pub fn is_none(&self) -> bool {
-        self.attributes.contains_key("none")
-    }
-}
-
-/// Extracts all ranges marked with `<tag ...>...</tag>`.
-/// Supports attributes like `<warn message="foo">`.
-/// Also supports self-closing/point tags like `<hint label="type">` where end range == start range.
-/// Accepting multiple tag names allows extracting mixed tags (e.g. err and warn) correctly in one pass.
-pub fn extract_tags_with_attributes(text: &str, tag_names: &[&str]) -> (Vec<Tag>, String) {
-    let open_tags: Vec<(String, String)> = tag_names
-        .iter()
-        .map(|name| (format!("<{}", name), name.to_string()))
-        .collect();
-    let close_tags: std::collections::HashMap<String, String> = tag_names
-        .iter()
-        .map(|name| (name.to_string(), format!("</{}>", name)))
-        .collect();
-
-    let mut tags = Vec::new();
-    let mut clean_text = String::with_capacity(text.len());
-    let mut remaining = text;
-    let mut current_line = 0u32;
-    let mut current_char = 0u32;
-    let attr_regex = regex::Regex::new(r#"(\w+)="([^"]*)""#).unwrap();
-    let keyword_regex = regex::Regex::new(r#"\b(none)\b"#).unwrap();
-
-    while !remaining.is_empty() {
-        // Find the earliest occurrence of any open tag
-        let mut next_tag_idx = None;
-
-        for (open_tag_start, name) in &open_tags {
-            if let Some(idx) = remaining.find(open_tag_start) {
-                // Check if it's a real match (followed by space or >)
-                let char_after_start = remaining.chars().nth(idx + open_tag_start.len());
-                let is_match = matches!(char_after_start, Some(' ') | Some('>'));
-
-                if is_match && next_tag_idx.is_none_or(|(min_idx, _, _)| idx < min_idx) {
-                    next_tag_idx = Some((idx, open_tag_start.as_str(), name.as_str()));
-                }
-            }
-        }
-
-        if let Some((open_start_idx, open_tag_start, tag_name)) = next_tag_idx {
-            // Append text before tag
-            let before = &remaining[..open_start_idx];
-            clean_text.push_str(before);
-            for ch in before.chars() {
-                if ch == '\n' {
-                    current_line += 1;
-                    current_char = 0;
-                } else {
-                    current_char += 1;
-                }
-            }
-
-            // Parse opening tag looking for next '>'
-            // We must respect quotes when looking for '>'
-            let rest_from_start = &remaining[open_start_idx..];
-            let mut tag_content_end = 0;
-            let mut in_quote = false;
-            let mut quote_char = '\0';
-
-            for (i, ch) in rest_from_start.char_indices() {
-                match ch {
-                    '"' | '\'' => {
-                        if !in_quote {
-                            in_quote = true;
-                            quote_char = ch;
-                        } else if ch == quote_char {
-                            in_quote = false;
-                        }
-                    }
-                    '>' => {
-                        if !in_quote {
-                            tag_content_end = i;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            if tag_content_end == 0 {
-                panic!("Unclosed tag opening");
-            }
-
-            let tag_content = &rest_from_start[open_tag_start.len()..tag_content_end];
-
-            // Parse attributes
-            let mut attributes = std::collections::HashMap::new();
-            // Match key="value" pairs
-            for cap in attr_regex.captures_iter(tag_content) {
-                attributes.insert(cap[1].to_string(), cap[2].to_string());
-            }
-            // Also match standalone keywords like "none"
-            for cap in keyword_regex.captures_iter(tag_content) {
-                attributes.insert(cap[1].to_string(), "true".to_string());
-            }
-
-            // Check if it's a known range tag (has matching close tag) or point tag
-            // We assume tags without a matching closing tag are point tags (start == end)
-            // This is a heuristic: look ahead for the closing tag
-            let content_after_open = &remaining[open_start_idx + tag_content_end + 1..];
-
-            // Move past opening tag
-            remaining = content_after_open;
-            let start_pos = Position {
-                line: current_line,
-                character: current_char,
-            };
-
-            let close_tag = close_tags.get(tag_name).unwrap();
-            if let Some(close_pos) = remaining.find(close_tag) {
-                // It has a closing tag, treat as range
-                let content = &remaining[..close_pos];
-                clean_text.push_str(content);
-
-                for ch in content.chars() {
-                    if ch == '\n' {
-                        current_line += 1;
-                        current_char = 0;
-                    } else {
-                        current_char += 1;
-                    }
-                }
-
-                tags.push(Tag {
-                    kind: tag_name.to_string(),
-                    range: Range {
-                        start: start_pos,
-                        end: Position {
-                            line: current_line,
-                            character: current_char,
-                        },
-                    },
-                    attributes,
-                });
-
-                remaining = &remaining[close_pos + close_tag.len()..];
-            } else {
-                // No closing tag found, treat as point marker (start == end)
-                tags.push(Tag {
-                    kind: tag_name.to_string(),
-                    range: Range {
-                        start: start_pos,
-                        end: start_pos,
-                    },
-                    attributes,
-                });
-                // 'remaining' was already advanced past the opening tag
-            }
+    fn shape(&self) -> Shape {
+        let spec = self.kind.spec();
+        if self.none {
+            spec.none_shape
+                .expect("INVARIANT VIOLATED: `none` parsed for a tag without none_shape. Fix: reject `none` in parse_attributes.")
         } else {
-            clean_text.push_str(remaining);
-            break;
+            spec.shape
         }
     }
 
-    (tags, clean_text)
-}
-
-/// Virtual URI used for inline fixtures.
-fn virtual_uri() -> Url {
-    crate::test::harness::fixture_uri("/inline_test.rb")
-}
-
-/// Virtual URI with custom filename
-fn virtual_uri_with_name(name: &str) -> Url {
-    super::fixture_uri(name)
-}
-
-/// Sets up a server with an inline fixture loaded.
-///
-/// Routes through the real `handle_did_open` handler to ensure tests
-/// exercise the same code path as a real editor.
-pub async fn setup_with_fixture(content: &str) -> (RubyLanguageServer, Url) {
-    let server = RubyLanguageServer::default();
-    let _ = server.initialize(InitializeParams::default()).await;
-
-    let uri = virtual_uri();
-
-    let params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "ruby".to_string(),
-            version: 1,
-            text: content.to_string(),
-        },
-    };
-    indexing::handle_did_open(&server, params).await;
-
-    (server, uri)
-}
-
-/// Sets up a server with multiple files loaded.
-///
-/// Each tuple contains (filename, content). The first file in the list
-/// is considered the "primary" file and its URI is returned.
-///
-/// Routes through the real `handle_did_open` handler to ensure tests
-/// exercise the same code path as a real editor.
-///
-/// This is useful for testing cross-file scenarios like:
-/// - Class reopenings with mixins in different files
-/// - Module definitions across files
-/// - Cross-file references
-pub async fn setup_with_multi_file_fixture(
-    files: &[(&str, &str)],
-) -> (RubyLanguageServer, Vec<Url>) {
-    let server = RubyLanguageServer::default();
-    let _ = server.initialize(InitializeParams::default()).await;
-
-    let mut uris = Vec::new();
-
-    for (filename, content) in files {
-        let uri = virtual_uri_with_name(filename);
-        uris.push(uri.clone());
-
-        let params = DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri,
-                language_id: "ruby".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        };
-        indexing::handle_did_open(&server, params).await;
+    pub fn attr(&self, name: &str) -> Option<&str> {
+        assert!(
+            self.kind.spec().attributes.contains(&name),
+            "INVARIANT VIOLATED: harness read undeclared attribute `{name}` of <{}>. This is a bug because parse_fixture rejects undeclared attributes. Fix: declare it in the tag's TagSpec.",
+            self.kind.spec().name
+        );
+        self.attributes.get(name).map(String::as_str)
     }
 
-    (server, uris)
+    /// Comma-separated attribute values with surrounding whitespace removed.
+    pub fn list(&self, name: &str) -> Vec<&str> {
+        self.attr(name)
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// A parsed inline fixture.
+#[derive(Debug, Clone)]
+pub struct Fixture {
+    /// Ruby source with every marker removed.
+    pub source: String,
+    pub cursor: Option<Position>,
+    pub tags: Vec<Tag>,
+}
+
+impl Fixture {
+    pub fn has_markers(&self) -> bool {
+        self.cursor.is_some() || !self.tags.is_empty()
+    }
+
+    pub fn tags_of(&self, kind: TagKind) -> impl Iterator<Item = &Tag> {
+        self.tags.iter().filter(move |tag| tag.kind == kind)
+    }
+}
+
+/// Remove every marker, returning the source the editor should see.
+pub fn strip_markers(text: &str) -> String {
+    parse_fixture(text).source
+}
+
+/// Parse a fixture, panicking on malformed or unknown markers.
+pub fn parse_fixture(text: &str) -> Fixture {
+    let mut source = String::with_capacity(text.len());
+    let mut position = Position::new(0, 0);
+    let mut cursor = None;
+    let mut tags = Vec::new();
+    let mut open: Vec<Tag> = Vec::new();
+    let mut rest = text;
+
+    while let Some(ch) = rest.chars().next() {
+        if let Some(after) = rest.strip_prefix(CURSOR_MARKER) {
+            assert!(
+                cursor.is_none(),
+                "fixture has more than one `{CURSOR_MARKER}` cursor marker"
+            );
+            cursor = Some(position);
+            rest = after;
+            continue;
+        }
+        if ch == '<' {
+            if let Some((kind, after)) = parse_close_tag(rest) {
+                let index = open
+                    .iter()
+                    .rposition(|tag| tag.kind == kind)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "fixture has </{}> without a matching opening tag",
+                            kind.spec().name
+                        )
+                    });
+                let mut tag = open.remove(index);
+                tag.range.end = position;
+                tags.push(tag);
+                rest = after;
+                continue;
+            }
+            if let Some((tag, after)) = parse_open_tag(rest, position) {
+                let closes = match tag.shape() {
+                    Shape::Range | Shape::Either => true,
+                    Shape::Point => false,
+                };
+                if closes {
+                    open.push(tag);
+                } else {
+                    tags.push(tag);
+                }
+                rest = after;
+                continue;
+            }
+        }
+        source.push(ch);
+        advance(&mut position, ch);
+        rest = &rest[ch.len_utf8()..];
+    }
+
+    for tag in open {
+        let spec = tag.kind.spec();
+        assert!(
+            tag.shape() == Shape::Either,
+            "fixture has an unclosed <{}> tag at {:?}",
+            spec.name,
+            tag.range.start
+        );
+        tags.push(tag);
+    }
+    tags.sort_by_key(|tag| (tag.range.start.line, tag.range.start.character));
+
+    Fixture {
+        source,
+        cursor,
+        tags,
+    }
+}
+
+fn advance(position: &mut Position, ch: char) {
+    if ch == '\n' {
+        position.line += 1;
+        position.character = 0;
+    } else {
+        position.character += ch.len_utf16() as u32;
+    }
+}
+
+/// `</name>` for a known tag.
+fn parse_close_tag(text: &str) -> Option<(TagKind, &str)> {
+    let body = text.strip_prefix("</")?;
+    let end = body.find('>')?;
+    let name = &body[..end];
+    if let Some(kind) = TagKind::from_name(name) {
+        return Some((kind, &body[end + 1..]));
+    }
+    reject_unknown_tag(name);
+    None
+}
+
+/// `<name attr="value" none>` for a known tag.
+fn parse_open_tag(text: &str, position: Position) -> Option<(Tag, &str)> {
+    let body = text.strip_prefix('<')?;
+    let name_len = body
+        .find(|ch: char| !(ch.is_ascii_lowercase() || ch == '_'))
+        .unwrap_or(body.len());
+    let name = &body[..name_len];
+    let after_name = &body[name_len..];
+    if !(after_name.starts_with('>') || after_name.starts_with(' ')) {
+        return None;
+    }
+    let Some(kind) = TagKind::from_name(name) else {
+        if looks_like_tag(after_name) {
+            reject_unknown_tag(name);
+        }
+        return None;
+    };
+    let end = tag_end(after_name)
+        .unwrap_or_else(|| panic!("fixture has an unterminated <{name} tag at {position:?}"));
+    let (attributes, none) = parse_attributes(kind, &after_name[..end]);
+    let tag = Tag {
+        kind,
+        range: Range::new(position, position),
+        attributes,
+        none,
+    };
+    Some((tag, &after_name[end + 1..]))
+}
+
+/// Byte index of the `>` that ends a tag, ignoring `>` inside quotes.
+fn tag_end(text: &str) -> Option<usize> {
+    let mut quoted = false;
+    for (index, ch) in text.char_indices() {
+        match ch {
+            '"' => quoted = !quoted,
+            '>' if !quoted => return Some(index),
+            '\n' if !quoted => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `>` directly, or a first ` key="` attribute, as an assertion tag body would be.
+fn looks_like_tag(after_name: &str) -> bool {
+    let Some(end) = tag_end(after_name) else {
+        return false;
+    };
+    let body = after_name[..end].trim_start();
+    end == 0
+        || body == "none"
+        || body.split_once("=\"").is_some_and(|(key, _)| {
+            !key.is_empty()
+                && key
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        })
+}
+
+/// Names that look like assertion tags but are not supported fail loudly.
+/// Ruby code rarely contains `<lowercase>`; HTML templates are not fixtures.
+fn reject_unknown_tag(name: &str) {
+    assert!(
+        name.is_empty(),
+        "fixture contains unknown tag <{name}>; supported tags: {}",
+        SPECS
+            .iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
+fn parse_attributes(kind: TagKind, text: &str) -> (BTreeMap<String, String>, bool) {
+    let spec = kind.spec();
+    let mut attributes = BTreeMap::new();
+    let mut none = false;
+    let mut rest = text.trim_start();
+    while !rest.is_empty() {
+        let key_len = rest
+            .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+            .unwrap_or(rest.len());
+        let key = &rest[..key_len];
+        assert!(
+            !key.is_empty(),
+            "malformed attributes in <{}>: {text:?}",
+            spec.name
+        );
+        rest = &rest[key_len..];
+        if let Some(value_start) = rest.strip_prefix("=\"") {
+            let value_end = value_start
+                .find('"')
+                .unwrap_or_else(|| panic!("unterminated attribute `{key}` in <{}>", spec.name));
+            assert!(
+                spec.attributes.contains(&key),
+                "<{}> does not support attribute `{key}`; supported: {:?}",
+                spec.name,
+                spec.attributes
+            );
+            let previous = attributes.insert(key.to_string(), value_start[..value_end].to_string());
+            assert!(
+                previous.is_none(),
+                "<{}> repeats attribute `{key}`",
+                spec.name
+            );
+            rest = &value_start[value_end + 1..];
+        } else {
+            assert!(
+                key == "none" && spec.none_shape.is_some(),
+                "<{}> does not support keyword `{key}`",
+                spec.name
+            );
+            none = true;
+        }
+        rest = rest.trim_start();
+    }
+    if !none {
+        for required in spec.required {
+            assert!(
+                attributes.contains_key(*required),
+                "<{}> requires attribute `{required}`",
+                spec.name
+            );
+        }
+    }
+    (attributes, none)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_and_range_tags_use_clean_coordinates() {
+        let fixture = parse_fixture("class <def>Foo</def>\nFoo$0.new");
+        assert_eq!(fixture.source, "class Foo\nFoo.new");
+        assert_eq!(fixture.cursor, Some(Position::new(1, 3)));
+        assert_eq!(fixture.tags.len(), 1);
+        assert_eq!(fixture.tags[0].kind, TagKind::Def);
+        assert_eq!(
+            fixture.tags[0].range,
+            Range::new(Position::new(0, 6), Position::new(0, 9))
+        );
+    }
+
+    #[test]
+    fn multiline_ranges_end_on_their_closing_line() {
+        let fixture = parse_fixture("<def>class Foo\nend</def>");
+        assert_eq!(
+            fixture.tags[0].range,
+            Range::new(Position::new(0, 0), Position::new(1, 3))
+        );
+    }
+
+    #[test]
+    fn columns_count_utf16_code_units() {
+        // "é" is one UTF-16 unit and two bytes; "😀" is two UTF-16 units and four bytes.
+        let fixture = parse_fixture("s = \"é😀\"; <def>x</def> = 1$0");
+        assert_eq!(
+            fixture.tags[0].range,
+            Range::new(Position::new(0, 11), Position::new(0, 12))
+        );
+        assert_eq!(fixture.cursor, Some(Position::new(0, 16)));
+    }
+
+    #[test]
+    fn point_tags_do_not_consume_later_closing_tags() {
+        let fixture = parse_fixture("x<hint label=\"Integer\"> = 1\n<hint none>y = z</hint>");
+        assert_eq!(fixture.source, "x = 1\ny = z");
+        let ranges: Vec<_> = fixture
+            .tags
+            .iter()
+            .map(|tag| (tag.none, tag.range))
+            .collect();
+        assert_eq!(
+            ranges,
+            vec![
+                (false, Range::new(Position::new(0, 1), Position::new(0, 1))),
+                (true, Range::new(Position::new(1, 0), Position::new(1, 5))),
+            ]
+        );
+    }
+
+    #[test]
+    fn quoted_attributes_may_contain_angle_brackets_and_newlines() {
+        let fixture = parse_fixture("x<hint label=\": Array<String>\" tooltip=\"a\nb\"> = []");
+        assert_eq!(fixture.source, "x = []");
+        assert_eq!(fixture.tags[0].attr("label"), Some(": Array<String>"));
+        assert_eq!(fixture.tags[0].attr("tooltip"), Some("a\nb"));
+    }
+
+    #[test]
+    fn ruby_comparisons_are_not_tags() {
+        let fixture = parse_fixture("class Dog < Animal; end\na <b if c > d\nx = y <=> z");
+        assert!(fixture.tags.is_empty());
+        assert_eq!(
+            fixture.source,
+            "class Dog < Animal; end\na <b if c > d\nx = y <=> z"
+        );
+    }
+
+    #[test]
+    fn location_none_tags_are_points() {
+        let fixture = parse_fixture("class Foo$0<impl none>\nend");
+        assert_eq!(fixture.source, "class Foo\nend");
+        assert!(fixture.tags[0].none);
+        assert_eq!(fixture.tags[0].range.start, fixture.tags[0].range.end);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown tag <defn>")]
+    fn misspelled_tags_fail() {
+        parse_fixture("<defn>Foo</defn>");
+    }
+
+    #[test]
+    #[should_panic(expected = "does not support attribute `lable`")]
+    fn misspelled_attributes_fail() {
+        parse_fixture("x<hint lable=\"Integer\"> = 1");
+    }
+
+    #[test]
+    #[should_panic(expected = "unclosed <err>")]
+    fn unclosed_range_tags_fail() {
+        parse_fixture("<err>Foo");
+    }
+
+    #[test]
+    #[should_panic(expected = "more than one")]
+    fn duplicate_cursors_fail() {
+        parse_fixture("a$0 b$0");
+    }
 }

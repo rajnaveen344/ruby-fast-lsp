@@ -130,7 +130,7 @@ async fn each_with_object_returns_the_proven_accumulator_shape() {
     check(
         r#"
 values = [1, 2]
-summary<hint label="Hash"> = values.each_with_object({ count: 0 }) do |value, memo|
+summary<hint label="Hash<Symbol, Integer>"> = values.each_with_object({ count: 0 }) do |value, memo|
   memo[:count] = value
 end
 summary<hover label="{ count: Integer }">

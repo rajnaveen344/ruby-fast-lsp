@@ -1,7 +1,7 @@
 //! Collections of value constants must not acquire synthetic class-object types.
 
 use crate::test::harness::{
-    extract_tags_with_attributes, get_hint_label, get_hint_tooltip, FakeEditor,
+    get_hint_label, get_hint_tooltip, parse_fixture, strip_markers, FakeEditor, TagKind,
 };
 
 const SYMBOLS: &str = r#"
@@ -41,14 +41,14 @@ end
 "#;
 
 fn clean(fixture: &str) -> String {
-    extract_tags_with_attributes(fixture, &["hint", "hover", "warn"]).1
+    strip_markers(fixture)
 }
 
 async fn assert_exact_hints(editor: &FakeEditor, file: &str, fixture: &str) {
     editor.check(file, fixture).await;
-    let (tags, _) = extract_tags_with_attributes(fixture, &["hint", "hover", "warn"]);
+    let tags = parse_fixture(fixture).tags;
     let hints = editor.inlay_hints(file).await;
-    for tag in tags.into_iter().filter(|tag| tag.kind == "hint") {
+    for tag in tags.into_iter().filter(|tag| tag.kind == TagKind::Hint) {
         let matching = hints
             .iter()
             .filter(|hint| hint.position == tag.range.start)

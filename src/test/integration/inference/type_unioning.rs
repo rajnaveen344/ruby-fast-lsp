@@ -15,7 +15,7 @@ module M
 end
 
 include M
-foo<hover label="Integer | String">
+foo<hover label="(Integer | String)">
 "#,
     )
     .await;
