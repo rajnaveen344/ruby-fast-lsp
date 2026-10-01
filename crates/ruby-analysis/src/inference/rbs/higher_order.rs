@@ -5,7 +5,7 @@ use crate::core::callables::callable_signature::CallableBlockTemplate;
 use crate::core::callables::callable_signature::CallableSignature;
 use crate::core::callables::callable_signature::CallableTypeTemplate;
 use crate::core::{FullyQualifiedName, MethodFact, MethodParamKind, RubyMethod, RubyType};
-use crate::engine::{AnalysisQuery, AnalysisQueryCache};
+use crate::engine::{AnalysisQueryCache, View};
 use crate::inference::higher_order::{prepare_callable_set, PreparedCallableSet};
 
 fn receiver_uses_embedded_rbs_without_engine(receiver_type: &RubyType) -> bool {
@@ -19,7 +19,7 @@ fn receiver_uses_embedded_rbs_without_engine(receiver_type: &RubyType) -> bool {
 /// back to the embedded language signatures only when no project signature
 /// fact supplies callable evidence.
 pub(crate) fn prepare_higher_order_call(
-    query: Option<&AnalysisQuery<'_>>,
+    query: Option<&View<'_>>,
     cache: Option<&AnalysisQueryCache>,
     receiver_type: &RubyType,
     method_name: &str,
@@ -46,7 +46,7 @@ pub(crate) fn prepare_higher_order_call(
 }
 
 pub(super) fn prepare_higher_order_call_with_fallbacks_uncached(
-    query: Option<&AnalysisQuery<'_>>,
+    query: Option<&View<'_>>,
     cache: Option<&AnalysisQueryCache>,
     receiver_type: Option<&RubyType>,
     implicit_namespace: Option<&FullyQualifiedName>,
@@ -104,7 +104,7 @@ pub(super) fn prepare_higher_order_call_with_fallbacks_uncached(
 }
 
 fn resolve_signature_facts_for_type(
-    query: &AnalysisQuery<'_>,
+    query: &View<'_>,
     cache: Option<&AnalysisQueryCache>,
     receiver_type: &RubyType,
     method: &RubyMethod,
@@ -126,7 +126,7 @@ fn resolve_signature_facts_for_type(
 }
 
 fn resolve_signature_facts(
-    query: &AnalysisQuery<'_>,
+    query: &View<'_>,
     cache: Option<&AnalysisQueryCache>,
     namespace: &FullyQualifiedName,
     method: &RubyMethod,
@@ -191,7 +191,7 @@ fn prepare_from_callable_signatures(
 }
 
 fn prepare_forwarded_from_facts(
-    query: &AnalysisQuery<'_>,
+    query: &View<'_>,
     cache: Option<&AnalysisQueryCache>,
     facts: &[MethodFact],
     argument_types: &[RubyType],

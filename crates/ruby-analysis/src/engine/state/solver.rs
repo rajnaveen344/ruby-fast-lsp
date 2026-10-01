@@ -15,9 +15,9 @@ use crate::core::{
 };
 
 use super::types::{TypeInferenceOutcomeRef, TypeTable};
-use super::AnalysisEngine;
+use super::Project;
 use crate::core::callables::callable_body::CallableBodySummary;
-use crate::engine::AnalysisQuery;
+use crate::engine::View;
 use crate::inference::constant::{
     solve_constant_type_equations, ConstantFactInput, ResolvedConstantDependency,
 };
@@ -27,7 +27,7 @@ use crate::inference::method::recursive::{
 };
 
 fn resolve_constant_dependency(
-    query: &AnalysisQuery<'_>,
+    query: &View<'_>,
     dependency: &ConstantTypeDependency,
 ) -> Option<ResolvedConstantDependency> {
     let context = if dependency.absolute {
@@ -83,7 +83,7 @@ fn constructed_dependency(
 }
 
 pub(in crate::engine) fn resolve_constant_dependency_type(
-    query: &AnalysisQuery<'_>,
+    query: &View<'_>,
     dependency: &ConstantTypeDependency,
 ) -> Option<RubyType> {
     match resolve_constant_dependency(query, dependency)? {
@@ -249,7 +249,7 @@ impl Solver {
     /// the current constant facts and resolved dependencies. Writes nothing.
     pub(in crate::engine) fn plan_constant_type_equations(
         &self,
-        query: &AnalysisQuery<'_>,
+        query: &View<'_>,
         types: &TypeTable,
     ) -> ConstantEquationPlan {
         if !self.constant_type_equations_dirty {
@@ -367,7 +367,7 @@ impl Solver {
     /// lifecycle as the inferred type facts they update.
     pub(in crate::engine) fn plan_method_return_equations(
         &self,
-        query: &AnalysisQuery<'_>,
+        query: &View<'_>,
     ) -> MethodReturnEquationPlan {
         if !self.method_return_equations_dirty {
             return MethodReturnEquationPlan::Clean;
@@ -598,11 +598,11 @@ impl Solver {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn resolve_constant_type_equations(&mut self) -> bool {
         let plan = self
             .solver
-            .plan_constant_type_equations(&AnalysisQuery::new(self), &self.types);
+            .plan_constant_type_equations(&View::new(self), &self.types);
         self.solver
             .apply_constant_type_equations(&mut self.types, plan)
     }
@@ -612,9 +612,7 @@ impl AnalysisEngine {
     ///
     /// Ordinary `resolve()` calls are O(1) when method bodies did not change.
     pub(super) fn resolve_method_return_equations(&mut self) -> bool {
-        let plan = self
-            .solver
-            .plan_method_return_equations(&AnalysisQuery::new(self));
+        let plan = self.solver.plan_method_return_equations(&View::new(self));
         self.solver
             .apply_method_return_equations(&mut self.types, plan)
     }

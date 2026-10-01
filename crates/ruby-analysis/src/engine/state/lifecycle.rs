@@ -10,10 +10,10 @@ use std::time::Instant;
 use crate::core::{DiagnosticFact, FileAnalysis, SourceFileId};
 
 use super::types::TypeTable;
-use super::{AnalysisEngine, ResolveMode, ResolveStat, SourceFileSnapshot};
+use super::{Project, ResolveMode, ResolveStat, SourceFileSnapshot};
 use crate::engine::persist::fingerprint::{SemanticChange, SemanticExportFingerprint};
 
-impl AnalysisEngine {
+impl Project {
     pub fn replace_facts(
         &mut self,
         file_id: SourceFileId,
@@ -86,7 +86,7 @@ impl AnalysisEngine {
                 unique.insert(*file_id),
                 what = "selected-file resolution contains duplicate file id {:?}",
                 why = "one resolution replaces each file's references and diagnostics once",
-                fix = "sort and dedupe file ids before AnalysisEngine::resolve_files",
+                fix = "sort and dedupe file ids before Project::resolve_files",
                 file_id,
             );
         }
@@ -102,7 +102,7 @@ impl AnalysisEngine {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     /// Invalidate every query cache keyed by `query_cache_identity`.
     fn advance_semantic_revision(&mut self) {
         self.semantic_revision = self.semantic_revision.checked_add(1).expect_invariant(
@@ -162,7 +162,7 @@ impl AnalysisEngine {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     /// Replace only `unresolved-require` diagnostics for one file.
     ///
     /// Keeps every other resolved diagnostic fact, candidates, and semantic

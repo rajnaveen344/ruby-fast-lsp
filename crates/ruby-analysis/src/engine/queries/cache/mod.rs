@@ -1,4 +1,4 @@
-//! Semantic query memoization and the `AnalysisQuery` type queries that use it.
+//! Semantic query memoization and the `View` type queries that use it.
 
 mod bindings;
 mod expressions;

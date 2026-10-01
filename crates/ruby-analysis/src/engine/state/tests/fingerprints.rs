@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn semantic_export_fingerprint_distinguishes_body_and_api_edits() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "def name; 'A'; end");
     let owner = FullyQualifiedName::try_from("Object").unwrap();
     let method_fqn =
@@ -42,8 +42,8 @@ fn semantic_export_fingerprint_distinguishes_body_and_api_edits() {
 
 #[test]
 fn semantic_context_fingerprint_is_path_independent_but_kind_and_fact_sensitive() {
-    fn engine_with(path: &str, kind: SourceKind, method_name: &str) -> AnalysisEngine {
-        let mut engine = AnalysisEngine::new();
+    fn engine_with(path: &str, kind: SourceKind, method_name: &str) -> Project {
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: PathBuf::from(path),
             content: "class Shared; end".to_string(),
@@ -87,9 +87,9 @@ fn semantic_context_fingerprint_is_path_independent_but_kind_and_fact_sensitive(
 
 #[test]
 fn semantic_result_fingerprint_is_file_id_independent_and_reference_sensitive() {
-    fn engine_with(target_name: &str, reverse_registration: bool) -> AnalysisEngine {
-        let mut engine = AnalysisEngine::new();
-        let register_definitions = |engine: &mut AnalysisEngine| {
+    fn engine_with(target_name: &str, reverse_registration: bool) -> Project {
+        let mut engine = Project::new();
+        let register_definitions = |engine: &mut Project| {
             register_project_file(
                 engine,
                 "app/models.rb",
@@ -97,7 +97,7 @@ fn semantic_result_fingerprint_is_file_id_independent_and_reference_sensitive() 
             )
         };
         let register_call =
-            |engine: &mut AnalysisEngine| register_project_file(engine, "app/call.rb", "Alpha\n");
+            |engine: &mut Project| register_project_file(engine, "app/call.rb", "Alpha\n");
         let (definitions_file, call_file) = if reverse_registration {
             let call = register_call(&mut engine);
             let definitions = register_definitions(&mut engine);
@@ -179,7 +179,7 @@ fn semantic_result_fingerprint_is_file_id_independent_and_reference_sensitive() 
 #[test]
 fn semantic_context_fingerprint_is_cross_process_stable() {
     fn fingerprint() -> String {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "stubs/widget.rb".into(),
             content: "class Widget; def call(value); end; end".into(),

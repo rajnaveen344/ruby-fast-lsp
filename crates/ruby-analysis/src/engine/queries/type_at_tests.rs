@@ -1,13 +1,13 @@
-//! File-scoped type reads through `AnalysisQuery::type_at`.
+//! File-scoped type reads through `View::type_at`.
 
 use crate::core::{
     FileAnalysis, FullyQualifiedName, RubyType, SourceFileId, TextRange, TypeFact, TypeProvenance,
     TypeResolution, TypeSubject,
 };
-use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+use crate::engine::{Project, ResolveMode, SourceFileInput};
 
 fn constant_type_at(
-    engine: &AnalysisEngine,
+    engine: &Project,
     constant: &FullyQualifiedName,
     file_id: SourceFileId,
     byte_offset: u32,
@@ -24,7 +24,7 @@ fn constant_type_at(
 
 #[test]
 fn file_scoped_queries_follow_replacement_without_losing_other_files() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let constant = FullyQualifiedName::try_from("LABEL").unwrap();
     let mut file_ids = Vec::new();
     for (path, source, ruby_type) in [
@@ -79,7 +79,7 @@ fn file_scoped_queries_follow_replacement_without_losing_other_files() {
 
 #[test]
 fn query_uses_domain_byte_offsets_without_source_or_protocol_coordinates() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(crate::engine::SourceFileInput {
         path: "sample.rb".into(),
         content: "VALUE = \"text\"".into(),

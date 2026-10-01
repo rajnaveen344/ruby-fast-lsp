@@ -3,10 +3,10 @@
 use super::receiver_type_members;
 use crate::core::{FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMethod, RubyType};
 use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::invariant::ExpectInvariant;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn resolve_method_signature_facts(
         &self,
         namespace_fqn: &FullyQualifiedName,

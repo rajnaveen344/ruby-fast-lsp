@@ -10,9 +10,9 @@ use crate::core::{
     DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, MethodFact, MethodReferenceAccess,
     ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId,
 };
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{Project, View};
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn resolve_grouped_method_callees(
         &self,
         receiver_type: &RubyType,
@@ -26,7 +26,7 @@ impl AnalysisEngine {
             why = "scalar receivers must use the compact single-owner resolution path",
             fix = "enter grouped resolution only after validating a canonical RubyType::Union",
         );
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         match access {
             MethodReferenceAccess::Normal
             | MethodReferenceAccess::VisibilityBypass
@@ -136,7 +136,7 @@ impl AnalysisEngine {
         if !diagnostics.diagnose_unresolved {
             return;
         }
-        let namespaces = AnalysisQuery::receiver_type_to_method_namespaces(receiver_type);
+        let namespaces = View::receiver_type_to_method_namespaces(receiver_type);
         if namespaces.is_empty()
             || namespaces.iter().any(|owner| {
                 !self.method_namespace_target_exists(owner)
@@ -150,7 +150,7 @@ impl AnalysisEngine {
         {
             return;
         }
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         if namespaces.iter().any(|owner| {
             query
                 .resolve_method_callees(owner, &method)

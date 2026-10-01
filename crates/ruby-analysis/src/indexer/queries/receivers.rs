@@ -3,13 +3,13 @@
 //! Converts parser-level receiver shapes into reusable semantic namespaces.
 
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType};
-use crate::engine::{AnalysisQuery, VariableTypeKind};
+use crate::engine::{VariableTypeKind, View};
 use crate::indexer::{MethodReceiver, RubyDocument};
 use crate::inference::method::return_type::method_call_return_type;
 use crate::invariant::ExpectInvariant;
 
 pub struct ReceiverResolutionContext<'a, 'q> {
-    pub query: Option<&'q AnalysisQuery<'a>>,
+    pub query: Option<&'q View<'a>>,
     pub document: Option<&'q RubyDocument>,
     pub current_namespace: &'q [RubyConstant],
     pub namespace_kind: NamespaceKind,

@@ -20,10 +20,10 @@ use super::{
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMethod, SourceKind, TextRange,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::engine::state::EffectiveMethodFactMatch;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn resolve_method_reference(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -475,7 +475,7 @@ impl<'a> AnalysisQuery<'a> {
 }
 
 fn non_core_fact_requires_ancestry_proof(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     requested_owner: &FullyQualifiedName,
     fact: &MethodFact,
     crossed_universal_root: bool,

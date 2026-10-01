@@ -11,9 +11,9 @@ use crate::core::{
     MethodFact, SourceFileId, TextRange,
 };
 use crate::engine::resolution::method_lookup_chain;
-use crate::engine::AnalysisEngine;
+use crate::engine::Project;
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn push_unavailable_method_diagnostic(
         &self,
         fact: &MethodFact,

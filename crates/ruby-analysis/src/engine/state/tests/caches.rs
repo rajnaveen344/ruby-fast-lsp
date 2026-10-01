@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn cached_method_return_queries_invalidate_after_semantic_replacement() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -79,7 +79,7 @@ fn cached_method_return_queries_invalidate_after_semantic_replacement() {
 
 #[test]
 fn thread_local_method_return_cache_reuses_across_per_source_caches() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -135,7 +135,7 @@ fn thread_local_method_return_cache_reuses_across_per_source_caches() {
 
 #[test]
 fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -204,7 +204,7 @@ fn thread_local_method_return_cache_does_not_reuse_a_different_method() {
 
 #[test]
 fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -272,7 +272,7 @@ fn thread_local_method_return_cache_reuses_public_returns_across_callers() {
 
 #[test]
 fn protected_override_does_not_reuse_a_parent_public_return() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/vault.rb",
@@ -358,7 +358,7 @@ fn protected_override_does_not_reuse_a_parent_public_return() {
 
 #[test]
 fn resolved_method_callee_cache_is_bounded_per_source_collection() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/widget.rb", "class Widget; end\n");
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
     engine.replace_facts(
@@ -392,7 +392,7 @@ fn resolved_method_callee_cache_is_bounded_per_source_collection() {
 
 #[test]
 fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/widget.rb",
@@ -445,7 +445,7 @@ fn cached_method_signature_facts_invalidate_after_semantic_replacement() {
 
 #[test]
 fn method_signature_fact_cache_is_bounded_per_source_collection() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/widget.rb", "class Widget; end\n");
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
     engine.replace_facts(
@@ -479,7 +479,7 @@ fn method_signature_fact_cache_is_bounded_per_source_collection() {
 
 #[test]
 fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -544,7 +544,7 @@ fn method_lookup_chain_cache_is_engine_local_and_invalidates_on_replacement() {
 
 #[test]
 fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -605,7 +605,7 @@ fn method_lookup_chain_reuses_construction_for_one_engine_identity() {
 
 #[test]
 fn method_reference_chain_cache_returns_the_stored_chain_by_borrow() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -656,7 +656,7 @@ fn method_reference_chain_cache_returns_the_stored_chain_by_borrow() {
 
 #[test]
 fn method_reference_chain_cache_reuses_interned_owner_ids() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -742,7 +742,7 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
 
 #[test]
 fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/metaclass.rb",

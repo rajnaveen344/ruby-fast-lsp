@@ -2,7 +2,7 @@ use crate::core::{
     FileAnalysis, FullyQualifiedName, RubyConstant, RubyType, SourceKind, SymbolFact, SymbolKind,
     TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance, TypeSubject, UnknownReason,
 };
-use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+use crate::engine::{Project, ResolveMode, SourceFileInput};
 use crate::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use crate::indexer::RubyDocument;
 use parking_lot::RwLock;
@@ -23,7 +23,7 @@ fn nested_shape_invalidation_installs_a_fail_closed_local_read() {
 end
 "#;
     let uri = Url::parse("file:///workspace/lib/collection.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/collection.rb"),
         content: source.to_string(),
@@ -64,7 +64,7 @@ end
 fn direct_expression_range_index_preserves_latest_provenance_and_type_deduplication() {
     let source = "1";
     let uri = Url::parse("file:///workspace/lib/value.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/value.rb"),
         content: source.to_string(),
@@ -108,7 +108,7 @@ fn direct_expression_range_index_preserves_latest_provenance_and_type_deduplicat
 fn local_receiver_inference_uses_the_active_lexical_scope() {
     let source = "class User\nend\nouter = User.new\n2.times do\n  outer.save\n  inner = \"value\"\n  1.times do\n    inner.upcase\n  end\nend\n";
     let uri = Url::parse("file:///workspace/lib/local_receiver.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/local_receiver.rb"),
         content: source.to_string(),
@@ -160,7 +160,7 @@ fn local_receiver_inference_uses_the_active_lexical_scope() {
 fn ordinary_block_records_unknown_for_an_implicit_receiver() {
     let source = "class Processor\n  def label = \"lexical\"\n  def run\n    configure do\n      label\n    end\n  end\nend\n";
     let uri = Url::parse("file:///workspace/lib/processor.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/processor.rb"),
         content: source.to_string(),
@@ -209,7 +209,7 @@ fn ordinary_block_records_unknown_for_an_implicit_receiver() {
 fn nested_value_constant_receiver_preserves_its_proven_type() {
     let source = "ARGV.first.upcase\n";
     let uri = Url::parse("file:///workspace/lib/argv.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let core_file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/embedded/core/constants.rbs"),
         content: "ARGV: Array[String]\n".to_string(),
@@ -266,7 +266,7 @@ fn nested_value_constant_receiver_preserves_its_proven_type() {
 fn immediate_hash_literal_keeps_established_generic_read_methods() {
     let source = "{one: 1}.keys\n";
     let uri = Url::parse("file:///workspace/lib/immediate_hash.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/immediate_hash.rb"),
         content: source.to_string(),
@@ -304,7 +304,7 @@ fn immediate_hash_literal_keeps_established_generic_read_methods() {
         ResolveMode::Immediate,
     );
     let engine = engine.read();
-    let query = crate::engine::AnalysisQuery::new(&engine);
+    let query = crate::engine::View::new(&engine);
     assert_eq!(
         query
             .call_expression_outcome_at_position(file_id, 10)
@@ -318,7 +318,7 @@ fn immediate_hash_literal_keeps_established_generic_read_methods() {
 fn terminal_unknown_receiver_does_not_retain_the_rest_of_a_call_chain() {
     let source = "def normalize(value)\n  value.first.upcase\nend\n";
     let uri = Url::parse("file:///workspace/lib/terminal_unknown.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/terminal_unknown.rb"),
         content: source.to_string(),
@@ -358,7 +358,7 @@ fn terminal_unknown_receiver_does_not_retain_the_rest_of_a_call_chain() {
 fn potentially_provable_nested_calls_are_retained_inner_first() {
     let source = "Factory.build.name\nclass Product\n  def name\n    \"value\"\n  end\nend\nclass Factory\n  def self.build\n    Product.new\n  end\nend\n";
     let uri = Url::parse("file:///workspace/lib/deferred_chain.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/deferred_chain.rb"),
         content: source.to_string(),
@@ -402,7 +402,7 @@ fn local_receiver_inference_does_not_borrow_an_assignment_from_another_method() 
     let source =
         "class User\nend\ndef inspect(user)\n  user.save\nend\ndef build\n  user = User.new\nend\n";
     let uri = Url::parse("file:///workspace/lib/source_order.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/source_order.rb"),
         content: source.to_string(),

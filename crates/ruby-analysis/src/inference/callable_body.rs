@@ -1,7 +1,7 @@
 //! Evaluation of canonical callable-body summaries from proven call inputs.
 //!
 //! The evaluator is parser-free and workspace-free. Method dispatch is
-//! supplied by the caller and must delegate to `AnalysisQuery`; shape reads
+//! supplied by the caller and must delegate to `View`; shape reads
 //! reuse the canonical shape algebra directly.
 
 use crate::core::callables::callable_body::CallableBodyExpression;

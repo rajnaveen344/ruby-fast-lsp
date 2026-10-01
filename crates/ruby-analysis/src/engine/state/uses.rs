@@ -9,7 +9,7 @@ use crate::core::storage::reference_store::{
 use crate::core::{FullyQualifiedName, ReferenceCandidate, ReferenceCandidateKind, SourceFileId};
 
 use super::names::Names;
-use super::AnalysisEngine;
+use super::Project;
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct UseIndex {
@@ -109,7 +109,7 @@ impl UseIndex {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub fn reference_facts_for(&self, target: &FullyQualifiedName) -> &[ReferenceFact] {
         self.uses.facts_for(&self.names, target)
     }

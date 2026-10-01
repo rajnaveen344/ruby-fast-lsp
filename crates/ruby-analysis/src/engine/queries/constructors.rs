@@ -4,10 +4,10 @@
 use crate::core::{FullyQualifiedName, NamespaceKind};
 use crate::inference::method::constructor::{declared_singleton_new, ConstructorResult};
 
-use super::AnalysisQuery;
+use super::View;
 use crate::engine::resolution::method_lookup_chain;
 
-impl AnalysisQuery<'_> {
+impl View<'_> {
     /// Resolve what `class.new` returns.
     ///
     /// The nearest singleton ancestor that declares its own singleton `new`

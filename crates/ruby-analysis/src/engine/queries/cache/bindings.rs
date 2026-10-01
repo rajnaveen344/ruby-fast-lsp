@@ -4,10 +4,10 @@ use crate::core::{
     FullyQualifiedName, RubyType, SourceFileId, SourceKind, TypeFact, TypeResolution, TypeSubject,
 };
 use crate::engine::queries::lookup::types::VariableTypeKind;
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::invariant::ExpectInvariant;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn parameter_type_at(
         &self,
         method_name: &str,

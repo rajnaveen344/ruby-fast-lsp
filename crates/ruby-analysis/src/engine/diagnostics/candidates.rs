@@ -8,9 +8,9 @@ use crate::core::{
     DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FullyQualifiedName,
     RaiseArgCandidate, RubyConstant, RubyMethod, RubyType, SourceFileId,
 };
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{Project, View};
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn resolve_diagnostic_candidates(
         &self,
     ) -> HashMap<SourceFileId, Vec<DiagnosticFact>> {
@@ -47,8 +47,8 @@ impl AnalysisEngine {
                 variable,
                 method,
             } => {
-                let ruby_type = AnalysisQuery::new(self)
-                    .exact_call_receiver_type(candidate.range, *local_read)?;
+                let ruby_type =
+                    View::new(self).exact_call_receiver_type(candidate.range, *local_read)?;
                 if ruby_type != RubyType::nil_class() {
                     return None;
                 }
@@ -115,7 +115,7 @@ impl AnalysisEngine {
         current_namespace: &[RubyConstant],
         method: &RubyMethod,
     ) -> Option<RubyType> {
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         let mut namespace = current_namespace.to_vec();
         loop {
             let namespace_fqn = FullyQualifiedName::namespace_with_kind(

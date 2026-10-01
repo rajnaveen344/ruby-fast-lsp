@@ -11,7 +11,7 @@ use crate::engine::state::EffectiveMethodFactMatch;
 use crate::invariant::ExpectInvariant;
 
 pub(in crate::engine) fn execution_context_application_targets(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     template: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut targets = engine
@@ -25,7 +25,7 @@ pub(in crate::engine) fn execution_context_application_targets(
 }
 
 pub(super) fn method_callee_in_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
     resolution: MethodCalleeResolution,
@@ -48,7 +48,7 @@ pub(super) fn method_callee_in_chain(
 }
 
 pub(in crate::engine) fn method_facts_in_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
     allow_private: bool,
@@ -118,7 +118,7 @@ pub(in crate::engine) fn method_facts_in_chain(
 }
 
 pub(super) fn private_method_in_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
 ) -> bool {
@@ -137,7 +137,7 @@ pub(super) fn private_method_in_chain(
 }
 
 pub(in crate::engine) fn effective_method_visibility_for_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     fact: &crate::core::MethodFact,
     method: &RubyMethod,
@@ -151,7 +151,7 @@ pub(in crate::engine) fn effective_method_visibility_for_chain(
 }
 
 fn method_visibility_override_for_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
@@ -179,7 +179,7 @@ fn method_visibility_override_for_chain(
 }
 
 pub(super) fn global_visibility_override_for_method_owner(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
 ) -> Option<crate::core::MethodVisibilityOverrideFact> {
@@ -219,7 +219,7 @@ pub(super) fn global_visibility_override_for_method_owner(
 }
 
 pub(super) fn global_visibility_override_for_method_owner_matching(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     method_owner: &FullyQualifiedName,
     method: &RubyMethod,
     visibility: MethodVisibility,
@@ -249,7 +249,7 @@ pub(super) fn global_visibility_override_for_method_owner_matching(
 }
 
 fn method_visibility_allowed(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     visibility: MethodVisibility,
     owner: &FullyQualifiedName,
     allow_private: bool,
@@ -267,7 +267,7 @@ fn method_visibility_allowed(
 }
 
 pub(in crate::engine) fn protected_method_visible_from(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     protected_owner: &FullyQualifiedName,
     caller_namespace: &FullyQualifiedName,
 ) -> bool {
@@ -292,7 +292,7 @@ pub(super) fn receiver_only_callee(
 }
 
 pub(super) fn method_missing_callee_in_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
 ) -> Option<ResolvedMethodCallee> {
     let method_missing = method_missing_method();
@@ -311,7 +311,7 @@ pub(super) fn method_missing_callee_in_chain(
 }
 
 pub(super) fn default_basic_object_method_missing_fact(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fact: &MethodFact,
 ) -> bool {
     fact.owner == basic_object_instance_fqn()
@@ -325,7 +325,7 @@ pub(super) fn default_basic_object_method_missing_fact(
 }
 
 fn default_basic_object_method_missing_callee(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     callee: &ResolvedMethodCallee,
 ) -> bool {
     callee.owner == basic_object_instance_fqn()
@@ -352,7 +352,7 @@ fn basic_object_instance_fqn() -> FullyQualifiedName {
 }
 
 pub(super) fn method_callee_after_owner(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
     owner: &FullyQualifiedName,
     method: &RubyMethod,
@@ -389,7 +389,7 @@ pub(in crate::engine) fn method_missing_method() -> RubyMethod {
 }
 
 pub(in crate::engine) fn chain_has_custom_method_missing(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     ancestor_chain: &[FullyQualifiedName],
 ) -> bool {
     let method = method_missing_method();

@@ -127,7 +127,7 @@ pub(in crate::engine) fn method_name_from_fact(fact: &MethodFact) -> RubyMethod 
 }
 
 pub(in crate::engine) fn namespace_target_exists(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
 ) -> bool {
     let parts = fqn.namespace_parts_slice();
@@ -162,10 +162,7 @@ pub(in crate::engine) fn namespace_target_exists(
     engine.has_symbol_facts(&FullyQualifiedName::constant(parts.to_vec()))
 }
 
-fn is_module_instance_namespace(
-    engine: &crate::engine::AnalysisEngine,
-    fqn: &FullyQualifiedName,
-) -> bool {
+fn is_module_instance_namespace(engine: &crate::engine::Project, fqn: &FullyQualifiedName) -> bool {
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Instance) {
         return false;
     }
@@ -176,7 +173,7 @@ fn is_module_instance_namespace(
 /// Share this selection across navigation, references, and return inference;
 /// selecting a method from the module first would hide receiver overrides.
 pub(in crate::engine) fn module_instance_receivers(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     if !is_module_instance_namespace(engine, module_fqn) {

@@ -10,7 +10,7 @@ use crate::core::storage::reference_store::StoredReferenceCandidateRef;
 use crate::core::{
     FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolKind, TextRange,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct MethodRenameIdentity {
@@ -25,7 +25,7 @@ pub struct MethodRenameTarget {
     pub ranges: Vec<TextRange>,
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     /// Resolve a method declaration or call at a byte offset into a safe,
     /// project-editable rename target.
     ///
@@ -313,7 +313,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     fn method_candidate_rename_identities(
         &self,
         candidate: &StoredMethodReferenceCandidate,
@@ -361,7 +361,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     /// Resolve a constant-like symbol and return every editable project range.
     ///
     /// Definition token boundaries come from indexer facts; references come
@@ -476,7 +476,7 @@ fn method_name_is_refactorable(method: RubyMethod) -> bool {
 }
 
 fn constant_reference_name_range(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     range: TextRange,
     name: RubyConstant,
 ) -> Option<TextRange> {
@@ -508,7 +508,7 @@ fn constant_reference_name_range(
 }
 
 fn constant_name_collides(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     target: &FullyQualifiedName,
     new_name: RubyConstant,
 ) -> bool {

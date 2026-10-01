@@ -9,9 +9,9 @@ use super::MethodChainCompletenessCache;
 use crate::core::{
     FullyQualifiedName, GraphEdgeKind, GraphNodeKind, NamespaceKind, RubyConstant, RubyMethod,
 };
-use crate::engine::AnalysisEngine;
+use crate::engine::Project;
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn method_lookup_chain_is_incomplete_cached(
         &self,
         owner: &FullyQualifiedName,

@@ -1,9 +1,9 @@
 //! Constant resolution in context and definition ranges for symbols.
 
 use crate::core::{FullyQualifiedName, RubyConstant, SymbolKind, TextRange, TypeSubject};
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn resolve_constant_receiver(
         &self,
         path: &[RubyConstant],
@@ -38,7 +38,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn constant_definition_ranges(
         &self,
         parts: &[RubyConstant],
@@ -162,7 +162,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn symbol_definition_ranges(
         &self,
         fqn: &FullyQualifiedName,
@@ -189,7 +189,7 @@ impl<'a> AnalysisQuery<'a> {
 }
 
 fn resolve_constant_fqn(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     parts: &[RubyConstant],
     absolute: bool,
     context_fqn: &FullyQualifiedName,

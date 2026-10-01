@@ -5,7 +5,7 @@ use std::collections::{HashMap, VecDeque};
 
 use super::higher_order::prepare_higher_order_call_with_fallbacks_uncached;
 use crate::core::{FullyQualifiedName, RubyType};
-use crate::engine::{AnalysisQuery, AnalysisQueryCache};
+use crate::engine::{AnalysisQueryCache, View};
 use crate::inference::higher_order::PreparedCallableSet;
 
 const MAX_HIGHER_ORDER_PREPARE_CACHE_ENTRIES: usize = 256;
@@ -117,16 +117,14 @@ fn cached_higher_order_prepare(
 /// direct-yield preparation. Collection receivers skip the engine and use the
 /// same embedded RBS path as ordinary Array/Hash method returns.
 pub(crate) fn prepare_higher_order_call_with_fallbacks(
-    query: Option<&AnalysisQuery<'_>>,
+    query: Option<&View<'_>>,
     cache: Option<&AnalysisQueryCache>,
     receiver_type: Option<&RubyType>,
     implicit_namespace: Option<&FullyQualifiedName>,
     method_name: &str,
     argument_types: &[RubyType],
 ) -> Result<PreparedCallableSet, crate::core::UnknownReason> {
-    let identity = query
-        .map(AnalysisQuery::query_cache_identity)
-        .unwrap_or((0, 0));
+    let identity = query.map(View::query_cache_identity).unwrap_or((0, 0));
     let key = HigherOrderPrepareKey {
         receiver_type: receiver_type.cloned(),
         implicit_namespace: implicit_namespace.cloned(),

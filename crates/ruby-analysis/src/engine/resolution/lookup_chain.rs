@@ -27,7 +27,7 @@ fn is_universal_open_root(owner: &FullyQualifiedName) -> bool {
 const UNIVERSAL_OPEN_ROOT_NAMES: [&str; 5] = ["BasicObject", "Object", "Kernel", "Module", "Class"];
 
 pub(super) fn interned_universal_open_root_ids(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     cache: &mut MethodLookupChainCache,
 ) -> Vec<FqnId> {
     if cache.universal_open_root_ids.is_none() {
@@ -44,7 +44,7 @@ pub(super) fn interned_universal_open_root_ids(
         .clone()
 }
 
-fn collect_interned_universal_open_root_ids(engine: &crate::engine::AnalysisEngine) -> Vec<FqnId> {
+fn collect_interned_universal_open_root_ids(engine: &crate::engine::Project) -> Vec<FqnId> {
     let mut ids = Vec::with_capacity(12);
     for kind in [
         crate::core::NamespaceKind::Instance,
@@ -174,7 +174,7 @@ fn thread_method_lookup_chain_insert(
 }
 
 pub(in crate::engine) fn method_lookup_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let identity = engine.query_cache_identity();
@@ -188,7 +188,7 @@ pub(in crate::engine) fn method_lookup_chain(
 }
 
 fn method_lookup_chain_uncached(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut chain = method_lookup_chain_without_metaclass(engine, fqn);
@@ -204,7 +204,7 @@ fn method_lookup_chain_uncached(
 }
 
 pub(super) fn method_lookup_chain_without_metaclass(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let allow_top_level_fallback =
@@ -213,7 +213,7 @@ pub(super) fn method_lookup_chain_without_metaclass(
 }
 
 fn method_lookup_chain_without_metaclass_with_fallback(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
     allow_top_level_fallback: bool,
 ) -> Vec<FullyQualifiedName> {
@@ -270,7 +270,7 @@ fn method_lookup_chain_without_metaclass_with_fallback(
 }
 
 pub(super) fn method_lookup_chain_has_unresolved_dependency_cached(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     owner: &FullyQualifiedName,
     cache: &mut MethodLookupChainCache,
 ) -> bool {
@@ -291,7 +291,7 @@ pub(super) fn method_lookup_chain_has_unresolved_dependency_cached(
 }
 
 pub(super) fn method_lookup_chain_has_unresolved_dependency_from_graph(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     owner: &FullyQualifiedName,
 ) -> bool {
     let mut pending = vec![owner.clone()];
@@ -337,7 +337,7 @@ pub(super) fn method_lookup_chain_has_unresolved_dependency_from_graph(
 }
 
 pub(super) fn metaclass_namespace_for_object(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
 ) -> Option<FullyQualifiedName> {
     if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Singleton) {
@@ -364,7 +364,7 @@ pub(super) fn metaclass_namespace_for_object(
 }
 
 pub(in crate::engine) fn method_lookup_chain_for_reference_cached<'cache>(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
     chain_cache: &'cache mut MethodLookupChainCache,
 ) -> &'cache [FqnId] {
@@ -402,7 +402,7 @@ pub(in crate::engine) fn method_lookup_chain_for_reference_cached<'cache>(
 }
 
 fn append_top_level_instance_fallback(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
 ) {
@@ -423,7 +423,7 @@ fn append_top_level_instance_fallback(
 }
 
 fn append_universal_object_fallback(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
 ) {
@@ -434,9 +434,7 @@ fn append_universal_object_fallback(
     }
 }
 
-fn compute_universal_object_fallback(
-    engine: &crate::engine::AnalysisEngine,
-) -> Vec<FullyQualifiedName> {
+fn compute_universal_object_fallback(engine: &crate::engine::Project) -> Vec<FullyQualifiedName> {
     if let Some(cached) = engine.cached_universal_object_method_lookup_chain() {
         return cached;
     }
@@ -451,7 +449,7 @@ fn compute_universal_object_fallback(
 }
 
 pub(super) fn unproven_universal_method_exists(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     universal_roots: &[FqnId],
     method: &RubyMethod,
     cache: &mut MethodLookupChainCache,
@@ -504,7 +502,7 @@ pub(super) fn unproven_universal_method_exists(
 }
 
 fn compute_top_level_instance_fallback(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
 ) {
@@ -530,7 +528,7 @@ fn top_level_object_instance_fqn() -> FullyQualifiedName {
 }
 
 fn build_mro(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
     chain: &mut Vec<FullyQualifiedName>,
     visited: &mut std::collections::HashSet<FullyQualifiedName>,
@@ -610,7 +608,7 @@ fn build_mro(
 }
 
 fn method_lookup_edge_is_language_owned(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     edge: &StoredGraphEdgeFact,
 ) -> bool {
     matches!(
@@ -630,7 +628,7 @@ fn method_lookup_edge_is_language_owned(
 }
 
 fn included_hook_extend_edges(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
     language_owned_only: bool,
 ) -> Vec<StoredGraphEdgeFact> {
@@ -662,7 +660,7 @@ fn included_hook_extend_edges(
 }
 
 pub(in crate::engine) fn node_kind(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
 ) -> Option<GraphNodeKind> {
     engine.first_graph_node_kind(fqn)

@@ -2,9 +2,9 @@ pub(in crate::engine) mod types;
 
 use crate::core::{FullyQualifiedName, SymbolFact, SymbolKind};
 use crate::engine::queries::workspace_symbols::types::WorkspaceSymbolMatch;
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn top_level_symbols(&self, limit: usize) -> Vec<WorkspaceSymbolMatch> {
         let mut symbols = Vec::new();
 
@@ -69,7 +69,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-fn fact_is_project(query: &AnalysisQuery<'_>, fact: &SymbolFact) -> bool {
+fn fact_is_project(query: &View<'_>, fact: &SymbolFact) -> bool {
     !fact.fqn.has_generated_owner()
         && query
             .engine
@@ -277,14 +277,14 @@ mod tests {
         FileAnalysis, FullyQualifiedName, GeneratedOwnerId, RubyConstant, RubyMethod, SourceFileId,
         SourceKind, SymbolFact, SymbolKind, TextRange,
     };
-    use crate::engine::AnalysisQuery;
-    use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+    use crate::engine::View;
+    use crate::engine::{Project, ResolveMode, SourceFileInput};
 
     use super::*;
 
-    fn query_with_symbols() -> (AnalysisEngine, SourceFileId) {
+    fn query_with_symbols() -> (Project, SourceFileId) {
         let source = "class User\n  def name\n  end\nend";
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/user.rb".into(),
             content: source.into(),
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn workspace_symbol_search_returns_domain_matches() {
         let (engine, file_id) = query_with_symbols();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         let symbols = query.search_workspace_symbols("name", 100);
 
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn top_level_symbols_return_only_top_level_namespaces() {
         let (engine, _) = query_with_symbols();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         let symbols = query.top_level_symbols(50);
 
@@ -364,7 +364,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert!(query
             .search_workspace_symbols("ExternalGem", 100)
@@ -397,7 +397,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert!(query
             .search_workspace_symbols("generated_helper", 100)

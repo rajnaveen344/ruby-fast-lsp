@@ -3,16 +3,10 @@ use crate::core::{
     NamespaceKind, ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SourceFileId,
     SourceKind, TextRange, UnknownReason,
 };
-use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+use crate::engine::{Project, ResolveMode, SourceFileInput};
 
-fn fixture() -> (
-    AnalysisEngine,
-    SourceFileId,
-    TextRange,
-    TextRange,
-    FileAnalysis,
-) {
-    let mut engine = AnalysisEngine::new();
+fn fixture() -> (Project, SourceFileId, TextRange, TextRange, FileAnalysis) {
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: "receiver.rb".into(),
         content: "x.upcase".to_string(),

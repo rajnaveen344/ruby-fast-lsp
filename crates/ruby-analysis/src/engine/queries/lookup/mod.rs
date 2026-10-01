@@ -9,12 +9,12 @@ use crate::core::{
 use crate::engine::queries::lookup::types::{
     ConstantLookupRequest, ConstantMatch, MethodMatch, MixinUsage, MixinUsageKind,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::engine::resolution::{
     execution_context_application_targets, method_lookup_chain, namespace_target_exists,
 };
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn method_facts_matching(
         &self,
         namespace_fqn: &FullyQualifiedName,

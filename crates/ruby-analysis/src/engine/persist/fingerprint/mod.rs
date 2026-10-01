@@ -10,7 +10,7 @@ use std::hash::Hash;
 use crate::core::equations::method_return_equation::MethodReturnBase;
 use crate::core::{FileAnalysis, SourceFileId, SymbolKind, TypeSubject};
 
-use crate::engine::AnalysisEngine;
+use crate::engine::Project;
 use stable_hash::{
     export_hash, result_hash, stable_bool, stable_callable_body_summary,
     stable_callable_signatures, stable_diagnostic_severity, stable_direct_yield_call,
@@ -216,7 +216,7 @@ pub enum SemanticChange {
     ExportsChanged,
 }
 
-impl AnalysisEngine {
+impl Project {
     pub fn semantic_export_fingerprint(
         &self,
         file_id: SourceFileId,

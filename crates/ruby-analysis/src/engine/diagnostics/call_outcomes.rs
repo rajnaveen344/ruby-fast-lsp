@@ -19,9 +19,9 @@ use crate::engine::resolution::{
     MethodLookupChainCache, MethodLookupResult,
 };
 use crate::engine::state::TypeInferenceOutcomeRef;
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{Project, View};
 
-impl AnalysisEngine {
+impl Project {
     pub(super) fn proven_deferred_receiver_type(
         &self,
         range: TextRange,
@@ -36,7 +36,7 @@ impl AnalysisEngine {
                 TypeInferenceOutcomeRef::Unknown(_) => None,
             };
         }
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         if let Some(local_type) = query.local_read_type_at(range.file_id, range.start_byte) {
             return (local_type != RubyType::Unknown).then_some(local_type);
         }
@@ -56,7 +56,7 @@ impl AnalysisEngine {
         if let Some(outcome) = self.call_expression_outcome_at(range) {
             return matches!(outcome, TypeInferenceOutcomeRef::Unknown(_));
         }
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         query.local_read_type_at(range.file_id, range.start_byte) == Some(RubyType::Unknown)
             || query.exact_expression_unknown_reason(range).is_some()
     }
@@ -66,7 +66,7 @@ impl AnalysisEngine {
         receiver_type: &RubyType,
         allow_unindexed_owner: bool,
     ) -> Option<FullyQualifiedName> {
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         let namespace = query.type_to_namespace(receiver_type)?;
         let expected_kind = match receiver_type {
             RubyType::Class(_)
@@ -293,7 +293,7 @@ impl AnalysisEngine {
                     "retain the owner lookup for the candidate lifetime",
                 );
                 let instance_namespace = FullyQualifiedName::namespace(owner_lookup.path.to_vec());
-                (AnalysisQuery::new(self).namespace_node_kind(&instance_namespace)
+                (View::new(self).namespace_node_kind(&instance_namespace)
                     == Some(GraphNodeKind::Class))
                 .then(|| RubyType::Class(FullyQualifiedName::constant(owner_lookup.path.to_vec())))
             });
@@ -324,7 +324,7 @@ impl AnalysisEngine {
             "one resolve pass cannot exceed addressable operations",
             "inspect corrupt resolve instrumentation",
         );
-        let result = AnalysisQuery::new(self).method_return_type(fact);
+        let result = View::new(self).method_return_type(fact);
         caches.returns.insert(key, result.clone());
         result
     }
@@ -363,7 +363,7 @@ impl AnalysisEngine {
             "retain the owner lookup for the candidate lifetime",
         );
         let owner = FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind);
-        let query = AnalysisQuery::new(self);
+        let query = View::new(self);
         let result = match access {
             AmbiguousMethodReturnAccess::Private => {
                 query.method_return_type_for_receiver(&owner, &method)

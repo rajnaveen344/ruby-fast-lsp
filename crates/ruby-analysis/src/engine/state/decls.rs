@@ -14,7 +14,7 @@ use crate::core::{
 };
 
 use super::names::Names;
-use super::AnalysisEngine;
+use super::Project;
 
 pub(in crate::engine) enum EffectiveMethodFactMatch {
     Missing,
@@ -251,7 +251,7 @@ impl DeclIndex {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub fn execution_context_at(
         &self,
         file_id: SourceFileId,

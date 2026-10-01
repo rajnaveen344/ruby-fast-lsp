@@ -10,9 +10,9 @@ use crate::engine::debug::types::{
     ExportGraphResponse, GraphNodeSnapshot, LookupEntry, LookupResponse,
 };
 use crate::engine::queries::namespace_tree::analysis_location_info;
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::engine::resolution::{method_lookup_chain, node_kind};
-use crate::engine::AnalysisEngine;
+use crate::engine::Project;
 
 /// Native sizes for profiler output without exposing stored representations.
 pub fn reference_storage_sizes() -> [(&'static str, usize); 4] {
@@ -41,7 +41,7 @@ pub fn reference_storage_sizes() -> [(&'static str, usize); 4] {
     ]
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn debug_lookup(&self, fqn: &str) -> LookupResponse {
         let Some(fqn) = parse_debug_fqn(fqn) else {
             return LookupResponse {
@@ -146,7 +146,7 @@ fn lookup_candidates(fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
     }
 }
 
-fn lookup_entry_from_symbol_fact(engine: &AnalysisEngine, fact: &SymbolFact) -> LookupEntry {
+fn lookup_entry_from_symbol_fact(engine: &Project, fact: &SymbolFact) -> LookupEntry {
     LookupEntry {
         fqn: fact.fqn.to_string(),
         kind: format!("{:?}", fact.kind),
@@ -157,8 +157,8 @@ fn lookup_entry_from_symbol_fact(engine: &AnalysisEngine, fact: &SymbolFact) -> 
     }
 }
 
-fn lookup_entry_from_method_fact(engine: &AnalysisEngine, fact: &MethodFact) -> LookupEntry {
-    let query = AnalysisQuery::new(engine);
+fn lookup_entry_from_method_fact(engine: &Project, fact: &MethodFact) -> LookupEntry {
+    let query = View::new(engine);
     LookupEntry {
         fqn: fact.fqn.to_string(),
         kind: format!(
@@ -188,7 +188,7 @@ fn non_unknown_type_string(ruby_type: crate::core::RubyType) -> Option<String> {
     }
 }
 
-fn location_string(engine: &AnalysisEngine, range: TextRange) -> String {
+fn location_string(engine: &Project, range: TextRange) -> String {
     analysis_location_info(engine, range)
         .map(|location| format!("{}:{}:{}", location.uri, location.line, location.character))
         .unwrap_or_else(|| "unknown".to_string())
@@ -255,7 +255,7 @@ fn fqn_to_key(fqn: &FullyQualifiedName) -> String {
     }
 }
 
-fn graph_nodes_by_fqn(engine: &AnalysisEngine) -> HashMap<FullyQualifiedName, GraphNodeKind> {
+fn graph_nodes_by_fqn(engine: &Project) -> HashMap<FullyQualifiedName, GraphNodeKind> {
     let mut nodes = HashMap::new();
     for node in engine.all_graph_nodes() {
         nodes.entry(node.fqn).or_insert(node.kind);
@@ -272,7 +272,7 @@ fn edge_targets(edges: &[GraphEdgeFact], kind: GraphEdgeKind) -> Vec<String> {
 }
 
 fn reverse_edge_sources(
-    engine: &AnalysisEngine,
+    engine: &Project,
     target: &FullyQualifiedName,
     kind: GraphEdgeKind,
 ) -> Vec<String> {
@@ -286,7 +286,7 @@ fn reverse_edge_sources(
     result
 }
 
-fn included_by_classes(engine: &AnalysisEngine, module_fqn: &FullyQualifiedName) -> Vec<String> {
+fn included_by_classes(engine: &Project, module_fqn: &FullyQualifiedName) -> Vec<String> {
     let mut result = Vec::new();
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
@@ -321,7 +321,7 @@ fn included_by_classes(engine: &AnalysisEngine, module_fqn: &FullyQualifiedName)
     result
 }
 
-fn method_resolution_order(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> Vec<String> {
+fn method_resolution_order(engine: &Project, fqn: &FullyQualifiedName) -> Vec<String> {
     method_lookup_chain(engine, fqn)
         .into_iter()
         .map(|item| fqn_to_key(&item))

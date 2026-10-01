@@ -5,7 +5,7 @@ use crate::engine::ResolveStat;
 
 #[test]
 fn type_at_reads_engine_owned_store() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "A = 1");
     let subject = constant_subject("A");
 
@@ -31,7 +31,7 @@ fn type_at_reads_engine_owned_store() {
 
 #[test]
 fn expression_query_preserves_an_exact_unknown_proof_barrier() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "@value");
     let range = engine.text_range(file_id, 0, 6);
 
@@ -73,7 +73,7 @@ fn expression_query_preserves_an_exact_unknown_proof_barrier() {
 
 #[test]
 fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "value");
     let range = engine.text_range(file_id, 0, 5);
 
@@ -103,7 +103,7 @@ fn compact_expression_unknown_reason_does_not_require_a_type_store_fact() {
 
 #[test]
 fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "value");
     let range = engine.text_range(file_id, 0, 5);
     let empty_fingerprint = engine.semantic_result_fingerprint();
@@ -141,7 +141,7 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
 
 #[test]
 fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let first_ref = register_project_file(&mut engine, "app/first.rb", "User");
     let second_ref = register_project_file(&mut engine, "app/second.rb", "User");
@@ -190,7 +190,7 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
 
 #[test]
 fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "app/user.rb",
@@ -297,7 +297,7 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
 
 #[test]
 fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let first_def = register_project_file(
         &mut engine,
         "app/user_first.rb",
@@ -413,7 +413,7 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
 
 #[test]
 fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "app/user.rb",
@@ -521,7 +521,7 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
 
 #[test]
 fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "app/user.rb",
@@ -605,7 +605,7 @@ fn file_owned_call_outcome_survives_resolve_merge_on_a_disjoint_range() {
 #[test]
 #[should_panic(expected = "one call expression resolved through multiple method candidates")]
 fn duplicate_call_expression_range_is_an_invariant_violation() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "app/user.rb",
@@ -674,7 +674,7 @@ fn duplicate_call_expression_range_is_an_invariant_violation() {
 
 #[test]
 fn resolve_files_materializes_only_selected_open_document_candidates() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let first_ref = register_project_file(&mut engine, "app/first.rb", "User.new");
     let second_ref = register_project_file(&mut engine, "app/second.rb", "User.new");
     let def_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
@@ -709,31 +709,19 @@ fn resolve_files_materializes_only_selected_open_document_candidates() {
 
     engine.resolve_files(&[first_ref]);
 
-    assert_eq!(
-        AnalysisQuery::new(&engine)
-            .references_in_file(first_ref)
-            .len(),
-        1
-    );
+    assert_eq!(View::new(&engine).references_in_file(first_ref).len(), 1);
     assert!(
-        AnalysisQuery::new(&engine)
-            .references_in_file(second_ref)
-            .is_empty(),
+        View::new(&engine).references_in_file(second_ref).is_empty(),
         "closed-file candidates must remain deferred until the complete project resolution"
     );
 
     engine.resolve();
-    assert_eq!(
-        AnalysisQuery::new(&engine)
-            .references_in_file(second_ref)
-            .len(),
-        1
-    );
+    assert_eq!(View::new(&engine).references_in_file(second_ref).len(), 1);
 }
 
 #[test]
 fn reopened_method_return_requires_every_definition_to_resolve() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let known_file = register_project_file(
         &mut engine,
         "lib/known.rb",
@@ -809,7 +797,7 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
 
 #[test]
 fn default_basic_object_method_missing_is_not_a_return_type() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let stub_file = engine.register_file(SourceFileInput {
         path: "core/basic_object.rb".into(),
         content: "class BasicObject; def method_missing(name, *args); end; end".into(),
@@ -925,7 +913,7 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
 
 #[test]
 fn expression_end_query_treats_exact_unknown_call_outcome_as_authoritative() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "consumer.rb", "payload[:name]\n");
     let range = TextRange::new(file_id, 0, 14);
     engine.replace_facts(

@@ -20,7 +20,7 @@ fn name_registry_interns_one_owned_identity_with_stable_ids() {
 
 #[test]
 fn file_ids_are_stable_across_updates() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
 
     let first = register_project_file(&mut engine, "app/user.rb", "A = 1");
     let second = register_project_file(&mut engine, "app/user.rb", "A = 2");
@@ -34,7 +34,7 @@ fn file_ids_are_stable_across_updates() {
 
 #[test]
 fn source_revisions_change_only_for_distinct_registered_snapshots() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let path = std::path::PathBuf::from("app/utility.rb");
     let first = register_project_file(&mut engine, path.clone(), "module Utility; end");
     let first_snapshot = engine.source_snapshot_for_path(&path).unwrap();
@@ -61,7 +61,7 @@ fn source_revisions_change_only_for_distinct_registered_snapshots() {
 
 #[test]
 fn stale_source_revision_cannot_replace_newer_file_facts() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let path = std::path::PathBuf::from("app/utility.rb");
     let file_id = register_project_file(&mut engine, path.clone(), "module Utility; end");
     let stale_snapshot = engine.source_snapshot_for_path(&path).unwrap();
@@ -99,7 +99,7 @@ fn stale_source_revision_cannot_replace_newer_file_facts() {
 
 #[test]
 fn source_kind_updates_with_file() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
 
     let file_id = engine.register_file(SourceFileInput {
         path: "gems/foo.rb".into(),
@@ -112,7 +112,7 @@ fn source_kind_updates_with_file() {
 
 #[test]
 fn namespace_existence_tracks_graph_node_replacement() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
 
@@ -143,7 +143,7 @@ fn namespace_existence_tracks_graph_node_replacement() {
 
 #[test]
 fn replace_facts_removes_stale_type_facts() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "A = 1");
     let subject = constant_subject("A");
 
@@ -186,7 +186,7 @@ fn replace_facts_removes_stale_type_facts() {
 
 #[test]
 fn replace_facts_removes_stale_symbol_facts() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
 
@@ -223,7 +223,7 @@ fn replace_facts_removes_stale_symbol_facts() {
 #[test]
 #[should_panic(expected = "file analysis references unknown source file id")]
 fn rejects_type_fact_for_unknown_file() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let subject = constant_subject("A");
 
     engine.replace_facts(
@@ -243,7 +243,7 @@ fn rejects_type_fact_for_unknown_file() {
 
 #[test]
 fn source_positions_use_utf16_code_units() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "unicode.rb", "a😀b\n");
     let file = engine
         .file(file_id)
@@ -255,7 +255,7 @@ fn source_positions_use_utf16_code_units() {
 
 #[test]
 fn borrowed_source_registration_preserves_ascii_and_utf16_semantics() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let ascii = String::from("class User\nend\n");
     let unicode = String::from("a😀b\n");
 
@@ -278,7 +278,7 @@ fn borrowed_source_registration_preserves_ascii_and_utf16_semantics() {
 
 #[test]
 fn inference_telemetry_replaces_with_its_owning_file() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "types.rb", "class Types; end\n");
     let method = FullyQualifiedName::method(
         vec![RubyConstant::new("Types").unwrap()],

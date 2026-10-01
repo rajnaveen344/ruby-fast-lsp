@@ -18,7 +18,7 @@ pub(in crate::engine) use types::TypeInferenceOutcomeRef;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::engine::diagnostics::Diagnostics;
-use crate::engine::AnalysisQuery;
+use crate::engine::View;
 use crate::stats::{self, StatsSnapshot};
 use decls::DeclIndex;
 use files::Files;
@@ -56,7 +56,7 @@ crate::stat_set! {
 }
 
 crate::stat_set! {
-    /// Measurement counters for the most recent full `AnalysisEngine::resolve` pass.
+    /// Measurement counters for the most recent full `Project::resolve` pass.
     ///
     /// These are process-local profiler evidence only. They must not change semantic
     /// resolution policy, diagnostic emission, or project ownership.
@@ -132,7 +132,7 @@ impl AnalysisMemoryStats {
 
 /// Shared analysis state for editor and agent consumers.
 #[derive(Debug)]
-pub struct AnalysisEngine {
+pub struct Project {
     instance_id: u64,
     semantic_revision: u64,
     pub(in crate::engine) files: Files,
@@ -162,7 +162,7 @@ fn next_analysis_engine_instance_id() -> u64 {
         })
 }
 
-impl Default for AnalysisEngine {
+impl Default for Project {
     fn default() -> Self {
         Self {
             instance_id: next_analysis_engine_instance_id(),
@@ -180,7 +180,7 @@ impl Default for AnalysisEngine {
     }
 }
 
-impl Clone for AnalysisEngine {
+impl Clone for Project {
     fn clone(&self) -> Self {
         Self {
             instance_id: next_analysis_engine_instance_id(),
@@ -198,7 +198,7 @@ impl Clone for AnalysisEngine {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub fn new() -> Self {
         Self::default()
     }
@@ -209,9 +209,9 @@ impl AnalysisEngine {
     }
 }
 
-impl AnalysisEngine {
-    pub fn query(&self) -> AnalysisQuery<'_> {
-        AnalysisQuery::new(self)
+impl Project {
+    pub fn query(&self) -> View<'_> {
+        View::new(self)
     }
 
     pub fn stats(&self) -> StatsSnapshot<AnalysisStat> {

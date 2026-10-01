@@ -19,10 +19,10 @@ use crate::core::{
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
 use crate::engine::state::ResolveStat;
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{Project, View};
 use crate::stats::{self, StatsSnapshot};
 
-impl AnalysisEngine {
+impl Project {
     pub(in crate::engine) fn resolve_reference_candidates(
         &mut self,
         stats: &mut StatsSnapshot<ResolveStat>,
@@ -250,7 +250,7 @@ impl AnalysisEngine {
                         let owner_kind = owner_fqn.namespace_kind().expect_invariant(
                             "a proven receiver namespace has no namespace kind",
                             "type-to-namespace conversion must return a Namespace FQN",
-                            "keep receiver proof conversion in AnalysisQuery::type_to_namespace",
+                            "keep receiver proof conversion in View::type_to_namespace",
                         );
                         let root = self
                             .names
@@ -272,7 +272,7 @@ impl AnalysisEngine {
                     let fact_cache_key = (method_cache_key, reflects_instance);
                     let cached = method_fact_cache.contains_key(&fact_cache_key);
                     let fact = method_fact_cache.entry(fact_cache_key).or_insert_with(|| {
-                        let query = AnalysisQuery::new(self);
+                        let query = View::new(self);
                         if candidate.is_super {
                             query.resolve_super_method_reference(&owner_fqn, &candidate.method)
                         } else if reflects_instance {
@@ -298,7 +298,7 @@ impl AnalysisEngine {
                     if candidate.access == MethodReferenceAccess::Normal
                         && matches!(fact, MethodLookupResult::Ambiguous { .. })
                     {
-                        if let Some(source_ordered) = AnalysisQuery::new(self)
+                        if let Some(source_ordered) = View::new(self)
                             .source_ordered_top_level_method_reference(
                                 &owner_fqn,
                                 &candidate.method,
@@ -541,7 +541,7 @@ impl AnalysisEngine {
 }
 
 fn method_reference_owner_fqn(
-    engine: &AnalysisEngine,
+    engine: &Project,
     owner: ConstLookupId,
     owner_kind: NamespaceKind,
 ) -> FullyQualifiedName {

@@ -1,7 +1,7 @@
 //! Editor-agnostic Ruby analysis engine.
 //!
-//! [`AnalysisEngine`] owns one project's semantic state. Callers register source,
-//! replace a file's [`FileAnalysis`](crate::core::FileAnalysis), and read domain results through [`AnalysisQuery`].
+//! [`Project`] owns one project's semantic state. Callers register source,
+//! replace a file's [`FileAnalysis`](crate::core::FileAnalysis), and read domain results through [`View`].
 //!
 //! Resolution coordinates the constant and method-return equation solvers in
 //! [`crate::inference`], then stores their outcomes through the same file-owned
@@ -44,10 +44,16 @@ pub use queries::namespace_tree::types::{
     MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
 pub use queries::workspace_symbols::types::WorkspaceSymbolMatch;
-pub use queries::AnalysisQuery;
+pub use queries::View;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
 pub(crate) use semantics::{ReceiverAccess, Semantics};
 pub use state::{
-    AnalysisEngine, AnalysisStat, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
+    AnalysisStat, Project, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
     SourceFileSnapshot,
 };
+
+/// Former name of [`Project`]; kept while callers migrate.
+pub type AnalysisEngine = Project;
+
+/// Former name of [`View`]; kept while callers migrate.
+pub type AnalysisQuery<'a> = View<'a>;

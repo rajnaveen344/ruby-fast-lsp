@@ -5,7 +5,7 @@
 //! after visiting to hand the completed collection to the file composer.
 
 use crate::core::{FullyQualifiedName, ResolvedMethodCallee, RubyMethod, TypeFact, TypeSubject};
-use crate::engine::AnalysisEngine;
+use crate::engine::Project;
 use crate::indexer::{MethodReceiver, RubyDocument, ScopeTracker};
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -51,7 +51,7 @@ impl FactCollector {
     pub fn analysis_only(
         document: RubyDocument,
         extension_host: Arc<dyn FactCollectorExtensionHost>,
-        analysis_engine: Arc<RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<RwLock<Project>>,
     ) -> Self {
         // Each mid-walk read takes its own short read guard on the shared engine.
         let semantics = SemanticContext::new(&document, analysis_engine);

@@ -20,14 +20,14 @@ use crate::core::{
     SymbolFact, TextRange, TypeFact, TypeResolution, TypeSubject, UnknownReason,
 };
 
-use crate::engine::{AnalysisEngine, SourceFile};
+use crate::engine::{Project, SourceFile};
 
-pub struct AnalysisQuery<'a> {
-    pub(crate) engine: &'a AnalysisEngine,
+pub struct View<'a> {
+    pub(crate) engine: &'a Project,
 }
 
-impl<'a> AnalysisQuery<'a> {
-    pub fn new(engine: &'a AnalysisEngine) -> Self {
+impl<'a> View<'a> {
+    pub fn new(engine: &'a Project) -> Self {
         Self { engine }
     }
 

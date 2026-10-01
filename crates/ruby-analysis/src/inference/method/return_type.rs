@@ -3,7 +3,7 @@
 use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeInferenceOutcome, UnknownReason,
 };
-use crate::engine::AnalysisQuery;
+use crate::engine::View;
 use crate::inference::r#type::shape as shape_reads;
 
 /// Resolve every reachable member of a union before publishing a call result.
@@ -20,7 +20,7 @@ pub(crate) fn resolve_proven_union(
 
 /// Resolve a method call return type for a receiver type.
 pub fn method_call_return_type(
-    query: Option<&AnalysisQuery<'_>>,
+    query: Option<&View<'_>>,
     receiver_type: &RubyType,
     method_name: &str,
 ) -> Option<RubyType> {
@@ -29,7 +29,7 @@ pub fn method_call_return_type(
 
 /// Resolve a method call while retaining why a concrete result was withheld.
 pub fn method_call_type_outcome(
-    query: Option<&AnalysisQuery<'_>>,
+    query: Option<&View<'_>>,
     receiver_type: &RubyType,
     method_name: &str,
 ) -> TypeInferenceOutcome {
@@ -37,7 +37,7 @@ pub fn method_call_type_outcome(
 }
 
 pub fn method_call_type_outcome_with_private(
-    query: Option<&AnalysisQuery<'_>>,
+    query: Option<&View<'_>>,
     receiver_type: &RubyType,
     method_name: &str,
     allow_private: bool,
@@ -46,7 +46,7 @@ pub fn method_call_type_outcome_with_private(
 }
 
 pub fn method_call_return_type_with_visibility(
-    query: Option<&AnalysisQuery<'_>>,
+    query: Option<&View<'_>>,
     receiver_type: &RubyType,
     method_name: &str,
     allow_private: bool,
@@ -63,7 +63,7 @@ pub fn method_call_return_type_with_visibility(
 }
 
 pub fn method_call_type_outcome_with_visibility(
-    query: Option<&AnalysisQuery<'_>>,
+    query: Option<&View<'_>>,
     receiver_type: &RubyType,
     method_name: &str,
     allow_private: bool,
@@ -131,7 +131,7 @@ pub fn method_call_type_outcome_with_visibility(
         return TypeInferenceOutcome::unknown(UnknownReason::InvalidMethodName);
     };
     if let Some(query) = query {
-        for namespace in AnalysisQuery::receiver_type_to_method_namespaces(receiver_type) {
+        for namespace in View::receiver_type_to_method_namespaces(receiver_type) {
             let return_type = if allow_private {
                 query.method_return_type_for_receiver(&namespace, &method)
             } else if let Some(caller) = protected_caller {

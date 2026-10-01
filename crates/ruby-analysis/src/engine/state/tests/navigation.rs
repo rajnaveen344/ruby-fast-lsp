@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn union_method_completion_requires_every_receiver_member() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/types.rb", "class Alpha; end");
     let alpha = FullyQualifiedName::namespace_with_kind(
         vec![RubyConstant::new("Alpha").unwrap()],
@@ -128,7 +128,7 @@ fn union_method_completion_requires_every_receiver_member() {
 
 #[test]
 fn method_rename_rejects_external_definition_even_with_exact_name_range() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: "gems/user.rb".into(),
         content: "class User; def name; end; end".into(),
@@ -154,7 +154,7 @@ fn method_rename_rejects_external_definition_even_with_exact_name_range() {
     );
 
     assert!(
-        AnalysisQuery::new(&engine)
+        View::new(&engine)
             .method_rename_target_at(file_id, 17)
             .is_none(),
         "dependency sources are navigation inputs, never editable rename truth"
@@ -163,7 +163,7 @@ fn method_rename_rejects_external_definition_even_with_exact_name_range() {
 
 #[test]
 fn reference_candidate_resolves_when_definition_arrives_later() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let ref_file = register_project_file(&mut engine, "app/use_user.rb", "User.new");
     let def_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let user_name = RubyConstant::new("User").unwrap();
@@ -215,7 +215,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
 
 #[test]
 fn resolved_reference_definition_query_requires_one_exact_target() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let source_file = register_project_file(&mut engine, "app/model.rb", "field :user");
     let user_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
     let account_file = register_project_file(&mut engine, "app/account.rb", "class Account; end");
@@ -259,7 +259,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
     );
 
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 8),
+        View::new(&engine).resolved_reference_definition_ranges_at(source_file, 8),
         vec![user_range]
     );
 
@@ -275,7 +275,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
         ResolveMode::Immediate,
     );
     assert!(
-        AnalysisQuery::new(&engine)
+        View::new(&engine)
             .resolved_reference_definition_ranges_at(source_file, 8)
             .is_empty(),
         "ambiguous resolved reference targets must not guess a definition"
@@ -284,7 +284,7 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
 
 #[test]
 fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let model_file = register_project_file(
         &mut engine,
         "app/models/user.rb",
@@ -335,7 +335,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
     );
 
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(callback_file, 15),
+        View::new(&engine).resolved_reference_definition_ranges_at(callback_file, 15),
         vec![method_range],
         "exact callback target must use normal engine method lookup, including private methods"
     );
@@ -353,7 +353,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
         ResolveMode::Immediate,
     );
     assert!(
-        AnalysisQuery::new(&engine)
+        View::new(&engine)
             .resolved_reference_definition_ranges_at(callback_file, 15)
             .is_empty(),
         "removing callback facts must remove exact method navigation"
@@ -362,7 +362,7 @@ fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
 
 #[test]
 fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_removal() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let signature_file = engine.register_file(SourceFileInput {
         path: PathBuf::from("signatures/java/list.rb"),
         content: "def get(index); end\ndef get(key); end".to_string(),
@@ -473,7 +473,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
     );
 
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
+        View::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
         vec![int_range],
         "a verified JVM overload range must outrank same-named methods and signatures"
     );
@@ -484,7 +484,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
         ResolveMode::Immediate,
     );
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
+        View::new(&engine).resolved_reference_definition_ranges_at(source_file, 17),
         vec![signature_range],
         "a removed preferred declaration must not leave a stale location and must fall back normally"
     );
@@ -492,7 +492,7 @@ fn exact_method_reference_prefers_a_verified_declaration_and_falls_back_after_re
 
 #[test]
 fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let import_file = register_project_file(
         &mut engine,
         "lib/runtime.rb",
@@ -544,7 +544,7 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
     );
 
     assert_eq!(
-        AnalysisQuery::new(&engine)
+        View::new(&engine)
             .constant_definition_ranges(&[RubyConstant::new("TimeUnit").unwrap()], &[]),
         vec![implementation_range],
         "a runtime import alias must navigate to the implementation class instead of its import statement"
@@ -553,7 +553,7 @@ fn runtime_constant_alias_definition_prefers_the_external_proxy_declaration() {
 
 #[test]
 fn method_candidate_resolves_when_method_definition_arrives_later() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let ref_file = register_project_file(&mut engine, "app/use_user.rb", "user.name");
     let def_file =
         register_project_file(&mut engine, "app/user.rb", "class User; def name; end; end");
@@ -638,7 +638,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         .iter()
         .all(|fact| fact.code != "unresolved-method"));
     assert_eq!(
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(ref_file, 6),
+        View::new(&engine).resolved_reference_definition_ranges_at(ref_file, 6),
         vec![TextRange::new(def_file, 12, 20)],
         "ordinary diagnostics-bearing method candidates must navigate through their resolved reference fact"
     );
@@ -646,7 +646,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
 
 #[test]
 fn constant_rename_rejects_external_only_definition() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: "gem/user.rb".into(),
         content: "class User\nend\n".to_string(),
@@ -673,7 +673,7 @@ fn constant_rename_rejects_external_only_definition() {
 
 #[test]
 fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let signature_file = engine.register_file(SourceFileInput {
         path: "sig/widget.rbs".into(),
         content: "class Widget\n  def encode: () -> String\nend\n".to_string(),
@@ -769,7 +769,7 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
 
 #[test]
 fn inherited_method_callee_keeps_the_defining_parent_owner() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -822,7 +822,7 @@ fn inherited_method_callee_keeps_the_defining_parent_owner() {
 
 #[test]
 fn public_lookup_of_a_private_method_is_receiver_only() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/user.rb",

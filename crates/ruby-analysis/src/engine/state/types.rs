@@ -12,7 +12,7 @@ use crate::core::{
 };
 use crate::invariant::ExpectInvariant;
 
-use super::AnalysisEngine;
+use super::Project;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StoredTypeInferenceOutcome {
@@ -429,7 +429,7 @@ impl TypeTable {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub fn type_at(
         &self,
         subject: &TypeSubject,

@@ -1,5 +1,5 @@
 use crate::core::{FullyQualifiedName, GeneratedOwnerId, NamespaceKind, RubyConstant, SourceKind};
-use crate::engine::{AnalysisEngine, SourceFileInput};
+use crate::engine::{Project, SourceFileInput};
 use crate::indexer::fact_collector::{
     BlockExecutionContext, FactCollector, FactCollectorExtensionHost,
     NullFactCollectorExtensionHost,
@@ -50,7 +50,7 @@ fn nested_extension_calls_preserve_parent_context_and_handled_decisions() {
     }
 
     let source = "outer(supplied.child, untracked(inner(leaf)), sibling)\nafter\n";
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/nested.rb"),
         content: source.to_string(),
@@ -140,7 +140,7 @@ fn attr_macros_use_the_method_definition_context_in_direct_facts() {
     let source =
         "class User\n  attr_accessor :name\n  class << self\n    attr_reader :count\n  end\nend\n";
     let uri = Url::parse("file:///workspace/lib/user.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/lib/user.rb"),
         content: source.to_string(),
@@ -189,7 +189,7 @@ fn attr_macros_use_the_method_definition_context_in_direct_facts() {
 fn extension_context_rehomes_block_method_without_changing_lexical_namespace() {
     let source = "module Lexical\n  describe do\n    def helper\n    end\n    helper\n    VALUE\n  end\nend\n";
     let uri = Url::parse("file:///workspace/spec/context_spec.rb").unwrap();
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = engine.register_file(SourceFileInput {
         path: PathBuf::from("/workspace/spec/context_spec.rb"),
         content: source.to_string(),

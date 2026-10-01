@@ -15,8 +15,8 @@ use crate::core::{
     UnresolvedGraphEdgeFact,
 };
 use crate::engine::{
-    AnalysisEngine, AnalysisQuery, ProjectNeutralFileFactsTemplate,
-    ProjectNeutralTemplateRejection, ResolveMode, SourceFileInput,
+    Project, ProjectNeutralFileFactsTemplate, ProjectNeutralTemplateRejection, ResolveMode,
+    SourceFileInput, View,
 };
 use std::path::PathBuf;
 
@@ -249,7 +249,7 @@ fn rebound_templates_preserve_navigation_without_sharing_file_identity() {
     )
     .unwrap();
 
-    let mut first = AnalysisEngine::new();
+    let mut first = Project::new();
     let first_file = first.register_file(SourceFileInput {
         path: PathBuf::from("/cache/a/cached_widget.rb"),
         content: "class CachedWidget; end".to_string(),
@@ -261,7 +261,7 @@ fn rebound_templates_preserve_navigation_without_sharing_file_identity() {
         ResolveMode::Immediate,
     );
 
-    let mut second = AnalysisEngine::new();
+    let mut second = Project::new();
     second.register_file(SourceFileInput {
         path: PathBuf::from("/other/preexisting.rb"),
         content: String::new(),
@@ -280,11 +280,11 @@ fn rebound_templates_preserve_navigation_without_sharing_file_identity() {
 
     let parts = [RubyConstant::new("CachedWidget").unwrap()];
     assert_eq!(
-        AnalysisQuery::new(&first).constant_definition_ranges(&parts, &[]),
+        View::new(&first).constant_definition_ranges(&parts, &[]),
         vec![TextRange::new(first_file, 0, 12)]
     );
     assert_eq!(
-        AnalysisQuery::new(&second).constant_definition_ranges(&parts, &[]),
+        View::new(&second).constant_definition_ranges(&parts, &[]),
         vec![TextRange::new(second_file, 0, 12)]
     );
     assert_ne!(first_file, second_file);

@@ -13,7 +13,7 @@ use crate::core::storage::memory_estimate::vec_payload_bytes;
 use crate::core::{LibraryPackageId, SourceFileId, SourceKind, TextRange};
 use crate::engine::persist::fingerprint::SemanticExportFingerprint;
 
-use super::AnalysisEngine;
+use super::Project;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
@@ -189,7 +189,7 @@ impl Files {
             self.files.contains_key(&file_id),
             what = "{message}",
             why = "analysis facts and ranges must only reference registered files",
-            fix = "call AnalysisEngine::register_file before adding file facts",
+            fix = "call Project::register_file before adding file facts",
             message = message,
         );
     }
@@ -413,7 +413,7 @@ fn source_hash(source: &str) -> u64 {
     hasher.finish()
 }
 
-impl AnalysisEngine {
+impl Project {
     pub fn register_file(&mut self, file: SourceFileInput) -> SourceFileId {
         self.files.register_owned(file, None)
     }

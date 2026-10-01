@@ -34,7 +34,7 @@ fn constant_subject(name: &str) -> TypeSubject {
 }
 
 fn register_project_file(
-    engine: &mut AnalysisEngine,
+    engine: &mut Project,
     path: impl Into<std::path::PathBuf>,
     source: impl Into<String>,
 ) -> SourceFileId {

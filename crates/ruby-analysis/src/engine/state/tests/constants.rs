@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn namespace_target_exists_accepts_interned_instance_without_a_sibling_declaration() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/user.rb", "class User; end\n");
     let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
@@ -30,7 +30,7 @@ fn namespace_target_exists_accepts_interned_instance_without_a_sibling_declarati
 
 #[test]
 fn namespace_target_exists_accepts_singleton_when_instance_is_absent() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/eigen.rb", "class << User; end\n");
     let instance = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let singleton =
@@ -57,7 +57,7 @@ fn namespace_target_exists_accepts_singleton_when_instance_is_absent() {
 
 #[test]
 fn namespace_target_exists_accepts_a_value_constant_without_a_namespace_node() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/status.rb", "STATUS = 1\n");
     let constant = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
     let as_namespace = FullyQualifiedName::namespace(vec![RubyConstant::new("STATUS").unwrap()]);
@@ -83,7 +83,7 @@ fn namespace_target_exists_accepts_a_value_constant_without_a_namespace_node() {
 
 #[test]
 fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(&mut engine, "lib/status.rb", "STATUS = 1\n");
     let ref_file = register_project_file(&mut engine, "lib/use_status.rb", "STATUS\n");
     let status = FullyQualifiedName::constant(vec![RubyConstant::new("STATUS").unwrap()]);
@@ -121,7 +121,7 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
 
 #[test]
 fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "lib/nested.rb",
@@ -206,7 +206,7 @@ fn constant_reference_prefers_a_nested_class_over_an_outer_value_constant() {
 
 #[test]
 fn constant_reference_walks_out_to_an_outer_value_constant() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let def_file = register_project_file(
         &mut engine,
         "lib/outer.rb",

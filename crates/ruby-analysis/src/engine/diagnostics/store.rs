@@ -5,7 +5,7 @@
 use crate::core::storage::diagnostic_candidate_store::DiagnosticCandidateStore;
 use crate::core::storage::diagnostic_store::DiagnosticStore;
 use crate::core::{DiagnosticCandidate, DiagnosticFact, SourceFileId};
-use crate::engine::AnalysisEngine;
+use crate::engine::Project;
 
 /// Diagnostic codes that resolve passes derive from candidates. A rebuild
 /// drops these and keeps every other resolved fact.
@@ -120,7 +120,7 @@ impl Diagnostics {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
         self.diagnostics.facts_in_file(file_id)
     }

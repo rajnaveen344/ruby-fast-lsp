@@ -10,9 +10,9 @@ use crate::engine::queries::hierarchy::types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
     TypeHierarchyRelation,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn parse_method_fqn(&self, fqn: &str) -> Option<FullyQualifiedName> {
         parse_method_fqn_string(fqn)
     }
@@ -287,7 +287,7 @@ fn push_grouped_text_range(
 }
 
 fn push_subtype_entries(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     edges: &mut [GraphEdgeFact],
     relation: TypeHierarchyRelation,
     entries: &mut Vec<TypeHierarchyEntry>,
@@ -301,7 +301,7 @@ fn push_subtype_entries(
 }
 
 fn push_supertype_entries(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     edges: &[GraphEdgeFact],
     kind: GraphEdgeKind,
     relation: TypeHierarchyRelation,
@@ -324,7 +324,7 @@ fn push_supertype_entries(
 }
 
 fn push_unresolved_supertype_entries(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
     entries: &mut Vec<TypeHierarchyEntry>,
 ) {
@@ -351,7 +351,7 @@ fn push_unresolved_supertype_entries(
 }
 
 fn hierarchy_entry_for_node(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     fqn: &FullyQualifiedName,
     relation: TypeHierarchyRelation,
     edge_file_id: Option<SourceFileId>,
@@ -369,7 +369,7 @@ fn hierarchy_entry_for_node(
 }
 
 fn collect_all_implementors(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut result = Vec::new();
@@ -398,7 +398,7 @@ fn collect_all_implementors(
 }
 
 fn mixers(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut mixers = engine
@@ -419,7 +419,7 @@ fn mixers(
 }
 
 fn descendants(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut result = Vec::new();
@@ -446,12 +446,12 @@ mod tests {
         FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind,
         SymbolFact, SymbolKind, TextRange,
     };
-    use crate::engine::AnalysisQuery;
-    use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+    use crate::engine::View;
+    use crate::engine::{Project, ResolveMode, SourceFileInput};
 
-    fn query_with_symbols() -> (AnalysisEngine, SourceFileId) {
+    fn query_with_symbols() -> (Project, SourceFileId) {
         let source = "class User\n  def name\n  end\nend";
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/user.rb".into(),
             content: source.into(),
@@ -486,7 +486,7 @@ mod tests {
     #[test]
     fn parse_method_fqn_strings() {
         let (engine, _) = query_with_symbols();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert_eq!(
             query.parse_method_fqn("Foo#bar").unwrap().to_string(),
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn parse_namespace_fqn_strings() {
         let (engine, _) = query_with_symbols();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert_eq!(
             query

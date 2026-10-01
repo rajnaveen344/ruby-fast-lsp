@@ -4,7 +4,7 @@ mod precedence;
 #[cfg(test)]
 mod tests;
 
-use super::AnalysisQuery;
+use super::View;
 use crate::core::storage::reference_store::StoredMethodReferenceCandidate;
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
@@ -15,7 +15,7 @@ use crate::invariant::ExpectInvariant;
 
 pub(in crate::engine) type DefinitionLookupChains = Vec<Vec<FullyQualifiedName>>;
 
-impl AnalysisQuery<'_> {
+impl View<'_> {
     /// Exact declaration-name targets for a proven type identity. Types may
     /// retain constant-form FQNs; declarations belong to instance namespaces.
     /// Name ranges let clients resolve navigation at the actual Ruby token.

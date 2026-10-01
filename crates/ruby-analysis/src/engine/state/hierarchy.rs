@@ -20,7 +20,7 @@ use crate::invariant::ExpectInvariant;
 
 use super::decls::DeclIndex;
 use super::names::Names;
-use super::AnalysisEngine;
+use super::Project;
 
 #[derive(Debug, Default)]
 pub(in crate::engine) struct Hierarchy {
@@ -339,7 +339,7 @@ impl Hierarchy {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub(in crate::engine) fn cached_top_level_method_lookup_chain(
         &self,
     ) -> Option<Vec<FullyQualifiedName>> {
@@ -373,7 +373,7 @@ impl AnalysisEngine {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {
         let Some(fqn_id) = self.names.fqn_id(fqn) else {
             return Vec::new();
@@ -413,7 +413,7 @@ impl AnalysisEngine {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     pub(in crate::engine) fn resolve_constant_reference(
         &self,
         parts: &[RubyConstant],
@@ -485,7 +485,7 @@ impl AnalysisEngine {
     }
 }
 
-impl AnalysisEngine {
+impl Project {
     /// Returns the one superclass that is statically proven for `source`.
     /// Explicit declarations outrank per-declaration implicit `Object` facts,
     /// but two distinct explicit targets or any unresolved explicit target

@@ -1,19 +1,20 @@
 # Analysis engine
 
 `mod.rs` preserves the public API: register source and replace a file's
-`core::FileAnalysis` through `AnalysisEngine`, then read domain results through
-`AnalysisQuery`. The engine has no per-file type of its own; `replace_facts`
-takes the core value.
+`core::FileAnalysis` through `Project`, then read domain results through
+`View`. `AnalysisEngine` and `AnalysisQuery` remain as type aliases of
+`Project` and `View` until the remaining callers migrate. The engine has no
+per-file type of its own; `replace_facts` takes the core value.
 Implementation folders are private to the engine.
 
 | Area | Responsibility |
 | --- | --- |
-| `state/` | `AnalysisEngine` and its components (see below); `lifecycle` orders file replacement and resolve passes over them, and `mod` owns the engine identity, `semantic_revision`, `query_cache_identity`, statistics, memory stats, and compaction |
+| `state/` | `Project` and its components (see below); `lifecycle` orders file replacement and resolve passes over them, and `mod` owns the engine identity, `semantic_revision`, `query_cache_identity`, statistics, memory stats, and compaction |
 | `persist/fingerprint/` | Semantic export and result fingerprints that classify file replacements and key persistent caches |
 | `persist/external_facts_template/` | Project-neutral dependency fact templates and their snapshot codecs |
 | `state/tests/` | Engine state tests grouped by lifecycle, fingerprints, inference outcomes, navigation, graph, caches, and constants |
 | `resolution/` | Ruby lookup chains and MRO (`lookup_chain`), chain method facts and visibility (`chain_methods`), callees, signatures, method references, reference ranges, definitions, and rename policy |
-| `queries/` | Common reads and the `AnalysisQuery` entry point |
+| `queries/` | Common reads and the `View` entry point |
 | `semantics.rs` | The read-only `Semantics` trait the fact collector and `TypeTracker` use for mid-walk reads, implemented for the shared engine lock with one short read guard per call |
 | `queries/cache/` | Per-source and thread-local method lookup memos (`memo`, `thread_memo`), and expression, binding, namespace/constant, and method-return type queries |
 | `queries/definitions/` | Definition source selection and partial ordering from participating Ruby lookup chains |
@@ -26,7 +27,7 @@ Implementation folders are private to the engine.
 
 ## State components
 
-`AnalysisEngine` holds one private-field component per kind of semantic state.
+`Project` holds one private-field component per kind of semantic state.
 Each component owns its fields and exposes `pub(in crate::engine)` operations;
 components that need names take `&Names` or `&mut Names` as a parameter. The
 engine keeps only its identity, `semantic_revision`, `query_cache_identity`,
@@ -48,8 +49,8 @@ then writes each component in a fixed order and runs the resolve passes.
 
 Query result types live with their query family. Shared helpers retain the
 engine-wide privacy boundary even when a folder adds another module level.
-Submodules of `state/` and `resolution/` extend `AnalysisEngine` and
-`AnalysisQuery` with inherent impl blocks; their helpers stay private to the
+Submodules of `state/` and `resolution/` extend `Project` and
+`View` with inherent impl blocks; their helpers stay private to the
 owning folder unless a sibling engine area needs them through a narrow re-export.
 
 ## Mid-walk reads

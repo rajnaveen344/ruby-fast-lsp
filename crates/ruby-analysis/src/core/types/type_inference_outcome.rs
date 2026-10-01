@@ -279,7 +279,7 @@ pub struct InferenceEvidence {
     pub constant_type_equations: Vec<ConstantTypeEquation>,
     /// Capture-free callable constants lowered during the owning file's
     /// ordinary traversal. Cross-file consumers resolve these facts through
-    /// `AnalysisQuery`; replacement removes them with the source file.
+    /// `View`; replacement removes them with the source file.
     pub(crate) constant_callable_bodies: Vec<ConstantCallableBodyFact>,
     /// Compact, file-owned results for complete call expressions. These are
     /// resolved from the same method candidates as navigation and diagnostics

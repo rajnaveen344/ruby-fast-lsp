@@ -3,10 +3,10 @@ use crate::core::{
     FileAnalysis, GraphNodeFact, GraphNodeKind, MethodFact, RubyConstant, SourceKind, SymbolFact,
     SymbolKind,
 };
-use crate::engine::{AnalysisEngine, ResolveMode, SourceFileInput};
+use crate::engine::{Project, ResolveMode, SourceFileInput};
 
 fn declaration(
-    engine: &mut AnalysisEngine,
+    engine: &mut Project,
     path: &str,
     kind: SourceKind,
     name: &str,
@@ -51,7 +51,7 @@ fn declaration(
 
 #[test]
 fn definition_source_preference_is_shared_and_falls_back_after_removal() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let (_, signature) = declaration(
         &mut engine,
         "/a_record.rbs",
@@ -95,7 +95,7 @@ fn definition_source_preference_is_shared_and_falls_back_after_removal() {
 
 #[test]
 fn definition_source_preference_retains_a_different_receivers_signature() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let (other, signature) =
         declaration(&mut engine, "/a_other.rbs", SourceKind::Signature, "Other");
     let (record, implementation) =

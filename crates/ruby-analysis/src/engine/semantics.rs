@@ -26,7 +26,7 @@ use crate::core::{
     ConstantTypeDependency, FullyQualifiedName, GraphNodeKind, NamespaceKind, ResolvedMethodCallee,
     RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject, UnknownReason,
 };
-use crate::engine::{AnalysisEngine, AnalysisQuery, AnalysisQueryCache};
+use crate::engine::{AnalysisQueryCache, Project, View};
 use crate::indexer::MethodReceiver;
 use crate::inference::higher_order::PreparedCallableSet;
 use crate::inference::method::constructor::ConstructorResult;
@@ -212,15 +212,15 @@ pub(crate) trait Semantics: Send + Sync {
 }
 
 /// The shared project engine: each read takes its own short read guard.
-impl Semantics for RwLock<AnalysisEngine> {
+impl Semantics for RwLock<Project> {
     fn has_graph_node(&self, namespace: &FullyQualifiedName) -> bool {
         let engine = self.read();
-        AnalysisQuery::new(&engine).has_graph_node(namespace)
+        View::new(&engine).has_graph_node(namespace)
     }
 
     fn namespace_node_kind(&self, namespace: &FullyQualifiedName) -> Option<GraphNodeKind> {
         let engine = self.read();
-        AnalysisQuery::new(&engine).namespace_node_kind(namespace)
+        View::new(&engine).namespace_node_kind(namespace)
     }
 
     fn resolve_constant_in_context(
@@ -229,12 +229,12 @@ impl Semantics for RwLock<AnalysisEngine> {
         lexical_context: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
         let engine = self.read();
-        AnalysisQuery::new(&engine).resolve_constant_in_context(parts, lexical_context)
+        View::new(&engine).resolve_constant_in_context(parts, lexical_context)
     }
 
     fn type_namespace(&self, ruby_type: &RubyType) -> Option<FullyQualifiedName> {
         let engine = self.read();
-        AnalysisQuery::new(&engine).type_to_namespace(ruby_type)
+        View::new(&engine).type_to_namespace(ruby_type)
     }
 
     fn extension_call_callees(
@@ -246,7 +246,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         cache: &AnalysisQueryCache,
     ) -> Vec<ResolvedMethodCallee> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         let namespace_fqn = match receiver {
             MethodReceiver::Constant(path) => {
                 query.resolve_constant_receiver(path, current_namespace)
@@ -285,7 +285,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         local: LocalType<'_>,
     ) -> Option<(FullyQualifiedName, RubyType)> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         candidates.iter().find_map(|constant| {
             local(constant)
                 .or_else(|| query.constant_value_type(constant))
@@ -299,7 +299,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         path: &[RubyConstant],
     ) -> Option<RubyType> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         query
             .constant_value_type(constant)
             .or_else(|| query.constant_reference_type(path))
@@ -307,7 +307,7 @@ impl Semantics for RwLock<AnalysisEngine> {
 
     fn constant_reference_type(&self, path: &[RubyConstant]) -> Option<RubyType> {
         let engine = self.read();
-        AnalysisQuery::new(&engine).constant_reference_type(path)
+        View::new(&engine).constant_reference_type(path)
     }
 
     fn resolved_constant_value_type(
@@ -316,7 +316,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         current_namespace: &[RubyConstant],
     ) -> Option<RubyType> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         query
             .resolve_constant_in_context(std::slice::from_ref(name), current_namespace)
             .and_then(|resolved| {
@@ -331,7 +331,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         lexical_context: &[RubyConstant],
     ) -> Option<RubyType> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         let constant = contextual_constant(&query, parts, absolute, lexical_context)?;
         query
             .constant_value_type(&constant)
@@ -343,7 +343,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         constant: &FullyQualifiedName,
     ) -> Option<Result<CallableBodySummary, UnknownReason>> {
         let engine = self.read();
-        AnalysisQuery::new(&engine).constant_callable_body(constant)
+        View::new(&engine).constant_callable_body(constant)
     }
 
     fn constant_callable_body_in_context(
@@ -353,19 +353,19 @@ impl Semantics for RwLock<AnalysisEngine> {
         lexical_context: &[RubyConstant],
     ) -> Option<Result<CallableBodySummary, UnknownReason>> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         let constant = contextual_constant(&query, parts, absolute, lexical_context)?;
         query.constant_callable_body(&constant)
     }
 
     fn constant_dependency_type(&self, dependency: &ConstantTypeDependency) -> Option<RubyType> {
         let engine = self.read();
-        AnalysisQuery::new(&engine).constant_dependency_type(dependency)
+        View::new(&engine).constant_dependency_type(dependency)
     }
 
     fn constructor_result(&self, class: &FullyQualifiedName) -> ConstructorResult {
         let engine = self.read();
-        AnalysisQuery::new(&engine).constructor_result(class)
+        View::new(&engine).constructor_result(class)
     }
 
     fn prepare_higher_order_call(
@@ -377,7 +377,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         argument_types: &[RubyType],
     ) -> Result<PreparedCallableSet, UnknownReason> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         crate::inference::rbs::prepare_higher_order_call_with_fallbacks(
             Some(&query),
             cache,
@@ -396,7 +396,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         cache: Option<&AnalysisQueryCache>,
     ) -> Option<RubyType> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         match (access, cache) {
             (ReceiverAccess::Any, None) => query.method_return_type_for_receiver(receiver, method),
             (ReceiverAccess::Any, Some(cache)) => {
@@ -422,7 +422,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         method_name: &str,
     ) -> Option<RubyType> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         method_call_return_type(Some(&query), receiver_type, method_name)
     }
 
@@ -433,7 +433,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         parameter_names: &[&str],
     ) -> Vec<Option<RubyType>> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         parameter_names
             .iter()
             .map(|name| query.rbs_parameter_contract_type(method, owner, name))
@@ -446,7 +446,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         owner: &FullyQualifiedName,
     ) -> Option<RubyType> {
         let engine = self.read();
-        AnalysisQuery::new(&engine).rbs_return_contract_type(method, owner)
+        View::new(&engine).rbs_return_contract_type(method, owner)
     }
 
     fn super_method_return_type(
@@ -456,7 +456,7 @@ impl Semantics for RwLock<AnalysisEngine> {
         local: LocalType<'_>,
     ) -> Option<RubyType> {
         let engine = self.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         let callee = query.resolve_super_method_callee(namespace, method)?;
         let super_method =
             FullyQualifiedName::method(callee.owner.namespace_parts(), method.clone());
@@ -471,7 +471,7 @@ impl Semantics for RwLock<AnalysisEngine> {
 /// The constant a reference names: itself when absolute, otherwise its
 /// lexical resolution.
 fn contextual_constant(
-    query: &AnalysisQuery<'_>,
+    query: &View<'_>,
     parts: &[RubyConstant],
     absolute: bool,
     lexical_context: &[RubyConstant],

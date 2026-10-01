@@ -12,15 +12,15 @@ use crate::engine::queries::namespace_tree::types::{
     IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
     MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
-use crate::engine::queries::AnalysisQuery;
-use crate::engine::AnalysisEngine;
+use crate::engine::queries::View;
+use crate::engine::Project;
 
 struct NamespaceTreeResult {
     modules: Vec<NamespaceNode>,
     classes: Vec<NamespaceNode>,
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn namespace_tree_hash(&self, show_external_types: bool) -> u64 {
         compute_namespace_tree_hash(self.engine, show_external_types)
     }
@@ -30,7 +30,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-fn compute_namespace_tree_hash(engine: &AnalysisEngine, show_external_types: bool) -> u64 {
+fn compute_namespace_tree_hash(engine: &Project, show_external_types: bool) -> u64 {
     let mut hasher = DefaultHasher::new();
     show_external_types.hash(&mut hasher);
 
@@ -79,10 +79,7 @@ fn compute_namespace_tree_hash(engine: &AnalysisEngine, show_external_types: boo
     hasher.finish()
 }
 
-fn compute_namespace_tree(
-    engine: &AnalysisEngine,
-    show_external_types: bool,
-) -> NamespaceTreeResponse {
+fn compute_namespace_tree(engine: &Project, show_external_types: bool) -> NamespaceTreeResponse {
     if !show_external_types {
         let project_tree = build_namespace_tree(collect_project_namespace_map(engine, false));
         return NamespaceTreeResponse {
@@ -190,7 +187,7 @@ struct PartitionedNamespaceNodes {
     gem_packages: HashMap<LibraryPackageId, HashMap<FullyQualifiedName, Vec<GraphNodeFact>>>,
 }
 
-fn partition_namespace_nodes(engine: &AnalysisEngine) -> PartitionedNamespaceNodes {
+fn partition_namespace_nodes(engine: &Project) -> PartitionedNamespaceNodes {
     let mut partitioned = PartitionedNamespaceNodes {
         project: HashMap::new(),
         runtime: HashMap::new(),
@@ -287,7 +284,7 @@ fn source_kind_library_section(kind: SourceKind) -> Option<LibrarySectionId> {
 }
 
 fn collect_project_namespace_map(
-    engine: &AnalysisEngine,
+    engine: &Project,
     show_external_mixins: bool,
 ) -> HashMap<String, NamespaceNode> {
     let mut nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>> = HashMap::new();
@@ -309,7 +306,7 @@ fn collect_project_namespace_map(
 }
 
 fn build_namespace_map_from_grouped_nodes(
-    engine: &AnalysisEngine,
+    engine: &Project,
     nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>>,
     show_external_mixins: bool,
     compute_included_by: bool,
@@ -402,7 +399,7 @@ fn build_namespace_map_from_grouped_nodes(
 }
 
 fn analysis_edges_from(
-    engine: &AnalysisEngine,
+    engine: &Project,
     fqn: &FullyQualifiedName,
     kind: GraphEdgeKind,
 ) -> Vec<GraphEdgeFact> {
@@ -415,7 +412,7 @@ fn analysis_edges_from(
 }
 
 fn analysis_edges_to_mixins(
-    engine: &AnalysisEngine,
+    engine: &Project,
     edges: &[GraphEdgeFact],
     show_external_types: bool,
 ) -> Vec<MixinInfo> {
@@ -440,7 +437,7 @@ fn analysis_edges_to_mixins(
 }
 
 fn analysis_find_includers(
-    engine: &AnalysisEngine,
+    engine: &Project,
     module_fqn: &FullyQualifiedName,
     show_external_types: bool,
 ) -> Vec<IncluderInfo> {
@@ -487,27 +484,24 @@ fn analysis_find_includers(
     result
 }
 
-fn analysis_node_kind(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+fn analysis_node_kind(engine: &Project, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
     engine.first_graph_node_kind(fqn)
 }
 
-fn analysis_namespace_is_project(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> bool {
+fn analysis_namespace_is_project(engine: &Project, fqn: &FullyQualifiedName) -> bool {
     engine
         .graph_nodes_for(fqn)
         .iter()
         .any(|node| analysis_range_is_project(engine, node.range))
 }
 
-fn analysis_range_is_project(engine: &AnalysisEngine, range: TextRange) -> bool {
+fn analysis_range_is_project(engine: &Project, range: TextRange) -> bool {
     engine
         .file(range.file_id)
         .is_some_and(|file| file.kind.is_workspace_owned())
 }
 
-fn analysis_namespace_locations(
-    engine: &AnalysisEngine,
-    fqn: &FullyQualifiedName,
-) -> Vec<LocationInfo> {
+fn analysis_namespace_locations(engine: &Project, fqn: &FullyQualifiedName) -> Vec<LocationInfo> {
     engine
         .graph_nodes_for(fqn)
         .iter()
@@ -516,7 +510,7 @@ fn analysis_namespace_locations(
 }
 
 pub(in crate::engine) fn analysis_location_info(
-    engine: &AnalysisEngine,
+    engine: &Project,
     range: TextRange,
 ) -> Option<LocationInfo> {
     let file = engine.file(range.file_id)?;
@@ -614,7 +608,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_filters_external_mixins() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let user_file = engine.register_file(SourceFileInput {
             path: "/tmp/project/user.rb".into(),
             content: "class User; include Auth; end".into(),
@@ -658,7 +652,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
         let project_only = query.namespace_tree(false);
         assert_eq!(project_only.modules.len(), 0);
         assert_eq!(project_only.classes.len(), 1);
@@ -683,7 +677,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_splits_runtime_and_gem_libraries() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let user_file = engine.register_file(SourceFileInput {
             path: "/tmp/project/user.rb".into(),
             content: "class User; end".into(),
@@ -742,7 +736,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        let tree = AnalysisQuery::new(&engine).namespace_tree(true);
+        let tree = View::new(&engine).namespace_tree(true);
         assert_eq!(tree.classes[0].fqn, "User");
         assert_eq!(tree.libraries.len(), 2);
         assert_eq!(tree.libraries[0].id, LibrarySectionId::Runtime);
@@ -759,7 +753,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_shows_gem_reopen_of_stdlib_class_under_package() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let stub_string = engine.register_file(SourceFileInput {
             path: "/tmp/stubs/string.rb".into(),
             content: "class String; end".into(),
@@ -799,7 +793,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        let tree = AnalysisQuery::new(&engine).namespace_tree(true);
+        let tree = View::new(&engine).namespace_tree(true);
         assert_eq!(tree.libraries.len(), 2);
         assert_eq!(tree.libraries[0].id, LibrarySectionId::Runtime);
         assert_eq!(tree.libraries[0].classes[0].fqn, "String");
@@ -815,7 +809,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_nests_project_modules_by_fqn() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/project/platform.rb".into(),
             content: "module ExampleApp; module Platform; module API; end; end; end".into(),
@@ -850,7 +844,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        let tree = AnalysisQuery::new(&engine).namespace_tree(false);
+        let tree = View::new(&engine).namespace_tree(false);
         assert_eq!(tree.modules.len(), 1);
         assert_eq!(tree.modules[0].fqn, "ExampleApp");
         assert_eq!(tree.modules[0].modules.len(), 1);
@@ -864,7 +858,7 @@ mod tests {
 
     #[test]
     fn namespace_tree_hides_generated_semantic_owners() {
-        let mut engine = AnalysisEngine::new();
+        let mut engine = Project::new();
         let file_id = engine.register_file(SourceFileInput {
             path: "/tmp/user_spec.rb".into(),
             content: "RSpec.describe User do; end".into(),
@@ -886,7 +880,7 @@ mod tests {
             },
             ResolveMode::Immediate,
         );
-        let query = AnalysisQuery::new(&engine);
+        let query = View::new(&engine);
 
         assert!(query.namespace_tree(false).classes.is_empty());
         assert!(query.namespace_tree(true).classes.is_empty());

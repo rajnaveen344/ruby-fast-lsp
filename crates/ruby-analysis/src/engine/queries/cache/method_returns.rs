@@ -7,7 +7,7 @@ use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, ResolvedMethodCallee, RubyMethod, RubyType,
     SourceFileId, TypeResolution, TypeSubject,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::engine::resolution::{
     chain_has_custom_method_missing, execution_context_application_targets, method_facts_in_chain,
     method_lookup_chain, method_missing_method, module_instance_receivers, namespace_target_exists,
@@ -18,7 +18,7 @@ use super::thread_memo::thread_receiver_has_non_public;
 
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn method_return_type_at(
         &self,
         name: &str,
@@ -404,7 +404,7 @@ impl<'a> AnalysisQuery<'a> {
         )?;
 
         RubyType::union_from_proven(
-            AnalysisQuery::receiver_type_to_method_namespaces(&receiver_type),
+            View::receiver_type_to_method_namespaces(&receiver_type),
             |namespace| {
                 self.method_return_type_for_receiver_inner(
                     &namespace,

@@ -141,7 +141,7 @@ Delete this file when the last task is done. Git history keeps the record.
   data in the same order (`state/tests/fingerprints.rs`).
 - [ ] B4. Reduce `AnalysisEngine` to `Project` with `update`, `remove`,
       `resolve`, and `view`.
-  - [ ] B4a. Rename `AnalysisEngine` to `Project` and `AnalysisQuery` to
+  - [x] B4a. Rename `AnalysisEngine` to `Project` and `AnalysisQuery` to
         `View`; keep `pub type` aliases in `engine/mod.rs` until C1 lands.
   - [ ] B4b. Rename `replace_facts` to `update` and
         `replace_facts_if_source_snapshot` to `update_if_snapshot`; migrate

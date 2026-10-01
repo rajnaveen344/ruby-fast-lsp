@@ -4,11 +4,11 @@ use crate::core::{
     RubyType, SourceFileId, TextRange, TypeInferenceOutcome, TypeResolution, TypeSubject,
     UnknownReason,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::engine::state::TypeInferenceOutcomeRef;
 use crate::invariant::ExpectInvariant;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     /// Return the exact receiver proof retained for a call's message range.
     ///
     /// Sparse flow overrides and explicit Unknown evidence precede the

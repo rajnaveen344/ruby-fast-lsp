@@ -15,10 +15,10 @@ use crate::core::{
 };
 use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
 use crate::engine::queries::definitions::DefinitionLookupChains;
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 use crate::invariant::ExpectInvariant;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub(in crate::engine) fn method_candidate_callees(
         &self,
         candidate: &StoredMethodReferenceCandidate,
@@ -197,7 +197,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 }
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn resolve_method_callees(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -449,7 +449,7 @@ impl<'a> AnalysisQuery<'a> {
 /// Retain the proven chain starting at the callable winner. Earlier namespaces
 /// rejected by visibility/availability cannot claim navigation priority.
 fn retain_definition_lookup_chain(
-    engine: &crate::engine::AnalysisEngine,
+    engine: &crate::engine::Project,
     lookup_chains: Option<&mut DefinitionLookupChains>,
     receiver: &FullyQualifiedName,
     winner: &FullyQualifiedName,

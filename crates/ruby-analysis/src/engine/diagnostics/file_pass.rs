@@ -13,9 +13,9 @@ use crate::core::{
     RubyMethod, RubyType, SourceFileId, TypeInferenceOutcome, UnknownReason,
 };
 use crate::engine::resolution::{MethodLookupChainCache, MethodLookupResult};
-use crate::engine::{AnalysisEngine, AnalysisQuery};
+use crate::engine::{Project, View};
 
-impl AnalysisEngine {
+impl Project {
     pub(in crate::engine) fn resolve_reference_candidates_in_file(
         &mut self,
         file_id: SourceFileId,
@@ -211,7 +211,7 @@ impl AnalysisEngine {
                         let owner_kind = owner_fqn.namespace_kind().expect_invariant(
                             "a proven receiver namespace has no namespace kind",
                             "type-to-namespace conversion must return a Namespace FQN",
-                            "keep receiver proof conversion in AnalysisQuery::type_to_namespace",
+                            "keep receiver proof conversion in View::type_to_namespace",
                         );
                         let root = self
                             .names
@@ -237,7 +237,7 @@ impl AnalysisEngine {
                     let mut fact = method_fact_cache
                         .entry((owner_fqn.clone(), method, is_super, reflects_instance))
                         .or_insert_with(|| {
-                            let query = AnalysisQuery::new(self);
+                            let query = View::new(self);
                             if is_super {
                                 query.resolve_super_method_reference(&owner_fqn, &method)
                             } else if reflects_instance {
@@ -258,7 +258,7 @@ impl AnalysisEngine {
                     if access == MethodReferenceAccess::Normal
                         && matches!(fact, MethodLookupResult::Ambiguous { .. })
                     {
-                        if let Some(source_ordered) = AnalysisQuery::new(self)
+                        if let Some(source_ordered) = View::new(self)
                             .source_ordered_top_level_method_reference(
                                 &owner_fqn,
                                 &method,

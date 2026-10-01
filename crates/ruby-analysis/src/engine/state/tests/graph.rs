@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn graph_update_retries_unresolved_edges_when_target_arrives() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let user_file = register_project_file(&mut engine, "user.rb", "class User; include Auth; end");
     let auth_file = register_project_file(&mut engine, "auth.rb", "module Auth; end");
 
@@ -54,7 +54,7 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
 
 #[test]
 fn delayed_class_superclass_materializes_singleton_inheritance() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let child_file = register_project_file(&mut engine, "child.rb", "class Child < Parent; end");
     let parent_file = register_project_file(&mut engine, "parent.rb", "class Parent; end");
 
@@ -120,7 +120,7 @@ fn delayed_class_superclass_materializes_singleton_inheritance() {
 
 #[test]
 fn explicit_superclass_outranks_reopened_implicit_object_fact() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "child.rb", "class Child; end");
     let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
     let object = FullyQualifiedName::namespace(vec![RubyConstant::new("Object").unwrap()]);
@@ -160,7 +160,7 @@ fn explicit_superclass_outranks_reopened_implicit_object_fact() {
 
 #[test]
 fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let class_file = register_project_file(
         &mut engine,
         "pending.rb",
@@ -253,7 +253,7 @@ fn conditional_delayed_superclasses_make_instance_and_singleton_ancestry_unknown
 
 #[test]
 fn later_include_wins_mro_when_facts_are_inserted_out_of_range_order() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "lib/child.rb",
@@ -313,7 +313,7 @@ fn later_include_wins_mro_when_facts_are_inserted_out_of_range_order() {
 
 #[test]
 fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "lib/edge.rb", "class Parent\nend\n");
     let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
     let missing = FullyQualifiedName::namespace(vec![RubyConstant::new("Missing").unwrap()]);
@@ -352,18 +352,15 @@ fn edge_only_graph_entries_do_not_promote_missing_namespaces() {
     );
     assert_eq!(engine.latest_graph_node_kind(&missing), None);
     assert_eq!(
-        AnalysisQuery::new(&engine).namespace_node_kind(&parent),
+        View::new(&engine).namespace_node_kind(&parent),
         Some(GraphNodeKind::Class)
     );
-    assert_eq!(
-        AnalysisQuery::new(&engine).namespace_node_kind(&missing),
-        None
-    );
+    assert_eq!(View::new(&engine).namespace_node_kind(&missing), None);
 }
 
 #[test]
 fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let project_file = register_project_file(
         &mut engine,
         "spec/mock_support.rb",
@@ -508,7 +505,7 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
 
 #[test]
 fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "spec/user_spec.rb",
@@ -612,7 +609,7 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
 
 #[test]
 fn execution_context_applications_resolve_independently_and_replace_per_file() {
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let template_file = register_project_file(
         &mut engine,
         "spec/support/shared_examples.rb",
@@ -789,7 +786,7 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
 fn execution_context_query_selects_innermost_range_and_replaces_per_file() {
     use crate::core::{ExecutionContextFact, ExecutionScopeMode};
 
-    let mut engine = AnalysisEngine::new();
+    let mut engine = Project::new();
     let file_id = register_project_file(
         &mut engine,
         "spec/nested_spec.rb",

@@ -5,9 +5,9 @@ use std::collections::HashSet;
 
 use crate::core::{FullyQualifiedName, GraphNodeKind, RubyConstant, RubyType, TypeSubject};
 use crate::engine::queries::lookup::types::{ConstantHover, ConstantHoverKind};
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn namespace_node_kind(&self, namespace_fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
         self.engine.latest_graph_node_kind(namespace_fqn)
     }

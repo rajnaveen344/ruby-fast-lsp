@@ -13,9 +13,9 @@ use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodReferenceAccess, RubyConstant, RubyMethod,
     TextRange,
 };
-use crate::engine::queries::AnalysisQuery;
+use crate::engine::queries::View;
 
-impl<'a> AnalysisQuery<'a> {
+impl<'a> View<'a> {
     pub fn reference_ranges_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
         self.engine
             .reference_facts_for(fqn)
