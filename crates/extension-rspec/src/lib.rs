@@ -75,6 +75,11 @@ impl Extension for RSpecExtension {
                 patches
             }
             "subject" | "subject!" => {
+                // Only a call with a block declares a subject; a bare `subject`
+                // inside an example reads it.
+                if ctx.block_range.is_none() {
+                    return Vec::new();
+                }
                 let mut patches = Vec::new();
                 if first_symbol_or_string(ctx).is_some() || ctx.method_name != "subject" {
                     patches.push(self.define_dsl_macro(
@@ -961,6 +966,40 @@ mod tests {
         };
         assert_eq!(context.implicit_receiver, implicit_target);
         assert_eq!(context.method_definition_owner, definition_target);
+    }
+
+    fn subject_call(block_range: Option<SourceRange>) -> CallContext {
+        CallContext {
+            project: None,
+            method_name: "subject".to_string(),
+            receiver: Receiver::None,
+            arguments: Vec::new(),
+            current_namespace: Vec::new(),
+            namespace_kind: NamespaceKind::Instance,
+            call_range: range(4, 4, 4, 11),
+            block_range,
+            message_range: range(4, 4, 4, 11),
+            resolved_callees: Vec::new(),
+            enclosing_calls: vec![enclosing_describe()],
+        }
+    }
+
+    #[test]
+    fn subject_with_block_declares_the_subject_helper() {
+        let patches = extension().index_call(&subject_call(Some(range(4, 12, 4, 24))));
+        let names: Vec<&str> = patches
+            .iter()
+            .filter_map(|patch| match patch {
+                IndexPatch::DefineMethod(method) => Some(method.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["subject"]);
+    }
+
+    #[test]
+    fn bare_subject_reads_without_declaring() {
+        assert!(extension().index_call(&subject_call(None)).is_empty());
     }
 
     #[test]

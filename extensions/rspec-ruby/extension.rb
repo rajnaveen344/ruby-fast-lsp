@@ -630,6 +630,8 @@ extension "rspec-ruby" do
 
   on_call "subject", "subject!" do |ctx|
     next [] unless RSpecRuby.inside_rspec_scope?(ctx)
+    # Only a call with a block declares a subject; a bare `subject` reads it.
+    next [] unless ctx.block_range
 
     arg = ctx.arguments.first
     name = arg && arg.symbol_or_string

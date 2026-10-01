@@ -32,6 +32,10 @@ class RSpecRubyExtensionTest < Minitest::Test
     }
   end
 
+  def block_ctx(method_name, args)
+    ctx(method_name, args).merge("block_range" => BLOCK_RANGE)
+  end
+
   def outside_ctx(method_name, args)
     ctx(method_name, args).merge("enclosing_calls" => [])
   end
@@ -324,7 +328,7 @@ class RSpecRubyExtensionTest < Minitest::Test
   end
 
   def test_named_subject_defines_named_helper_method
-    patches = extension.index_call(ctx("subject", [symbol_arg("record")]))
+    patches = extension.index_call(block_ctx("subject", [symbol_arg("record")]))
 
     method = patches.map { |patch| patch.fetch("DefineMethod") }.find { |patch| patch.fetch("name") == "record" }
     assert_equal "record", method.fetch("name")
@@ -332,7 +336,7 @@ class RSpecRubyExtensionTest < Minitest::Test
   end
 
   def test_unnamed_subject_defines_subject_method
-    patches = extension.index_call(ctx("subject", []))
+    patches = extension.index_call(block_ctx("subject", []))
 
     assert_equal 1, patches.length
     method = patches.map { |patch| patch.fetch("DefineMethod") }.find { |patch| patch.fetch("name") == "subject" }
@@ -342,11 +346,15 @@ class RSpecRubyExtensionTest < Minitest::Test
   end
 
   def test_bang_subject_defines_subject_method
-    patches = extension.index_call(ctx("subject!", []))
+    patches = extension.index_call(block_ctx("subject!", []))
 
     method = patches.map { |patch| patch.fetch("DefineMethod") }.find { |patch| patch.fetch("name") == "subject" }
     assert_equal "subject", method.fetch("name")
     assert_equal "subject!", method.fetch("source").fetch("macro_name")
+  end
+
+  def test_bare_subject_reads_without_declaring
+    assert_equal [], extension.index_call(ctx("subject", []))
   end
 
   def test_include_applies_mixin
