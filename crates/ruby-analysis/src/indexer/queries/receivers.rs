@@ -2,9 +2,11 @@
 //!
 //! Converts parser-level receiver shapes into reusable semantic namespaces.
 
+use crate::core::MethodReceiver;
+use crate::core::VariableTypeKind;
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType};
-use crate::engine::{VariableTypeKind, View};
-use crate::indexer::{MethodReceiver, RubyDocument};
+use crate::engine::View;
+use crate::indexer::RubyDocument;
 use crate::inference::method::return_type::method_call_return_type;
 use crate::invariant::ExpectInvariant;
 

@@ -217,7 +217,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [ ] B7f. Move composition with C3e; the linter stays a runner.
 - [ ] B8. Break the indexer ↔ inference ↔ engine cycle so dependencies point
       one way: core ← inference ← indexer ← engine.
-  - [ ] B8a. Move `MethodReceiver` and `VariableTypeKind` to `core`.
+  - [x] B8a. Move `MethodReceiver` and `VariableTypeKind` to `core`.
   - [ ] B8b. Move `inference/completion/` to `engine/queries/completion/`.
   - [ ] B8c. Move callable-literal lowering helpers into inference.
   - [ ] B8d. Move `Semantics`, `ReceiverAccess`, and `LocalType` to

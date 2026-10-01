@@ -29,7 +29,7 @@ pub struct RubyPrismAnalyzer {
 pub struct SignatureHelpTarget {
     pub namespace: Vec<RubyConstant>,
     pub namespace_kind: crate::core::NamespaceKind,
-    pub receiver: crate::indexer::MethodReceiver,
+    pub receiver: crate::core::MethodReceiver,
     pub receiver_range: Option<(u32, u32)>,
     pub method: crate::core::RubyMethod,
     pub active_parameter: u32,

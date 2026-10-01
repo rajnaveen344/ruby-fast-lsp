@@ -26,7 +26,7 @@ pub use documents::variable_scopes::{
     LVScopeId, LVScopeKind, RenameTarget, RenameTargetKind, ScopeNode, TypeAssignment,
     VariableNode, VariableScopes,
 };
-pub use identifiers::types::{Identifier, MethodReceiver};
+pub use identifiers::types::Identifier;
 pub use identifiers::{IdentifierType, IdentifierVisitor};
 pub use lowering::analysis_indexer::AnalysisIndexer;
 pub(crate) use lowering::callable_body::{

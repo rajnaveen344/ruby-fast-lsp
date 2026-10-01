@@ -1,9 +1,9 @@
 //! Parameter, RBS contract, and variable binding type queries.
 
+use crate::core::VariableTypeKind;
 use crate::core::{
     FullyQualifiedName, RubyType, SourceFileId, SourceKind, TypeFact, TypeResolution, TypeSubject,
 };
-use crate::engine::queries::lookup::types::VariableTypeKind;
 use crate::engine::queries::View;
 use crate::invariant::ExpectInvariant;
 

@@ -14,13 +14,14 @@
 mod analysis;
 
 use ruby_analysis::core::FullyQualifiedName;
+use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::RubyType;
 pub use ruby_analysis::core::{MethodCalleeResolution, ResolvedMethodCallee};
 use ruby_analysis::indexer::{
-    resolve_receiver_to_namespace, resolve_receiver_type, MethodReceiver, ReceiverResolutionContext,
+    resolve_receiver_to_namespace, resolve_receiver_type, ReceiverResolutionContext,
 };
 use tower_lsp::lsp_types::{Location, Position};
 

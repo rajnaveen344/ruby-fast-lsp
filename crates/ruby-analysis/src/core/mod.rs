@@ -19,8 +19,10 @@ pub use equations::constant_type_equation::{
 pub use equations::method_return_equation::MethodReturnEquation;
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use names::fully_qualified_name::{FqnParts, FullyQualifiedName, NamespaceKind};
+pub use names::method_receiver::MethodReceiver;
 pub use names::ruby_method::RubyMethod;
 pub use names::ruby_namespace::{GeneratedOwnerId, RubyConstant};
+pub use names::variable_kind::VariableTypeKind;
 pub use source::execution_context::{ExecutionContextFact, ExecutionScopeMode};
 pub use source::file_analysis::FileAnalysis;
 pub use source::source_file::{LibraryPackageId, SourceKind};

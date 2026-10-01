@@ -2,7 +2,8 @@ use crate::core::{FullyQualifiedName, NamespaceKind, RubyMethod};
 use log::warn;
 use ruby_prism::DefNode;
 
-use crate::indexer::{queries::syntax, Identifier, LVScopeKind, MethodReceiver};
+use crate::core::MethodReceiver;
+use crate::indexer::{queries::syntax, Identifier, LVScopeKind};
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 

@@ -1,7 +1,8 @@
 //! Hover target classification.
 
+use crate::core::MethodReceiver;
 use crate::core::{NamespaceKind, RubyConstant};
-use crate::indexer::{Identifier, IdentifierType, LVScopeId, MethodReceiver};
+use crate::indexer::{Identifier, IdentifierType, LVScopeId};
 
 /// Represents a Ruby construct at the hover position.
 #[derive(Debug, Clone)]

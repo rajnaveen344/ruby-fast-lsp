@@ -4,12 +4,13 @@
 
 use crate::invariant::ExpectInvariant;
 use log::info;
+use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::{FullyQualifiedName, SymbolKind};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::yard::parser::YardParser;
-use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::lsp::query::analysis_location::{locations_for_ranges, non_empty_locations};
@@ -152,14 +153,13 @@ impl EngineQuery {
 }
 
 fn method_receiver_allows_private(
-    receiver: &ruby_analysis::indexer::MethodReceiver,
+    receiver: &ruby_analysis::core::MethodReceiver,
     content: &str,
     position: Position,
 ) -> bool {
     matches!(
         receiver,
-        ruby_analysis::indexer::MethodReceiver::None
-            | ruby_analysis::indexer::MethodReceiver::Super
+        ruby_analysis::core::MethodReceiver::None | ruby_analysis::core::MethodReceiver::Super
     ) || static_send_symbol_at_position(content, position)
 }
 

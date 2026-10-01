@@ -1,5 +1,5 @@
+use crate::core::VariableTypeKind;
 use crate::core::{FullyQualifiedName, TypeFact, TypeProvenance, TypeSubject};
-use crate::engine::VariableTypeKind;
 use ruby_prism::{ClassVariableReadNode, GlobalVariableReadNode, InstanceVariableReadNode};
 
 use crate::indexer::fact_collector::FactCollector;

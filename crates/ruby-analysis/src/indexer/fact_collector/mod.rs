@@ -4,9 +4,10 @@
 //! node modules translate Ruby syntax into facts. Call [`FactCollector::finish`]
 //! after visiting to hand the completed collection to the file composer.
 
+use crate::core::MethodReceiver;
 use crate::core::{FullyQualifiedName, ResolvedMethodCallee, RubyMethod, TypeFact, TypeSubject};
 use crate::engine::Project;
-use crate::indexer::{MethodReceiver, RubyDocument, ScopeTracker};
+use crate::indexer::{RubyDocument, ScopeTracker};
 use parking_lot::RwLock;
 use std::sync::Arc;
 

@@ -1,9 +1,9 @@
 use crate::core::storage::type_store::NamedTypeResolution;
+use crate::core::VariableTypeKind;
 use crate::core::{
     FullyQualifiedName, RubyType, TextRange, TypeFact, TypeInferenceOutcome, TypeProvenance,
     TypeSubject, UnknownReason,
 };
-use crate::engine::VariableTypeKind;
 use crate::indexer::fact_collector::FactCollector;
 use crate::invariant::ExpectInvariant;
 use ruby_prism::*;

@@ -770,7 +770,7 @@ async fn cross_file_instance_variable_constructor_receiver_has_engine_proof() {
         ruby_analysis::core::NamespaceKind::Instance,
     );
     let receiver_type = query.variable_type_before_in_owner(
-        ruby_analysis::engine::VariableTypeKind::Instance,
+        ruby_analysis::core::VariableTypeKind::Instance,
         "@service",
         &owner,
         document.analysis_file_id(),

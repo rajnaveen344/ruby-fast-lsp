@@ -84,15 +84,6 @@ pub struct MixinUsage {
     pub range: TextRange,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VariableTypeKind {
-    Local,
-    Instance,
-    Class,
-    Global,
-    Constant,
-}
-
 #[cfg(test)]
 mod tests {
     use super::ConstantLookupRequest;

@@ -9,7 +9,7 @@ mod methods;
 mod nonlocal_variables;
 mod receiver_kinds;
 
-use crate::core::{RubyConstant, SourcePosition as Position};
+use crate::core::{MethodReceiver, RubyConstant, SourcePosition as Position};
 use crate::indexer::LVScopeId;
 use crate::indexer::*;
 use url::Url;

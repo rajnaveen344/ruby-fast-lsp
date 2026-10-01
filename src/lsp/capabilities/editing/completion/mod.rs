@@ -10,7 +10,8 @@ use tower_lsp::lsp_types::{
     CompletionTriggerKind, Position, Range, TextEdit, Url,
 };
 
-use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use ruby_analysis::core::MethodReceiver;
+use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use ruby_analysis::inference::completion::{CompletionSemanticQuery, CompletionVariableKind};
 
 use crate::lsp::query::{analyzer_for_document, EngineQuery};
@@ -396,9 +397,9 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
         byte_offset: u32,
     ) -> Option<RubyType> {
         let kind = match kind {
-            CompletionVariableKind::Instance => ruby_analysis::engine::VariableTypeKind::Instance,
-            CompletionVariableKind::Class => ruby_analysis::engine::VariableTypeKind::Class,
-            CompletionVariableKind::Global => ruby_analysis::engine::VariableTypeKind::Global,
+            CompletionVariableKind::Instance => ruby_analysis::core::VariableTypeKind::Instance,
+            CompletionVariableKind::Class => ruby_analysis::core::VariableTypeKind::Class,
+            CompletionVariableKind::Global => ruby_analysis::core::VariableTypeKind::Global,
         };
         let engine = self.analysis_engine.read();
         ruby_analysis::engine::AnalysisQuery::new(&engine).variable_type_before_in_owner(

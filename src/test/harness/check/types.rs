@@ -1,11 +1,12 @@
 //! Inferred types at a point.
 
 use crate::invariant::ExpectInvariant;
+use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeResolution, TypeSubject,
 };
 use ruby_analysis::engine::AnalysisQuery;
-use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use ruby_prism::{DefNode, Visit};
 use tower_lsp::lsp_types::Url;
 

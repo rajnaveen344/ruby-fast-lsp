@@ -2,8 +2,8 @@
 
 use crate::lsp::query::EngineQuery;
 use crate::test::harness::FakeEditor;
+use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{NamespaceKind, RubyConstant, RubyMethod};
-use ruby_analysis::indexer::MethodReceiver;
 use tower_lsp::lsp_types::{Location, Position};
 
 fn destinations(locations: Vec<Location>) -> Vec<(String, u32, u32)> {

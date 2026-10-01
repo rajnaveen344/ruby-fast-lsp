@@ -1,7 +1,7 @@
 //! Call receiver classification and receiver namespace/type resolution.
 
+use crate::core::VariableTypeKind;
 use crate::core::{FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant};
-use crate::engine::VariableTypeKind;
 use crate::indexer::{build_constant_path_name, mixin_ref_from_node, utf8_str};
 use crate::invariant::ExpectInvariant;
 use ruby_prism::Node;

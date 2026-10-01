@@ -97,7 +97,7 @@ end
         let assignment_start = u32::try_from(first_consumer.find("code =").unwrap()).unwrap();
         assert_eq!(
             AnalysisQuery::new(&engine).variable_assignment_type_at(
-                ruby_analysis::engine::VariableTypeKind::Local,
+                ruby_analysis::core::VariableTypeKind::Local,
                 "code",
                 file_id,
                 assignment_start,
@@ -159,7 +159,7 @@ end
         let assignment_end = assignment_start + u32::try_from(name.len()).unwrap();
         assert_eq!(
             AnalysisQuery::new(&engine).variable_assignment_type_at(
-                ruby_analysis::engine::VariableTypeKind::Local,
+                ruby_analysis::core::VariableTypeKind::Local,
                 name,
                 file_id,
                 assignment_start,
@@ -184,7 +184,7 @@ end
     let fallback_start = u32::try_from(first_consumer.find("fallback ||=").unwrap()).unwrap();
     assert_eq!(
         query.variable_assignment_type_at(
-            ruby_analysis::engine::VariableTypeKind::Local,
+            ruby_analysis::core::VariableTypeKind::Local,
             "fallback",
             first_file_id,
             fallback_start,
@@ -196,7 +196,7 @@ end
     let cycle_file_id = engine.file_id(&cycle_consumer_path).unwrap();
     assert_eq!(
         query.variable_assignment_type_at(
-            ruby_analysis::engine::VariableTypeKind::Local,
+            ruby_analysis::core::VariableTypeKind::Local,
             "cycle",
             cycle_file_id,
             0,
@@ -276,7 +276,7 @@ end
         let file_id = engine.file_id(&consumer_path).unwrap();
         assert_eq!(
             AnalysisQuery::new(&engine).variable_assignment_type_at(
-                ruby_analysis::engine::VariableTypeKind::Local,
+                ruby_analysis::core::VariableTypeKind::Local,
                 "tags",
                 file_id,
                 assignment_start,
@@ -310,7 +310,7 @@ end
     ]));
     assert_eq!(
         AnalysisQuery::new(&engine).variable_assignment_type_at(
-            ruby_analysis::engine::VariableTypeKind::Local,
+            ruby_analysis::core::VariableTypeKind::Local,
             "tags",
             file_id,
             assignment_start,

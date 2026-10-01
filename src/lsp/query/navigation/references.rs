@@ -5,6 +5,7 @@
 use crate::invariant::ExpectInvariant;
 use log::info;
 use ruby_analysis::core::FullyQualifiedName;
+use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
@@ -12,7 +13,7 @@ use ruby_analysis::core::SourceFileId;
 use ruby_analysis::core::TextRange;
 use ruby_analysis::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use ruby_analysis::indexer::yard::converter::YardTypeConverter;
-use ruby_analysis::indexer::{Identifier, MethodReceiver};
+use ruby_analysis::indexer::Identifier;
 use ruby_prism::Visit;
 use std::path::Path;
 use std::sync::Arc;

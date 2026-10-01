@@ -24,12 +24,12 @@
 //! the same point in the sequence as before. The walk never writes the engine.
 
 use crate::core::callables::callable_body::CallableBodySummary;
+use crate::core::MethodReceiver;
 use crate::core::{
     ConstantTypeDependency, FullyQualifiedName, GraphNodeKind, NamespaceKind, ResolvedMethodCallee,
     RubyConstant, RubyMethod, RubyType, SourceFileId, TypeFact, TypeSubject, UnknownReason,
 };
 use crate::engine::{AnalysisQueryCache, Project, View};
-use crate::indexer::MethodReceiver;
 use crate::inference::higher_order::PreparedCallableSet;
 use crate::inference::method::constructor::ConstructorResult;
 use crate::inference::method::return_type::method_call_return_type;

@@ -7,8 +7,8 @@ use super::navigation::type_hint_label;
 use crate::utils::lsp::lsp_position;
 use parking_lot::RwLock;
 use ruby_analysis::core::RubyType;
-use ruby_analysis::core::SourceFileId;
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
+use ruby_analysis::core::{SourceFileId, VariableTypeKind};
+use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
 use ruby_analysis::indexer::{
     inlay_hints::{InlayNode, VariableKind},
     RubyDocument,

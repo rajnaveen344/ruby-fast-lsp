@@ -37,7 +37,7 @@ pub use queries::hierarchy::types::{
 };
 pub use queries::lookup::types::{
     ConstantHover, ConstantHoverKind, ConstantLookupRequest, ConstantMatch, MethodMatch,
-    MixinUsage, MixinUsageKind, VariableTypeKind,
+    MixinUsage, MixinUsageKind,
 };
 pub use queries::namespace_tree::types::{
     IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,

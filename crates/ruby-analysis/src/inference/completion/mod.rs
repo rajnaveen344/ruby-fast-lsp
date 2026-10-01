@@ -15,9 +15,10 @@ pub use shape_keys::{shape_key_completions_for_target, ShapeKeyCompletionResult}
 
 use method_return::{infer_bare_method_return_type, infer_method_call_return_type};
 
+use crate::core::MethodReceiver;
 use crate::core::RubyType;
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
-use crate::indexer::{CompletionReceiverTarget, Identifier, MethodReceiver, RubyDocument};
+use crate::indexer::{CompletionReceiverTarget, Identifier, RubyDocument};
 
 pub trait CompletionSemanticQuery {
     fn constant_type_in_context(

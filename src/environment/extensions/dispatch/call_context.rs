@@ -1,8 +1,8 @@
 use crate::invariant::ExpectInvariant;
+use ruby_analysis::core::MethodReceiver as CoreMethodReceiver;
 use ruby_analysis::core::{MethodCalleeResolution, NamespaceKind, RubyConstant, RubyMethod};
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
-use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
 use ruby_fast_lsp_extension_api::{
     Argument, ArgumentValue, CallContext, Keyword, NamespaceKind as AbiNamespaceKind, Receiver,
     ResolvedCall, ResolvedCallee, SourcePosition, SourceRange,

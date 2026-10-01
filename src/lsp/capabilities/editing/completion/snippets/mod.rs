@@ -1,4 +1,5 @@
-use ruby_analysis::indexer::{Identifier, MethodReceiver};
+use ruby_analysis::core::MethodReceiver;
+use ruby_analysis::indexer::Identifier;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
 
 /// Context for snippet completion to determine appropriate snippets

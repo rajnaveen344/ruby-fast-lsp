@@ -1,8 +1,9 @@
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{ForwardingSuperNode, SuperNode};
 
+use crate::core::MethodReceiver;
 use crate::core::{FullyQualifiedName, RubyMethod};
-use crate::indexer::{Identifier, MethodReceiver};
+use crate::indexer::Identifier;
 
 use crate::indexer::identifiers::{IdentifierType, IdentifierVisitor};
 
