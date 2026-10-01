@@ -1,8 +1,8 @@
-use crate::core::{
-    FullyQualifiedName, MethodReturnEquation, RubyMethod, RubyType, TypeInferenceOutcome,
-    UnknownReason,
-};
+use crate::core::{FullyQualifiedName, MethodReturnEquation, RubyMethod, RubyType};
+#[cfg(test)]
+use crate::core::{TypeInferenceOutcome, UnknownReason};
 use crate::inference::control_flow;
+#[cfg(test)]
 use crate::inference::method::recursive::MAX_RECURSIVE_RETURN_ITERATIONS;
 use crate::inference::type_tracker::returns::dependencies::join_recursive_return_approximations;
 use crate::inference::type_tracker::returns::RecursiveReturnApproximation;
@@ -13,6 +13,9 @@ use std::sync::Arc;
 
 impl TypeTracker {
     /// Infer a method's explicit and fallthrough returns from its Prism body.
+    /// Test entry point: production collects equations through
+    /// `track_method_equation` and the engine solves them.
+    #[cfg(test)]
     pub fn track_method(&mut self, method: &DefNode) -> RubyType {
         self.track_method_outcome(method).into_ruby_type()
     }
@@ -24,6 +27,7 @@ impl TypeTracker {
     /// public `Unknown` remains absorbing. A cycle with no proven base, an
     /// incomplete premise, or a non-converging equation therefore stays
     /// explainable Unknown instead of becoming a guessed concrete type.
+    #[cfg(test)]
     pub fn track_method_outcome(&mut self, method: &DefNode) -> TypeInferenceOutcome {
         let mut approximation = RecursiveReturnApproximation::Bottom;
         for _iteration in 0..MAX_RECURSIVE_RETURN_ITERATIONS {

@@ -20,10 +20,10 @@ remains supported; unavailable lookup evidence stays unproven.
 | Entry point | Responsibility |
 | --- | --- |
 | `track_program` | Follow top-level statements |
-| `track_method` / `track_method_outcome` | Infer explicit and fallthrough returns, retaining an Unknown reason when requested |
+| `track_method` / `track_method_outcome` (tests only) | Solve one method standalone, retaining an Unknown reason when requested |
 | `track_method_equation` (crate-private) | Collect a same-file return equation for engine resolution |
 | `track_isolated_block_body` (crate-private) | Infer a block body with the supplied parameter types |
-| `into_var_types` | Return variable snapshots for offset queries |
+| `into_var_types` (tests only) | Return variable snapshots for offset queries |
 | `take_local_read_types` (crate-private) | Return exact reads, collapsing repeated loop visits to their final evidence |
 
 ## State ownership

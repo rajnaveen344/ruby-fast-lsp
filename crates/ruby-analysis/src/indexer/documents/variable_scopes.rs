@@ -7,7 +7,6 @@
 //!
 //! - **ScopeNode**: Represents a single scope (method, block, class body, etc.)
 //! - **VariableNode**: Represents a local variable with its full def-use chain
-//! - **Capture**: References to variables from outer scopes (in blocks)
 //!
 //! # Scope Hierarchy
 //!
@@ -57,8 +56,6 @@ impl VariableScopes {
             kind: LVScopeKind::Constant,
             range: TextRange::default(),
             local_variables: Vec::new(),
-            captured_variables: Vec::new(),
-            name: None,
         };
         scopes.push(root);
 
@@ -84,12 +81,7 @@ impl VariableScopes {
     }
 
     /// Enter a new scope (called when entering method, block, etc.)
-    pub fn enter_scope(
-        &mut self,
-        kind: LVScopeKind,
-        range: TextRange,
-        name: Option<String>,
-    ) -> LVScopeId {
+    pub fn enter_scope(&mut self, kind: LVScopeKind, range: TextRange) -> LVScopeId {
         let parent = self.current;
         let id = self.scopes.len();
 
@@ -100,8 +92,6 @@ impl VariableScopes {
             kind,
             range,
             local_variables: Vec::new(),
-            captured_variables: Vec::new(),
-            name,
         };
 
         self.scopes.push(node);
@@ -635,12 +625,8 @@ pub struct ScopeNode {
     pub children: Vec<LVScopeId>,
     pub kind: LVScopeKind,
     pub range: TextRange,
-    /// Optional name (e.g., method name, block info)
-    pub name: Option<String>,
     /// Variables defined in this scope
     pub local_variables: Vec<VariableNode>,
-    /// References to variables from outer scopes (captured in blocks)
-    pub captured_variables: Vec<CaptureRef>,
 }
 
 #[derive(Clone)]
@@ -667,15 +653,6 @@ pub struct VariableNode {
 pub struct TypeAssignment {
     pub range: TextRange,
     pub ruby_type: RubyType,
-}
-
-/// A reference to a variable from an outer scope (captured in a block)
-#[derive(Clone)]
-pub struct CaptureRef {
-    pub variable_scope: LVScopeId,
-    pub variable_index: usize,
-    pub captured_by_scope: LVScopeId,
-    pub capture_location: TextRange,
 }
 
 /// A location that would be renamed

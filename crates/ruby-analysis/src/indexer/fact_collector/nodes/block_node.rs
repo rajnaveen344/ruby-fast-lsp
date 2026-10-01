@@ -13,7 +13,7 @@ impl FactCollector {
         self.scope_tracker.push_scope_kind(LVScopeKind::Block);
         self.document
             .variable_scopes_mut()
-            .enter_scope(LVScopeKind::Block, body_range, None);
+            .enter_scope(LVScopeKind::Block, body_range);
         self.assign_block_parameter_types(node);
     }
 

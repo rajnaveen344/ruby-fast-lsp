@@ -68,7 +68,7 @@ impl IndexerGem {
         self.load_locked_gems()?;
         let lockfile_wall = lockfile_started.elapsed();
         let installed_started = Instant::now();
-        self.discover_installed_gems()?;
+        self.discover_auto_gems()?;
         let installed_wall = installed_started.elapsed();
         let git_started = Instant::now();
         self.discover_cached_git_gems()?;
@@ -141,7 +141,7 @@ impl IndexerGem {
         self.load_locked_gems()?;
         let lockfile_wall = lockfile_started.elapsed();
         let installed_started = Instant::now();
-        self.discover_installed_gems()?;
+        self.discover_auto_gems()?;
         let installed_wall = installed_started.elapsed();
         let git_started = Instant::now();
         self.discover_cached_git_gems()?;
@@ -250,28 +250,6 @@ impl IndexerGem {
         Ok(())
     }
 
-    /// Discover all installed gems using the configured scope
-    fn discover_installed_gems(&mut self) -> Result<()> {
-        let scope = std::env::var("RUBY_LSP_GEM_SCOPE")
-            .unwrap_or_else(|_| "auto".to_string())
-            .to_lowercase();
-
-        match scope.as_str() {
-            "bundler" | "gemfile" => {
-                info!("Gem indexing scope: Bundler/Gemfile only");
-                self.discover_bundler_gems()
-            }
-            "global" => {
-                info!("Gem indexing scope: Global gems only");
-                self.discover_global_gems()
-            }
-            _ => {
-                debug!("Gem indexing scope: Auto (Bundler with in-process global fallback)");
-                self.discover_auto_gems()
-            }
-        }
-    }
-
     /// Discover the exact Bundler environment when available, otherwise the
     /// selected runtime's global RubyGems installation. Both branches execute
     /// in one selected-runtime process so a missing Bundler does not pay a
@@ -362,50 +340,6 @@ impl IndexerGem {
                 "automatic gem discovery returned unknown source `{other}`"
             )),
         }
-    }
-
-    /// Discover gems using Bundler (Gemfile-based)
-    fn discover_bundler_gems(&mut self) -> Result<()> {
-        let gemfile = self.find_gemfile()?;
-
-        let script = r#"
-            require 'bundler'
-            require 'json'
-            begin
-              Bundler.root
-              gems = Bundler.load.specs.map do |spec|
-                next if spec.name.nil? || spec.version.nil?
-                {{
-                  name: spec.name,
-                  version: spec.version.to_s,
-                  platform: spec.platform.to_s,
-                  gem_dir: spec.gem_dir,
-                  lib_dirs: spec.require_paths.map {{ |p| File.join(spec.gem_dir, p) }},
-                  dependencies: spec.runtime_dependencies.map(&:name),
-                  default_gem: spec.default_gem?
-                }}
-              end.compact
-              puts JSON.generate(gems)
-            rescue Bundler::GemfileNotFound
-              exit 1
-            end
-        "#;
-
-        let output = self
-            .ruby_command()?
-            .env("BUNDLE_GEMFILE", &gemfile)
-            .args(["-e", script])
-            .output()
-            .map_err(|e| anyhow!("Failed to execute bundler gem discovery: {}", e))?;
-
-        if !output.status.success() {
-            return Err(anyhow!(
-                "No Gemfile found or bundler failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        self.process_gem_json(&output.stdout, "Bundler", GemSource::BundlerInstalled)
     }
 
     /// Discover all global gems

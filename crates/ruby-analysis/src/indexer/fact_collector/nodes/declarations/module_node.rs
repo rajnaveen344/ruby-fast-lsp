@@ -29,12 +29,9 @@ impl FactCollector {
 
         self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
 
-        let module_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        self.document.variable_scopes_mut().enter_scope(
-            LVScopeKind::Constant,
-            body_range,
-            Some(module_name),
-        );
+        self.document
+            .variable_scopes_mut()
+            .enter_scope(LVScopeKind::Constant, body_range);
         true
     }
 

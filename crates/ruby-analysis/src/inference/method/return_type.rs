@@ -36,16 +36,6 @@ pub fn method_call_type_outcome(
     method_call_type_outcome_with_private(query, receiver_type, method_name, true)
 }
 
-pub fn method_call_return_type_with_private(
-    query: Option<&AnalysisQuery<'_>>,
-    receiver_type: &RubyType,
-    method_name: &str,
-    allow_private: bool,
-) -> Option<RubyType> {
-    method_call_type_outcome_with_private(query, receiver_type, method_name, allow_private)
-        .into_proven_type()
-}
-
 pub fn method_call_type_outcome_with_private(
     query: Option<&AnalysisQuery<'_>>,
     receiver_type: &RubyType,

@@ -628,7 +628,7 @@ impl TypeInferenceOutcome {
     /// reason because the dispatched branch is still unproven.
     pub fn with_nil_alternative(self) -> Self {
         match self.state {
-            TypeInferenceState::Proven(ruby_type) => Self::proven(ruby_type.make_nilable()),
+            TypeInferenceState::Proven(ruby_type) => Self::proven(RubyType::optional(ruby_type)),
             TypeInferenceState::Unknown(reason) => Self::unknown(reason),
         }
     }

@@ -149,13 +149,9 @@ impl FactCollector {
         // Setup local variable scope
         self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
 
-        // Get class name for scope tree
-        let class_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        self.document.variable_scopes_mut().enter_scope(
-            LVScopeKind::Constant,
-            body_range,
-            Some(class_name),
-        );
+        self.document
+            .variable_scopes_mut()
+            .enter_scope(LVScopeKind::Constant, body_range);
         true
     }
 

@@ -23,9 +23,10 @@ fn test_configured_gem_selection_augments_inferred_and_preserves_exclusions() {
     );
 }
 
-#[test]
-fn configured_ruby_version_overrides_runtime_auto_detection() {
+#[tokio::test]
+async fn configured_ruby_version_overrides_runtime_auto_detection() {
     let fixture = TestProjectFixture::new();
+    let server = create_test_server();
     let config = RubyFastLspConfig {
         ruby_version: "2.5".to_string(),
         ..RubyFastLspConfig::default()
@@ -33,7 +34,7 @@ fn configured_ruby_version_overrides_runtime_auto_detection() {
     let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
     assert_eq!(
-        coordinator.detect_ruby_version(),
+        select_ruby_version(&mut coordinator, &server).await,
         Some(RubyVersion::new(2, 5)),
         "an explicit Ruby version must select its matching core stubs"
     );
@@ -101,7 +102,10 @@ async fn auto_runtime_marker_becomes_the_exact_effective_runtime() {
         .await
         .unwrap();
     assert_eq!(
-        coordinator.detect_ruby_version(),
+        coordinator
+            .detect_ruby_version_off_reactor(&server)
+            .await
+            .unwrap(),
         Some(RubyVersion::new_with_implementation(
             2,
             5,

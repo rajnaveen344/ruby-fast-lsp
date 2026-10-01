@@ -40,7 +40,7 @@ impl RubySnippets {
     }
 
     /// Get control flow (keyword) snippets
-    pub fn get_control_flow_snippets() -> Vec<CompletionItem> {
+    fn get_control_flow_snippets() -> Vec<CompletionItem> {
         vec![
             Self::if_snippet(),
             Self::if_else_snippet(),
@@ -55,7 +55,7 @@ impl RubySnippets {
     }
 
     /// Get iterator/method snippets
-    pub fn get_iterator_snippets() -> Vec<CompletionItem> {
+    fn get_iterator_snippets() -> Vec<CompletionItem> {
         vec![
             Self::times_snippet(),
             Self::each_snippet(),
@@ -67,12 +67,12 @@ impl RubySnippets {
     }
 
     /// Get block snippets
-    pub fn get_block_snippets() -> Vec<CompletionItem> {
+    fn get_block_snippets() -> Vec<CompletionItem> {
         vec![Self::do_block_snippet(), Self::brace_block_snippet()]
     }
 
     /// Get definition snippets
-    pub fn get_definition_snippets() -> Vec<CompletionItem> {
+    fn get_definition_snippets() -> Vec<CompletionItem> {
         vec![
             Self::def_snippet(),
             Self::def_with_args_snippet(),
@@ -83,7 +83,7 @@ impl RubySnippets {
     }
 
     /// Get exception handling snippets
-    pub fn get_exception_snippets() -> Vec<CompletionItem> {
+    fn get_exception_snippets() -> Vec<CompletionItem> {
         vec![
             Self::begin_rescue_snippet(),
             Self::begin_rescue_ensure_snippet(),
@@ -92,7 +92,7 @@ impl RubySnippets {
     }
 
     /// Get testing snippets
-    pub fn get_testing_snippets() -> Vec<CompletionItem> {
+    fn get_testing_snippets() -> Vec<CompletionItem> {
         vec![
             Self::describe_snippet(),
             Self::it_snippet(),
@@ -159,28 +159,6 @@ impl RubySnippets {
             .collect();
 
         matching_snippets
-    }
-
-    /// Get snippets that match a given prefix (backward compatibility)
-    pub fn get_matching_snippets(prefix: &str) -> Vec<CompletionItem> {
-        Self::get_matching_snippets_with_context(prefix, SnippetContext::General)
-    }
-
-    /// Determine snippet context from identifier information and position context
-    pub fn determine_context(identifier: &Option<Identifier>) -> SnippetContext {
-        match identifier {
-            Some(Identifier::RubyMethod {
-                receiver:
-                    MethodReceiver::LocalVariable(_)
-                    | MethodReceiver::InstanceVariable(_)
-                    | MethodReceiver::ClassVariable(_)
-                    | MethodReceiver::GlobalVariable(_)
-                    | MethodReceiver::MethodCall { .. }
-                    | MethodReceiver::Expression,
-                ..
-            }) => SnippetContext::MethodCall,
-            _ => SnippetContext::General,
-        }
     }
 
     /// Enhanced context determination that considers position and line content

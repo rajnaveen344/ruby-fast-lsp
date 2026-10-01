@@ -6,7 +6,7 @@ use rbs_parser::RbsType;
 
 #[test]
 fn test_rbs_loader_initialized() {
-    let count = rbs_declaration_count();
+    let count = RBS_LOADER.read().declaration_count();
     assert!(count > 0, "RBS loader should have declarations");
     println!("Loaded {} RBS declarations", count);
 }

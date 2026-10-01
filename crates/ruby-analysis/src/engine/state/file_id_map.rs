@@ -11,15 +11,10 @@ use crate::core::SourceFileId;
 #[derive(Debug, Clone, Default)]
 pub struct FileIdMap {
     by_path: HashMap<PathBuf, SourceFileId>,
-    by_id: HashMap<SourceFileId, PathBuf>,
     next_id: u32,
 }
 
 impl FileIdMap {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn get_or_insert(&mut self, path: impl AsRef<Path>) -> SourceFileId {
         let path = normalize_path(path.as_ref());
         if let Some(id) = self.by_path.get(&path) {
@@ -32,8 +27,7 @@ impl FileIdMap {
              This is a bug because SourceFileId currently stores u32 ids. \
              Fix: widen SourceFileId before indexing more than u32::MAX files.",
         );
-        self.by_path.insert(path.clone(), id);
-        self.by_id.insert(id, path);
+        self.by_path.insert(path, id);
         id
     }
 
@@ -41,34 +35,15 @@ impl FileIdMap {
         self.by_path.get(&normalize_path(path.as_ref())).copied()
     }
 
-    pub fn path(&self, id: SourceFileId) -> Option<&Path> {
-        self.by_id.get(&id).map(PathBuf::as_path)
-    }
-
-    pub fn len(&self) -> usize {
-        self.by_path.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.by_path.is_empty()
-    }
-
     pub fn shrink_to_fit(&mut self) {
         self.by_path.shrink_to_fit();
-        self.by_id.shrink_to_fit();
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
         self.by_path.capacity() * (size_of::<PathBuf>() + size_of::<SourceFileId>() + 1)
-            + self.by_id.capacity() * (size_of::<SourceFileId>() + size_of::<PathBuf>() + 1)
             + self
                 .by_path
                 .keys()
-                .map(|path| path_heap_bytes(path.as_path()))
-                .sum::<usize>()
-            + self
-                .by_id
-                .values()
                 .map(|path| path_heap_bytes(path.as_path()))
                 .sum::<usize>()
     }
@@ -88,24 +63,24 @@ mod tests {
 
     #[test]
     fn same_path_gets_same_id() {
-        let mut ids = FileIdMap::new();
+        let mut ids = FileIdMap::default();
 
         let first = ids.get_or_insert("app/user.rb");
         let second = ids.get_or_insert("app/user.rb");
 
         assert_eq!(first, second);
-        assert_eq!(ids.len(), 1);
+        assert_eq!(ids.get("app/user.rb"), Some(first));
     }
 
     #[test]
     fn different_paths_get_different_ids() {
-        let mut ids = FileIdMap::new();
+        let mut ids = FileIdMap::default();
 
         let first = ids.get_or_insert("app/user.rb");
         let second = ids.get_or_insert("app/team.rb");
 
         assert_ne!(first, second);
-        assert_eq!(ids.path(first), Some(Path::new("app/user.rb")));
-        assert_eq!(ids.path(second), Some(Path::new("app/team.rb")));
+        assert_eq!(ids.get("app/user.rb"), Some(first));
+        assert_eq!(ids.get("app/team.rb"), Some(second));
     }
 }

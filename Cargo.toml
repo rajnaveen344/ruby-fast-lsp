@@ -73,7 +73,6 @@ once_cell = "1.19"
 chrono = { version = "0.4.31", features = ["serde"] }
 flate2 = "1.0.28"
 fs2 = "0.4"
-slotmap = "1.0"
 rayon = "1.10"
 
 # Archives: gem packages and persistent cache envelopes
@@ -98,8 +97,6 @@ windows-sys = { version = "0.59", features = [
 
 [dev-dependencies]
 tokio = { version = "1.32.0", features = ["test-util"] }
-tokio-test = "0.4.3"
-pretty_assertions = "1.4.0"
 tempfile = "3.8.0"
 async-trait = "0.1.73"
 wat = "1.248.0"

@@ -1,9 +1,9 @@
 //! Method return evidence and bounded recursive return solving.
 
 use crate::core::equations::method_return_equation::MethodReturnBase;
-use crate::core::{
-    ConstantTypeDependency, FullyQualifiedName, RubyType, TypeInferenceOutcome, UnknownReason,
-};
+#[cfg(test)]
+use crate::core::TypeInferenceOutcome;
+use crate::core::{ConstantTypeDependency, FullyQualifiedName, RubyType, UnknownReason};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub(in crate::inference::type_tracker) mod dependencies;
@@ -38,6 +38,7 @@ impl RecursiveReturnApproximation {
         }
     }
 
+    #[cfg(test)]
     pub(in crate::inference::type_tracker) fn into_outcome(
         self,
         unknown_reason: UnknownReason,

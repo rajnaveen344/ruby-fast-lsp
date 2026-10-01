@@ -7,7 +7,7 @@ mod variables;
 
 use crate::core::{ExecutionContextFact, ExecutionScopeMode, NamespaceKind, RubyConstant};
 
-use crate::indexer::{Identifier, LVScopeId, RubyDocument, ScopeTracker};
+use crate::indexer::{Identifier, LVScopeId, ScopeTracker};
 
 use ruby_prism::*;
 
@@ -45,13 +45,13 @@ pub struct IdentifierVisitor {
 }
 
 impl IdentifierVisitor {
-    pub fn new(document: RubyDocument, position: crate::core::SourcePosition) -> Self {
+    #[cfg(test)]
+    pub fn new(
+        document: crate::indexer::RubyDocument,
+        position: crate::core::SourcePosition,
+    ) -> Self {
         let byte_offset = document.position_to_analysis_offset(position);
-        Self::new_at_offset(document.content, byte_offset)
-    }
-
-    pub fn new_at_offset(content: String, byte_offset: u32) -> Self {
-        Self::new_with_execution_context_at_offset(content, byte_offset, None)
+        Self::new_with_execution_context_at_offset(document.content, byte_offset, None)
     }
 
     pub fn new_with_execution_context_at_offset(

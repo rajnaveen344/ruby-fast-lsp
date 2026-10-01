@@ -2,7 +2,6 @@
 //!
 //! [`AnalysisEngine`] owns one project's semantic state. Callers register source,
 //! replace [`FileFacts`], and read domain results through [`AnalysisQuery`].
-//! [`TypeQuery`] provides a file-scoped view of existing type facts.
 //!
 //! Resolution coordinates the constant and method-return equation solvers in
 //! [`crate::inference`], then stores their outcomes through the same file-owned
@@ -17,11 +16,7 @@ mod resolution;
 mod state;
 
 pub use debug::reference_storage_sizes;
-pub use debug::types::{
-    AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
-    InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
-    StatsResponse,
-};
+pub use debug::types::{ExportGraphResponse, LookupResponse};
 pub use queries::cache::AnalysisQueryCache;
 pub use queries::hierarchy::types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
@@ -35,7 +30,6 @@ pub use queries::namespace_tree::types::{
     IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
     MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
-pub use queries::type_query::TypeQuery;
 pub use queries::workspace_symbols::types::WorkspaceSymbolMatch;
 pub use queries::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};

@@ -4,12 +4,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodFact, RubyConstant,
-    RubyMethod, SymbolFact, SymbolKind, TextRange,
+    RubyMethod, SymbolFact, TextRange,
 };
 use crate::engine::debug::types::{
-    AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
-    InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
-    StatsResponse,
+    ExportGraphResponse, GraphNodeSnapshot, LookupEntry, LookupResponse,
 };
 use crate::engine::queries::namespace_tree::analysis_location_info;
 use crate::engine::queries::AnalysisQuery;
@@ -83,139 +81,6 @@ impl<'a> AnalysisQuery<'a> {
         LookupResponse {
             found: !entries.is_empty(),
             entries,
-        }
-    }
-
-    pub fn debug_stats(&self, indexing_complete: bool) -> StatsResponse {
-        let symbols = self.engine.all_symbol_facts();
-        let unique_definitions = symbols
-            .iter()
-            .map(|fact| fact.fqn.clone())
-            .collect::<HashSet<_>>()
-            .len();
-
-        StatsResponse {
-            total_definitions: unique_definitions,
-            total_entries: symbols.len(),
-            classes: count_symbols(&symbols, SymbolKind::Class),
-            modules: count_symbols(&symbols, SymbolKind::Module),
-            methods: count_symbols(&symbols, SymbolKind::Method),
-            constants: count_symbols(&symbols, SymbolKind::Constant),
-            instance_variables: count_symbols(&symbols, SymbolKind::InstanceVariable),
-            files_indexed: self.engine.file_count(),
-            indexing_complete,
-        }
-    }
-
-    pub fn debug_ancestors(&self, class_name: &str) -> AncestorsResponse {
-        let Some(namespace) = parse_namespace(class_name) else {
-            return AncestorsResponse {
-                class: class_name.to_string(),
-                ancestors: Vec::new(),
-            };
-        };
-        let fqn = FullyQualifiedName::namespace_with_kind(
-            namespace,
-            crate::core::NamespaceKind::Instance,
-        );
-        let ancestors = self
-            .engine
-            .graph_edges_from(&fqn)
-            .iter()
-            .map(|edge| AncestorEntry {
-                name: fqn_to_key(&edge.target),
-                kind: graph_edge_kind_label(edge.kind).to_string(),
-            })
-            .collect();
-
-        AncestorsResponse {
-            class: class_name.to_string(),
-            ancestors,
-        }
-    }
-
-    pub fn debug_methods(&self, class_name: &str) -> MethodsResponse {
-        let Some(namespace) = parse_namespace(class_name) else {
-            return MethodsResponse {
-                class: class_name.to_string(),
-                methods: Vec::new(),
-            };
-        };
-        let mut methods = self
-            .engine
-            .all_method_facts()
-            .into_iter()
-            .filter(|fact| fact.owner.namespace_parts() == namespace)
-            .map(|fact| MethodEntry {
-                name: method_name(&fact),
-                kind: format!(
-                    "{:?}",
-                    fact.owner
-                        .namespace_kind()
-                        .unwrap_or(crate::core::NamespaceKind::Instance)
-                ),
-                visibility: "Public".to_string(),
-                return_type: self
-                    .method_return_type(&fact)
-                    .and_then(non_unknown_type_string),
-            })
-            .collect::<Vec<_>>();
-        methods.sort_by_key(|method| (method.kind.clone(), method.name.clone()));
-
-        MethodsResponse {
-            class: class_name.to_string(),
-            methods,
-        }
-    }
-
-    pub fn debug_inference_stats(&self) -> InferenceStatsResponse {
-        let methods = self.engine.all_method_facts();
-        let total_methods = methods.len();
-        let mut methods_with_return_type = 0usize;
-        let mut file_method_counts: HashMap<String, usize> = HashMap::new();
-
-        for fact in &methods {
-            if self
-                .method_return_type(fact)
-                .and_then(non_unknown_type_string)
-                .is_some()
-            {
-                methods_with_return_type += 1;
-            }
-            let file_name = self
-                .engine
-                .file(fact.range.file_id)
-                .and_then(|file| {
-                    file.path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().to_string())
-                })
-                .unwrap_or_else(|| "unknown".to_string());
-            *file_method_counts.entry(file_name).or_insert(0) += 1;
-        }
-
-        let methods_without_return_type = total_methods - methods_with_return_type;
-        let inference_coverage_percent = if total_methods > 0 {
-            (methods_with_return_type as f64 / total_methods as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        let mut file_counts = file_method_counts.into_iter().collect::<Vec<_>>();
-        file_counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-        let top_files_by_method_count = file_counts
-            .into_iter()
-            .take(10)
-            .map(|(file, method_count)| FileMethodCount { file, method_count })
-            .collect();
-
-        InferenceStatsResponse {
-            total_methods,
-            methods_with_return_type,
-            methods_without_return_type,
-            inference_coverage_percent,
-            top_files_by_method_count,
-            proof_telemetry: self.engine.inference_telemetry(),
         }
     }
 
@@ -315,28 +180,12 @@ fn lookup_entry_from_method_fact(engine: &AnalysisEngine, fact: &MethodFact) -> 
     }
 }
 
-fn count_symbols(symbols: &[SymbolFact], kind: SymbolKind) -> usize {
-    symbols.iter().filter(|fact| fact.kind == kind).count()
-}
-
 fn non_unknown_type_string(ruby_type: crate::core::RubyType) -> Option<String> {
     if ruby_type == crate::core::RubyType::Unknown {
         None
     } else {
         Some(ruby_type.to_string())
     }
-}
-
-fn method_name(fact: &MethodFact) -> String {
-    let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-        panic!(
-            "INVARIANT VIOLATED: MethodFact FQN is not a method: {}. \
-             This is a bug because MethodStore must only contain method FQNs. \
-             Fix: validate MethodFact before insertion.",
-            fact.fqn
-        );
-    };
-    method.get_name().to_string()
 }
 
 fn location_string(engine: &AnalysisEngine, range: TextRange) -> String {
@@ -477,14 +326,4 @@ fn method_resolution_order(engine: &AnalysisEngine, fqn: &FullyQualifiedName) ->
         .into_iter()
         .map(|item| fqn_to_key(&item))
         .collect()
-}
-
-fn graph_edge_kind_label(kind: GraphEdgeKind) -> &'static str {
-    match kind {
-        GraphEdgeKind::Superclass => "superclass",
-        GraphEdgeKind::Include => "include",
-        GraphEdgeKind::Extend => "extend",
-        GraphEdgeKind::Prepend => "prepend",
-        GraphEdgeKind::ExecutionContextApplication => "execution-context-application",
-    }
 }

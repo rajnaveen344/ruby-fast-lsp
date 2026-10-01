@@ -98,9 +98,6 @@ pub struct IndexingCoordinator {
     // Gem indexer
     gem_indexer: Option<IndexerGem>,
 
-    // Where to find Ruby libraries on this system
-    ruby_library_paths: Vec<PathBuf>,
-
     /// Timings from the most recent `run_complete_indexing` call.
     last_timings: IndexingTimings,
     indexing_run: Option<crate::indexer::scheduling::status::IndexingRun>,
@@ -138,7 +135,6 @@ impl IndexingCoordinator {
             project_indexer: None,
             stdlib_indexer: None,
             gem_indexer: None,
-            ruby_library_paths: Vec::new(),
             last_timings: IndexingTimings::default(),
             indexing_run: None,
             analysis_engine_override: None,

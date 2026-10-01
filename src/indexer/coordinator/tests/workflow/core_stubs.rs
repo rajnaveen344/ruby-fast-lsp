@@ -210,30 +210,6 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
 }
 
 #[tokio::test]
-async fn test_coordinator_core_stubs_resolution() {
-    let fixture = TestProjectFixture::new();
-    fixture.create_core_stubs();
-
-    let config = RubyFastLspConfig::default();
-    let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
-
-    // Test core stubs path resolution
-    let stubs_path = coordinator.find_core_stubs_for_version((3, 0));
-    assert!(stubs_path.is_some(), "Should find core stubs path");
-
-    let stubs_path = stubs_path.unwrap();
-    assert!(stubs_path.exists(), "Core stubs path should exist");
-    assert!(
-        stubs_path.join("object.rb").exists(),
-        "Should find object.rb stub"
-    );
-    assert!(
-        stubs_path.join("string.rb").exists(),
-        "Should find string.rb stub"
-    );
-}
-
-#[tokio::test]
 async fn test_coordinator_with_missing_directories() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let project_root = temp_dir.path().to_path_buf();

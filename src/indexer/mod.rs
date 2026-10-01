@@ -22,7 +22,6 @@
 pub mod cache;
 pub mod coordinator;
 pub mod file_processor;
-pub mod interner;
 pub mod require_paths;
 pub mod scheduling;
 pub mod sources;

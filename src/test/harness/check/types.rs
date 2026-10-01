@@ -1,7 +1,9 @@
 //! Inferred types at a point.
 
-use ruby_analysis::core::{FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeSubject};
-use ruby_analysis::engine::{AnalysisQuery, TypeQuery};
+use ruby_analysis::core::{
+    FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeResolution, TypeSubject,
+};
+use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use ruby_prism::{DefNode, Visit};
 use tower_lsp::lsp_types::Url;
@@ -60,18 +62,26 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                     let scope = u32::try_from(scope).expect(
                         "INVARIANT VIOLATED: local variable scope id exceeded u32. This is a bug because TypeSubject::Local stores u32 scope ids. Fix: widen TypeSubject::Local scope_id.",
                     );
-                    TypeQuery::new(&engine, document.analysis_file_id())
-                        .get_local_variable_type_at(name, scope, byte_offset)
+                    AnalysisQuery::new(&engine).local_variable_type_at(
+                        name,
+                        scope,
+                        document.analysis_file_id(),
+                        byte_offset,
+                    )
                 });
                 (TypeKind::Var, inferred)
             }
             Identifier::RubyConstant { iden, .. } => {
                 let constant = FullyQualifiedName::constant(iden.clone());
-                let inferred = TypeQuery::new(&engine, document.analysis_file_id())
-                    .get_constant_type_at(&constant, byte_offset)
-                    .unwrap_or_else(|| {
-                        RubyType::Class(FullyQualifiedName::namespace(iden.clone()))
-                    });
+                let inferred = match AnalysisQuery::new(&engine).type_at(
+                    &TypeSubject::Constant(constant),
+                    document.analysis_file_id(),
+                    byte_offset,
+                ) {
+                    TypeResolution::Resolved(fact) => Some(fact.ruby_type),
+                    TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => None,
+                }
+                .unwrap_or_else(|| RubyType::Class(FullyQualifiedName::namespace(iden.clone())));
                 (TypeKind::Const, Some(inferred))
             }
             Identifier::RubyMethod {

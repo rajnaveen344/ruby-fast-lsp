@@ -37,3 +37,19 @@ use zip::write::SimpleFileOptions;
 mod jruby;
 mod scheduling;
 mod workflow;
+
+/// Select the project runtime and Ruby version through the production
+/// indexing sequence: exact runtime resolution, then version selection.
+async fn select_ruby_version(
+    coordinator: &mut IndexingCoordinator,
+    server: &RubyLanguageServer,
+) -> Option<RubyVersion> {
+    coordinator
+        .resolve_effective_runtime(server)
+        .await
+        .expect("fixture runtime selection must resolve");
+    coordinator
+        .detect_ruby_version_off_reactor(server)
+        .await
+        .expect("fixture Ruby version selection must succeed")
+}

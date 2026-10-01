@@ -144,7 +144,7 @@ fn local_read_type_from_analysis(context: &HoverContext, byte_offset: u32) -> Op
     AnalysisQuery::new(&engine).local_read_type_at(file_id, byte_offset)
 }
 
-/// Get type from TypeQuery.
+/// Get a local variable type from engine type facts.
 fn get_type_from_type_query(
     context: &HoverContext,
     name: &str,

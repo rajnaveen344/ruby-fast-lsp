@@ -15,13 +15,15 @@ fn test_get_all_snippets_returns_expected_count() {
 #[test]
 fn test_get_matching_snippets_empty_prefix_returns_all() {
     let all_snippets = RubySnippets::get_all_snippets();
-    let matching_snippets = RubySnippets::get_matching_snippets("");
+    let matching_snippets =
+        RubySnippets::get_matching_snippets_with_context("", SnippetContext::General);
     assert_eq!(all_snippets.len(), matching_snippets.len());
 }
 
 #[test]
 fn test_get_matching_snippets_each_prefix() {
-    let matching_snippets = RubySnippets::get_matching_snippets("each");
+    let matching_snippets =
+        RubySnippets::get_matching_snippets_with_context("each", SnippetContext::General);
 
     // Should find both each and each_with_index snippets
     assert!(
@@ -100,9 +102,12 @@ fn test_contextual_map_snippet_in_method_context() {
 
 #[test]
 fn test_get_matching_snippets_case_insensitive() {
-    let matching_snippets_lower = RubySnippets::get_matching_snippets("each");
-    let matching_snippets_upper = RubySnippets::get_matching_snippets("EACH");
-    let matching_snippets_mixed = RubySnippets::get_matching_snippets("Each");
+    let matching_snippets_lower =
+        RubySnippets::get_matching_snippets_with_context("each", SnippetContext::General);
+    let matching_snippets_upper =
+        RubySnippets::get_matching_snippets_with_context("EACH", SnippetContext::General);
+    let matching_snippets_mixed =
+        RubySnippets::get_matching_snippets_with_context("Each", SnippetContext::General);
 
     assert_eq!(matching_snippets_lower.len(), matching_snippets_upper.len());
     assert_eq!(matching_snippets_lower.len(), matching_snippets_mixed.len());
@@ -110,7 +115,8 @@ fn test_get_matching_snippets_case_insensitive() {
 
 #[test]
 fn test_get_matching_snippets_partial_match() {
-    let matching_snippets = RubySnippets::get_matching_snippets("sel");
+    let matching_snippets =
+        RubySnippets::get_matching_snippets_with_context("sel", SnippetContext::General);
 
     // Should find select snippets
     let labels: Vec<&String> = matching_snippets.iter().map(|s| &s.label).collect();
@@ -122,7 +128,8 @@ fn test_get_matching_snippets_partial_match() {
 
 #[test]
 fn test_get_matching_snippets_filter_text_contains() {
-    let matching_snippets = RubySnippets::get_matching_snippets("i");
+    let matching_snippets =
+        RubySnippets::get_matching_snippets_with_context("i", SnippetContext::General);
 
     // Should find snippets where filter_text contains "i"
     let labels: Vec<&String> = matching_snippets.iter().map(|s| &s.label).collect();
@@ -317,7 +324,7 @@ fn test_determine_context_with_analyzer() {
         ruby_analysis::core::SourcePosition::new(position.line, position.character),
     );
 
-    let context = RubySnippets::determine_context(&identifier);
+    let context = RubySnippets::determine_context_with_position(&identifier, "", 0);
     match context {
         SnippetContext::MethodCall => {}
         SnippetContext::General => {
@@ -340,7 +347,7 @@ fn test_determine_context_with_analyzer() {
         ruby_analysis::core::SourcePosition::new(position2.line, position2.character),
     );
 
-    let context2 = RubySnippets::determine_context(&identifier2);
+    let context2 = RubySnippets::determine_context_with_position(&identifier2, "", 0);
     assert!(
         matches!(context2, SnippetContext::General),
         "Expected General context for standalone 'each'"
@@ -363,7 +370,7 @@ fn test_full_completion_output_with_analyzer() {
         ruby_analysis::core::SourcePosition::new(position.line, position.character),
     );
 
-    let context = RubySnippets::determine_context(&identifier);
+    let context = RubySnippets::determine_context_with_position(&identifier, "", 0);
     let completions = RubySnippets::get_matching_snippets_with_context("each", context);
 
     // Find the each snippet
@@ -401,7 +408,7 @@ fn test_full_completion_output_with_analyzer() {
         ruby_analysis::core::SourcePosition::new(position2.line, position2.character),
     );
 
-    let context2 = RubySnippets::determine_context(&identifier2);
+    let context2 = RubySnippets::determine_context_with_position(&identifier2, "", 0);
     let completions2 = RubySnippets::get_matching_snippets_with_context("each", context2);
 
     let each_completion2 = completions2.iter().find(|s| s.label == "each");

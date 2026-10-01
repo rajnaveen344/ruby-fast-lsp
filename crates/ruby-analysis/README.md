@@ -8,7 +8,7 @@ root exposes four modules; import a concept from the module that owns it.
 | `core` | Names, source identities, byte ranges, types, and semantic facts | `RubyType`, `TextRange`, `SourceFileId`, `MethodFact` |
 | `indexer` | Parse source and collect file-owned facts | `AnalysisIndexer`, `fact_collector::FactCollector`, `index_rbs` |
 | `inference` | Derive types from expressions, flow, calls, and signatures | `type_tracker::TypeTracker`, `method`, `rbs` |
-| `engine` | Own project state, resolve facts, and answer semantic queries | `AnalysisEngine`, `FileFacts`, `AnalysisQuery`, `TypeQuery` |
+| `engine` | Own project state, resolve facts, and answer semantic queries | `AnalysisEngine`, `FileFacts`, `AnalysisQuery` |
 
 `RubyType` belongs to `core`, including when inference produces it. Engine
 stores, interned IDs, and stored representations are internal. Public consumers
@@ -87,8 +87,8 @@ background producers must retain `SourceFileSnapshot` and use
 `replace_facts_if_source_snapshot`; an obsolete producer cannot replace newer
 source facts.
 
-`AnalysisQuery` reads an engine snapshot. `TypeQuery::new(&engine, file_id)` is a
-file-scoped view of existing type facts; it does not trigger inference or copy
+`AnalysisQuery` reads an engine snapshot, including file-scoped type facts
+(`type_at`, `local_variable_type_at`); it does not trigger inference or copy
 stores. During collection, extensions use `FactCollector::add_type_fact` and
 the collector's fact views. Final publication still goes through replacement.
 

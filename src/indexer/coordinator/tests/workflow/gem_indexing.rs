@@ -4,10 +4,6 @@ use super::*;
 
 #[tokio::test]
 async fn test_coordinator_gem_discovery() {
-    // Set environment variable to limit gem processing for faster tests
-    // SAFETY: This test is not run concurrently with other tests that modify this env var
-    unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "5") };
-
     let fixture = TestProjectFixture::new();
     fixture.setup_complete_project();
 
@@ -23,22 +19,10 @@ async fn test_coordinator_gem_discovery() {
         coordinator.gem_indexer.is_some(),
         "production gem discovery must initialize the owning project's exact gem indexer"
     );
-    assert!(
-        coordinator.get_ruby_library_paths().is_empty(),
-        "complete indexing must not launch the redundant legacy load-path discovery"
-    );
-
-    // Clean up environment variable
-    // SAFETY: This test is not run concurrently with other tests that modify this env var
-    unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
 }
 
 #[tokio::test]
 async fn test_coordinator_gem_indexing_integration() {
-    // Set environment variable to limit gem processing for faster tests
-    // SAFETY: This test is not run concurrently with other tests that modify this env var
-    unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "3") };
-
     let fixture = TestProjectFixture::new();
     fixture.setup_complete_project();
 
@@ -57,30 +41,17 @@ async fn test_coordinator_gem_indexing_integration() {
         coordinator.gem_indexer.is_some(),
         "gem indexing must complete through the owning project's exact gem indexer"
     );
-    assert!(
-        coordinator.get_ruby_library_paths().is_empty(),
-        "gem indexing must not populate the unused legacy load-path side table"
-    );
 
     // The gem indexing should not interfere with project file indexing
-    let mut project_files = Vec::new();
-    coordinator.find_all_ruby_files_in_directory(fixture.project_root(), &mut project_files);
+    let project_files = crate::utils::collect_ruby_files(fixture.project_root());
     assert!(
         !project_files.is_empty(),
         "Project files should still be discoverable after gem indexing"
     );
-
-    // Clean up environment variable
-    // SAFETY: This test is not run concurrently with other tests that modify this env var
-    unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
 }
 
 #[tokio::test]
 async fn test_coordinator_gem_error_handling() {
-    // Set environment variable to limit gem processing for faster tests
-    // SAFETY: This test is not run concurrently with other tests that modify this env var
-    unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "2") };
-
     let fixture = TestProjectFixture::new();
     fixture.setup_complete_project();
 
@@ -95,24 +66,10 @@ async fn test_coordinator_gem_error_handling() {
         result.is_ok(),
         "Indexing should succeed even if gem discovery encounters errors"
     );
-
-    // Basic functionality should still work
-    let lib_dirs = coordinator.get_ruby_library_paths();
-    // We should at least have some directories (even if gem discovery failed)
-    // The system Ruby directories should still be found
-    let _ = lib_dirs;
-
-    // Clean up environment variable
-    // SAFETY: This test is not run concurrently with other tests that modify this env var
-    unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
 }
 
 #[tokio::test]
 async fn test_coordinator_gem_performance() {
-    // Set environment variable to limit gem processing for faster tests
-    // SAFETY: This test is not run concurrently with other tests that modify this env var
-    unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "3") };
-
     let fixture = TestProjectFixture::new();
     fixture.setup_complete_project();
 
@@ -142,8 +99,4 @@ async fn test_coordinator_gem_performance() {
         "Indexing with gem discovery completed in {}ms",
         elapsed.as_millis()
     );
-
-    // Clean up environment variable
-    // SAFETY: This test is not run concurrently with other tests that modify this env var
-    unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
 }

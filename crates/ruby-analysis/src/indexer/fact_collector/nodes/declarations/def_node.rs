@@ -264,11 +264,9 @@ impl FactCollector {
             namespace_kind,
         );
 
-        self.document.variable_scopes_mut().enter_scope(
-            scope_kind,
-            body_range,
-            Some(method_name_str.to_string()),
-        );
+        self.document
+            .variable_scopes_mut()
+            .enter_scope(scope_kind, body_range);
 
         // Convert YARD types to RubyType for type inference
         // Use namespace-aware conversion to resolve relative type names

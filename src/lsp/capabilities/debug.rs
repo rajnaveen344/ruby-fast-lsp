@@ -1,14 +1,8 @@
-//! Debug capabilities exposed through custom LSP requests.
-//!
-//! This module provides custom debug methods that can be invoked via the
-//! `$/listCommands` protocol.
+//! Debug capabilities exposed through custom LSP requests: FQN lookup for the
+//! VS Code index view and graph export.
 
 use log::debug;
-pub use ruby_analysis::engine::{
-    AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
-    InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
-    StatsResponse,
-};
+pub use ruby_analysis::engine::{ExportGraphResponse, LookupResponse};
 use serde::{Deserialize, Serialize};
 
 use crate::lsp::query::EngineQuery;
@@ -29,38 +23,6 @@ fn project_engine(server: &RubyLanguageServer, uri: Option<&str>) -> Arc<RwLock<
 }
 
 // ============================================================================
-// Protocol Types
-// ============================================================================
-
-/// A parameter definition for a custom command.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandParam {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub param_type: String,
-    #[serde(default)]
-    pub required: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-/// A custom command definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandDefinition {
-    pub name: String,
-    pub method: String,
-    pub description: String,
-    #[serde(default)]
-    pub params: Vec<CommandParam>,
-}
-
-/// Response from `$/listCommands`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ListCommandsResponse {
-    pub commands: Vec<CommandDefinition>,
-}
-
-// ============================================================================
 // Lookup Types
 // ============================================================================
 
@@ -69,31 +31,6 @@ pub struct ListCommandsResponse {
 pub struct LookupParams {
     /// The fully qualified name to look up (e.g., "User#find", "Foo::Bar")
     pub fqn: String,
-    #[serde(default)]
-    pub uri: Option<String>,
-}
-
-// ============================================================================
-// Stats Types
-// ============================================================================
-
-/// Parameters for `ruby-fast-lsp/debug/stats`.
-/// Empty struct to satisfy tower-lsp custom method requirements.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StatsParams {
-    #[serde(default)]
-    pub uri: Option<String>,
-}
-
-// ============================================================================
-// Ancestors Types
-// ============================================================================
-
-/// Parameters for `ruby-fast-lsp/debug/ancestors`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AncestorsParams {
-    /// The class/module name to get ancestors for
-    pub class: String,
     #[serde(default)]
     pub uri: Option<String>,
 }
@@ -113,118 +50,11 @@ pub struct ExportGraphParams {
 // Handlers
 // ============================================================================
 
-/// Handle `$/listCommands` - return the list of available custom commands.
-pub fn handle_list_commands() -> ListCommandsResponse {
-    debug!("[DEBUG] Listing available commands");
-
-    let commands = vec![
-        CommandDefinition {
-            name: "lookup".to_string(),
-            method: "ruby-fast-lsp/debug/lookup".to_string(),
-            description: "Query index for a fully qualified name (e.g., User#find, Foo::Bar)"
-                .to_string(),
-            params: vec![CommandParam {
-                name: "fqn".to_string(),
-                param_type: "string".to_string(),
-                required: true,
-                description: Some("The FQN to look up".to_string()),
-            }],
-        },
-        CommandDefinition {
-            name: "stats".to_string(),
-            method: "ruby-fast-lsp/debug/stats".to_string(),
-            description: "Show index statistics".to_string(),
-            params: vec![],
-        },
-        CommandDefinition {
-            name: "ancestors".to_string(),
-            method: "ruby-fast-lsp/debug/ancestors".to_string(),
-            description: "Show inheritance and mixin chain for a class".to_string(),
-            params: vec![CommandParam {
-                name: "class".to_string(),
-                param_type: "string".to_string(),
-                required: true,
-                description: Some("The class name".to_string()),
-            }],
-        },
-        CommandDefinition {
-            name: "methods".to_string(),
-            method: "ruby-fast-lsp/debug/methods".to_string(),
-            description: "List all methods for a class".to_string(),
-            params: vec![CommandParam {
-                name: "class".to_string(),
-                param_type: "string".to_string(),
-                required: true,
-                description: Some("The class name".to_string()),
-            }],
-        },
-        CommandDefinition {
-            name: "inference-stats".to_string(),
-            method: "ruby-fast-lsp/debug/inference-stats".to_string(),
-            description: "Show type inference statistics and coverage".to_string(),
-            params: vec![],
-        },
-    ];
-
-    ListCommandsResponse { commands }
-}
-
 /// Handle `ruby-fast-lsp/debug/lookup` - query analysis state for an FQN.
 pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> LookupResponse {
     debug!("[DEBUG] Looking up FQN: {}", params.fqn);
     let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
     query.debug_lookup(&params.fqn)
-}
-
-/// Handle `ruby-fast-lsp/debug/stats` - return index statistics.
-pub fn handle_stats(server: &RubyLanguageServer, params: StatsParams) -> StatsResponse {
-    debug!("[DEBUG] Getting index stats");
-    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
-    query.debug_stats(server.is_indexing_complete())
-}
-
-/// Handle `ruby-fast-lsp/debug/ancestors` - get inheritance chain for a class.
-pub fn handle_ancestors(server: &RubyLanguageServer, params: AncestorsParams) -> AncestorsResponse {
-    debug!("[DEBUG] Getting ancestors for: {}", params.class);
-    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
-    query.debug_ancestors(&params.class)
-}
-
-/// Parameters for `ruby-fast-lsp/debug/methods`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MethodsParams {
-    /// The class name to list methods for
-    pub class: String,
-    #[serde(default)]
-    pub uri: Option<String>,
-}
-
-/// Handle `ruby-fast-lsp/debug/methods` - list methods for a class.
-pub fn handle_methods(server: &RubyLanguageServer, params: MethodsParams) -> MethodsResponse {
-    debug!("[DEBUG] Getting methods for: {}", params.class);
-    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
-    query.debug_methods(&params.class)
-}
-
-// ============================================================================
-// Inference Stats Types
-// ============================================================================
-
-/// Parameters for `ruby-fast-lsp/debug/inference-stats`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct InferenceStatsParams {
-    #[serde(default)]
-    pub uri: Option<String>,
-}
-
-/// Handle `ruby-fast-lsp/debug/inference-stats` - get type inference statistics.
-pub fn handle_inference_stats(
-    server: &RubyLanguageServer,
-    params: InferenceStatsParams,
-) -> InferenceStatsResponse {
-    debug!("[DEBUG] Getting inference stats");
-    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
-    query.debug_inference_stats()
 }
 
 /// Handle `ruby/exportGraph` - export the inheritance graph as JSON.

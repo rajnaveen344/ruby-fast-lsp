@@ -339,62 +339,12 @@ impl RubyType {
         self.is_subtype_of(other) || other.is_subtype_of(self)
     }
 
-    /// Get the most specific common supertype of two types
-    pub fn common_supertype(&self, other: &RubyType) -> RubyType {
-        if self.is_subtype_of(other) {
-            other.clone()
-        } else if other.is_subtype_of(self) {
-            self.clone()
-        } else {
-            // Create union of both types
-            RubyType::union([self.clone(), other.clone()])
-        }
-    }
-
-    /// Check if this is a primitive type
-    pub fn is_primitive(&self) -> bool {
-        match self {
-            RubyType::Literal(_) => true,
-            RubyType::Class(fqn) => {
-                let name = fqn.to_string();
-                matches!(
-                    name.as_str(),
-                    "NilClass"
-                        | "TrueClass"
-                        | "FalseClass"
-                        | "Integer"
-                        | "Float"
-                        | "String"
-                        | "Symbol"
-                )
-            }
-            _ => false,
-        }
-    }
-
-    /// Check if this is a collection type
-    pub fn is_collection(&self) -> bool {
-        matches!(
-            self,
-            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Shape(_)
-        )
-    }
-
     /// Check if this type is nilable (can be nil)
     pub fn is_nilable(&self) -> bool {
         match self {
             RubyType::Class(fqn) if fqn.to_string() == "NilClass" => true,
             RubyType::Union(types) => types.iter().any(|t| t.is_nilable()),
             _ => false,
-        }
-    }
-
-    /// Make this type nilable by creating a union with Nil
-    pub fn make_nilable(self) -> RubyType {
-        if self.is_nilable() {
-            self
-        } else {
-            RubyType::optional(self)
         }
     }
 
@@ -662,42 +612,19 @@ mod tests {
     }
 
     #[test]
-    fn test_nilable_operations() {
-        assert!(!RubyType::integer().is_nilable());
-        assert!(RubyType::nil_class().is_nilable());
-
-        let nilable_int = RubyType::integer().make_nilable();
-        assert!(nilable_int.is_nilable());
-
-        let non_nil = nilable_int.remove_nil();
-        assert!(!non_nil.is_nilable());
-        assert_eq!(non_nil, RubyType::integer());
+    fn remove_nil_keeps_the_non_nil_member() {
+        assert_eq!(
+            RubyType::optional(RubyType::integer()).remove_nil(),
+            RubyType::integer()
+        );
     }
 
     #[test]
-    fn test_primitive_and_collection_checks() {
-        assert!(RubyType::integer().is_primitive());
-        assert!(RubyType::string().is_primitive());
-        assert!(!RubyType::array_of(RubyType::integer()).is_primitive());
-
-        assert!(RubyType::array_of(RubyType::integer()).is_collection());
-        assert!(RubyType::hash_of(RubyType::string(), RubyType::integer()).is_collection());
-        assert!(!RubyType::integer().is_collection());
-    }
-
-    #[test]
-    fn test_common_supertype() {
-        let int_str_union = RubyType::integer().common_supertype(&RubyType::string());
-        match int_str_union {
-            RubyType::Union(types) => {
-                assert!(types.contains(&RubyType::integer()));
-                assert!(types.contains(&RubyType::string()));
-            }
-            _ => panic!("Expected union type"),
-        }
-
-        let int_unknown = RubyType::integer().union_with(&RubyType::Unknown);
-        assert_eq!(int_unknown, RubyType::Unknown);
+    fn union_with_unknown_stays_unknown() {
+        assert_eq!(
+            RubyType::integer().union_with(&RubyType::Unknown),
+            RubyType::Unknown
+        );
     }
 
     #[test]

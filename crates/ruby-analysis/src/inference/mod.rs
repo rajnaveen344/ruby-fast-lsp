@@ -222,9 +222,7 @@ pub mod rbs;
 pub mod r#type;
 pub mod type_tracker;
 
-pub use method::{MethodSignature, MethodSignatureContext, MethodVisibility, Parameter};
-pub use r#type::{ArrayTypeInfo, CollectionAnalyzer, HashTypeInfo, LiteralAnalyzer};
-pub use rbs::{get_rbs_method_return_type, has_rbs_class, rbs_declaration_count, rbs_method_count};
+pub use r#type::LiteralAnalyzer;
 
 #[cfg(test)]
 mod architecture_tests {

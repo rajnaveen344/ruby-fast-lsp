@@ -2,8 +2,8 @@
 
 use super::*;
 
-#[test]
-fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project() {
+#[tokio::test]
+async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path().join("admin");
     let jruby_home = fixture.path().join("jruby-9.2.21.0");
@@ -67,7 +67,7 @@ fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project() {
     let mut coordinator = IndexingCoordinator::new(root.clone(), config);
     coordinator.set_cache_root(fixture.path().join("user-cache"));
     assert_eq!(
-        coordinator.detect_ruby_version(),
+        select_ruby_version(&mut coordinator, &server).await,
         Some(RubyVersion::new_with_implementation(
             2,
             5,
@@ -430,7 +430,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     server.add_workspace(Url::from_directory_path(&root).unwrap());
     let mut coordinator = IndexingCoordinator::new(root.clone(), config);
     coordinator.set_cache_root(fixture.path().join("user-cache"));
-    coordinator.detect_ruby_version();
+    select_ruby_version(&mut coordinator, &server).await;
     coordinator.setup_jruby_import_provider().unwrap();
     let signature_cache = coordinator
         .jruby_signature_cache_root(

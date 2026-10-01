@@ -14,7 +14,7 @@ and `docs/development/server-state.md`; follow their source links as needed.
 2. Keep parser/fact production in `indexer`, type derivation in `inference`, and
    graph/query/diagnostic policy in `engine`. The LSP adapter converts context and
    responses; it must not introduce a second semantic resolution policy.
-3. Read through `AnalysisQuery`/`TypeQuery`; write through the existing file-fact
+3. Read through `AnalysisQuery`; write through the existing file-fact
    lifecycle. Expose domain operations, not mutable stores. Engine and inference
    can cooperate inside the analysis crate while preserving engine state ownership.
 4. Preserve source snapshots, project isolation, lock lifetimes, resource

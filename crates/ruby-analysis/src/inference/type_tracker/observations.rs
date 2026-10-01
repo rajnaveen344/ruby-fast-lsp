@@ -40,7 +40,8 @@ impl TypeTracker {
         self.environment.max_live_shape_aliases
     }
 
-    /// Get variable types map (for storing in RubyDocument)
+    /// Variable snapshots by offset, for tests that inspect flow state.
+    #[cfg(test)]
     pub fn into_var_types(self) -> BTreeMap<usize, HashMap<String, RubyType>> {
         self.observations.snapshots
     }
@@ -81,6 +82,7 @@ impl TypeTracker {
 }
 
 /// Read the latest variable snapshot at or before an offset.
+#[cfg(test)]
 pub fn get_var_type_at(
     var_types: &BTreeMap<usize, HashMap<String, RubyType>>,
     offset: usize,

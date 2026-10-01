@@ -23,7 +23,7 @@ pub use documents::scope_tracker::{
 };
 pub use documents::source_document::{mask_shebang, SourceDocument};
 pub use documents::variable_scopes::{
-    CaptureRef, LVScopeId, LVScopeKind, RenameTarget, RenameTargetKind, ScopeNode, TypeAssignment,
+    LVScopeId, LVScopeKind, RenameTarget, RenameTargetKind, ScopeNode, TypeAssignment,
     VariableNode, VariableScopes,
 };
 pub use identifiers::types::{Identifier, MethodReceiver};

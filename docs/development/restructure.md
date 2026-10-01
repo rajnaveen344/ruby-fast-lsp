@@ -32,7 +32,7 @@ Delete this file when the last task is done. Git history keeps the record.
       release step.
 - [x] A4. Move `src/bin/*` and `utils/perf` into a `crates/devtools` crate so
       the server crate holds only the server.
-- [ ] A5. Delete dead code, APIs used only by tests, and unused debug
+- [x] A5. Delete dead code, APIs used only by tests, and unused debug
       endpoints.
 - [ ] A6. Add an `invariant!` macro and shorten the multi-line invariant
       messages without losing what broke, why it is a bug, and the fix.

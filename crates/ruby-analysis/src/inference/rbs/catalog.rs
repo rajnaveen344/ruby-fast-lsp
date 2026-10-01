@@ -27,7 +27,6 @@ static RBS_METHOD_NAMES: Lazy<RwLock<RbsMethodNameCache>> =
 pub struct RbsMethodInfo {
     pub name: String,
     pub return_type: Option<RubyType>,
-    pub is_singleton: bool,
     pub params: Vec<String>,
 }
 
@@ -340,7 +339,6 @@ fn collect_methods_from_decl(
         methods.push(RbsMethodInfo {
             name: method.name.clone(),
             return_type,
-            is_singleton,
             params,
         });
     }
@@ -387,7 +385,6 @@ fn collect_aliases_from_members(
             methods.push(RbsMethodInfo {
                 name: alias.new_name.clone(),
                 return_type,
-                is_singleton: alias.is_singleton,
                 params,
             });
         }

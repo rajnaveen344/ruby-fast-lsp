@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 pub mod runtime;
 
@@ -287,27 +286,5 @@ impl RubyFastLspConfig {
             }
             None
         }
-    }
-
-    /// Internal method to get core stubs path
-    pub fn get_core_stubs_path_internal(&self, ruby_version: (u8, u8)) -> Option<String> {
-        // Use extension path if available
-        if let Some(ref ext_path) = self.extension_path {
-            let stubs_dir = PathBuf::from(ext_path).join("stubs");
-            if stubs_dir.exists() {
-                let version_dir = format!("rubystubs{}{}", ruby_version.0, ruby_version.1);
-                let version_path = stubs_dir.join(version_dir);
-                if version_path.exists() {
-                    return Some(version_path.to_string_lossy().to_string());
-                }
-
-                // Fallback to default rubystubs30 if specific version not found
-                let default_path = stubs_dir.join("rubystubs30");
-                if default_path.exists() {
-                    return Some(default_path.to_string_lossy().to_string());
-                }
-            }
-        }
-        None
     }
 }

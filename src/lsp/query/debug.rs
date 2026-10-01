@@ -1,9 +1,6 @@
 //! Debug Query — LSP adapter over analysis-engine inspection commands.
 
-use ruby_analysis::engine::{
-    AnalysisQuery, AncestorsResponse, ExportGraphResponse, InferenceStatsResponse, LookupResponse,
-    MethodsResponse, StatsResponse,
-};
+use ruby_analysis::engine::{AnalysisQuery, ExportGraphResponse, LookupResponse};
 
 use super::EngineQuery;
 
@@ -12,30 +9,6 @@ impl EngineQuery {
         let engine_ref = self.debug_engine();
         let engine = engine_ref.read();
         AnalysisQuery::new(&engine).debug_lookup(fqn)
-    }
-
-    pub fn debug_stats(&self, indexing_complete: bool) -> StatsResponse {
-        let engine_ref = self.debug_engine();
-        let engine = engine_ref.read();
-        AnalysisQuery::new(&engine).debug_stats(indexing_complete)
-    }
-
-    pub fn debug_ancestors(&self, class_name: &str) -> AncestorsResponse {
-        let engine_ref = self.debug_engine();
-        let engine = engine_ref.read();
-        AnalysisQuery::new(&engine).debug_ancestors(class_name)
-    }
-
-    pub fn debug_methods(&self, class_name: &str) -> MethodsResponse {
-        let engine_ref = self.debug_engine();
-        let engine = engine_ref.read();
-        AnalysisQuery::new(&engine).debug_methods(class_name)
-    }
-
-    pub fn debug_inference_stats(&self) -> InferenceStatsResponse {
-        let engine_ref = self.debug_engine();
-        let engine = engine_ref.read();
-        AnalysisQuery::new(&engine).debug_inference_stats()
     }
 
     pub fn debug_export_graph(&self) -> ExportGraphResponse {

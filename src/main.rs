@@ -54,27 +54,9 @@ async fn main() -> Result<()> {
         "ruby/namespaceTree",
         RubyLanguageServer::handle_namespace_tree_request,
     )
-    // Debug commands for custom LSP clients
-    .custom_method("$/listCommands", RubyLanguageServer::handle_list_commands)
     .custom_method(
         "ruby-fast-lsp/debug/lookup",
         RubyLanguageServer::handle_debug_lookup,
-    )
-    .custom_method(
-        "ruby-fast-lsp/debug/stats",
-        RubyLanguageServer::handle_debug_stats,
-    )
-    .custom_method(
-        "ruby-fast-lsp/debug/ancestors",
-        RubyLanguageServer::handle_debug_ancestors,
-    )
-    .custom_method(
-        "ruby-fast-lsp/debug/methods",
-        RubyLanguageServer::handle_debug_methods,
-    )
-    .custom_method(
-        "ruby-fast-lsp/debug/inference-stats",
-        RubyLanguageServer::handle_debug_inference_stats,
     )
     .custom_method("ruby/exportGraph", RubyLanguageServer::handle_export_graph)
     .custom_method(

@@ -418,51 +418,12 @@ pub async fn handle_hover(
 // Debug Handlers
 // ============================================================================
 
-pub async fn handle_list_commands(
-    _lang_server: &RubyLanguageServer,
-) -> LspResult<debug::ListCommandsResponse> {
-    info!("List commands request received");
-    Ok(debug::handle_list_commands())
-}
-
 pub async fn handle_debug_lookup(
     lang_server: &RubyLanguageServer,
     params: debug::LookupParams,
 ) -> LspResult<debug::LookupResponse> {
     info!("Debug lookup request received for: {}", params.fqn);
     Ok(debug::handle_lookup(lang_server, params))
-}
-
-pub async fn handle_debug_stats(
-    lang_server: &RubyLanguageServer,
-    params: debug::StatsParams,
-) -> LspResult<debug::StatsResponse> {
-    info!("Debug stats request received");
-    Ok(debug::handle_stats(lang_server, params))
-}
-
-pub async fn handle_debug_ancestors(
-    lang_server: &RubyLanguageServer,
-    params: debug::AncestorsParams,
-) -> LspResult<debug::AncestorsResponse> {
-    info!("Debug ancestors request received for: {}", params.class);
-    Ok(debug::handle_ancestors(lang_server, params))
-}
-
-pub async fn handle_debug_methods(
-    lang_server: &RubyLanguageServer,
-    params: debug::MethodsParams,
-) -> LspResult<debug::MethodsResponse> {
-    info!("Debug methods request received for: {}", params.class);
-    Ok(debug::handle_methods(lang_server, params))
-}
-
-pub async fn handle_debug_inference_stats(
-    lang_server: &RubyLanguageServer,
-    params: debug::InferenceStatsParams,
-) -> LspResult<debug::InferenceStatsResponse> {
-    info!("Debug inference-stats request received");
-    Ok(debug::handle_inference_stats(lang_server, params))
 }
 
 pub async fn handle_export_graph(

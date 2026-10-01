@@ -19,7 +19,7 @@ impl EngineQuery {
     /// Get hover info for the symbol at position.
     ///
     /// This is the unified entry point for hover requests. It handles:
-    /// - Local variables (with type inference from TypeQuery, document lvars, type snapshots)
+    /// - Local variables (with engine type facts, document lvars, type snapshots)
     /// - Instance/class/global variables
     /// - Constants (classes, modules)
     /// - Methods (with receiver type resolution and return type inference)

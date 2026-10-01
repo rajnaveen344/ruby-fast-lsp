@@ -1,5 +1,5 @@
 use crate::core::SourcePosition as Position;
-use crate::indexer::MethodReceiver;
+use crate::indexer::{MethodReceiver, RubyDocument};
 
 use super::*;
 use url::Url;

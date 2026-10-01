@@ -3,7 +3,8 @@ use super::*;
 use parking_lot::RwLock;
 use ruby_analysis::core::MethodVisibility;
 use ruby_analysis::core::{
-    FullyQualifiedName, MethodParamKind, NamespaceKind, RubyConstant, RubyMethod, RubyType,
+    FullyQualifiedName, GraphEdgeKind, MethodParamKind, NamespaceKind, RubyConstant, RubyMethod,
+    RubyType,
 };
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
 use std::fs;
@@ -501,12 +502,17 @@ fn runtime_stdlib_deferred_collection_leaves_resolution_to_the_coordinator() {
             .all(|edge| edge.target_parts != vec![runtime_base]),
         "the coordinator's one final resolution must connect the deferred stdlib graph edge"
     );
+    let runtime_child = FullyQualifiedName::namespace_with_kind(
+        vec![RubyConstant::new("RuntimeChild").expect("RuntimeChild must be a valid Ruby constant")],
+        NamespaceKind::Instance,
+    );
+    let runtime_base_fqn =
+        FullyQualifiedName::namespace_with_kind(vec![runtime_base], NamespaceKind::Instance);
     assert!(
         AnalysisQuery::new(&engine.read())
-            .debug_ancestors("RuntimeChild")
-            .ancestors
+            .graph_edges_from(&runtime_child)
             .iter()
-            .any(|ancestor| { ancestor.name == "RuntimeBase" && ancestor.kind == "superclass" }),
+            .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == runtime_base_fqn),
         "the coordinator's one final resolution must materialize stdlib inheritance"
     );
 }

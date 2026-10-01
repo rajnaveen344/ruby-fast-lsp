@@ -1,6 +1,5 @@
 //! Required-gem manifests, shared dependency products, and gem fact indexing.
 
-use super::GemInfo;
 use super::GemSource;
 use super::IndexerGem;
 use super::LoadedGemDependencyProduct;
@@ -12,7 +11,7 @@ use crate::indexer::scheduling::resources::{IndexingResourcePriority, IndexingWo
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
-use log::{debug, info, warn};
+use log::{debug, info};
 use rayon::prelude::*;
 use std::path::{Component, Path};
 use std::sync::Arc;
@@ -489,87 +488,5 @@ impl IndexerGem {
             sources,
         )
         .map(Some)
-    }
-
-    /// Legacy direct indexing path retained for focused tests and unlocked
-    /// callers. Production selective indexing uses the checksum-keyed product.
-    #[allow(dead_code)]
-    async fn index_required_gems(
-        &self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    ) -> Result<Vec<Url>> {
-        let required_gems = self.required_gems_with_dependencies();
-        let mut indexed_files = Vec::new();
-
-        for gem_name in &required_gems {
-            if let Some(gem_versions) = self.discovered_gems.get(gem_name.as_str()) {
-                if let Some(gem_info) = self.select_preferred_version(gem_versions) {
-                    info!(
-                        "Indexing required gem: {} v{} platform={} source={:?}",
-                        gem_info.name, gem_info.version, gem_info.platform, gem_info.source
-                    );
-                    indexed_files.extend(self.index_gem_files(gem_info, analysis_engine.clone()));
-                }
-            } else {
-                debug!("Required gem not found: {}", gem_name);
-            }
-        }
-
-        Ok(indexed_files)
-    }
-
-    /// Index all Ruby files from a gem's lib paths
-    fn index_gem_files(
-        &self,
-        gem_info: &GemInfo,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
-    ) -> Vec<Url> {
-        let Some(processor) = &self.file_processor else {
-            warn!(
-                "No file processor set for gem indexer, skipping {}",
-                gem_info.name
-            );
-            return Vec::new();
-        };
-
-        let mut indexed_files = Vec::new();
-        let known_namespaces = std::sync::Arc::new({
-            let engine = analysis_engine.read();
-            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
-        });
-
-        for lib_path in &gem_info.lib_paths {
-            if lib_path.exists() && lib_path.is_dir() {
-                debug!("Indexing files from gem lib path: {:?}", lib_path);
-
-                let ruby_files = utils::collect_ruby_files(lib_path);
-
-                ruby_files.iter().for_each(|file_path| {
-                    if let Ok(content) = std::fs::read_to_string(file_path) {
-                        if let Ok(uri) = Url::from_file_path(file_path) {
-                            if let Err(e) = processor
-                                .collect_file_facts_as_deferred_resolution_with_known_namespaces_in_engine(
-                                    &uri,
-                                    &content,
-                                    analysis_engine.clone(),
-                                    ruby_analysis::core::SourceKind::Gem,
-                                    known_namespaces.clone(),
-                                )
-                            {
-                                warn!("Failed to index gem file {:?}: {}", file_path, e);
-                            }
-                        }
-                    }
-                });
-
-                for file_path in &ruby_files {
-                    if let Ok(uri) = Url::from_file_path(file_path) {
-                        indexed_files.push(uri);
-                    }
-                }
-            }
-        }
-
-        indexed_files
     }
 }

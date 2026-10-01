@@ -7,12 +7,8 @@ async fn test_coordinator_project_file_collection() {
     let fixture = TestProjectFixture::new();
     fixture.setup_complete_project();
 
-    let config = RubyFastLspConfig::default();
-    let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
-
     // Test Ruby file collection
-    let mut files = Vec::new();
-    coordinator.find_all_ruby_files_in_directory(fixture.project_root(), &mut files);
+    let files = crate::utils::collect_ruby_files(fixture.project_root());
 
     assert!(!files.is_empty(), "Should find Ruby files in project");
 
@@ -107,52 +103,30 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
     assert!(hover.content.contains("String"));
 }
 
-#[tokio::test]
-async fn test_coordinator_ruby_file_detection() {
-    let fixture = TestProjectFixture::new();
-    let config = RubyFastLspConfig::default();
-    let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
-
+#[test]
+fn test_coordinator_ruby_file_detection() {
     // Test various Ruby file extensions
-    assert!(coordinator.is_ruby_file(&PathBuf::from("test.rb")));
-    assert!(coordinator.is_ruby_file(&PathBuf::from("test.ruby")));
-    assert!(coordinator.is_ruby_file(&PathBuf::from("test.rake")));
-    assert!(coordinator.is_ruby_file(&PathBuf::from("show.html.erb")));
-    assert!(coordinator.is_ruby_file(&PathBuf::from("Rakefile")));
-    assert!(coordinator.is_ruby_file(&PathBuf::from("Gemfile")));
-    assert!(coordinator.is_ruby_file(&PathBuf::from("Guardfile")));
-    assert!(coordinator.is_ruby_file(&PathBuf::from("Capfile")));
+    assert!(crate::utils::should_index_file(&PathBuf::from("test.rb")));
+    assert!(crate::utils::should_index_file(&PathBuf::from("test.ruby")));
+    assert!(crate::utils::should_index_file(&PathBuf::from("test.rake")));
+    assert!(crate::utils::should_index_file(&PathBuf::from(
+        "show.html.erb"
+    )));
+    assert!(crate::utils::should_index_file(&PathBuf::from("Rakefile")));
+    assert!(crate::utils::should_index_file(&PathBuf::from("Gemfile")));
+    assert!(crate::utils::should_index_file(&PathBuf::from("Guardfile")));
+    assert!(crate::utils::should_index_file(&PathBuf::from("Capfile")));
 
     // Test non-Ruby files
-    assert!(!coordinator.is_ruby_file(&PathBuf::from("test.js")));
-    assert!(!coordinator.is_ruby_file(&PathBuf::from("test.py")));
-    assert!(!coordinator.is_ruby_file(&PathBuf::from("README.md")));
-}
-
-#[tokio::test]
-async fn test_coordinator_lib_directory_discovery() {
-    let fixture = TestProjectFixture::new();
-    let config = RubyFastLspConfig::default();
-    let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
-
-    // Test lib directory discovery
-    coordinator.discover_ruby_library_paths();
-    let lib_dirs = coordinator.get_ruby_library_paths();
-
-    // This test depends on the system having Ruby installed
-    // In CI environments, this might not be available, so we make it lenient
-    println!("Discovered {} lib directories", lib_dirs.len());
-    for dir in lib_dirs {
-        println!("  - {:?}", dir);
-    }
+    assert!(!crate::utils::should_index_file(&PathBuf::from("test.js")));
+    assert!(!crate::utils::should_index_file(&PathBuf::from("test.py")));
+    assert!(!crate::utils::should_index_file(&PathBuf::from(
+        "README.md"
+    )));
 }
 
 #[tokio::test]
 async fn test_coordinator_performance_with_large_project() {
-    // SAFETY: This test is not run concurrently with other tests that modify this env var.
-    // Keep the large-project check focused on project files instead of local gem volume.
-    unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "3") };
-
     let fixture = TestProjectFixture::new();
     fixture.setup_complete_project();
 
@@ -203,8 +177,6 @@ end
         duration.as_secs() < 45,
         "Indexing should complete within 45 seconds"
     );
-
-    unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
 }
 
 #[tokio::test]
@@ -230,12 +202,8 @@ async fn test_coordinator_collects_all_ruby_files() {
     fs::write(&vendor_bundle_ruby_file, "class BundledGem\nend")
         .expect("Failed to write vendor/bundle Ruby file");
 
-    let config = RubyFastLspConfig::default();
-    let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
-
     // Collect Ruby files from the project
-    let mut collected_files: Vec<PathBuf> = Vec::new();
-    coordinator.find_all_ruby_files_in_directory(fixture.project_root(), &mut collected_files);
+    let collected_files = crate::utils::collect_ruby_files(fixture.project_root());
 
     // Verify that vendor files ARE collected (no exclusion)
     let vendor_files: Vec<_> = collected_files

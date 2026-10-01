@@ -34,8 +34,8 @@ representations remain internal.
 
 Engine resolution invokes inference's AST-free constant and method-return
 solvers and stores their outcomes. Inference may consult engine queries, but
-lookup policy and file replacement remain engine-owned. `AnalysisQuery` and
-file-scoped `TypeQuery` borrow engine state; callers never clone or obtain a
+lookup policy and file replacement remain engine-owned. `AnalysisQuery`
+borrows engine state; callers never clone or obtain a
 store to read it. Profiler representation sizes are detached numeric evidence.
 
 See the [analysis library guide](../crates/ruby-analysis/README.md) for public

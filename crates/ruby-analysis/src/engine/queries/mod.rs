@@ -4,8 +4,10 @@ pub(in crate::engine) mod definitions;
 pub(in crate::engine) mod hierarchy;
 pub(in crate::engine) mod lookup;
 pub(in crate::engine) mod namespace_tree;
-pub(in crate::engine) mod type_query;
 pub(in crate::engine) mod workspace_symbols;
+
+#[cfg(test)]
+mod type_at_tests;
 
 use std::path::Path;
 

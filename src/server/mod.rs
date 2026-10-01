@@ -22,10 +22,7 @@ use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::{
     ExtensionRegistryHandle, ExtensionStatusParams, ExtensionStatusResponse,
 };
-use crate::lsp::capabilities::debug::{
-    AncestorsParams, AncestorsResponse, ListCommandsResponse, LookupParams, LookupResponse,
-    MethodsParams, MethodsResponse, StatsParams, StatsResponse,
-};
+use crate::lsp::capabilities::debug::{LookupParams, LookupResponse};
 use crate::lsp::handlers::{notification, request};
 
 use crate::lsp::query::navigation::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
@@ -235,40 +232,9 @@ impl RubyLanguageServer {
     // Debug Request Handlers
     // ========================================================================
 
-    /// Handle `$/listCommands` - return available custom debug commands.
-    pub async fn handle_list_commands(&self) -> LspResult<ListCommandsResponse> {
-        request::handle_list_commands(self).await
-    }
-
     /// Handle `ruby-fast-lsp/debug/lookup` - query index for an FQN.
     pub async fn handle_debug_lookup(&self, params: LookupParams) -> LspResult<LookupResponse> {
         request::handle_debug_lookup(self, params).await
-    }
-
-    /// Handle `ruby-fast-lsp/debug/stats` - return index statistics.
-    pub async fn handle_debug_stats(&self, params: StatsParams) -> LspResult<StatsResponse> {
-        request::handle_debug_stats(self, params).await
-    }
-
-    /// Handle `ruby-fast-lsp/debug/ancestors` - return inheritance chain.
-    pub async fn handle_debug_ancestors(
-        &self,
-        params: AncestorsParams,
-    ) -> LspResult<AncestorsResponse> {
-        request::handle_debug_ancestors(self, params).await
-    }
-
-    /// Handle `ruby-fast-lsp/debug/methods` - list methods for a class.
-    pub async fn handle_debug_methods(&self, params: MethodsParams) -> LspResult<MethodsResponse> {
-        request::handle_debug_methods(self, params).await
-    }
-
-    /// Handle `ruby-fast-lsp/debug/inference-stats` - get type inference statistics.
-    pub async fn handle_debug_inference_stats(
-        &self,
-        params: crate::lsp::capabilities::debug::InferenceStatsParams,
-    ) -> LspResult<crate::lsp::capabilities::debug::InferenceStatsResponse> {
-        request::handle_debug_inference_stats(self, params).await
     }
 
     /// Handle `ruby/exportGraph` - export the inheritance graph as JSON.

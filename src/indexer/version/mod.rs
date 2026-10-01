@@ -1,12 +1,4 @@
-//! Ruby Version Management
-//!
-//! This module handles Ruby version detection and version manager integration.
-//!
-//! ## Components
-//!
-//! - **`version_detector`**: Detects Ruby version from workspace files (.ruby-version, Gemfile, etc.)
-//! - **`version_managers`**: Interfaces with rbenv, rvm, chruby, and system Ruby
+//! Ruby version identity used to select bundled core stubs and runtime
+//! compatibility. Runtime discovery lives in `environment::runtime`.
 
 pub mod ruby_version;
-pub mod version_detector;
-pub mod version_managers;

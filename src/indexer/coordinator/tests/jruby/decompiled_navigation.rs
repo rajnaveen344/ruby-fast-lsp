@@ -22,8 +22,8 @@ fn real_java_executable() -> PathBuf {
 }
 
 #[cfg(unix)]
-#[test]
-fn source_less_jruby_import_navigates_to_verified_decompiled_implementation() {
+#[tokio::test]
+async fn source_less_jruby_import_navigates_to_verified_decompiled_implementation() {
     let _decompiler_budget = crate::test::harness::isolate_decompiler_budget();
     let fixture = TempDir::new().unwrap();
     let root = fixture.path().join("admin");
@@ -76,7 +76,7 @@ fn source_less_jruby_import_navigates_to_verified_decompiled_implementation() {
     let mut coordinator = IndexingCoordinator::new(root.clone(), config);
     let cache = fixture.path().join("user-cache");
     coordinator.set_cache_root(cache.clone());
-    coordinator.detect_ruby_version();
+    select_ruby_version(&mut coordinator, &server).await;
     coordinator.setup_jruby_import_provider().unwrap();
     coordinator.setup_file_processor(&server);
     let source = "java_import fixtures.RichFixture\n\
