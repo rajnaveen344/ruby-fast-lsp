@@ -391,3 +391,35 @@ fn latest_node_kind_follows_sorted_definition_order() {
         Some((GraphNodeKind::Class, TextRange::new(earlier, 0, 10)))
     );
 }
+
+#[test]
+fn remove_edge_fact_removes_one_matching_edge_and_its_file_index() {
+    let source = FqnId(1);
+    let first_target = FqnId(2);
+    let second_target = FqnId(3);
+    let first = StoredGraphEdgeFact::new(
+        source,
+        first_target,
+        GraphEdgeKind::Include,
+        TextRange::new(file(), 0, 10),
+    );
+    let second = StoredGraphEdgeFact::new(
+        source,
+        second_target,
+        GraphEdgeKind::Include,
+        TextRange::new(file(), 20, 30),
+    );
+    let mut store = SemanticGraph::default();
+    store.add_edge(first);
+    store.add_edge(second);
+
+    assert!(store.remove_edge_fact(&first));
+    assert!(!store.remove_edge_fact(&first));
+    assert_eq!(store.edges_from(source), vec![second]);
+    assert!(store.edges_to(first_target).is_empty());
+    assert_eq!(store.edges_in_file(file()), vec![second]);
+
+    assert!(store.remove_edge_fact(&second));
+    assert!(store.edges_in_file(file()).is_empty());
+    assert_eq!(store.edge_count(), 0);
+}

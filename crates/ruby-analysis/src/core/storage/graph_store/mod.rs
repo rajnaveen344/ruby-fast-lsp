@@ -267,6 +267,32 @@ impl SemanticGraph {
         self.insert_edge(fact.into());
     }
 
+    /// Remove one resolved edge equal to `fact`. Returns false when no such
+    /// edge is live, for example because its owning file was replaced.
+    pub fn remove_edge_fact(&mut self, fact: &StoredGraphEdgeFact) -> bool {
+        let file_id = fact.range.file_id;
+        let Some(ids) = self.edges_by_file.get(&file_id) else {
+            return false;
+        };
+        let Some(position) = ids.iter().position(|id| {
+            self.edge(*id)
+                .is_some_and(|edge| StoredGraphEdgeFact::from(edge) == *fact)
+        }) else {
+            return false;
+        };
+        let ids = self.edges_by_file.get_mut(&file_id).expect_invariant(
+            "graph edge file index vanished during edge removal",
+            "the index was read immediately before this mutable lookup",
+            "keep edge removal free of intervening file index mutation",
+        );
+        let id = ids.swap_remove(position);
+        if ids.is_empty() {
+            self.edges_by_file.remove(&file_id);
+        }
+        self.remove_edge(id);
+        true
+    }
+
     pub fn nodes_for(&self, fqn: FqnId) -> Vec<StoredGraphNodeFact> {
         self.nodes
             .get(&fqn)
@@ -467,6 +493,11 @@ impl SemanticGraph {
 
     pub fn edge_count(&self) -> usize {
         self.edges.iter().filter(|edge| edge.is_some()).count()
+    }
+
+    /// Whether any node definition currently belongs to `file_id`.
+    pub fn defines_nodes_in(&self, file_id: SourceFileId) -> bool {
+        self.node_definition_files.contains(&file_id)
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {

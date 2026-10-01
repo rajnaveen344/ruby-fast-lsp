@@ -2,15 +2,18 @@
 //! edges, constant path resolution, retry of unresolved graph edges, and the
 //! method lookup chain caches that graph replacement invalidates.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use parking_lot::Mutex;
 
+use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::graph_store::{
     SemanticGraph, StoredGraphEdgeFact, StoredGraphNodeFact, StoredSuperclassResolution,
     StoredUnresolvedGraphEdgeFact,
 };
-use crate::core::storage::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
+use crate::core::storage::memory_estimate::{
+    fqn_heap_bytes, map_table_bytes, set_table_bytes, vec_payload_bytes,
+};
 use crate::core::storage::reference_store::ConstLookup;
 use crate::core::{
     ConstantPath, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
@@ -25,6 +28,7 @@ use super::Project;
 #[derive(Debug, Default)]
 pub(in crate::engine) struct Hierarchy {
     graph: SemanticGraph,
+    retried: RetriedEdges,
     top_level_method_lookup_chain: Mutex<Option<Vec<FullyQualifiedName>>>,
     universal_object_method_lookup_chain: Mutex<Option<Vec<FullyQualifiedName>>>,
 }
@@ -34,8 +38,116 @@ impl Clone for Hierarchy {
     fn clone(&self) -> Self {
         Self {
             graph: self.graph.clone(),
+            retried: self.retried.clone(),
             top_level_method_lookup_chain: Mutex::new(None),
             universal_object_method_lookup_chain: Mutex::new(None),
+        }
+    }
+}
+
+/// An unresolved edge that a retry resolved against another file's node,
+/// with the resolved edges it produced. When the target loses its last
+/// definition, the produced edges are removed and the origin becomes
+/// unresolved again, so the next retry sees current declarations.
+#[derive(Debug, Clone)]
+struct RetriedEdge {
+    origin: StoredUnresolvedGraphEdgeFact,
+    target: FqnId,
+    edges: Vec<StoredGraphEdgeFact>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RetriedEdges {
+    /// Records keyed by the file that owns the origin edge.
+    by_file: HashMap<SourceFileId, Vec<RetriedEdge>>,
+    /// Origin files of the records resolved to each target.
+    files_by_target: HashMap<FqnId, HashSet<SourceFileId>>,
+}
+
+impl RetriedEdges {
+    fn record(&mut self, retried: RetriedEdge) {
+        let file_id = retried.origin.range.file_id;
+        self.files_by_target
+            .entry(retried.target)
+            .or_default()
+            .insert(file_id);
+        self.by_file.entry(file_id).or_default().push(retried);
+    }
+
+    /// Forget the records owned by `file_id`; the graph already dropped the
+    /// file's edges.
+    fn forget_file(&mut self, file_id: SourceFileId) {
+        let Some(records) = self.by_file.remove(&file_id) else {
+            return;
+        };
+        for record in records {
+            if let Some(files) = self.files_by_target.get_mut(&record.target) {
+                files.remove(&file_id);
+                if files.is_empty() {
+                    self.files_by_target.remove(&record.target);
+                }
+            }
+        }
+    }
+
+    /// Take the records whose target satisfies `lost`.
+    fn take_lost(&mut self, mut lost: impl FnMut(FqnId) -> bool) -> Vec<RetriedEdge> {
+        let lost_targets: Vec<FqnId> = self
+            .files_by_target
+            .keys()
+            .copied()
+            .filter(|target| lost(*target))
+            .collect();
+        let mut taken = Vec::new();
+        for target in lost_targets {
+            let files = self.files_by_target.remove(&target).unwrap_or_default();
+            for file_id in files {
+                let Some(records) = self.by_file.get_mut(&file_id) else {
+                    continue;
+                };
+                let (lost, kept): (Vec<_>, Vec<_>) = std::mem::take(records)
+                    .into_iter()
+                    .partition(|record| record.target == target);
+                taken.extend(lost);
+                if kept.is_empty() {
+                    self.by_file.remove(&file_id);
+                } else {
+                    *records = kept;
+                }
+            }
+        }
+        taken
+    }
+
+    fn heap_bytes(&self) -> usize {
+        map_table_bytes(&self.by_file)
+            + self
+                .by_file
+                .values()
+                .map(|records| {
+                    vec_payload_bytes(records)
+                        + records
+                            .iter()
+                            .map(|record| vec_payload_bytes(&record.edges))
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
+            + map_table_bytes(&self.files_by_target)
+            + self
+                .files_by_target
+                .values()
+                .map(set_table_bytes)
+                .sum::<usize>()
+    }
+
+    fn shrink_to_fit(&mut self) {
+        self.by_file.shrink_to_fit();
+        self.files_by_target.shrink_to_fit();
+        for records in self.by_file.values_mut() {
+            records.shrink_to_fit();
+        }
+        for files in self.files_by_target.values_mut() {
+            files.shrink_to_fit();
         }
     }
 }
@@ -54,7 +166,33 @@ impl Hierarchy {
         let nodes = intern_node_facts(names, nodes);
         let edges = intern_edge_facts(names, edges);
         let unresolved = intern_unresolved_edge_facts(names, unresolved);
+        let defined_nodes = self.graph.defines_nodes_in(file_id);
         self.graph.replace_file(file_id, nodes, edges, unresolved);
+        self.retried.forget_file(file_id);
+        if defined_nodes {
+            self.unresolve_edges_to_lost_targets();
+        }
+    }
+
+    /// Return retried edges to unresolved when their target no longer has
+    /// any node definition. Retry resolves only against graph nodes, so a
+    /// target without definitions can no longer justify the edge.
+    fn unresolve_edges_to_lost_targets(&mut self) {
+        let graph = &self.graph;
+        let lost = self
+            .retried
+            .take_lost(|target| !graph.has_node_definition(target));
+        for record in lost {
+            for edge in &record.edges {
+                invariant!(
+                    self.graph.remove_edge_fact(edge),
+                    what = "retried graph edge record outlived its resolved edge",
+                    why = "records are forgotten whenever their origin file is replaced",
+                    fix = "forget retried records together with their origin file's edges",
+                );
+            }
+            self.graph.add_unresolved_edge(record.origin);
+        }
     }
 
     pub(in crate::engine) fn invalidate_method_lookup_chains(&mut self) {
@@ -168,28 +306,34 @@ impl Hierarchy {
                 let singleton_superclass =
                     self.resolved_singleton_superclass_companion(names, &unresolved, &target);
                 let target = names.intern_fqn(target);
-                self.graph.add_edge(
-                    StoredGraphEdgeFact::new(
-                        unresolved.source,
-                        target,
-                        unresolved.kind,
-                        unresolved.range,
-                    )
-                    .with_provenance(unresolved.provenance),
-                );
-                if let Some((source, target)) = singleton_superclass {
+                let mut edges = vec![StoredGraphEdgeFact::new(
+                    unresolved.source,
+                    target,
+                    unresolved.kind,
+                    unresolved.range,
+                )
+                .with_provenance(unresolved.provenance)];
+                if let Some((source, singleton_target)) = singleton_superclass {
                     let source = names.intern_fqn(source);
-                    let target = names.intern_fqn(target);
-                    self.graph.add_edge(
+                    let singleton_target = names.intern_fqn(singleton_target);
+                    edges.push(
                         StoredGraphEdgeFact::new(
                             source,
-                            target,
+                            singleton_target,
                             GraphEdgeKind::Superclass,
                             unresolved.range,
                         )
                         .with_provenance(unresolved.provenance),
                     );
                 }
+                for edge in &edges {
+                    self.graph.add_edge(*edge);
+                }
+                self.retried.record(RetriedEdge {
+                    origin: unresolved,
+                    target,
+                    edges,
+                });
             } else {
                 self.graph.add_unresolved_edge(unresolved);
             }
@@ -331,11 +475,12 @@ impl Hierarchy {
     }
 
     pub(in crate::engine) fn unresolved_heap_bytes(&self) -> usize {
-        self.graph.estimated_unresolved_heap_bytes()
+        self.graph.estimated_unresolved_heap_bytes() + self.retried.heap_bytes()
     }
 
     pub(in crate::engine) fn shrink_to_fit(&mut self) {
         self.graph.shrink_to_fit();
+        self.retried.shrink_to_fit();
     }
 }
 

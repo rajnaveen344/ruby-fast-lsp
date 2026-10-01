@@ -53,6 +53,113 @@ fn graph_update_retries_unresolved_edges_when_target_arrives() {
 }
 
 #[test]
+fn retried_edges_return_to_unresolved_when_their_target_disappears() {
+    let mut engine = Project::new();
+    let child_file = register_project_file(
+        &mut engine,
+        "child.rb",
+        "class Child < Parent; include Mixin; end",
+    );
+    let parent_file = register_project_file(
+        &mut engine,
+        "parent.rb",
+        "class Parent; end\nmodule Mixin; end",
+    );
+
+    let child = FullyQualifiedName::namespace(vec![RubyConstant::new("Child").unwrap()]);
+    let parent = FullyQualifiedName::namespace(vec![RubyConstant::new("Parent").unwrap()]);
+    let mixin = FullyQualifiedName::namespace(vec![RubyConstant::new("Mixin").unwrap()]);
+    let child_singleton = child.to_singleton_namespace().unwrap();
+    let parent_singleton = parent.to_singleton_namespace().unwrap();
+    engine.update(
+        child_file,
+        FileAnalysis {
+            graph_nodes: vec![
+                GraphNodeFact::new(
+                    child.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(child_file, 0, 40),
+                ),
+                GraphNodeFact::new(
+                    child_singleton.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(child_file, 0, 40),
+                ),
+            ],
+            unresolved_graph_edges: vec![
+                UnresolvedGraphEdgeFact::new(
+                    child.clone(),
+                    vec![RubyConstant::new("Parent").unwrap()],
+                    false,
+                    child.clone(),
+                    GraphEdgeKind::Superclass,
+                    TextRange::new(child_file, 14, 20),
+                ),
+                UnresolvedGraphEdgeFact::new(
+                    child.clone(),
+                    vec![RubyConstant::new("Mixin").unwrap()],
+                    false,
+                    child.clone(),
+                    GraphEdgeKind::Include,
+                    TextRange::new(child_file, 22, 35),
+                ),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    let parent_facts = FileAnalysis {
+        graph_nodes: vec![
+            GraphNodeFact::new(
+                parent.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(parent_file, 0, 17),
+            ),
+            GraphNodeFact::new(
+                parent_singleton.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(parent_file, 0, 17),
+            ),
+            GraphNodeFact::new(
+                mixin.clone(),
+                GraphNodeKind::Module,
+                TextRange::new(parent_file, 18, 35),
+            ),
+        ],
+        ..Default::default()
+    };
+    engine.update(parent_file, parent_facts.clone(), ResolveMode::Immediate);
+    assert!(engine.unresolved_graph_edges().is_empty());
+
+    engine.update(parent_file, FileAnalysis::default(), ResolveMode::Immediate);
+
+    assert_eq!(
+        engine.unresolved_graph_edges().len(),
+        2,
+        "edges resolved into a replaced file must be retried as unresolved lookups"
+    );
+    assert!(!engine.graph_edges_from(&child).iter().any(|edge| {
+        (edge.kind == GraphEdgeKind::Superclass && edge.target == parent)
+            || (edge.kind == GraphEdgeKind::Include && edge.target == mixin)
+    }));
+    assert!(!engine
+        .graph_edges_from(&child_singleton)
+        .iter()
+        .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent_singleton));
+
+    engine.update(parent_file, parent_facts, ResolveMode::Immediate);
+    assert!(engine.unresolved_graph_edges().is_empty());
+    assert!(engine
+        .graph_edges_from(&child)
+        .iter()
+        .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent));
+    assert!(engine
+        .graph_edges_from(&child_singleton)
+        .iter()
+        .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == parent_singleton));
+}
+
+#[test]
 fn delayed_class_superclass_materializes_singleton_inheritance() {
     let mut engine = Project::new();
     let child_file = register_project_file(&mut engine, "child.rb", "class Child < Parent; end");
