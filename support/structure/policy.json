@@ -172,7 +172,6 @@
     "editors/vscode/vsix/extension.js": 2021,
     "src/bin/profiler/main.rs": 2959,
     "src/environment/runtime/jruby/classpath/mod.rs": 1187,
-    "src/environment/runtime/jruby/imports/mod.rs": 2398,
     "src/indexer/cache/persistent/mod.rs": 1236,
     "src/indexer/coordinator/tests/jruby.rs": 1101,
     "src/indexer/coordinator/tests/workflow.rs": 1270,

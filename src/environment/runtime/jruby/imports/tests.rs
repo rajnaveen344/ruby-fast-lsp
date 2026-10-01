@@ -1,11 +1,18 @@
 use super::super::java_catalog::JavaClassDeclaration;
+use super::navigation::supplemental_implementation_location;
+use super::static_scan::SEMANTIC_PREFILTER_PARSE_COUNT;
 use super::*;
 use parking_lot::RwLock;
-use ruby_analysis::core::{ReferenceCandidateKind, SourceKind, TypeProvenance};
+use ruby_analysis::core::{
+    FullyQualifiedName, NamespaceKind, ReferenceCandidateKind, RubyConstant, RubyType,
+    SourceFileId, SourceKind, SymbolKind, TypeProvenance, TypeSubject,
+};
 use ruby_analysis::engine::{AnalysisEngine, SourceFileInput};
+use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_jvm_metadata::{
-    ClassFile, JavaSourceMemberLocation, MemberInfo, MethodParameter, SourceByteRange,
+    ClassFile, JavaSourceClassLocation, JavaSourceMemberLocation, MemberInfo, MethodParameter,
+    SourceByteRange,
 };
 use ruby_prism::Visit;
 use std::collections::BTreeMap;

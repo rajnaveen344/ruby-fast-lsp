@@ -14,7 +14,14 @@ const GEM_FACT_PRODUCER_TREES: &[&str] = &[
     "src/indexer/file_processor",
 ];
 const GEM_FACT_PRODUCER_FILES: &[&str] = &[
+    "src/environment/runtime/jruby/imports/call_host.rs",
+    "src/environment/runtime/jruby/imports/declarations.rs",
+    "src/environment/runtime/jruby/imports/java_methods.rs",
+    "src/environment/runtime/jruby/imports/java_types.rs",
     "src/environment/runtime/jruby/imports/mod.rs",
+    "src/environment/runtime/jruby/imports/navigation.rs",
+    "src/environment/runtime/jruby/imports/static_scan.rs",
+    "src/environment/runtime/jruby/imports/syntax.rs",
     "src/environment/runtime/jruby/java_catalog.rs",
 ];
 
