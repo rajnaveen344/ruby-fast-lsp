@@ -1,0 +1,186 @@
+//! Replay of project files whose facts depend on the JRuby Java catalog.
+
+use super::IndexerProject;
+use crate::indexer::file_processor::FileProcessor;
+use crate::runtime::jruby::imports::{JrubyImportProvider, StaticJavaNavigationPlan};
+use crate::server::RubyLanguageServer;
+use anyhow::{anyhow, Context, Result};
+use log::info;
+use rayon::prelude::*;
+use ruby_analysis::engine::SourceFileSnapshot;
+use std::path::PathBuf;
+use std::time::Instant;
+use tower_lsp::lsp_types::Url;
+
+impl IndexerProject {
+    pub(crate) fn jruby_catalog_sensitive_files(
+        &self,
+        provider: &JrubyImportProvider,
+    ) -> Vec<PathBuf> {
+        self.jruby_source_hints
+            .iter()
+            .filter(|(_, hint)| provider.source_hint_may_reference_static_java(hint))
+            .map(|(path, _)| path.clone())
+            .collect()
+    }
+
+    pub(crate) fn replay_jruby_catalog_sensitive_files(
+        &mut self,
+        file_processor: FileProcessor,
+        server: &RubyLanguageServer,
+    ) -> Result<usize> {
+        let provider = file_processor.jruby_import_provider().cloned().expect(
+            "INVARIANT VIOLATED: a JRuby catalog-sensitive replay was requested without an exact \
+             project import provider. This is a bug because replay selection and replacement must \
+             use the same isolated classpath catalog. Fix: install the completed provider on the \
+             final project FileProcessor before replay.",
+        );
+        let files = self.jruby_catalog_sensitive_files(&provider);
+        let project_uri = Url::from_directory_path(&self.workspace_root).map_err(|_| {
+            anyhow!(
+                "Project root is not a valid file URI: {}",
+                self.workspace_root.display()
+            )
+        })?;
+        let analysis_engine = server.analysis_engine_for_uri(&project_uri);
+        let known_namespaces = self.jruby_replay_known_namespaces.take().expect(
+            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no immutable pre-collection \
+             namespace baseline. This is a bug because replayed files must use the same semantic \
+             context as provider-aware project batches regardless of concurrent dependency \
+             binding. Fix: retain the generation-owned baseline through exhaustive project \
+             completion and consume it exactly once during replay.",
+        );
+        let semantic_read_engine = self.jruby_replay_analysis_engine.take().expect(
+            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no immutable pre-collection semantic engine. This is a bug because providerless and provider-aware collection must observe the same generation-owned facts. Fix: retain the project collection baseline through replay and consume it exactly once."
+        );
+        let replay_started = Instant::now();
+        let outcomes = files
+            .par_iter()
+            .map(
+                |file_path| -> Result<Option<(
+                    PathBuf,
+                    SourceFileSnapshot,
+                    ruby_analysis::engine::FileFacts,
+                    StaticJavaNavigationPlan,
+                )>> {
+                    let (content, open_document) =
+                        Self::read_authoritative_project_source(server, file_path).with_context(|| {
+                        format!(
+                            "failed to reread JRuby catalog-sensitive project source {}",
+                            file_path.display()
+                        )
+                    })?;
+                    let source_snapshot = {
+                        let engine = analysis_engine.read();
+                        let Some(file_id) = engine.file_id(file_path) else {
+                            panic!(
+                                "INVARIANT VIOLATED: JRuby project replay received an unregistered source {}. This is a bug because replay is selected only from the completed project pass. Fix: preserve project source registration through provider materialization.",
+                                file_path.display()
+                            );
+                        };
+                        if open_document && !engine.file_content_matches(file_id, &content) {
+                            info!(
+                                "Skipping stale JRuby replay snapshot for open document {}",
+                                file_path.display()
+                            );
+                            return Ok(None);
+                        }
+                        engine.source_snapshot_for_path(file_path).unwrap_or_else(|| {
+                            panic!(
+                                "INVARIANT VIOLATED: JRuby project replay lost source revision for {}. This is a bug because every registered source has one monotonic revision. Fix: keep source registration and revision capture atomic.",
+                                file_path.display()
+                            )
+                        })
+                    };
+                    let uri = Url::from_file_path(file_path).map_err(|_| {
+                        anyhow!(
+                            "JRuby catalog-sensitive project source is not a valid file URI: {}",
+                            file_path.display()
+                        )
+                    })?;
+                    let collected = file_processor
+                    .collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution(
+                        &uri,
+                        content,
+                        semantic_read_engine.clone(),
+                        known_namespaces.clone(),
+                    )
+                    .with_context(|| {
+                        format!(
+                            "failed to replay JRuby catalog-sensitive project facts for {}",
+                            file_path.display()
+                        )
+                    })?;
+                    Ok(Some((
+                        file_path.clone(),
+                        source_snapshot,
+                        collected.file_facts,
+                        collected.jruby_navigation_plan,
+                    )))
+                },
+            )
+            .collect::<Vec<_>>();
+        let mut plan = StaticJavaNavigationPlan::default();
+        for outcome in outcomes {
+            let Some((path, source_snapshot, file_facts, file_plan)) = outcome? else {
+                continue;
+            };
+            let committed = file_processor
+                .replace_collected_project_file_facts_if_source_snapshot_as_deferred_resolution(
+                    &path,
+                    &analysis_engine,
+                    source_snapshot,
+                    file_facts,
+                );
+            if !committed {
+                info!(
+                    "Discarded JRuby project replay facts collected from a superseded source snapshot: {}",
+                    path.display()
+                );
+                continue;
+            }
+            plan.signature_class_names
+                .extend(file_plan.signature_class_names);
+            plan.implementation_class_names
+                .extend(file_plan.implementation_class_names);
+        }
+        let fact_replacement_elapsed = replay_started.elapsed();
+        plan.signature_class_names.sort();
+        plan.signature_class_names.dedup();
+        plan.implementation_class_names.sort();
+        plan.implementation_class_names.dedup();
+        let signature_classes = plan.signature_class_names.len();
+        let implementation_classes = plan.implementation_class_names.len();
+        let materialization_started = Instant::now();
+        file_processor.materialize_jruby_navigation_plan_as_deferred_resolution(
+            plan,
+            &analysis_engine,
+            known_namespaces,
+        )?;
+        let materialization_elapsed = materialization_started.elapsed();
+        self.file_processor = file_processor;
+        self.resolve_open_project_files(server, &analysis_engine);
+        info!(
+            "[PERF][JRuby project replay] project={} files={} fact_replacement={:?} \
+             signature_classes={} implementation_classes={} materialization={:?} total={:?}",
+            self.workspace_root.display(),
+            files.len(),
+            fact_replacement_elapsed,
+            signature_classes,
+            implementation_classes,
+            materialization_elapsed,
+            replay_started.elapsed()
+        );
+        Ok(files.len())
+    }
+
+    pub(crate) fn discard_jruby_replay_semantic_context(&mut self) {
+        let known_namespaces = self.jruby_replay_known_namespaces.take();
+        let semantic_engine = self.jruby_replay_analysis_engine.take();
+        assert_eq!(
+            known_namespaces.is_some(),
+            semantic_engine.is_some(),
+            "INVARIANT VIOLATED: JRuby replay namespace and semantic-engine ownership diverged. This is a bug because both snapshots are created and consumed as one generation-owned context. Fix: move or discard both fields in the same lifecycle transition."
+        );
+    }
+}
