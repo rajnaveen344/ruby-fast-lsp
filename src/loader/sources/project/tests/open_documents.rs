@@ -171,7 +171,6 @@ fn cold_project_result_is_independent_of_a_prior_identical_file_pass() {
                     &uri,
                     source,
                     &server.load_context_for_uri(&uri),
-                    &server,
                 )
                 .unwrap();
         }

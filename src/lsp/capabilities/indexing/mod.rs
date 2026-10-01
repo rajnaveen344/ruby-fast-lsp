@@ -79,9 +79,9 @@ async fn process_interactive_file(
                 let start = Instant::now();
                 let ctx = server.load_context_for_uri(&uri);
                 let result = if current_file_resolution {
-                    indexer.process_file_current_file_resolution(&uri, &content, &ctx, &server)
+                    indexer.process_file_current_file_resolution(&uri, &content, &ctx)
                 } else {
-                    indexer.process_file(&uri, &content, &ctx, &server)
+                    indexer.process_file(&uri, &content, &ctx)
                 };
                 info!(
                     "[PERF][interactive] file={} mode={} elapsed={:?}",
@@ -308,7 +308,6 @@ async fn refresh_open_project_files_after_dependency_open(
             &uri,
             &content,
             &server.load_context_for_uri(&uri),
-            server,
         ) {
             Ok(result) => {
                 let mut diagnostics = result.diagnostics;
@@ -502,7 +501,6 @@ async fn refresh_bounded_open_diagnostics(
             &uri,
             &content,
             &server.load_context_for_uri(&uri),
-            server,
         ) else {
             log::warn!("Failed to refresh open-file diagnostics for {}", uri.path());
             continue;
@@ -832,7 +830,6 @@ fn refresh_open_project_files_for_dependency_engines(
             &uri,
             &content,
             &server.load_context_for_uri(&uri),
-            server,
         ) {
             log::warn!(
                 "Failed to refresh open project consumer after dependency change: {}: {error}",

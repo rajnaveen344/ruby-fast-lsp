@@ -145,7 +145,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         .file_processor
         .as_ref()
         .unwrap()
-        .process_file(&uri, source, &server.load_context_for_uri(&uri), &server)
+        .process_file(&uri, source, &server.load_context_for_uri(&uri))
         .unwrap();
 
     let alias = FullyQualifiedName::try_from("Admin::RichFixture").unwrap();
@@ -352,7 +352,6 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             &uri,
             "module Admin\nend\n",
             &server.load_context_for_uri(&uri),
-            &server,
         )
         .unwrap();
     let engine = server.analysis_engine_for_uri(&uri);

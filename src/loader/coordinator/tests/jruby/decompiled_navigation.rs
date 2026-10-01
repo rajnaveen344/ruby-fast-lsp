@@ -102,7 +102,7 @@ async fn source_less_jruby_import_navigates_to_verified_decompiled_implementatio
         .file_processor
         .as_ref()
         .unwrap()
-        .process_file(&uri, source, &server.load_context_for_uri(&uri), &server)
+        .process_file(&uri, source, &server.load_context_for_uri(&uri))
         .unwrap();
 
     let engine = server.analysis_engine_for_uri(&uri);

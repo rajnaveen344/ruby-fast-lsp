@@ -56,7 +56,6 @@ fn main() -> Result<()> {
         &file_uri,
         &content,
         &server.load_context_for_uri(&file_uri),
-        &server,
     )?;
     info!("Profile single file total: {:?}", start.elapsed());
 

@@ -21,7 +21,6 @@ fn file_processor_reports_body_only_and_exported_api_changes() {
             &uri,
             "class User\n  def name\n    'A'\n  end\nend\n",
             &server.load_context_for_uri(&uri),
-            &server,
         )
         .unwrap();
     assert_eq!(initial.semantic_change, SemanticChange::InitialIndex);
@@ -31,7 +30,6 @@ fn file_processor_reports_body_only_and_exported_api_changes() {
             &uri,
             "class User\n  def name\n    'B'\n  end\nend\n",
             &server.load_context_for_uri(&uri),
-            &server,
         )
         .unwrap();
     assert_eq!(body.semantic_change, SemanticChange::BodyOnly);
@@ -41,7 +39,6 @@ fn file_processor_reports_body_only_and_exported_api_changes() {
             &uri,
             "class User\n  def name(prefix)\n    prefix\n  end\nend\n",
             &server.load_context_for_uri(&uri),
-            &server,
         )
         .unwrap();
     assert_eq!(api.semantic_change, SemanticChange::ExportsChanged);
@@ -361,7 +358,6 @@ fn file_processor_handles_shebang_source_without_crashing() {
             &uri,
             source,
             &server.load_context_for_uri(&uri),
-            &server,
         )
         .expect("shebang-bearing Ruby entry points must index successfully");
 
@@ -382,7 +378,6 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
             &helpers_uri,
             helpers,
             &server.load_context_for_uri(&helpers_uri),
-            &server,
         )
         .unwrap();
     processor
@@ -390,7 +385,6 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
             &app_uri,
             app,
             &server.load_context_for_uri(&app_uri),
-            &server,
         )
         .unwrap();
     // Second pass mirrors didOpen-then-cold-index: the class constant already
@@ -400,7 +394,6 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
             &app_uri,
             app,
             &server.load_context_for_uri(&app_uri),
-            &server,
         )
         .unwrap();
 
@@ -437,7 +430,6 @@ fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
             &declaration_uri,
             "module Types\n  class Original\n  end\n  Alias = Original\nend\n",
             &server.load_context_for_uri(&declaration_uri),
-            &server,
         )
         .unwrap();
     processor
@@ -445,7 +437,6 @@ fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
             &reopening_uri,
             "module Types\n  class Alias\n    def from_other_file\n    end\n  end\nend\n",
             &server.load_context_for_uri(&reopening_uri),
-            &server,
         )
         .unwrap();
 

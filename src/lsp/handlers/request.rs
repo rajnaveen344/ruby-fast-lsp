@@ -656,7 +656,6 @@ mod navigation_demand_tests {
                 &target_uri,
                 "class AccountRecord\nend\n",
                 &server.load_context_for_uri(&target_uri),
-                &server,
             )
             .unwrap();
         workspace.navigation_demands.complete_keys(

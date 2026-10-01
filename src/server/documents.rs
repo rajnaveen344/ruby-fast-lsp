@@ -123,12 +123,7 @@ impl RubyLanguageServer {
             }
         }
         FileProcessor::with_extension_registry(self.extensions.registry().clone())
-            .process_file_current_file_resolution(
-                uri,
-                content,
-                &self.load_context_for_uri(uri),
-                self,
-            )
+            .process_file_current_file_resolution(uri, content, &self.load_context_for_uri(uri))
             .map(|_| ())
     }
 

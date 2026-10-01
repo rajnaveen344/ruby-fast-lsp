@@ -21,7 +21,6 @@ use crate::environment::runtime::jruby::imports::{
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
 use crate::loader::require_paths::RequireFeatureIndex;
-use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use collection::{replace_analysis_facts_for_file, replace_file_analysis};
 use compose::{ExtensionDocument, FileComposition, RequireDiagnosticRoots};
@@ -202,7 +201,6 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         ctx: &LoadContext,
-        _server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
         self.process_file_with_resolution(uri, content, ctx, FileResolution::Full)
     }
@@ -212,7 +210,6 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         ctx: &LoadContext,
-        _server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
         self.process_file_with_resolution(uri, content, ctx, FileResolution::CurrentFile)
     }
@@ -222,7 +219,6 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         ctx: &LoadContext,
-        _server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
         self.process_file_with_resolution_forced(
             uri,
