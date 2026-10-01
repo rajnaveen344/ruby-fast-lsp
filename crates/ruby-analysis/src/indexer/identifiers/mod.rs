@@ -6,6 +6,7 @@ pub(in crate::indexer) mod types;
 mod variables;
 
 use crate::core::{ExecutionContextFact, ExecutionScopeMode, NamespaceKind, RubyConstant};
+use crate::invariant::ExpectInvariant;
 
 use crate::indexer::{Identifier, LVScopeId, ScopeTracker};
 
@@ -78,11 +79,18 @@ impl IdentifierVisitor {
         let context = self.execution_context.as_ref()?;
         let block = node.block()?;
         let location = block.location();
-        (context.range.start_byte == u32::try_from(location.start_offset()).expect(
-            "INVARIANT VIOLATED: Prism block start exceeds u32. This is a bug because TextRange stores u32 byte offsets. Fix: widen TextRange before parsing files larger than u32::MAX bytes.",
-        ) && context.range.end_byte == u32::try_from(location.end_offset()).expect(
-            "INVARIANT VIOLATED: Prism block end exceeds u32. This is a bug because TextRange stores u32 byte offsets. Fix: widen TextRange before parsing files larger than u32::MAX bytes.",
-        ))
+        (context.range.start_byte
+            == u32::try_from(location.start_offset()).expect_invariant(
+                "Prism block start exceeds u32",
+                "TextRange stores u32 byte offsets",
+                "widen TextRange before parsing files larger than u32::MAX bytes",
+            )
+            && context.range.end_byte
+                == u32::try_from(location.end_offset()).expect_invariant(
+                    "Prism block end exceeds u32",
+                    "TextRange stores u32 byte offsets",
+                    "widen TextRange before parsing files larger than u32::MAX bytes",
+                ))
         .then_some(context)
     }
 
@@ -91,8 +99,10 @@ impl IdentifierVisitor {
     }
 
     pub fn is_position_in_offsets(&self, start_offset: usize, end_offset: usize) -> bool {
-        let position_offset = usize::try_from(self.byte_offset).expect(
-            "INVARIANT VIOLATED: u32 identifier offset could not fit usize. This is a bug because supported targets must address u32 source offsets. Fix: reject the unsupported target architecture.",
+        let position_offset = usize::try_from(self.byte_offset).expect_invariant(
+            "u32 identifier offset could not fit usize",
+            "supported targets must address u32 source offsets",
+            "reject the unsupported target architecture",
         );
         // Include the end position for completion support (when cursor is right after an identifier)
         position_offset >= start_offset && position_offset <= end_offset
@@ -307,10 +317,10 @@ fn concern_class_methods_block_namespace(node: &CallNode) -> Option<Vec<RubyCons
         return None;
     }
     node.block()?;
-    Some(vec![RubyConstant::new("ClassMethods").expect(
-        "INVARIANT VIOLATED: static Concern ClassMethods constant is invalid. \
-         This is a bug because `ClassMethods` is a valid Ruby constant. \
-         Fix: inspect RubyConstant validation.",
+    Some(vec![RubyConstant::new("ClassMethods").expect_invariant(
+        "static Concern ClassMethods constant is invalid",
+        "`ClassMethods` is a valid Ruby constant",
+        "inspect RubyConstant validation",
     )])
 }
 
@@ -421,20 +431,26 @@ impl Visit<'_> for IdentifierVisitor {
     fn visit_call_node(&mut self, node: &CallNode) {
         self.process_call_node_entry(node);
         if let Some(context) = self.execution_context_for_call(node).cloned() {
-            assert_eq!(
+            invariant_eq!(
                 context.lexical_scope,
                 ExecutionScopeMode::Preserve,
-                "INVARIANT VIOLATED: unsupported lexical execution-scope mode reached IdentifierVisitor. This is a bug because only implemented scope modes may enter engine facts. Fix: validate modes at the extension boundary and add traversal support before extending the enum."
+                what = "unsupported lexical execution-scope mode reached IdentifierVisitor",
+                why = "only implemented scope modes may enter engine facts",
+                fix = "validate modes at the extension boundary; add traversal support first",
             );
-            assert_eq!(
+            invariant_eq!(
                 context.local_scope,
                 ExecutionScopeMode::Preserve,
-                "INVARIANT VIOLATED: unsupported local execution-scope mode reached IdentifierVisitor. This is a bug because only implemented scope modes may enter engine facts. Fix: validate modes at the extension boundary and add traversal support before extending the enum."
+                what = "unsupported local execution-scope mode reached IdentifierVisitor",
+                why = "only implemented scope modes may enter engine facts",
+                fix = "validate modes at the extension boundary; add traversal support first",
             );
-            assert_eq!(
+            invariant_eq!(
                 self.scope_tracker.get_ns_stack(),
                 context.lexical_namespace.namespace_parts(),
-                "INVARIANT VIOLATED: persisted execution context lexical namespace differs from current AST traversal. This is a bug because stale context facts must be removed on every file replacement. Fix: keep extension contexts in the ordinary per-file replacement lifecycle."
+                what = "persisted execution context lexical namespace differs from current AST traversal",
+                why = "stale context facts must be removed on every file replacement",
+                fix = "keep extension contexts in the ordinary per-file replacement lifecycle",
             );
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
@@ -442,20 +458,29 @@ impl Visit<'_> for IdentifierVisitor {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
-            let implicit_kind = context.implicit_receiver.namespace_kind().expect(
-                "INVARIANT VIOLATED: execution implicit receiver is not a namespace. This is a bug because engine ingestion validates execution targets. Fix: keep ExecutionContextFact namespace validation in replace_facts.",
+            let implicit_kind = context.implicit_receiver.namespace_kind().expect_invariant(
+                "execution implicit receiver is not a namespace",
+                "engine ingestion validates execution targets",
+                "keep ExecutionContextFact namespace validation in replace_facts",
             );
-            let definition_kind = context.method_definition_owner.namespace_kind().expect(
-                "INVARIANT VIOLATED: execution method owner is not a namespace. This is a bug because engine ingestion validates execution targets. Fix: keep ExecutionContextFact namespace validation in replace_facts.",
-            );
+            let definition_kind = context
+                .method_definition_owner
+                .namespace_kind()
+                .expect_invariant(
+                    "execution method owner is not a namespace",
+                    "engine ingestion validates execution targets",
+                    "keep ExecutionContextFact namespace validation in replace_facts",
+                );
             self.scope_tracker.push_block_execution_context(
                 context.implicit_receiver.namespace_parts(),
                 implicit_kind,
                 context.method_definition_owner.namespace_parts(),
                 definition_kind,
             );
-            self.visit(&node.block().expect(
-                "INVARIANT VIOLATED: matching execution context call lost its block. This is a bug because execution_context_for_call matched that block immediately before traversal. Fix: keep the Prism call node immutable during visitor dispatch.",
+            self.visit(&node.block().expect_invariant(
+                "matching execution context call lost its block",
+                "execution_context_for_call matched that block immediately before traversal",
+                "keep the Prism call node immutable during visitor dispatch",
             ));
             self.scope_tracker.pop_execution_context();
         } else if let Some((
@@ -471,8 +496,10 @@ impl Visit<'_> for IdentifierVisitor {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
-            let block = node.block().expect(
-                "INVARIANT VIOLATED: dynamic-definition identifier context lost its block. This is a bug because static_dynamic_definition_block_context required the same immutable Prism call to have a block. Fix: keep identifier traversal and context matching atomic.",
+            let block = node.block().expect_invariant(
+                "dynamic-definition identifier context lost its block",
+                "context matching required the same Prism call to have a block",
+                "keep identifier traversal and context matching atomic",
             );
             self.scope_tracker.push_block_execution_context(
                 implicit_namespace,

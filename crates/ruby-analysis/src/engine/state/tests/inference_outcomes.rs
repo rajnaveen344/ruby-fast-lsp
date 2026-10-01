@@ -772,21 +772,22 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
         .resolve_method_callees(&owner, &method_name)
         .expect("reopened Service#value must resolve");
     assert_eq!(callees.len(), 1);
-    assert_eq!(
+    invariant_eq!(
         engine
             .query()
             .method_return_type_for_receiver(&owner, &method_name),
         None,
-        "INVARIANT VIOLATED: receiver return inference discarded an unresolved reopened method \
-         definition. This is a bug because every definition is a reachable static outcome. Fix: \
-         return Unknown/None unless every matching definition proves a return type."
+        what = "receiver return inference discarded an unresolved reopened method definition",
+        why = "every definition is a reachable static outcome",
+        fix = "return Unknown/None unless every matching definition proves a return type",
     );
-    assert_eq!(
+    invariant_eq!(
         engine.query().method_return_type_for_callee(&callees[0]),
         None,
-        "INVARIANT VIOLATED: resolved-callee return inference discarded an unresolved reopened \
-         method definition. This is a bug because chained calls would consume a partial concrete \
-         type. Fix: require a return type for every resolved definition range."
+        what =
+            "resolved-callee return inference discarded an unresolved reopened method definition",
+        why = "chained calls would consume a partial concrete type",
+        fix = "require a return type for every resolved definition range",
     );
 }
 
@@ -888,14 +889,14 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
             .any(|fqn| fqn == &basic_object),
         "Widget must inherit BasicObject so the stub method_missing is on the lookup chain"
     );
-    assert_eq!(
+    invariant_eq!(
         engine
             .query()
             .method_return_type_for_receiver(&widget, &ghost),
         None,
-        "INVARIANT VIOLATED: Widget#ghost inherited BasicObject#method_missing's stub return. \
-         This is a bug because default language fallback is not a proven return. \
-         Fix: skip stub/signature BasicObject#method_missing in receiver return lookup."
+        what = "Widget#ghost inherited BasicObject#method_missing's stub return",
+        why = "default language fallback is not a proven return",
+        fix = "skip stub/signature BasicObject#method_missing in receiver return lookup",
     );
     assert_eq!(
         engine

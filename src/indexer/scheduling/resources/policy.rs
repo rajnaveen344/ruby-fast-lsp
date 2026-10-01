@@ -34,21 +34,29 @@ impl IndexingResourcePolicy {
         transient_memory_limit_bytes: usize,
         io_slots: usize,
     ) -> Self {
-        assert!(
+        invariant!(
             cpu_lanes > 0,
-            "INVARIANT VIOLATED: the indexing CPU lane budget is zero. This is a bug because no indexing work could make progress. Fix: configure at least one CPU lane."
+            what = "the indexing CPU lane budget is zero",
+            why = "no indexing work could make progress",
+            fix = "configure at least one CPU lane",
         );
-        assert!(
+        invariant!(
             top_level_tasks > 0,
-            "INVARIANT VIOLATED: the indexing task admission budget is zero. This is a bug because no coordinator phase could enter the worker pool. Fix: configure at least one top-level task."
+            what = "the indexing task admission budget is zero",
+            why = "no coordinator phase could enter the worker pool",
+            fix = "configure at least one top-level task",
         );
-        assert!(
+        invariant!(
             transient_memory_limit_bytes > 0,
-            "INVARIANT VIOLATED: the indexing transient-memory budget is zero. This is a bug because every indexing task requires bounded temporary allocations. Fix: configure a positive transient-memory budget."
+            what = "the indexing transient-memory budget is zero",
+            why = "every indexing task requires bounded temporary allocations",
+            fix = "configure a positive transient-memory budget",
         );
-        assert!(
+        invariant!(
             io_slots > 0,
-            "INVARIANT VIOLATED: the indexing I/O budget is zero. This is a bug because project discovery and source loading could never make progress. Fix: configure at least one I/O slot."
+            what = "the indexing I/O budget is zero",
+            why = "project discovery and source loading could never make progress",
+            fix = "configure at least one I/O slot",
         );
         Self {
             cpu_lanes,
@@ -78,8 +86,10 @@ impl IndexingResourcePolicy {
         self.cpu_lanes
             .checked_div(self.top_level_tasks)
             .unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: cooperative indexing divided by a zero task limit. This is a bug because policy construction rejects zero top-level tasks. Fix: preserve the validated resource policy when deriving cooperative lane partitions."
+                unreachable_invariant!(
+                    what = "cooperative indexing divided by a zero task limit",
+                    why = "policy construction rejects zero top-level tasks",
+                    fix = "preserve the validated resource policy when deriving cooperative lane partitions",
                 )
             })
             .max(1)
@@ -121,13 +131,17 @@ impl IndexingWorkSpec {
         transient_memory_bytes: usize,
         io_slots: usize,
     ) -> Self {
-        assert!(
+        invariant!(
             cpu_lanes > 0,
-            "INVARIANT VIOLATED: an indexing work request claims zero CPU lanes. This is a bug because admitted work could execute without CPU accounting. Fix: reserve at least one CPU lane."
+            what = "an indexing work request claims zero CPU lanes",
+            why = "admitted work could execute without CPU accounting",
+            fix = "reserve at least one CPU lane",
         );
-        assert!(
+        invariant!(
             transient_memory_bytes > 0,
-            "INVARIANT VIOLATED: an indexing work request claims zero transient-memory bytes. This is a bug because admitted work could allocate outside memory accounting. Fix: provide a conservative positive transient-memory estimate."
+            what = "an indexing work request claims zero transient-memory bytes",
+            why = "admitted work could allocate outside memory accounting",
+            fix = "provide a conservative positive transient-memory estimate",
         );
         Self {
             project_root,
@@ -140,11 +154,11 @@ impl IndexingWorkSpec {
     }
 
     pub fn as_project_parallel(mut self) -> Self {
-        assert!(
+        invariant!(
             self.project_root.is_some(),
-            "INVARIANT VIOLATED: project-parallel work has no project root. This is a bug because \
-             the active-project reservation cannot distinguish its owner. Fix: attach the exact \
-             isolated project root before marking a work request project-parallel."
+            what = "project-parallel work has no project root",
+            why = "the active-project reservation cannot distinguish its owner",
+            fix = "attach the exact isolated project root before marking a work request project-parallel",
         );
         self.project_parallel = true;
         self

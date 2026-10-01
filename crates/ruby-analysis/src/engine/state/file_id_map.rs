@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -22,10 +23,10 @@ impl FileIdMap {
         }
 
         let id = SourceFileId(self.next_id);
-        self.next_id = self.next_id.checked_add(1).expect(
-            "INVARIANT VIOLATED: source file id allocator overflowed u32. \
-             This is a bug because SourceFileId currently stores u32 ids. \
-             Fix: widen SourceFileId before indexing more than u32::MAX files.",
+        self.next_id = self.next_id.checked_add(1).expect_invariant(
+            "source file id allocator overflowed u32",
+            "SourceFileId currently stores u32 ids",
+            "widen SourceFileId before indexing more than u32::MAX files",
         );
         self.by_path.insert(path, id);
         id

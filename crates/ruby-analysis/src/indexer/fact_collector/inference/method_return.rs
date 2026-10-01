@@ -10,6 +10,7 @@ use crate::inference::r#type::shape as shape_reads;
 use crate::inference::rbs::{
     get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
 };
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Default)]
@@ -201,12 +202,16 @@ impl FactCollector {
             parents.dedup();
             match parents.len() {
                 0 => return None,
-                1 => current = parents.pop().expect(
-                    "INVARIANT VIOLATED: one local superclass disappeared after length validation. This is a bug because local same-pass inheritance lookup must be deterministic. Fix: keep parent extraction and selection atomic.",
+                1 => current = parents.pop().expect_invariant(
+                    "one local superclass disappeared after length validation",
+                    "local same-pass inheritance lookup must be deterministic",
+                    "keep parent extraction and selection atomic",
                 ),
-                2.. => panic!(
-                    "INVARIANT VIOLATED: namespace `{}` has multiple local superclass edges. This is a bug because Ruby classes have exactly one superclass. Fix: reject conflicting generated or parser superclass facts before same-pass inference.",
-                    current
+                2.. => unreachable_invariant!(
+                    what = "namespace `{}` has multiple local superclass edges",
+                    why = "ruby classes have exactly one superclass",
+                    fix = "reject conflicting generated or parser superclass facts before same-pass inference",
+                    current,
                 ),
             }
 
@@ -224,9 +229,12 @@ impl FactCollector {
             }
         }
 
-        panic!(
-            "INVARIANT VIOLATED: local superclass cycle encountered while inferring `{}` on `{}`. This is a bug because inheritance cycles cannot define a valid Ruby MRO. Fix: reject cyclic graph facts before same-pass inference.",
-            method, receiver
+        unreachable_invariant!(
+            what = "local superclass cycle encountered while inferring `{}` on `{}`",
+            why = "inheritance cycles cannot define a valid Ruby MRO",
+            fix = "reject cyclic graph facts before same-pass inference",
+            method,
+            receiver,
         );
     }
 

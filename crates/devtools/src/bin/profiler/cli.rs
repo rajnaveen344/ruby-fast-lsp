@@ -82,11 +82,11 @@ where
                 config.memory_profiling = true;
             }
             "--config" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: profiler --config has no path. This is a bug because a \
-                     configured profiling run requires an explicit JSON file. Fix: pass \
-                     --config /path/to/ruby-fast-lsp.json."
+                    what = "profiler --config has no path",
+                    why = "a configured profiling run requires an explicit JSON file",
+                    fix = "pass --config /path/to/ruby-fast-lsp.json",
                 );
                 config.config_path = Some(PathBuf::from(&args[i + 1]));
                 i += 1;
@@ -114,10 +114,11 @@ where
             "--hold-seconds" => {
                 if i + 1 < args.len() {
                     config.hold_seconds = args[i + 1].parse().unwrap_or_else(|error| {
-                        panic!(
-                            "INVARIANT VIOLATED: --hold-seconds must be an unsigned integer. \
-                             This is a bug because profiler hold duration must be parseable seconds. \
-                             Fix: pass a numeric value like --hold-seconds 30. Error: {error}"
+                        unreachable_invariant!(
+                            what = "--hold-seconds must be an unsigned integer (error: {error})",
+                            why = "profiler hold duration must be parseable seconds",
+                            fix = "pass a numeric value like --hold-seconds 30",
+                            error = error,
                         )
                     });
                     i += 1;
@@ -126,99 +127,140 @@ where
             "--benchmark-iterations" => {
                 if i + 1 < args.len() {
                     let iterations = args[i + 1].parse().unwrap_or_else(|error| {
-                        panic!(
-                            "INVARIANT VIOLATED: --benchmark-iterations must be a positive integer. This is a bug because p95 measurement requires a fixed nonzero sample count. Fix: pass a numeric value like --benchmark-iterations 100. Error: {error}"
+                        unreachable_invariant!(
+                            what = "--benchmark-iterations must be a positive integer (error: {error})",
+                            why = "p95 measurement requires a fixed nonzero sample count",
+                            fix = "pass a numeric value like --benchmark-iterations 100",
+                            error = error,
                         )
                     });
-                    assert!(
+                    invariant!(
                         iterations > 0,
-                        "INVARIANT VIOLATED: --benchmark-iterations is zero. This is a bug because p95 measurement requires observations. Fix: pass a positive iteration count."
+                        what = "--benchmark-iterations is zero",
+                        why = "p95 measurement requires observations",
+                        fix = "pass a positive iteration count",
                     );
                     config.benchmark_iterations = Some(iterations);
                     i += 1;
                 }
             }
             "--scheduler-concurrency" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: profiler --scheduler-concurrency has no value. This is a bug because scheduling evidence requires an explicit positive worker limit. Fix: pass --scheduler-concurrency 1."
+                    what = "profiler --scheduler-concurrency has no value",
+                    why = "scheduling evidence requires an explicit positive worker limit",
+                    fix = "pass --scheduler-concurrency 1",
                 );
                 let concurrency = args[i + 1].parse().unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: --scheduler-concurrency must be a positive integer. This is a bug because profiler scheduling must be reproducible. Fix: pass a numeric value such as 1 or 2. Error: {error}"
+                    unreachable_invariant!(
+                        what =
+                            "--scheduler-concurrency must be a positive integer (error: {error})",
+                        why = "profiler scheduling must be reproducible",
+                        fix = "pass a numeric value such as 1 or 2",
+                        error = error,
                     )
                 });
-                assert!(
+                invariant!(
                     concurrency > 0,
-                    "INVARIANT VIOLATED: --scheduler-concurrency is zero. This is a bug because no project could be admitted. Fix: pass a positive worker count."
+                    what = "--scheduler-concurrency is zero",
+                    why = "no project could be admitted",
+                    fix = "pass a positive worker count",
                 );
                 config.scheduler_concurrency = concurrency;
                 i += 1;
             }
             "--resource-cpu-lanes" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: profiler --resource-cpu-lanes has no value. This is a bug because resource evidence requires an explicit positive lane limit. Fix: pass --resource-cpu-lanes 2."
+                    what = "profiler --resource-cpu-lanes has no value",
+                    why = "resource evidence requires an explicit positive lane limit",
+                    fix = "pass --resource-cpu-lanes 2",
                 );
                 let lanes = args[i + 1].parse().unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: --resource-cpu-lanes must be a positive integer. This is a bug because profiler resource evidence must be reproducible. Fix: pass a numeric value such as 2 or 6. Error: {error}"
+                    unreachable_invariant!(
+                        what = "--resource-cpu-lanes must be a positive integer (error: {error})",
+                        why = "profiler resource evidence must be reproducible",
+                        fix = "pass a numeric value such as 2 or 6",
+                        error = error,
                     )
                 });
-                assert!(
+                invariant!(
                     lanes > 0,
-                    "INVARIANT VIOLATED: --resource-cpu-lanes is zero. This is a bug because no indexing CPU work could progress. Fix: pass a positive lane count."
+                    what = "--resource-cpu-lanes is zero",
+                    why = "no indexing CPU work could progress",
+                    fix = "pass a positive lane count",
                 );
                 config.resource_cpu_lanes = Some(lanes);
                 i += 1;
             }
             "--resource-task-limit" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: profiler --resource-task-limit has no value. This is a bug because resource evidence requires an explicit positive admission limit. Fix: pass --resource-task-limit 2."
+                    what = "profiler --resource-task-limit has no value",
+                    why = "resource evidence requires an explicit positive admission limit",
+                    fix = "pass --resource-task-limit 2",
                 );
                 let tasks = args[i + 1].parse().unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: --resource-task-limit must be a positive integer. This is a bug because profiler resource evidence must be reproducible. Fix: pass a numeric value such as 1 or 2. Error: {error}"
+                    unreachable_invariant!(
+                        what = "--resource-task-limit must be a positive integer (error: {error})",
+                        why = "profiler resource evidence must be reproducible",
+                        fix = "pass a numeric value such as 1 or 2",
+                        error = error,
                     )
                 });
-                assert!(
+                invariant!(
                     tasks > 0,
-                    "INVARIANT VIOLATED: --resource-task-limit is zero. This is a bug because no indexing task could enter the worker pool. Fix: pass a positive task limit."
+                    what = "--resource-task-limit is zero",
+                    why = "no indexing task could enter the worker pool",
+                    fix = "pass a positive task limit",
                 );
                 config.resource_task_limit = Some(tasks);
                 i += 1;
             }
             "--resource-memory-mib" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: profiler --resource-memory-mib has no value. This is a bug because memory evidence requires an explicit positive admission limit. Fix: pass --resource-memory-mib 512."
+                    what = "profiler --resource-memory-mib has no value",
+                    why = "memory evidence requires an explicit positive admission limit",
+                    fix = "pass --resource-memory-mib 512",
                 );
                 let memory_mib = args[i + 1].parse::<usize>().unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: --resource-memory-mib must be a positive integer. This is a bug because profiler resource evidence must be reproducible. Fix: pass a numeric value such as 256 or 512. Error: {error}"
+                    unreachable_invariant!(
+                        what = "--resource-memory-mib must be a positive integer (error: {error})",
+                        why = "profiler resource evidence must be reproducible",
+                        fix = "pass a numeric value such as 256 or 512",
+                        error = error,
                     )
                 });
-                assert!(
+                invariant!(
                     memory_mib > 0,
-                    "INVARIANT VIOLATED: --resource-memory-mib is zero. This is a bug because no indexing work could reserve temporary memory. Fix: pass a positive MiB limit."
+                    what = "--resource-memory-mib is zero",
+                    why = "no indexing work could reserve temporary memory",
+                    fix = "pass a positive MiB limit",
                 );
                 config.resource_memory_mib = Some(memory_mib);
                 i += 1;
             }
             "--resource-io-slots" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: profiler --resource-io-slots has no value. This is a bug because I/O evidence requires an explicit positive admission limit. Fix: pass --resource-io-slots 2."
+                    what = "profiler --resource-io-slots has no value",
+                    why = "I/O evidence requires an explicit positive admission limit",
+                    fix = "pass --resource-io-slots 2",
                 );
                 let io_slots = args[i + 1].parse::<usize>().unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: --resource-io-slots must be a positive integer. This is a bug because profiler resource evidence must be reproducible. Fix: pass a numeric value such as 1 or 2. Error: {error}"
+                    unreachable_invariant!(
+                        what = "--resource-io-slots must be a positive integer (error: {error})",
+                        why = "profiler resource evidence must be reproducible",
+                        fix = "pass a numeric value such as 1 or 2",
+                        error = error,
                     )
                 });
-                assert!(
+                invariant!(
                     io_slots > 0,
-                    "INVARIANT VIOLATED: --resource-io-slots is zero. This is a bug because source discovery could never enter the I/O budget. Fix: pass a positive slot count."
+                    what = "--resource-io-slots is zero",
+                    why = "source discovery could never enter the I/O budget",
+                    fix = "pass a positive slot count",
                 );
                 config.resource_io_slots = Some(io_slots);
                 i += 1;
@@ -233,17 +275,21 @@ where
                 config.diagnostic_manifest = true;
             }
             "--diagnostics-file" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: --diagnostics-file has no path. This is a bug because diagnostic sampling requires an explicit workspace-relative file. Fix: pass --diagnostics-file path/to/file.rb."
+                    what = "--diagnostics-file has no path",
+                    why = "diagnostic sampling requires an explicit workspace-relative file",
+                    fix = "pass --diagnostics-file path/to/file.rb",
                 );
                 config.diagnostics_files.push(PathBuf::from(&args[i + 1]));
                 i += 1;
             }
             "--references-at" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: --references-at has no path and position. This is a bug because reference sampling requires path:line:character. Fix: pass --references-at spec/example_spec.rb:29:10."
+                    what = "--references-at has no path and position",
+                    why = "reference sampling requires path:line:character",
+                    fix = "pass --references-at spec/example_spec.rb:29:10",
                 );
                 config
                     .reference_probes
@@ -251,9 +297,11 @@ where
                 i += 1;
             }
             "--definition-at" => {
-                assert!(
+                invariant!(
                     i + 1 < args.len(),
-                    "INVARIANT VIOLATED: --definition-at has no path and position. This is a bug because definition sampling requires path:line:character. Fix: pass --definition-at lib/example.rb:4:10."
+                    what = "--definition-at has no path and position",
+                    why = "definition sampling requires path:line:character",
+                    fix = "pass --definition-at lib/example.rb:4:10",
                 );
                 config
                     .definition_probes
@@ -283,22 +331,51 @@ fn parse_reference_probe(value: &str) -> ReferenceProbe {
 
 fn parse_position_probe(flag: &str, value: &str) -> ReferenceProbe {
     let (path_and_line, character) = value.rsplit_once(':').unwrap_or_else(|| {
-        panic!("INVARIANT VIOLATED: {flag} `{value}` has no character component. This is a bug because profiler query positions must be explicit. Fix: use path:line:character with zero-indexed LSP coordinates.")
+        unreachable_invariant!(
+            what = "{flag} `{value}` has no character component",
+            why = "profiler query positions must be explicit",
+            fix = "use path:line:character with zero-indexed LSP coordinates",
+            flag = flag,
+            value = value,
+        )
     });
     let (path, line) = path_and_line.rsplit_once(':').unwrap_or_else(|| {
-        panic!("INVARIANT VIOLATED: {flag} `{value}` has no line component. This is a bug because profiler query positions must be explicit. Fix: use path:line:character with zero-indexed LSP coordinates.")
+        unreachable_invariant!(
+            what = "{flag} `{value}` has no line component",
+            why = "profiler query positions must be explicit",
+            fix = "use path:line:character with zero-indexed LSP coordinates",
+            flag = flag,
+            value = value,
+        )
     });
     let line = line.parse().unwrap_or_else(|error| {
-        panic!("INVARIANT VIOLATED: {flag} line `{line}` is invalid. This is a bug because LSP lines are unsigned integers. Fix: pass a zero-indexed numeric line. Error: {error}")
+        unreachable_invariant!(
+            what = "{flag} line `{line}` is invalid (error: {error})",
+            why = "LSP lines are unsigned integers",
+            fix = "pass a zero-indexed numeric line",
+            flag = flag,
+            line = line,
+            error = error,
+        )
     });
     let character = character.parse().unwrap_or_else(|error| {
-        panic!("INVARIANT VIOLATED: {flag} character `{character}` is invalid. This is a bug because LSP characters are unsigned integers. Fix: pass a zero-indexed numeric character. Error: {error}")
+        unreachable_invariant!(
+            what = "{flag} character `{character}` is invalid (error: {error})",
+            why = "LSP characters are unsigned integers",
+            fix = "pass a zero-indexed numeric character",
+            flag = flag,
+            character = character,
+            error = error,
+        )
     });
     let path = PathBuf::from(path);
-    assert!(
+    invariant!(
         path.is_relative(),
-        "INVARIANT VIOLATED: {flag} path `{}` is absolute. This is a bug because profiler probes must remain inside the selected workspace. Fix: pass a workspace-relative path.",
-        path.display()
+        what = "{flag} path `{}` is absolute",
+        why = "profiler probes must remain inside the selected workspace",
+        fix = "pass a workspace-relative path",
+        path.display(),
+        flag = flag,
     );
     ReferenceProbe {
         path,

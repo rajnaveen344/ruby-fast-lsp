@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
 use crate::core::callables::callable_signature::CallableSignature;
@@ -80,11 +81,11 @@ impl HigherOrderMethodMetadata {
 impl MethodParamFact {
     pub fn new(name: impl Into<String>, kind: MethodParamKind) -> Self {
         let name = name.into();
-        assert!(
+        invariant!(
             !name.is_empty(),
-            "INVARIANT VIOLATED: method parameter fact name is empty. \
-             This is a bug because parameter facts must identify a Ruby parameter. \
-             Fix: skip anonymous parameters or assign a valid generated name before inserting."
+            what = "method parameter fact name is empty",
+            why = "parameter facts must identify a Ruby parameter",
+            fix = "skip anonymous parameters or assign a valid generated name before inserting",
         );
         Self {
             name,
@@ -218,11 +219,11 @@ impl MethodFact {
         if let MethodAvailability::Unavailable { reason } | MethodAvailability::Absent { reason } =
             &availability
         {
-            assert!(
+            invariant!(
                 !reason.trim().is_empty(),
-                "INVARIANT VIOLATED: unavailable method fact has an empty reason. \
-                 This is a bug because unsupported-runtime-api diagnostics must explain the runtime limitation. \
-                 Fix: provide a non-empty @unavailable reason in the owning stub declaration."
+                what = "unavailable method fact has an empty reason",
+                why = "unsupported-runtime-api diagnostics must explain the runtime limitation",
+                fix = "provide a non-empty @unavailable reason in the owning stub declaration",
             );
         }
         self.availability = availability;
@@ -230,14 +231,18 @@ impl MethodFact {
     }
 
     pub fn with_name_range(mut self, name_range: TextRange) -> Self {
-        assert!(
+        invariant!(
             name_range.file_id == self.range.file_id,
-            "INVARIANT VIOLATED: method name range belongs to a different file than its declaration. This is a bug because declaration edits must stay within their source file. Fix: derive both ranges from the same registered source document."
+            what = "method name range belongs to a different file than its declaration",
+            why = "declaration edits must stay within their source file",
+            fix = "derive both ranges from the same registered source document",
         );
-        assert!(
+        invariant!(
             self.range.start_byte <= name_range.start_byte
                 && name_range.end_byte <= self.range.end_byte,
-            "INVARIANT VIOLATED: method name range is outside its declaration range. This is a bug because rename requires the exact declaration token. Fix: use Prism's method name location inside the enclosing declaration location."
+            what = "method name range is outside its declaration range",
+            why = "rename requires the exact declaration token",
+            fix = "use Prism's method name location inside the enclosing declaration location",
         );
         self.name_range = name_range;
         self
@@ -408,10 +413,10 @@ struct MethodFactId(u32);
 
 impl MethodFactId {
     fn from_index(index: usize) -> Self {
-        Self(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: method fact arena exceeded u32 ids. This is a bug because \
-             retained method indexes use bounded compact ids. Fix: widen MethodFactId and \
-             every stored method index together before retaining more than u32::MAX facts.",
+        Self(u32::try_from(index).expect_invariant(
+            "method fact arena exceeded u32 ids",
+            "method indexes use compact u32 ids",
+            "widen MethodFactId and every stored method index together",
         ))
     }
 
@@ -477,10 +482,10 @@ impl MethodStore {
             return StoredMethodFactMatch::Missing;
         };
         let indexed_fact = |id: &MethodFactId| {
-            self.fact(*id).expect(
-                "INVARIANT VIOLATED: method owner/name index points to a missing fact. \
-                 This is a bug because indexes must be cleared before arena facts. \
-                 Fix: remove every MethodFactId from owner/name indexes before freeing it.",
+            self.fact(*id).expect_invariant(
+                "method owner/name index points to a missing fact",
+                "indexes must be cleared before arena facts",
+                "remove every MethodFactId from owner/name indexes before freeing it",
             )
         };
 
@@ -576,11 +581,11 @@ impl MethodStore {
         let mut touched_owners = HashSet::new();
         let mut touched_owner_names = HashSet::new();
         for fact in facts {
-            assert!(
+            invariant!(
                 fact.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement method fact belongs to a different file id. \
-                 This is a bug because MethodStore::replace_file must only receive facts for the target file. \
-                 Fix: partition method facts by SourceFileId before replacing."
+                what = "replacement method fact belongs to a different file id",
+                why = "MethodStore::replace_file must only receive facts for the target file",
+                fix = "partition method facts by SourceFileId before replacing",
             );
             let fqn = fact.fqn;
             let owner = fact.owner;
@@ -679,16 +684,16 @@ impl MethodStore {
 
     fn insert_fact(&mut self, fact: StoredMethodFact) -> MethodFactId {
         if let Some(id) = self.free_facts.pop() {
-            let slot = self.facts.get_mut(id.index()).expect(
-                "INVARIANT VIOLATED: method free list points outside fact arena. \
-                 This is a bug because free ids must come from previous arena slots. \
-                 Fix: only push ids returned by MethodStore::take_fact.",
+            let slot = self.facts.get_mut(id.index()).expect_invariant(
+                "method free list points outside fact arena",
+                "free ids must come from previous arena slots",
+                "only push ids returned by MethodStore::take_fact",
             );
-            assert!(
+            invariant!(
                 slot.is_none(),
-                "INVARIANT VIOLATED: method free list points to occupied fact slot. \
-                 This is a bug because free ids must only reference removed facts. \
-                 Fix: push each removed method id at most once."
+                what = "method free list points to occupied fact slot",
+                why = "free ids must only reference removed facts",
+                fix = "push each removed method id at most once",
             );
             *slot = Some(fact);
             return id;
@@ -835,10 +840,10 @@ fn callable_template_heap_bytes(template: &CallableTypeTemplate) -> usize {
 
 fn sort_method_ids_by_fqn(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect(
-            "INVARIANT VIOLATED: method index points to missing fact. \
-             This is a bug because indexes must be removed before arena facts. \
-             Fix: remove stale ids from every MethodStore index.",
+        let fact = facts[id.index()].as_ref().expect_invariant(
+            "method index points to missing fact",
+            "indexes must be removed before arena facts",
+            "remove stale ids from every MethodStore index",
         );
         (
             fact.range.file_id,
@@ -851,10 +856,10 @@ fn sort_method_ids_by_fqn(facts: &[Option<StoredMethodFact>], ids: &mut [MethodF
 
 fn sort_method_ids_by_owner(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect(
-            "INVARIANT VIOLATED: method owner index points to missing fact. \
-             This is a bug because indexes must be removed before arena facts. \
-             Fix: remove stale ids from every MethodStore index.",
+        let fact = facts[id.index()].as_ref().expect_invariant(
+            "method owner index points to missing fact",
+            "indexes must be removed before arena facts",
+            "remove stale ids from every MethodStore index",
         );
         (
             fact.range.file_id,
@@ -867,10 +872,10 @@ fn sort_method_ids_by_owner(facts: &[Option<StoredMethodFact>], ids: &mut [Metho
 
 fn sort_method_ids_by_file(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect(
-            "INVARIANT VIOLATED: method file index points to missing fact. \
-             This is a bug because indexes must be removed before arena facts. \
-             Fix: remove stale ids from every MethodStore index.",
+        let fact = facts[id.index()].as_ref().expect_invariant(
+            "method file index points to missing fact",
+            "indexes must be removed before arena facts",
+            "remove stale ids from every MethodStore index",
         );
         (fact.range.start_byte, fact.range.end_byte)
     });

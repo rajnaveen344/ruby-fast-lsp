@@ -37,6 +37,11 @@
 //!   --diagnostic-manifest  Print stable per-project resolved diagnostic facts
 //!   --help               Show help
 
+#[macro_use]
+#[allow(unused_macros)]
+#[path = "../../../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 mod benchmark;
 mod cli;
 mod evidence;
@@ -48,6 +53,7 @@ mod sample_project;
 mod tests;
 mod workspace_indexing;
 
+use crate::invariant::ExpectInvariant;
 use devtools::metrics::ProductionBudget;
 use log::info;
 use ruby_fast_lsp::indexer::scheduling::resources;
@@ -83,7 +89,7 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(all(feature = "jemalloc", feature = "memory-profiling"))]
 compile_error!(
-    "INVARIANT VIOLATED: jemalloc and memory-profiling select two global allocators. This is a build configuration bug because one binary may own only one global allocator. Fix: enable exactly one allocator feature."
+    "invariant violated: jemalloc and memory-profiling both select a global allocator — bug: one binary owns one global allocator — fix: enable exactly one allocator feature"
 );
 
 fn main() -> anyhow::Result<()> {
@@ -137,25 +143,25 @@ fn main() -> anyhow::Result<()> {
             let transient_memory_limit_bytes = config
                 .resource_memory_mib
                 .map(|memory_mib| {
-                    memory_mib.checked_mul(1024 * 1024).expect(
-                        "INVARIANT VIOLATED: profiler transient-memory MiB overflowed usize. This is a bug because the requested evidence budget cannot fit the host address space. Fix: pass a smaller --resource-memory-mib value.",
+                    memory_mib.checked_mul(1024 * 1024).expect_invariant(
+                        "profiler transient-memory MiB overflowed usize",
+                        "the requested evidence budget cannot fit the host address space",
+                        "pass a smaller --resource-memory-mib value",
                     )
                 })
                 .unwrap_or_else(|| default_policy.transient_memory_limit_bytes());
-            server.set_indexing_resource_policy(
-                    resources::IndexingResourcePolicy::with_limits(
-                        config
-                            .resource_cpu_lanes
-                            .unwrap_or_else(|| default_policy.cpu_lanes()),
-                        config
-                            .resource_task_limit
-                            .unwrap_or_else(|| default_policy.top_level_tasks()),
-                        transient_memory_limit_bytes,
-                        config
-                            .resource_io_slots
-                            .unwrap_or_else(|| default_policy.io_slots()),
-                    ),
-                );
+            server.set_indexing_resource_policy(resources::IndexingResourcePolicy::with_limits(
+                config
+                    .resource_cpu_lanes
+                    .unwrap_or_else(|| default_policy.cpu_lanes()),
+                config
+                    .resource_task_limit
+                    .unwrap_or_else(|| default_policy.top_level_tasks()),
+                transient_memory_limit_bytes,
+                config
+                    .resource_io_slots
+                    .unwrap_or_else(|| default_policy.io_slots()),
+            ));
         }
         let extension_load = configure_server(
             &mut server,
@@ -200,12 +206,16 @@ fn main() -> anyhow::Result<()> {
             prepare_live_definition_probes(&server, &workspace_path, &config.definition_probes)
                 .await?;
         if let Some(active_probe) = live_definition_probes.first() {
-            let workspace = server.workspace_for_uri(&active_probe.uri).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: live definition probe {} has no owning project. This is a profiler setup bug because probes must remain inside one discovered Ruby project. Fix: choose a project-owned source file.",
-                    active_probe.relative_path.display()
-                )
-            });
+            let workspace = server
+                .workspace_for_uri(&active_probe.uri)
+                .unwrap_or_else(|| {
+                    unreachable_invariant!(
+                        what = "live definition probe {} has no owning project",
+                        why = "probes must remain inside one discovered Ruby project",
+                        fix = "choose a project-owned source file",
+                        active_probe.relative_path.display(),
+                    )
+                });
             server.prioritize_indexing_project(&workspace.root_path);
         }
 
@@ -254,17 +264,15 @@ fn main() -> anyhow::Result<()> {
         sample_references(&server, &workspace_path, &config.reference_probes).await?;
 
         let benchmark_result = if let Some(iterations) = config.benchmark_iterations {
-            assert!(
+            invariant!(
                 config.phase == Phase::All,
-                "INVARIANT VIOLATED: production benchmark requested with a partial profiler phase. This is a bug because editor latency budgets require a fully indexed workspace. Fix: use --phase all or omit --phase."
+                what = "production benchmark requested with a partial profiler phase",
+                why = "editor latency budgets require a fully indexed workspace",
+                fix = "use --phase all or omit --phase",
             );
-            let measurements = run_production_benchmark(
-                &server,
-                &workspace_path,
-                cold_indexing,
-                iterations,
-            )
-            .await?;
+            let measurements =
+                run_production_benchmark(&server, &workspace_path, cold_indexing, iterations)
+                    .await?;
             print_production_measurements(&measurements);
             Some(measurements)
         } else {

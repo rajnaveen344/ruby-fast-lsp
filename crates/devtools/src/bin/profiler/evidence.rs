@@ -1,10 +1,13 @@
 //! Dataset fingerprints, build and machine identity, and process resource usage evidence.
 
+use crate::invariant::ExpectInvariant;
 use sha2::{Digest, Sha256};
 
 pub(crate) fn hash_length_prefixed(hasher: &mut Sha256, bytes: &[u8]) {
-    let length = u64::try_from(bytes.len()).expect(
-        "INVARIANT VIOLATED: profiler fingerprint input length exceeds u64. This is a bug because one source path or file cannot be that large in the process address space. Fix: inspect corrupt source metadata.",
+    let length = u64::try_from(bytes.len()).expect_invariant(
+        "profiler fingerprint input length exceeds u64",
+        "one source path or file cannot be that large in the process address space",
+        "inspect corrupt source metadata",
     );
     hasher.update(length.to_le_bytes());
     hasher.update(bytes);
@@ -14,8 +17,10 @@ pub(crate) fn stable_fingerprint_hex(bytes: [u8; 16]) -> String {
     let mut encoded = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         use std::fmt::Write as _;
-        write!(&mut encoded, "{byte:02x}").expect(
-            "INVARIANT VIOLATED: writing a byte to an in-memory String failed. This is a bug because String formatting is infallible. Fix: inspect the formatter implementation before emitting profiler evidence.",
+        write!(&mut encoded, "{byte:02x}").expect_invariant(
+            "writing a byte to an in-memory String failed",
+            "string formatting is infallible",
+            "inspect the formatter implementation before emitting profiler evidence",
         );
     }
     encoded
@@ -37,14 +42,18 @@ pub(crate) fn dataset_fingerprint_sha256(project_evidence: &[serde_json::Value])
         let left_root = left
             .get("root")
             .and_then(serde_json::Value::as_str)
-            .expect(
-                "INVARIANT VIOLATED: profiler project evidence has no string root. This is a bug because dataset identity requires one canonical project owner. Fix: construct project evidence with its canonical root before fingerprinting.",
+            .expect_invariant(
+                "profiler project evidence has no string root",
+                "dataset identity requires one canonical project owner",
+                "construct project evidence with its canonical root before fingerprinting",
             );
         let right_root = right
             .get("root")
             .and_then(serde_json::Value::as_str)
-            .expect(
-                "INVARIANT VIOLATED: profiler project evidence has no string root. This is a bug because dataset identity requires one canonical project owner. Fix: construct project evidence with its canonical root before fingerprinting.",
+            .expect_invariant(
+                "profiler project evidence has no string root",
+                "dataset identity requires one canonical project owner",
+                "construct project evidence with its canonical root before fingerprinting",
             );
         left_root.cmp(right_root)
     });
@@ -54,12 +63,17 @@ pub(crate) fn dataset_fingerprint_sha256(project_evidence: &[serde_json::Value])
     for project in projects {
         for field in IDENTITY_FIELDS {
             let value = project.get(field).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: profiler project evidence is missing dataset identity field `{field}`. This is a bug because comparable runs must hash the same complete input identity. Fix: add the field before computing the dataset fingerprint."
+                unreachable_invariant!(
+                    what = "profiler project evidence is missing dataset identity field `{field}`",
+                    why = "comparable runs must hash the same complete input identity",
+                    fix = "add the field before computing the dataset fingerprint",
+                    field = field,
                 )
             });
-            let encoded = serde_json::to_vec(value).expect(
-                "INVARIANT VIOLATED: profiler dataset identity could not serialize to JSON. This is a bug because every evidence field is already JSON-compatible. Fix: keep dataset identity fields serializable.",
+            let encoded = serde_json::to_vec(value).expect_invariant(
+                "profiler dataset identity could not serialize to JSON",
+                "every evidence field is already JSON-compatible",
+                "keep dataset identity fields serializable",
             );
             hash_length_prefixed(&mut fingerprint, field.as_bytes());
             hash_length_prefixed(&mut fingerprint, &encoded);

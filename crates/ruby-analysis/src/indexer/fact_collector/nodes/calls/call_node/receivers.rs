@@ -3,6 +3,7 @@
 use crate::core::{FullyQualifiedName, GraphNodeKind, NamespaceKind, RubyConstant};
 use crate::engine::{AnalysisQuery, VariableTypeKind};
 use crate::indexer::{build_constant_path_name, mixin_ref_from_node, utf8_str};
+use crate::invariant::ExpectInvariant;
 use ruby_prism::Node;
 
 use crate::core::RubyType;
@@ -279,10 +280,10 @@ impl FactCollector {
 
         if let Some(ivar) = receiver_node.as_instance_variable_read_node() {
             let var_name = utf8_str(ivar.name().as_slice());
-            let byte_offset = u32::try_from(ivar.location().start_offset()).expect(
-                "INVARIANT VIOLATED: Prism location offset exceeded u32. \
-                 This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-                 Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            let byte_offset = u32::try_from(ivar.location().start_offset()).expect_invariant(
+                "Prism location offset exceeded u32",
+                "ruby-analysis::core TextRange currently stores u32 offsets",
+                "widen TextRange offsets before indexing files larger than u32::MAX bytes",
             );
             let owner = FullyQualifiedName::namespace_with_kind(
                 self.scope_tracker.get_ns_stack(),
@@ -298,8 +299,10 @@ impl FactCollector {
 
         if let Some(class_var) = receiver_node.as_class_variable_read_node() {
             let var_name = utf8_str(class_var.name().as_slice());
-            let byte_offset = u32::try_from(class_var.location().start_offset()).expect(
-                "INVARIANT VIOLATED: Prism location offset exceeded u32. This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            let byte_offset = u32::try_from(class_var.location().start_offset()).expect_invariant(
+                "Prism location offset exceeded u32",
+                "ruby-analysis::core TextRange currently stores u32 offsets",
+                "widen TextRange offsets before indexing files larger than u32::MAX bytes",
             );
             let owner = FullyQualifiedName::namespace_with_kind(
                 self.scope_tracker.get_ns_stack(),
@@ -315,8 +318,10 @@ impl FactCollector {
 
         if let Some(global_var) = receiver_node.as_global_variable_read_node() {
             let var_name = utf8_str(global_var.name().as_slice());
-            let byte_offset = u32::try_from(global_var.location().start_offset()).expect(
-                "INVARIANT VIOLATED: Prism location offset exceeded u32. This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            let byte_offset = u32::try_from(global_var.location().start_offset()).expect_invariant(
+                "Prism location offset exceeded u32",
+                "ruby-analysis::core TextRange currently stores u32 offsets",
+                "widen TextRange offsets before indexing files larger than u32::MAX bytes",
             );
             let owner = FullyQualifiedName::namespace_with_kind(
                 self.scope_tracker.get_ns_stack(),

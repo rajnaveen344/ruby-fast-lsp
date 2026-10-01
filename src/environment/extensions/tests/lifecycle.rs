@@ -60,14 +60,14 @@ fn activation_failure_disables_extension_before_use() {
     assert_eq!(reports[0].telemetry.guest_failures, 1);
     assert_eq!(reports[0].telemetry.disablements, 1);
     assert!(reports[0].telemetry.max_guest_time_ns <= reports[0].telemetry.total_guest_time_ns);
-    assert!(
+    invariant!(
         reports[0]
             .last_error
             .as_deref()
             .is_some_and(|error| error.contains("activation")),
-        "INVARIANT VIOLATED: activation failure was not reported with lifecycle context. \
-         This is a bug because users cannot diagnose why an extension was disabled. \
-         Fix: retain the activation error in extension status."
+        what = "activation failure was not reported with lifecycle context",
+        why = "users cannot diagnose why an extension was disabled",
+        fix = "retain the activation error in extension status",
     );
 }
 
@@ -145,14 +145,14 @@ fn settings_only_reconfiguration_notifies_existing_extension() {
 
     let reports = registry.status_reports();
     assert_eq!(reports[0].status, "failed");
-    assert!(
+    invariant!(
         reports[0]
             .last_error
             .as_deref()
             .is_some_and(|error| error.contains("settings.changed")),
-        "INVARIANT VIOLATED: settings event failure lacks event context. \
-         This is a bug because settings-only reload failures must be diagnosable. \
-         Fix: report the settings.changed event in extension status."
+        what = "settings event failure lacks event context",
+        why = "settings-only reload failures must be diagnosable",
+        fix = "report the settings.changed event in extension status",
     );
 
     config.extension_settings.insert(
@@ -670,12 +670,14 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
 
     let report = &server.extensions.registry().status_reports()[0];
     assert_eq!(report.status, "failed");
-    assert!(
+    invariant!(
         report
             .last_error
             .as_deref()
             .is_some_and(|error| error.contains("files.changed")),
-        "INVARIANT VIOLATED: watched-file failure lacks event context. This is a bug because extension watcher failures must be diagnosable. Fix: retain files.changed in extension status."
+        what = "watched-file failure lacks event context",
+        why = "extension watcher failures must be diagnosable",
+        fix = "retain files.changed in extension status",
     );
 }
 
@@ -849,10 +851,10 @@ fn initialization_options_do_not_load_direct_wasm_files() {
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: initialization options loaded a direct wasm file. \
-         This is a bug because editor-installed extensions must be manifest packages. \
-         Fix: require extension.toml for initialization option extension paths."
+        what = "initialization options loaded a direct wasm file",
+        why = "editor-installed extensions must be manifest packages",
+        fix = "require extension.toml for initialization option extension paths",
     );
 }

@@ -136,7 +136,11 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
             2 => "collect old; edit new; cancel old; collect new; publish new; compare fresh",
             3 => "collect old; restart server; open new; reject old into replacement engine; compare fresh",
             4 => "collect alpha; open beta; reject alpha into beta engine; compare both projects",
-            5..=u64::MAX => unreachable!("INVARIANT VIOLATED: unchecked schedule seed reached dispatch. This is a test bug because schedules are bounded to 0 through 4. Fix: validate the seed before execution."),
+            5..=u64::MAX => unreachable_invariant!(
+                what = "unchecked schedule seed reached dispatch",
+                why = "schedules are bounded to 0 through 4",
+                fix = "validate the seed before execution",
+            ),
         };
         std::fs::write(artifact.join("schedule.json"), serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": 1, "seed": seed, "steps": steps, "file": FILE,
@@ -165,7 +169,10 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
                 editor.set(FILE, NEW).await;
                 let current = collect(&editor, FILE, NEW);
                 assert!(release_commit(pending_commit(current, engine)).await);
-                assert!(!release_commit(pending).await, "older collection must be rejected after newer publication");
+                assert!(
+                    !release_commit(pending).await,
+                    "older collection must be rejected after newer publication"
+                );
                 assert_current(&editor, FILE, NEW).await;
             }
             2 => {
@@ -174,8 +181,10 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
                 drop(release);
                 assert_eq!(task.await.unwrap(), None);
                 let current = collect(&editor, FILE, NEW);
-                assert!(release_commit(pending_commit(current, engine)).await,
-                    "a cancelled producer must not prevent the next valid publication");
+                assert!(
+                    release_commit(pending_commit(current, engine)).await,
+                    "a cancelled producer must not prevent the next valid publication"
+                );
                 assert_current(&editor, FILE, NEW).await;
             }
             3 => {
@@ -184,8 +193,10 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
                 replacement.add_workspace("release_alpha");
                 replacement.open(FILE, NEW).await;
                 let target = replacement.server().analysis_engine_for_uri(&uri);
-                assert!(!release_commit(pending_commit(old, target)).await,
-                    "source snapshots must not survive engine replacement");
+                assert!(
+                    !release_commit(pending_commit(old, target)).await,
+                    "source snapshots must not survive engine replacement"
+                );
                 assert_current(&replacement, FILE, NEW).await;
             }
             4 => {
@@ -193,12 +204,18 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
                 editor.open(other_file, NEW).await;
                 let other_uri = crate::test::harness::fixture_uri(format!("/{other_file}"));
                 let other_engine = editor.server().analysis_engine_for_uri(&other_uri);
-                assert!(!release_commit(pending_commit(old, other_engine)).await,
-                    "project-specific facts must never cross isolated engines");
+                assert!(
+                    !release_commit(pending_commit(old, other_engine)).await,
+                    "project-specific facts must never cross isolated engines"
+                );
                 assert_current(&editor, FILE, OLD).await;
                 assert_current(&editor, other_file, NEW).await;
             }
-            5..=u64::MAX => unreachable!("INVARIANT VIOLATED: unchecked schedule seed reached dispatch. This is a test bug because schedules are bounded to 0 through 4. Fix: validate the seed before execution."),
+            5..=u64::MAX => unreachable_invariant!(
+                what = "unchecked schedule seed reached dispatch",
+                why = "schedules are bounded to 0 through 4",
+                fix = "validate the seed before execution",
+            ),
         }
         std::fs::write(artifact.join("result.json"), "{\"passed\":true}\n")
             .expect("schedule completion evidence must be written");

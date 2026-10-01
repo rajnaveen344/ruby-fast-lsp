@@ -3,6 +3,7 @@ use crate::core::{
 };
 use crate::indexer::mixin_ref_from_node;
 use crate::indexer::LocalScopeKind as LVScopeKind;
+use crate::invariant::ExpectInvariant;
 use log::error;
 use ruby_prism::ClassNode;
 
@@ -90,9 +91,12 @@ impl FactCollector {
         let name_range = self
             .direct_terminal_name_range(&node.constant_path().location(), node.name().as_slice());
         if reopened_target.is_none() {
-            assert_eq!(
-                fqn, syntactic_fqn,
-                "INVARIANT VIOLATED: syntactic class scope differs from the scope used for its declaration. This is a bug because both scopes were derived from the same Prism constant path. Fix: keep class declaration scope construction single-sourced."
+            invariant_eq!(
+                fqn,
+                syntactic_fqn,
+                what = "syntactic class scope differs from the scope used for its declaration",
+                why = "both scopes were derived from the same Prism constant path",
+                fix = "keep class declaration scope construction single-sourced",
             );
             self.direct_push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range, name_range);
         }
@@ -131,10 +135,10 @@ impl FactCollector {
             && !has_explicit_superclass
             && class_implicitly_inherits_object(&fqn)
         {
-            let object = RubyConstant::new("Object").expect(
-                "INVARIANT VIOLATED: Object is not a valid Ruby constant. \
-                 This is a bug because Ruby's implicit class superclass must be representable. \
-                 Fix: update RubyConstant validation or implicit superclass construction.",
+            let object = RubyConstant::new("Object").expect_invariant(
+                "Object is not a valid Ruby constant",
+                "ruby's implicit class superclass must be representable",
+                "update RubyConstant validation or implicit superclass construction",
             );
             self.direct_push_edge_with_provenance(
                 fqn.clone(),

@@ -1,4 +1,5 @@
 use crate::environment::config::LinterKind;
+use crate::invariant::ExpectInvariant;
 use crate::lsp::capabilities::editing::formatting::full_document_range;
 use crate::lsp::linter::fix_document;
 use crate::server::RubyLanguageServer;
@@ -76,10 +77,10 @@ pub async fn handle_code_actions(
     Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
         title: format!(
             "Fix safe {} offenses",
-            config.linter.diagnostic_source().expect(
-                "INVARIANT VIOLATED: enabled linter has no display name. \
-                 This is a bug because quick fixes require a user-facing title. \
-                 Fix: add diagnostic_source for every enabled LinterKind."
+            config.linter.diagnostic_source().expect_invariant(
+                "enabled linter has no display name",
+                "quick fixes require a user-facing title",
+                "add diagnostic_source for every enabled LinterKind",
             )
         ),
         kind: Some(CodeActionKind::QUICKFIX),

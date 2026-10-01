@@ -3,6 +3,7 @@
 use crate::core::{
     FullyQualifiedName, RubyConstant, RubyType, TypeFact, TypeProvenance, TypeSubject,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{DefNode, Node};
 
 use super::syntax::{constant_parts, constant_parts_and_absolute, constant_path_parts};
@@ -206,8 +207,10 @@ pub(super) fn literal_type(node: &Node<'_>) -> Option<RubyType> {
         || node.as_interpolated_regular_expression_node().is_some()
     {
         return Some(RubyType::Class(
-            FullyQualifiedName::try_from("Regexp").expect(
-                "INVARIANT VIOLATED: Regexp is not a valid Ruby constant. This is a bug because it is a language-defined literal type. Fix: preserve the canonical constant spelling.",
+            FullyQualifiedName::try_from("Regexp").expect_invariant(
+                "Regexp is not a valid Ruby constant",
+                "it is a language-defined literal type",
+                "preserve the canonical constant spelling",
             ),
         ));
     }

@@ -5,6 +5,7 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeKind, MethodFact, MethodParamFact, MethodParamKind,
     MethodReferenceAccess, NamespaceKind, ReferenceCandidate, RubyMethod, TypeFact, TypeSubject,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::CallNode;
 
 use super::names::{
@@ -132,10 +133,10 @@ impl FactCollector {
         let old_fqn = FullyQualifiedName::method(namespace.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
             namespace,
-            RubyMethod::new(&new_name).expect(
-                "INVARIANT VIOLATED: alias_method new method became invalid after validation. \
-                 This is a bug because the same string was already accepted. \
-                 Fix: keep alias_method validation single-sourced.",
+            RubyMethod::new(&new_name).expect_invariant(
+                "alias_method new method became invalid after validation",
+                "the same string was already accepted",
+                "keep alias_method validation single-sourced",
             ),
         );
         let old_subject = TypeSubject::MethodReturn(old_fqn);
@@ -287,10 +288,10 @@ impl FactCollector {
         let source = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
         let in_singleton = self.scope_tracker.in_singleton();
         let source_for_edge = if in_singleton {
-            source.to_singleton_namespace().expect(
-                "INVARIANT VIOLATED: singleton class mixin source could not convert to singleton namespace. \
-                 This is a bug because class << self can only appear inside a namespace. \
-                 Fix: guard singleton mixin indexing to namespace scopes.",
+            source.to_singleton_namespace().expect_invariant(
+                "singleton class mixin source could not convert to singleton namespace",
+                "class << self can only appear inside a namespace",
+                "guard singleton mixin indexing to namespace scopes",
             )
         } else {
             source.clone()

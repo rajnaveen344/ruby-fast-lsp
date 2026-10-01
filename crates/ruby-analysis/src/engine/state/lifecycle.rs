@@ -1,5 +1,6 @@
 //! Source registration, file-owned fact replacement, and resolve passes.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -35,12 +36,12 @@ impl AnalysisEngine {
         file: SourceFileInput,
         package: crate::core::LibraryPackageId,
     ) -> SourceFileId {
-        assert!(
+        invariant!(
             file.kind == SourceKind::Gem,
-            "INVARIANT VIOLATED: register_gem_file received SourceKind::{:?}. \
-             This is a bug because only Gem sources carry locked package identity. \
-             Fix: use register_file for non-gem sources or pass SourceKind::Gem.",
-            file.kind
+            what = "register_gem_file received SourceKind::{:?}",
+            why = "only Gem sources carry locked package identity",
+            fix = "use register_file for non-gem sources or pass SourceKind::Gem",
+            file.kind,
         );
         let line_index = SourceLineIndex::new(&file.content);
         let content_hash = source_hash(&file.content);
@@ -98,8 +99,10 @@ impl AnalysisEngine {
         }) {
             return id;
         }
-        self.next_source_revision = self.next_source_revision.checked_add(1).expect(
-            "INVARIANT VIOLATED: analysis engine source revision exhausted u64. This is a bug because stale background fact commits require monotonic source identity. Fix: widen the source snapshot revision before registering u64::MAX distinct source snapshots.",
+        self.next_source_revision = self.next_source_revision.checked_add(1).expect_invariant(
+            "analysis engine source revision exhausted u64",
+            "stale background commits need monotonic source identity",
+            "widen the source snapshot revision",
         );
         self.sources.files.insert(
             id,
@@ -137,10 +140,12 @@ impl AnalysisEngine {
         expected_snapshot: Option<SourceFileSnapshot>,
     ) -> Option<SourceFileSnapshot> {
         if let Some(expected) = expected_snapshot {
-            assert_eq!(
+            invariant_eq!(
                 expected.engine_instance_id,
                 self.instance_id,
-                "INVARIANT VIOLATED: conditional source registration received a snapshot from another analysis engine. This is a bug because source revisions are engine-local lifecycle identities. Fix: capture and commit the snapshot through the same isolated project engine."
+                what = "conditional source registration received a snapshot from another analysis engine",
+                why = "source revisions are engine-local lifecycle identities",
+                fix = "capture and commit the snapshot through the same isolated project engine",
             );
         }
         if self.source_snapshot_for_path(&path) != expected_snapshot {
@@ -148,9 +153,11 @@ impl AnalysisEngine {
         }
         let file_id = self.register_file_borrowed(path, content, kind);
         let file = self.file(file_id).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: conditional source registration lost file id {:?}. This is a bug because registration and revision capture occur under one engine write borrow. Fix: keep SourceRegistry insertion atomic.",
-                file_id
+            unreachable_invariant!(
+                what = "conditional source registration lost file id {:?}",
+                why = "registration and revision capture occur under one engine write borrow",
+                fix = "keep SourceRegistry insertion atomic",
+                file_id,
             )
         });
         Some(SourceFileSnapshot {
@@ -187,10 +194,12 @@ impl AnalysisEngine {
         facts: FileFacts,
         mode: ResolveMode,
     ) -> Option<SemanticChange> {
-        assert_eq!(
+        invariant_eq!(
             expected_snapshot.engine_instance_id,
             self.instance_id,
-            "INVARIANT VIOLATED: fact replacement received a source snapshot from another analysis engine. This is a bug because isolated projects cannot share mutable source lifecycle identity. Fix: commit collected facts through the same engine that issued the snapshot."
+            what = "fact replacement received a source snapshot from another analysis engine",
+            why = "isolated projects cannot share mutable source lifecycle identity",
+            fix = "commit collected facts through the same engine that issued the snapshot",
         );
         if self
             .file(expected_snapshot.file_id)
@@ -230,13 +239,12 @@ impl AnalysisEngine {
                 *file_id,
                 "selected-file resolve references unknown source file id",
             );
-            assert!(
+            invariant!(
                 unique.insert(*file_id),
-                "INVARIANT VIOLATED: selected-file semantic resolution contains duplicate file \
-                 id {:?}. This is a bug because one staged resolution must replace each file's \
-                 references and diagnostics exactly once. Fix: sort and deduplicate the selected \
-                 file ids before calling AnalysisEngine::resolve_files.",
-                file_id
+                what = "selected-file resolution contains duplicate file id {:?}",
+                why = "one resolution replaces each file's references and diagnostics once",
+                fix = "sort and dedupe file ids before AnalysisEngine::resolve_files",
+                file_id,
             );
         }
         if file_ids.is_empty() {
@@ -253,28 +261,36 @@ impl AnalysisEngine {
 
 impl AnalysisEngine {
     fn replace_facts_deferred(&mut self, file_id: SourceFileId, mut facts: FileFacts) {
-        self.semantic_revision = self.semantic_revision.checked_add(1).expect(
-            "INVARIANT VIOLATED: analysis engine semantic revision exhausted u64. \
-             This is a bug because cached queries require monotonic invalidation. \
-             Fix: widen the semantic revision before performing u64::MAX replacements.",
+        self.semantic_revision = self.semantic_revision.checked_add(1).expect_invariant(
+            "analysis engine semantic revision exhausted u64",
+            "cached queries require monotonic invalidation",
+            "widen the semantic revision before performing u64::MAX replacements",
         );
         *self.top_level_method_lookup_chain_cache.get_mut() = None;
         *self.universal_object_method_lookup_chain_cache.get_mut() = None;
         self.assert_known_file_id(file_id, "file analysis references unknown source file id");
         for (range, ruby_type) in facts.local_read_types.as_ref() {
-            assert_eq!(
-                range.file_id, file_id,
-                "INVARIANT VIOLATED: compact local-read type belongs to a different file. This is a bug because inference evidence must be replaced atomically with its source. Fix: attach the registered SourceFileId while converting TypeTracker offsets."
+            invariant_eq!(
+                range.file_id,
+                file_id,
+                what = "compact local-read type belongs to a different file",
+                why = "inference evidence must be replaced atomically with its source",
+                fix = "attach the registered SourceFileId while converting TypeTracker offsets",
             );
-            assert!(
+            invariant!(
                 *ruby_type != RubyType::Unknown,
-                "INVARIANT VIOLATED: compact local-read evidence contains Unknown at {range:?}. This is a bug because only proven flow types may enter local_read_types. Fix: retain the failure in expression_unknown_reasons instead."
+                what = "compact local-read evidence contains Unknown at {range:?}",
+                why = "only proven flow types may enter local_read_types",
+                fix = "retain the failure in expression_unknown_reasons instead",
+                range = range,
             );
         }
         for adjacent in facts.local_read_types.windows(2) {
-            assert!(
+            invariant!(
                 adjacent[0].0 < adjacent[1].0,
-                "INVARIANT VIOLATED: compact local-read evidence is duplicated or unsorted. This is a bug because deterministic range queries require one result per AST read. Fix: sort and deduplicate TypeTracker results before engine replacement."
+                what = "compact local-read evidence is duplicated or unsorted",
+                why = "deterministic range queries require one result per AST read",
+                fix = "sort and deduplicate TypeTracker results before engine replacement",
             );
         }
         let equations_changed = match self.inference_by_file.get(&file_id) {
@@ -416,8 +432,10 @@ impl AnalysisEngine {
         }
         self.inference_by_file
             .get_mut(&file_id)
-            .expect(
-                "INVARIANT VIOLATED: retained shape telemetry lost its file-owned inference evidence. This is a bug because the refresh runs only after atomic evidence insertion. Fix: keep telemetry refresh inside the file replacement lifecycle.",
+            .expect_invariant(
+                "retained shape telemetry lost its file-owned inference evidence",
+                "the refresh runs only after atomic evidence insertion",
+                "keep telemetry refresh inside the file replacement lifecycle",
             )
             .telemetry
             .replace_retained_shape_observations(&observed);
@@ -431,19 +449,26 @@ impl AnalysisEngine {
         mut contexts: Vec<ExecutionContextFact>,
     ) {
         for context in &contexts {
-            assert_eq!(
-                context.range.file_id, file_id,
-                "INVARIANT VIOLATED: execution context range belongs to a different file. This is a bug because FileFacts replacement must be file-local. Fix: construct execution context ranges from the owning RubyDocument."
+            invariant_eq!(
+                context.range.file_id,
+                file_id,
+                what = "execution context range belongs to a different file",
+                why = "FileFacts replacement must be file-local",
+                fix = "construct execution context ranges from the owning RubyDocument",
             );
-            assert!(
+            invariant!(
                 context.lexical_namespace.namespace_kind().is_some()
                     && context.implicit_receiver.namespace_kind().is_some()
                     && context.method_definition_owner.namespace_kind().is_some(),
-                "INVARIANT VIOLATED: execution context contains a non-namespace semantic target. This is a bug because receiver and definition ownership require namespace identities. Fix: validate and convert extension targets before engine ingestion."
+                what = "execution context contains a non-namespace semantic target",
+                why = "receiver and definition ownership require namespace identities",
+                fix = "validate and convert extension targets before engine ingestion",
             );
-            assert!(
+            invariant!(
                 !context.extension_id.is_empty(),
-                "INVARIANT VIOLATED: execution context has empty extension provenance. This is a bug because generated runtime semantics must remain attributable. Fix: retain the validated manifest ID in ExecutionContextFact."
+                what = "execution context has empty extension provenance",
+                why = "generated runtime semantics must remain attributable",
+                fix = "retain the validated manifest ID in ExecutionContextFact",
             );
         }
         contexts.sort_by_key(|context| {
@@ -454,9 +479,11 @@ impl AnalysisEngine {
             )
         });
         for pair in contexts.windows(2) {
-            assert!(
+            invariant!(
                 pair[0].range != pair[1].range,
-                "INVARIANT VIOLATED: multiple execution contexts own the same block range. This is a bug because extension context conflicts must be resolved before engine ingestion. Fix: deterministically reject incompatible contexts at the host boundary."
+                what = "multiple execution contexts own the same block range",
+                why = "extension context conflicts must be resolved before engine ingestion",
+                fix = "deterministically reject incompatible contexts at the host boundary",
             );
         }
         if contexts.is_empty() {
@@ -479,10 +506,12 @@ impl AnalysisEngine {
         expected_snapshot: SourceFileSnapshot,
         require_diagnostics: Vec<DiagnosticFact>,
     ) -> bool {
-        assert_eq!(
+        invariant_eq!(
             expected_snapshot.engine_instance_id,
             self.instance_id,
-            "INVARIANT VIOLATED: require diagnostic replacement received another engine's source snapshot. This is a bug because isolated projects cannot share mutable diagnostic ownership. Fix: commit through the engine that issued the snapshot."
+            what = "require diagnostic replacement received another engine's source snapshot",
+            why = "isolated projects cannot share mutable diagnostic ownership",
+            fix = "commit through the engine that issued the snapshot",
         );
         if self
             .file(expected_snapshot.file_id)
@@ -493,24 +522,26 @@ impl AnalysisEngine {
         }
         let file_id = expected_snapshot.file_id;
         for fact in &require_diagnostics {
-            assert_eq!(
-                fact.range.file_id, file_id,
-                "INVARIANT VIOLATED: unresolved-require diagnostic belongs to a different file. \
-                 This is a bug because require diagnostic refresh is file-local. \
-                 Fix: construct DiagnosticFact ranges from the owning SourceFileId."
+            invariant_eq!(
+                fact.range.file_id,
+                file_id,
+                what = "unresolved-require diagnostic belongs to a different file",
+                why = "require diagnostic refresh is file-local",
+                fix = "construct DiagnosticFact ranges from the owning SourceFileId",
             );
-            assert_eq!(
-                fact.code, "unresolved-require",
-                "INVARIANT VIOLATED: replace_unresolved_require_diagnostics received code `{}`. \
-                 This is a bug because this API only swaps unresolved-require facts. \
-                 Fix: filter non-require diagnostics before calling this method.",
-                fact.code
+            invariant_eq!(
+                fact.code,
+                "unresolved-require",
+                what = "replace_unresolved_require_diagnostics received code `{}`",
+                why = "this API only swaps unresolved-require facts",
+                fix = "filter non-require diagnostics before calling this method",
+                fact.code,
             );
         }
-        self.semantic_revision = self.semantic_revision.checked_add(1).expect(
-            "INVARIANT VIOLATED: analysis engine semantic revision exhausted u64. \
-             This is a bug because cached queries require monotonic invalidation. \
-             Fix: widen the semantic revision before performing u64::MAX replacements.",
+        self.semantic_revision = self.semantic_revision.checked_add(1).expect_invariant(
+            "analysis engine semantic revision exhausted u64",
+            "cached queries require monotonic invalidation",
+            "widen the semantic revision before performing u64::MAX replacements",
         );
         let mut diagnostics = self
             .facts

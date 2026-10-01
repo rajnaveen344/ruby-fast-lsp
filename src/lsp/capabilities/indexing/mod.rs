@@ -1,5 +1,6 @@
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
+use crate::invariant::ExpectInvariant;
 use crate::lsp::capabilities::diagnostics::generate_diagnostics;
 use crate::lsp::linter::lint_document;
 use crate::lsp::query::EngineQuery;
@@ -183,9 +184,14 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let (affected_uris, mut diagnostics) = if skip_processing {
         let diagnostics = if source_kind.is_editable() {
             let document = server
-                .documents.read()
+                .documents
+                .read()
                 .get(&uri)
-                .expect("INVARIANT VIOLATED: didOpen syntax-only path lost the document inserted into the cache. This is a bug because skipped dependency files still require an open RubyDocument. Fix: keep cache insertion before skip processing.")
+                .expect_invariant(
+                    "didOpen syntax-only path lost the document inserted into the cache",
+                    "skipped dependency files still require an open RubyDocument",
+                    "keep cache insertion before skip processing",
+                )
                 .read()
                 .clone();
             let parse_result = document.parse();

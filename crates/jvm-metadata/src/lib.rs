@@ -3,6 +3,11 @@
 //! This crate must remain independent from Ruby analysis, LSP protocol types,
 //! editors, workspace configuration, and runtime execution.
 
+#[macro_use]
+#[allow(unused_macros)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 mod archive;
 mod classfile;
 mod descriptor;

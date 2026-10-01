@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
 use crate::core::names::fqn_id::FqnId;
@@ -38,13 +39,13 @@ impl SymbolFact {
     }
 
     pub fn with_name_range(mut self, name_range: TextRange) -> Self {
-        assert!(
+        invariant!(
             name_range.file_id == self.range.file_id
                 && name_range.start_byte >= self.range.start_byte
                 && name_range.end_byte <= self.range.end_byte,
-            "INVARIANT VIOLATED: symbol name range is outside its declaration range. \
-             This is a bug because rename edits must target a token within the declaration. \
-             Fix: derive name_range from the declaring Prism node."
+            what = "symbol name range is outside its declaration range",
+            why = "rename edits must target a token within the declaration",
+            fix = "derive name_range from the declaring Prism node",
         );
         self.name_range = name_range;
         self
@@ -70,13 +71,13 @@ impl StoredSymbolFact {
     }
 
     pub fn with_name_range(mut self, name_range: TextRange) -> Self {
-        assert!(
+        invariant!(
             name_range.file_id == self.range.file_id
                 && name_range.start_byte >= self.range.start_byte
                 && name_range.end_byte <= self.range.end_byte,
-            "INVARIANT VIOLATED: stored symbol name range is outside its declaration range. \
-             This is a bug because interned facts must preserve declaration token boundaries. \
-             Fix: intern SymbolFact::name_range without changing offsets."
+            what = "stored symbol name range is outside its declaration range",
+            why = "interned facts must preserve declaration token boundaries",
+            fix = "intern SymbolFact::name_range without changing offsets",
         );
         self.name_range = name_range;
         self
@@ -96,10 +97,10 @@ struct SymbolFactId(u32);
 
 impl SymbolFactId {
     fn from_index(index: usize) -> Self {
-        Self(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: symbol fact arena exceeded u32 ids. This is a bug because \
-             retained symbol indexes use bounded compact ids. Fix: widen SymbolFactId and \
-             every stored symbol index together before retaining more than u32::MAX facts.",
+        Self(u32::try_from(index).expect_invariant(
+            "symbol fact arena exceeded u32 ids",
+            "symbol indexes use compact u32 ids",
+            "widen SymbolFactId and every stored symbol index together",
         ))
     }
 
@@ -172,11 +173,11 @@ impl SymbolStore {
         self.remove_file(file_id);
         let mut touched_fqns = Vec::new();
         for fact in facts {
-            assert!(
+            invariant!(
                 fact.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement symbol fact belongs to a different file id. \
-                 This is a bug because SymbolStore::replace_file must only receive facts for the target file. \
-                 Fix: partition facts by SourceFileId before replacing."
+                what = "replacement symbol fact belongs to a different file id",
+                why = "SymbolStore::replace_file must only receive facts for the target file",
+                fix = "partition facts by SourceFileId before replacing",
             );
             let key = fact.fqn;
             if let Some((_, appended_count)) =
@@ -199,10 +200,10 @@ impl SymbolStore {
                     |id| {
                         self.facts[id.index()]
                             .as_ref()
-                            .expect(
-                                "INVARIANT VIOLATED: symbol index points to missing fact. \
-                                 This is a bug because indexes must be removed before arena facts. \
-                                 Fix: remove stale ids from every SymbolStore index.",
+                            .expect_invariant(
+                                "symbol index points to missing fact",
+                                "indexes must be removed before arena facts",
+                                "remove stale ids from every SymbolStore index",
                             )
                             .range
                             .file_id
@@ -250,16 +251,16 @@ impl SymbolStore {
 
     fn insert_fact(&mut self, fact: StoredSymbolFact) -> SymbolFactId {
         if let Some(id) = self.free_facts.pop() {
-            let slot = self.facts.get_mut(id.index()).expect(
-                "INVARIANT VIOLATED: symbol free list points outside fact arena. \
-                 This is a bug because free ids must come from previous arena slots. \
-                 Fix: only push ids returned by SymbolStore::take_fact.",
+            let slot = self.facts.get_mut(id.index()).expect_invariant(
+                "symbol free list points outside fact arena",
+                "free ids must come from previous arena slots",
+                "only push ids returned by SymbolStore::take_fact",
             );
-            assert!(
+            invariant!(
                 slot.is_none(),
-                "INVARIANT VIOLATED: symbol free list points to occupied fact slot. \
-                 This is a bug because free ids must only reference removed facts. \
-                 Fix: push each removed symbol id at most once."
+                what = "symbol free list points to occupied fact slot",
+                why = "free ids must only reference removed facts",
+                fix = "push each removed symbol id at most once",
             );
             *slot = Some(fact);
             return id;
@@ -284,10 +285,10 @@ impl SymbolStore {
 
 fn sort_symbol_ids(facts: &[Option<StoredSymbolFact>], ids: &mut [SymbolFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect(
-            "INVARIANT VIOLATED: symbol index points to missing fact. \
-             This is a bug because indexes must be removed before arena facts. \
-             Fix: remove stale ids from every SymbolStore index.",
+        let fact = facts[id.index()].as_ref().expect_invariant(
+            "symbol index points to missing fact",
+            "indexes must be removed before arena facts",
+            "remove stale ids from every SymbolStore index",
         );
         (
             fact.range.file_id,
@@ -300,10 +301,10 @@ fn sort_symbol_ids(facts: &[Option<StoredSymbolFact>], ids: &mut [SymbolFactId])
 
 fn sort_symbol_ids_by_file(facts: &[Option<StoredSymbolFact>], ids: &mut [SymbolFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect(
-            "INVARIANT VIOLATED: symbol file index points to missing fact. \
-             This is a bug because indexes must be removed before arena facts. \
-             Fix: remove stale ids from every SymbolStore index.",
+        let fact = facts[id.index()].as_ref().expect_invariant(
+            "symbol file index points to missing fact",
+            "indexes must be removed before arena facts",
+            "remove stale ids from every SymbolStore index",
         );
         (fact.range.start_byte, fact.range.end_byte, fact.kind)
     });

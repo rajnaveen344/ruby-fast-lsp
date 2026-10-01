@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{
     FullyQualifiedName, GeneratedOwnerId, GraphNodeKind,
     MethodVisibility as AnalysisMethodVisibility, NamespaceKind, ReferenceCandidate, RubyConstant,
@@ -23,9 +24,13 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
             let parts = namespace
                 .namespace
                 .iter()
-                .map(|part| RubyConstant::new(part).expect(
-                    "INVARIANT VIOLATED: extension namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
-                ))
+                .map(|part| {
+                    RubyConstant::new(part).expect_invariant(
+                        "extension namespace reached application without validation",
+                        "guest patches must be validated before conflict resolution",
+                        "keep validate_index_patch_payloads before emitted patch collection",
+                    )
+                })
                 .collect::<Vec<_>>();
             let range = crate::utils::lsp::text_range(
                 visitor.document(),
@@ -49,12 +54,18 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
             let mut parts = constant
                 .namespace
                 .iter()
-                .map(|part| RubyConstant::new(part).expect(
-                    "INVARIANT VIOLATED: extension constant namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
-                ))
+                .map(|part| {
+                    RubyConstant::new(part).expect_invariant(
+                        "extension constant namespace reached application without validation",
+                        "guest patches must be validated before conflict resolution",
+                        "keep validate_index_patch_payloads before emitted patch collection",
+                    )
+                })
                 .collect::<Vec<_>>();
-            parts.push(RubyConstant::new(&constant.name).expect(
-                "INVARIANT VIOLATED: extension constant name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+            parts.push(RubyConstant::new(&constant.name).expect_invariant(
+                "extension constant name reached application without validation",
+                "guest patches must be validated before conflict resolution",
+                "keep validate_index_patch_payloads before emitted patch collection",
             ));
             let fqn = FullyQualifiedName::constant(parts);
             let range = crate::utils::lsp::text_range(
@@ -66,9 +77,11 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
                 AnalysisSymbolKind::Constant,
                 range,
             ));
-            if let Some(ruby_type) =
-                analysis_ruby_type_from_extension(constant.ruby_type.as_ref()).expect(
-                    "INVARIANT VIOLATED: extension constant type reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+            if let Some(ruby_type) = analysis_ruby_type_from_extension(constant.ruby_type.as_ref())
+                .expect_invariant(
+                    "extension constant type reached application without validation",
+                    "guest patches must be validated before conflict resolution",
+                    "keep validate_index_patch_payloads before emitted patch collection",
                 )
             {
                 let fact = TypeFact::new(
@@ -91,8 +104,10 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
                     FullyQualifiedName::namespace(
                         namespace
                             .iter()
-                            .map(|part| RubyConstant::new(part).expect(
-                                "INVARIANT VIOLATED: extension reference namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                            .map(|part| RubyConstant::new(part).expect_invariant(
+                                "extension reference namespace reached application without validation",
+                                "guest patches must be validated before conflict resolution",
+                                "keep validate_index_patch_payloads before emitted patch collection",
                             ))
                             .collect::<Vec<_>>(),
                     )
@@ -100,12 +115,16 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
                 ruby_fast_lsp_extension_api::ReferenceTarget::Constant { namespace, name } => {
                     let mut parts = namespace
                         .iter()
-                        .map(|part| RubyConstant::new(part).expect(
-                            "INVARIANT VIOLATED: extension reference constant namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                        .map(|part| RubyConstant::new(part).expect_invariant(
+                            "extension reference constant namespace reached application without validation",
+                            "guest patches must be validated before conflict resolution",
+                            "keep validate_index_patch_payloads before emitted patch collection",
                         ))
                         .collect::<Vec<_>>();
-                    parts.push(RubyConstant::new(name).expect(
-                        "INVARIANT VIOLATED: extension reference constant name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                    parts.push(RubyConstant::new(name).expect_invariant(
+                        "extension reference constant name reached application without validation",
+                        "guest patches must be validated before conflict resolution",
+                        "keep validate_index_patch_payloads before emitted patch collection",
                     ));
                     FullyQualifiedName::constant(parts)
                 }
@@ -116,12 +135,16 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
                 } => {
                     let owner = namespace
                         .iter()
-                        .map(|part| RubyConstant::new(part).expect(
-                            "INVARIANT VIOLATED: extension method reference namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before patch application.",
+                        .map(|part| RubyConstant::new(part).expect_invariant(
+                            "extension method reference namespace reached application without validation",
+                            "guest patches must be validated before conflict resolution",
+                            "keep validate_index_patch_payloads before patch application",
                         ))
                         .collect::<Vec<_>>();
-                    let method = RubyMethod::new(name).expect(
-                        "INVARIANT VIOLATED: extension method reference name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before patch application.",
+                    let method = RubyMethod::new(name).expect_invariant(
+                        "extension method reference name reached application without validation",
+                        "guest patches must be validated before conflict resolution",
+                        "keep validate_index_patch_payloads before patch application",
                     );
                     let owner_kind = match owner_kind {
                         AbiNamespaceKind::Instance => NamespaceKind::Instance,
@@ -140,8 +163,12 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
             visitor.add_reference_candidate(ReferenceCandidate::resolved(range, target, None));
         }
         IndexPatch::DefineMethod(method) => {
-            let declared_return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
-                .expect("INVARIANT VIOLATED: extension return type reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.");
+            let declared_return_type =
+                analysis_ruby_type_from_extension(method.return_type.as_ref()).expect_invariant(
+                    "extension return type reached application without validation",
+                    "guest patches must be validated before conflict resolution",
+                    "keep validate_index_patch_payloads before emitted patch collection",
+                );
             let inferred_return_type = match method.return_type_source {
                 Some(ruby_fast_lsp_extension_api::MethodReturnTypeSource::Block) => {
                     visitor.infer_call_block_return_type(call)
@@ -160,8 +187,10 @@ pub(super) fn apply_patch(visitor: &mut FactCollector, call: &CallNode, patch: I
                     .map(|project| project.project_uri.as_str()),
                 "method owner",
             );
-            let ruby_method = RubyMethod::new(&method.name).expect(
-                "INVARIANT VIOLATED: extension method name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+            let ruby_method = RubyMethod::new(&method.name).expect_invariant(
+                "extension method name reached application without validation",
+                "guest patches must be validated before conflict resolution",
+                "keep validate_index_patch_payloads before emitted patch collection",
             );
             let fqn = FullyQualifiedName::method(namespace, ruby_method);
             let range =
@@ -230,9 +259,12 @@ fn resolved_patch_owner(
             local_id,
             owner_kind,
         }) => {
-            let owner = GeneratedOwnerId::new(extension_id, source_identity, local_id).expect(
-                "INVARIANT VIOLATED: invalid generated patch owner reached application. This is a bug because semantic patch owners must be validated before conversion. Fix: keep validate_patch_owner_target before apply_patch.",
-            );
+            let owner = GeneratedOwnerId::new(extension_id, source_identity, local_id)
+                .expect_invariant(
+                    "invalid generated patch owner reached application",
+                    "semantic patch owners must be validated before conversion",
+                    "keep validate_patch_owner_target before apply_patch",
+                );
             (
                 vec![RubyConstant::generated_owner(owner)],
                 owner_kind
@@ -250,8 +282,10 @@ fn resolved_patch_owner(
                 project_identity,
                 label,
             );
-            let owner = GeneratedOwnerId::new(extension_id, identity, local_id).expect(
-                "INVARIANT VIOLATED: invalid project-generated patch owner reached application. This is a bug because semantic patch owners must be validated before conversion. Fix: keep validation before apply_patch.",
+            let owner = GeneratedOwnerId::new(extension_id, identity, local_id).expect_invariant(
+                "invalid project-generated patch owner reached application",
+                "semantic patch owners must be validated before conversion",
+                "keep validation before apply_patch",
             );
             (
                 vec![RubyConstant::generated_owner(owner)],

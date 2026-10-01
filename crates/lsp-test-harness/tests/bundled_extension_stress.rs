@@ -1,3 +1,8 @@
+#[macro_use]
+#[allow(unused_macros, dead_code)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -61,10 +66,13 @@ fn package_paths_or_skip() -> Option<Vec<PathBuf>> {
                 .collect(),
         );
     }
-    assert_ne!(
+    invariant_ne!(
         std::env::var_os("RUBY_FAST_LSP_REQUIRE_BUNDLED_STRESS").as_deref(),
         Some(std::ffi::OsStr::new("1")),
-        "INVARIANT VIOLATED: required bundled-extension stress artifacts are missing: {missing:?}. This is a packaging gate failure because all five official guests must be tested together. Fix: build the guests or point RUBY_FAST_LSP_BUNDLED_EXTENSION_ROOT at an extracted VSIX."
+        what = "required bundled-extension stress artifacts are missing: {missing:?}",
+        why = "all five official guests must be tested together",
+        fix = "build the guests or point RUBY_FAST_LSP_BUNDLED_EXTENSION_ROOT at an extracted VSIX",
+        missing = missing,
     );
     eprintln!(
         "skipping bundled-extension stress test because artifacts are absent: {missing:?}; use editors/scripts/stress_bundled_extensions.sh for the required gate"
@@ -306,6 +314,11 @@ fn source_for(framework: &str, iteration: usize) -> String {
         "minitest" => format!("describe Service do\n  let(:value) {{ {iteration} }}\n  it('works') {{ value }}\nend\n"),
         "sinatra" => format!("module Sinatra\n  class Base\n  end\nend\nclass App < Sinatra::Base\n  get('/{iteration}') {{ nil }}\nend\n"),
         "cucumber" => format!("Given('service {iteration}') {{ nil }}\nBefore {{ nil }}\n"),
-        other => panic!("INVARIANT VIOLATED: unknown stress framework `{other}`. This is a test bug because every fixture must map to one official extension. Fix: add an explicit source_for match arm."),
+        other => unreachable_invariant!(
+            what = "unknown stress framework `{other}`",
+            why = "every fixture must map to one official extension",
+            fix = "add an explicit source_for match arm",
+            other = other,
+        ),
     }
 }

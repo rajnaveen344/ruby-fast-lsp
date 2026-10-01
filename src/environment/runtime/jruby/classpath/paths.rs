@@ -1,5 +1,6 @@
 //! Project-confined pattern matching and canonical path reads for classpath inputs.
 
+use crate::invariant::ExpectInvariant;
 use globset::Glob;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -32,9 +33,11 @@ pub(super) fn project_pattern_matches(
             return Err(ClasspathError::LimitExceeded("project pattern entries"));
         }
         let path = entry.path();
-        let relative = path
-            .strip_prefix(project_root)
-            .expect("INVARIANT VIOLATED: project walker entry must remain below its root");
+        let relative = path.strip_prefix(project_root).expect_invariant(
+            "project walker entry is outside its root",
+            "the walker starts at the project root",
+            "walk from project_root only",
+        );
         if matcher.is_match(relative) {
             let canonical = fs::canonicalize(path).map_err(|error| ClasspathError::Io {
                 path: path.to_path_buf(),

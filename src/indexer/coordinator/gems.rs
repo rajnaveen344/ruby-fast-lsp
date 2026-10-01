@@ -9,6 +9,7 @@ use crate::environment::config::IndexingConfig;
 use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::indexer::sources::gems::IndexerGem;
 use crate::indexer::version::ruby_version::RubyImplementation;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use futures::stream::{self, StreamExt};
@@ -53,7 +54,11 @@ impl IndexingCoordinator {
         gem_indexer.set_file_processor(
             self.file_processor
                 .as_ref()
-                .expect("INVARIANT VIOLATED: gem indexing started before FileProcessor setup. This is a coordinator bug because every source kind must share the owning project's extension context. Fix: keep setup_file_processor before constructing the gem indexer.")
+                .expect_invariant(
+                    "gem indexing started before FileProcessor setup",
+                    "every source kind must share the owning project's extension context",
+                    "keep setup_file_processor before constructing the gem indexer",
+                )
                 .clone(),
         );
         gem_indexer.set_runtime_provider_fingerprint(
@@ -79,11 +84,10 @@ impl IndexingCoordinator {
         gem_indexer.set_file_processor(
             self.file_processor
                 .as_ref()
-                .expect(
-                    "INVARIANT VIOLATED: discovered gems were bound before the final project \
-                     FileProcessor existed. This is a coordinator bug because JRuby-sensitive \
-                     dependencies must use the exact completed runtime provider. Fix: install \
-                     the final processor before dependency fact construction.",
+                .expect_invariant(
+                    "discovered gems were bound before the final project FileProcessor existed",
+                    "JRuby-sensitive dependencies must use the exact completed runtime provider",
+                    "install the final processor before dependency fact construction",
                 )
                 .clone(),
         );
@@ -93,12 +97,15 @@ impl IndexingCoordinator {
                 .map(|provider| provider.classpath_fingerprint().to_string()),
         );
         let mut inferred_required = self.get_required_gems();
-        inferred_required.extend(gem_indexer.gemfile_required_roots_blocking().expect(
-            "INVARIANT VIOLATED: owning-project Gemfile could not be read while configuring \
-                 discovered gems. This is a bug because Bundler projects keep Gemfile next to the \
-                 lockfile already used for discovery. Fix: keep Gemfile readable for the same \
-                 project root that produced Gemfile.lock.",
-        ));
+        inferred_required.extend(
+            gem_indexer
+                .gemfile_required_roots_blocking()
+                .expect_invariant(
+                    "owning-project Gemfile could not be read while configuring discovered gems",
+                    "bundler projects keep Gemfile next to the lockfile already used for discovery",
+                    "keep Gemfile readable for the same project root that produced Gemfile.lock",
+                ),
+        );
         let (required_gems, excluded_gems) =
             configured_gem_selection(inferred_required, &self.config.indexing);
 
@@ -114,9 +121,11 @@ impl IndexingCoordinator {
         );
         gem_indexer.set_excluded_gems(excluded_gems);
         gem_indexer.set_dependency_seed_engine(
-            self.dependency_seed_engine
-                .clone()
-                .expect("INVARIANT VIOLATED: gem indexing started before the dependency-only semantic seed was captured. This is a coordinator bug because reusable gem facts must never depend on project-owned declarations. Fix: capture the core/runtime engine immediately before indexing project sources."),
+            self.dependency_seed_engine.clone().expect_invariant(
+                "gem indexing started before the dependency-only semantic seed was captured",
+                "reusable gem facts must never depend on project-owned declarations",
+                "capture the core/runtime engine immediately before indexing project sources",
+            ),
         );
         gem_indexer
     }
@@ -365,10 +374,10 @@ impl IndexingCoordinator {
                             .append(&mut keys);
                     }
                 }
-                let gem_name = remaining_gem_names.pop_front().expect(
-                    "INVARIANT VIOLATED: non-empty gem pipeline queue had no first item. This is \
-                     a bug because the loop and pop observe the same owned VecDeque. Fix: keep \
-                     demand reprioritization within this producer.",
+                let gem_name = remaining_gem_names.pop_front().expect_invariant(
+                    "non-empty gem pipeline queue had no first item",
+                    "the loop and pop observe the same owned VecDeque",
+                    "keep demand reprioritization within this producer",
                 );
                 let matched_demand_keys = demand_keys_by_gem.remove(&gem_name).unwrap_or_default();
                 if producer_cancellation
@@ -415,11 +424,10 @@ impl IndexingCoordinator {
                     Ok(None) => {
                         if !matched_demand_keys.is_empty() {
                             let (demands, generation) =
-                                producer_navigation_demands.as_ref().expect(
-                                    "INVARIANT VIOLATED: matched dependency demand has no \
-                                     controller. This is a bug because only a controller drain \
-                                     can create matched keys. Fix: retain demand provenance with \
-                                     the gem producer.",
+                                producer_navigation_demands.as_ref().expect_invariant(
+                                    "matched dependency demand has no controller",
+                                    "only a controller drain can create matched keys",
+                                    "retain demand provenance with the gem producer",
                                 );
                             demands.complete_keys(
                                 *generation,
@@ -489,12 +497,14 @@ impl IndexingCoordinator {
                 indexed_files += bound.len();
                 product_binding_wall += binding_started.elapsed();
                 let dependency_key = dependency_priority_key(&gem_name);
-                assert!(
+                invariant!(
                     matched_demand_keys.iter().all(|key| key == &dependency_key),
-                    "INVARIANT VIOLATED: dependency product `{gem_name}` carried demand keys \
-                     {matched_demand_keys:?} that do not match `{dependency_key}`. This is a bug \
-                     because producer reordering and consumer completion must use one normalized \
-                     gem identity. Fix: keep demand provenance attached only to its exact gem."
+                    what = "dependency product `{gem_name}` carried demand keys {matched_demand_keys:?} not matching `{dependency_key}`",
+                    why = "producer and consumer must share one normalized gem identity",
+                    fix = "attach demand provenance only to its exact gem",
+                    gem_name = gem_name,
+                    matched_demand_keys = matched_demand_keys,
+                    dependency_key = dependency_key,
                 );
                 let requested =
                     consumer_navigation_demands
@@ -514,11 +524,12 @@ impl IndexingCoordinator {
                             cancellation.clone(),
                         )
                         .await?;
-                    let (demands, generation) = consumer_navigation_demands.as_ref().expect(
-                        "INVARIANT VIOLATED: bound dependency demand has no controller. This \
-                             is a bug because matched keys originate only from the exact \
-                             generation queue. Fix: retain the controller through product \
-                             resolution and waiter completion.",
+                    let (demands, generation) = consumer_navigation_demands
+                        .as_ref()
+                        .expect_invariant(
+                        "bound dependency demand has no controller",
+                        "matched keys originate only from the exact generation queue",
+                        "retain the controller through product resolution and waiter completion",
                     );
                     demands.complete_keys(
                         *generation,
@@ -556,10 +567,9 @@ impl IndexingCoordinator {
         );
         Arc::try_unwrap(gem_indexer).map_err(|_| {
             anyhow!(
-                "INVARIANT VIOLATED: gem dependency pipeline retained its IndexerGem after \
-                 producer and consumer completion. This is a bug because every bounded pipeline \
-                 clone must be dropped before isolated coordinator ownership resumes. Fix: keep \
-                 IndexerGem clones scoped to the joined producer and consumer futures."
+                "invariant violated: gem pipeline retained its IndexerGem after producer and consumer \
+                 completion — bug: pipeline clones drop before coordinator ownership resumes — \
+                 fix: scope IndexerGem clones to the joined producer and consumer futures"
             )
         })
     }

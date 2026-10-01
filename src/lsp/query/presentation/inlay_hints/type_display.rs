@@ -1,6 +1,7 @@
 //! Editor presentation only: summaries never replace the engine's exact types.
 
 use super::tooltip::type_tooltip;
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{FullyQualifiedName, LiteralValue, RubyType, ShapeType};
 use std::collections::{BTreeMap, BTreeSet};
 use tower_lsp::lsp_types::InlayHintTooltip;
@@ -37,9 +38,14 @@ impl TypeLabelPart {
     }
 
     fn core(name: &'static str) -> Self {
-        Self::named(name, FullyQualifiedName::try_from(name).expect(
-            "INVARIANT VIOLATED: built-in inlay type name is invalid. This is a bug because presentation uses Ruby core constants. Fix: use the canonical core type name."
-        ))
+        Self::named(
+            name,
+            FullyQualifiedName::try_from(name).expect_invariant(
+                "built-in inlay type name is invalid",
+                "presentation uses Ruby core constants",
+                "use the canonical core type name",
+            ),
+        )
     }
 }
 
@@ -114,7 +120,11 @@ impl Label {
                 continue;
             }
             let RubyType::Hash(shape_keys, shape_values) = shape.generic_hash_type() else {
-                panic!("INVARIANT VIOLATED: shape generic view is not a Hash. This is a bug because shape presentation relies on the canonical Hash projection. Fix: preserve the generic_hash_type contract.");
+                unreachable_invariant!(
+                    what = "shape generic view is not a Hash",
+                    why = "shape presentation relies on the canonical Hash projection",
+                    fix = "preserve the generic_hash_type contract",
+                );
             };
             keys.extend(shape_keys);
             values.extend(shape_values);

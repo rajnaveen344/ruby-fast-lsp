@@ -1,5 +1,6 @@
 //! Server configuration and the measured workspace indexing phases.
 
+use crate::invariant::ExpectInvariant;
 use log::info;
 use ruby_analysis::core::TypeSubject;
 use ruby_fast_lsp::environment::config::RubyFastLspConfig;
@@ -23,19 +24,22 @@ pub(crate) fn configure_server(
         .unwrap_or_default();
     if let Some(path) = extension_path {
         let absolute = std::fs::canonicalize(path).unwrap_or_else(|error| {
-            panic!(
-                "INVARIANT VIOLATED: profiler --extension-path must point to an existing path. \
-                 This is a bug because VS Code parity profiling requires real bundled stubs. \
-                 Fix: pass the installed extension directory. Path: {}. Error: {error}",
-                path.display()
+            unreachable_invariant!(
+                what = "profiler --extension-path must point to an existing path (path: {}, error: {error})",
+                why = "VS Code parity profiling requires real bundled stubs",
+                fix = "pass the installed extension directory",
+                path.display(),
+                error = error,
             )
         });
         info!("Using extension path: {}", absolute.display());
         let bundled_extensions = absolute.join("extensions");
-        assert!(
+        invariant!(
             bundled_extensions.is_dir(),
-            "INVARIANT VIOLATED: profiler --extension-path has no bundled extensions directory. This is a bug because VS Code parity profiling must load the same framework guests as the installed editor package. Fix: pass the extracted or installed VS Code extension root. Missing: {}",
-            bundled_extensions.display()
+            what = "profiler --extension-path has no bundled extensions directory (missing: {})",
+            why = "parity profiling must load the installed package's guests",
+            fix = "pass the extracted or installed VS Code extension root",
+            bundled_extensions.display(),
         );
         lsp_config.extension_path = Some(absolute.to_string_lossy().to_string());
         lsp_config
@@ -48,53 +52,59 @@ pub(crate) fn configure_server(
 pub(crate) fn load_profiler_config(path: &PathBuf) -> RubyFastLspConfig {
     const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
     let absolute = std::fs::canonicalize(path).unwrap_or_else(|error| {
-        panic!(
-            "INVARIANT VIOLATED: profiler --config path cannot be canonicalized. This is a bug \
-             because production evidence must record one exact configuration file. Fix: pass an \
-             existing readable JSON file. Path: {}. Error: {error}",
-            path.display()
+        unreachable_invariant!(
+            what = "profiler --config path cannot be canonicalized (path: {}, error: {error})",
+            why = "production evidence must record one exact configuration file",
+            fix = "pass an existing readable JSON file",
+            path.display(),
+            error = error,
         )
     });
     let metadata = std::fs::metadata(&absolute).unwrap_or_else(|error| {
-        panic!(
-            "INVARIANT VIOLATED: profiler --config metadata is unreadable. This is a bug because \
-             configuration input must be bounded before reading. Fix: make the file readable. \
-             Path: {}. Error: {error}",
-            absolute.display()
+        unreachable_invariant!(
+            what = "profiler --config metadata is unreadable (path: {}, error: {error})",
+            why = "configuration input must be bounded before reading",
+            fix = "make the file readable",
+            absolute.display(),
+            error = error,
         )
     });
-    assert!(
+    invariant!(
         metadata.is_file() && metadata.len() <= MAX_CONFIG_BYTES,
-        "INVARIANT VIOLATED: profiler --config must be a regular JSON file no larger than 1 MiB. \
-         This is a bug because profiler configuration must remain bounded. Fix: pass a small \
-         canonical configuration file. Path: {}, bytes: {}",
+        what = "profiler --config is not a regular JSON file under 1 MiB (path: {}, bytes: {})",
+        why = "profiler configuration must stay bounded",
+        fix = "pass a small canonical configuration file",
         absolute.display(),
-        metadata.len()
+        metadata.len(),
     );
     let bytes = std::fs::read(&absolute).unwrap_or_else(|error| {
-        panic!(
-            "INVARIANT VIOLATED: profiler --config cannot be read. This is a bug because the \
-             selected evidence configuration must be reproducible. Fix: make the file readable. \
-             Path: {}. Error: {error}",
-            absolute.display()
+        unreachable_invariant!(
+            what = "profiler --config cannot be read (path: {}, error: {error})",
+            why = "the selected evidence configuration must be reproducible",
+            fix = "make the file readable",
+            absolute.display(),
+            error = error,
         )
     });
     let config: RubyFastLspConfig = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
-        panic!(
-            "INVARIANT VIOLATED: profiler --config is not canonical Ruby Fast LSP JSON. This is a \
-             bug because measurements cannot silently use defaults after malformed input. Fix: \
-             correct the JSON configuration. Path: {}. Error: {error}",
-            absolute.display()
+        unreachable_invariant!(
+            what =
+                "profiler --config is not canonical Ruby Fast LSP JSON (path: {}, error: {error})",
+            why = "measurements cannot silently use defaults after malformed input",
+            fix = "correct the JSON configuration",
+            absolute.display(),
+            error = error,
         )
     });
     config
         .validate_runtime_configuration()
         .unwrap_or_else(|error| {
-            panic!(
-                "INVARIANT VIOLATED: profiler --config runtime selection is invalid. This is a \
-                 bug because evidence must use a defensible runtime identity. Fix: correct the \
-                 runtime/JRuby project configuration. Path: {}. Error: {error}",
-                absolute.display()
+            unreachable_invariant!(
+                what = "profiler --config runtime selection is invalid (path: {}, error: {error})",
+                why = "evidence must use a defensible runtime identity",
+                fix = "correct the runtime/JRuby project configuration",
+                absolute.display(),
+                error = error,
             )
         });
     config
@@ -125,9 +135,11 @@ async fn run_registered_workspace_indexing(
     definition_probes: &[PreparedDefinitionProbe],
 ) {
     let workspaces = server.list_workspaces();
-    assert!(
+    invariant!(
         !workspaces.is_empty(),
-        "INVARIANT VIOLATED: profiler reached indexing without registered projects. This is a profiler lifecycle bug because workspace containers must be expanded before indexing. Fix: call add_workspace_folder before run_registered_workspace_indexing."
+        what = "profiler reached indexing without registered projects",
+        why = "workspace containers must be expanded before indexing",
+        fix = "call add_workspace_folder before run_registered_workspace_indexing",
     );
     let wall_started = Instant::now();
     let resources_started = ProcessResourceUsage::capture();
@@ -191,14 +203,20 @@ async fn run_registered_workspace_indexing(
     }
     let mut completed = Vec::new();
     while let Some(joined) = tasks.join_next().await {
-        let (uri, result) = joined.expect(
-            "INVARIANT VIOLATED: profiler workspace indexing task panicked. This is a bug because a production measurement cannot omit one isolated project. Fix: inspect the indexing task panic and keep every discovered project in the gate.",
+        let (uri, result) = joined.expect_invariant(
+            "profiler workspace indexing task panicked",
+            "a production measurement cannot omit one isolated project",
+            "inspect the indexing task panic and keep every discovered project in the gate",
         );
         match result {
             Ok(timings) => completed.push((uri, timings)),
             Err(error) => {
-                panic!(
-                    "INVARIANT VIOLATED: profiler project `{uri}` indexing failed. This is a bug because performance measurements require every isolated project to complete. Fix: repair the corpus or indexing failure before benchmarking. Error: {error}"
+                unreachable_invariant!(
+                    what = "profiler project `{uri}` indexing failed (error: {error})",
+                    why = "performance measurements require every isolated project to complete",
+                    fix = "repair the corpus or indexing failure before benchmarking",
+                    uri = uri,
+                    error = error,
                 );
             }
         }
@@ -206,8 +224,10 @@ async fn run_registered_workspace_indexing(
     completed.sort_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
     let mut live_definition_evidence = Vec::new();
     while let Some(joined) = live_probe_tasks.join_next().await {
-        live_definition_evidence.push(joined.expect(
-            "INVARIANT VIOLATED: live navigation probe task panicked. This is a bug because staged readiness evidence cannot silently omit a configured probe. Fix: inspect the probe panic and keep every configured position in the profiler result.",
+        live_definition_evidence.push(joined.expect_invariant(
+            "live navigation probe task panicked",
+            "staged readiness evidence cannot silently omit a configured probe",
+            "inspect the probe panic and keep every configured position in the profiler result",
         ));
     }
     live_definition_evidence.sort_by(|left, right| {

@@ -29,12 +29,12 @@ const READY_MARKER: &str = ".corpus-ready";
 /// `name` maps to a tarball at `tests/perf/corpus/<name>.tar.zst` (relative
 /// to the repository root). Pass e.g. `"discourse"` or `"mastodon"`.
 pub fn ensure_corpus(name: &str) -> Result<PathBuf> {
-    assert!(
+    invariant!(
         !name.is_empty() && !name.contains('/') && !name.contains(".."),
-        "INVARIANT VIOLATED: corpus name {:?} is invalid. \
-         This is a bug because corpus names are used as path segments. \
-         Fix: pass a bare identifier like \"discourse\".",
-        name
+        what = "corpus name {:?} is invalid",
+        why = "corpus names are used as path segments",
+        fix = "pass a bare identifier like \"discourse\"",
+        name,
     );
 
     if let Ok(override_dir) = std::env::var("RUBY_FAST_LSP_CORPUS_DIR") {
@@ -75,11 +75,11 @@ pub fn ensure_synthetic(
     scale: usize,
     generate: impl FnOnce(&Path) -> Result<()>,
 ) -> Result<PathBuf> {
-    assert!(
+    invariant!(
         scale > 0,
-        "INVARIANT VIOLATED: synthetic corpus scale is zero. \
-         This is a bug because a zero-file corpus is not useful. \
-         Fix: pass a positive scale."
+        what = "synthetic corpus scale is zero",
+        why = "a zero-file corpus is not useful",
+        fix = "pass a positive scale",
     );
 
     let name = format!("synthetic-{}", scale);

@@ -1,5 +1,6 @@
 //! Method lookup chain construction (MRO), its caches, and universal fallbacks.
 
+use crate::invariant::ExpectInvariant;
 #[cfg(test)]
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -35,8 +36,10 @@ pub(super) fn interned_universal_open_root_ids(
     cache
         .universal_open_root_ids
         .as_ref()
-        .expect(
-            "INVARIANT VIOLATED: universal open-root ids disappeared after insertion. This is a bug because the resolve-local chain cache retains that list for one pass. Fix: populate interned universal roots once before method lookup.",
+        .expect_invariant(
+            "universal open-root ids disappeared after insertion",
+            "the resolve-local chain cache retains that list for one pass",
+            "populate interned universal roots once before method lookup",
         )
         .clone()
 }
@@ -53,8 +56,12 @@ fn collect_interned_universal_open_root_ids(engine: &crate::engine::AnalysisEngi
         }
         for name in UNIVERSAL_OPEN_ROOT_NAMES {
             let constant = RubyConstant::new(name).unwrap_or_else(|error| {
-                panic!(
-                    "INVARIANT VIOLATED: Ruby universal root name `{name}` is invalid: {error}. This is a bug because BasicObject, Object, Kernel, Module, and Class are language-defined constants. Fix: preserve RubyConstant support for those names."
+                unreachable_invariant!(
+                    what = "Ruby universal root name `{name}` is invalid: {error}",
+                    why = "BasicObject, Object, Kernel, Module, and Class are language-defined constants",
+                    fix = "preserve RubyConstant support for those names",
+                    name = name,
+                    error = error,
                 )
             });
             let fqn = FullyQualifiedName::namespace_with_kind(vec![constant], kind);
@@ -210,11 +217,12 @@ fn method_lookup_chain_without_metaclass_with_fallback(
     fqn: &FullyQualifiedName,
     allow_top_level_fallback: bool,
 ) -> Vec<FullyQualifiedName> {
-    assert!(
+    invariant!(
         matches!(fqn, FullyQualifiedName::Namespace(_, _)),
-        "INVARIANT VIOLATED: analysis method lookup requested for non-namespace FQN: {fqn}. \
-         This is a bug because only namespaces have method lookup chains. \
-         Fix: resolve receivers to Namespace FQNs before method lookup."
+        what = "analysis method lookup requested for non-namespace FQN: {fqn}",
+        why = "only namespaces have method lookup chains",
+        fix = "resolve receivers to Namespace FQNs before method lookup",
+        fqn = fqn,
     );
 
     if !engine.has_graph_node(fqn) {
@@ -270,12 +278,14 @@ pub(super) fn method_lookup_chain_has_unresolved_dependency_cached(
         return *incomplete;
     }
     let incomplete = method_lookup_chain_has_unresolved_dependency_from_graph(engine, owner);
-    assert!(
+    invariant!(
         cache
             .unresolved_dependencies
             .insert(owner.clone(), incomplete)
             .is_none(),
-        "INVARIANT VIOLATED: unresolved method-dependency cache replaced an entry after a confirmed miss. This is a bug because the engine graph is immutable during one resolve pass. Fix: keep lookup and insertion in one candidate step."
+        what = "unresolved method-dependency cache replaced an entry after a confirmed miss",
+        why = "the engine graph is immutable during one resolve pass",
+        fix = "keep lookup and insertion in one candidate step",
     );
     incomplete
 }
@@ -296,14 +306,19 @@ pub(super) fn method_lookup_chain_has_unresolved_dependency_from_graph(
         }
 
         let unresolved_source = match current.namespace_kind() {
-            Some(crate::core::NamespaceKind::Singleton) => current
-                .to_instance_namespace()
-                .expect(
-                    "INVARIANT VIOLATED: singleton lookup owner cannot produce an instance namespace. This is a bug because unresolved superclass facts are keyed by class/module instance identity. Fix: preserve Namespace identity while checking method proof barriers.",
-                ),
+            Some(crate::core::NamespaceKind::Singleton) => {
+                current.to_instance_namespace().expect_invariant(
+                    "singleton lookup owner cannot produce an instance namespace",
+                    "unresolved superclass facts are keyed by class/module instance identity",
+                    "preserve Namespace identity while checking method proof barriers",
+                )
+            }
             Some(crate::core::NamespaceKind::Instance) => current.clone(),
-            None => panic!(
-                "INVARIANT VIOLATED: method lookup proof barrier received non-namespace FQN `{current}`. This is a bug because only namespace receivers have ancestry. Fix: convert receiver types before method resolution."
+            None => unreachable_invariant!(
+                what = "method lookup proof barrier received non-namespace FQN `{current}`",
+                why = "only namespace receivers have ancestry",
+                fix = "convert receiver types before method resolution",
+                current = current,
             ),
         };
         if let Some(source_id) = engine.names.fqn_id(&unresolved_source) {
@@ -337,8 +352,12 @@ pub(super) fn metaclass_namespace_for_object(
     };
     let metaclass = FullyQualifiedName::namespace_with_kind(
         vec![RubyConstant::new(metaclass_name).unwrap_or_else(|error| {
-            panic!(
-                "INVARIANT VIOLATED: Ruby metaclass name `{metaclass_name}` is invalid: {error}. This is a bug because Class and Module are universal Ruby constants. Fix: preserve RubyConstant support for language-defined class names."
+            unreachable_invariant!(
+                what = "Ruby metaclass name `{metaclass_name}` is invalid: {error}",
+                why = "class and Module are universal Ruby constants",
+                fix = "preserve RubyConstant support for language-defined class names",
+                metaclass_name = metaclass_name,
+                error = error,
             )
         })],
         crate::core::NamespaceKind::Instance,
@@ -366,16 +385,20 @@ pub(in crate::engine) fn method_lookup_chain_for_reference_cached<'cache>(
         // the previous owner lookup returning Missing.
         .filter_map(|fqn| engine.names.fqn_id(&fqn))
         .collect();
-        assert!(
+        invariant!(
             chain_cache.chains.insert(fqn.clone(), chain).is_none(),
-            "INVARIANT VIOLATED: method lookup-chain cache replaced an entry after a confirmed miss. This is a bug because the engine graph is immutable during one resolve pass. Fix: keep chain construction and insertion in one candidate step."
+            what = "method lookup-chain cache replaced an entry after a confirmed miss",
+            why = "the engine graph is immutable during one resolve pass",
+            fix = "keep chain construction and insertion in one candidate step",
         );
     }
     chain_cache
         .chains
         .get(fqn)
-        .expect(
-            "INVARIANT VIOLATED: method lookup-chain cache lost an entry immediately after insertion. This is a bug because the cache is not mutated between insertion and lookup. Fix: keep cached chain access in one resolution step.",
+        .expect_invariant(
+            "method lookup-chain cache lost an entry immediately after insertion",
+            "the cache is not mutated between insertion and lookup",
+            "keep cached chain access in one resolution step",
         )
         .as_slice()
 }
@@ -437,8 +460,10 @@ pub(super) fn unproven_universal_method_exists(
 ) -> bool {
     for root_id in universal_roots {
         if !cache.unproven_universal_methods.contains_key(root_id) {
-            let root = engine.names.fqn(*root_id).expect(
-                "INVARIANT VIOLATED: universal lookup root ID is absent from the name registry. This is a bug because roots are selected from a cached chain owned by the same immutable registry. Fix: invalidate resolution-local caches whenever names change.",
+            let root = engine.names.fqn(*root_id).expect_invariant(
+                "universal lookup root ID is absent from the name registry",
+                "roots are selected from a cached chain owned by the same immutable registry",
+                "invalidate resolution-local caches whenever names change",
             );
             let mut broad = Vec::new();
             let mut broad_visited = HashSet::new();
@@ -454,19 +479,23 @@ pub(super) fn unproven_universal_method_exists(
                 };
                 methods.extend(engine.ruby_method_names_for_owner_id(owner_id));
             }
-            assert!(
+            invariant!(
                 cache
                     .unproven_universal_methods
                     .insert(*root_id, methods)
                     .is_none(),
-                "INVARIANT VIOLATED: unproven universal-method cache replaced one root after a confirmed miss. This is a bug because the engine graph is immutable during one resolve pass. Fix: keep root lookup and insertion atomic."
+                what = "unproven universal-method cache replaced one root after a confirmed miss",
+                why = "the engine graph is immutable during one resolve pass",
+                fix = "keep root lookup and insertion atomic",
             );
         }
         if cache
             .unproven_universal_methods
             .get(root_id)
-            .expect(
-                "INVARIANT VIOLATED: unproven universal-method cache lost one root immediately after insertion. This is a bug because the resolution-local cache is not cleared during one pass. Fix: retain root entries for the cache lifetime.",
+            .expect_invariant(
+                "unproven universal-method cache lost one root immediately after insertion",
+                "the resolution-local cache is not cleared during one pass",
+                "retain root entries for the cache lifetime",
             )
             .contains(method)
         {
@@ -493,10 +522,10 @@ fn compute_top_level_instance_fallback(
 
 fn top_level_object_instance_fqn() -> FullyQualifiedName {
     FullyQualifiedName::namespace_with_kind(
-        vec![RubyConstant::new("Object").expect(
-            "INVARIANT VIOLATED: `Object` is not a valid Ruby constant. \
-             This is a bug because Ruby core class names must be valid constants. \
-             Fix: inspect RubyConstant validation.",
+        vec![RubyConstant::new("Object").expect_invariant(
+            "`Object` is not a valid Ruby constant",
+            "ruby core class names must be valid constants",
+            "inspect RubyConstant validation",
         )],
         crate::core::NamespaceKind::Instance,
     )
@@ -590,8 +619,10 @@ fn method_lookup_edge_is_language_owned(
         engine
             .file(edge.range.file_id)
             .unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: method lookup graph edge references missing source file {}. This is a bug because every graph edge must remain owned by a registered source. Fix: remove graph edges before unregistering their file.",
+                unreachable_invariant!(
+                    what = "method lookup graph edge references missing source file {}",
+                    why = "every graph edge must remain owned by a registered source",
+                    fix = "remove graph edges before unregistering their file",
                     edge.range.file_id.0,
                 )
             })

@@ -34,7 +34,7 @@ Delete this file when the last task is done. Git history keeps the record.
       the server crate holds only the server.
 - [x] A5. Delete dead code, APIs used only by tests, and unused debug
       endpoints.
-- [ ] A6. Add an `invariant!` macro and shorten the multi-line invariant
+- [x] A6. Add an `invariant!` macro and shorten the multi-line invariant
       messages without losing what broke, why it is a bug, and the fix.
 - [ ] A7. Replace scattered statistics plumbing with one stats registry.
 - [x] A8. Remove `mod.rs` files that only re-export.

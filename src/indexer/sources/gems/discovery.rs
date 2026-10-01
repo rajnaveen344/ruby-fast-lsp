@@ -106,19 +106,19 @@ impl IndexerGem {
         &mut self,
         priority_keys: &HashSet<String>,
     ) -> Result<usize> {
-        assert!(
+        invariant!(
             !priority_keys.is_empty(),
-            "INVARIANT VIOLATED: navigation gem discovery received no active-document keys. \
-             This is a bug because an empty frontier cannot identify bounded dependency work. \
-             Fix: use complete discovery when no active dependency key exists."
+            what = "navigation gem discovery received no active-document keys",
+            why = "an empty frontier cannot identify bounded dependency work",
+            fix = "use complete discovery when no active dependency key exists",
         );
-        assert!(
+        invariant!(
             self.workspace_root
                 .as_ref()
                 .is_some_and(|root| root.join("Gemfile").is_file()),
-            "INVARIANT VIOLATED: navigation gem discovery has no owning-project Gemfile. This is \
-             a bug because exact locked source precedence exists only for a Ruby project. Fix: \
-             keep standalone explicit-global discovery on the complete discovery path."
+            what = "navigation gem discovery has no owning-project Gemfile",
+            why = "exact locked source precedence exists only for a Ruby project",
+            fix = "keep standalone explicit-global discovery on the complete discovery path",
         );
         let total_started = Instant::now();
         self.discovered_gems.clear();
@@ -176,13 +176,12 @@ impl IndexerGem {
     }
 
     pub(crate) fn complete_navigation_gem_discovery_blocking(&mut self) -> Result<usize> {
-        assert_eq!(
+        invariant_eq!(
             self.discovery_stage,
             GemDiscoveryStage::NavigationInputs,
-            "INVARIANT VIOLATED: exhaustive gem discovery did not follow the bounded navigation \
-             phase. This is a bug because completing an uninitialized or already-complete \
-             catalog could hide stale candidates. Fix: call this exactly once after successful \
-             discover_navigation_gems_blocking."
+            what = "exhaustive gem discovery did not follow the bounded navigation phase",
+            why = "completing an uninitialized or already-complete catalog could hide stale candidates",
+            fix = "call this exactly once after successful discover_navigation_gems_blocking",
         );
         let started = Instant::now();
         if self.ruby_executable.is_some() {

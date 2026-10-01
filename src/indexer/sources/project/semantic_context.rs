@@ -1,6 +1,7 @@
 //! Exhaustive project semantic context and open-document resolution.
 
 use super::IndexerProject;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::info;
@@ -19,25 +20,33 @@ impl IndexerProject {
         &mut self,
         _server: &RubyLanguageServer,
     ) -> Result<()> {
-        assert!(
+        invariant!(
             self.pending_project_navigation_files.is_none()
                 && self.pending_project_files.is_some()
                 && !self.exhaustive_collection_started,
-            "INVARIANT VIOLATED: the project collection baseline was validated outside the idle post-navigation-frontier state. This is a bug because every project source file must read one immutable generation-owned engine. Fix: initialize the baseline before collecting any project file, finish the active frontier, then validate the retained baseline before taking the first tail batch."
+            what = "project collection baseline validated outside the idle post-frontier state",
+            why = "every project file reads one immutable generation engine",
+            fix = "initialize the baseline first; validate it after the frontier, before the first tail batch",
         );
-        let snapshot = self.exhaustive_analysis_engine.as_ref().expect(
-            "INVARIANT VIOLATED: project completion lost the pre-collection semantic baseline. This is a bug because rebuilding the context after the active frontier would make results depend on navigation demand. Fix: initialize and retain one baseline before collecting any Ruby project file.",
+        let snapshot = self.exhaustive_analysis_engine.as_ref().expect_invariant(
+            "project completion lost the pre-collection semantic baseline",
+            "rebuilding it later makes results depend on navigation demand",
+            "initialize one baseline before collecting any project file",
         );
-        let known_namespaces = self.exhaustive_known_namespaces.as_ref().expect(
-            "INVARIANT VIOLATED: project completion lost the pre-collection namespace baseline. This is a bug because rebuilding namespaces after the active frontier would make results depend on navigation demand. Fix: initialize and retain one baseline before collecting any Ruby project file.",
+        let known_namespaces = self.exhaustive_known_namespaces.as_ref().expect_invariant(
+            "project completion lost the pre-collection namespace baseline",
+            "rebuilding it later makes results depend on navigation demand",
+            "initialize one baseline before collecting any project file",
         );
         let estimated_bytes = snapshot.read().estimated_memory_stats().total();
-        assert!(
+        invariant!(
             estimated_bytes <= MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
-            "INVARIANT VIOLATED: project collection baseline for {} requires an estimated {} bytes, exceeding the bounded {}-byte clone budget. This is a bug because deterministic parallel collection must not create an unbounded engine snapshot. Fix: reduce the dependency/signature seed or replace the clone with a compact immutable query projection.",
+            what = "collection baseline for {} needs about {} bytes, over the {}-byte clone budget",
+            why = "parallel collection must not clone an unbounded engine",
+            fix = "shrink the seed or replace the clone with a compact query projection",
             self.workspace_root.display(),
             estimated_bytes,
-            MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES
+            MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
         );
         info!(
             "Retained immutable project collection baseline for {}: estimated_bytes={}, namespaces={}",
@@ -53,10 +62,11 @@ impl IndexerProject {
         server: &RubyLanguageServer,
         project_files: &[PathBuf],
     ) -> Result<()> {
-        assert!(
-            self.exhaustive_known_namespaces.is_none()
-                && self.exhaustive_analysis_engine.is_none(),
-            "INVARIANT VIOLATED: one project generation initialized its semantic collection baseline twice. This is a bug because every Ruby file must read exactly one immutable pre-collection universe. Fix: clear the prior generation before starting project collection."
+        invariant!(
+            self.exhaustive_known_namespaces.is_none() && self.exhaustive_analysis_engine.is_none(),
+            what = "one project generation initialized its semantic collection baseline twice",
+            why = "every Ruby file must read exactly one immutable pre-collection universe",
+            fix = "clear the prior generation before starting project collection",
         );
         let project_uri = Url::from_directory_path(&self.workspace_root).map_err(|_| {
             anyhow::anyhow!(
@@ -137,12 +147,11 @@ impl IndexerProject {
                 let (path, facts) = outcome?;
                 let Some(facts) = facts else { continue };
                 let file_id = engine.file_id(&path).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: project-wide semantic seed lost the registered identity for {}. \
-                         This is a bug because the immutable project skeleton must address the same \
-                         pre-registered file as full collection. Fix: preserve registration while \
-                         installing the whole-project declaration barrier.",
-                        path.display()
+                    unreachable_invariant!(
+                        what = "project semantic seed lost the registered identity for {}",
+                        why = "the skeleton addresses the same pre-registered file as collection",
+                        fix = "keep registration while installing the declaration barrier",
+                        path.display(),
                     )
                 });
                 engine.replace_facts(file_id, facts, ResolveMode::Deferred);
@@ -162,12 +171,14 @@ impl IndexerProject {
             ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
         });
         let estimated_bytes = semantic_context.read().estimated_memory_stats().total();
-        assert!(
+        invariant!(
             estimated_bytes <= MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
-            "INVARIANT VIOLATED: pre-collection semantic baseline for {} requires an estimated {} bytes, exceeding the bounded {}-byte clone budget. This is a bug because deterministic project collection must not retain an unbounded snapshot. Fix: reduce the dependency/signature seed or replace the clone with a compact immutable query projection.",
+            what = "semantic baseline for {} needs about {} bytes, over the {}-byte clone budget",
+            why = "collection must not retain an unbounded snapshot",
+            fix = "shrink the seed or replace the clone with a compact query projection",
             self.workspace_root.display(),
             estimated_bytes,
-            MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES
+            MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
         );
         info!(
             "Captured immutable pre-collection semantic baseline for {}: estimated_bytes={}, namespaces={}",
@@ -205,13 +216,11 @@ impl IndexerProject {
                 .iter()
                 .map(|path| {
                     engine.file_id(path).unwrap_or_else(|| {
-                        panic!(
-                            "INVARIANT VIOLATED: open project document {} has no registered \
-                             analysis file after project fact collection. This is a bug because \
-                             didOpen and the project pass share the owning isolated engine. Fix: \
-                             keep open-document registration and project routing on the same \
-                             longest-prefix workspace owner.",
-                            path.display()
+                        unreachable_invariant!(
+                            what = "open document {} has no registered analysis file after collection",
+                            why = "didOpen and the project pass share one engine",
+                            fix = "route open documents and the project pass to the same workspace owner",
+                            path.display(),
                         )
                     })
                 })

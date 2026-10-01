@@ -1,6 +1,7 @@
 use crate::environment::runtime::catalog::{
     DiscoveredRuntime, RuntimeDiscoverySource, RuntimeImplementation,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_fast_lsp_jruby_support::JrubyRuntimeIdentity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -143,9 +144,11 @@ impl SelectedRuntimeDescriptor {
             .is_some_and(|path| !path.is_absolute())
         {
             return Err(RuntimeConfigError::InvalidJavaHome(
-                self.java_home
-                    .clone()
-                    .expect("INVARIANT VIOLATED: checked Java home must exist"),
+                self.java_home.clone().expect_invariant(
+                    "checked Java home is missing",
+                    "the branch runs only when java_home is Some",
+                    "keep the is_some check on the same field",
+                ),
             ));
         }
         let compatibility = parse_family(&self.compatibility_version).ok_or_else(|| {

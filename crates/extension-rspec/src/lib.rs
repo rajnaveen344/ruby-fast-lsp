@@ -1,3 +1,8 @@
+#[macro_use]
+#[allow(unused_macros, dead_code)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 use ruby_fast_lsp_extension_api::{
     ApplyMixinPatch, ArgumentValue, BlockExecutionContextPatch, CallContext,
     ConnectExecutionContextPatch, DefineMethodPatch, ExecutionContextTarget, Extension,
@@ -821,10 +826,11 @@ fn dsl_params(method_name: &str) -> Vec<MethodParamPatch> {
             ]
         }
         "include" | "prepend" | "extend" => Vec::new(),
-        other => panic!(
-            "INVARIANT VIOLATED: unknown RSpec DSL method `{other}` reached signature builder. \
-             This is a bug because indexed_call_names and index_call must stay in sync. \
-             Fix: add explicit signature handling for the DSL macro."
+        other => unreachable_invariant!(
+            what = "unknown RSpec DSL method `{other}` reached signature builder",
+            why = "indexed_call_names and index_call must stay in sync",
+            fix = "add explicit signature handling for the DSL macro",
+            other = other,
         ),
     }
 }

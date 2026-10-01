@@ -5,6 +5,7 @@ use crate::core::{
     GraphNodeKind, RubyConstant, RubyType, SymbolFact, SymbolKind, TextRange, TypeFact,
     TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, Node};
 
 use super::syntax::{
@@ -46,10 +47,10 @@ impl AnalysisIndexer {
             TypeProvenance::Inferred,
         ));
 
-        let singleton_fqn = fqn.to_singleton_namespace().expect(
-            "INVARIANT VIOLATED: namespace fact could not convert to singleton namespace. \
-             This is a bug because class/module graph nodes must be namespace FQNs. \
-             Fix: only call push_namespace_facts with Namespace facts.",
+        let singleton_fqn = fqn.to_singleton_namespace().expect_invariant(
+            "namespace fact could not convert to singleton namespace",
+            "class/module graph nodes must be namespace FQNs",
+            "only call push_namespace_facts with Namespace facts",
         );
         self.known_namespaces.insert(singleton_fqn.clone());
         self.facts
@@ -289,10 +290,10 @@ impl AnalysisIndexer {
             return None;
         }
 
-        let class_methods = RubyConstant::new("ClassMethods").expect(
-            "INVARIANT VIOLATED: static Concern ClassMethods constant is invalid. \
-             This is a bug because `ClassMethods` is a valid Ruby constant. \
-             Fix: inspect RubyConstant validation.",
+        let class_methods = RubyConstant::new("ClassMethods").expect_invariant(
+            "static Concern ClassMethods constant is invalid",
+            "`ClassMethods` is a valid Ruby constant",
+            "inspect RubyConstant validation",
         );
         let mut target_namespace = self.namespace_stack.clone();
         target_namespace.push(class_methods);

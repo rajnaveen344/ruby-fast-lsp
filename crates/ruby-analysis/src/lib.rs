@@ -1,5 +1,11 @@
 #![doc = include_str!("../README.md")]
 
+#[macro_use]
+#[allow(unused_macros)]
+mod invariant;
+#[cfg(test)]
+mod invariant_tests;
+
 pub mod core;
 pub mod engine;
 pub mod indexer;
@@ -15,14 +21,19 @@ mod architecture_tests {
         let protocol_crate = ["tower", "-lsp"].concat();
         let manifest = std::fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap_or_else(
             |error| {
-                panic!(
-                    "INVARIANT VIOLATED: ruby-analysis Cargo.toml could not be read: {error}. This is a bug because the architecture boundary test must inspect the crate's direct dependencies. Fix: restore the crate manifest before running tests."
+                unreachable_invariant!(
+                    what = "ruby-analysis Cargo.toml could not be read: {error}",
+                    why = "the architecture boundary test must inspect the crate's direct dependencies",
+                    fix = "restore the crate manifest before running tests",
+                    error = error,
                 )
             },
         );
-        assert!(
+        invariant!(
             !manifest.contains(&protocol_crate),
-            "INVARIANT VIOLATED: ruby-analysis directly depends on the editor protocol crate. This is a bug because the reusable checker and LSP must share analysis without an LSP data model. Fix: replace protocol coordinates and response records with domain byte ranges and adapter-owned projection."
+            what = "ruby-analysis depends on the editor protocol crate",
+            why = "checker and LSP share analysis without an LSP data model",
+            fix = "use domain byte ranges; project to protocol types in the adapter",
         );
 
         let protocol_module = ["tower", "_lsp"].concat();
@@ -30,15 +41,21 @@ mod architecture_tests {
         let mut pending = vec![manifest_dir.join("src")];
         while let Some(directory) = pending.pop() {
             let entries = std::fs::read_dir(&directory).unwrap_or_else(|error| {
-                panic!(
-                    "INVARIANT VIOLATED: ruby-analysis source directory `{}` could not be read: {error}. This is a bug because skipping a directory could hide an editor-protocol dependency. Fix: restore a readable source tree or deliberately update the architecture boundary root.",
+                unreachable_invariant!(
+                    what = "ruby-analysis source directory `{}` could not be read: {error}",
+                    why = "skipping a directory could hide an editor-protocol dependency",
+                    fix = "restore a readable source tree or deliberately update the architecture boundary root",
                     directory.display(),
+                    error = error,
                 )
             });
             for entry in entries {
                 let entry = entry.unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: a ruby-analysis source entry could not be read: {error}. This is a bug because the boundary audit must inspect every Rust module. Fix: repair the source tree before running architecture tests."
+                    unreachable_invariant!(
+                        what = "a ruby-analysis source entry could not be read: {error}",
+                        why = "the boundary audit must inspect every Rust module",
+                        fix = "repair the source tree before running architecture tests",
+                        error = error,
                     )
                 });
                 let path = entry.path();
@@ -50,14 +67,19 @@ mod architecture_tests {
                     continue;
                 }
                 let source = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: ruby-analysis source `{}` could not be decoded as UTF-8: {error}. This is a bug because Rust source must be readable by the architecture audit. Fix: restore valid Rust source text.",
+                    unreachable_invariant!(
+                        what = "ruby-analysis source `{}` could not be decoded as UTF-8: {error}",
+                        why = "rust source must be readable by the architecture audit",
+                        fix = "restore valid Rust source text",
                         path.display(),
+                        error = error,
                     )
                 });
-                assert!(
+                invariant!(
                     !source.contains(&protocol_module) && !source.contains(&protocol_types),
-                    "INVARIANT VIOLATED: ruby-analysis source `{}` imports editor protocol types. This is a bug because reusable analysis must expose SourceFileId, TextRange, byte offsets, and domain records. Fix: move protocol projection to the root adapter.",
+                    what = "ruby-analysis source `{}` imports editor protocol types",
+                    why = "reusable analysis exposes SourceFileId, TextRange, and domain records",
+                    fix = "move protocol projection to the root adapter",
                     path.display(),
                 );
             }

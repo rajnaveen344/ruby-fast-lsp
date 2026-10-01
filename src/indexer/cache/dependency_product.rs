@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Result};
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{
@@ -85,17 +86,17 @@ impl GemDependencySource {
         }
         let package_name = package_name.into();
         let package_version = package_version.into();
-        assert!(
+        invariant!(
             !package_name.is_empty(),
-            "INVARIANT VIOLATED: gem dependency source package name is empty. \
-             This is a bug because locked gem sources must carry GemInfo.name. \
-             Fix: pass gem_info.name into GemDependencySource::new."
+            what = "gem dependency source package name is empty",
+            why = "locked gem sources must carry GemInfo.name",
+            fix = "pass gem_info.name into GemDependencySource::new",
         );
-        assert!(
+        invariant!(
             !package_version.is_empty(),
-            "INVARIANT VIOLATED: gem dependency source package version is empty. \
-             This is a bug because locked gem sources must carry GemInfo.locked_version. \
-             Fix: pass gem_info.locked_version into GemDependencySource::new."
+            what = "gem dependency source package version is empty",
+            why = "locked gem sources must carry GemInfo.locked_version",
+            fix = "pass gem_info.locked_version into GemDependencySource::new",
         );
         let content_sha256 = Sha256::digest(content.as_bytes()).into();
         Ok(Self {
@@ -178,8 +179,10 @@ impl GemDependencyManifest {
         }
         closure.update(
             u64::try_from(closure_identities.len())
-                .expect(
-                    "INVARIANT VIOLATED: dependency closure identity count exceeded u64. This is a bug because one process cannot hold that many locked gems. Fix: reject oversized lockfiles during discovery.",
+                .expect_invariant(
+                    "dependency closure identity count exceeded u64",
+                    "one process cannot hold that many locked gems",
+                    "reject oversized lockfiles during discovery",
                 )
                 .to_le_bytes(),
         );
@@ -192,8 +195,10 @@ impl GemDependencyManifest {
             closure.update(source.content_sha256);
             closure.update(
                 u64::try_from(source.content.len())
-                    .expect(
-                        "INVARIANT VIOLATED: dependency source length exceeded u64. This is a bug because one process cannot hold a source larger than u64. Fix: reject oversized dependency sources during discovery.",
+                    .expect_invariant(
+                        "dependency source length exceeded u64",
+                        "one process cannot hold a source larger than u64",
+                        "reject oversized dependency sources during discovery",
                     )
                     .to_le_bytes(),
             );
@@ -643,8 +648,10 @@ fn record_duration(total: &AtomicU64, maximum: &AtomicU64, elapsed: Duration) {
 fn hash_field(hasher: &mut Sha256, field: &[u8]) {
     hasher.update(
         u64::try_from(field.len())
-            .expect(
-                "INVARIANT VIOLATED: dependency product key field exceeded u64. This is a bug because one process cannot hold a key field larger than u64. Fix: reject oversized dependency metadata.",
+            .expect_invariant(
+                "dependency product key field exceeded u64",
+                "one process cannot hold a key field larger than u64",
+                "reject oversized dependency metadata",
             )
             .to_le_bytes(),
     );

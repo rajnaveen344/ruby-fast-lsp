@@ -78,9 +78,11 @@ pub(crate) async fn observe_first_live_definition(
     indexing_started: Instant,
 ) -> serde_json::Value {
     let workspace = server.workspace_for_uri(&probe.uri).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: live definition probe {} has no owning project. This is a profiler setup bug because live navigation evidence requires one isolated engine. Fix: choose a project-owned file.",
-            probe.relative_path.display()
+        unreachable_invariant!(
+            what = "live definition probe {} has no owning project",
+            why = "live navigation evidence requires one isolated engine",
+            fix = "choose a project-owned file",
+            probe.relative_path.display(),
         )
     });
     loop {
@@ -128,10 +130,12 @@ pub(crate) async fn observe_first_live_definition(
                         .unwrap_or_else(|| "Unknown".to_string())
                 })
                 .collect::<Vec<_>>();
-            assert!(
+            invariant!(
                 target_source_kinds.iter().all(|kind| kind != "Unknown"),
-                "INVARIANT VIOLATED: live definition probe {} resolved to a location absent from its originating project engine. This is a profiler or provenance bug because successful staged navigation must retain exact semantic ownership. Fix: preserve the originating engine for external locations and register every returned source.",
-                probe.relative_path.display()
+                what = "definition probe {} resolved outside its originating project engine",
+                why = "staged navigation must keep semantic ownership",
+                fix = "keep the originating engine for external locations",
+                probe.relative_path.display(),
             );
             return serde_json::json!({
                 "file": probe.relative_path,
@@ -153,14 +157,16 @@ pub(crate) async fn observe_first_live_definition(
                 | status::IndexingPhase::Failed
                 | status::IndexingPhase::Cancelled
         ) {
-            panic!(
-                "INVARIANT VIOLATED: live definition probe {}:{}:{} never resolved before project {} reached terminal phase {:?}. This is a profiler acceptance failure because readiness timestamps without a successful semantic query are not evidence. Fix: repair the selected probe or the staged indexing lifecycle. Failure: {:?}",
+            unreachable_invariant!(
+                what = "definition probe {}:{}:{} unresolved when project {} reached phase {:?} (failure: {:?})",
+                why = "readiness without a successful query is not evidence",
+                fix = "repair the probe or the staged indexing lifecycle",
                 probe.relative_path.display(),
                 probe.position.line,
                 probe.position.character,
                 workspace.root_path.display(),
                 status.phase,
-                status.failure
+                status.failure,
             );
         }
         tokio::time::sleep(Duration::from_millis(5)).await;

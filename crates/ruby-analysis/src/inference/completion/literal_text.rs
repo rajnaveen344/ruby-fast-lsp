@@ -1,6 +1,7 @@
 //! Textual literal and constructor-assignment receiver heuristics.
 
 use crate::core::{FullyQualifiedName, RubyConstant, RubyType};
+use crate::invariant::ExpectInvariant;
 
 pub fn infer_constructor_assignment_type(content: &str, var_name: &str) -> Option<RubyType> {
     for line in content.lines() {
@@ -118,10 +119,10 @@ pub fn is_variable_name(text: &str) -> bool {
         return false;
     }
 
-    let first_char = text.chars().next().expect(
-        "INVARIANT VIOLATED: non-empty variable text has no first char. \
-         This is a bug because Rust str chars must yield at least one char for non-empty valid UTF-8. \
-         Fix: check caller input encoding.",
+    let first_char = text.chars().next().expect_invariant(
+        "non-empty variable text has no first char",
+        "rust str chars must yield at least one char for non-empty valid UTF-8",
+        "check caller input encoding",
     );
     if !first_char.is_lowercase() && first_char != '_' {
         return false;

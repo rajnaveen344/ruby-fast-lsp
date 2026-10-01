@@ -2,6 +2,7 @@ use crate::core::{
     FullyQualifiedName, MethodCallSignatureCandidate, MethodReferenceAccess,
     MethodReferenceCandidate, MethodReferenceDiagnostics, ReferenceCandidate, RubyMethod,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{ForwardingSuperNode, SuperNode};
 
 use crate::indexer::fact_collector::FactCollector;
@@ -47,10 +48,10 @@ impl FactCollector {
         else {
             return;
         };
-        let method = RubyMethod::new(method.as_str()).expect(
-            "INVARIANT VIOLATED: current method FQN contains invalid Ruby method. \
-             This is a bug because RubyMethod validates names at construction. \
-             Fix: keep current_method_fqn populated only from RubyMethod values.",
+        let method = RubyMethod::new(method.as_str()).expect_invariant(
+            "current method FQN contains invalid Ruby method",
+            "RubyMethod validates names at construction",
+            "keep current_method_fqn populated only from RubyMethod values",
         );
         let range = self.text_range_from_prism_location(location, "super method reference");
         self.facts.references.push(ReferenceCandidate::method(

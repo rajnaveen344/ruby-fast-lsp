@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use futures::{stream, StreamExt};
 use ruby_fast_lsp_jruby_support::{
     JrubySeries, JrubyVersion, RubyCompatibilityVersion, VersionError,
@@ -307,10 +308,10 @@ pub async fn discover_runtimes(
             },
         )
         .await
-        .expect(
-            "INVARIANT VIOLATED: runtime installation discovery failed its fixed resource admission. \
-             This is a bug because its bounded claim must fit the server-owned policy. \
-             Fix: keep runtime discovery within the configured production budget.",
+        .expect_invariant(
+            "runtime installation discovery failed its fixed resource admission",
+            "its bounded claim must fit the server-owned policy",
+            "keep runtime discovery within the configured production budget",
         );
     let mut runtimes = stream::iter(candidates)
         .map(|candidate| {
@@ -552,10 +553,10 @@ async fn bounded_version_output(
             bounded_version_output_admitted(executable, java_home),
         )
         .await
-        .expect(
-            "INVARIANT VIOLATED: a non-cancellable runtime probe failed resource admission. \
-             This is a bug because its fixed positive claim must fit the server-owned policy. \
-             Fix: keep runtime probes within the configured production budget.",
+        .expect_invariant(
+            "a non-cancellable runtime probe failed resource admission",
+            "its fixed positive claim must fit the server-owned policy",
+            "keep runtime probes within the configured production budget",
         )
 }
 

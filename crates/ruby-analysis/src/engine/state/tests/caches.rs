@@ -717,8 +717,10 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
             std::sync::Arc::ptr_eq(first, cloned),
             "a cached method resolution clone must share its immutable MethodFact; deep cloning facts multiplies resolve-pass memory by reference count"
         ),
-        (first, cloned) => panic!(
-            "INVARIANT VIOLATED: method lookup result changed shape while cloning (first={:?}, cloned={:?}). This is a bug because clone must preserve an exact immutable resolution. Fix: clone every MethodLookupResult variant without semantic conversion.",
+        (first, cloned) => unreachable_invariant!(
+            what = "method lookup result changed shape while cloning (first={:?}, cloned={:?})",
+            why = "clone must preserve an exact immutable resolution",
+            fix = "clone every MethodLookupResult variant without semantic conversion",
             std::mem::discriminant(first),
             std::mem::discriminant(cloned),
         ),
@@ -786,12 +788,18 @@ fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
                 crate::engine::resolution::MethodLookupResult::Ambiguous { owner, method } => {
                     (owner, method)
                 }
-                crate::engine::resolution::MethodLookupResult::Unique(fact) => panic!(
-                    "INVARIANT VIOLATED: project-defined Class fallback resolved concretely for `{receiver}` through `{}`. This is a bug because indexing the defining file does not prove the runtime monkeypatch was loaded. Fix: keep non-language metaclass fallbacks Unknown.",
+                crate::engine::resolution::MethodLookupResult::Unique(fact) => unreachable_invariant!(
+                    what = "project-defined Class fallback resolved concretely for `{receiver}` through `{}`",
+                    why = "indexing the defining file does not prove the runtime monkeypatch was loaded",
+                    fix = "keep non-language metaclass fallbacks Unknown",
                     fact.owner,
+                    receiver = receiver,
                 ),
-                crate::engine::resolution::MethodLookupResult::Missing => panic!(
-                    "INVARIANT VIOLATED: indexed Class fallback became definitely missing for `{receiver}`. This is a bug because the runtime load state is unknown. Fix: retain an ambiguous canonical metaclass candidate."
+                crate::engine::resolution::MethodLookupResult::Missing => unreachable_invariant!(
+                    what = "indexed Class fallback became definitely missing for `{receiver}`",
+                    why = "the runtime load state is unknown",
+                    fix = "retain an ambiguous canonical metaclass candidate",
+                    receiver = receiver,
                 ),
             }
         })

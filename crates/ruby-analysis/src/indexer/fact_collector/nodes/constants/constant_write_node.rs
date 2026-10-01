@@ -1,6 +1,7 @@
 use crate::core::{
     FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
 };
+use crate::invariant::ExpectInvariant;
 use log::{error, trace};
 use ruby_prism::{
     ConstantAndWriteNode, ConstantOperatorWriteNode, ConstantOrWriteNode, ConstantTargetNode,
@@ -109,14 +110,19 @@ impl FactCollector {
         self.record_constant_value_type(fqn, &node.value(), &node.name_loc(), &node.location());
         if let Ok(summary) = crate::indexer::lower_callable_literal(&node.value()) {
             if summary.is_capture_free() {
-                self.constants.callable_bodies
-                    .push(crate::core::callables::callable_body::ConstantCallableBodyFact {
+                self.constants.callable_bodies.push(
+                    crate::core::callables::callable_body::ConstantCallableBodyFact {
                         constant: self
                             .constant_fqn_from_name(&constant_name)
-                            .expect("INVARIANT VIOLATED: a validated constant name stopped producing its FQN. This is a bug because callable and type facts use the same declaration identity. Fix: construct both facts from one retained FQN."),
+                            .expect_invariant(
+                                "a validated constant name stopped producing its FQN",
+                                "callable and type facts use the same declaration identity",
+                                "construct both facts from one retained FQN",
+                            ),
                         summary,
                         range: self.direct_range(&node.location()),
-                    });
+                    },
+                );
             }
         }
     }

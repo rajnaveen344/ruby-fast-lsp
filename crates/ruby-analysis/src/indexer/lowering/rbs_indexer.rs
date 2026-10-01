@@ -4,6 +4,7 @@ use crate::core::{
     MethodParamKind, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact,
     SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
+use crate::invariant::ExpectInvariant;
 use rbs_parser::{
     rbs_type_to_string, AttrKind, Declaration, Location, MethodDecl, MethodKind, ParamKind,
     RbsType, Visibility,
@@ -34,8 +35,10 @@ pub fn index_rbs(
                     range,
                 ));
                 facts.graph_nodes.push(GraphNodeFact::new(
-                    namespace.to_singleton_namespace().expect(
-                        "INVARIANT VIOLATED: an RBS class namespace cannot produce its singleton namespace. This is a bug because RBS class declarations always use Namespace FQNs. Fix: validate declaration names before graph construction.",
+                    namespace.to_singleton_namespace().expect_invariant(
+                        "an RBS class namespace cannot produce its singleton namespace",
+                        "RBS class declarations always use Namespace FQNs",
+                        "validate declaration names before graph construction",
                     ),
                     GraphNodeKind::Class,
                     range,
@@ -86,8 +89,10 @@ pub fn index_rbs(
                     range,
                 ));
                 facts.graph_nodes.push(GraphNodeFact::new(
-                    namespace.to_singleton_namespace().expect(
-                        "INVARIANT VIOLATED: an RBS module namespace cannot produce its singleton namespace. This is a bug because RBS module declarations always use Namespace FQNs. Fix: validate declaration names before graph construction.",
+                    namespace.to_singleton_namespace().expect_invariant(
+                        "an RBS module namespace cannot produce its singleton namespace",
+                        "RBS module declarations always use Namespace FQNs",
+                        "validate declaration names before graph construction",
                     ),
                     GraphNodeKind::Module,
                     range,
@@ -432,8 +437,10 @@ fn normalized_type_parameter_name(parameter: &rbs_parser::TypeParam) -> String {
         .split_whitespace()
         .last()
         .unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: an RBS type parameter has no non-whitespace name. This is a bug because the parser accepted an unusable generic binding. Fix: reject empty type-parameter names during RBS indexing."
+            unreachable_invariant!(
+                what = "an RBS type parameter has no non-whitespace name",
+                why = "the parser accepted an unusable generic binding",
+                fix = "reject empty type-parameter names during RBS indexing",
             )
         })
         .to_string()
@@ -551,19 +558,22 @@ impl LineOffsets {
 
     fn offset(&self, row: usize, column: usize, source_len: usize) -> usize {
         let line_start = *self.starts.get(row).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: RBS parser returned row {row} outside {} source lines. \
-                 This is a bug because parser locations must address the parsed source. \
-                 Fix: keep RBS location conversion synchronized with tree-sitter points.",
-                self.starts.len()
+            unreachable_invariant!(
+                what = "RBS parser returned row {row} outside {} source lines",
+                why = "parser locations must address the parsed source",
+                fix = "keep RBS location conversion synchronized with tree-sitter points",
+                self.starts.len(),
+                row = row,
             )
         });
         let offset = line_start + column;
-        assert!(
+        invariant!(
             offset <= source_len,
-            "INVARIANT VIOLATED: RBS parser byte location {offset} exceeds source length {source_len}. \
-             This is a bug because parser locations must remain inside the parsed file. \
-             Fix: verify RBS columns are interpreted as UTF-8 byte columns."
+            what = "RBS parser byte location {offset} exceeds source length {source_len}",
+            why = "parser locations must remain inside the parsed file",
+            fix = "verify RBS columns are interpreted as UTF-8 byte columns",
+            offset = offset,
+            source_len = source_len,
         );
         offset
     }
@@ -691,8 +701,10 @@ end
             .find(|fact| fact.fqn.name() == "apply")
             .expect("the block-bearing method must be indexed");
         let [signature] = method.callable_signatures() else {
-            panic!(
-                "INVARIANT VIOLATED: one RBS overload did not produce exactly one callable signature. This is a bug because callable overload evidence must remain file-owned and complete. Fix: retain every supported block-bearing MethodType on its MethodFact."
+            unreachable_invariant!(
+                what = "one RBS overload did not produce exactly one callable signature",
+                why = "callable overload evidence must remain file-owned and complete",
+                fix = "retain every supported block-bearing MethodType on its MethodFact",
             );
         };
         assert_eq!(signature.type_parameters, ["Input", "Output"]);

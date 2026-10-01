@@ -1,5 +1,6 @@
 //! Embedded RBS callable owner lookup: receiver identity, generic bindings, and ancestor edges.
 
+use crate::invariant::ExpectInvariant;
 use rbs_parser::{Loader, RbsType};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -92,8 +93,10 @@ fn normalized_type_parameter_name(parameter: &rbs_parser::TypeParam) -> String {
         .split_whitespace()
         .last()
         .unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: an RBS type parameter has no non-whitespace name. This is a bug because the parser accepted an unusable generic binding. Fix: reject empty type-parameter names during RBS conversion."
+            unreachable_invariant!(
+                what = "an RBS type parameter has no non-whitespace name",
+                why = "the parser accepted an unusable generic binding",
+                fix = "reject empty type-parameter names during RBS conversion",
             )
         })
         .to_string()
@@ -115,9 +118,12 @@ fn declaration_bindings(
             return Err(crate::core::UnknownReason::IncompleteBlockInput);
         }
         let name = normalized_type_parameter_name(parameter);
-        assert!(
+        invariant!(
             bindings.insert(name.clone(), argument.clone()).is_none(),
-            "INVARIANT VIOLATED: RBS declaration repeats type parameter `{name}`. This is a bug because one generic variable cannot have two declaration bindings. Fix: reject duplicate RBS type parameters before callable solving."
+            what = "RBS declaration repeats type parameter `{name}`",
+            why = "one generic variable cannot have two declaration bindings",
+            fix = "reject duplicate RBS type parameters before callable solving",
+            name = name,
         );
     }
     Ok(bindings)
@@ -270,14 +276,13 @@ fn callable_owner_from_method(
             .iter()
             .map(normalized_type_parameter_name)
             .collect::<Vec<_>>();
-        let signature = callable_signature_from_rbs(
-            &owner_parameter_names,
-            &method_type_parameters,
-            overload,
-        )?
-        .expect(
-            "INVARIANT VIOLATED: an RBS overload lost its checked block during callable conversion. This is a bug because block presence was tested immediately before conversion. Fix: keep the immutable overload and conversion atomic.",
-        );
+        let signature =
+            callable_signature_from_rbs(&owner_parameter_names, &method_type_parameters, overload)?
+                .expect_invariant(
+                    "an RBS overload lost its checked block during callable conversion",
+                    "block presence was tested immediately before conversion",
+                    "keep the immutable overload and conversion atomic",
+                );
         signatures.push(signature);
     }
     if signatures.is_empty() {

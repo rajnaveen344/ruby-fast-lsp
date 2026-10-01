@@ -19,6 +19,7 @@
 //!
 //! The supertypes list follows this exact order (excluding self).
 
+use crate::invariant::ExpectInvariant;
 use log::{debug, info};
 use ruby_analysis::engine::{
     AnalysisQuery, TypeHierarchyEntry, TypeHierarchyNode, TypeHierarchyRelation,
@@ -80,10 +81,10 @@ impl EngineQuery {
             }
         };
 
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: type hierarchy prepare requires an analysis engine. \
-             This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "type hierarchy prepare requires an analysis engine",
+            "LSP typeHierarchy should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_engine()",
         );
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
@@ -115,10 +116,10 @@ impl EngineQuery {
         info!("Supertypes request for: {}", data.fqn);
 
         // Parse the FQN string - return empty if can't parse (type might have been deleted)
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: supertype query requires an analysis engine. \
-             This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "supertype query requires an analysis engine",
+            "LSP typeHierarchy should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_engine()",
         );
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
@@ -157,10 +158,10 @@ impl EngineQuery {
         info!("Subtypes request for: {}", data.fqn);
 
         // Parse the FQN string - return empty if can't parse (type might have been deleted)
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: subtype query requires an analysis engine. \
-             This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "subtype query requires an analysis engine",
+            "LSP typeHierarchy should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_engine()",
         );
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);

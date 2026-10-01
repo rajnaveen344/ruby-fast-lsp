@@ -1,6 +1,7 @@
 //! Negative proof for `unresolved-method`: lookup-chain completeness, explicit
 //! absence contracts, owner existence, and spelling suggestions.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 
 use super::helpers::{levenshtein, suggestion_threshold};
@@ -16,8 +17,10 @@ impl AnalysisEngine {
             .unresolved_edges()
             .into_iter()
             .filter(|edge| {
-                let lookup = self.names.const_lookup(edge.target).expect(
-                    "INVARIANT VIOLATED: unresolved graph edge points to a missing constant lookup. This is a bug because graph edges must retain valid interned targets. Fix: intern and retain every unresolved graph target for the edge lifetime.",
+                let lookup = self.names.const_lookup(edge.target).expect_invariant(
+                    "unresolved graph edge points to a missing constant lookup",
+                    "graph edges must retain valid interned targets",
+                    "intern and retain every unresolved graph target for the edge lifetime",
                 );
                 !(edge.kind == GraphEdgeKind::Superclass
                     && lookup.absolute
@@ -66,8 +69,12 @@ impl AnalysisEngine {
             };
             if metaclass.is_some_and(|name| {
                 let constant = RubyConstant::new(name).unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: Ruby metaclass name `{name}` is invalid: {error}. This is a bug because Class and Module are universal Ruby constants. Fix: preserve RubyConstant support for language-defined class names."
+                    unreachable_invariant!(
+                        what = "Ruby metaclass name `{name}` is invalid: {error}",
+                        why = "class and Module are universal Ruby constants",
+                        fix = "preserve RubyConstant support for language-defined class names",
+                        name = name,
+                        error = error,
                     )
                 });
                 !self.has_graph_node(&FullyQualifiedName::namespace(vec![constant]))
@@ -132,11 +139,16 @@ impl AnalysisEngine {
     fn namespace_has_dynamic_mixin_hook(&self, namespace: &FullyQualifiedName) -> bool {
         let instance_namespace = match namespace.namespace_kind() {
             Some(NamespaceKind::Instance) => namespace.clone(),
-            Some(NamespaceKind::Singleton) => namespace.to_instance_namespace().expect(
-                "INVARIANT VIOLATED: singleton namespace cannot produce its instance counterpart. This is a bug because method lookup chains contain only Namespace FQNs. Fix: preserve Namespace identity while traversing mixin hooks.",
+            Some(NamespaceKind::Singleton) => namespace.to_instance_namespace().expect_invariant(
+                "singleton namespace cannot produce its instance counterpart",
+                "method lookup chains contain only Namespace FQNs",
+                "preserve Namespace identity while traversing mixin hooks",
             ),
-            None => panic!(
-                "INVARIANT VIOLATED: method lookup completeness received a non-namespace FQN `{namespace}`. This is a bug because only namespaces own method lookup chains. Fix: convert receiver types to Namespace FQNs before diagnostics."
+            None => unreachable_invariant!(
+                what = "method lookup completeness received a non-namespace FQN `{namespace}`",
+                why = "only namespaces own method lookup chains",
+                fix = "convert receiver types to Namespace FQNs before diagnostics",
+                namespace = namespace,
             ),
         };
 
@@ -176,8 +188,12 @@ impl AnalysisEngine {
         };
         names.iter().any(|name| {
             let method = RubyMethod::new(name).unwrap_or_else(|error| {
-                panic!(
-                    "INVARIANT VIOLATED: Ruby lifecycle method name `{name}` is invalid: {error}. This is a bug because lifecycle names are fixed Ruby identifiers. Fix: preserve RubyMethod support for language-defined callback names."
+                unreachable_invariant!(
+                    what = "Ruby lifecycle method name `{name}` is invalid: {error}",
+                    why = "lifecycle names are fixed Ruby identifiers",
+                    fix = "preserve RubyMethod support for language-defined callback names",
+                    name = name,
+                    error = error,
                 )
             });
             !self

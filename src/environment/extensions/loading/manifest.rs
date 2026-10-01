@@ -592,11 +592,11 @@ pub(super) fn wasm_file_stem(path: &Path) -> String {
     path.file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: Wasm extension path `{}` has no valid UTF-8 file stem. \
-                 This is a bug because direct wasm loads default extension IDs to file stems. \
-                 Fix: rename the wasm file or load it through an extension.toml manifest.",
-                path.display()
+            unreachable_invariant!(
+                what = "Wasm extension path `{}` has no valid UTF-8 file stem",
+                why = "direct wasm loads default extension IDs to file stems",
+                fix = "rename the wasm file or load it through an extension.toml manifest",
+                path.display(),
             )
         })
         .to_string()

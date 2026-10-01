@@ -5,6 +5,7 @@ use crate::core::{
 };
 use crate::engine::VariableTypeKind;
 use crate::indexer::fact_collector::FactCollector;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::HashMap;
 
@@ -56,10 +57,10 @@ impl FactCollector {
             range,
             param_type.clone(),
         );
-        let scope_id = u32::try_from(current_scope_id).expect(
-            "INVARIANT VIOLATED: block parameter scope id exceeded u32. \
-             This is a bug because ruby-analysis::core TypeSubject::Local stores u32 scope ids. \
-             Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
+        let scope_id = u32::try_from(current_scope_id).expect_invariant(
+            "block parameter scope id exceeded u32",
+            "ruby-analysis::core TypeSubject::Local stores u32 scope ids",
+            "widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes",
         );
         self.facts.types.add(TypeFact::new(
             TypeSubject::Local {
@@ -78,21 +79,25 @@ impl FactCollector {
         var_name: &str,
         location: &Location,
     ) -> Option<RubyType> {
-        let byte_offset = u32::try_from(location.start_offset()).expect(
-            "INVARIANT VIOLATED: Prism location offset exceeded u32. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        let byte_offset = u32::try_from(location.start_offset()).expect_invariant(
+            "Prism location offset exceeded u32",
+            "ruby-analysis::core TextRange currently stores u32 offsets",
+            "widen TextRange offsets before indexing files larger than u32::MAX bytes",
         );
         let file_id = self.document.analysis_file_id();
 
         // Fact collection traverses the AST while keeping VariableScopes aligned with the
         // current lexical node. Starting from that scope preserves block capture and hard-scope
         // boundaries through get_type_at_position without rescanning every variable location.
-        let scope_id = self.document.variable_scopes().current_scope().expect(
-            "INVARIANT VIOLATED: local variable type inference ran without an active lexical scope. \
-             This is a bug because FactCollector and VariableScopes must enter and exit AST scopes together. \
-             Fix: balance the variable-scope lifecycle around every collector traversal branch.",
-        );
+        let scope_id = self
+            .document
+            .variable_scopes()
+            .current_scope()
+            .expect_invariant(
+                "local variable type inference ran without an active lexical scope",
+                "FactCollector and VariableScopes must enter and exit AST scopes together",
+                "balance the variable-scope lifecycle around every collector traversal branch",
+            );
 
         let ty = self.document.variable_scopes().get_type_at_position(
             var_name,
@@ -117,8 +122,10 @@ impl FactCollector {
     }
 
     pub(in crate::indexer::fact_collector) fn finish_nonlocal_write(&mut self) {
-        self.flow.active_writes.pop().expect(
-            "INVARIANT VIOLATED: nonlocal write traversal stack underflowed. This is a bug because every variable-write exit must match one entry. Fix: keep FactCollector variable write callbacks balanced.",
+        self.flow.active_writes.pop().expect_invariant(
+            "nonlocal write traversal stack underflowed",
+            "every variable-write exit must match one entry",
+            "keep FactCollector variable write callbacks balanced",
         );
     }
 
@@ -137,8 +144,10 @@ impl FactCollector {
         if let Some(ruby_type) = outcome.proven_type() {
             return Some(ruby_type.clone());
         }
-        match outcome.unknown_reason().expect(
-            "INVARIANT VIOLATED: an unproven nonlocal-variable result lost its Unknown reason. This is a bug because TypeInferenceOutcome cannot represent a reasonless failure. Fix: construct every failed reaching-assignment proof with TypeInferenceOutcome::unknown.",
+        match outcome.unknown_reason().expect_invariant(
+            "an unproven nonlocal-variable result lost its Unknown reason",
+            "TypeInferenceOutcome cannot represent a reasonless failure",
+            "construct every failed reaching-assignment proof with TypeInferenceOutcome::unknown",
         ) {
             UnknownReason::NoReachingAssignment => None,
             UnknownReason::UnresolvedAssignmentValue
@@ -164,8 +173,10 @@ impl FactCollector {
             | UnknownReason::EscapedCallableValue
             | UnknownReason::CallableBodyBoundExceeded
             | UnknownReason::CallableRecursionUnsupported
-            | UnknownReason::UnsupportedCallableFlow => panic!(
-                "INVARIANT VIOLATED: nonlocal reaching-assignment inference produced a method-call Unknown reason. This is a bug because the selector owns only assignment proof failures. Fix: keep reaching-assignment and method-call reason construction in their respective inference paths."
+            | UnknownReason::UnsupportedCallableFlow => unreachable_invariant!(
+                what = "reaching-assignment inference produced a method-call Unknown reason",
+                why = "the selector owns only assignment proof failures",
+                fix = "keep assignment and method-call reasons in their own inference paths",
             ),
         }
     }

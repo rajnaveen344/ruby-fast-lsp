@@ -146,13 +146,17 @@ impl IndexerProject {
     }
 
     pub(crate) fn install_jruby_import_provider(&mut self, provider: Arc<JrubyImportProvider>) {
-        assert!(
+        invariant!(
             self.pending_project_files.is_some(),
-            "INVARIANT VIOLATED: the exact JRuby provider was installed outside the retained exhaustive project lifecycle. This is a bug because a generation-local handoff may occur only between bounded batches while the same pending tail and immutable semantic context are owned. Fix: install the provider after the active frontier and before finish_remaining_project_facts consumes the tail."
+            what = "JRuby provider installed outside the retained project lifecycle",
+            why = "handoff happens only between batches that own the tail and context",
+            fix = "install the provider after the frontier, before finish_remaining_project_facts",
         );
-        assert!(
+        invariant!(
             self.file_processor.jruby_import_provider().is_none(),
-            "INVARIANT VIOLATED: one project indexing generation installed its exact JRuby provider twice. This is a bug because runtime identity is immutable within a generation. Fix: cancel and replace the generation before changing its provider."
+            what = "one project indexing generation installed its exact JRuby provider twice",
+            why = "runtime identity is immutable within a generation",
+            fix = "cancel and replace the generation before changing its provider",
         );
         self.file_processor = self
             .file_processor

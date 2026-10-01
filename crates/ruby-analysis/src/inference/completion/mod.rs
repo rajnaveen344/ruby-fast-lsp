@@ -5,6 +5,7 @@ mod method_matches;
 mod method_return;
 mod shape_keys;
 
+use crate::invariant::ExpectInvariant;
 pub use literal_text::{
     infer_constructor_assignment_type, infer_literal_type, infer_literal_type_from_expression,
     is_variable_name,
@@ -186,13 +187,18 @@ pub fn receiver_type_from_context(
         }
     }
 
-    let cursor_offset = usize::try_from(byte_offset).expect(
-        "INVARIANT VIOLATED: completion byte offset cannot fit usize. This is a bug because source buffers are indexed by usize. Fix: widen the completion offset representation together with source indexing.",
+    let cursor_offset = usize::try_from(byte_offset).expect_invariant(
+        "completion byte offset cannot fit usize",
+        "source buffers are indexed by usize",
+        "widen the completion offset representation together with source indexing",
     );
-    assert!(
+    invariant!(
         cursor_offset <= content.len() && content.is_char_boundary(cursor_offset),
-        "INVARIANT VIOLATED: completion byte offset {cursor_offset} is not a valid UTF-8 boundary in a {}-byte source. This is a bug because the root adapter must convert the current LSP position through RubyDocument before querying inference. Fix: pass position_to_analysis_offset output for the same document generation.",
+        what = "completion offset {cursor_offset} is not a UTF-8 boundary in a {}-byte source",
+        why = "the adapter converts LSP positions through RubyDocument first",
+        fix = "pass position_to_analysis_offset output for the same document generation",
         content.len(),
+        cursor_offset = cursor_offset,
     );
     let line_start = content[..cursor_offset]
         .rfind('\n')
@@ -239,21 +245,32 @@ pub fn receiver_type_from_context(
     // triggered. Recover only the receiver's source range, then ask the same
     // engine-owned expression query. An explicit Unknown remains
     // authoritative and must not fall through to textual constructor guesses.
-    let receiver_start_in_line = before_dot.len().checked_sub(receiver_text.len()).expect(
-        "INVARIANT VIOLATED: completion receiver text is longer than the line prefix it was extracted from. This is a bug because receiver extraction must return a suffix of that prefix. Fix: keep receiver parsing and source-offset calculation coupled.",
-    );
+    let receiver_start_in_line = before_dot
+        .len()
+        .checked_sub(receiver_text.len())
+        .expect_invariant(
+            "completion receiver text is longer than the line prefix it was extracted from",
+            "receiver extraction must return a suffix of that prefix",
+            "keep receiver parsing and source-offset calculation coupled",
+        );
     let receiver_offset = line_start
         .checked_add(receiver_start_in_line)
         .and_then(|offset| u32::try_from(offset).ok())
-        .expect(
-            "INVARIANT VIOLATED: completion receiver offset overflowed its source coordinates. This is a bug because receiver text was sliced from the same bounded line prefix. Fix: keep receiver extraction and byte-offset calculation coupled.",
+        .expect_invariant(
+            "completion receiver offset overflowed its source coordinates",
+            "receiver text was sliced from the same bounded line prefix",
+            "keep receiver extraction and byte-offset calculation coupled",
         );
     let receiver_end = receiver_offset
-        .checked_add(u32::try_from(receiver_text.len()).expect(
-            "INVARIANT VIOLATED: completion receiver length exceeded u32. This is a bug because the receiver was sliced from a u32-addressed source document. Fix: reject oversized documents before completion.",
+        .checked_add(u32::try_from(receiver_text.len()).expect_invariant(
+            "completion receiver length exceeded u32",
+            "the receiver was sliced from a u32-addressed source document",
+            "reject oversized documents before completion",
         ))
-        .expect(
-            "INVARIANT VIOLATED: completion receiver end overflowed u32 source coordinates. This is a bug because the receiver range came from one bounded document. Fix: reject oversized documents before completion.",
+        .expect_invariant(
+            "completion receiver end overflowed u32 source coordinates",
+            "the receiver range came from one bounded document",
+            "reject oversized documents before completion",
         );
     let file_id = document.analysis_file_id();
     match query.exact_expression_type(file_id, receiver_offset, receiver_end) {

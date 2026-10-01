@@ -1,6 +1,7 @@
 //! Union-receiver (grouped) method dispatch: callee resolution, references, and
 //! diagnostics across every receiver member.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
 use super::MethodChainCompletenessCache;
@@ -19,9 +20,11 @@ impl AnalysisEngine {
         access: MethodReferenceAccess,
         caller: Option<FqnId>,
     ) -> Option<Vec<ResolvedMethodCallee>> {
-        assert!(
+        invariant!(
             matches!(receiver_type, RubyType::Union(_)),
-            "INVARIANT VIOLATED: grouped method dispatch received a non-union receiver. This is a bug because scalar receivers must use the compact single-owner resolution path. Fix: enter grouped resolution only after validating a canonical RubyType::Union."
+            what = "grouped method dispatch received a non-union receiver",
+            why = "scalar receivers must use the compact single-owner resolution path",
+            fix = "enter grouped resolution only after validating a canonical RubyType::Union",
         );
         let query = AnalysisQuery::new(self);
         match access {
@@ -52,8 +55,10 @@ impl AnalysisEngine {
                 .filter(|fact| callee.definition_ranges.contains(&fact.range))
                 .collect::<Vec<_>>();
             if matching.len() == 1 {
-                facts.push(matching.pop().expect(
-                    "INVARIANT VIOLATED: one grouped method fact disappeared after length validation. This is a bug because the local fact vector is not mutated between the check and pop. Fix: keep grouped fact selection atomic.",
+                facts.push(matching.pop().expect_invariant(
+                    "one grouped method fact disappeared after length validation",
+                    "the local fact vector is not mutated between the check and pop",
+                    "keep grouped fact selection atomic",
                 ));
             }
         }
@@ -180,9 +185,11 @@ pub(super) fn grouped_method_targets(
     let mut targets = callees
         .iter()
         .map(|callee| {
-            assert!(
+            invariant!(
                 callee.method == method && !callee.definition_ranges.is_empty(),
-                "INVARIANT VIOLATED: complete grouped dispatch contains a non-exact method callee. This is a bug because resolve_method_callees_for_type must return Some only after every receiver member resolves to an exact declaration. Fix: retain exact-callee filtering in the shared type resolver."
+                what = "complete grouped dispatch contains a non-exact method callee",
+                why = "resolve_method_callees_for_type returns Some only when every member resolves exactly",
+                fix = "keep exact-callee filtering in the shared type resolver",
             );
             FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method)
         })

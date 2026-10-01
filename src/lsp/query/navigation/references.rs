@@ -2,6 +2,7 @@
 //!
 //! Consolidates reference logic from `capabilities/references.rs`.
 
+use crate::invariant::ExpectInvariant;
 use log::info;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
@@ -85,8 +86,11 @@ impl EngineQuery {
         same_file: bool,
     ) -> Option<Vec<Location>> {
         let file_id = self.doc.as_ref()?.read().analysis_file_id();
-        let byte_offset = u32::try_from(position_to_offset(content, position))
-            .expect("INVARIANT VIOLATED: reference position exceeded u32 offsets. This is a bug because engine ranges use u32. Fix: bound source input sizes.");
+        let byte_offset = u32::try_from(position_to_offset(content, position)).expect_invariant(
+            "reference position exceeded u32 offsets",
+            "engine ranges use u32",
+            "bound source input sizes",
+        );
         let engine = self.analysis_engine()?;
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);

@@ -9,6 +9,7 @@
 //! of the enclosing method (the caller). This makes both incoming and outgoing
 //! calls simple grouping operations on existing analysis data.
 
+use crate::invariant::ExpectInvariant;
 use log::info;
 use ruby_analysis::engine::{AnalysisQuery, CallHierarchyMethod};
 use serde::{Deserialize, Serialize};
@@ -70,10 +71,10 @@ impl EngineQuery {
                     namespace_kind,
                     position,
                 )?;
-                let engine_ref = self.analysis_engine().expect(
-                    "INVARIANT VIOLATED: call hierarchy prepare requires an analysis engine. \
-                     This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
-                     Fix: construct EngineQuery with with_engine().",
+                let engine_ref = self.analysis_engine().expect_invariant(
+                    "call hierarchy prepare requires an analysis engine",
+                    "LSP callHierarchy should be a thin wrapper over AnalysisEngine",
+                    "construct EngineQuery with with_engine()",
                 );
                 let engine = engine_ref.read();
                 let query = AnalysisQuery::new(&engine);
@@ -100,10 +101,10 @@ impl EngineQuery {
         &self,
         data: &CallHierarchyData,
     ) -> Option<Vec<CallHierarchyIncomingCall>> {
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: incoming call hierarchy requires an analysis engine. \
-             This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "incoming call hierarchy requires an analysis engine",
+            "LSP callHierarchy should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_engine()",
         );
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
@@ -127,10 +128,10 @@ impl EngineQuery {
         &self,
         data: &CallHierarchyData,
     ) -> Option<Vec<CallHierarchyOutgoingCall>> {
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: outgoing call hierarchy requires an analysis engine. \
-             This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "outgoing call hierarchy requires an analysis engine",
+            "LSP callHierarchy should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_engine()",
         );
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);

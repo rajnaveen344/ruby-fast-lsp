@@ -7,6 +7,7 @@ use crate::core::{
     RubyType, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{
     visit_alias_method_node, visit_call_node, visit_class_node,
     visit_class_variable_and_write_node, visit_class_variable_operator_write_node,
@@ -69,11 +70,11 @@ impl Visit<'_> for AnalysisIndexer {
         }
         let (parts, previous_namespace) = if let Some(target) = &reopened_target {
             let parts = target.namespace_parts().to_vec();
-            assert!(
+            invariant!(
                 !parts.is_empty(),
-                "INVARIANT VIOLATED: a resolved class alias target has an empty namespace. \
-                 This is a bug because a Ruby class object must have a constant identity. \
-                 Fix: reject root namespace values before class alias reopening."
+                what = "a resolved class alias target has an empty namespace",
+                why = "a Ruby class object must have a constant identity",
+                fix = "reject root namespace values before class alias reopening",
             );
             let previous = std::mem::replace(&mut self.namespace_stack, parts.clone());
             self.module_function_mode_stack.push(false);
@@ -139,10 +140,10 @@ impl Visit<'_> for AnalysisIndexer {
             && !has_explicit_superclass
             && class_implicitly_inherits_object(&fqn)
         {
-            let object = RubyConstant::new("Object").expect(
-                "INVARIANT VIOLATED: Object is not a valid Ruby constant. \
-                 This is a bug because Ruby's implicit class superclass must be representable. \
-                 Fix: update RubyConstant validation or implicit superclass construction.",
+            let object = RubyConstant::new("Object").expect_invariant(
+                "Object is not a valid Ruby constant",
+                "ruby's implicit class superclass must be representable",
+                "update RubyConstant validation or implicit superclass construction",
             );
             self.push_edge_with_provenance(
                 fqn.clone(),
@@ -158,15 +159,15 @@ impl Visit<'_> for AnalysisIndexer {
         visit_class_node(self, node);
         self.scope_stack.pop();
         if let Some(previous) = previous_namespace {
-            self.module_function_mode_stack.pop().expect(
-                "INVARIANT VIOLATED: analysis indexer module_function mode stack underflow after an aliased class reopening. \
-                 This is a bug because every aliased namespace frame owns one module_function flag. \
-                 Fix: keep aliased class visitor enter/exit balanced.",
+            self.module_function_mode_stack.pop().expect_invariant(
+                "module_function mode stack underflow after an aliased class reopening",
+                "each aliased namespace frame owns one module_function flag",
+                "keep aliased class visitor enter/exit balanced",
             );
-            self.visibility_stack.pop().expect(
-                "INVARIANT VIOLATED: analysis indexer visibility stack underflow after an aliased class reopening. \
-                 This is a bug because every aliased namespace frame owns one visibility flag. \
-                 Fix: keep aliased class visitor enter/exit balanced.",
+            self.visibility_stack.pop().expect_invariant(
+                "analysis indexer visibility stack underflow after an aliased class reopening",
+                "every aliased namespace frame owns one visibility flag",
+                "keep aliased class visitor enter/exit balanced",
             );
             self.namespace_stack = previous;
         } else {
@@ -202,11 +203,11 @@ impl Visit<'_> for AnalysisIndexer {
         }
         let (parts, previous_namespace) = if let Some(target) = &reopened_target {
             let parts = target.namespace_parts().to_vec();
-            assert!(
+            invariant!(
                 !parts.is_empty(),
-                "INVARIANT VIOLATED: a resolved module alias target has an empty namespace. \
-                 This is a bug because a Ruby module object must have a constant identity. \
-                 Fix: reject root namespace values before module alias reopening."
+                what = "a resolved module alias target has an empty namespace",
+                why = "a Ruby module object must have a constant identity",
+                fix = "reject root namespace values before module alias reopening",
             );
             let previous = std::mem::replace(&mut self.namespace_stack, parts.clone());
             self.module_function_mode_stack.push(false);
@@ -234,15 +235,15 @@ impl Visit<'_> for AnalysisIndexer {
         visit_module_node(self, node);
         self.scope_stack.pop();
         if let Some(previous) = previous_namespace {
-            self.module_function_mode_stack.pop().expect(
-                "INVARIANT VIOLATED: analysis indexer module_function mode stack underflow after an aliased module reopening. \
-                 This is a bug because every aliased namespace frame owns one module_function flag. \
-                 Fix: keep aliased module visitor enter/exit balanced.",
+            self.module_function_mode_stack.pop().expect_invariant(
+                "module_function mode stack underflow after an aliased module reopening",
+                "each aliased namespace frame owns one module_function flag",
+                "keep aliased module visitor enter/exit balanced",
             );
-            self.visibility_stack.pop().expect(
-                "INVARIANT VIOLATED: analysis indexer visibility stack underflow after an aliased module reopening. \
-                 This is a bug because every aliased namespace frame owns one visibility flag. \
-                 Fix: keep aliased module visitor enter/exit balanced.",
+            self.visibility_stack.pop().expect_invariant(
+                "analysis indexer visibility stack underflow after an aliased module reopening",
+                "every aliased namespace frame owns one visibility flag",
+                "keep aliased module visitor enter/exit balanced",
             );
             self.namespace_stack = previous;
         } else {
@@ -270,10 +271,10 @@ impl Visit<'_> for AnalysisIndexer {
             }
         }
         if method.as_str() == "initialize" {
-            method = RubyMethod::new("new").expect(
-                "INVARIANT VIOLATED: `new` must be a valid Ruby method name. \
-                 This is a bug because constructor normalization relies on RubyMethod validation. \
-                 Fix: update RubyMethod validation to accept `new`.",
+            method = RubyMethod::new("new").expect_invariant(
+                "`new` must be a valid Ruby method name",
+                "constructor normalization relies on RubyMethod validation",
+                "update RubyMethod validation to accept `new`",
             );
             owner_kind = NamespaceKind::Singleton;
         }
@@ -310,10 +311,11 @@ impl Visit<'_> for AnalysisIndexer {
                     reason: reason.clone(),
                 },
                 (None, None) => MethodAvailability::Available,
-                (Some(_), Some(_)) => panic!(
-                    "INVARIANT VIOLATED: method `{method}` is marked both @unavailable and @absent. \
-                     This is a bug because a runtime API cannot simultaneously exist-but-fail and not exist. \
-                     Fix: retain exactly one availability annotation in the owning stub."
+                (Some(_), Some(_)) => unreachable_invariant!(
+                    what = "method `{method}` is marked both @unavailable and @absent",
+                    why = "a runtime API cannot simultaneously exist-but-fail and not exist",
+                    fix = "retain exactly one availability annotation in the owning stub",
+                    method = method,
                 ),
             },
             None => MethodAvailability::Available,
@@ -373,10 +375,10 @@ impl Visit<'_> for AnalysisIndexer {
 
         self.method_context_stack.push((method, owner_kind));
         visit_def_node(self, node);
-        self.method_context_stack.pop().expect(
-            "INVARIANT VIOLATED: analysis indexer method context stack underflow. \
-             This is a bug because each pushed method context must pop after visiting the method body. \
-             Fix: keep visit_def_node method context push/pop balanced.",
+        self.method_context_stack.pop().expect_invariant(
+            "analysis indexer method context stack underflow",
+            "each pushed method context must pop after visiting the method body",
+            "keep visit_def_node method context push/pop balanced",
         );
     }
 
@@ -409,10 +411,10 @@ impl Visit<'_> for AnalysisIndexer {
         let old_fqn = FullyQualifiedName::method(self.namespace_stack.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
             self.namespace_stack.clone(),
-            RubyMethod::new(&new_name).expect(
-                "INVARIANT VIOLATED: alias new method became invalid after validation. \
-                 This is a bug because the same string was already accepted. \
-                 Fix: keep alias method validation single-sourced.",
+            RubyMethod::new(&new_name).expect_invariant(
+                "alias new method became invalid after validation",
+                "the same string was already accepted",
+                "keep alias method validation single-sourced",
             ),
         );
         if let Some(old_type) = self
@@ -460,10 +462,10 @@ impl Visit<'_> for AnalysisIndexer {
         let target = node.target();
         if let Some(parts) = constant_path_parts(&target) {
             let fqn = FullyQualifiedName::constant(parts);
-            let name = target.name().expect(
-                "INVARIANT VIOLATED: constant path write target has no terminal name. \
-                 This is a bug because constant_path_parts accepted the same target. \
-                 Fix: keep constant path extraction and name range derivation aligned.",
+            let name = target.name().expect_invariant(
+                "constant path write target has no terminal name",
+                "constant_path_parts accepted the same target",
+                "keep constant path extraction and name range derivation aligned",
             );
             self.facts.symbols.push(
                 SymbolFact::new(
@@ -497,16 +499,20 @@ impl Visit<'_> for AnalysisIndexer {
             if let Some(block) = node.block() {
                 let old_namespace = std::mem::replace(&mut self.namespace_stack, eval_namespace);
                 self.eval_context_depths.push((
-                    self.scope_stack.len().checked_add(1).expect(
-                        "INVARIANT VIOLATED: analysis indexer scope depth overflowed while entering an eval block. This is a bug because source nesting cannot exceed usize address space. Fix: reject impossibly deep source before traversal.",
+                    self.scope_stack.len().checked_add(1).expect_invariant(
+                        "analysis indexer scope depth overflowed while entering an eval block",
+                        "source nesting cannot exceed usize address space",
+                        "reject impossibly deep source before traversal",
                     ),
                     self.method_context_stack.len(),
                 ));
                 self.scope_stack.push(definition_scope);
                 self.visit(&block);
                 self.scope_stack.pop();
-                self.eval_context_depths.pop().expect(
-                    "INVARIANT VIOLATED: analysis indexer eval-context stack underflow. This is a bug because every static eval block context must be popped exactly once. Fix: keep AnalysisIndexer::visit_call_node eval traversal balanced.",
+                self.eval_context_depths.pop().expect_invariant(
+                    "analysis indexer eval-context stack underflow",
+                    "every static eval block context must be popped exactly once",
+                    "keep AnalysisIndexer::visit_call_node eval traversal balanced",
                 );
                 self.namespace_stack = old_namespace;
             }
@@ -565,10 +571,10 @@ impl Visit<'_> for AnalysisIndexer {
                 let source = FullyQualifiedName::namespace(self.namespace_stack.clone());
                 let in_singleton = self.current_scope_kind() == ScopeKind::Singleton;
                 let source_for_edge = if in_singleton {
-                    source.to_singleton_namespace().expect(
-                        "INVARIANT VIOLATED: singleton class mixin source could not convert to singleton namespace. \
-                         This is a bug because class << self can only appear inside a namespace. \
-                         Fix: guard singleton mixin indexing to namespace scopes.",
+                    source.to_singleton_namespace().expect_invariant(
+                        "singleton class mixin source could not convert to singleton namespace",
+                        "class << self can only appear inside a namespace",
+                        "guard singleton mixin indexing to namespace scopes",
                     )
                 } else {
                     source.clone()
@@ -609,10 +615,10 @@ impl Visit<'_> for AnalysisIndexer {
         self.scope_stack.push(ScopeKind::Singleton);
         self.visibility_stack.push(MethodVisibility::Public);
         visit_singleton_class_node(self, node);
-        self.visibility_stack.pop().expect(
-            "INVARIANT VIOLATED: analysis indexer visibility stack underflow on singleton exit. \
-             This is a bug because every singleton class visit must pop exactly one visibility flag. \
-             Fix: keep singleton visitor enter/exit balanced.",
+        self.visibility_stack.pop().expect_invariant(
+            "analysis indexer visibility stack underflow on singleton exit",
+            "every singleton class visit must pop exactly one visibility flag",
+            "keep singleton visitor enter/exit balanced",
         );
         self.scope_stack.pop();
     }

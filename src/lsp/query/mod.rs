@@ -68,9 +68,12 @@ impl EngineQuery {
             return analyzer;
         };
         let document = document.read();
-        assert_eq!(
-            &document.uri, uri,
-            "INVARIANT VIOLATED: EngineQuery document URI differs from the analyzed request URI. This is a bug because execution-context facts are file-local. Fix: construct EngineQuery with the request's owning document."
+        invariant_eq!(
+            &document.uri,
+            uri,
+            what = "EngineQuery document URI differs from the analyzed request URI",
+            why = "execution-context facts are file-local",
+            fix = "construct EngineQuery with the request's owning document",
         );
         analyzer_for_document(analyzer, &document, engine, position)
     }

@@ -54,9 +54,11 @@ impl FlowEnvironment {
         ruby_type: RubyType,
         identities: BTreeSet<ShapeIdentity>,
     ) {
-        assert!(
+        invariant!(
             !identities.is_empty(),
-            "INVARIANT VIOLATED: a shape binding was installed without an abstract identity. This is a bug because aliases can only synchronize through a concrete flow-local identity. Fix: allocate or copy at least one identity before binding a shape local."
+            what = "a shape binding was installed without an abstract identity",
+            why = "aliases can only synchronize through a concrete flow-local identity",
+            fix = "allocate or copy at least one identity before binding a shape local",
         );
         self.constant_dependencies.remove(&name);
         self.unknown_reasons.remove(&name);
@@ -99,10 +101,12 @@ impl FlowEnvironment {
             }
         }
         for identity in &affected {
-            assert!(
+            invariant!(
                 self.shape_states.contains_key(identity),
-                "INVARIANT VIOLATED: shape invalidation targeted an unknown abstract identity {:?}. This is a bug because a local cannot reference an identity absent from its environment. Fix: merge identity bindings and states atomically.",
-                identity
+                what = "shape invalidation targeted an unknown abstract identity {:?}",
+                why = "a local cannot reference an identity absent from its environment",
+                fix = "merge identity bindings and states atomically",
+                identity,
             );
             self.shape_states
                 .insert(*identity, ShapeIdentityState::Invalidated(reason));
@@ -146,9 +150,12 @@ impl FlowEnvironment {
             .filter(|link| link.parent == parent && &link.key == key)
             .map(|link| link.child);
         let child = matches.next()?;
-        assert!(
+        invariant!(
             matches.next().is_none(),
-            "INVARIANT VIOLATED: one parent Hash field points at multiple abstract child identities. This is a bug because a precise required field contains one Ruby object on one flow path. Fix: invalidate ambiguous branch containment before installing the merged environment."
+            what = "one parent Hash field points at multiple abstract child identities",
+            why = "a precise required field contains one Ruby object on one flow path",
+            fix =
+                "invalidate ambiguous branch containment before installing the merged environment",
         );
         Some(child)
     }
@@ -159,18 +166,26 @@ impl FlowEnvironment {
         key: LiteralKey,
         child: ShapeIdentity,
     ) {
-        assert!(
+        invariant!(
             parent != child,
-            "INVARIANT VIOLATED: a Hash identity was linked as its own statically proven child. This is a bug because bounded literal construction cannot create a recursive Ruby Hash. Fix: treat runtime-created cycles as an unsupported mutation boundary."
+            what = "a Hash identity was linked as its own statically proven child",
+            why = "bounded literal construction cannot create a recursive Ruby Hash",
+            fix = "treat runtime-created cycles as an unsupported mutation boundary",
         );
-        assert!(
+        invariant!(
             self.shape_states.contains_key(&parent) && self.shape_states.contains_key(&child),
-            "INVARIANT VIOLATED: a containment edge references an absent Hash identity. This is a bug because parent and child states must exist before their relationship is installed. Fix: allocate both identities before calling link_contained_shape."
+            what = "a containment edge references an absent Hash identity",
+            why = "parent and child states must exist before their relationship is installed",
+            fix = "allocate both identities before calling link_contained_shape",
         );
         if let Some(existing) = self.contained_child(parent, &key) {
-            assert_eq!(
-                existing, child,
-                "INVARIANT VIOLATED: one parent Hash field was rebound without detaching its prior child identity. This is a bug because Ruby assignment replaces the contained object. Fix: detach the exact field before installing its replacement containment edge."
+            invariant_eq!(
+                existing,
+                child,
+                what =
+                    "one parent Hash field was rebound without detaching its prior child identity",
+                why = "ruby assignment replaces the contained object",
+                fix = "detach the exact field before installing its replacement containment edge",
             );
             return;
         }
@@ -193,8 +208,11 @@ impl FlowEnvironment {
         for name in names {
             let identities = self.shape_identities(&name);
             let current_type = self.types.get(&name).cloned().unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: shape alias `{name}` has no local type. This is a bug because bindings and type entries must be installed atomically. Fix: use FlowEnvironment::bind_shape_identities for shape locals."
+                unreachable_invariant!(
+                    what = "shape alias `{name}` has no local type",
+                    why = "bindings and type entries must be installed atomically",
+                    fix = "use FlowEnvironment::bind_shape_identities for shape locals",
+                    name = name,
                 )
             });
             match self.type_for_shape_identities(&current_type, &identities) {
@@ -216,13 +234,19 @@ impl FlowEnvironment {
                 .get(&name)
                 .cloned()
                 .unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: Array alias `{name}` disappeared during synchronization. This is a bug because the alias-name snapshot and map are not mutated by type projection. Fix: keep Array alias removal outside synchronize_shape_aliases."
+                    unreachable_invariant!(
+                        what = "Array alias `{name}` disappeared during synchronization",
+                        why = "the alias-name snapshot and map are not mutated by type projection",
+                        fix = "keep Array alias removal outside synchronize_shape_aliases",
+                        name = name,
                     )
                 });
             let current_type = self.types.get(&name).cloned().unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: Array alias `{name}` has no local type. This is a bug because positional evidence and the Array type must be installed atomically. Fix: bind Array aliases only after inserting the assignment type."
+                unreachable_invariant!(
+                    what = "Array alias `{name}` has no local type",
+                    why = "positional evidence and the Array type must be installed atomically",
+                    fix = "bind Array aliases only after inserting the assignment type",
+                    name = name,
                 )
             });
             match self.type_for_array_shape_aliases(&current_type, &aliases) {
@@ -253,9 +277,11 @@ impl FlowEnvironment {
             .collect::<Vec<_>>();
         for identity in &aliases.contained {
             match self.shape_states.get(identity).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: Array alias references absent contained identity {:?}. This is a bug because Array summaries and shape states must merge atomically. Fix: preserve every contained identity state while retaining positional evidence.",
-                    identity
+                unreachable_invariant!(
+                    what = "Array alias references absent contained identity {:?}",
+                    why = "array summaries and shape states must merge atomically",
+                    fix = "preserve every contained identity state while retaining positional evidence",
+                    identity,
                 )
             }) {
                 ShapeIdentityState::Proven(ruby_type) => {
@@ -264,9 +290,11 @@ impl FlowEnvironment {
                 ShapeIdentityState::Invalidated(reason) => return Err(*reason),
             }
         }
-        assert!(
+        invariant!(
             !elements.is_empty(),
-            "INVARIANT VIOLATED: a proven Array shape summary produced no element alternatives. This is a bug because a retained summary must contain at least one shape identity or an explicit unknown reason. Fix: remove empty Array summaries in bind_array_shape_aliases."
+            what = "a proven Array shape summary has no element alternatives",
+            why = "a summary holds a shape identity or an Unknown reason",
+            fix = "remove empty Array summaries in bind_array_shape_aliases",
         );
         Ok(RubyType::Array(RubyType::canonical_union_members(elements)))
     }
@@ -279,9 +307,11 @@ impl FlowEnvironment {
         let mut alternatives = non_shape_alternatives(current_type);
         for identity in identities {
             match self.shape_states.get(identity).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: shape binding references absent identity {:?}. This is a bug because branch joins must merge identity states before synchronizing aliases. Fix: keep shape_bindings and shape_states in one FlowEnvironment.",
-                    identity
+                unreachable_invariant!(
+                    what = "shape binding references absent identity {:?}",
+                    why = "branch joins must merge identity states before synchronizing aliases",
+                    fix = "keep shape_bindings and shape_states in one FlowEnvironment",
+                    identity,
                 )
             }) {
                 ShapeIdentityState::Proven(ruby_type) => {
@@ -474,9 +504,11 @@ impl TypeTracker {
                     }
                 }
                 (Some(state), None) | (None, Some(state)) => state.clone(),
-                (None, None) => panic!(
-                    "INVARIANT VIOLATED: merged shape identity {:?} is absent from both branch environments. This is a bug because identity_keys is derived from those exact maps. Fix: keep key collection and state lookup in one immutable merge.",
-                    identity
+                (None, None) => unreachable_invariant!(
+                    what = "merged shape identity {:?} is absent from both branch environments",
+                    why = "identity_keys is derived from those exact maps",
+                    fix = "keep key collection and state lookup in one immutable merge",
+                    identity,
                 ),
             };
             merged_states.insert(identity, state);
@@ -569,8 +601,12 @@ impl TypeTracker {
                 (Some(aliases), None) | (None, Some(aliases)) => {
                     inconsistent_array_identities.extend(&aliases.contained);
                 }
-                (None, None) => panic!(
-                    "INVARIANT VIOLATED: merged Array alias name `{name}` is absent from both branch environments. This is a bug because array_names is derived from those exact maps. Fix: keep key collection and lookup in one immutable merge."
+                (None, None) => unreachable_invariant!(
+                    what =
+                        "merged Array alias name `{name}` is absent from both branch environments",
+                    why = "array_names is derived from those exact maps",
+                    fix = "keep key collection and lookup in one immutable merge",
+                    name = name,
                 ),
             }
         }
@@ -605,8 +641,11 @@ impl TypeTracker {
                         summary: Err(UnknownReason::AmbiguousCallableValue),
                     }
                 }
-                (None, None) => panic!(
-                    "INVARIANT VIOLATED: callable merge key `{name}` is absent from both branch environments. This is a bug because keys are derived from those exact maps. Fix: keep callable key collection and lookup atomic."
+                (None, None) => unreachable_invariant!(
+                    what = "callable merge key `{name}` is absent from both branch environments",
+                    why = "keys are derived from those exact maps",
+                    fix = "keep callable key collection and lookup atomic",
+                    name = name,
                 ),
             };
             merged_callables.insert(name, merged);
@@ -638,8 +677,11 @@ pub(in crate::inference::type_tracker) fn array_element_alternatives(
         | RubyType::Literal(_)
         | RubyType::Hash(_, _)
         | RubyType::Shape(_)
-        | RubyType::Unknown => panic!(
-            "INVARIANT VIOLATED: positional shape aliases are attached to non-Array type `{ruby_type}`. This is a bug because every reachable type for an Array identity must remain an Array. Fix: clear Array aliases whenever any branch rebinds the local to a non-Array value."
+        | RubyType::Unknown => unreachable_invariant!(
+            what = "positional shape aliases are attached to non-Array type `{ruby_type}`",
+            why = "every reachable type for an Array identity must remain an Array",
+            fix = "clear Array aliases whenever any branch rebinds the local to a non-Array value",
+            ruby_type = ruby_type,
         ),
     }
 }

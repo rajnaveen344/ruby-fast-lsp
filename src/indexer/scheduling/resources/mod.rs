@@ -4,6 +4,7 @@ mod admission;
 mod lease;
 mod policy;
 
+use crate::invariant::ExpectInvariant;
 use admission::{
     best_admissible_entry_index, effective_priority, record_cancelled_before_start,
     request_fits_available, reserve_resources, validate_request_fits_policy, AdmissionState,
@@ -53,11 +54,10 @@ impl IndexingResourceGovernor {
             .num_threads(policy.cpu_lanes())
             .thread_name(|index| format!("ruby-fast-lsp-index-{index}"))
             .build()
-            .expect(
-                "INVARIANT VIOLATED: the server-owned indexing CPU pool could not be created. \
-                 This is a bug because every background indexing phase must execute inside the \
-                 bounded process pool. Fix: inspect the configured positive CPU lane budget and \
-                 host thread availability.",
+            .expect_invariant(
+                "the server-owned indexing CPU pool could not be created",
+                "every background indexing phase must execute inside the bounded process pool",
+                "inspect the configured positive CPU lane budget and host thread availability",
             );
         Self {
             state: Arc::new(IndexingResourceState {
@@ -266,10 +266,12 @@ impl IndexingResourceGovernor {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        assert_eq!(
+        invariant_eq!(
             spec.cpu_lanes(),
             self.state.policy.cpu_lanes(),
-            "INVARIANT VIOLATED: parallel indexing work reserved {} CPU lanes but the owned Rayon pool has {} lanes. This is a bug because nested Rayon work could exceed its declared resource claim. Fix: reserve the complete process indexing CPU pool for parallel work.",
+            what = "parallel indexing work reserved {} CPU lanes but the owned Rayon pool has {} lanes",
+            why = "nested Rayon work could exceed its declared resource claim",
+            fix = "reserve the complete process indexing CPU pool for parallel work",
             spec.cpu_lanes(),
             self.state.policy.cpu_lanes(),
         );
@@ -288,9 +290,11 @@ impl IndexingResourceGovernor {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        assert!(
+        invariant!(
             spec.cpu_lanes() <= self.state.policy.cooperative_parallel_cpu_lanes(),
-            "INVARIANT VIOLATED: cooperative parallel indexing reserved {} CPU lanes but the policy's per-task partition is {} lanes. This is a bug because one cooperative task could serialize sibling project work despite a multi-task budget. Fix: derive the claim from IndexingResourcePolicy::cooperative_parallel_cpu_lanes.",
+            what = "cooperative indexing reserved {} CPU lanes but the per-task partition is {}",
+            why = "one task could serialize sibling project work",
+            fix = "derive the claim from cooperative_parallel_cpu_lanes",
             spec.cpu_lanes(),
             self.state.policy.cooperative_parallel_cpu_lanes(),
         );
@@ -309,9 +313,11 @@ impl IndexingResourceGovernor {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        assert!(
+        invariant!(
             spec.cpu_lanes() < self.state.policy.cpu_lanes(),
-            "INVARIANT VIOLATED: partitioned parallel indexing reserved {} CPU lanes from a {}-lane process pool. This is a bug because a full-width task must use the server-owned shared pool instead of creating a redundant private pool. Fix: route full-width work through run_parallel_with_resources and reserve partitioned pools only for strict subsets.",
+            what = "partitioned indexing reserved {} CPU lanes from a {}-lane pool",
+            why = "full-width work must use the shared server pool",
+            fix = "route full-width work through run_parallel_with_resources",
             spec.cpu_lanes(),
             self.state.policy.cpu_lanes(),
         );
@@ -338,8 +344,10 @@ impl IndexingResourceGovernor {
                 .num_threads(lanes)
                 .thread_name(|index| format!("ruby-fast-lsp-partition-{index}"))
                 .build()
-                .expect(
-                    "INVARIANT VIOLATED: a partitioned indexing Rayon pool could not be created. This is a bug because its positive lane count was admitted under the process resource budget. Fix: inspect host thread creation failure and the admitted lane accounting.",
+                .expect_invariant(
+                    "a partitioned indexing Rayon pool could not be created",
+                    "its positive lane count was admitted under the process resource budget",
+                    "inspect host thread creation failure and the admitted lane accounting",
                 );
             let output = pool.install(task);
             lease.completed = true;
@@ -418,9 +426,11 @@ impl IndexingResourceGovernor {
     ) -> Result<ActiveResourceLease> {
         validate_request_fits_policy(&spec, self.state.policy);
         let id = self.state.next_id.fetch_add(1, Ordering::Relaxed);
-        assert!(
+        invariant!(
             id != u64::MAX,
-            "INVARIANT VIOLATED: indexing resource ticket overflowed. This is a bug because one server cannot enqueue 2^64 work items. Fix: inspect the loop continuously rebuilding indexing products."
+            what = "indexing resource ticket overflowed",
+            why = "one server cannot enqueue 2^64 work items",
+            fix = "inspect the loop continuously rebuilding indexing products",
         );
         {
             let mut admission = self.state.admission.lock();
@@ -485,10 +495,12 @@ impl IndexingResourceGovernor {
                                     1,
                                     "indexing resource fairness counter",
                                 );
-                            assert!(
+                            invariant!(
                                 admission.priority_admissions_while_background_waits
                                     <= MAX_PRIORITY_ADMISSIONS_WHILE_BACKGROUND_WAITS,
-                                "INVARIANT VIOLATED: weighted resource admission exceeded its bounded priority burst. This is a bug because an admitted background coordinator could starve behind active-project phases. Fix: route every resource admission through the fairness-aware selector."
+                                what = "weighted resource admission exceeded its bounded priority burst",
+                                why = "an admitted background coordinator could starve behind active-project phases",
+                                fix = "route every resource admission through the fairness-aware selector",
                             );
                         }
                         registration.admitted = true;
@@ -527,24 +539,33 @@ impl Default for IndexingResourceGovernor {
 
 fn checked_add_usize(current: usize, amount: usize, label: &'static str) -> usize {
     current.checked_add(amount).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: {label} overflowed. This is a bug because one process cannot reserve more than usize::MAX resources. Fix: inspect corrupt work estimates or leaked resource registrations."
+        unreachable_invariant!(
+            what = "{label} overflowed",
+            why = "one process cannot reserve more than usize::MAX resources",
+            fix = "inspect corrupt work estimates or leaked resource registrations",
+            label = label,
         )
     })
 }
 
 fn checked_sub_usize(current: usize, amount: usize, label: &'static str) -> usize {
     current.checked_sub(amount).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: {label} underflowed. This is a bug because a resource registration released more than it reserved. Fix: preserve one exact RAII lease per atomic admission."
+        unreachable_invariant!(
+            what = "{label} underflowed",
+            why = "a resource registration released more than it reserved",
+            fix = "preserve one exact RAII lease per atomic admission",
+            label = label,
         )
     })
 }
 
 fn checked_add_u64(current: u64, amount: u64, label: &'static str) -> u64 {
     current.checked_add(amount).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: {label} overflowed. This is a bug because one server cannot record 2^64 indexing events. Fix: inspect the runaway indexing loop."
+        unreachable_invariant!(
+            what = "{label} overflowed",
+            why = "one server cannot record 2^64 indexing events",
+            fix = "inspect the runaway indexing loop",
+            label = label,
         )
     })
 }

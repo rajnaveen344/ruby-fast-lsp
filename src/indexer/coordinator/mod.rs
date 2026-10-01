@@ -9,6 +9,7 @@ use crate::indexer::sources::gems::IndexerGem;
 use crate::indexer::sources::project::IndexerProject;
 use crate::indexer::sources::stdlib::IndexerStdlib;
 use crate::indexer::version::ruby_version::RubyVersion;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use gems::configured_gem_selection;
@@ -112,8 +113,10 @@ impl IndexingCoordinator {
         if let Some(engine) = &self.analysis_engine_override {
             return engine.clone();
         }
-        let uri = Url::from_directory_path(&self.workspace_root).expect(
-            "INVARIANT VIOLATED: workspace root cannot be represented as a file URI. This is a bug because indexing only accepts filesystem workspace roots. Fix: register a canonical filesystem project root before creating the coordinator.",
+        let uri = Url::from_directory_path(&self.workspace_root).expect_invariant(
+            "workspace root cannot be represented as a file URI",
+            "indexing only accepts filesystem workspace roots",
+            "register a canonical filesystem project root before creating the coordinator",
         );
         server.analysis_engine_for_uri(&uri)
     }
@@ -169,7 +172,12 @@ impl IndexingCoordinator {
     }
 
     pub(crate) fn set_cache_root(&mut self, root: PathBuf) {
-        assert!(root.is_absolute(), "INVARIANT VIOLATED: coordinator cache root is relative. This is a bug because runtime products require stable paths. Fix: supply the owning server's absolute cache root.");
+        invariant!(
+            root.is_absolute(),
+            what = "coordinator cache root is relative",
+            why = "runtime products require stable paths",
+            fix = "supply the owning server's absolute cache root",
+        );
         self.cache_root = Some(root);
     }
 
@@ -299,17 +307,16 @@ impl IndexingCoordinator {
                 .list_workspaces()
                 .into_iter()
                 .find(|workspace| workspace.root_path == self.workspace_root)
-                .expect(
-                    "INVARIANT VIOLATED: active indexing run has no registered workspace while \
-                     preparing dependency navigation. This is a coordinator bug because the \
-                     generation checkpoint already proved exact workspace ownership. Fix: keep \
-                     workspace removal and coordinator cancellation atomic.",
+                .expect_invariant(
+                    "active indexing run has no registered workspace while preparing dependency navigation",
+                    "the generation checkpoint already proved exact workspace ownership",
+                    "keep workspace removal and coordinator cancellation atomic",
                 );
             (workspace.navigation_demands, run.generation())
         });
         let startup_dependency_seed = {
             let dependency_seed = dependency_seed_engine.read();
-            assert!(
+            invariant!(
                 dependency_seed.files().all(|source| matches!(
                     source.kind,
                     ruby_analysis::core::SourceKind::Stub
@@ -317,10 +324,10 @@ impl IndexingCoordinator {
                         | ruby_analysis::core::SourceKind::Signature
                         | ruby_analysis::core::SourceKind::External
                 )),
-                "INVARIANT VIOLATED: providerless startup dependency seed contains project, \
-                 excluded, or gem facts. This is a bug because active dependency navigation \
-                 products must be reusable before project timing can affect them. Fix: fork the \
-                 startup seed immediately after clean core stub indexing."
+                what =
+                    "providerless startup dependency seed contains project, excluded, or gem facts",
+                why = "dependency products must be reusable before project timing",
+                fix = "fork the seed right after core stub indexing",
             );
             dependency_seed.clone()
         };
@@ -400,7 +407,7 @@ impl IndexingCoordinator {
         let runtime_sources_dur = runtime_sources_start.elapsed();
         self.dependency_seed_engine = Some({
             let dependency_seed = dependency_seed_engine.read();
-            assert!(
+            invariant!(
                 dependency_seed.files().all(|source| matches!(
                     source.kind,
                     ruby_analysis::core::SourceKind::Stub
@@ -408,9 +415,9 @@ impl IndexingCoordinator {
                         | ruby_analysis::core::SourceKind::Signature
                         | ruby_analysis::core::SourceKind::External
                 )),
-                "INVARIANT VIOLATED: immutable dependency seed contains project, excluded, or gem facts. \
-                 This is a bug because editor timing or one dependency could contaminate every reusable \
-                 gem product identity. Fix: build the seed only from clean core and runtime inputs."
+                what = "immutable dependency seed contains project, excluded, or gem facts",
+                why = "editor timing or one dependency could contaminate every reusable gem product identity",
+                fix = "build the seed only from clean core and runtime inputs",
             );
             dependency_seed.clone()
         });

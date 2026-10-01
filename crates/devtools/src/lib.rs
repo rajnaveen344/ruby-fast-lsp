@@ -1,6 +1,11 @@
 //! Shared support for the developer binaries: fixture corpora, latency
 //! metrics, and the file-open memory measurement.
 
+#[macro_use]
+#[allow(unused_macros, dead_code)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 pub mod corpus;
 pub mod file_open;
 pub mod metrics;
@@ -16,9 +21,11 @@ pub fn workspace_root() -> PathBuf {
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: devtools manifest {} is not two levels below the repository root. This is a bug because corpus and evidence paths are resolved from the repository root. Fix: keep the crate at crates/devtools or update workspace_root.",
-                manifest_dir.display()
+            unreachable_invariant!(
+                what = "devtools manifest {} is not two levels below the repository root",
+                why = "corpus and evidence paths are resolved from the repository root",
+                fix = "keep the crate at crates/devtools or update workspace_root",
+                manifest_dir.display(),
             )
         })
 }

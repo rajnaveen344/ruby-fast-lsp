@@ -7,6 +7,7 @@ use crate::indexer::scheduling::status::{
     IndexingReuseSnapshot, IndexingSingleFlightReuseSnapshot, IndexingStatusNotification,
     IndexingStatusParams, IndexingStatusSnapshot,
 };
+use crate::invariant::ExpectInvariant;
 use log::warn;
 #[cfg(test)]
 use parking_lot::Mutex;
@@ -403,11 +404,14 @@ impl IndexingStatusPublisher {
         &self,
         mut snapshot: IndexingStatusSnapshot,
     ) -> IndexingStatusSnapshot {
-        let sequence = self.sequence
+        let sequence = self
+            .sequence
             .fetch_add(1, Ordering::AcqRel)
             .checked_add(1)
-            .expect(
-                "INVARIANT VIOLATED: global indexing status sequence overflowed. This is a bug because one server cannot publish 2^64 snapshots. Fix: inspect the status publication loop.",
+            .expect_invariant(
+                "global indexing status sequence overflowed",
+                "one server cannot publish 2^64 snapshots",
+                "inspect the status publication loop",
             );
         snapshot.sequence = sequence;
         snapshot

@@ -2,6 +2,7 @@
 //!
 //! Consolidates definition logic from `capabilities/definitions/`.
 
+use crate::invariant::ExpectInvariant;
 use log::info;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
@@ -37,17 +38,22 @@ impl EngineQuery {
             info!("Found YARD type at position: {}", yard_type.type_name);
             // Get the enclosing namespace context for proper resolution
             let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-            let byte_offset = u32::try_from(position_to_offset(content, position)).expect(
-                "INVARIANT VIOLATED: definition position exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
-            );
+            let byte_offset = u32::try_from(position_to_offset(content, position))
+                .expect_invariant(
+                    "definition position exceeded u32 byte offsets",
+                    "analysis TextRange offsets are u32",
+                    "widen domain offsets before accepting larger source files",
+                );
             let ancestors = analyzer.get_namespace_at_offset(byte_offset);
             info!("YARD type namespace context: {:?}", ancestors);
             return self.find_yard_type_definitions(&yard_type.type_name, &ancestors);
         }
 
         let analyzer = self.analyzer_at_position(uri, content, position);
-        let byte_offset = u32::try_from(position_to_offset(content, position)).expect(
-            "INVARIANT VIOLATED: definition position exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+        let byte_offset = u32::try_from(position_to_offset(content, position)).expect_invariant(
+            "definition position exceeded u32 byte offsets",
+            "analysis TextRange offsets are u32",
+            "widen domain offsets before accepting larger source files",
         );
         let (identifier, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier(byte_offset);

@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::fmt;
 
 use crate::core::MethodVisibility;
@@ -151,22 +152,30 @@ impl ScopeTracker {
     }
 
     pub fn pop_execution_context(&mut self) {
-        self.execution_context_stack.pop().expect(
-            "INVARIANT VIOLATED: execution context stack underflow. This is a bug because every pushed block execution context must be popped exactly once. Fix: keep execution-context traversal balanced.",
+        self.execution_context_stack.pop().expect_invariant(
+            "execution context stack underflow",
+            "every pushed block execution context must be popped exactly once",
+            "keep execution-context traversal balanced",
         );
-        self.module_function_mode_stack.pop().expect(
-            "INVARIANT VIOLATED: module_function stack underflow after execution context. This is a bug because every execution context owns one module_function flag. Fix: keep execution-context traversal balanced.",
+        self.module_function_mode_stack.pop().expect_invariant(
+            "module_function stack underflow after execution context",
+            "every execution context owns one module_function flag",
+            "keep execution-context traversal balanced",
         );
-        self.visibility_stack.pop().expect(
-            "INVARIANT VIOLATED: visibility stack underflow after execution context. This is a bug because every execution context owns one visibility frame. Fix: keep execution-context traversal balanced.",
+        self.visibility_stack.pop().expect_invariant(
+            "visibility stack underflow after execution context",
+            "every execution context owns one visibility frame",
+            "keep execution-context traversal balanced",
         );
     }
 
     fn current_execution_context(&self) -> Option<&ExecutionContextFrame> {
         let context = self.execution_context_stack.last()?;
-        assert!(
+        invariant!(
             context.local_scope_depth <= self.scope_kind_stack.len(),
-            "INVARIANT VIOLATED: execution context local-scope depth exceeds the active scope stack. This is a bug because scopes present when an execution context was pushed cannot disappear before that context is popped. Fix: keep execution-context and local-scope traversal balanced."
+            what = "execution context local-scope depth exceeds the scope stack",
+            why = "scopes present at context push outlive that context",
+            fix = "keep execution-context and local-scope traversal balanced",
         );
         (context.lexical_frame_depth == self.frames.len()
             && !self.scope_kind_stack[context.local_scope_depth..]
@@ -240,8 +249,11 @@ impl ScopeTracker {
             }
             LocalScopeKind::FrameworkInstanceBlock => true,
             LocalScopeKind::Rescue | LocalScopeKind::ExplicitBlockLocal => {
-                panic!(
-                    "INVARIANT VIOLATED: filtered local-scope kind reached implicit receiver proof classification. This is a bug because rescue and explicit-block-local frames were removed immediately above. Fix: keep filtering and exhaustive classification in one function."
+                unreachable_invariant!(
+                    what =
+                        "filtered local-scope kind reached implicit receiver proof classification",
+                    why = "rescue and explicit-block-local frames were removed immediately above",
+                    fix = "keep filtering and exhaustive classification in one function",
                 )
             }
         }
@@ -282,11 +294,11 @@ impl ScopeTracker {
     }
 
     pub fn push_absolute_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
-        assert!(
+        invariant!(
             !namespaces.is_empty(),
-            "INVARIANT VIOLATED: absolute namespace frame is empty. \
-             This is a bug because an absolute class/module target must contain at least one Ruby constant. \
-             Fix: validate the resolved namespace before pushing an absolute frame."
+            what = "absolute namespace frame is empty",
+            why = "an absolute class/module target must contain at least one Ruby constant",
+            fix = "validate the resolved namespace before pushing an absolute frame",
         );
         self.frames.push(ScopeFrame::Namespace {
             parts: namespaces,
@@ -299,15 +311,15 @@ impl ScopeTracker {
     pub fn pop_ns_scope(&mut self) {
         if matches!(self.frames.last(), Some(ScopeFrame::Namespace { .. })) {
             self.frames.pop();
-            self.module_function_mode_stack.pop().expect(
-                "INVARIANT VIOLATED: module_function mode stack underflow. \
-                 This is a bug because every namespace frame must own one module_function mode flag. \
-                 Fix: keep namespace frame push/pop balanced.",
+            self.module_function_mode_stack.pop().expect_invariant(
+                "module_function mode stack underflow",
+                "every namespace frame must own one module_function mode flag",
+                "keep namespace frame push/pop balanced",
             );
-            self.visibility_stack.pop().expect(
-                "INVARIANT VIOLATED: visibility stack underflow. \
-                 This is a bug because every namespace frame must own one visibility flag. \
-                 Fix: keep namespace frame push/pop balanced.",
+            self.visibility_stack.pop().expect_invariant(
+                "visibility stack underflow",
+                "every namespace frame must own one visibility flag",
+                "keep namespace frame push/pop balanced",
             );
         }
     }
@@ -357,11 +369,12 @@ impl ScopeTracker {
     /// Enter a method definition stored as `fqn` on the `owner_kind` side of
     /// its namespace.
     pub fn push_method_fqn(&mut self, fqn: FullyQualifiedName, owner_kind: NamespaceKind) {
-        assert!(
+        invariant!(
             matches!(fqn, FullyQualifiedName::Method(..)),
-            "INVARIANT VIOLATED: method scope entered with non-method FQN {fqn:?}. \
-             This is a bug because `super` and caller identity read this stack as a method. \
-             Fix: push FullyQualifiedName::method for every def scope."
+            what = "method scope entered with non-method FQN {fqn:?}",
+            why = "`super` and caller identity read this stack as a method",
+            fix = "push FullyQualifiedName::method for every def scope",
+            fqn = fqn,
         );
         self.method_stack.push((fqn, owner_kind));
     }
@@ -398,10 +411,10 @@ impl ScopeTracker {
 
     pub fn set_current_visibility(&mut self, visibility: MethodVisibility) {
         let Some(current) = self.visibility_stack.last_mut() else {
-            panic!(
-                "INVARIANT VIOLATED: visibility stack is empty. \
-                 This is a bug because ScopeTracker always starts with public visibility. \
-                 Fix: initialize ScopeTracker with a root visibility frame."
+            unreachable_invariant!(
+                what = "visibility stack is empty",
+                why = "ScopeTracker always starts with public visibility",
+                fix = "initialize ScopeTracker with a root visibility frame",
             );
         };
         *current = visibility;
@@ -409,10 +422,10 @@ impl ScopeTracker {
 
     pub fn current_visibility(&self) -> MethodVisibility {
         self.visibility_stack.last().copied().unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: visibility stack is empty. \
-                 This is a bug because ScopeTracker always starts with public visibility. \
-                 Fix: initialize ScopeTracker with a root visibility frame."
+            unreachable_invariant!(
+                what = "visibility stack is empty",
+                why = "ScopeTracker always starts with public visibility",
+                fix = "initialize ScopeTracker with a root visibility frame",
             )
         })
     }
@@ -425,10 +438,10 @@ impl ScopeTracker {
     pub fn exit_singleton(&mut self) {
         if matches!(self.frames.last(), Some(ScopeFrame::Singleton)) {
             self.frames.pop();
-            self.visibility_stack.pop().expect(
-                "INVARIANT VIOLATED: visibility stack underflow on singleton exit. \
-                 This is a bug because every singleton frame must own one visibility flag. \
-                 Fix: keep singleton enter/exit balanced.",
+            self.visibility_stack.pop().expect_invariant(
+                "visibility stack underflow on singleton exit",
+                "every singleton frame must own one visibility flag",
+                "keep singleton enter/exit balanced",
             );
         }
     }

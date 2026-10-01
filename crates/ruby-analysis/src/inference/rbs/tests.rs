@@ -208,23 +208,23 @@ fn rbs_method_catalog_is_shared_and_preserves_inherited_aliases() {
     let first = rbs_method_name_catalog("String", false);
     let second = rbs_method_name_catalog("String", false);
 
-    assert!(
+    invariant!(
         std::sync::Arc::ptr_eq(&first, &second),
-        "INVARIANT VIOLATED: repeated immutable RBS catalog queries rebuilt String. \
-             This is a bug because the embedded RBS environment cannot change at runtime. \
-             Fix: share one catalog per declared RBS owner and singleton mode."
+        what = "repeated immutable RBS catalog queries rebuilt String",
+        why = "the embedded RBS environment cannot change at runtime",
+        fix = "share one catalog per declared RBS owner and singleton mode",
     );
-    assert!(
+    invariant!(
         first.contains("tap"),
-        "INVARIANT VIOLATED: cached String methods lost inherited Kernel#tap. \
-             This is a bug because caching must preserve the complete RBS ancestor lookup. \
-             Fix: construct the cache entry through the ordinary recursive collector."
+        what = "cached String methods lost inherited Kernel#tap",
+        why = "caching must preserve the complete RBS ancestor lookup",
+        fix = "construct the cache entry through the ordinary recursive collector",
     );
-    assert!(
+    invariant!(
         first.contains("object_id"),
-        "INVARIANT VIOLATED: cached String methods lost the Kernel#object_id alias. \
-             This is a bug because cached and uncached RBS lookup must be semantically identical. \
-             Fix: retain alias collection when constructing a cache entry."
+        what = "cached String methods lost the Kernel#object_id alias",
+        why = "cached and uncached RBS lookup must be semantically identical",
+        fix = "retain alias collection when constructing a cache entry",
     );
 }
 

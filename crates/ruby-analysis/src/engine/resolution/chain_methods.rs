@@ -8,6 +8,7 @@ use crate::core::{
     RubyConstant, RubyMethod,
 };
 use crate::engine::state::EffectiveMethodFactMatch;
+use crate::invariant::ExpectInvariant;
 
 pub(in crate::engine) fn execution_context_application_targets(
     engine: &crate::engine::AnalysisEngine,
@@ -78,10 +79,10 @@ pub(in crate::engine) fn method_facts_in_chain(
         if facts.iter().any(|fact| {
             engine
                 .file(fact.range.file_id)
-                .expect(
-                    "INVARIANT VIOLATED: method fact references an unregistered source file. \
-                     This is a bug because engine facts must never outlive their file metadata. \
-                     Fix: register the file before replacing method facts.",
+                .expect_invariant(
+                    "method fact references an unregistered source file",
+                    "engine facts must never outlive their file metadata",
+                    "register the file before replacing method facts",
                 )
                 .kind
                 != crate::core::SourceKind::Signature
@@ -89,10 +90,10 @@ pub(in crate::engine) fn method_facts_in_chain(
             facts.retain(|fact| {
                 engine
                     .file(fact.range.file_id)
-                    .expect(
-                        "INVARIANT VIOLATED: method fact references an unregistered source file. \
-                         This is a bug because source precedence requires valid file metadata. \
-                         Fix: remove facts through the per-file replacement lifecycle.",
+                    .expect_invariant(
+                        "method fact references an unregistered source file",
+                        "source precedence requires valid file metadata",
+                        "remove facts through the per-file replacement lifecycle",
                     )
                     .kind
                     != crate::core::SourceKind::Signature
@@ -341,10 +342,10 @@ fn default_basic_object_method_missing_callee(
 
 fn basic_object_instance_fqn() -> FullyQualifiedName {
     FullyQualifiedName::namespace_with_kind(
-        vec![RubyConstant::new("BasicObject").expect(
-            "INVARIANT VIOLATED: `BasicObject` is not a valid Ruby constant. \
-             This is a bug because Ruby core class names must be valid constants. \
-             Fix: update RubyConstant validation to accept core Ruby class names.",
+        vec![RubyConstant::new("BasicObject").expect_invariant(
+            "`BasicObject` is not a valid Ruby constant",
+            "ruby core class names must be valid constants",
+            "update RubyConstant validation to accept core Ruby class names",
         )],
         crate::core::NamespaceKind::Instance,
     )
@@ -380,10 +381,10 @@ pub(super) fn method_callee_after_owner(
 }
 
 pub(in crate::engine) fn method_missing_method() -> RubyMethod {
-    RubyMethod::new("method_missing").expect(
-        "INVARIANT VIOLATED: `method_missing` is not a valid Ruby method name. \
-         This is a bug because Ruby's fallback dispatch method must be representable. \
-         Fix: update RubyMethod validation to accept core Ruby method names.",
+    RubyMethod::new("method_missing").expect_invariant(
+        "`method_missing` is not a valid Ruby method name",
+        "ruby's fallback dispatch method must be representable",
+        "update RubyMethod validation to accept core Ruby method names",
     )
 }
 

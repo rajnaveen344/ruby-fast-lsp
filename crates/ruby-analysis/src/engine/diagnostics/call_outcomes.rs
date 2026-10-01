@@ -1,6 +1,7 @@
 //! Call-expression outcomes: deferred receiver proof and cached return-type and
 //! visibility derivation for resolved method calls.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use super::{
@@ -91,9 +92,11 @@ impl AnalysisEngine {
         range: TextRange,
         outcome: TypeInferenceOutcome,
     ) {
-        assert!(
+        invariant!(
             outcomes.insert(range, outcome).is_none(),
-            "INVARIANT VIOLATED: one call expression resolved through multiple method candidates. This is a bug because one runtime dispatch must have one proof outcome. Fix: attach the call range only to the candidate representing the invoked method."
+            what = "one call expression resolved through multiple method candidates",
+            why = "one runtime dispatch must have one proof outcome",
+            fix = "attach the call range only to the candidate representing the invoked method",
         );
     }
 
@@ -161,8 +164,10 @@ impl AnalysisEngine {
             if matching.len() != 1 {
                 return TypeInferenceOutcome::unknown(UnknownReason::UnresolvedMethodReturn);
             }
-            let fact = matching.pop().expect(
-                "INVARIANT VIOLATED: one grouped method fact disappeared after length validation. This is a bug because the local fact vector is not mutated between the check and pop. Fix: keep grouped return selection atomic.",
+            let fact = matching.pop().expect_invariant(
+                "one grouped method fact disappeared after length validation",
+                "the local fact vector is not mutated between the check and pop",
+                "keep grouped return selection atomic",
             );
             let Some(return_type) = self.cached_method_return_type(&fact, caches) else {
                 return TypeInferenceOutcome::unknown(UnknownReason::UnresolvedMethodReturn);
@@ -181,8 +186,10 @@ impl AnalysisEngine {
             MethodLookupResult::Ambiguous { .. } => false,
             MethodLookupResult::Unique(fact) => {
                 let FullyQualifiedName::Method(_, resolved_method) = &fact.fqn else {
-                    panic!(
-                        "INVARIANT VIOLATED: method lookup returned a fact whose FQN is not a method. This is a bug because constructor proof can inspect only resolved method declarations. Fix: keep MethodStore restricted to Method FQNs."
+                    unreachable_invariant!(
+                        what = "method lookup returned a fact whose FQN is not a method",
+                        why = "constructor proof can inspect only resolved method declarations",
+                        fix = "keep MethodStore restricted to Method FQNs",
                     );
                 };
                 if resolved_method.as_str() != "new" {
@@ -232,8 +239,10 @@ impl AnalysisEngine {
                     CachedMethodVisibility::Protected(visibility_owner) => caller
                         .and_then(|caller| self.call_expression_caller_namespace(caller))
                         .and_then(|caller| {
-                            let visibility_owner = self.fqn_for_id(visibility_owner).expect(
-                                "INVARIANT VIOLATED: cached protected visibility owner disappeared from the name registry. This is a bug because resolve-local cache entries reference the immutable engine name registry. Fix: discard visibility caches before mutating engine names.",
+                            let visibility_owner = self.fqn_for_id(visibility_owner).expect_invariant(
+                                "cached protected visibility owner disappeared from the name registry",
+                                "resolve-local cache entries reference the immutable engine name registry",
+                                "discard visibility caches before mutating engine names",
                             );
                             protected_method_visible_from(self, visibility_owner, &caller)
                                 .then(|| self.cached_method_return_type(fact, caches))
@@ -272,23 +281,22 @@ impl AnalysisEngine {
         let return_type = return_type
             .filter(|ruby_type| *ruby_type != RubyType::Unknown)
             .or_else(|| {
-            if method.as_str() != "new"
-                || owner_kind != NamespaceKind::Singleton
-                || !self.resolution_uses_builtin_constructor(resolution)
-            {
-                return None;
-            }
-            let owner_lookup = self.names.const_lookup(owner).expect(
-                "INVARIANT VIOLATED: constructor call candidate points to a missing owner lookup. This is a bug because reference candidates contain only interned lookup IDs. Fix: retain the owner lookup for the candidate lifetime.",
-            );
-            let instance_namespace =
-                FullyQualifiedName::namespace(owner_lookup.path.to_vec());
-            (AnalysisQuery::new(self).namespace_node_kind(&instance_namespace)
-                == Some(GraphNodeKind::Class))
-            .then(|| {
-                RubyType::Class(FullyQualifiedName::constant(owner_lookup.path.to_vec()))
-            })
-        });
+                if method.as_str() != "new"
+                    || owner_kind != NamespaceKind::Singleton
+                    || !self.resolution_uses_builtin_constructor(resolution)
+                {
+                    return None;
+                }
+                let owner_lookup = self.names.const_lookup(owner).expect_invariant(
+                    "constructor call candidate points to a missing owner lookup",
+                    "reference candidates contain only interned lookup IDs",
+                    "retain the owner lookup for the candidate lifetime",
+                );
+                let instance_namespace = FullyQualifiedName::namespace(owner_lookup.path.to_vec());
+                (AnalysisQuery::new(self).namespace_node_kind(&instance_namespace)
+                    == Some(GraphNodeKind::Class))
+                .then(|| RubyType::Class(FullyQualifiedName::constant(owner_lookup.path.to_vec())))
+            });
         TypeInferenceOutcome::from_optional(return_type, UnknownReason::UnresolvedMethodReturn)
     }
 
@@ -297,18 +305,24 @@ impl AnalysisEngine {
         fact: &MethodFact,
         caches: &mut MethodCallOutcomeCaches,
     ) -> Option<RubyType> {
-        let fqn = self.names.fqn_id(&fact.fqn).expect(
-            "INVARIANT VIOLATED: resolved method fact has no interned FQN. This is a bug because resolve-local return caching can reference only facts stored in this engine. Fix: intern method FQNs before reference resolution.",
+        let fqn = self.names.fqn_id(&fact.fqn).expect_invariant(
+            "resolved method fact has no interned FQN",
+            "resolve-local return caching can reference only facts stored in this engine",
+            "intern method FQNs before reference resolution",
         );
         let key = (fqn, fact.range);
         if let Some(cached) = caches.returns.get(&key) {
-            caches.return_hits = caches.return_hits.checked_add(1).expect(
-                "INVARIANT VIOLATED: method-return cache hit counter overflowed usize. This is a bug because one resolve pass cannot exceed addressable operations. Fix: inspect corrupt resolve instrumentation.",
+            caches.return_hits = caches.return_hits.checked_add(1).expect_invariant(
+                "method-return cache hit counter overflowed usize",
+                "one resolve pass cannot exceed addressable operations",
+                "inspect corrupt resolve instrumentation",
             );
             return cached.clone();
         }
-        caches.return_misses = caches.return_misses.checked_add(1).expect(
-            "INVARIANT VIOLATED: method-return cache miss counter overflowed usize. This is a bug because one resolve pass cannot exceed addressable operations. Fix: inspect corrupt resolve instrumentation.",
+        caches.return_misses = caches.return_misses.checked_add(1).expect_invariant(
+            "method-return cache miss counter overflowed usize",
+            "one resolve pass cannot exceed addressable operations",
+            "inspect corrupt resolve instrumentation",
         );
         let result = AnalysisQuery::new(self).method_return_type(fact);
         caches.returns.insert(key, result.clone());
@@ -326,21 +340,27 @@ impl AnalysisEngine {
             caches.ambiguous_return_hits = caches
                 .ambiguous_return_hits
                 .checked_add(1)
-                .expect(
-                    "INVARIANT VIOLATED: ambiguous method-return cache hit counter overflowed usize. This is a bug because one resolve pass cannot exceed addressable operations. Fix: inspect corrupt resolve instrumentation.",
+                .expect_invariant(
+                    "ambiguous method-return cache hit counter overflowed usize",
+                    "one resolve pass cannot exceed addressable operations",
+                    "inspect corrupt resolve instrumentation",
                 );
             return cached.clone();
         }
         caches.ambiguous_return_misses = caches
             .ambiguous_return_misses
             .checked_add(1)
-            .expect(
-                "INVARIANT VIOLATED: ambiguous method-return cache miss counter overflowed usize. This is a bug because one resolve pass cannot exceed addressable operations. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "ambiguous method-return cache miss counter overflowed usize",
+                "one resolve pass cannot exceed addressable operations",
+                "inspect corrupt resolve instrumentation",
             );
 
         let (owner, owner_kind, method, _is_super) = key;
-        let owner_lookup = self.names.const_lookup(owner).expect(
-            "INVARIANT VIOLATED: ambiguous call-expression candidate points to a missing owner lookup. This is a bug because reference candidates contain only interned lookup IDs. Fix: retain the owner lookup for the candidate lifetime.",
+        let owner_lookup = self.names.const_lookup(owner).expect_invariant(
+            "ambiguous call-expression candidate points to a missing owner lookup",
+            "reference candidates contain only interned lookup IDs",
+            "retain the owner lookup for the candidate lifetime",
         );
         let owner = FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind);
         let query = AnalysisQuery::new(self);
@@ -369,12 +389,14 @@ impl AnalysisEngine {
                         .flatten()
                 }),
         };
-        assert!(
+        invariant!(
             caches
                 .ambiguous_returns
                 .insert(cache_key, result.clone())
                 .is_none(),
-            "INVARIANT VIOLATED: ambiguous method-return cache replaced an existing key after a confirmed miss. This is a bug because resolve-local lookup identity, access, and caller are immutable. Fix: keep ambiguous return lookup and insertion in one candidate step."
+            what = "ambiguous method-return cache replaced an existing key after a confirmed miss",
+            why = "resolve-local lookup identity, access, and caller are immutable",
+            fix = "keep ambiguous return lookup and insertion in one candidate step",
         );
         result
     }
@@ -387,17 +409,23 @@ impl AnalysisEngine {
         caches: &mut MethodCallOutcomeCaches,
     ) -> CachedMethodVisibility {
         if let Some(cached) = caches.visibilities.get(&key) {
-            caches.visibility_hits = caches.visibility_hits.checked_add(1).expect(
-                "INVARIANT VIOLATED: method-visibility cache hit counter overflowed usize. This is a bug because one resolve pass cannot exceed addressable operations. Fix: inspect corrupt resolve instrumentation.",
+            caches.visibility_hits = caches.visibility_hits.checked_add(1).expect_invariant(
+                "method-visibility cache hit counter overflowed usize",
+                "one resolve pass cannot exceed addressable operations",
+                "inspect corrupt resolve instrumentation",
             );
             return *cached;
         }
-        caches.visibility_misses = caches.visibility_misses.checked_add(1).expect(
-            "INVARIANT VIOLATED: method-visibility cache miss counter overflowed usize. This is a bug because one resolve pass cannot exceed addressable operations. Fix: inspect corrupt resolve instrumentation.",
+        caches.visibility_misses = caches.visibility_misses.checked_add(1).expect_invariant(
+            "method-visibility cache miss counter overflowed usize",
+            "one resolve pass cannot exceed addressable operations",
+            "inspect corrupt resolve instrumentation",
         );
         let (owner, owner_kind, method, _is_super) = key;
-        let owner_lookup = self.names.const_lookup(owner).expect(
-            "INVARIANT VIOLATED: call-expression candidate points to a missing owner lookup. This is a bug because reference candidates contain only interned lookup IDs. Fix: retain the owner lookup for the candidate lifetime.",
+        let owner_lookup = self.names.const_lookup(owner).expect_invariant(
+            "call-expression candidate points to a missing owner lookup",
+            "reference candidates contain only interned lookup IDs",
+            "retain the owner lookup for the candidate lifetime",
         );
         let owner = FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind);
         let ancestor_chain = method_lookup_chain_cache
@@ -407,8 +435,10 @@ impl AnalysisEngine {
                     .iter()
                     .map(|owner_id| {
                         self.fqn_for_id(*owner_id)
-                            .expect(
-                                "INVARIANT VIOLATED: call-expression lookup-chain owner ID is absent from the name registry. This is a bug because the resolution-local cache contains only IDs from that registry. Fix: invalidate lookup-chain caches when names change.",
+                            .expect_invariant(
+                                "call-expression lookup-chain owner ID is absent from the name registry",
+                                "the resolution-local cache contains only IDs from that registry",
+                                "invalidate lookup-chain caches when names change",
                             )
                             .clone()
                     })
@@ -423,14 +453,18 @@ impl AnalysisEngine {
                 .names
                 .fqn_id(&visibility_owner)
                 .map(CachedMethodVisibility::Protected)
-                .expect(
-                    "INVARIANT VIOLATED: effective protected visibility owner has no interned FQN. This is a bug because lookup-chain owners come from this engine's name registry. Fix: intern graph and method owners before reference resolution.",
+                .expect_invariant(
+                    "effective protected visibility owner has no interned FQN",
+                    "lookup-chain owners come from this engine's name registry",
+                    "intern graph and method owners before reference resolution",
                 ),
             MethodVisibility::Private => CachedMethodVisibility::Private,
         };
-        assert!(
+        invariant!(
             caches.visibilities.insert(key, cached).is_none(),
-            "INVARIANT VIOLATED: method visibility cache replaced an existing key after a confirmed miss. This is a bug because resolve-local lookup identity is immutable. Fix: keep visibility lookup and insertion in one candidate step."
+            what = "method visibility cache replaced an existing key after a confirmed miss",
+            why = "resolve-local lookup identity is immutable",
+            fix = "keep visibility lookup and insertion in one candidate step",
         );
         cached
     }
@@ -448,8 +482,10 @@ impl AnalysisEngine {
         owners.sort_by_key(ToString::to_string);
         owners.dedup();
         Some(if owners.len() == 1 {
-            owners.pop().expect(
-                "INVARIANT VIOLATED: one call-expression caller owner disappeared after length validation. This is a bug because protected return-type lookup needs a stable caller namespace. Fix: keep caller-owner selection atomic.",
+            owners.pop().expect_invariant(
+                "one call-expression caller owner disappeared after length validation",
+                "protected return-type lookup needs a stable caller namespace",
+                "keep caller-owner selection atomic",
             )
         } else {
             FullyQualifiedName::namespace(caller.namespace_parts())

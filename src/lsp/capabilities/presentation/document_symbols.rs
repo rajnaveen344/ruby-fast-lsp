@@ -428,8 +428,10 @@ mod tests {
             .unwrap()
             .expect("open document must return symbols");
         let DocumentSymbolResponse::Nested(symbols) = response else {
-            panic!(
-                "INVARIANT VIOLATED: document-symbol handler returned flat symbols. This is a bug because the handler always constructs a nested hierarchy. Fix: preserve nested document-symbol responses."
+            unreachable_invariant!(
+                what = "document-symbol handler returned flat symbols",
+                why = "the handler always constructs a nested hierarchy",
+                fix = "preserve nested document-symbol responses",
             );
         };
         assert!(symbols

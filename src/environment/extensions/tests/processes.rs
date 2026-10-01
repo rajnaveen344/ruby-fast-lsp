@@ -37,11 +37,11 @@ commands = ["standardrb"]
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: process command manifest loaded without process.exec. \
-         This is a bug because external process permissions must be explicit. \
-         Fix: require process.exec when [process].commands is present."
+        what = "process command manifest loaded without process.exec",
+        why = "external process permissions must be explicit",
+        fix = "require process.exec when [process].commands is present",
     );
 }
 

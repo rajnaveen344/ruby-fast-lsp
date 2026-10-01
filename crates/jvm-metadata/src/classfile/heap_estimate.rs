@@ -3,6 +3,7 @@
 use super::model::{
     AnnotationInfo, ClassFile, InnerClassInfo, MemberInfo, MethodParameter, RecordComponentInfo,
 };
+use crate::invariant::ExpectInvariant;
 use std::mem::size_of;
 
 impl ClassFile {
@@ -62,8 +63,10 @@ impl ClassFile {
         }
 
         add_optional_string(&mut bytes, self.module_name.as_ref(), "module name");
-        u64::try_from(bytes).expect(
-            "INVARIANT VIOLATED: a JVM ClassFile heap estimate does not fit u64. This is a bug because one parsed class cannot exceed the process address space. Fix: inspect class metadata bounds and weight arithmetic.",
+        u64::try_from(bytes).expect_invariant(
+            "a JVM ClassFile heap estimate does not fit u64",
+            "one parsed class cannot exceed the process address space",
+            "inspect class metadata bounds and weight arithmetic",
         )
     }
 }
@@ -128,8 +131,11 @@ fn add_vector_allocation(
     label: &'static str,
 ) {
     let allocation = capacity.checked_mul(element_size).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: JVM {label} allocation weight overflowed usize. This is a bug because parsed metadata is bounded by the process address space. Fix: inspect vector capacity and element-size accounting."
+        unreachable_invariant!(
+            what = "JVM {label} allocation weight overflowed usize",
+            why = "parsed metadata is bounded by the process address space",
+            fix = "inspect vector capacity and element-size accounting",
+            label = label,
         )
     });
     add_capacity(bytes, allocation, label);
@@ -137,8 +143,11 @@ fn add_vector_allocation(
 
 fn add_capacity(bytes: &mut usize, capacity: usize, label: &'static str) {
     *bytes = bytes.checked_add(capacity).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: JVM {label} heap weight overflowed usize. This is a bug because parsed metadata is bounded by the process address space. Fix: inspect nested metadata weight accounting."
+        unreachable_invariant!(
+            what = "JVM {label} heap weight overflowed usize",
+            why = "parsed metadata is bounded by the process address space",
+            fix = "inspect nested metadata weight accounting",
+            label = label,
         )
     });
 }

@@ -69,9 +69,11 @@ impl RubyConstant {
     }
 
     pub fn generated_owner(owner: GeneratedOwnerId) -> Self {
-        assert!(
+        invariant!(
             owner.as_str().starts_with(GENERATED_OWNER_PREFIX),
-            "INVARIANT VIOLATED: generated owner identity lacks its reserved prefix. This is a bug because generated semantic owners must never collide with source-level Ruby constants. Fix: construct identities only through GeneratedOwnerId::new."
+            what = "generated owner identity lacks its reserved prefix",
+            why = "generated semantic owners must never collide with source-level Ruby constants",
+            fix = "construct identities only through GeneratedOwnerId::new",
         );
         Self(owner.0)
     }

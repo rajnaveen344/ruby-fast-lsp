@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use parking_lot::{Condvar, Mutex};
 use std::collections::HashMap;
 use std::future::Future;
@@ -41,9 +42,11 @@ impl<V> FlightState<V> {
     }
 
     fn complete(&self, result: SharedResult<V>) {
-        assert!(
+        invariant!(
             self.result.set(result).is_ok(),
-            "INVARIANT VIOLATED: a single-flight producer completed the same key more than once. This is a bug because exactly one producer owns each flight. Fix: inspect producer admission and completion ownership."
+            what = "a single-flight producer completed the same key more than once",
+            why = "exactly one producer owns each flight",
+            fix = "inspect producer admission and completion ownership",
         );
         self.ready.notify_waiters();
     }
@@ -251,13 +254,17 @@ where
         max_weight: u64,
         weight: impl Fn(&V) -> u64 + Send + Sync + 'static,
     ) -> Self {
-        assert!(
+        invariant!(
             max_entries > 0,
-            "INVARIANT VIOLATED: bounded single-flight cache has a zero entry limit. This is a bug because a zero-retention product should use an explicit ephemeral flight instead of pretending to be a cache. Fix: configure at least one retained entry."
+            what = "bounded single-flight cache has a zero entry limit",
+            why = "zero retention needs an ephemeral flight, not a cache",
+            fix = "configure at least one retained entry",
         );
-        assert!(
+        invariant!(
             max_weight > 0,
-            "INVARIANT VIOLATED: bounded single-flight cache has a zero weight limit. This is a bug because every retained product must have a positive resource budget. Fix: configure a measured positive byte/weight budget."
+            what = "bounded single-flight cache has a zero weight limit",
+            why = "every retained product must have a positive resource budget",
+            fix = "configure a measured positive byte/weight budget",
         );
         Self {
             entries: Arc::new(Mutex::new(HashMap::new())),
@@ -294,8 +301,10 @@ where
                         .next_generation
                         .fetch_add(1, Ordering::AcqRel)
                         .checked_add(1)
-                        .expect(
-                            "INVARIANT VIOLATED: bounded single-flight cache generation overflowed. This is a bug because one process cannot create 2^64 cache entries. Fix: inspect the cache key/invalidation loop.",
+                        .expect_invariant(
+                            "bounded single-flight cache generation overflowed",
+                            "one process cannot create 2^64 cache entries",
+                            "inspect the cache key/invalidation loop",
                         );
                     (
                         entry
@@ -442,9 +451,11 @@ impl<V, E> BlockingFlightState<V, E> {
 
     fn complete(&self, result: Result<Arc<V>, Arc<E>>) {
         let mut completion = self.completion.lock();
-        assert!(
+        invariant!(
             matches!(*completion, BlockingFlightCompletion::Pending),
-            "INVARIANT VIOLATED: a blocking single-flight producer completed the same key more than once. This is a bug because exactly one blocking worker owns each flight. Fix: inspect blocking producer admission and completion ownership."
+            what = "a blocking single-flight producer completed the same key more than once",
+            why = "exactly one blocking worker owns each flight",
+            fix = "inspect blocking producer admission and completion ownership",
         );
         *completion = BlockingFlightCompletion::Completed(result);
         self.ready.notify_all();
@@ -452,9 +463,11 @@ impl<V, E> BlockingFlightState<V, E> {
 
     fn complete_panicked(&self) {
         let mut completion = self.completion.lock();
-        assert!(
+        invariant!(
             matches!(*completion, BlockingFlightCompletion::Pending),
-            "INVARIANT VIOLATED: a panicked blocking single-flight producer had already completed. This is a bug because one producer cannot have two terminal states. Fix: inspect panic and completion ownership."
+            what = "a panicked blocking single-flight producer had already completed",
+            why = "one producer cannot have two terminal states",
+            fix = "inspect panic and completion ownership",
         );
         *completion = BlockingFlightCompletion::ProducerPanicked;
         self.ready.notify_all();
@@ -474,8 +487,10 @@ where
                     return result.clone().map_err(|error| error.as_ref().clone());
                 }
                 BlockingFlightCompletion::ProducerPanicked => {
-                    panic!(
-                        "INVARIANT VIOLATED: a blocking single-flight consumer observed a panicked producer. This is a bug because the requested immutable product was not constructed. Fix: inspect the producer panic reported by the owning worker."
+                    unreachable_invariant!(
+                        what = "a blocking single-flight consumer observed a panicked producer",
+                        why = "the requested immutable product was not constructed",
+                        fix = "inspect the producer panic reported by the owning worker",
                     );
                 }
             }
@@ -524,13 +539,17 @@ where
         max_weight: u64,
         weight: impl Fn(&V) -> u64 + Send + Sync + 'static,
     ) -> Self {
-        assert!(
+        invariant!(
             max_entries > 0,
-            "INVARIANT VIOLATED: blocking single-flight cache has a zero entry limit. This is a bug because completed synchronous products need an explicit retention policy. Fix: configure at least one retained entry."
+            what = "blocking single-flight cache has a zero entry limit",
+            why = "completed synchronous products need an explicit retention policy",
+            fix = "configure at least one retained entry",
         );
-        assert!(
+        invariant!(
             max_weight > 0,
-            "INVARIANT VIOLATED: blocking single-flight cache has a zero weight limit. This is a bug because retained synchronous products must have a positive resource bound. Fix: configure a measured positive weight budget."
+            what = "blocking single-flight cache has a zero weight limit",
+            why = "retained synchronous products must have a positive resource bound",
+            fix = "configure a measured positive weight budget",
         );
         Self {
             entries: Arc::new(Mutex::new(HashMap::new())),
@@ -566,8 +585,10 @@ where
                         .next_generation
                         .fetch_add(1, Ordering::AcqRel)
                         .checked_add(1)
-                        .expect(
-                            "INVARIANT VIOLATED: blocking single-flight generation overflowed. This is a bug because one process cannot construct 2^64 immutable products. Fix: inspect cache invalidation and key creation.",
+                        .expect_invariant(
+                            "blocking single-flight generation overflowed",
+                            "one process cannot construct 2^64 immutable products",
+                            "inspect cache invalidation and key creation",
                         );
                     let cell = Arc::new(BlockingFlightState::new());
                     entry.insert(BlockingBoundedFlightEntry {
@@ -717,8 +738,10 @@ fn completed_weight<K, V>(
             Some(Err(_)) | None => None,
         })
         .try_fold(0u64, |total, value| total.checked_add(value))
-        .expect(
-            "INVARIANT VIOLATED: bounded single-flight cache retained weight overflowed u64. This is a bug because the configured process memory budget is far below u64::MAX. Fix: validate product weight accounting before retention.",
+        .expect_invariant(
+            "bounded single-flight cache retained weight overflowed u64",
+            "the configured process memory budget is far below u64::MAX",
+            "validate product weight accounting before retention",
         )
 }
 
@@ -735,8 +758,10 @@ fn blocking_completed_weight<K, V, E>(
             | BlockingFlightCompletion::ProducerPanicked => None,
         })
         .try_fold(0u64, |total, value| total.checked_add(value))
-        .expect(
-            "INVARIANT VIOLATED: blocking single-flight retained weight overflowed u64. This is a bug because the configured process memory budget is far below u64::MAX. Fix: validate synchronous product weight accounting before retention.",
+        .expect_invariant(
+            "blocking single-flight retained weight overflowed u64",
+            "the configured process memory budget is far below u64::MAX",
+            "validate synchronous product weight accounting before retention",
         )
 }
 

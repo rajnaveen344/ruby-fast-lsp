@@ -1,6 +1,7 @@
 //! Direct declaration pass that lowers one Ruby file into namespace, method,
 //! variable, and seed type facts.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
 use crate::core::{
@@ -157,40 +158,40 @@ impl AnalysisIndexer {
 
     fn pop_namespace_parts(&mut self, parts: &[RubyConstant]) {
         for _ in parts {
-            self.namespace_stack.pop().expect(
-                "INVARIANT VIOLATED: analysis indexer namespace stack underflow. \
-                 This is a bug because each class/module entry must pop exactly the pushed parts. \
-                 Fix: keep class/module visitor enter/exit balanced.",
+            self.namespace_stack.pop().expect_invariant(
+                "analysis indexer namespace stack underflow",
+                "each class/module entry must pop exactly the pushed parts",
+                "keep class/module visitor enter/exit balanced",
             );
         }
-        self.module_function_mode_stack.pop().expect(
-            "INVARIANT VIOLATED: analysis indexer module_function mode stack underflow. \
-             This is a bug because each namespace frame must pop exactly one module_function flag. \
-             Fix: keep class/module visitor enter/exit balanced.",
+        self.module_function_mode_stack.pop().expect_invariant(
+            "analysis indexer module_function mode stack underflow",
+            "each namespace frame must pop exactly one module_function flag",
+            "keep class/module visitor enter/exit balanced",
         );
-        self.visibility_stack.pop().expect(
-            "INVARIANT VIOLATED: analysis indexer visibility stack underflow. \
-             This is a bug because each namespace frame must pop exactly one visibility flag. \
-             Fix: keep class/module visitor enter/exit balanced.",
+        self.visibility_stack.pop().expect_invariant(
+            "analysis indexer visibility stack underflow",
+            "each namespace frame must pop exactly one visibility flag",
+            "keep class/module visitor enter/exit balanced",
         );
     }
 
     fn current_visibility(&self) -> MethodVisibility {
         self.visibility_stack.last().copied().unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: analysis indexer visibility stack is empty. \
-                 This is a bug because the indexer starts with a root public visibility. \
-                 Fix: initialize AnalysisIndexer with a root visibility frame."
+            unreachable_invariant!(
+                what = "analysis indexer visibility stack is empty",
+                why = "the indexer starts with a root public visibility",
+                fix = "initialize AnalysisIndexer with a root visibility frame",
             )
         })
     }
 
     fn set_current_visibility(&mut self, visibility: MethodVisibility) {
         let Some(current) = self.visibility_stack.last_mut() else {
-            panic!(
-                "INVARIANT VIOLATED: analysis indexer visibility stack is empty. \
-                 This is a bug because the indexer starts with a root public visibility. \
-                 Fix: initialize AnalysisIndexer with a root visibility frame."
+            unreachable_invariant!(
+                what = "analysis indexer visibility stack is empty",
+                why = "the indexer starts with a root public visibility",
+                fix = "initialize AnalysisIndexer with a root visibility frame",
             );
         };
         *current = visibility;

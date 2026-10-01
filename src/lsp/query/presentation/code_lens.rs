@@ -6,6 +6,7 @@
 //!
 //! The capability handler converts `CodeLensData` → LSP `CodeLens`.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use log::debug;
@@ -61,9 +62,11 @@ impl EngineQuery {
     pub fn get_code_lenses(&self, uri: &Url) -> Vec<CodeLensData> {
         // 1. Parse the document's Ruby analysis projection. For ERB this preserves
         // template byte offsets while masking host-language text.
-        let doc_arc = self
-            .doc()
-            .expect("INVARIANT VIOLATED: get_code_lenses requires a document via with_doc_and_engine(). Fix: call EngineQuery::with_doc_and_engine() before get_code_lenses()");
+        let doc_arc = self.doc().expect_invariant(
+            "get_code_lenses has no document",
+            "callers attach one via with_doc_and_engine()",
+            "call EngineQuery::with_doc_and_engine() first",
+        );
         let document = doc_arc.read();
         let modules = module_definitions_for_lens(document.analysis_content());
 
@@ -74,10 +77,10 @@ impl EngineQuery {
         let mut results = Vec::new();
 
         for module in &modules {
-            let engine_ref = self.analysis_engine().expect(
-                "INVARIANT VIOLATED: code lens query requires analysis engine. \
-                 This is a bug because module usage lenses are derived from graph facts. \
-                 Fix: construct EngineQuery with with_doc_and_engine().",
+            let engine_ref = self.analysis_engine().expect_invariant(
+                "code lens query requires analysis engine",
+                "module usage lenses are derived from graph facts",
+                "construct EngineQuery with with_doc_and_engine()",
             );
             let engine = engine_ref.read();
             let query = AnalysisQuery::new(&engine);

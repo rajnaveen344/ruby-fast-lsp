@@ -5,6 +5,7 @@
 //! and the iteration itself uses integer equation indexes. FQN `Ord`/clone and
 //! `ConstantTypeTarget` hashing belong only to intern construction.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::BTreeMap;
 
 use crate::core::{
@@ -48,8 +49,10 @@ pub(crate) fn solve_constant_type_equations(
         prepare_dependencies(equations, &latest, &equation_indexes, resolved_dependencies);
 
     let mut values: Vec<Option<RubyType>> = vec![None; equations.len()];
-    let iteration_bound = equations.len().checked_add(1).expect(
-        "INVARIANT VIOLATED: constant equation iteration bound overflowed usize. This is a bug because retained equations already fit addressable memory. Fix: reject an equation set at usize::MAX entries.",
+    let iteration_bound = equations.len().checked_add(1).expect_invariant(
+        "constant equation iteration bound overflowed usize",
+        "retained equations already fit addressable memory",
+        "reject an equation set at usize::MAX entries",
     );
     let mut converged = false;
     for _iteration in 0..iteration_bound {
@@ -96,9 +99,11 @@ pub(crate) fn solve_constant_type_equations(
         }
         values = next;
     }
-    assert!(
+    invariant!(
         converged,
-        "INVARIANT VIOLATED: monotone constant type equations did not converge within N+1 iterations. This is a bug because every dependency step can expose at most one previously Bottom target. Fix: keep the equation domain monotone or replace the bound with a proven SCC solver."
+        what = "monotone constant type equations did not converge within N+1 iterations",
+        why = "every dependency step can expose at most one previously Bottom target",
+        fix = "keep the equation domain monotone or replace the bound with a proven SCC solver",
     );
 
     equations
@@ -125,12 +130,17 @@ fn equation_indexes_by_target(equations: &[ConstantTypeEquation]) -> Vec<usize> 
     for index in order {
         if let Some(&previous) = unique.last() {
             if equations[previous].target() == equations[index].target() {
-                assert_eq!(
-                    equations[previous], equations[index],
-                    "INVARIANT VIOLATED: one exact type target has conflicting constant equations. This is a bug because one AST value owns one compact equation. Fix: merge dependency terms before publishing file evidence."
+                invariant_eq!(
+                    equations[previous],
+                    equations[index],
+                    what = "one exact type target has conflicting constant equations",
+                    why = "one AST value owns one compact equation",
+                    fix = "merge dependency terms before publishing file evidence",
                 );
-                *unique.last_mut().expect(
-                    "INVARIANT VIOLATED: duplicate constant equation target compaction lost the previous index. This is a bug because last() was Some immediately before replacement. Fix: compact unique targets in one pass.",
+                *unique.last_mut().expect_invariant(
+                    "duplicate constant equation target compaction lost the previous index",
+                    "last() was Some immediately before replacement",
+                    "compact unique targets in one pass",
                 ) = index;
                 continue;
             }
@@ -199,10 +209,12 @@ fn prepare_dependencies<'a>(
                 .iter()
                 .map(|dependency| match resolved_dependencies.get(dependency) {
                     Some(Some(ResolvedConstantDependency::Projected(ruby_type))) => {
-                        assert_ne!(
+                        invariant_ne!(
                             *ruby_type,
                             RubyType::Unknown,
-                            "INVARIANT VIOLATED: a projected constant dependency contains Unknown. This is a bug because unresolved projections must be represented by None. Fix: publish Projected only for a proven namespace/value type."
+                            what = "a projected constant dependency contains Unknown",
+                            why = "unresolved projections must be represented by None",
+                            fix = "publish Projected only for a proven namespace/value type",
                         );
                         PreparedDependency::Projected(ruby_type)
                     }

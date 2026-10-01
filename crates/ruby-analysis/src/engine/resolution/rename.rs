@@ -1,5 +1,6 @@
 //! Rename targets and their safety checks for methods and constants.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 
 use super::lookup_chain::method_lookup_chain;
@@ -113,8 +114,10 @@ impl<'a> AnalysisQuery<'a> {
         identities.sort();
         identities.dedup();
         (identities.len() == 1).then(|| {
-            identities.pop().expect(
-                "INVARIANT VIOLATED: method rename identity disappeared after length validation. This is a bug because the local identity vector is not mutated between the check and pop. Fix: keep identity selection atomic.",
+            identities.pop().expect_invariant(
+                "method rename identity disappeared after length validation",
+                "the local identity vector is not mutated between the check and pop",
+                "keep identity selection atomic",
             )
         })
     }
@@ -274,8 +277,10 @@ impl<'a> AnalysisQuery<'a> {
                 }
                 StoredReferenceCandidateRef::Resolved(candidate) => {
                     let Some(target) = self.engine.fqn_for_id(candidate.target) else {
-                        panic!(
-                            "INVARIANT VIOLATED: resolved rename candidate points to a missing FQN. This is a bug because resolved candidates retain interned targets. Fix: retain interned names for the candidate lifetime."
+                        unreachable_invariant!(
+                            what = "resolved rename candidate points to a missing FQN",
+                            why = "resolved candidates retain interned targets",
+                            fix = "retain interned names for the candidate lifetime",
                         );
                     };
                     if target != &method_fqn {
@@ -343,9 +348,15 @@ impl<'a> AnalysisQuery<'a> {
             .unresolved_edges()
             .into_iter()
             .filter_map(|edge| {
-                let lookup = self.engine.names.const_lookup(edge.target).expect(
-                    "INVARIANT VIOLATED: unresolved rename graph edge points to a missing lookup. This is a bug because graph edges retain interned targets. Fix: retain target lookups for the graph edge lifetime.",
-                );
+                let lookup = self
+                    .engine
+                    .names
+                    .const_lookup(edge.target)
+                    .expect_invariant(
+                        "unresolved rename graph edge points to a missing lookup",
+                        "graph edges retain interned targets",
+                        "retain target lookups for the graph edge lifetime",
+                    );
                 if edge.kind == GraphEdgeKind::Superclass
                     && lookup.absolute
                     && lookup.path.len() == 1
@@ -510,11 +521,11 @@ fn constant_reference_name_range(
             return None;
         }
     } else {
-        assert!(
+        invariant!(
             file.line_index.is_ascii(),
-            "INVARIANT VIOLATED: source text was discarded for a non-ASCII file. \
-             This is a bug because exact rename validation requires retained non-ASCII source. \
-             Fix: retain SourceFile::source whenever SourceLineIndex::is_ascii is false."
+            what = "source text was discarded for a non-ASCII file",
+            why = "exact rename validation requires retained non-ASCII source",
+            fix = "retain SourceFile::source whenever SourceLineIndex::is_ascii is false",
         );
     }
     let name_start = end.checked_sub(name.as_str().len())?;
@@ -534,10 +545,10 @@ fn constant_name_collides(
     new_name: RubyConstant,
 ) -> bool {
     let mut parts = target.namespace_parts();
-    let last = parts.last_mut().expect(
-        "INVARIANT VIOLATED: rename target has no constant path component. \
-         This is a bug because constant_rename_target only returns constant-like FQNs. \
-         Fix: reject empty constant paths before constructing a rename target.",
+    let last = parts.last_mut().expect_invariant(
+        "rename target has no constant path component",
+        "constant_rename_target only returns constant-like FQNs",
+        "reject empty constant paths before constructing a rename target",
     );
     *last = new_name;
 

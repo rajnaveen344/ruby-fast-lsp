@@ -12,6 +12,7 @@ use super::{
 };
 use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::indexer::require_paths::unresolved_require_diagnostics;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::debug;
@@ -274,8 +275,10 @@ impl FileProcessor {
             true,
         )?;
         Ok(CollectedProjectFileFacts {
-            file_facts: output.retained_file_facts.expect(
-                "INVARIANT VIOLATED: project batch collection did not retain its file-owned facts. This is a bug because deterministic batch insertion requires every worker to return facts without mutating the shared engine. Fix: keep retained_file_facts enabled for the project batch path.",
+            file_facts: output.retained_file_facts.expect_invariant(
+                "project batch collection did not retain its file-owned facts",
+                "batch workers return facts without touching the shared engine",
+                "keep retained_file_facts on for the project batch path",
             ),
             jruby_navigation_plan: output.jruby_navigation_plan,
             jruby_source_hint: output.jruby_source_hint,
@@ -309,12 +312,11 @@ impl FileProcessor {
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         let file_id = analysis_engine.read().file_id(&path).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: project semantic seed received an unregistered source {}. \
-                 This is a bug because batch file identities must be fixed before declaration \
-                 collection. Fix: pre-register the complete project batch before collecting its \
-                 direct semantic seed.",
-                path.display()
+            unreachable_invariant!(
+                what = "project semantic seed received an unregistered source {}",
+                why = "batch file identities must be fixed before declaration collection",
+                fix = "pre-register the complete project batch before collecting its direct semantic seed",
+                path.display(),
             )
         });
         let source = analysis_source(uri, content);
@@ -398,9 +400,11 @@ impl FileProcessor {
         facts: FileFacts,
     ) {
         let file_id = analysis_engine.read().file_id(path).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: deterministic project fact replacement received an unregistered source {}. This is a bug because the bounded batch must be registered before semantic collection. Fix: preserve the pre-registration and ordered replacement lifecycle.",
-                path.display()
+            unreachable_invariant!(
+                what = "deterministic project fact replacement received an unregistered source {}",
+                why = "the bounded batch must be registered before semantic collection",
+                fix = "preserve the pre-registration and ordered replacement lifecycle",
+                path.display(),
             )
         });
         replace_file_analysis(analysis_engine, file_id, facts, FileResolution::Deferred);
@@ -430,9 +434,11 @@ impl FileProcessor {
         source_kind: SourceKind,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<ProjectNeutralFileFactsTemplate> {
-        assert!(
+        invariant!(
             source_kind.is_external(),
-            "INVARIANT VIOLATED: a project-neutral dependency template was requested for a project-owned source kind. This is a bug because project facts may contain project-specific references, diagnostics, and extension execution contexts. Fix: request templates only for validated external dependency source kinds."
+            what = "project-neutral dependency template requested for a project-owned source",
+            why = "project facts hold project-specific references, diagnostics, and contexts",
+            fix = "request templates only for external dependency sources",
         );
         self.collect_file_facts_as_with_resolution(
             uri,
@@ -460,9 +466,11 @@ impl FileProcessor {
         source_kind: SourceKind,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<ProjectNeutralFileFactsTemplate> {
-        assert!(
+        invariant!(
             source_kind.is_external(),
-            "INVARIANT VIOLATED: a project-neutral dependency template was requested for a project-owned source kind. This is a bug because project facts may contain project-specific references, diagnostics, and extension execution contexts. Fix: request templates only for validated external dependency source kinds."
+            what = "project-neutral dependency template requested for a project-owned source",
+            why = "project facts hold project-specific references, diagnostics, and contexts",
+            fix = "request templates only for external dependency sources",
         );
         self.collect_file_facts_as_with_resolution(
             uri,
@@ -548,15 +556,21 @@ impl FileProcessor {
         retain_collected_facts: bool,
     ) -> Result<CollectedFileFactsOutput> {
         let collection_started = Instant::now();
-        assert!(
+        invariant!(
             insert_collected_facts
                 || retain_collected_facts
                 || (capture_project_neutral_template && !resolve_references),
-            "INVARIANT VIOLATED: FileProcessor skipped engine insertion without retaining file-owned facts or capturing a deferred project-neutral template. This is a bug because ordinary indexing must use the engine replacement lifecycle. Fix: use insertion for normal sources, retained facts for deterministic project batches, or the explicit dependency-template collection path."
+            what =
+                "FileProcessor skipped insertion without retaining facts or a dependency template",
+            why = "ordinary indexing uses the engine replacement lifecycle",
+            fix = "insert normal sources; retain facts only for batches or templates",
         );
-        assert!(
-            !retain_collected_facts || (!insert_collected_facts && !capture_project_neutral_template),
-            "INVARIANT VIOLATED: retained file facts were combined with insertion or project-neutral capture. This is a bug because one collection result must have exactly one owner. Fix: retain facts only for the deterministic project batch path."
+        invariant!(
+            !retain_collected_facts
+                || (!insert_collected_facts && !capture_project_neutral_template),
+            what = "retained file facts were combined with insertion or project-neutral capture",
+            why = "one collection result must have exactly one owner",
+            fix = "retain facts only for the deterministic project batch path",
         );
         debug!("Collecting facts for: {:?}", uri);
 
@@ -567,9 +581,11 @@ impl FileProcessor {
         let registration_started = Instant::now();
         let analysis_file_id = if retain_collected_facts {
             analysis_engine.read().file_id(&path).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: deterministic project batch collection received an unregistered source {}. This is a bug because every batch file must be pre-registered before parallel semantic reads begin. Fix: register the complete bounded batch in path order before collecting facts.",
-                        path.display()
+                    unreachable_invariant!(
+                        what = "deterministic project batch collection received an unregistered source {}",
+                        why = "every batch file must be pre-registered before parallel semantic reads begin",
+                        fix = "register the complete bounded batch in path order before collecting facts",
+                        path.display(),
                     )
                 })
         } else {

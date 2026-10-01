@@ -1,6 +1,7 @@
 use super::FactCollector;
 use crate::inference::control_flow;
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 
 impl Visit<'_> for FactCollector {
@@ -11,8 +12,10 @@ impl Visit<'_> for FactCollector {
         let before = self.flow.local_callables.clone();
         let mut surviving = Vec::new();
         for condition in node.conditions().iter() {
-            let when = condition.as_when_node().expect(
-                "INVARIANT VIOLATED: an ordinary CaseNode contains a non-When condition. This is a bug because Prism's CaseNode schema permits only WhenNode conditions. Fix: route pattern cases through CaseMatchNode instead of weakening this invariant.",
+            let when = condition.as_when_node().expect_invariant(
+                "an ordinary CaseNode contains a non-When condition",
+                "prism's CaseNode schema permits only WhenNode conditions",
+                "route pattern cases through CaseMatchNode instead of weakening this invariant",
             );
             self.flow.local_callables = before.clone();
             for expression in when.conditions().iter() {
@@ -121,9 +124,11 @@ impl Visit<'_> for FactCollector {
             self.install_local_read_types(tracker.take_local_read_types());
         }
         visit_program_node(self, node);
-        assert!(
+        invariant!(
             self.flow.active_writes.is_empty(),
-            "INVARIANT VIOLATED: nonlocal write traversal remained active after the program walk. This is a bug because every variable-write entry must have a matching exit. Fix: balance the FactCollector write callbacks for every Prism write-node form."
+            what = "nonlocal write traversal remained active after the program walk",
+            why = "every variable-write entry must have a matching exit",
+            fix = "balance the FactCollector write callbacks for every Prism write-node form",
         );
         self.finalize_all_method_return_equations();
     }
@@ -150,10 +155,10 @@ impl Visit<'_> for FactCollector {
             if let Some(statements) = in_node.statements() {
                 self.visit(&statements.as_node());
             }
-            self.flow.pattern_captures.pop().expect(
-                "INVARIANT VIOLATED: pattern capture type stack underflow after case/in branch. \
-                 This is a bug because each pushed pattern capture frame must be popped exactly once. \
-                 Fix: keep FactCollector::visit_case_match_node branch traversal balanced.",
+            self.flow.pattern_captures.pop().expect_invariant(
+                "pattern capture type stack underflow after case/in branch",
+                "each pushed pattern capture frame must be popped exactly once",
+                "keep FactCollector::visit_case_match_node branch traversal balanced",
             );
         }
 
@@ -175,13 +180,17 @@ impl Visit<'_> for FactCollector {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
-            let block = node.block().expect(
-                "INVARIANT VIOLATED: extension execution context was applied to a call without a block. This is a bug because the host must validate the context against the current AST call. Fix: reject execution contexts whose call has no block.",
+            let block = node.block().expect_invariant(
+                "extension execution context was applied to a call without a block",
+                "the host must validate the context against the current AST call",
+                "reject execution contexts whose call has no block",
             );
-            assert_eq!(
+            invariant_eq!(
                 context.block_range,
                 self.direct_range(&block.location()),
-                "INVARIANT VIOLATED: extension execution context block range differs from the traversed block. This is a bug because a guest must not redirect execution semantics to unrelated source. Fix: validate the exact call and block ranges at the extension boundary."
+                what = "extension execution context block range differs from the traversed block",
+                why = "a guest must not redirect execution semantics to unrelated source",
+                fix = "validate the exact call and block ranges at the extension boundary",
             );
             self.scope_tracker.push_block_execution_context(
                 context.implicit_receiver,
@@ -191,8 +200,10 @@ impl Visit<'_> for FactCollector {
             );
             self.flow.block_parameters.push(Vec::new());
             self.visit(&block);
-            self.flow.block_parameters.pop().expect(
-                "INVARIANT VIOLATED: block parameter type stack underflow after extension execution context. This is a bug because each pushed block type frame must be popped exactly once. Fix: keep FactCollector::visit_call_node extension traversal balanced.",
+            self.flow.block_parameters.pop().expect_invariant(
+                "block parameter type stack underflow after extension execution context",
+                "each pushed block type frame must be popped exactly once",
+                "keep FactCollector::visit_call_node extension traversal balanced",
             );
             self.scope_tracker.pop_execution_context();
         } else if let Some((
@@ -208,8 +219,10 @@ impl Visit<'_> for FactCollector {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
-            let block = node.block().expect(
-                "INVARIANT VIOLATED: dynamic-definition block context lost its block. This is a bug because static_dynamic_definition_block_context required the same immutable Prism call to have a block. Fix: keep call traversal and context matching atomic.",
+            let block = node.block().expect_invariant(
+                "dynamic-definition block context lost its block",
+                "context matching required the same Prism call to have a block",
+                "keep call traversal and context matching atomic",
             );
             self.scope_tracker.push_block_execution_context(
                 implicit_namespace.clone(),
@@ -220,8 +233,10 @@ impl Visit<'_> for FactCollector {
             self.push_direct_dynamic_definition_block_return_type(node, implicit_namespace);
             self.flow.block_parameters.push(Vec::new());
             self.visit(&block);
-            self.flow.block_parameters.pop().expect(
-                "INVARIANT VIOLATED: block parameter type stack underflow after dynamic-definition block. This is a bug because every pushed block type frame must be popped exactly once. Fix: keep FactCollector::visit_call_node dynamic-definition traversal balanced.",
+            self.flow.block_parameters.pop().expect_invariant(
+                "block parameter type stack underflow after dynamic-definition block",
+                "every pushed block type frame must be popped exactly once",
+                "keep FactCollector::visit_call_node dynamic-definition traversal balanced",
             );
             self.scope_tracker.pop_execution_context();
         } else if let Some((eval_namespace, implicit_kind, definition_kind)) =
@@ -242,10 +257,10 @@ impl Visit<'_> for FactCollector {
                 );
                 self.flow.block_parameters.push(Vec::new());
                 self.visit(&block);
-                self.flow.block_parameters.pop().expect(
-                    "INVARIANT VIOLATED: block parameter type stack underflow after static eval block. \
-                     This is a bug because each pushed block type frame must be popped exactly once. \
-                     Fix: keep FactCollector::visit_call_node block traversal balanced.",
+                self.flow.block_parameters.pop().expect_invariant(
+                    "block parameter type stack underflow after static eval block",
+                    "each pushed block type frame must be popped exactly once",
+                    "keep FactCollector::visit_call_node block traversal balanced",
                 );
                 self.scope_tracker.pop_execution_context();
             }
@@ -259,10 +274,10 @@ impl Visit<'_> for FactCollector {
                 self.scope_tracker.push_ns_scopes(class_methods_namespace);
                 self.flow.block_parameters.push(Vec::new());
                 self.visit(&block);
-                self.flow.block_parameters.pop().expect(
-                    "INVARIANT VIOLATED: block parameter type stack underflow after Concern class_methods block. \
-                     This is a bug because each pushed block type frame must be popped exactly once. \
-                     Fix: keep FactCollector::visit_call_node block traversal balanced.",
+                self.flow.block_parameters.pop().expect_invariant(
+                    "block parameter type stack underflow after Concern class_methods block",
+                    "each pushed block type frame must be popped exactly once",
+                    "keep FactCollector::visit_call_node block traversal balanced",
                 );
                 self.scope_tracker.pop_ns_scope();
             }
@@ -292,10 +307,10 @@ impl Visit<'_> for FactCollector {
                 if framework_instance_block {
                     self.scope_tracker.pop_scope_kind();
                 }
-                self.flow.block_parameters.pop().expect(
-                    "INVARIANT VIOLATED: block parameter type stack underflow after call block. \
-                     This is a bug because each pushed block type frame must be popped exactly once. \
-                     Fix: keep FactCollector::visit_call_node block traversal balanced.",
+                self.flow.block_parameters.pop().expect_invariant(
+                    "block parameter type stack underflow after call block",
+                    "each pushed block type frame must be popped exactly once",
+                    "keep FactCollector::visit_call_node block traversal balanced",
                 );
             }
         }
@@ -459,10 +474,10 @@ impl Visit<'_> for FactCollector {
         for target in node.rights().iter() {
             self.visit(&target);
         }
-        self.flow.assignment_elements.pop().expect(
-            "INVARIANT VIOLATED: multi-write LHS type stack underflow. \
-             This is a bug because each MultiWriteNode push must be balanced by one pop. \
-             Fix: keep FactCollector::visit_multi_write_node stack frames paired.",
+        self.flow.assignment_elements.pop().expect_invariant(
+            "multi-write LHS type stack underflow",
+            "each MultiWriteNode push must be balanced by one pop",
+            "keep FactCollector::visit_multi_write_node stack frames paired",
         );
     }
 

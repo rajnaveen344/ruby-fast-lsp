@@ -4,6 +4,7 @@ use crate::indexer::utf8_str;
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::r#type::shape as shape_reads;
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::{HashMap, HashSet};
 
@@ -155,8 +156,11 @@ impl FactCollector {
                         summary: Err(UnknownReason::AmbiguousCallableValue),
                     }
                 }
-                (None, None) => panic!(
-                    "INVARIANT VIOLATED: callable merge key `{name}` is absent from both branches. This is a bug because keys are derived from those exact maps. Fix: keep key collection and lookup atomic."
+                (None, None) => unreachable_invariant!(
+                    what = "callable merge key `{name}` is absent from both branches",
+                    why = "keys are derived from those exact maps",
+                    fix = "keep key collection and lookup atomic",
+                    name = name,
                 ),
             };
             merged.insert(name, callable);
@@ -392,9 +396,15 @@ impl FactCollector {
         value_node: &Node,
     ) -> Option<crate::inference::higher_order::KnownProcType> {
         crate::indexer::is_static_callable_literal(value_node).then(|| {
-            let scope_id = self.document.variable_scopes().current_scope().expect(
-                "INVARIANT VIOLATED: callable lowering ran without an active lexical scope. This is a bug because FactCollector and VariableScopes must enter and exit scopes together. Fix: keep callable lowering inside the ordinary collector traversal.",
-            );
+            let scope_id = self
+                .document
+                .variable_scopes()
+                .current_scope()
+                .expect_invariant(
+                    "callable lowering ran without an active lexical scope",
+                    "FactCollector and VariableScopes must enter and exit scopes together",
+                    "keep callable lowering inside the ordinary collector traversal",
+                );
             let outer_locals = self
                 .document
                 .variable_scopes()
@@ -402,8 +412,10 @@ impl FactCollector {
                 .into_iter()
                 .map(|variable| variable.name.to_string());
             crate::inference::higher_order::KnownProcType {
-                identity: u32::try_from(value_node.location().start_offset()).expect(
-                    "INVARIANT VIOLATED: callable literal offset exceeded u32. This is a bug because analysis ranges already require u32 offsets. Fix: reject oversized source before callable lowering.",
+                identity: u32::try_from(value_node.location().start_offset()).expect_invariant(
+                    "callable literal offset exceeded u32",
+                    "analysis ranges already require u32 offsets",
+                    "reject oversized source before callable lowering",
                 ),
                 summary: crate::indexer::lower_callable_literal_with_outer_locals(
                     value_node,
@@ -459,12 +471,17 @@ impl FactCollector {
                 )
             },
         );
-        let popped = stack.pop().expect(
-            "INVARIANT VIOLATED: callable instantiation stack underflowed. This is a bug because every accepted callable pushes exactly one identity. Fix: keep push/evaluate/pop in one function.",
+        let popped = stack.pop().expect_invariant(
+            "callable instantiation stack underflowed",
+            "every accepted callable pushes exactly one identity",
+            "keep push/evaluate/pop in one function",
         );
-        assert_eq!(
-            popped, callable.identity,
-            "INVARIANT VIOLATED: callable instantiation stack order changed during evaluation. This is a bug because nested evaluation must be strictly LIFO. Fix: do not retain or reorder stack entries."
+        invariant_eq!(
+            popped,
+            callable.identity,
+            what = "callable instantiation stack order changed during evaluation",
+            why = "nested evaluation must be strictly LIFO",
+            fix = "do not retain or reorder stack entries",
         );
         result
     }
@@ -595,15 +612,21 @@ impl FactCollector {
         {
             let key_type = match shape_reads::keys(&receiver_type) {
                 Ok(RubyType::Array(types)) => RubyType::union(types),
-                Ok(ruby_type) => panic!(
-                    "INVARIANT VIOLATED: shape keys projection returned `{ruby_type}` instead of Array. This is a bug because Hash#keys always returns an Array. Fix: keep shape_reads::keys canonical."
+                Ok(ruby_type) => unreachable_invariant!(
+                    what = "shape keys projection returned `{ruby_type}` instead of Array",
+                    why = "hash#keys always returns an Array",
+                    fix = "keep shape_reads::keys canonical",
+                    ruby_type = ruby_type,
                 ),
                 Err(_) => return (Vec::new(), Some(Err(preparation_reason))),
             };
             let value_type = match shape_reads::values(&receiver_type) {
                 Ok(RubyType::Array(types)) => RubyType::union(types),
-                Ok(ruby_type) => panic!(
-                    "INVARIANT VIOLATED: shape values projection returned `{ruby_type}` instead of Array. This is a bug because Hash#values always returns an Array. Fix: keep shape_reads::values canonical."
+                Ok(ruby_type) => unreachable_invariant!(
+                    what = "shape values projection returned `{ruby_type}` instead of Array",
+                    why = "hash#values always returns an Array",
+                    fix = "keep shape_reads::values canonical",
+                    ruby_type = ruby_type,
                 ),
                 Err(_) => return (Vec::new(), Some(Err(preparation_reason))),
             };
@@ -623,8 +646,10 @@ impl FactCollector {
             if method_name == b"each_value" {
                 return (vec![value_type], Some(Err(preparation_reason)));
             }
-            panic!(
-                "INVARIANT VIOLATED: non-Hash iterator reached shape block parameter projection. This is a bug because the method-name guard accepts only each variants. Fix: keep the guard and exhaustive projection branches aligned."
+            unreachable_invariant!(
+                what = "non-Hash iterator reached shape block parameter projection",
+                why = "the method-name guard accepts only each variants",
+                fix = "keep the guard and exhaustive projection branches aligned",
             );
         }
 

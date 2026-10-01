@@ -1,17 +1,23 @@
 //! Exact navigation and rename contracts across edit recovery. Compare complete
 //! values: never erase extra targets, duplicate entries, or edit ranges.
 
+use crate::invariant::ExpectInvariant;
 use crate::test::harness::FakeEditor;
 use serde::Serialize;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{Location, Position, Range, TextEdit, Url, WorkspaceEdit};
 
 fn exact_values<T: Serialize>(values: Vec<T>) -> Vec<String> {
-    let mut values = values.into_iter().map(|value| {
-        serde_json::to_string(&value).expect(
-            "INVARIANT VIOLATED: an LSP observation cannot be serialized. This is a bug because exact contracts compare complete LSP values. Fix: retain serializable observations."
-        )
-    }).collect::<Vec<_>>();
+    let mut values = values
+        .into_iter()
+        .map(|value| {
+            serde_json::to_string(&value).expect_invariant(
+                "an LSP observation cannot be serialized",
+                "exact contracts compare complete LSP values",
+                "retain serializable observations",
+            )
+        })
+        .collect::<Vec<_>>();
     // LSP location arrays are unordered; duplicates remain observable.
     values.sort();
     values

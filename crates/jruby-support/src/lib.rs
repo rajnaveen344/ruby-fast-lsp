@@ -3,6 +3,11 @@
 //! This crate intentionally has no LSP, editor, workspace, filesystem, or
 //! `ruby-analysis` dependencies.
 
+#[macro_use]
+#[allow(unused_macros)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 mod names;
 mod signatures;
 mod version;

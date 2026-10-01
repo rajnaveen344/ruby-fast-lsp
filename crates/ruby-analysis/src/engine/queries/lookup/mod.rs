@@ -81,8 +81,10 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Vec<MethodMatch> {
         if let RubyType::Union(members) = receiver_type {
             let Some((first, rest)) = members.split_first() else {
-                panic!(
-                    "INVARIANT VIOLATED: completion received an empty RubyType::Union. This is a bug because RubyType::union collapses empty inputs to Unknown. Fix: construct receiver unions only through the canonical RubyType helpers."
+                unreachable_invariant!(
+                    what = "completion received an empty RubyType::Union",
+                    why = "RubyType::union collapses empty inputs to Unknown",
+                    fix = "construct receiver unions only through the canonical RubyType helpers",
                 );
             };
             let mut common = self
@@ -236,11 +238,11 @@ impl<'a> AnalysisQuery<'a> {
 
     fn method_match(&self, fact: &MethodFact) -> MethodMatch {
         let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-            panic!(
-                "INVARIANT VIOLATED: analysis method match fact has non-method FQN: {}. \
-                 This is a bug because MethodStore must only contain method facts. \
-                 Fix: reject non-method FQNs in MethodFact construction.",
-                fact.fqn
+            unreachable_invariant!(
+                what = "analysis method match fact has non-method FQN: {}",
+                why = "MethodStore must only contain method facts",
+                fix = "reject non-method FQNs in MethodFact construction",
+                fact.fqn,
             );
         };
 

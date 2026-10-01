@@ -5,6 +5,7 @@ mod facts;
 mod replacement;
 mod updates;
 
+use crate::invariant::ExpectInvariant;
 pub(crate) use compact::RubyTypeId;
 use compact::{StoredTypeFact, StoredTypeSubject, TypeFactId, TypeSubjectId};
 pub(crate) use facts::NamedTypeResolution;
@@ -151,8 +152,10 @@ impl TypeStore {
                     | TypeSubject::ClassVariable { .. }
                     | TypeSubject::GlobalVariable(_)
                     | TypeSubject::Parameter { .. } => None,
-                    TypeSubject::Expression(_) => panic!(
-                        "INVARIANT VIOLATED: an expression subject was inserted into the general type-subject interner. This is a bug because expressions must use their compact file-local range identity. Fix: route every inserted TypeSubject through TypeStore::store_subject."
+                    TypeSubject::Expression(_) => unreachable_invariant!(
+                        what = "an expression subject was inserted into the general type-subject interner",
+                        why = "expressions must use their compact file-local range identity",
+                        fix = "route every inserted TypeSubject through TypeStore::store_subject",
                     ),
                 },
                 None => None,
@@ -180,8 +183,10 @@ impl TypeStore {
                     | TypeSubject::GlobalVariable(_)
                     | TypeSubject::MethodReturn(_)
                     | TypeSubject::Parameter { .. } => None,
-                    TypeSubject::Expression(_) => panic!(
-                        "INVARIANT VIOLATED: an expression subject was inserted into the general type-subject interner. This is a bug because expressions must use their compact file-local range identity. Fix: route every inserted TypeSubject through TypeStore::store_subject."
+                    TypeSubject::Expression(_) => unreachable_invariant!(
+                        what = "an expression subject was inserted into the general type-subject interner",
+                        why = "expressions must use their compact file-local range identity",
+                        fix = "route every inserted TypeSubject through TypeStore::store_subject",
                     ),
                 },
                 None => None,
@@ -375,16 +380,16 @@ impl TypeStore {
 
     fn insert_fact(&mut self, fact: StoredTypeFact) -> TypeFactId {
         if let Some(id) = self.free_facts.pop() {
-            let slot = self.facts.get_mut(id.index()).expect(
-                "INVARIANT VIOLATED: type free list points outside fact arena. \
-                 This is a bug because free ids must come from previous arena slots. \
-                 Fix: only push ids returned by TypeStore::take_fact.",
+            let slot = self.facts.get_mut(id.index()).expect_invariant(
+                "type free list points outside fact arena",
+                "free ids must come from previous arena slots",
+                "only push ids returned by TypeStore::take_fact",
             );
-            assert!(
+            invariant!(
                 slot.is_none(),
-                "INVARIANT VIOLATED: type free list points to occupied fact slot. \
-                 This is a bug because free ids must only reference removed type facts. \
-                 Fix: push each removed type id at most once."
+                what = "type free list points to occupied fact slot",
+                why = "free ids must only reference removed type facts",
+                fix = "push each removed type id at most once",
             );
             *slot = Some(fact);
             return id;
@@ -450,19 +455,21 @@ impl TypeStore {
     }
 
     fn indexed_file_fact(&self, id: TypeFactId) -> &StoredTypeFact {
-        self.fact(id).expect(
-            "INVARIANT VIOLATED: type file index points to missing fact. \
-             This is a bug because indexes must be removed before arena facts. \
-             Fix: remove stale ids from every TypeStore index.",
+        self.fact(id).expect_invariant(
+            "type file index points to missing fact",
+            "indexes must be removed before arena facts",
+            "remove stale ids from every TypeStore index",
         )
     }
 
     fn store_subject(&mut self, subject: TypeSubject, fact_range: TextRange) -> StoredTypeSubject {
         match subject {
             TypeSubject::Expression(range) => {
-                assert!(
+                invariant!(
                     range == fact_range,
-                    "INVARIANT VIOLATED: expression subject range differs from its type fact range. This is a bug because compact expression identity reuses the fact's existing range. Fix: construct the expression subject and fact from the same AST location."
+                    what = "expression subject range differs from its type fact range",
+                    why = "compact expression identity reuses the fact's existing range",
+                    fix = "construct the expression subject and fact from the same AST location",
                 );
                 StoredTypeSubject::expression()
             }
@@ -519,10 +526,10 @@ impl TypeStore {
     }
 
     fn subject(&self, id: TypeSubjectId) -> &TypeSubject {
-        self.subjects.get_index(id.index()).expect(
-            "INVARIANT VIOLATED: type fact points to missing subject id. \
-             This is a bug because type facts must only store interned subject ids. \
-             Fix: intern type subjects before inserting facts.",
+        self.subjects.get_index(id.index()).expect_invariant(
+            "type fact points to missing subject id",
+            "type facts must only store interned subject ids",
+            "intern type subjects before inserting facts",
         )
     }
 
@@ -532,10 +539,10 @@ impl TypeStore {
     }
 
     pub(crate) fn ruby_type(&self, id: RubyTypeId) -> &RubyType {
-        self.ruby_types.get_index(id.index()).expect(
-            "INVARIANT VIOLATED: type fact points to missing Ruby type id. This is a bug because \
-             stored facts must only reference interned Ruby types. Fix: intern Ruby types before \
-             inserting facts and keep the interner append-only while facts exist.",
+        self.ruby_types.get_index(id.index()).expect_invariant(
+            "type fact points to missing Ruby type id",
+            "facts reference only interned Ruby types",
+            "intern types before inserting facts; keep the interner append-only",
         )
     }
 

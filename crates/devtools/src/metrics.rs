@@ -11,9 +11,11 @@ pub struct LatencySummary {
 
 impl LatencySummary {
     pub fn from_samples(samples: &[Duration]) -> Self {
-        assert!(
+        invariant!(
             !samples.is_empty(),
-            "INVARIANT VIOLATED: latency samples are empty. This is a bug because a percentile cannot be computed without observations. Fix: record at least one measured operation before building a summary."
+            what = "latency samples are empty",
+            why = "a percentile cannot be computed without observations",
+            fix = "record at least one measured operation before building a summary",
         );
 
         let mut sorted = samples.to_vec();
@@ -30,13 +32,18 @@ impl LatencySummary {
 }
 
 fn nearest_rank(sorted: &[Duration], percentile: usize) -> Duration {
-    assert!(
+    invariant!(
         !sorted.is_empty(),
-        "INVARIANT VIOLATED: sorted latency samples are empty. This is a bug because nearest-rank selection requires observations. Fix: validate samples before selecting a percentile."
+        what = "sorted latency samples are empty",
+        why = "nearest-rank selection requires observations",
+        fix = "validate samples before selecting a percentile",
     );
-    assert!(
+    invariant!(
         (1..=100).contains(&percentile),
-        "INVARIANT VIOLATED: percentile {percentile} is outside 1..=100. This is a bug because nearest-rank percentiles are defined only in that range. Fix: request a percentile from 1 through 100."
+        what = "percentile {percentile} is outside 1..=100",
+        why = "nearest-rank percentiles are defined only in that range",
+        fix = "request a percentile from 1 through 100",
+        percentile = percentile,
     );
 
     let rank = (percentile * sorted.len()).div_ceil(100);

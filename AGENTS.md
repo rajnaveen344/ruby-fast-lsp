@@ -43,10 +43,12 @@ singular. Expose domain operations and views, never mutable stores or arena IDs.
 
 ## Correctness contracts
 
-- Use production `assert!`/`expect`/`panic!` for broken internal invariants, never
-  `debug_assert!`. Messages must identify the broken invariant, why it is a bug,
-  and how to fix it. Enumerate impossible variants instead of hiding them in a
-  wildcard panic arm. Represent invalid states in the type system where possible.
+- Check broken internal invariants in production with `invariant!`,
+  `invariant_eq!`/`invariant_ne!`, `unreachable_invariant!`, or `.expect_invariant`
+  (`crates/ruby-analysis/src/invariant.rs`), never `debug_assert!`; each takes
+  what broke, why it is a bug, and the fix. Enumerate impossible variants
+  instead of hiding them in a wildcard panic arm. Represent invalid states in
+  the type system where possible.
 - Missing evidence in user code is an expected analysis outcome: retain explicit
   `Unknown` reasons. Malformed source, unsupported Ruby, unavailable runtimes, and
   external tool failures must not be treated as corrupt internal state. Never

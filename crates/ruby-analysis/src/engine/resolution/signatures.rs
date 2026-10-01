@@ -4,6 +4,7 @@ use super::receiver_type_members;
 use crate::core::{FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMethod, RubyType};
 use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
 use crate::engine::queries::AnalysisQuery;
+use crate::invariant::ExpectInvariant;
 
 impl<'a> AnalysisQuery<'a> {
     pub fn resolve_method_signature_facts(
@@ -210,10 +211,10 @@ impl<'a> AnalysisQuery<'a> {
                     .filter(|fact| {
                         self.engine
                             .file(fact.range.file_id)
-                            .expect(
-                                "INVARIANT VIOLATED: signature fact references an unregistered file. \
-                                 This is a bug because signature selection requires source metadata. \
-                                 Fix: replace signature facts only after registering their source file.",
+                            .expect_invariant(
+                                "signature fact references an unregistered file",
+                                "signature selection requires source metadata",
+                                "replace signature facts only after registering their source file",
                             )
                             .kind
                             == crate::core::SourceKind::Signature

@@ -1,4 +1,5 @@
 use crate::core::{SourceFileId, TextRange};
+use crate::invariant::ExpectInvariant;
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
@@ -51,24 +52,24 @@ impl SourceDocument {
             .map(char::len_utf16)
             .sum();
         (
-            u32::try_from(line_index).expect(
-                "INVARIANT VIOLATED: source line index exceeded u32. \
-                 This is a bug because editor protocol positions use u32. \
-                 Fix: reject or segment files with more than u32::MAX lines.",
+            u32::try_from(line_index).expect_invariant(
+                "source line index exceeded u32",
+                "editor protocol positions use u32",
+                "reject or segment files with more than u32::MAX lines",
             ),
-            u32::try_from(character).expect(
-                "INVARIANT VIOLATED: source character index exceeded u32. \
-                 This is a bug because editor protocol positions use u32. \
-                 Fix: reject or segment lines with more than u32::MAX characters.",
+            u32::try_from(character).expect_invariant(
+                "source character index exceeded u32",
+                "editor protocol positions use u32",
+                "reject or segment lines with more than u32::MAX characters",
             ),
         )
     }
 
     pub fn line_character_to_offset(&self, content: &str, line: u32, character: u32) -> usize {
-        let line = usize::try_from(line).expect(
-            "INVARIANT VIOLATED: u32 line could not convert to usize. \
-             This is a bug because usize must represent u32 on supported platforms. \
-             Fix: unsupported target architecture.",
+        let line = usize::try_from(line).expect_invariant(
+            "u32 line could not convert to usize",
+            "usize must represent u32 on supported platforms",
+            "unsupported target architecture",
         );
         if line >= self.line_offsets.len() - 1 {
             return content.len();
@@ -76,10 +77,10 @@ impl SourceDocument {
 
         let line_start = self.line_offsets[line];
         let line_end = self.line_offsets[line + 1];
-        let target_char = usize::try_from(character).expect(
-            "INVARIANT VIOLATED: u32 character could not convert to usize. \
-             This is a bug because usize must represent u32 on supported platforms. \
-             Fix: unsupported target architecture.",
+        let target_char = usize::try_from(character).expect_invariant(
+            "u32 character could not convert to usize",
+            "usize must represent u32 on supported platforms",
+            "unsupported target architecture",
         );
 
         let mut byte_offset = 0;
@@ -146,16 +147,18 @@ pub fn mask_shebang(content: &str) -> Cow<'_, str> {
     }
     let mut bytes = content.as_bytes().to_vec();
     bytes[1] = b'#';
-    Cow::Owned(String::from_utf8(bytes).expect(
-        "INVARIANT VIOLATED: masking an ASCII shebang byte produced invalid UTF-8. This is a bug because replacing `!` with `#` cannot invalidate UTF-8. Fix: preserve the original byte length while masking the shebang.",
+    Cow::Owned(String::from_utf8(bytes).expect_invariant(
+        "masking an ASCII shebang byte produced invalid UTF-8",
+        "replacing `!` with `#` cannot invalidate UTF-8",
+        "preserve the original byte length while masking the shebang",
     ))
 }
 
 fn u32_offset(offset: usize) -> u32 {
-    u32::try_from(offset).expect(
-        "INVARIANT VIOLATED: source byte offset exceeded u32. \
-         This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-         Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+    u32::try_from(offset).expect_invariant(
+        "source byte offset exceeded u32",
+        "ruby-analysis::core TextRange currently stores u32 offsets",
+        "widen TextRange offsets before indexing files larger than u32::MAX bytes",
     )
 }
 

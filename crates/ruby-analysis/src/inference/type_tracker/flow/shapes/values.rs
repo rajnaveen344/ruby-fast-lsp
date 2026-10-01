@@ -83,8 +83,11 @@ pub(in crate::inference::type_tracker) fn map_shape_alternatives(
     let mut transformed = Vec::new();
     for alternative in shape_alternatives(ruby_type)? {
         let RubyType::Shape(shape) = alternative else {
-            panic!(
-                "INVARIANT VIOLATED: shape_alternatives returned non-shape type `{alternative}`. This is a bug because callers rely on exhaustive shape-only mapping. Fix: keep shape_alternatives filtering explicit."
+            unreachable_invariant!(
+                what = "shape_alternatives returned non-shape type `{alternative}`",
+                why = "callers rely on exhaustive shape-only mapping",
+                fix = "keep shape_alternatives filtering explicit",
+                alternative = alternative,
             );
         };
         transformed.push(RubyType::Shape(Box::new(transform(&shape)?)));
@@ -224,14 +227,18 @@ pub(in crate::inference::type_tracker) fn merge_shape_types(
     let mut merged = Vec::new();
     for left in &left_alternatives {
         let RubyType::Shape(left_shape) = left else {
-            panic!(
-                "INVARIANT VIOLATED: left shape alternative is not a Shape. This is a bug because merge_shape_types consumes shape_alternatives. Fix: keep the helper return contract exhaustive."
+            unreachable_invariant!(
+                what = "left shape alternative is not a Shape",
+                why = "merge_shape_types consumes shape_alternatives",
+                fix = "keep the helper return contract exhaustive",
             );
         };
         for right in &right_alternatives {
             let RubyType::Shape(right_shape) = right else {
-                panic!(
-                    "INVARIANT VIOLATED: right shape alternative is not a Shape. This is a bug because merge_shape_types consumes shape_alternatives. Fix: keep the helper return contract exhaustive."
+                unreachable_invariant!(
+                    what = "right shape alternative is not a Shape",
+                    why = "merge_shape_types consumes shape_alternatives",
+                    fix = "keep the helper return contract exhaustive",
                 );
             };
             if !left_shape.is_exact()
@@ -297,8 +304,11 @@ pub(in crate::inference::type_tracker) fn shape_field_keys(
     let mut keys = BTreeSet::new();
     for alternative in shape_alternatives(ruby_type)? {
         let RubyType::Shape(shape) = alternative else {
-            panic!(
-                "INVARIANT VIOLATED: shape_alternatives returned non-shape type `{alternative}`. This is a bug because merge mutation key discovery accepts only shapes. Fix: keep shape_alternatives exhaustive."
+            unreachable_invariant!(
+                what = "shape_alternatives returned non-shape type `{alternative}`",
+                why = "merge mutation key discovery accepts only shapes",
+                fix = "keep shape_alternatives exhaustive",
+                alternative = alternative,
             );
         };
         keys.extend(shape.fields().iter().map(|field| field.key().clone()));

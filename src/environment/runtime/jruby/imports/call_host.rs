@@ -3,6 +3,7 @@
 
 use super::syntax::{canonical_java_constant_path, dotted_call_name, dotted_call_root};
 use super::JrubyImportProvider;
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyType, TypeProvenance};
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_fast_lsp_jruby_support::JavaClassName;
@@ -184,8 +185,10 @@ impl JrubyImportProvider {
             // The selected project's class catalog proves this proxy exists.
             // Ordinary constant inference must not guess Java classes from
             // syntax before the provider installs its runtime evidence.
-            let proxy = FullyQualifiedName::try_from(reference.as_str()).expect(
-                "INVARIANT VIOLATED: a catalog-owned Java proxy has an invalid Ruby constant path. This is a bug because proxy_to_internal contains validated proxy identities. Fix: preserve validation when constructing the catalog mapping.",
+            let proxy = FullyQualifiedName::try_from(reference.as_str()).expect_invariant(
+                "a catalog-owned Java proxy has an invalid Ruby constant path",
+                "proxy_to_internal contains validated proxy identities",
+                "preserve validation when constructing the catalog mapping",
             );
             visitor.direct_push_expression_type(
                 node,
@@ -216,10 +219,10 @@ impl JrubyImportProvider {
                 .ruby_namespace_parts()
                 .into_iter()
                 .map(|part| {
-                    RubyConstant::new(&part).expect(
-                        "INVARIANT VIOLATED: validated Java proxy part is not a Ruby constant. \
-                         This is a bug because JavaClassName owns proxy validation. \
-                         Fix: keep dotted proxy expression conversion single-sourced.",
+                    RubyConstant::new(&part).expect_invariant(
+                        "validated Java proxy part is not a Ruby constant",
+                        "JavaClassName owns proxy validation",
+                        "keep dotted proxy expression conversion single-sourced",
                     )
                 })
                 .collect::<Vec<_>>(),

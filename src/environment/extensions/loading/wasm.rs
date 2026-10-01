@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -65,9 +66,11 @@ pub(in crate::environment::extensions) fn read_extension_wasm(
         ))
     })?;
     let mut bytes = Vec::with_capacity(capacity);
-    let read_limit = MAX_EXTENSION_WASM_BYTES
-        .checked_add(1)
-        .expect("INVARIANT VIOLATED: Wasm source read limit overflowed u64. This is a bug because the fixed 64 MiB limit must fit u64. Fix: keep the source limit below u64::MAX.");
+    let read_limit = MAX_EXTENSION_WASM_BYTES.checked_add(1).expect_invariant(
+        "Wasm source read limit overflowed u64",
+        "the fixed 64 MiB limit must fit u64",
+        "keep the source limit below u64::MAX",
+    );
     let mut bounded = std::io::Read::take(&mut file, read_limit);
     std::io::Read::read_to_end(&mut bounded, &mut bytes).map_err(|error| {
         ExtensionLoadError::new(format!(

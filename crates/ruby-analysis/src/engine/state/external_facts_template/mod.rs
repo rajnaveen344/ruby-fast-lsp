@@ -784,9 +784,12 @@ fn rebind_all_ranges(facts: &mut FileFacts, source: SourceFileId, target: Source
 }
 
 fn rebind_range(range: &mut TextRange, source: SourceFileId, target: SourceFileId) {
-    assert_eq!(
-        range.file_id, source,
-        "INVARIANT VIOLATED: a semantic fact template contains a range from a foreign file. This is a bug because template construction validates every supported source range before caching. Fix: add validation and rebinding for the new range-bearing fact field."
+    invariant_eq!(
+        range.file_id,
+        source,
+        what = "a semantic fact template contains a range from a foreign file",
+        why = "template construction validates every supported source range before caching",
+        fix = "add validation and rebinding for the new range-bearing fact field",
     );
     range.file_id = target;
 }

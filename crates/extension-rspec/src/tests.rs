@@ -1,4 +1,5 @@
 use super::*;
+use crate::invariant::ExpectInvariant;
 use ruby_fast_lsp_extension_api::{
     Argument, CalleeResolution, LockedGem, LockedGemSource, ProjectContext, ProjectSourceKind,
     ResolvedCallee, SourcePosition,
@@ -166,9 +167,11 @@ fn nested_context_inherits_the_enclosing_generated_group() {
     };
 
     let output = extension().index_call_output(&ctx);
-    let context = output.execution_contexts.first().expect(
-            "INVARIANT VIOLATED: nested RSpec groups must emit an execution context. This is a bug because nested helper lookup depends on generated-owner inheritance. Fix: preserve the enclosing group chain in the RSpec adapter.",
-        );
+    let context = output.execution_contexts.first().expect_invariant(
+        "nested RSpec groups must emit an execution context",
+        "nested helper lookup depends on generated-owner inheritance",
+        "preserve the enclosing group chain in the RSpec adapter",
+    );
     assert_eq!(context.generated_owners.len(), 2);
     let outer_id = "example-group:1:0-8:3";
     let nested_id = "example-group:3:2-7:5";
@@ -189,20 +192,22 @@ fn nested_context_inherits_the_enclosing_generated_group() {
         }
     );
     let method = output
-            .index_patches
-            .first()
-            .and_then(|patch| match patch {
-                IndexPatch::DefineMethod(method) => Some(method),
-                IndexPatch::ApplyMixin(_)
-                | IndexPatch::DefineNamespace(_)
-                | IndexPatch::DefineConstant(_)
-                | IndexPatch::AddReference(_)
-                | IndexPatch::SetSuperclass(_)
-                | IndexPatch::ConnectExecutionContext(_) => None,
-            })
-            .expect(
-                "INVARIANT VIOLATED: nested RSpec context must retain its DSL method patch. This is a bug because execution contexts augment rather than replace semantic patches. Fix: return both outputs from index_call_output.",
-            );
+        .index_patches
+        .first()
+        .and_then(|patch| match patch {
+            IndexPatch::DefineMethod(method) => Some(method),
+            IndexPatch::ApplyMixin(_)
+            | IndexPatch::DefineNamespace(_)
+            | IndexPatch::DefineConstant(_)
+            | IndexPatch::AddReference(_)
+            | IndexPatch::SetSuperclass(_)
+            | IndexPatch::ConnectExecutionContext(_) => None,
+        })
+        .expect_invariant(
+            "nested RSpec context must retain its DSL method patch",
+            "execution contexts augment rather than replace semantic patches",
+            "return both outputs from index_call_output",
+        );
     assert_eq!(
         method.owner_target,
         Some(ExecutionContextTarget::GeneratedOwner {
@@ -226,9 +231,11 @@ fn shared_context_uses_project_scoped_owner_and_exact_mixin_target() {
     }];
 
     let output = extension().index_call_output(&shared);
-    let context = output.execution_contexts.first().expect(
-            "INVARIANT VIOLATED: shared context must emit an execution context. This is a fixture bug because project-scoped helper ownership requires the context. Fix: preserve the shared_context adapter branch.",
-        );
+    let context = output.execution_contexts.first().expect_invariant(
+        "shared context must emit an execution context",
+        "project-scoped helper ownership requires the context",
+        "preserve the shared_context adapter branch",
+    );
     assert_eq!(context.generated_owners.len(), 1);
     assert_eq!(
         context.generated_owners[0].scope,
@@ -292,9 +299,11 @@ fn shared_examples_connect_project_template_runtime_and_consuming_group() {
     }];
 
     let declaration = extension().index_call_output(&shared);
-    let context = declaration.execution_contexts.first().expect(
-            "INVARIANT VIOLATED: shared examples must emit a project template context. This is a fixture bug because reusable example semantics require a stable owner. Fix: preserve the shared_examples adapter branch.",
-        );
+    let context = declaration.execution_contexts.first().expect_invariant(
+        "shared examples must emit a project template context",
+        "reusable example semantics require a stable owner",
+        "preserve the shared_examples adapter branch",
+    );
     assert_eq!(context.generated_owners.len(), 1);
     assert_eq!(
         context.generated_owners[0].scope,

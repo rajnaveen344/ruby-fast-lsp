@@ -8,6 +8,7 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, NamespaceKind,
     RubyConstant, SourceFileId, TextRange, UnresolvedGraphEdgeFact,
 };
+use crate::invariant::ExpectInvariant;
 
 use super::AnalysisEngine;
 
@@ -209,8 +210,10 @@ impl AnalysisEngine {
 
     fn superclass_source_has_unresolved_explicit_edge(&self, source: &FullyQualifiedName) -> bool {
         let instance_source = match source.namespace_kind() {
-            Some(NamespaceKind::Singleton) => source.to_instance_namespace().expect(
-                "INVARIANT VIOLATED: singleton superclass source cannot produce an instance namespace. This is a bug because graph superclass sources are Namespace FQNs. Fix: preserve Namespace identity for class graph nodes.",
+            Some(NamespaceKind::Singleton) => source.to_instance_namespace().expect_invariant(
+                "singleton superclass source cannot produce an instance namespace",
+                "graph superclass sources are Namespace FQNs",
+                "preserve Namespace identity for class graph nodes",
             ),
             Some(NamespaceKind::Instance) => source.clone(),
             None => return false,
@@ -331,8 +334,10 @@ impl AnalysisEngine {
         {
             return None;
         }
-        let source = self.names.fqn(unresolved.source).expect(
-            "INVARIANT VIOLATED: unresolved superclass edge points to a missing source FQN. This is a bug because graph edges retain interned sources for their full lifetime. Fix: retain source FQNs until unresolved edges are removed.",
+        let source = self.names.fqn(unresolved.source).expect_invariant(
+            "unresolved superclass edge points to a missing source FQN",
+            "graph edges retain interned sources for their full lifetime",
+            "retain source FQNs until unresolved edges are removed",
         );
         if source.namespace_kind() != Some(NamespaceKind::Instance)
             || !self.graph_node_has_kind(source, GraphNodeKind::Class)
@@ -341,11 +346,15 @@ impl AnalysisEngine {
             return None;
         }
         Some((
-            source.to_singleton_namespace().expect(
-                "INVARIANT VIOLATED: a class instance namespace cannot produce its singleton namespace. This is a bug because class declarations always use Namespace FQNs. Fix: keep class graph nodes namespace-owned.",
+            source.to_singleton_namespace().expect_invariant(
+                "a class instance namespace cannot produce its singleton namespace",
+                "class declarations always use Namespace FQNs",
+                "keep class graph nodes namespace-owned",
             ),
-            target.to_singleton_namespace().expect(
-                "INVARIANT VIOLATED: a class superclass cannot produce its singleton namespace. This is a bug because resolved superclass targets are class Namespace FQNs. Fix: validate graph node kinds before materializing class inheritance.",
+            target.to_singleton_namespace().expect_invariant(
+                "a class superclass cannot produce its singleton namespace",
+                "resolved superclass targets are class Namespace FQNs",
+                "validate graph node kinds before materializing class inheritance",
             ),
         ))
     }
@@ -354,10 +363,10 @@ impl AnalysisEngine {
         &self,
         unresolved: &StoredUnresolvedGraphEdgeFact,
     ) -> Option<FullyQualifiedName> {
-        let lookup = self.names.const_lookup(unresolved.target).expect(
-            "INVARIANT VIOLATED: unresolved graph edge points to missing constant lookup id. \
-             This is a bug because unresolved graph edges must only store interned constant lookup ids. \
-             Fix: intern unresolved graph edge targets before inserting facts.",
+        let lookup = self.names.const_lookup(unresolved.target).expect_invariant(
+            "unresolved graph edge points to missing constant lookup id",
+            "unresolved graph edges must only store interned constant lookup ids",
+            "intern unresolved graph edge targets before inserting facts",
         );
         let path = lookup.path.clone();
         let current_namespace = if lookup.absolute {
@@ -365,10 +374,10 @@ impl AnalysisEngine {
         } else {
             self.names
                 .fqn(lookup.context)
-                .expect(
-                    "INVARIANT VIOLATED: unresolved graph edge lookup points to missing context FQN id. \
-                     This is a bug because constant lookups must only store interned context FQN ids. \
-                     Fix: intern constant lookup contexts before inserting facts.",
+                .expect_invariant(
+                    "unresolved graph edge lookup points to missing context FQN id",
+                    "constant lookups must only store interned context FQN ids",
+                    "intern constant lookup contexts before inserting facts",
                 )
                 .namespace_parts()
         };

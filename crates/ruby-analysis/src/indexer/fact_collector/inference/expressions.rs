@@ -10,6 +10,7 @@ use crate::inference::r#type::literal::{
     LiteralAnalyzer,
 };
 use crate::inference::r#type::shape as shape_reads;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::{HashMap, HashSet};
 
@@ -61,8 +62,10 @@ impl FactCollector {
                 self.facts.direct
                     .types
                     .get(*index)
-                    .expect(
-                        "INVARIANT VIOLATED: the direct expression deduplication index points outside the append-only fact vector. This is a bug because expression indexes and facts must be appended atomically. Fix: use push_direct_expression_fact for every expression fact.",
+                    .expect_invariant(
+                        "the direct expression deduplication index points outside the append-only fact vector",
+                        "expression indexes and facts must be appended atomically",
+                        "use push_direct_expression_fact for every expression fact",
                     )
                     .ruby_type
                     == ruby_type
@@ -642,19 +645,26 @@ impl FactCollector {
             };
             if *call_expression_range == Some(range) {
                 *call_expression_range = None;
-                suppressed_candidates = suppressed_candidates.checked_add(1).expect(
-                    "INVARIANT VIOLATED: suppressed call candidate count overflowed usize. This is a bug because one file cannot contain more candidates than addressable memory. Fix: bound candidate collection by the source size.",
+                suppressed_candidates = suppressed_candidates.checked_add(1).expect_invariant(
+                    "suppressed call candidate count overflowed usize",
+                    "one file cannot contain more candidates than addressable memory",
+                    "bound candidate collection by the source size",
                 );
             }
         }
-        assert!(
+        invariant!(
             suppressed_candidates <= 1,
-            "INVARIANT VIOLATED: one {proof_kind} suppressed multiple deferred outcomes. This is a bug because each CallNode owns at most one method candidate. Fix: emit exactly one candidate for the runtime dispatch."
+            what = "one {proof_kind} suppressed multiple deferred outcomes",
+            why = "each CallNode owns at most one method candidate",
+            fix = "emit exactly one candidate for the runtime dispatch",
+            proof_kind = proof_kind,
         );
         if suppressed_candidates == 1 {
-            assert!(
+            invariant!(
                 self.expressions.deferred_calls.remove(&range),
-                "INVARIANT VIOLATED: a suppressed deferred call candidate has no collector-local range marker. This is a bug because candidate and marker lifecycles must be identical. Fix: insert and remove deferred ranges with the owning method candidate."
+                what = "a suppressed deferred call candidate has no collector-local range marker",
+                why = "candidate and marker lifecycles must be identical",
+                fix = "insert and remove deferred ranges with the owning method candidate",
             );
         }
     }
@@ -666,15 +676,20 @@ impl FactCollector {
         let mut local_read_types = self.expressions.local_reads.clone();
         local_read_types.sort_unstable_by_key(|(range, _)| *range);
         for (range, ruby_type) in &local_read_types {
-            assert!(
+            invariant!(
                 *ruby_type != RubyType::Unknown,
-                "INVARIANT VIOLATED: compact local-read evidence retained Unknown at {range:?}. This is a bug because Unknown reads belong in expression_unknown_reasons and cannot be published as concrete proof. Fix: filter unresolved TypeTracker reads while installing file evidence."
+                what = "compact local-read evidence retained Unknown at {range:?}",
+                why = "unknown reads belong in expression_unknown_reasons, not proof",
+                fix = "filter unresolved TypeTracker reads when installing evidence",
+                range = range,
             );
         }
         for adjacent in local_read_types.windows(2) {
-            assert!(
+            invariant!(
                 adjacent[0].0 != adjacent[1].0,
-                "INVARIANT VIOLATED: one local-variable read produced multiple flow types. This is a bug because bounded solver revisits must overwrite the same AST read. Fix: retain local reads in TypeTracker's range-keyed map before installing evidence."
+                what = "one local-variable read produced multiple flow types",
+                why = "bounded solver revisits must overwrite the same AST read",
+                fix = "retain local reads in TypeTracker's range-keyed map before installing evidence",
             );
         }
         local_read_types.into_boxed_slice()

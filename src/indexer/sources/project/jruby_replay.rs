@@ -3,6 +3,7 @@
 use super::IndexerProject;
 use crate::environment::runtime::jruby::imports::{JrubyImportProvider, StaticJavaNavigationPlan};
 use crate::indexer::file_processor::FileProcessor;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::info;
@@ -29,12 +30,14 @@ impl IndexerProject {
         file_processor: FileProcessor,
         server: &RubyLanguageServer,
     ) -> Result<usize> {
-        let provider = file_processor.jruby_import_provider().cloned().expect(
-            "INVARIANT VIOLATED: a JRuby catalog-sensitive replay was requested without an exact \
-             project import provider. This is a bug because replay selection and replacement must \
-             use the same isolated classpath catalog. Fix: install the completed provider on the \
-             final project FileProcessor before replay.",
-        );
+        let provider = file_processor
+            .jruby_import_provider()
+            .cloned()
+            .expect_invariant(
+                "JRuby replay requested without a project import provider",
+                "selection and replacement use one isolated classpath catalog",
+                "install the completed provider on the final FileProcessor first",
+            );
         let files = self.jruby_catalog_sensitive_files(&provider);
         let project_uri = Url::from_directory_path(&self.workspace_root).map_err(|_| {
             anyhow!(
@@ -43,15 +46,15 @@ impl IndexerProject {
             )
         })?;
         let analysis_engine = server.analysis_engine_for_uri(&project_uri);
-        let known_namespaces = self.jruby_replay_known_namespaces.take().expect(
-            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no immutable pre-collection \
-             namespace baseline. This is a bug because replayed files must use the same semantic \
-             context as provider-aware project batches regardless of concurrent dependency \
-             binding. Fix: retain the generation-owned baseline through exhaustive project \
-             completion and consume it exactly once during replay.",
+        let known_namespaces = self.jruby_replay_known_namespaces.take().expect_invariant(
+            "JRuby replay has no immutable pre-collection namespace baseline",
+            "replayed files use the same context as provider-aware batches",
+            "keep the generation baseline through completion; consume it once in replay",
         );
-        let semantic_read_engine = self.jruby_replay_analysis_engine.take().expect(
-            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no immutable pre-collection semantic engine. This is a bug because providerless and provider-aware collection must observe the same generation-owned facts. Fix: retain the project collection baseline through replay and consume it exactly once."
+        let semantic_read_engine = self.jruby_replay_analysis_engine.take().expect_invariant(
+            "JRuby replay has no immutable pre-collection semantic engine",
+            "providerless and provider-aware collection see the same facts",
+            "keep the collection baseline through replay; consume it once",
         );
         let replay_started = Instant::now();
         let outcomes = files
@@ -73,9 +76,11 @@ impl IndexerProject {
                     let source_snapshot = {
                         let engine = analysis_engine.read();
                         let Some(file_id) = engine.file_id(file_path) else {
-                            panic!(
-                                "INVARIANT VIOLATED: JRuby project replay received an unregistered source {}. This is a bug because replay is selected only from the completed project pass. Fix: preserve project source registration through provider materialization.",
-                                file_path.display()
+                            unreachable_invariant!(
+                                what = "JRuby project replay received an unregistered source {}",
+                                why = "replay is selected only from the completed project pass",
+                                fix = "preserve project source registration through provider materialization",
+                                file_path.display(),
                             );
                         };
                         if open_document && !engine.file_content_matches(file_id, &content) {
@@ -86,9 +91,11 @@ impl IndexerProject {
                             return Ok(None);
                         }
                         engine.source_snapshot_for_path(file_path).unwrap_or_else(|| {
-                            panic!(
-                                "INVARIANT VIOLATED: JRuby project replay lost source revision for {}. This is a bug because every registered source has one monotonic revision. Fix: keep source registration and revision capture atomic.",
-                                file_path.display()
+                            unreachable_invariant!(
+                                what = "JRuby project replay lost source revision for {}",
+                                why = "every registered source has one monotonic revision",
+                                fix = "keep source registration and revision capture atomic",
+                                file_path.display(),
                             )
                         })
                     };
@@ -177,10 +184,12 @@ impl IndexerProject {
     pub(crate) fn discard_jruby_replay_semantic_context(&mut self) {
         let known_namespaces = self.jruby_replay_known_namespaces.take();
         let semantic_engine = self.jruby_replay_analysis_engine.take();
-        assert_eq!(
+        invariant_eq!(
             known_namespaces.is_some(),
             semantic_engine.is_some(),
-            "INVARIANT VIOLATED: JRuby replay namespace and semantic-engine ownership diverged. This is a bug because both snapshots are created and consumed as one generation-owned context. Fix: move or discard both fields in the same lifecycle transition."
+            what = "JRuby replay namespace and semantic-engine ownership diverged",
+            why = "both snapshots are created and consumed as one generation-owned context",
+            fix = "move or discard both fields in the same lifecycle transition",
         );
     }
 }

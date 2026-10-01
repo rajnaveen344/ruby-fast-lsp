@@ -6,6 +6,7 @@ use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, R
 use crate::engine::{AnalysisQuery, VariableTypeKind};
 use crate::indexer::{MethodReceiver, RubyDocument};
 use crate::inference::method::return_type::method_call_return_type;
+use crate::invariant::ExpectInvariant;
 
 pub struct ReceiverResolutionContext<'a, 'q> {
     pub query: Option<&'q AnalysisQuery<'a>>,
@@ -173,8 +174,10 @@ fn variable_receiver_type(
             }
 
             let query = context.query?;
-            let scope_id = u32::try_from(scope_id).expect(
-                "INVARIANT VIOLATED: local variable scope id exceeded u32. This is a bug because analysis TypeSubject stores scope ids as u32. Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
+            let scope_id = u32::try_from(scope_id).expect_invariant(
+                "local variable scope id exceeded u32",
+                "analysis TypeSubject stores scope ids as u32",
+                "widen TypeSubject scope ids before storing more than u32::MAX scopes",
             );
             return query.local_variable_type_at(var_name, scope_id, file_id, context.byte_offset);
         }
@@ -242,18 +245,18 @@ fn fallback_type_to_namespace(ruby_type: &RubyType) -> Option<FullyQualifiedName
             ))
         }
         RubyType::Array(_) => Some(FullyQualifiedName::namespace_with_kind(
-            vec![RubyConstant::new("Array").expect(
-                "INVARIANT VIOLATED: built-in constant `Array` is invalid. \
-                 This is a bug because Ruby built-in constants must be valid Ruby constants. \
-                 Fix: correct the hard-coded built-in constant name.",
+            vec![RubyConstant::new("Array").expect_invariant(
+                "built-in constant `Array` is invalid",
+                "ruby built-in constants must be valid Ruby constants",
+                "correct the hard-coded built-in constant name",
             )],
             NamespaceKind::Instance,
         )),
         RubyType::Hash(_, _) | RubyType::Shape(_) => Some(FullyQualifiedName::namespace_with_kind(
-            vec![RubyConstant::new("Hash").expect(
-                "INVARIANT VIOLATED: built-in constant `Hash` is invalid. \
-                 This is a bug because Ruby built-in constants must be valid Ruby constants. \
-                 Fix: correct the hard-coded built-in constant name.",
+            vec![RubyConstant::new("Hash").expect_invariant(
+                "built-in constant `Hash` is invalid",
+                "ruby built-in constants must be valid Ruby constants",
+                "correct the hard-coded built-in constant name",
             )],
             NamespaceKind::Instance,
         )),

@@ -3,6 +3,7 @@
 //! Ruby target classification and reusable semantic lookup live in
 //! `ruby-analysis`; this module builds the protocol-facing hover text.
 
+use crate::invariant::ExpectInvariant;
 use parking_lot::RwLock;
 use ruby_analysis::core::RubyType;
 use ruby_analysis::core::{
@@ -125,8 +126,12 @@ fn local_binding_hover(
             Some((RubyType::Unknown, reason)) => reason,
             // A flow-owned Unknown cannot borrow an older concrete assignment.
             Some((_, None)) | None => None,
-            Some((ruby_type, Some(reason))) => panic!(
-                "INVARIANT VIOLATED: concrete local type `{ruby_type}` carried Unknown reason `{}`. This is a bug because proof-failure evidence belongs only to Unknown. Fix: keep expression outcomes mutually exclusive.", reason.code()
+            Some((ruby_type, Some(reason))) => unreachable_invariant!(
+                what = "concrete local type `{ruby_type}` carried Unknown reason `{}`",
+                why = "proof-failure evidence belongs only to Unknown",
+                fix = "keep expression outcomes mutually exclusive",
+                reason.code(),
+                ruby_type = ruby_type,
             ),
         }
     } else {
@@ -154,10 +159,10 @@ fn get_type_from_type_query(
     let file_id = doc.analysis_file_id();
     let position = doc.offset_to_position(byte_offset as usize);
     let scope_id = doc.find_scope_for_variable_at(name, position)?;
-    let scope_id = u32::try_from(scope_id).expect(
-        "INVARIANT VIOLATED: local variable scope id exceeded u32. \
-         This is a bug because analysis TypeSubject stores scope ids as u32. \
-         Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
+    let scope_id = u32::try_from(scope_id).expect_invariant(
+        "local variable scope id exceeded u32",
+        "analysis TypeSubject stores scope ids as u32",
+        "widen TypeSubject scope ids before storing more than u32::MAX scopes",
     );
     drop(doc);
 
@@ -269,9 +274,12 @@ pub fn generate_method_hover(node: &HoverTarget, context: &HoverContext) -> Opti
             Some((ruby_type, None)) => {
                 return Some(HoverInfo::ruby_code(ruby_type.to_string()));
             }
-            Some((ruby_type, Some(reason))) => panic!(
-                "INVARIANT VIOLATED: concrete call type `{ruby_type}` carried Unknown reason `{}`. This is a bug because proof-failure evidence belongs only to RubyType::Unknown. Fix: attach expression reasons only when the exact call outcome is Unknown.",
-                reason.code()
+            Some((ruby_type, Some(reason))) => unreachable_invariant!(
+                what = "concrete call type `{ruby_type}` carried Unknown reason `{}`",
+                why = "proof-failure evidence belongs only to RubyType::Unknown",
+                fix = "attach expression reasons only when the exact call outcome is Unknown",
+                reason.code(),
+                ruby_type = ruby_type,
             ),
             None => {}
         }
@@ -290,8 +298,11 @@ pub fn generate_method_hover(node: &HoverTarget, context: &HoverContext) -> Opti
     match return_type {
         Some(t) if t != RubyType::Unknown => Some(HoverInfo::ruby_code(t.to_string())),
         Some(RubyType::Unknown) | None => Some(HoverInfo::text("?".to_string())),
-        Some(t) => panic!(
-            "INVARIANT VIOLATED: method hover matched an unhandled concrete return type `{t}`. This is a bug because the preceding guard accepts every non-Unknown RubyType. Fix: keep hover return projection exhaustive."
+        Some(t) => unreachable_invariant!(
+            what = "method hover matched an unhandled concrete return type `{t}`",
+            why = "the preceding guard accepts every non-Unknown RubyType",
+            fix = "keep hover return projection exhaustive",
+            t = t,
         ),
     }
 }
@@ -360,9 +371,11 @@ fn binding_hover(
     reason: Option<UnknownReason>,
     kind: &str,
 ) -> HoverInfo {
-    assert!(
+    invariant!(
         reason.is_none() || *ruby_type == RubyType::Unknown,
-        "INVARIANT VIOLATED: a concrete binding hover carries an Unknown reason. This is a bug because proof states are mutually exclusive. Fix: attach reasons only to Unknown types."
+        what = "a concrete binding hover carries an Unknown reason",
+        why = "proof states are mutually exclusive",
+        fix = "attach reasons only to Unknown types",
     );
     let mut hover = HoverInfo::ruby_code(format!("{name}: {ruby_type} # {kind}"));
     if let Some(reason) = reason {
@@ -433,8 +446,11 @@ fn expression_type_from_analysis(
         None => query
             .expression_unknown_reason_at(file_id, byte_offset)
             .map(|reason| (RubyType::Unknown, Some(reason))),
-        Some(ruby_type) => panic!(
-            "INVARIANT VIOLATED: concrete expression type `{ruby_type}` bypassed the concrete hover branch. This is a bug because the first match arm accepts every non-Unknown RubyType. Fix: keep expression hover projection exhaustive."
+        Some(ruby_type) => unreachable_invariant!(
+            what = "concrete expression type `{ruby_type}` bypassed the concrete hover branch",
+            why = "the first match arm accepts every non-Unknown RubyType",
+            fix = "keep expression hover projection exhaustive",
+            ruby_type = ruby_type,
         ),
     }
 }
@@ -453,12 +469,17 @@ fn call_expression_outcome_from_analysis(
     match (outcome.proven_type(), outcome.unknown_reason()) {
         (Some(ruby_type), None) => Some((ruby_type.clone(), None)),
         (None, Some(reason)) => Some((RubyType::Unknown, Some(reason))),
-        (Some(ruby_type), Some(reason)) => panic!(
-            "INVARIANT VIOLATED: proven call type `{ruby_type}` carried Unknown reason `{}`. This is a bug because TypeInferenceOutcome must represent exactly one proof state. Fix: construct call outcomes through TypeInferenceOutcome::proven or TypeInferenceOutcome::unknown.",
-            reason.code()
+        (Some(ruby_type), Some(reason)) => unreachable_invariant!(
+            what = "proven call type `{ruby_type}` carried Unknown reason `{}`",
+            why = "an outcome has exactly one proof state",
+            fix = "build outcomes via TypeInferenceOutcome::proven or ::unknown",
+            reason.code(),
+            ruby_type = ruby_type,
         ),
-        (None, None) => panic!(
-            "INVARIANT VIOLATED: a call inference outcome has neither a proven type nor an Unknown reason. This is a bug because TypeInferenceOutcome must represent exactly one proof state. Fix: keep its state representation exhaustive."
+        (None, None) => unreachable_invariant!(
+            what = "a call inference outcome has neither a proven type nor an Unknown reason",
+            why = "TypeInferenceOutcome must represent exactly one proof state",
+            fix = "keep its state representation exhaustive",
         ),
     }
 }

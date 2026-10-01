@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use parking_lot::Mutex;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -38,11 +39,14 @@ struct StageState {
 
 impl StageState {
     fn outstanding_len(&self) -> usize {
-        self.pending.len().checked_add(self.in_flight.len()).expect(
-            "INVARIANT VIOLATED: navigation demand outstanding-key count overflowed. This is \
-                 a bug because admission caps each stage at a tiny fixed bound. Fix: keep all \
-                 demand insertion routed through the bounded controller.",
-        )
+        self.pending
+            .len()
+            .checked_add(self.in_flight.len())
+            .expect_invariant(
+                "navigation demand outstanding-key count overflowed",
+                "admission caps each stage at a tiny fixed bound",
+                "keep all demand insertion routed through the bounded controller",
+            )
     }
 }
 
@@ -95,20 +99,22 @@ impl Default for NavigationDemandController {
 
 impl NavigationDemandController {
     pub(crate) fn begin_generation(&self, generation: u64) {
-        assert!(
+        invariant!(
             generation > 0,
-            "INVARIANT VIOLATED: navigation demand generation is zero. This is a bug because \
-             project indexing generations begin at one. Fix: call begin_generation only with \
-             the exact IndexingRun generation."
+            what = "navigation demand generation is zero",
+            why = "project indexing generations begin at one",
+            fix = "call begin_generation only with the exact IndexingRun generation",
         );
         {
             let mut state = self.inner.state.lock();
             if let Some(previous) = state.generation {
-                assert!(
+                invariant!(
                     generation > previous,
-                    "INVARIANT VIOLATED: navigation demand generation moved from {previous} to \
-                     {generation}. This is a bug because replacement indexing generations must \
-                     increase monotonically. Fix: begin demands from the exact new IndexingRun."
+                    what = "navigation demand generation moved from {previous} to {generation}",
+                    why = "replacement indexing generations must increase monotonically",
+                    fix = "begin demands from the exact new IndexingRun",
+                    previous = previous,
+                    generation = generation,
                 );
             }
             *state = NavigationDemandState {
@@ -127,11 +133,12 @@ impl NavigationDemandController {
         stage: NavigationDemandStage,
         key: &str,
     ) -> NavigationDemandTicket {
-        assert!(
+        invariant!(
             !key.is_empty() && key.chars().all(char::is_alphanumeric),
-            "INVARIANT VIOLATED: navigation demand key `{key}` is not normalized. This is a bug \
-             because demand selection accepts semantic identifiers, never paths or arbitrary \
-             request text. Fix: normalize the identifier at the query adapter boundary."
+            what = "navigation demand key `{key}` is not normalized",
+            why = "demand selection accepts semantic identifiers, never paths or arbitrary request text",
+            fix = "normalize the identifier at the query adapter boundary",
+            key = key,
         );
         let mut immediate = None;
         let mut inserted = false;
@@ -153,11 +160,11 @@ impl NavigationDemandController {
                     immediate = Some(NavigationDemandOutcome::Saturated);
                 } else {
                     inserted = stage_state.pending.insert(key.to_string());
-                    assert!(
+                    invariant!(
                         inserted,
-                        "INVARIANT VIOLATED: a new navigation demand key was not inserted. This \
-                         is a bug because pending and in-flight duplicate cases were handled \
-                         above. Fix: keep duplicate detection and insertion under one state lock."
+                        what = "a new navigation demand key was not inserted",
+                        why = "pending and in-flight duplicate cases were handled above",
+                        fix = "keep duplicate detection and insertion under one state lock",
                     );
                 }
             }
@@ -187,11 +194,12 @@ impl NavigationDemandController {
             }
             let pending = std::mem::take(&mut stage_state.pending);
             for key in &pending {
-                assert!(
+                invariant!(
                     stage_state.in_flight.insert(key.clone()),
-                    "INVARIANT VIOLATED: drained navigation key `{key}` was already in flight. \
-                     This is a bug because request deduplication and drain run under one state \
-                     lock. Fix: never copy a key between pending and in-flight sets."
+                    what = "drained navigation key `{key}` was already in flight",
+                    why = "request deduplication and drain run under one state lock",
+                    fix = "never copy a key between pending and in-flight sets",
+                    key = key,
                 );
             }
             pending.into_iter().collect::<Vec<_>>()
@@ -208,11 +216,12 @@ impl NavigationDemandController {
         stage: NavigationDemandStage,
         key: &str,
     ) -> bool {
-        assert!(
+        invariant!(
             !key.is_empty() && key.chars().all(char::is_alphanumeric),
-            "INVARIANT VIOLATED: coordinator navigation key `{key}` is not normalized. This is \
-             a bug because exact input completion must use the same identity as request \
-             admission. Fix: derive coordinator keys through normalize_navigation_key."
+            what = "coordinator navigation key `{key}` is not normalized",
+            why = "exact input completion must use the same identity as request admission",
+            fix = "derive coordinator keys through normalize_navigation_key",
+            key = key,
         );
         let mut moved_to_in_flight = false;
         let requested = {
@@ -226,11 +235,12 @@ impl NavigationDemandController {
                 } else if stage_state.in_flight.contains(key) {
                     true
                 } else if stage_state.pending.remove(key) {
-                    assert!(
+                    invariant!(
                         stage_state.in_flight.insert(key.to_string()),
-                        "INVARIANT VIOLATED: pending navigation key `{key}` was already in \
-                         flight. This is a bug because both sets are mutated under one lock. \
-                         Fix: keep claim transitions atomic."
+                        what = "pending navigation key `{key}` was already in flight",
+                        why = "both sets are mutated under one lock",
+                        fix = "keep claim transitions atomic",
+                        key = key,
                     );
                     moved_to_in_flight = true;
                     true
@@ -259,12 +269,12 @@ impl NavigationDemandController {
             let stage_state = state.stage_mut(stage);
             let mut changed = false;
             for key in keys {
-                assert!(
+                invariant!(
                     stage_state.in_flight.remove(key),
-                    "INVARIANT VIOLATED: completed navigation key `{key}` was not in flight. \
-                     This is a coordinator bug because only drained keys may be completed. Fix: \
-                     retain the exact drained key list until its bounded semantic insertion \
-                     finishes."
+                    what = "completed navigation key `{key}` was not in flight",
+                    why = "only drained keys may be completed",
+                    fix = "retain the exact drained key list until its bounded semantic insertion finishes",
+                    key = key,
                 );
                 changed |= stage_state.processed.insert(key.clone());
             }
@@ -340,10 +350,10 @@ impl NavigationDemandController {
 
     fn notify_change(&self) {
         self.inner.changed.send_modify(|revision| {
-            *revision = revision.checked_add(1).expect(
-                "INVARIANT VIOLATED: navigation demand revision overflowed. This is a bug because \
-                 one process cannot publish 2^64 demand changes. Fix: inspect the request loop \
-                 causing unbounded demand churn.",
+            *revision = revision.checked_add(1).expect_invariant(
+                "navigation demand revision overflowed",
+                "one process cannot publish 2^64 demand changes",
+                "inspect the request loop causing unbounded demand churn",
             );
         });
     }
@@ -380,11 +390,10 @@ impl NavigationDemandTicket {
             {
                 return outcome;
             }
-            self.changed.changed().await.expect(
-                "INVARIANT VIOLATED: navigation demand change channel closed while a ticket \
-                 retained its controller. This is a bug because the ticket's strong controller \
-                 reference keeps the sender alive. Fix: keep ticket ownership and the change \
-                 sender in the same shared controller.",
+            self.changed.changed().await.expect_invariant(
+                "navigation demand change channel closed while a ticket retained its controller",
+                "the ticket's strong controller reference keeps the sender alive",
+                "keep ticket ownership and the change sender in the same shared controller",
             );
         }
     }

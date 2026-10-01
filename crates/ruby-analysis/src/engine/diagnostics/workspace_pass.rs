@@ -1,6 +1,7 @@
 //! Whole-workspace resolve pass: turns every stored reference candidate into
 //! resolved references, call outcomes, and rebuilt diagnostics.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -55,31 +56,32 @@ impl AnalysisEngine {
                     );
                 }
                 StoredReferenceCandidateRef::Constant(candidate) => {
-                    let lookup = self.names.const_lookup(candidate.lookup).expect(
-                        "INVARIANT VIOLATED: reference candidate points to missing constant lookup. \
-                         This is a bug because stored reference candidates must only contain interned lookup ids. \
-                         Fix: intern constant lookups before inserting candidates.",
+                    let lookup = self.names.const_lookup(candidate.lookup).expect_invariant(
+                        "reference candidate points to missing constant lookup",
+                        "stored reference candidates must only contain interned lookup ids",
+                        "intern constant lookups before inserting candidates",
                     );
                     let parts = lookup.path.to_vec();
-                    let context = self.names.fqn(lookup.context).expect(
-                        "INVARIANT VIOLATED: constant lookup points to missing context FQN id. \
-                         This is a bug because constant lookups must only store interned context FQN ids. \
-                         Fix: intern lookup contexts before inserting candidates.",
+                    let context = self.names.fqn(lookup.context).expect_invariant(
+                        "constant lookup points to missing context FQN id",
+                        "constant lookups must only store interned context FQN ids",
+                        "intern lookup contexts before inserting candidates",
                     );
                     let target = if let Some(target) = constant_target_cache.get(&candidate.lookup)
                     {
-                        stats.constant_cache_hits = stats.constant_cache_hits.checked_add(1).expect(
-                            "INVARIANT VIOLATED: constant resolve-cache hit counter overflowed usize. \
-                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
-                             Fix: inspect corrupt resolve instrumentation.",
-                        );
+                        stats.constant_cache_hits =
+                            stats.constant_cache_hits.checked_add(1).expect_invariant(
+                                "constant resolve-cache hit counter overflowed usize",
+                                "one resolve pass cannot exceed addressable memory operations",
+                                "inspect corrupt resolve instrumentation",
+                            );
                         *target
                     } else {
                         stats.constant_cache_misses =
-                            stats.constant_cache_misses.checked_add(1).expect(
-                                "INVARIANT VIOLATED: constant resolve-cache miss counter overflowed usize. \
-                                 This is a bug because one resolve pass cannot exceed addressable memory operations. \
-                                 Fix: inspect corrupt resolve instrumentation.",
+                            stats.constant_cache_misses.checked_add(1).expect_invariant(
+                                "constant resolve-cache miss counter overflowed usize",
+                                "one resolve pass cannot exceed addressable memory operations",
+                                "inspect corrupt resolve instrumentation",
                             );
                         let target = self
                             .resolve_constant_reference(
@@ -137,22 +139,28 @@ impl AnalysisEngine {
                         stats.deferred_receiver_candidates = stats
                             .deferred_receiver_candidates
                             .checked_add(1)
-                            .expect(
-                                "INVARIANT VIOLATED: deferred-receiver candidate counter overflowed usize. This is a bug because one resolve pass cannot contain more candidates than addressable memory. Fix: inspect corrupt reference-candidate storage.",
+                            .expect_invariant(
+                                "deferred-receiver candidate counter overflowed usize",
+                                "one resolve pass cannot contain more candidates than addressable memory",
+                                "inspect corrupt reference-candidate storage",
                             );
                         if effective_receiver_type.is_some() {
                             stats.deferred_receiver_proven = stats
                                 .deferred_receiver_proven
                                 .checked_add(1)
-                                .expect(
-                                    "INVARIANT VIOLATED: proven deferred-receiver counter overflowed usize. This is a bug because proven receivers are a subset of addressable candidates. Fix: inspect corrupt resolve instrumentation.",
+                                .expect_invariant(
+                                    "proven deferred-receiver counter overflowed usize",
+                                    "proven receivers are a subset of addressable candidates",
+                                    "inspect corrupt resolve instrumentation",
                                 );
                         } else {
                             stats.deferred_receiver_unknown = stats
                                 .deferred_receiver_unknown
                                 .checked_add(1)
-                                .expect(
-                                    "INVARIANT VIOLATED: Unknown deferred-receiver counter overflowed usize. This is a bug because Unknown receivers are a subset of addressable candidates. Fix: inspect corrupt resolve instrumentation.",
+                                .expect_invariant(
+                                    "Unknown deferred-receiver counter overflowed usize",
+                                    "unknown receivers are a subset of addressable candidates",
+                                    "inspect corrupt resolve instrumentation",
                                 );
                         }
                     }
@@ -265,8 +273,10 @@ impl AnalysisEngine {
                             }
                             continue;
                         };
-                        let owner_kind = owner_fqn.namespace_kind().expect(
-                            "INVARIANT VIOLATED: a proven receiver namespace has no namespace kind. This is a bug because type-to-namespace conversion must return a Namespace FQN. Fix: keep receiver proof conversion in AnalysisQuery::type_to_namespace.",
+                        let owner_kind = owner_fqn.namespace_kind().expect_invariant(
+                            "a proven receiver namespace has no namespace kind",
+                            "type-to-namespace conversion must return a Namespace FQN",
+                            "keep receiver proof conversion in AnalysisQuery::type_to_namespace",
                         );
                         let root = self
                             .names
@@ -306,17 +316,19 @@ impl AnalysisEngine {
                         }
                     });
                     if cached {
-                        stats.method_cache_hits = stats.method_cache_hits.checked_add(1).expect(
-                            "INVARIANT VIOLATED: method resolve-cache hit counter overflowed usize. \
-                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
-                             Fix: inspect corrupt resolve instrumentation.",
-                        );
+                        stats.method_cache_hits =
+                            stats.method_cache_hits.checked_add(1).expect_invariant(
+                                "method resolve-cache hit counter overflowed usize",
+                                "one resolve pass cannot exceed addressable memory operations",
+                                "inspect corrupt resolve instrumentation",
+                            );
                     } else {
-                        stats.method_cache_misses = stats.method_cache_misses.checked_add(1).expect(
-                            "INVARIANT VIOLATED: method resolve-cache miss counter overflowed usize. \
-                             This is a bug because one resolve pass cannot exceed addressable memory operations. \
-                             Fix: inspect corrupt resolve instrumentation.",
-                        );
+                        stats.method_cache_misses =
+                            stats.method_cache_misses.checked_add(1).expect_invariant(
+                                "method resolve-cache miss counter overflowed usize",
+                                "one resolve pass cannot exceed addressable memory operations",
+                                "inspect corrupt resolve instrumentation",
+                            );
                     }
                     let mut fact = fact.clone();
                     if candidate.access == MethodReferenceAccess::Normal
@@ -535,10 +547,10 @@ fn method_reference_owner_fqn(
     owner: ConstLookupId,
     owner_kind: NamespaceKind,
 ) -> FullyQualifiedName {
-    let owner_lookup = engine.names.const_lookup(owner).expect(
-        "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
-         This is a bug because stored reference candidates must only contain interned lookup ids. \
-         Fix: intern constant lookups before inserting candidates.",
+    let owner_lookup = engine.names.const_lookup(owner).expect_invariant(
+        "method reference candidate points to missing owner lookup",
+        "stored reference candidates must only contain interned lookup ids",
+        "intern constant lookups before inserting candidates",
     );
     FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind)
 }

@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -150,11 +151,11 @@ fn resolved_core_callees_for_call_analysis(
 
 fn resolved_callee_to_abi(callee: ruby_analysis::core::ResolvedMethodCallee) -> ResolvedCallee {
     let owner_kind = callee.owner.namespace_kind().unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: analysis resolved extension callee owner `{}` is not a namespace. \
-             This is a bug because extension callee owners must be namespaces. \
-             Fix: keep AnalysisQuery::resolve_method_callees returning namespace owners.",
-            callee.owner
+        unreachable_invariant!(
+            what = "analysis resolved extension callee owner `{}` is not a namespace",
+            why = "extension callee owners must be namespaces",
+            fix = "keep AnalysisQuery::resolve_method_callees returning namespace owners",
+            callee.owner,
         )
     });
     ResolvedCallee {
@@ -177,10 +178,10 @@ fn core_method_receiver_from_node(visitor: &FactCollector, node: &Node) -> CoreM
         CoreMethodReceiver::Constant(vec![RubyConstant::new(utils::utf8_str(
             constant.name().as_slice(),
         ))
-        .expect(
-            "INVARIANT VIOLATED: Prism returned an invalid constant-read name. \
-             This is a bug because Prism constant names must be valid Ruby constants. \
-             Fix: inspect constant receiver conversion.",
+        .expect_invariant(
+            "Prism returned an invalid constant-read name",
+            "prism constant names must be valid Ruby constants",
+            "inspect constant receiver conversion",
         )])
     } else if let Some(path) = node.as_constant_path_node() {
         let mut parts = Vec::new();

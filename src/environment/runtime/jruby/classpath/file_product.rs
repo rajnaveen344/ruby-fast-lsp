@@ -1,5 +1,6 @@
 //! Process-shared, identity-checked fingerprints and manifest descriptors for classpath files.
 
+use crate::invariant::ExpectInvariant;
 use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightSnapshot};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, Metadata};
@@ -39,17 +40,25 @@ impl ClasspathFileProduct {
         self.manifest_class_path_entries
             .iter()
             .try_fold(512u64, |total, entry| {
-                total.checked_add(u64::try_from(entry.len()).expect(
-                    "INVARIANT VIOLATED: a manifest entry length does not fit u64. This is a bug because manifest input is bounded to one MiB. Fix: retain bounded manifest parsing before caching its logical entries.",
+                total.checked_add(u64::try_from(entry.len()).expect_invariant(
+                    "a manifest entry length does not fit u64",
+                    "manifest input is bounded to one MiB",
+                    "retain bounded manifest parsing before caching its logical entries",
                 ))
             })
             .and_then(|total| {
-                total.checked_add(u64::try_from(self.fingerprint_sha256.len()).expect(
-                    "INVARIANT VIOLATED: a SHA-256 string length does not fit u64. This is a bug because its encoded length is fixed at 64 bytes. Fix: keep fingerprints as bounded SHA-256 hex strings.",
-                ))
+                total.checked_add(
+                    u64::try_from(self.fingerprint_sha256.len()).expect_invariant(
+                        "a SHA-256 string length does not fit u64",
+                        "its encoded length is fixed at 64 bytes",
+                        "keep fingerprints as bounded SHA-256 hex strings",
+                    ),
+                )
             })
-            .expect(
-                "INVARIANT VIOLATED: retained classpath descriptor weight overflowed u64. This is a bug because manifest payloads and cache entry counts are bounded. Fix: inspect descriptor weight accounting.",
+            .expect_invariant(
+                "retained classpath descriptor weight overflowed u64",
+                "manifest payloads and cache entry counts are bounded",
+                "inspect descriptor weight accounting",
             )
     }
 }
@@ -177,8 +186,10 @@ pub(super) fn read_classpath_file_product(
             path: path.to_path_buf(),
             message: error.to_string(),
         })?;
-    if u64::try_from(bytes.len()).expect(
-        "INVARIANT VIOLATED: an in-memory classpath buffer length does not fit u64. This is a bug because the read is bounded far below u64::MAX. Fix: keep classpath read bounds below the addressable process size.",
+    if u64::try_from(bytes.len()).expect_invariant(
+        "an in-memory classpath buffer length does not fit u64",
+        "the read is bounded far below u64::MAX",
+        "keep classpath read bounds below the addressable process size",
     ) > max_file_bytes
     {
         return Err(ClasspathError::LimitExceeded("classpath artifact bytes"));
@@ -191,8 +202,10 @@ pub(super) fn read_classpath_file_product(
         })
         .and_then(|metadata| classpath_file_identity_from_metadata(path, &metadata))?;
     let path_after_identity = classpath_file_identity(path)?;
-    if u64::try_from(bytes.len()).expect(
-        "INVARIANT VIOLATED: an in-memory classpath buffer length does not fit u64. This is a bug because the read is bounded far below u64::MAX. Fix: keep classpath read bounds below the addressable process size.",
+    if u64::try_from(bytes.len()).expect_invariant(
+        "an in-memory classpath buffer length does not fit u64",
+        "the read is bounded far below u64::MAX",
+        "keep classpath read bounds below the addressable process size",
     ) != expected_identity.byte_length
         || handle_after_identity != expected_identity
         || path_after_identity != expected_identity

@@ -5,6 +5,7 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeKind, MethodParamFact, MethodParamKind, RubyConstant,
     SourceFileId, TextRange,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{AliasMethodNode, CallNode, ConstantPathNode, DefNode, Node};
 
 use crate::indexer::constant_path_is_absolute;
@@ -342,10 +343,10 @@ pub(super) fn terminal_name_range(
     name: &[u8],
 ) -> TextRange {
     let end = path.end_offset();
-    let start = end.checked_sub(name.len()).expect(
-        "INVARIANT VIOLATED: constant name is longer than its Prism path location. \
-         This is a bug because the terminal name must be contained in the constant path. \
-         Fix: inspect Prism constant path locations before deriving declaration ranges.",
+    let start = end.checked_sub(name.len()).expect_invariant(
+        "constant name is longer than its Prism path location",
+        "the terminal name must be contained in the constant path",
+        "inspect Prism constant path locations before deriving declaration ranges",
     );
     TextRange::new(file_id, u32_offset(start), u32_offset(end))
 }
@@ -359,9 +360,9 @@ pub(super) fn class_implicitly_inherits_object(fqn: &FullyQualifiedName) -> bool
 }
 
 pub(super) fn u32_offset(offset: usize) -> u32 {
-    u32::try_from(offset).expect(
-        "INVARIANT VIOLATED: source byte offset exceeded u32. \
-         This is a bug because analysis facts currently store u32 ranges. \
-         Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+    u32::try_from(offset).expect_invariant(
+        "source byte offset exceeded u32",
+        "analysis facts currently store u32 ranges",
+        "widen TextRange offsets before indexing files larger than u32::MAX bytes",
     )
 }

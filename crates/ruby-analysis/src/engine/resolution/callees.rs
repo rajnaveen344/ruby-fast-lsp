@@ -16,6 +16,7 @@ use crate::core::{
 use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
 use crate::engine::queries::definitions::DefinitionLookupChains;
 use crate::engine::queries::AnalysisQuery;
+use crate::invariant::ExpectInvariant;
 
 impl<'a> AnalysisQuery<'a> {
     pub(in crate::engine) fn method_candidate_callees(
@@ -30,9 +31,15 @@ impl<'a> AnalysisQuery<'a> {
         candidate: &StoredMethodReferenceCandidate,
         mut lookup_chains: Option<&mut DefinitionLookupChains>,
     ) -> Vec<ResolvedMethodCallee> {
-        let owner_lookup = self.engine.names.const_lookup(candidate.owner).expect(
-            "INVARIANT VIOLATED: method rename candidate points to a missing owner lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern method owners before storing candidates.",
-        );
+        let owner_lookup = self
+            .engine
+            .names
+            .const_lookup(candidate.owner)
+            .expect_invariant(
+                "method rename candidate points to a missing owner lookup",
+                "candidates contain only interned lookup ids",
+                "intern method owners before storing candidates",
+            );
         let owner = FullyQualifiedName::namespace_with_kind(
             owner_lookup.path.to_vec(),
             candidate.owner_kind,
@@ -42,17 +49,27 @@ impl<'a> AnalysisQuery<'a> {
             .as_deref()
             .and_then(|diagnostics| diagnostics.receiver_type.as_deref())
             .filter(|receiver_type| matches!(receiver_type, RubyType::Union(_)));
-        assert!(
+        invariant!(
             grouped_receiver_type.is_none() || !candidate.is_super,
-            "INVARIANT VIOLATED: a super reference carries grouped receiver metadata. This is a bug because super has one lexical owner chain rather than a value receiver union. Fix: attach receiver_type only to explicit call-node receiver inference."
+            what = "a super reference carries grouped receiver metadata",
+            why = "super has one lexical owner chain rather than a value receiver union",
+            fix = "attach receiver_type only to explicit call-node receiver inference",
         );
         let callees = if let Some(receiver_type) = grouped_receiver_type {
             match candidate.access {
-                MethodReferenceAccess::InstanceMethodReflection => panic!(
-                    "INVARIANT VIOLATED: instance-method reflection has a grouped value receiver. This is a bug because reflection names one namespace. Fix: collect reflection separately from value dispatch."
+                MethodReferenceAccess::InstanceMethodReflection => unreachable_invariant!(
+                    what = "instance-method reflection has a grouped value receiver",
+                    why = "reflection names one namespace",
+                    fix = "collect reflection separately from value dispatch",
                 ),
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass => self
-                    .resolve_method_callees_for_type_inner(receiver_type, &candidate.method, true, None, lookup_chains.as_deref_mut())
+                    .resolve_method_callees_for_type_inner(
+                        receiver_type,
+                        &candidate.method,
+                        true,
+                        None,
+                        lookup_chains.as_deref_mut(),
+                    )
                     .unwrap_or_default(),
                 MethodReferenceAccess::ExplicitReceiver => {
                     let protected = candidate
@@ -68,8 +85,10 @@ impl<'a> AnalysisQuery<'a> {
                             owners.sort_by_key(ToString::to_string);
                             owners.dedup();
                             let caller = if owners.len() == 1 {
-                                owners.pop().expect(
-                                    "INVARIANT VIOLATED: one grouped rename caller owner disappeared after length validation. This is a bug because caller selection must be atomic. Fix: keep the local owner vector unchanged before pop.",
+                                owners.pop().expect_invariant(
+                                    "one grouped rename caller owner disappeared after length validation",
+                                    "caller selection must be atomic",
+                                    "keep the local owner vector unchanged before pop",
                                 )
                             } else {
                                 FullyQualifiedName::namespace(caller.namespace_parts())
@@ -78,7 +97,13 @@ impl<'a> AnalysisQuery<'a> {
                         });
                     protected
                         .or_else(|| {
-                            self.resolve_method_callees_for_type_inner(receiver_type, &candidate.method, false, None, lookup_chains.as_deref_mut())
+                            self.resolve_method_callees_for_type_inner(
+                                receiver_type,
+                                &candidate.method,
+                                false,
+                                None,
+                                lookup_chains.as_deref_mut(),
+                            )
                         })
                         .unwrap_or_default()
                 }
@@ -125,8 +150,10 @@ impl<'a> AnalysisQuery<'a> {
                             owners.sort_by_key(ToString::to_string);
                             owners.dedup();
                             let caller = if owners.len() == 1 {
-                                owners.pop().expect(
-                                    "INVARIANT VIOLATED: one method rename caller owner disappeared after length validation. This is a bug because caller selection must be atomic. Fix: keep the local owner vector unchanged before pop.",
+                                owners.pop().expect_invariant(
+                                    "one method rename caller owner disappeared after length validation",
+                                    "caller selection must be atomic",
+                                    "keep the local owner vector unchanged before pop",
                                 )
                             } else {
                                 FullyQualifiedName::namespace(caller.namespace_parts())
@@ -434,9 +461,14 @@ fn retain_definition_lookup_chain(
     if method_lookup_chain_has_unresolved_dependency_from_graph(engine, receiver) {
         return;
     }
-    let start = chain.iter().position(|owner| owner == winner).expect(
-        "INVARIANT VIOLATED: a method winner is absent from its lookup chain. This is a bug because ranking must use the chain that selected the callee. Fix: retain the owning namespace returned by method lookup.",
-    );
+    let start = chain
+        .iter()
+        .position(|owner| owner == winner)
+        .expect_invariant(
+            "a method winner is absent from its lookup chain",
+            "ranking must use the chain that selected the callee",
+            "retain the owning namespace returned by method lookup",
+        );
     chain.drain(..start);
     chains.push(chain);
 }

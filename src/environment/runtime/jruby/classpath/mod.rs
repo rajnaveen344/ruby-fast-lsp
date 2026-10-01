@@ -1,5 +1,6 @@
 //! Project-isolated JRuby classpath discovery: runtime, gem, lockfile, and explicit artifacts.
 
+use crate::invariant::ExpectInvariant;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -156,7 +157,11 @@ fn discover_project_classpath_inner(
     let jruby_home = jruby_executable
         .parent()
         .and_then(Path::parent)
-        .expect("INVARIANT VIOLATED: canonical JRuby executable must have bin and home parents");
+        .expect_invariant(
+            "canonical JRuby executable has no bin and home parents",
+            "a canonical executable path lives under home/bin",
+            "validate the executable location before use",
+        );
 
     let mut builder = ClasspathBuilder::new(project_root.clone(), limits, file_product_cache);
     builder.add_known_jruby_runtime(jruby_home)?;

@@ -14,6 +14,11 @@
 //! For CPU profiling, prefer `samply record` around this binary. For
 //! lock-contention data, wait for task #5 (tracing) to land.
 
+#[macro_use]
+#[allow(unused_macros, dead_code)]
+#[path = "../../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 use anyhow::{anyhow, Context, Result};
 use devtools::corpus;
 use log::{info, LevelFilter};
@@ -237,7 +242,12 @@ fn print_summary(runs: &[IndexingTimings]) {
 
 fn print_stat(label: &str, iter: impl Iterator<Item = Duration> + Clone) {
     let samples: Vec<Duration> = iter.collect();
-    assert!(!samples.is_empty(), "INVARIANT VIOLATED: no samples");
+    invariant!(
+        !samples.is_empty(),
+        what = "benchmark statistic has no samples",
+        why = "every benchmark run records each phase",
+        fix = "run at least one iteration before printing",
+    );
     let sum: Duration = samples.iter().sum();
     let mean = sum / samples.len() as u32;
     let min = samples.iter().min().copied().unwrap();

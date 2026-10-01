@@ -199,11 +199,11 @@ impl IndexerGem {
         implementation: RubyImplementation,
         java_home: Option<PathBuf>,
     ) {
-        assert!(
+        invariant!(
             executable.is_absolute(),
-            "INVARIANT VIOLATED: selected Ruby executable is not absolute. This is a bug because \
-             gem discovery must execute the exact runtime selected for one project. Fix: pass the \
-             validated canonical runtime descriptor executable."
+            what = "selected Ruby executable is not absolute",
+            why = "gem discovery must execute the exact runtime selected for one project",
+            fix = "pass the validated canonical runtime descriptor executable",
         );
         self.ruby_executable = Some(executable);
         self.java_home = java_home;

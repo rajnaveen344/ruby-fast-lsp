@@ -8,6 +8,7 @@ use crate::core::callables::callable_body::ConstantCallableBodyFact;
 use crate::core::{
     ConstantTypeEquation, FullyQualifiedName, MethodReturnEquation, RubyType, TextRange,
 };
+use crate::invariant::ExpectInvariant;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
@@ -446,8 +447,10 @@ impl InferenceTelemetry {
                     1,
                     "retained shape occurrence count",
                 );
-                let fields = u64::try_from(shape.fields().len()).expect(
-                    "INVARIANT VIOLATED: retained shape field count did not fit u64. This is a bug because shape width is bounded far below u64. Fix: keep MAX_SHAPE_FIELDS representable by telemetry.",
+                let fields = u64::try_from(shape.fields().len()).expect_invariant(
+                    "retained shape field count did not fit u64",
+                    "shape width is bounded far below u64",
+                    "keep MAX_SHAPE_FIELDS representable by telemetry",
                 );
                 self.retained_shape_fields = checked_add(
                     self.retained_shape_fields,
@@ -455,8 +458,10 @@ impl InferenceTelemetry {
                     "retained shape field count",
                 );
                 self.max_retained_shape_fields = self.max_retained_shape_fields.max(fields);
-                let depth = u64::try_from(shape.depth()).expect(
-                    "INVARIANT VIOLATED: retained shape depth did not fit u64. This is a bug because shape depth is bounded far below u64. Fix: keep MAX_SHAPE_DEPTH representable by telemetry.",
+                let depth = u64::try_from(shape.depth()).expect_invariant(
+                    "retained shape depth did not fit u64",
+                    "shape depth is bounded far below u64",
+                    "keep MAX_SHAPE_DEPTH representable by telemetry",
                 );
                 self.max_retained_shape_depth = self.max_retained_shape_depth.max(depth);
                 for field in shape.fields() {
@@ -475,8 +480,10 @@ impl InferenceTelemetry {
                 if shape_variants > 1 {
                     self.retained_shape_unions =
                         checked_add(self.retained_shape_unions, 1, "retained shape union count");
-                    let variants = u64::try_from(shape_variants).expect(
-                        "INVARIANT VIOLATED: retained shape-union width did not fit u64. This is a bug because union width is bounded far below u64. Fix: keep MAX_SHAPE_UNION_VARIANTS representable by telemetry.",
+                    let variants = u64::try_from(shape_variants).expect_invariant(
+                        "retained shape-union width did not fit u64",
+                        "union width is bounded far below u64",
+                        "keep MAX_SHAPE_UNION_VARIANTS representable by telemetry",
                     );
                     self.retained_shape_union_variants = checked_add(
                         self.retained_shape_union_variants,
@@ -555,8 +562,10 @@ impl InferenceTelemetry {
     }
 
     pub fn observe_max_live_shape_aliases(&mut self, aliases: usize) {
-        let aliases = u64::try_from(aliases).expect(
-            "INVARIANT VIOLATED: live shape alias count did not fit u64. This is a bug because aliases are bounded far below u64. Fix: keep MAX_SHAPE_ALIASES representable by telemetry.",
+        let aliases = u64::try_from(aliases).expect_invariant(
+            "live shape alias count did not fit u64",
+            "aliases are bounded far below u64",
+            "keep MAX_SHAPE_ALIASES representable by telemetry",
         );
         self.max_live_shape_aliases = self.max_live_shape_aliases.max(aliases);
     }
@@ -578,8 +587,11 @@ impl InferenceTelemetry {
 
 fn checked_add(left: u64, right: u64, counter: &str) -> u64 {
     left.checked_add(right).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: {counter} exhausted u64. This is a bug because one process cannot observe more events than addressable work. Fix: reset telemetry at a bounded file/session lifecycle or widen the counter before overflow."
+        unreachable_invariant!(
+            what = "{counter} exhausted u64",
+            why = "one process cannot observe more events than addressable work",
+            fix = "reset telemetry per file/session or widen the counter",
+            counter = counter,
         )
     })
 }
@@ -596,12 +608,12 @@ impl TypeInferenceOutcome {
     /// distinction this type enforces: `RubyType::union` flattens unions and
     /// absorbs `Unknown`, so a `Union` containing `Unknown` is not proof.
     pub fn proven(ruby_type: RubyType) -> Self {
-        assert!(
+        invariant!(
             !RubyType::union_members_contain_unknown(&ruby_type),
-            "INVARIANT VIOLATED: TypeInferenceOutcome::proven received RubyType::Unknown (exactly \
-             or inside a union member). This is a bug because a proven result must contain a \
-             concrete type and Unknown must retain a reason. Fix: construct \
-             TypeInferenceOutcome::unknown with the precise UnknownReason instead."
+            what =
+                "TypeInferenceOutcome::proven received RubyType::Unknown (exactly or in a union)",
+            why = "proven results are concrete; Unknown must keep a reason",
+            fix = "use TypeInferenceOutcome::unknown with the precise UnknownReason",
         );
         Self {
             state: TypeInferenceState::Proven(ruby_type),
@@ -691,7 +703,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "INVARIANT VIOLATED: TypeInferenceOutcome::proven received RubyType::Unknown"
+        expected = "invariant violated: TypeInferenceOutcome::proven received RubyType::Unknown"
     )]
     fn unknown_cannot_be_constructed_as_proven() {
         let _ = TypeInferenceOutcome::proven(RubyType::Unknown);
@@ -699,7 +711,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "INVARIANT VIOLATED: TypeInferenceOutcome::proven received RubyType::Unknown"
+        expected = "invariant violated: TypeInferenceOutcome::proven received RubyType::Unknown"
     )]
     fn union_with_unknown_member_cannot_be_constructed_as_proven() {
         let _ = TypeInferenceOutcome::proven(RubyType::Union(vec![

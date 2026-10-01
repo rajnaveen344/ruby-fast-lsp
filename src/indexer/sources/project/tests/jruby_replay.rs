@@ -1,6 +1,7 @@
 //! Compact JRuby replay of catalog-sensitive project files across provider handoff.
 
 use super::*;
+use crate::invariant::ExpectInvariant;
 
 fn jruby_provider(class_names: &[&str]) -> JrubyImportProvider {
     jruby_provider_with_superclasses(
@@ -373,14 +374,18 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
 
         let engine = workspace_state.analysis_engine.read();
         let first_signature_path = signature_cache.path().join("com/example/First.rb");
-        let first_signature_id = engine.file_id(&first_signature_path).expect(
-            "INVARIANT VIOLATED: generated First signature was not indexed. This is a test bug because both schedules import the exact catalog class. Fix: keep the fixture import and signature cache identity aligned.",
+        let first_signature_id = engine.file_id(&first_signature_path).expect_invariant(
+            "generated First signature was not indexed",
+            "both schedules import the exact catalog class",
+            "keep the fixture import and signature cache identity aligned",
         );
         (
             engine
                 .semantic_export_fingerprint(first_signature_id)
-                .expect(
-                    "INVARIANT VIOLATED: generated First signature has no export fingerprint. This is a test bug because every indexed signature enters through replace_facts. Fix: retain the ordinary file-owned signature lifecycle in the fixture.",
+                .expect_invariant(
+                    "generated First signature has no export fingerprint",
+                    "every indexed signature enters through replace_facts",
+                    "retain the ordinary file-owned signature lifecycle in the fixture",
                 ),
             engine.semantic_result_fingerprint(),
         )
@@ -465,8 +470,10 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
         workspace_state.analysis_engine.write().resolve();
 
         let engine = workspace_state.analysis_engine.read();
-        let ordinary_id = engine.file_id(&ordinary_path).expect(
-            "INVARIANT VIOLATED: ordinary include fixture was not indexed. This is a test bug because the exhaustive batch must register every selected source. Fix: keep the fixture inside the project root and finish the batch.",
+        let ordinary_id = engine.file_id(&ordinary_path).expect_invariant(
+            "ordinary include fixture was not indexed",
+            "the exhaustive batch must register every selected source",
+            "keep the fixture inside the project root and finish the batch",
         );
         (
             engine.query().diagnostic_facts_in_file(ordinary_id),

@@ -5,6 +5,7 @@ use crate::core::{
     TypeInferenceOutcome, UnknownReason,
 };
 use crate::indexer::utf8_str;
+use crate::invariant::ExpectInvariant;
 use log::trace;
 use ruby_prism::CallNode;
 
@@ -184,8 +185,10 @@ impl FactCollector {
                     | UnknownReason::CallableBodyBoundExceeded
                     | UnknownReason::CallableRecursionUnsupported
                     | UnknownReason::UnsupportedCallableFlow,
-                ) => receiver_reason.expect(
-                    "INVARIANT VIOLATED: checked shape receiver reason disappeared. This is a bug because receiver_reason is immutable. Fix: bind the matched reason directly.",
+                ) => receiver_reason.expect_invariant(
+                    "checked shape receiver reason disappeared",
+                    "receiver_reason is immutable",
+                    "bind the matched reason directly",
                 ),
                 // Ordinary assignment/scope failures prove only that this
                 // call has no receiver. The receiver expression retains its
@@ -335,9 +338,11 @@ impl FactCollector {
                 },
             ));
             if defer_call_outcome {
-                assert!(
+                invariant!(
                     self.expressions.deferred_calls.insert(call_range),
-                    "INVARIANT VIOLATED: one call expression registered multiple deferred outcomes. This is a bug because one runtime call has exactly one method candidate. Fix: classify each CallNode once before retaining its deferred range."
+                    what = "one call expression registered multiple deferred outcomes",
+                    why = "one runtime call has exactly one method candidate",
+                    fix = "classify each CallNode once before retaining its deferred range",
                 );
             }
         }
@@ -429,11 +434,11 @@ fn method_reference_access(
         return match node.name().as_slice() {
             b"send" | b"__send__" => MethodReferenceAccess::VisibilityBypass,
             b"public_send" => MethodReferenceAccess::ExplicitReceiver,
-            other => panic!(
-                "INVARIANT VIOLATED: static send target came from unsupported call `{}`. \
-                 This is a bug because only send/public_send/__send__ calls expose a reflected target. \
-                 Fix: keep static_send_target_name_and_range and method_reference_access in sync.",
-                String::from_utf8_lossy(other)
+            other => unreachable_invariant!(
+                what = "static send target came from unsupported call `{}`",
+                why = "only send/public_send/__send__ calls expose a reflected target",
+                fix = "keep static_send_target_name_and_range and method_reference_access in sync",
+                String::from_utf8_lossy(other),
             ),
         };
     }

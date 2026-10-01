@@ -65,11 +65,11 @@ impl DiagnosticCandidateStore {
     ) {
         self.candidates_by_file.remove(&file_id);
         for candidate in candidates {
-            assert!(
+            invariant!(
                 candidate.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement diagnostic candidate belongs to a different file id. \
-                 This is a bug because DiagnosticCandidateStore::replace_file must only receive candidates for the target file. \
-                 Fix: partition candidates by SourceFileId before replacing."
+                what = "replacement diagnostic candidate belongs to another file",
+                why = "replace_file receives only the target file's candidates",
+                fix = "partition candidates by SourceFileId first",
             );
             self.candidates_by_file
                 .entry(file_id)

@@ -5,6 +5,7 @@ use crate::environment::extensions::{ProjectContextSeed, ProjectContextSnapshot}
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::indexer::scheduling::navigation_demand::NavigationDemandController;
 use crate::indexer::scheduling::status::{IndexingRun, ProjectIndexingStatus};
+use crate::invariant::ExpectInvariant;
 use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
 use ruby_analysis::engine::AnalysisEngine;
@@ -21,8 +22,10 @@ fn new_orphan_analysis_engine() -> Arc<RwLock<AnalysisEngine>> {
         None,
     )
     .index_core_runtime_constants(None, engine.clone())
-    .expect(
-        "INVARIANT VIOLATED: the orphan engine could not seed embedded Ruby core runtime constants. This is a bug because loose files require the same universal constant facts as project engines. Fix: keep the embedded core RBS overlay parseable and register it before orphan documents.",
+    .expect_invariant(
+        "the orphan engine could not seed embedded Ruby core runtime constants",
+        "loose files require the same universal constant facts as project engines",
+        "keep the embedded core RBS overlay parseable and register it before orphan documents",
     );
     engine.write().resolve();
     engine

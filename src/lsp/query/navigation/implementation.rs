@@ -4,6 +4,7 @@
 //! - For a method: find all overrides in descendant classes and including classes
 //! - For a module/class: find all classes that include/prepend/extend it
 
+use crate::invariant::ExpectInvariant;
 use log::info;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::RubyMethod;
@@ -79,10 +80,10 @@ impl EngineQuery {
         owner_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: method implementation query requires an analysis engine. \
-             This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_doc_and_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "method implementation query requires an analysis engine",
+            "LSP implementation should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_doc_and_engine()",
         );
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
@@ -96,10 +97,10 @@ impl EngineQuery {
         &self,
         fqn: &FullyQualifiedName,
     ) -> Option<Vec<Location>> {
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: namespace implementation query requires an analysis engine. \
-             This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_doc_and_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "namespace implementation query requires an analysis engine",
+            "LSP implementation should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_doc_and_engine()",
         );
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);

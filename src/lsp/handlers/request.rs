@@ -134,11 +134,11 @@ pub async fn handle_goto_definition(
                         dependency_wait = None;
                         outcome
                     }
-                    (None, None) => unreachable!(
-                    "INVARIANT VIOLATED: navigation wait loop entered without a future. This is \
-                     a bug because the loop predicate and exact branch observe the same local \
-                     options. Fix: keep demand-future removal inside this match."
-                ),
+                    (None, None) => unreachable_invariant!(
+                        what = "navigation wait loop entered without a future",
+                        why = "the loop predicate and exact branch observe the same local options",
+                        fix = "keep demand-future removal inside this match",
+                    ),
                 };
                 match outcome {
                     Ok(

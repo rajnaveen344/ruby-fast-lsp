@@ -5,6 +5,7 @@ use super::ProjectFileInput;
 use super::RegisteredProjectFileInput;
 use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, StaticJavaSourceHint};
 use crate::indexer::file_processor::ProjectFileCollectionTiming;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
@@ -29,11 +30,13 @@ where
     R: Send,
     F: Fn(T) -> R + Send + Sync,
 {
-    assert!(
+    invariant!(
         priority_input_count <= inputs.len(),
-        "INVARIANT VIOLATED: project priority input count {} exceeds the {} owned inputs. This is a bug because the priority partition must be selected from the same deterministic source vector. Fix: preserve the priority count returned with that vector.",
+        what = "project priority input count {} exceeds the {} owned inputs",
+        why = "the priority partition must be selected from the same deterministic source vector",
+        fix = "preserve the priority count returned with that vector",
         priority_input_count,
-        inputs.len()
+        inputs.len(),
     );
     let exhaustive_inputs = inputs.split_off(priority_input_count);
     let mut outcomes = inputs.into_par_iter().map(collect).collect::<Vec<_>>();
@@ -57,29 +60,28 @@ impl IndexerProject {
         &mut self,
         server: &RubyLanguageServer,
     ) -> Result<()> {
-        assert!(
+        invariant!(
             self.pending_project_navigation_files.is_none()
                 && self.project_navigation_started_at.is_none(),
-            "INVARIANT VIOLATED: exhaustive project collection started before the active \
-             navigation frontier completed. This is a coordinator bug because exhaustive files \
-             require the retained immutable pre-collection namespace baseline. Fix: finish the \
-             project navigation frontier before collecting its retained tail."
+            what = "exhaustive project collection started before the active navigation frontier completed",
+            why = "exhaustive files require the retained immutable pre-collection namespace baseline",
+            fix = "finish the project navigation frontier before collecting its retained tail",
         );
-        let files = self.pending_project_files.take().expect(
-            "INVARIANT VIOLATED: exhaustive project fact collection started without a completed \
-             navigation frontier. This is a bug because the remaining file set must be the exact \
-             deterministic complement discovered by that frontier. Fix: call \
-             collect_project_navigation_facts first and retain the same IndexerProject.",
+        let files = self.pending_project_files.take().expect_invariant(
+            "exhaustive project collection started without a completed navigation frontier",
+            "remaining files are the frontier's deterministic complement",
+            "call collect_project_navigation_facts first; keep the same IndexerProject",
         );
         let started = Instant::now();
-        let known_namespaces = self.exhaustive_known_namespaces.clone().expect(
-            "INVARIANT VIOLATED: exhaustive project collection has no pre-collection namespace \
-             baseline. This is a bug because every project file must be collected against one \
-             immutable semantic context. Fix: initialize the baseline before the first project \
-             file and retain it through completion.",
+        let known_namespaces = self.exhaustive_known_namespaces.clone().expect_invariant(
+            "exhaustive project collection has no pre-collection namespace baseline",
+            "all project files read one immutable semantic context",
+            "initialize the baseline before the first file; keep it to completion",
         );
-        let semantic_context_engine = self.exhaustive_analysis_engine.clone().expect(
-            "INVARIANT VIOLATED: exhaustive project collection has no immutable pre-collection semantic read engine. This is a bug because arbitrary project writes must never become inputs to later fact construction. Fix: initialize one baseline before the first project file and retain it through completion.",
+        let semantic_context_engine = self.exhaustive_analysis_engine.clone().expect_invariant(
+            "exhaustive project collection has no immutable pre-collection read engine",
+            "project writes must not feed later fact construction",
+            "initialize the baseline before the first file; keep it to completion",
         );
         self.exhaustive_collection_started = true;
         self.collect_facts_and_track_dependencies(
@@ -92,20 +94,22 @@ impl IndexerProject {
         )?;
         self.record_processed_project_files(&files, server);
         self.exhaustive_known_namespaces = None;
-        assert!(
+        invariant!(
             self.jruby_replay_known_namespaces
                 .replace(known_namespaces)
                 .is_none(),
-            "INVARIANT VIOLATED: completed project collection replaced an unconsumed JRuby \
-             replay namespace snapshot. This is a bug because one IndexerProject cannot own \
-             semantic context from two generations. Fix: replay or discard the completed \
-             generation before starting another project pass."
+            what = "completed project collection replaced an unconsumed JRuby replay namespace snapshot",
+            why = "one IndexerProject cannot own semantic context from two generations",
+            fix = "replay or discard the completed generation before starting another project pass",
         );
-        assert!(
+        invariant!(
             self.jruby_replay_analysis_engine
                 .replace(semantic_context_engine)
                 .is_none(),
-            "INVARIANT VIOLATED: completed project collection replaced an unconsumed JRuby replay semantic engine. This is a bug because one IndexerProject cannot retain read context from two generations. Fix: replay or discard the completed generation before starting another project pass."
+            what =
+                "completed project collection replaced an unconsumed JRuby replay semantic engine",
+            why = "one IndexerProject cannot retain read context from two generations",
+            fix = "replay or discard the completed generation before starting another project pass",
         );
         self.exhaustive_analysis_engine = None;
         info!(
@@ -120,17 +124,16 @@ impl IndexerProject {
     }
 
     pub(crate) fn take_next_remaining_project_files(&mut self, limit: usize) -> Vec<PathBuf> {
-        assert!(
+        invariant!(
             limit > 0,
-            "INVARIANT VIOLATED: exhaustive project batch limit is zero. This is a bug because \
-             a zero-sized batch can never make progress. Fix: configure a positive coordinator \
-             batch bound."
+            what = "exhaustive project batch limit is zero",
+            why = "a zero-sized batch can never make progress",
+            fix = "configure a positive coordinator batch bound",
         );
-        let pending_files = self.pending_project_files.as_mut().expect(
-            "INVARIANT VIOLATED: an exhaustive project batch was requested without a retained \
-             project tail. This is a coordinator bug because batches must consume the exact file \
-             set discovered by the navigation frontier. Fix: retain the same IndexerProject \
-             until every deterministic batch is consumed.",
+        let pending_files = self.pending_project_files.as_mut().expect_invariant(
+            "an exhaustive project batch was requested without a retained project tail",
+            "batches must consume the exact file set discovered by the navigation frontier",
+            "retain the same IndexerProject until every deterministic batch is consumed",
         );
         let take = pending_files.len().min(limit);
         pending_files.drain(..take).collect()
@@ -139,11 +142,10 @@ impl IndexerProject {
     pub(crate) fn remaining_project_file_count(&self) -> usize {
         self.pending_project_files
             .as_ref()
-            .expect(
-                "INVARIANT VIOLATED: remaining project file count was requested outside the \
-                 exhaustive project lifecycle. This is a coordinator bug because only a retained \
-                 navigation frontier owns a pending tail. Fix: inspect the batch loop's \
-                 ownership transitions.",
+            .expect_invariant(
+                "remaining project file count was requested outside the exhaustive project lifecycle",
+                "only a retained navigation frontier owns a pending tail",
+                "inspect the batch loop's ownership transitions",
             )
             .len()
     }
@@ -157,13 +159,15 @@ impl IndexerProject {
         if files.is_empty() {
             return Ok(());
         }
-        let known_namespaces = self.exhaustive_known_namespaces.clone().expect(
-            "INVARIANT VIOLATED: bounded project batch has no pre-collection namespace baseline. \
-             This is a coordinator bug because every demanded and exhaustive batch belongs to \
-             one project generation. Fix: keep the baseline until finish_remaining_project_facts.",
+        let known_namespaces = self.exhaustive_known_namespaces.clone().expect_invariant(
+            "bounded project batch has no pre-collection namespace baseline",
+            "every demanded and exhaustive batch belongs to one project generation",
+            "keep the baseline until finish_remaining_project_facts",
         );
-        let semantic_context_engine = self.exhaustive_analysis_engine.clone().expect(
-            "INVARIANT VIOLATED: bounded project batch has no immutable pre-collection semantic read engine. This is a coordinator bug because navigation demand and batch boundaries must not affect fact construction. Fix: initialize the baseline before the first project file and retain it through finish_remaining_project_facts.",
+        let semantic_context_engine = self.exhaustive_analysis_engine.clone().expect_invariant(
+            "bounded project batch has no immutable pre-collection read engine",
+            "demand and batch boundaries must not affect facts",
+            "initialize the baseline first; keep it through finish_remaining_project_facts",
         );
         self.exhaustive_collection_started = true;
         self.collect_facts_and_track_dependencies(
@@ -183,8 +187,10 @@ impl IndexerProject {
         total_files: usize,
         server: &RubyLanguageServer,
     ) {
-        self.project_file_total = Some(u64::try_from(total_files).expect(
-            "INVARIANT VIOLATED: project file count exceeds u64. This is a bug because a filesystem cannot contain that many paths. Fix: inspect collect_project_files.",
+        self.project_file_total = Some(u64::try_from(total_files).expect_invariant(
+            "project file count exceeds u64",
+            "a filesystem cannot contain that many paths",
+            "inspect collect_project_files",
         ));
         self.report_project_file_progress(server);
     }
@@ -196,8 +202,10 @@ impl IndexerProject {
         if total == 0 {
             return;
         }
-        let completed = u64::try_from(self.processed_project_files.len()).expect(
-            "INVARIANT VIOLATED: processed project file count exceeds u64. This is a bug because processed files are a subset of the discovered set. Fix: inspect record_processed_project_files.",
+        let completed = u64::try_from(self.processed_project_files.len()).expect_invariant(
+            "processed project file count exceeds u64",
+            "processed files are a subset of the discovered set",
+            "inspect record_processed_project_files",
         );
         self.project_file_completed
             .store(completed, Ordering::Relaxed);
@@ -215,13 +223,12 @@ impl IndexerProject {
         server: &RubyLanguageServer,
     ) {
         for file in files {
-            assert!(
+            invariant!(
                 self.processed_project_files.insert(file.clone()),
-                "INVARIANT VIOLATED: project source {} was processed twice in one navigation \
-                 frontier. This is a bug because demanded and exhaustive files must be removed \
-                 from one deterministic pending set before indexing. Fix: inspect frontier \
-                 partitioning and demand-file removal.",
-                file.display()
+                what = "project source {} was processed twice in one navigation frontier",
+                why = "demanded and exhaustive files leave one pending set before indexing",
+                fix = "inspect frontier partitioning and demand-file removal",
+                file.display(),
             );
         }
         if !files.is_empty() {
@@ -230,20 +237,19 @@ impl IndexerProject {
     }
 
     pub(crate) fn finish_remaining_project_facts(&mut self) {
-        let pending = self.pending_project_files.take().expect(
-            "INVARIANT VIOLATED: exhaustive project completion has no retained tail. This is a \
-             coordinator bug because completion must consume the exact frontier-owned file set. \
-             Fix: call completion once after the bounded batch loop.",
+        let pending = self.pending_project_files.take().expect_invariant(
+            "exhaustive project completion has no retained tail",
+            "completion must consume the exact frontier-owned file set",
+            "call completion once after the bounded batch loop",
         );
-        assert!(
+        invariant!(
             pending.is_empty(),
-            "INVARIANT VIOLATED: exhaustive project completion left {} source files unprocessed. \
-             This is a coordinator bug because project-navigation readiness cannot be published \
-             with omitted project truth. Fix: continue the deterministic batch loop until the \
-             retained tail is empty.",
-            pending.len()
+            what = "exhaustive project completion left {} source files unprocessed",
+            why = "project-navigation readiness cannot be published with omitted project truth",
+            fix = "continue the deterministic batch loop until the retained tail is empty",
+            pending.len(),
         );
-        assert!(
+        invariant!(
             self.pending_jruby_navigation_plan
                 .signature_class_names
                 .is_empty()
@@ -251,33 +257,35 @@ impl IndexerProject {
                     .pending_jruby_navigation_plan
                     .implementation_class_names
                     .is_empty(),
-            "INVARIANT VIOLATED: exhaustive project completion retained deferred JRuby \
-             navigation inputs. This is a coordinator bug because the final project batch must \
-             materialize every accumulated runtime input before project readiness. Fix: mark the \
-             last bounded batch as a navigation-resolution boundary."
+            what = "exhaustive project completion retained deferred JRuby navigation inputs",
+            why = "the final batch materializes all runtime inputs before readiness",
+            fix = "mark the last batch as a navigation-resolution boundary",
         );
-        let known_namespaces = self.exhaustive_known_namespaces.take().expect(
-            "INVARIANT VIOLATED: exhaustive project completion has no pre-collection namespace \
-             baseline. This is a coordinator bug because the baseline and pending tail have one \
-             lifecycle. Fix: retain both until the deterministic batch loop finishes.",
+        let known_namespaces = self.exhaustive_known_namespaces.take().expect_invariant(
+            "exhaustive project completion has no pre-collection namespace baseline",
+            "the baseline and pending tail have one lifecycle",
+            "retain both until the deterministic batch loop finishes",
         );
-        let semantic_context_engine = self.exhaustive_analysis_engine.take().expect(
-            "INVARIANT VIOLATED: exhaustive project completion has no immutable semantic read engine. This is a coordinator bug because the context and pending tail have one lifecycle. Fix: retain both until every deterministic batch is consumed.",
+        let semantic_context_engine = self.exhaustive_analysis_engine.take().expect_invariant(
+            "exhaustive project completion has no immutable semantic read engine",
+            "the context and pending tail have one lifecycle",
+            "retain both until every deterministic batch is consumed",
         );
-        assert!(
+        invariant!(
             self.jruby_replay_known_namespaces
                 .replace(known_namespaces)
                 .is_none(),
-            "INVARIANT VIOLATED: bounded project completion replaced an unconsumed JRuby replay \
-             namespace snapshot. This is a bug because one IndexerProject cannot mix semantic \
-             context from two indexing generations. Fix: finish the prior generation's replay \
-             lifecycle before completing another bounded project pass."
+            what = "project completion replaced an unconsumed JRuby replay namespace snapshot",
+            why = "an IndexerProject cannot mix two indexing generations",
+            fix = "finish the prior replay before completing another project pass",
         );
-        assert!(
+        invariant!(
             self.jruby_replay_analysis_engine
                 .replace(semantic_context_engine)
                 .is_none(),
-            "INVARIANT VIOLATED: bounded project completion replaced an unconsumed JRuby replay semantic engine. This is a bug because one IndexerProject cannot mix read context from two indexing generations. Fix: finish the prior generation's replay lifecycle before completing another bounded project pass."
+            what = "project completion replaced an unconsumed JRuby replay semantic engine",
+            why = "an IndexerProject cannot mix two indexing generations",
+            fix = "finish the prior replay before completing another project pass",
         );
     }
 
@@ -420,11 +428,13 @@ impl IndexerProject {
                     &input.content,
                     SourceKind::Project,
                 );
-                assert_eq!(
+                invariant_eq!(
                     engine.file_id(&input.path).unwrap(),
                     semantic_id,
-                    "INVARIANT VIOLATED: immutable semantic context assigned a different file id for {}. This is a bug because retained FileFacts ranges must be valid in the owning live engine. Fix: pre-register the complete tail in identical path order before either engine admits generated sources.",
-                    input.path.display()
+                    what = "immutable semantic context assigned a different file id for {}",
+                    why = "retained FileFacts ranges must be valid in the live engine",
+                    fix = "pre-register the tail in identical order in both engines",
+                    input.path.display(),
                 );
                 registered_priority_file_count += usize::from(index < priority_file_count);
                 registered_inputs.push(RegisteredProjectFileInput {
@@ -551,11 +561,11 @@ impl IndexerProject {
                 let (path, facts) = outcome?;
                 let Some(facts) = facts else { continue };
                 let file_id = engine.file_id(&path).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: project semantic seed lost the registered identity for {}. \
-                         This is a bug because declaration collection and replacement must address the \
-                         same batch file. Fix: preserve batch registration in the semantic snapshot.",
-                        path.display()
+                    unreachable_invariant!(
+                        what = "project semantic seed lost the registered identity for {}",
+                        why = "declaration collection and replacement must address the same batch file",
+                        fix = "preserve batch registration in the semantic snapshot",
+                        path.display(),
                     )
                 });
                 engine.replace_facts(file_id, facts, ResolveMode::Deferred);

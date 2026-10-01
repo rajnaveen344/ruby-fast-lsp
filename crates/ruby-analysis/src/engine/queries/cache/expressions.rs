@@ -6,6 +6,7 @@ use crate::core::{
 };
 use crate::engine::queries::AnalysisQuery;
 use crate::engine::state::TypeInferenceOutcomeRef;
+use crate::invariant::ExpectInvariant;
 
 impl<'a> AnalysisQuery<'a> {
     /// Return the exact receiver proof retained for a call's message range.
@@ -131,9 +132,14 @@ impl<'a> AnalysisQuery<'a> {
             if !range.contains_offset(file_id, byte_offset) {
                 return;
             }
-            let span = range.end_byte.checked_sub(range.start_byte).expect(
-                "INVARIANT VIOLATED: an expression Unknown reason has an inverted range. This is a bug because TextRange producers must emit start <= end. Fix: validate the indexer range before recording proof evidence.",
-            );
+            let span = range
+                .end_byte
+                .checked_sub(range.start_byte)
+                .expect_invariant(
+                    "an expression Unknown reason has an inverted range",
+                    "TextRange producers must emit start <= end",
+                    "validate the indexer range before recording proof evidence",
+                );
             match best {
                 None => {
                     best = Some((span, range, reason));
@@ -193,9 +199,14 @@ impl<'a> AnalysisQuery<'a> {
             if !range.contains_offset(file_id, byte_offset) {
                 return;
             }
-            let span = range.end_byte.checked_sub(range.start_byte).expect(
-                "INVARIANT VIOLATED: an expression type fact has an inverted range. This is a bug because TextRange producers must emit start <= end. Fix: validate the indexer range before inserting the expression fact.",
-            );
+            let span = range
+                .end_byte
+                .checked_sub(range.start_byte)
+                .expect_invariant(
+                    "an expression type fact has an inverted range",
+                    "TextRange producers must emit start <= end",
+                    "validate the indexer range before inserting the expression fact",
+                );
             match best_span {
                 None => {
                     best_span = Some(span);
@@ -278,9 +289,14 @@ impl<'a> AnalysisQuery<'a> {
             if !range.contains_offset(file_id, byte_offset) {
                 continue;
             }
-            let span = range.end_byte.checked_sub(range.start_byte).expect(
-                "INVARIANT VIOLATED: a call-expression outcome has an inverted range. This is a bug because TextRange producers must emit start <= end. Fix: validate the call range before storing its proof outcome.",
-            );
+            let span = range
+                .end_byte
+                .checked_sub(range.start_byte)
+                .expect_invariant(
+                    "a call-expression outcome has an inverted range",
+                    "TextRange producers must emit start <= end",
+                    "validate the call range before storing its proof outcome",
+                );
             let outcome = match outcome {
                 TypeInferenceOutcomeRef::Proven(ruby_type) => {
                     TypeInferenceOutcome::proven(ruby_type.clone())
@@ -293,9 +309,12 @@ impl<'a> AnalysisQuery<'a> {
                     best = Some((span, range, outcome));
                 }
                 Some((best_span, best_range, _)) if span == *best_span => {
-                    assert_eq!(
-                        range, *best_range,
-                        "INVARIANT VIOLATED: distinct equally specific call ranges overlap one source position. This is a bug because one syntax position cannot belong to two sibling complete calls with identical spans. Fix: emit one normalized call-expression range per AST call."
+                    invariant_eq!(
+                        range,
+                        *best_range,
+                        what = "distinct equally specific call ranges overlap one source position",
+                        why = "one syntax position cannot belong to two sibling complete calls with identical spans",
+                        fix = "emit one normalized call-expression range per AST call",
                     );
                 }
                 Some(_) => {}
@@ -395,9 +414,12 @@ impl<'a> AnalysisQuery<'a> {
             .chain(local_reads)
             .filter_map(|(candidate, ruby_type)| (candidate == range).then_some(ruby_type))
             .collect::<Vec<_>>();
-        assert!(
+        invariant!(
             !expression_types.is_empty(),
-            "INVARIANT VIOLATED: expression end-boundary selection found range {range:?} without a call outcome, Unknown reason, expression fact, or local-read type. This is a bug because the selected range came from exactly those stores. Fix: keep candidate selection and exact-range projection exhaustive."
+            what = "end-boundary selection found {range:?} with no outcome, reason, fact, or local-read type",
+            why = "the range came from exactly those stores",
+            fix = "keep candidate selection and exact-range projection exhaustive",
+            range = range,
         );
         if expression_types
             .iter()

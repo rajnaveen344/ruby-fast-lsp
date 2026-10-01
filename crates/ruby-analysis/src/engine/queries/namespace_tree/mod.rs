@@ -1,5 +1,6 @@
 pub(in crate::engine) mod types;
 
+use crate::invariant::ExpectInvariant;
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 
@@ -316,10 +317,10 @@ fn build_namespace_map_from_grouped_nodes(
     let mut namespace_map = HashMap::new();
     for (fqn, mut nodes) in nodes_by_fqn {
         nodes.sort_by_key(|node| (node.kind, node.range.file_id, node.range.start_byte));
-        let first_node = nodes.first().expect(
-            "INVARIANT VIOLATED: namespace node bucket is empty. \
-             This is a bug because only non-empty buckets are inserted. \
-             Fix: keep namespace node grouping and iteration coupled.",
+        let first_node = nodes.first().expect_invariant(
+            "namespace node bucket is empty",
+            "only non-empty buckets are inserted",
+            "keep namespace node grouping and iteration coupled",
         );
 
         let fqn_string = fqn.to_string();

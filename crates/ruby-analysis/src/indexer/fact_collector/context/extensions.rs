@@ -1,6 +1,7 @@
 use super::source::source_range;
 use crate::core::{NamespaceKind, RubyConstant, TextRange};
 use crate::indexer::fact_collector::FactCollector;
+use crate::invariant::ExpectInvariant;
 use ruby_fast_lsp_extension_api::{ProjectContext, Receiver, ResolvedCall};
 use ruby_prism::CallNode;
 use std::sync::Arc;
@@ -89,25 +90,25 @@ impl ExtensionState {
     pub(in crate::indexer::fact_collector) fn current_call_handled(&self) -> bool {
         self.call_frames
             .last()
-            .expect(
-                "INVARIANT VIOLATED: an extension call frame is missing while collecting a nested receiver. \
-                 This is a bug because every call entry must precede candidate collection. \
-                 Fix: keep call entry, candidate collection, and exit balanced.",
+            .expect_invariant(
+                "an extension call frame is missing while collecting a nested receiver",
+                "every call entry must precede candidate collection",
+                "keep call entry, candidate collection, and exit balanced",
             )
             .handled
     }
 
     pub(in crate::indexer::fact_collector) fn exit_call(&mut self) {
-        let frame = self.call_frames.pop().expect(
-            "INVARIANT VIOLATED: the extension call frame stack underflowed. \
-             This is a bug because every call exit must match one entry. \
-             Fix: keep FactCollector call callbacks balanced.",
+        let frame = self.call_frames.pop().expect_invariant(
+            "the extension call frame stack underflowed",
+            "every call exit must match one entry",
+            "keep FactCollector call callbacks balanced",
         );
         if frame.tracked {
-            self.enclosing_calls.pop().expect(
-                "INVARIANT VIOLATED: a tracked extension call has no enclosing-call frame. \
-                 This is a bug because tracked calls must retain their resolved call until exit. \
-                 Fix: push and pop resolved calls with their owning call frame.",
+            self.enclosing_calls.pop().expect_invariant(
+                "a tracked extension call has no enclosing-call frame",
+                "tracked calls must retain their resolved call until exit",
+                "push and pop resolved calls with their owning call frame",
             );
         }
     }
@@ -127,9 +128,11 @@ impl FactCollector {
     }
 
     pub fn set_pending_block_execution_context(&mut self, context: BlockExecutionContext) {
-        assert!(
+        invariant!(
             self.extensions.pending_block.is_none(),
-            "INVARIANT VIOLATED: more than one block execution context was applied to the same call. This is a bug because extension conflicts must be resolved before AST traversal. Fix: validate and deterministically resolve extension execution contexts in the host."
+            what = "more than one block execution context was applied to the same call",
+            why = "extension conflicts must be resolved before AST traversal",
+            fix = "validate and deterministically resolve extension execution contexts in the host",
         );
         self.extensions.pending_block = Some(context);
     }

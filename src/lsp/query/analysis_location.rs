@@ -43,11 +43,11 @@ fn source_file_uri(file: &SourceFile) -> Option<Url> {
 }
 
 fn lsp_range_for_text_range(file: &SourceFile, range: TextRange) -> Option<Range> {
-    assert!(
+    invariant!(
         file.id == range.file_id,
-        "INVARIANT VIOLATED: analysis range file id does not match source file id. \
-         This is a bug because analysis facts must only be converted with their owning source file. \
-         Fix: look up the SourceFile by range.file_id before converting."
+        what = "analysis range file id does not match source file id",
+        why = "analysis facts must only be converted with their owning source file",
+        fix = "look up the SourceFile by range.file_id before converting",
     );
     let (start_line, start_character) = file.byte_offset_to_line_character(range.start_byte)?;
     let (end_line, end_character) = file.byte_offset_to_line_character(range.end_byte)?;

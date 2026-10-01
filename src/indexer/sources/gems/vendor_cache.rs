@@ -7,6 +7,7 @@ use super::GemSource;
 use super::IndexerGem;
 use super::LockedGemIdentity;
 use super::LockedGemSource;
+use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Context, Result};
 use flate2::read::GzDecoder;
 use log::{info, warn};
@@ -92,11 +93,15 @@ fn bind_cached_gem_project_digest(extraction_root: &Path, project_digest: &str) 
     let marker = extraction_root.join(CACHED_GEM_PROJECT_DIGEST_MARKER);
     match std::fs::read_to_string(&marker) {
         Ok(existing) => {
-            assert_eq!(
+            invariant_eq!(
                 existing,
                 project_digest,
-                "INVARIANT VIOLATED: cached gem extraction root {} is bound to digest {existing}, expected {project_digest}. This is a bug because a project identity directory must belong to one canonical project. Fix: resolve the unoccupied short identity or the full-digest fallback before extracting.",
-                extraction_root.display()
+                what = "gem extraction root {} is bound to digest {existing}, expected {project_digest}",
+                why = "an identity directory belongs to one project",
+                fix = "resolve the free short identity or full-digest fallback before extracting",
+                extraction_root.display(),
+                existing = existing,
+                project_digest = project_digest,
             );
             Ok(())
         }
@@ -508,8 +513,10 @@ impl IndexerGem {
                 if !section_line.is_empty() && !section_line.starts_with(' ') {
                     break;
                 }
-                let section_line = lines.next().expect(
-                    "INVARIANT VIOLATED: peeked lockfile line disappeared. This is a bug because iterator state must remain stable between peek and next. Fix: keep lockfile parsing single-threaded.",
+                let section_line = lines.next().expect_invariant(
+                    "peeked lockfile line disappeared",
+                    "iterator state must remain stable between peek and next",
+                    "keep lockfile parsing single-threaded",
                 );
                 if let Some(value) = section_line.strip_prefix("  remote: ") {
                     remote = Some(value.to_string());
@@ -543,8 +550,10 @@ impl IndexerGem {
             let Some(repository) = repository else {
                 continue;
             };
-            let revision_prefix = revision.get(..revision.len().min(12)).expect(
-                "INVARIANT VIOLATED: Git revision prefix is not a UTF-8 boundary. This is a bug because lockfile revisions must be ASCII hexadecimal. Fix: validate Bundler lockfile revision syntax before slicing.",
+            let revision_prefix = revision.get(..revision.len().min(12)).expect_invariant(
+                "Git revision prefix is not a UTF-8 boundary",
+                "lockfile revisions must be ASCII hexadecimal",
+                "validate Bundler lockfile revision syntax before slicing",
             );
             let cache_path = cache_root.join(format!("{repository}-{revision_prefix}"));
             let lib_path = cache_path.join("lib");
@@ -590,18 +599,18 @@ impl IndexerGem {
         &mut self,
         priority_keys: &HashSet<String>,
     ) -> Result<()> {
-        assert!(
+        invariant!(
             !priority_keys.is_empty(),
-            "INVARIANT VIOLATED: priority vendor-archive discovery received no keys. This is a \
-             bug because an empty navigation frontier cannot select bounded work. Fix: skip the \
-             priority phase when the active document exposes no constant roots."
+            what = "priority vendor-archive discovery received no keys",
+            why = "an empty navigation frontier cannot select bounded work",
+            fix = "skip the priority phase when the active document exposes no constant roots",
         );
-        assert!(
+        invariant!(
             !self.locked_gems.is_empty(),
-            "INVARIANT VIOLATED: priority vendor-archive discovery started before lockfile \
-             identities were loaded. This is a bug because source selection must use the exact \
-             owning-project lock identity. Fix: load and select Gemfile.lock identities before \
-             scheduling priority archive work."
+            what =
+                "priority vendor-archive discovery started before lockfile identities were loaded",
+            why = "source selection must use the exact owning-project lock identity",
+            fix = "load and select Gemfile.lock identities before scheduling priority archive work",
         );
         self.discover_cached_gem_archives_matching(Some(priority_keys))
     }

@@ -1,5 +1,6 @@
 //! Exact selected-runtime standard library load-path discovery and identity.
 
+use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
 use std::collections::HashSet;
@@ -186,11 +187,15 @@ impl RuntimeStdlibPaths {
     pub(crate) fn estimated_weight_bytes(&self) -> u64 {
         self.paths.iter().fold(256u64, |total, path| {
             total
-                .checked_add(u64::try_from(path.as_os_str().len()).expect(
-                    "INVARIANT VIOLATED: a runtime stdlib path length does not fit u64. This is a bug because an in-memory path cannot exceed the process address space. Fix: inspect runtime load-path product accounting.",
+                .checked_add(u64::try_from(path.as_os_str().len()).expect_invariant(
+                    "a runtime stdlib path length does not fit u64",
+                    "an in-memory path cannot exceed the process address space",
+                    "inspect runtime load-path product accounting",
                 ))
-                .expect(
-                    "INVARIANT VIOLATED: runtime stdlib path-product weight overflowed u64. This is a bug because retained entry count and path storage are bounded. Fix: inspect runtime load-path product accounting.",
+                .expect_invariant(
+                    "runtime stdlib path-product weight overflowed u64",
+                    "retained entry count and path storage are bounded",
+                    "inspect runtime load-path product accounting",
                 )
         })
     }

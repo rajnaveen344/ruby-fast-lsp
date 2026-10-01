@@ -1,5 +1,6 @@
 //! Inferred types at a point.
 
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeResolution, TypeSubject,
 };
@@ -59,8 +60,10 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                     .find_scope_for_variable_at(name, source_position(position))
                     .or_else(|| document.scope_at_position(source_position(position)));
                 let inferred = scope.and_then(|scope| {
-                    let scope = u32::try_from(scope).expect(
-                        "INVARIANT VIOLATED: local variable scope id exceeded u32. This is a bug because TypeSubject::Local stores u32 scope ids. Fix: widen TypeSubject::Local scope_id.",
+                    let scope = u32::try_from(scope).expect_invariant(
+                        "local variable scope id exceeded u32",
+                        "TypeSubject::Local stores u32 scope ids",
+                        "widen TypeSubject::Local scope_id",
                     );
                     AnalysisQuery::new(&engine).local_variable_type_at(
                         name,

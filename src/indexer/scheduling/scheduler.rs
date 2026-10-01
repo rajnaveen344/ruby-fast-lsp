@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use parking_lot::Mutex;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -49,9 +50,11 @@ pub struct IndexingScheduler {
 
 impl IndexingScheduler {
     pub fn new(concurrency_limit: usize) -> Self {
-        assert!(
+        invariant!(
             concurrency_limit > 0,
-            "INVARIANT VIOLATED: indexing scheduler concurrency is zero. This is a bug because queued projects could never make progress. Fix: configure at least one indexing worker."
+            what = "indexing scheduler concurrency is zero",
+            why = "queued projects could never make progress",
+            fix = "configure at least one indexing worker",
         );
         Self {
             inner: Arc::new(SchedulerInner {
@@ -77,8 +80,10 @@ impl IndexingScheduler {
     ) -> IndexingPermit {
         self.acquire_cancellable(project_root, priority, CancellationToken::new())
             .await
-            .expect(
-                "INVARIANT VIOLATED: a non-cancellable indexing admission was cancelled. This is a bug because its private cancellation token is never exposed. Fix: inspect scheduler cancellation ownership.",
+            .expect_invariant(
+                "a non-cancellable indexing admission was cancelled",
+                "its private cancellation token is never exposed",
+                "inspect scheduler cancellation ownership",
             )
     }
 
@@ -106,9 +111,11 @@ impl IndexingScheduler {
         cancellation: CancellationToken,
     ) -> IndexingAdmission {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
-        assert!(
+        invariant!(
             id != u64::MAX,
-            "INVARIANT VIOLATED: indexing scheduler ticket overflowed. This is a bug because one server cannot enqueue 2^64 indexing jobs. Fix: inspect the loop continuously rebuilding projects."
+            what = "indexing scheduler ticket overflowed",
+            why = "one server cannot enqueue 2^64 indexing jobs",
+            fix = "inspect the loop continuously rebuilding projects",
         );
         {
             let mut state = self.inner.state.lock();
@@ -165,10 +172,12 @@ impl IndexingAdmission {
                             let admitted = state.queued.swap_remove(winner);
                             let inserted =
                                 state.active_projects.insert(admitted.project_root.clone());
-                            assert!(
+                            invariant!(
                                 inserted,
-                                "INVARIANT VIOLATED: indexing scheduler admitted two active generations for project {}. This is a bug because concurrent coordinators can replace facts in the same isolated engine. Fix: admit only queue entries whose project root is not active.",
-                                admitted.project_root.display()
+                                what = "indexing scheduler admitted two active generations for project {}",
+                                why = "concurrent coordinators can replace facts in the same isolated engine",
+                                fix = "admit only queue entries whose project root is not active",
+                                admitted.project_root.display(),
                             );
                             state.active += 1;
                             if admitted.priority == IndexingPriority::Background
@@ -179,14 +188,18 @@ impl IndexingAdmission {
                                 state.priority_admissions_while_background_waits = state
                                     .priority_admissions_while_background_waits
                                     .checked_add(1)
-                                    .expect(
-                                        "INVARIANT VIOLATED: indexing scheduler fairness counter overflowed. This is a bug because the counter resets after a bounded priority burst. Fix: inspect admission accounting and background detection.",
+                                    .expect_invariant(
+                                        "indexing scheduler fairness counter overflowed",
+                                        "the counter resets after a bounded priority burst",
+                                        "inspect admission accounting and background detection",
                                     );
-                                assert!(
+                                invariant!(
                                     state.priority_admissions_while_background_waits
                                         <= MAX_PRIORITY_ADMISSIONS_WHILE_BACKGROUND_WAITS,
-                                    "INVARIANT VIOLATED: indexing scheduler exceeded its bounded priority burst while background work was admissible. This is a bug because starvation resistance requires the next admission to select background work. Fix: route every admission through the fairness-aware selector."
-                                    );
+                                    what = "scheduler exceeded its priority burst while background work was admissible",
+                                    why = "starvation resistance requires admitting background work next",
+                                    fix = "route every admission through the fairness-aware selector",
+                                );
                             }
                             self.registration.admitted = true;
                             let permit = IndexingPermit {
@@ -216,10 +229,10 @@ impl IndexingScheduler {
             let mut state = self.inner.state.lock();
             if state.active_project.as_deref() != Some(project_root) {
                 state.active_project = Some(project_root.to_path_buf());
-                state.reprioritizations = state.reprioritizations.checked_add(1).expect(
-                    "INVARIANT VIOLATED: scheduler active-project reprioritization count overflowed. \
-                     This is a bug because one process cannot switch active projects 2^64 times. \
-                     Fix: inspect the editor activity notification loop.",
+                state.reprioritizations = state.reprioritizations.checked_add(1).expect_invariant(
+                    "scheduler active-project reprioritization count overflowed",
+                    "one process cannot switch active projects 2^64 times",
+                    "inspect the editor activity notification loop",
                 );
                 changed = true;
             }
@@ -352,15 +365,19 @@ pub struct IndexingPermit {
 impl Drop for IndexingPermit {
     fn drop(&mut self) {
         let mut state = self.inner.state.lock();
-        assert!(
+        invariant!(
             state.active > 0,
-            "INVARIANT VIOLATED: indexing scheduler released a permit with no active worker. This is a bug because every permit must increment active exactly once. Fix: inspect permit construction and drop ownership."
+            what = "indexing scheduler released a permit with no active worker",
+            why = "every permit must increment active exactly once",
+            fix = "inspect permit construction and drop ownership",
         );
         let removed = state.active_projects.remove(&self.project_root);
-        assert!(
+        invariant!(
             removed,
-            "INVARIANT VIOLATED: indexing scheduler released project {} without an active-project registration. This is a bug because every permit must own exactly one active project. Fix: preserve the admitted project root on the permit.",
-            self.project_root.display()
+            what = "indexing scheduler released project {} without an active-project registration",
+            why = "every permit must own exactly one active project",
+            fix = "preserve the admitted project root on the permit",
+            self.project_root.display(),
         );
         state.active -= 1;
         drop(state);
@@ -774,8 +791,10 @@ mod tests {
             }
         })
         .await
-        .expect(
-            "INVARIANT VIOLATED: scheduler test queue did not reach the expected size. This is a bug because every spawned waiter must register before admission. Fix: inspect queue registration and notification ownership.",
+        .expect_invariant(
+            "scheduler test queue did not reach the expected size",
+            "every spawned waiter must register before admission",
+            "inspect queue registration and notification ownership",
         );
     }
 }

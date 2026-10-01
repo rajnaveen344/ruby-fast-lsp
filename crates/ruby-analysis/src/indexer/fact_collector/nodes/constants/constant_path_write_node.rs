@@ -36,12 +36,12 @@ impl FactCollector {
 
         let mut fqn_parts = self.scope_tracker.get_ns_stack();
         fqn_parts.extend(namespace_parts);
-        assert!(
+        invariant!(
             fqn_parts.last() == Some(&constant),
-            "INVARIANT VIOLATED: constant path write target `{}` did not end with its name. \
-             This is a bug because Prism target path collection must preserve the written constant. \
-             Fix: inspect collect_namespaces for ConstantPathWriteNode targets.",
-            constant_name
+            what = "constant path write target `{}` did not end with its name",
+            why = "prism target path collection must preserve the written constant",
+            fix = "inspect collect_namespaces for ConstantPathWriteNode targets",
+            constant_name,
         );
 
         Some((constant_name, FullyQualifiedName::constant(fqn_parts)))

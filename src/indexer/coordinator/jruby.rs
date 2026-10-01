@@ -27,6 +27,7 @@ use crate::indexer::cache::persistent::{
 };
 use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::sources::gems::discover_locked_java_gem_roots;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
@@ -299,8 +300,10 @@ pub(super) fn build_jruby_import_provider(
             persistent_cache,
             process_cache,
         ),
-        (Some(_), None) | (None, Some(_)) => panic!(
-            "INVARIANT VIOLATED: persistent and process-local Java artifact caches were configured independently. This is a bug because production lookup must validate persistent products before bounded shared retention. Fix: pass both caches together or neither for an isolated uncached test."
+        (Some(_), None) | (None, Some(_)) => unreachable_invariant!(
+            what = "persistent and process-local Java artifact caches were configured independently",
+            why = "production lookup must validate persistent products before bounded shared retention",
+            fix = "pass both caches together or neither for an isolated uncached test",
         ),
         (None, None) => build_project_java_catalog(&classpath, jdk_feature, archive_limits)
             .map_err(|error| anyhow!("Java catalog construction failed: {error:?}")),
@@ -477,15 +480,15 @@ impl IndexingCoordinator {
         let Some(artifact) = self.jruby_runtime_archive.clone() else {
             return Ok(());
         };
-        let provider = self.jruby_import_provider.clone().expect(
-            "INVARIANT VIOLATED: a JRuby runtime archive exists without its import provider. \
-             This is a bug because both are derived transactionally from one isolated classpath. \
-             Fix: keep JRuby runtime archive and catalog setup in the same coordinator step.",
+        let provider = self.jruby_import_provider.clone().expect_invariant(
+            "a JRuby runtime archive exists without its import provider",
+            "both are derived transactionally from one isolated classpath",
+            "keep JRuby runtime archive and catalog setup in the same coordinator step",
         );
-        let processor = self.file_processor.clone().expect(
-            "INVARIANT VIOLATED: JRuby runtime source indexing started before FileProcessor setup. \
-             This is a coordinator bug because runtime sources must use ordinary file-owned facts. \
-             Fix: keep FileProcessor setup before JRuby runtime source materialization.",
+        let processor = self.file_processor.clone().expect_invariant(
+            "JRuby runtime source indexing started before FileProcessor setup",
+            "runtime sources must use ordinary file-owned facts",
+            "keep FileProcessor setup before JRuby runtime source materialization",
         );
         let workspace_root = self.workspace_root.clone();
         let user_cache_root_override = self.cache_root.clone();

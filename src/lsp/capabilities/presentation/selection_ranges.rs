@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::indexer::selection_range_chains;
 use tower_lsp::lsp_types::{SelectionRange, SelectionRangeParams};
 
@@ -43,9 +44,9 @@ fn selection_range_from_chain(
             parent: nested.map(Box::new),
         });
     }
-    nested.expect(
-        "INVARIANT VIOLATED: indexer returned an empty selection range chain. \
-         This is a bug because every requested position requires an LSP response. \
-         Fix: return a zero-width fallback range when no Prism node contains the position.",
+    nested.expect_invariant(
+        "indexer returned an empty selection range chain",
+        "every requested position requires an LSP response",
+        "return a zero-width fallback range when no Prism node contains the position",
     )
 }

@@ -531,7 +531,11 @@ fn invalid_extension_method_metadata_is_rejected_before_fact_conversion() {
     assert!(err.contains("invalid named Ruby type"), "got: {err}");
 
     let IndexPatch::DefineMethod(mut conflicting_return_source) = patch else {
-        panic!("INVARIANT VIOLATED: the method validation fixture changed patch variants. This is a test bug because the return-source invariant applies only to DefineMethod. Fix: keep this fixture as DefineMethod.");
+        unreachable_invariant!(
+            what = "the method validation fixture changed patch variants",
+            why = "the return-source invariant applies only to DefineMethod",
+            fix = "keep this fixture as DefineMethod",
+        );
     };
     conflicting_return_source.return_type = Some(ruby_fast_lsp_extension_api::RubyType::Named(
         "Widget".to_string(),
@@ -563,11 +567,11 @@ fn initialization_option_direct_wasm_in_directory_is_skipped() {
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: initialization option directory loaded a raw wasm file. \
-         This is a bug because editor extension directories must contain manifest packages. \
-        Fix: keep raw wasm loading scoped to environment/dev paths."
+        what = "initialization option directory loaded a raw wasm file",
+        why = "editor extension directories must contain manifest packages",
+        fix = "keep raw wasm loading scoped to environment/dev paths",
     );
 }
 
@@ -597,10 +601,10 @@ fn invalid_document_symbol_kind_is_recoverable_error() {
 
     let err = response_patch_to_document_symbol(patch)
         .expect_err("invalid symbol kind must be a recoverable extension error");
-    assert!(
+    invariant!(
         err.contains("unsupported document symbol kind"),
-        "INVARIANT VIOLATED: invalid extension document symbol kind did not produce a clear error. \
-         This is a bug because extension response patches must disable the extension instead of panicking. \
-         Fix: keep symbol kind conversion on the recoverable error path."
+        what = "invalid extension document symbol kind did not produce a clear error",
+        why = "extension response patches must disable the extension instead of panicking",
+        fix = "keep symbol kind conversion on the recoverable error path",
     );
 }

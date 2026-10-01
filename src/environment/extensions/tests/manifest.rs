@@ -38,7 +38,7 @@ frame = true
     let targets =
         parse_manifest_method_targets(&manifest).expect("test semantic targets must parse");
     assert_eq!(targets.len(), 1);
-    assert_eq!(
+    invariant_eq!(
         targets[0],
         ExtensionMethodTarget {
             owner: vec![RubyConstant::new("RSpec").expect("test constant is valid")],
@@ -46,9 +46,9 @@ frame = true
             method: RubyMethod::new("describe").expect("test method is valid"),
             frame: true,
         },
-        "INVARIANT VIOLATED: extension semantic target parsing changed. \
-         This is a bug because extension dispatch must be gated by resolved method target. \
-         Fix: preserve owner, owner_kind, method, and frame fields."
+        what = "extension semantic target parsing changed",
+        why = "extension dispatch must be gated by resolved method target",
+        fix = "preserve owner, owner_kind, method, and frame fields",
     );
 }
 
@@ -372,11 +372,11 @@ wasm = "missing.wasm"
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: invalid extension manifest loaded successfully. \
-         This is a bug because package validation must reject mismatched ABI or missing wasm. \
-         Fix: keep manifest validation in the recoverable load path."
+        what = "invalid extension manifest loaded successfully",
+        why = "package validation must reject mismatched ABI or missing wasm",
+        fix = "keep manifest validation in the recoverable load path",
     );
 }
 
@@ -397,11 +397,11 @@ fn initialization_option_package_without_manifest_is_skipped() {
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: initialization option package without manifest loaded. \
-         This is a bug because editor-installed extension packages must have extension.toml. \
-         Fix: keep extensionPackages stricter than extensionDirs."
+        what = "initialization option package without manifest loaded",
+        why = "editor-installed extension packages must have extension.toml",
+        fix = "keep extensionPackages stricter than extensionDirs",
     );
 }
 
@@ -439,11 +439,11 @@ permissions = []
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: incompatible server_version manifest loaded. \
-         This is a bug because extension packages must be gated by host compatibility. \
-         Fix: validate manifest server_version before wasm instantiation."
+        what = "incompatible server_version manifest loaded",
+        why = "extension packages must be gated by host compatibility",
+        fix = "validate manifest server_version before wasm instantiation",
     );
 }
 
@@ -482,10 +482,10 @@ permissions = []
     };
 
     let extensions = load_wasm_extensions(&config);
-    assert!(
+    invariant!(
         extensions.is_empty(),
-        "INVARIANT VIOLATED: checksum mismatch manifest loaded. \
-         This is a bug because extension packages must bind manifest metadata to wasm bytes. \
-         Fix: validate checksum_sha256 before wasm instantiation."
+        what = "checksum mismatch manifest loaded",
+        why = "extension packages must bind manifest metadata to wasm bytes",
+        fix = "validate checksum_sha256 before wasm instantiation",
     );
 }

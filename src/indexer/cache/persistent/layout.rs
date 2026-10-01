@@ -65,12 +65,12 @@ pub(super) fn product_kind_for_path(path: &Path) -> PersistentProductKind {
     {
         PersistentProductKind::CompiledWasm
     } else {
-        assert!(
+        invariant!(
             path.components()
                 .any(|component| component.as_os_str() == GEM_PRODUCT_NAMESPACE),
-            "INVARIANT VIOLATED: persistent cleanup found a product outside every registered \
-             product namespace. This is a bug because cleanup must never assign ownership by \
-             guessing. Fix: add the product namespace to the explicit kind mapping."
+            what = "persistent cleanup found a product outside every registered product namespace",
+            why = "cleanup must never assign ownership by guessing",
+            fix = "add the product namespace to the explicit kind mapping",
         );
         PersistentProductKind::Gem
     }

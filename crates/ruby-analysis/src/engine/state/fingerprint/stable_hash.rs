@@ -1,5 +1,6 @@
 //! Cross-process stable hashing of semantic facts for fingerprints.
 
+use crate::invariant::ExpectInvariant;
 use std::hash::Hasher;
 
 use crate::core::callables::callable_body::CallableBodyExpression;
@@ -35,8 +36,10 @@ pub(super) fn stable_u64(hasher: &mut StableExportHasher, value: u64) {
 pub(super) fn stable_len(hasher: &mut StableExportHasher, value: usize) {
     stable_u64(
         hasher,
-        u64::try_from(value).expect(
-            "INVARIANT VIOLATED: semantic export collection length exceeded u64. This is a bug because one process cannot hold that many facts. Fix: reject oversized semantic inputs before fingerprinting.",
+        u64::try_from(value).expect_invariant(
+            "semantic export collection length exceeded u64",
+            "one process cannot hold that many facts",
+            "reject oversized semantic inputs before fingerprinting",
         ),
     );
 }

@@ -37,9 +37,11 @@ impl ProjectFactCollectorHost {
         &self,
         project: Option<&ProjectContext>,
     ) -> &ExtensionApplicabilitySnapshot {
-        assert!(
+        invariant!(
             self.extensions_enabled,
-            "INVARIANT VIOLATED: disabled extension traversal requested an applicability snapshot. This is a bug because non-project sources must not execute extension hooks. Fix: keep all snapshot access behind the extensions_enabled gate."
+            what = "disabled extension traversal requested an applicability snapshot",
+            why = "non-project sources must not execute extension hooks",
+            fix = "keep all snapshot access behind the extensions_enabled gate",
         );
         self.extension_applicability
             .get_or_init(|| self.extension_registry.applicability_snapshot(project))
@@ -89,9 +91,12 @@ impl FactCollectorExtensionHost for ProjectFactCollectorHost {
         visitor: &FactCollector,
         node: &CallNode<'_>,
     ) -> ResolvedCall {
-        assert!(
+        invariant!(
             self.extensions_enabled,
-            "INVARIANT VIOLATED: an extension call frame was resolved for a source kind that disables extensions. This is a bug because disabled extension hosts must reject frame tracking before payload construction. Fix: keep should_track_enclosing_call gated by extensions_enabled."
+            what =
+                "an extension call frame was resolved for a source kind that disables extensions",
+            why = "disabled extension hosts must reject frame tracking before payload construction",
+            fix = "keep should_track_enclosing_call gated by extensions_enabled",
         );
         self.extension_registry
             .resolved_call_for_stack_with_applicability(

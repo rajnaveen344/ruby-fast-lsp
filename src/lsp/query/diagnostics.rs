@@ -5,6 +5,7 @@
 //!
 //! AST-only diagnostics (syntax errors/warnings) remain in `capabilities/diagnostics.rs`.
 
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity};
 use std::path::PathBuf;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
@@ -14,10 +15,10 @@ use super::{analysis_location::location_for_range, EngineQuery};
 impl EngineQuery {
     /// Get diagnostics for unresolved entries from the analysis engine.
     pub fn get_unresolved_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
-        let analysis_engine = self.analysis_engine.as_ref().expect(
-            "INVARIANT VIOLATED: unresolved diagnostics requested without analysis engine. \
-             This is a bug because diagnostics are owned by ruby-analysis::engine. \
-             Fix: construct EngineQuery with EngineQuery::with_engine or with_doc_and_engine.",
+        let analysis_engine = self.analysis_engine.as_ref().expect_invariant(
+            "unresolved diagnostics requested without analysis engine",
+            "diagnostics are owned by ruby-analysis::engine",
+            "construct EngineQuery with EngineQuery::with_engine or with_doc_and_engine",
         );
         let engine = analysis_engine.read();
         Self::unresolved_diagnostics_from_engine(&engine, uri)

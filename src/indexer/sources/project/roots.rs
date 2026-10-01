@@ -130,6 +130,7 @@ fn discover_nested_project_roots(directory: &Path, roots: &mut Vec<PathBuf>) -> 
 
 #[cfg(test)]
 mod tests {
+    use crate::invariant::ExpectInvariant;
     use std::fs;
 
     use tempfile::tempdir;
@@ -137,8 +138,10 @@ mod tests {
     use super::{discover_project_roots, discover_project_roots_with_explicit};
 
     fn touch(path: &std::path::Path) {
-        fs::create_dir_all(path.parent().expect(
-            "INVARIANT VIOLATED: test file must have a parent directory. This is a bug because fixtures require a containing directory. Fix: provide a nested fixture path.",
+        fs::create_dir_all(path.parent().expect_invariant(
+            "test file must have a parent directory",
+            "fixtures require a containing directory",
+            "provide a nested fixture path",
         ))
         .unwrap();
         fs::write(path, "source 'https://rubygems.org'\n").unwrap();

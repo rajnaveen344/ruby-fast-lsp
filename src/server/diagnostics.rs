@@ -2,6 +2,7 @@
 use super::projects::ProjectRegistry;
 use super::{RubyLanguageServer, Workspace};
 use crate::indexer::scheduling::status::IndexingPhase;
+use crate::invariant::ExpectInvariant;
 use log::{info, warn};
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
@@ -189,26 +190,38 @@ impl RubyLanguageServer {
                 .files()
                 .filter(|file| file.kind.contributes_project_diagnostics())
                 .filter_map(|file| {
-                    let candidates = engine.diagnostic_facts_in_file(file.id).into_iter()
+                    let candidates = engine
+                        .diagnostic_facts_in_file(file.id)
+                        .into_iter()
                         .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
                         .collect::<Vec<_>>();
                     if open_paths.contains(&file.path) {
-                        open_files = open_files.checked_add(1).expect(
-                            "INVARIANT VIOLATED: unresolved-require open-file refresh counter overflowed usize. This is a bug because the document cache must fit addressable memory. Fix: inspect corrupt document-cache iteration.",
+                        open_files = open_files.checked_add(1).expect_invariant(
+                            "unresolved-require open-file refresh counter overflowed usize",
+                            "the document cache must fit addressable memory",
+                            "inspect corrupt document-cache iteration",
                         );
                     } else {
                         if candidates.is_empty() {
                             return None;
                         }
-                        closed_files = closed_files.checked_add(1).expect(
-                            "INVARIANT VIOLATED: unresolved-require closed-file refresh counter overflowed usize. This is a bug because project files must fit addressable memory. Fix: inspect corrupt file-store iteration.",
+                        closed_files = closed_files.checked_add(1).expect_invariant(
+                            "unresolved-require closed-file refresh counter overflowed usize",
+                            "project files must fit addressable memory",
+                            "inspect corrupt file-store iteration",
                         );
                     }
-                    let snapshot = engine.source_snapshot_for_path(&file.path).expect(
-                        "INVARIANT VIOLATED: a registered project file has no source snapshot. This is a bug because delayed facts require exact source identity. Fix: keep file registration and snapshot lookup aligned.",
-                    );
-                    let uri = Url::from_file_path(&file.path).expect(
-                        "INVARIANT VIOLATED: a project source cannot form a file URI. This is a bug because registered project paths must be absolute. Fix: normalize paths before file registration.",
+                    let snapshot = engine
+                        .source_snapshot_for_path(&file.path)
+                        .expect_invariant(
+                            "a registered project file has no source snapshot",
+                            "delayed facts require exact source identity",
+                            "keep file registration and snapshot lookup aligned",
+                        );
+                    let uri = Url::from_file_path(&file.path).expect_invariant(
+                        "a project source cannot form a file URI",
+                        "registered project paths must be absolute",
+                        "normalize paths before file registration",
                     );
                     Some((file.path.clone(), uri, file.id, snapshot, candidates))
                 })

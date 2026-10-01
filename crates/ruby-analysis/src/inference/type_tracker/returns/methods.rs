@@ -7,6 +7,7 @@ use crate::inference::method::recursive::MAX_RECURSIVE_RETURN_ITERATIONS;
 use crate::inference::type_tracker::returns::dependencies::join_recursive_return_approximations;
 use crate::inference::type_tracker::returns::RecursiveReturnApproximation;
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::*;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -74,9 +75,11 @@ impl TypeTracker {
         method: &DefNode,
         recursive_return_approximation: Option<RecursiveReturnApproximation>,
     ) -> RecursiveReturnApproximation {
-        assert!(
+        invariant!(
             self.control_flow.rescue_entries.is_empty(),
-            "INVARIANT VIOLATED: a rescue-entry accumulator escaped a previous method traversal. This is a bug because protected-body state is lexical and cannot cross method boundaries. Fix: pop every accumulator immediately after tracking its protected expression."
+            what = "a rescue-entry accumulator escaped a previous method traversal",
+            why = "protected-body state is lexical and cannot cross method boundaries",
+            fix = "pop every accumulator immediately after tracking its protected expression",
         );
         self.environment.clear();
         self.next_shape_identity = 0;
@@ -130,8 +133,10 @@ impl TypeTracker {
                     )
                 }) =>
             {
-                let (dependency, approximation) = fallthrough_term.expect(
-                    "INVARIANT VIOLATED: checked return term disappeared before use. This is a bug because the local result is immutable. Fix: destructure the option once instead of mutating dependency state between checks.",
+                let (dependency, approximation) = fallthrough_term.expect_invariant(
+                    "checked return term disappeared before use",
+                    "the local result is immutable",
+                    "destructure the option once instead of mutating dependency state between checks",
                 );
                 self.returns.dependencies.insert(dependency);
                 approximation
@@ -152,9 +157,11 @@ impl TypeTracker {
         alternatives.push(fallthrough);
         let return_type = join_recursive_return_approximations(alternatives);
 
-        assert!(
+        invariant!(
             self.control_flow.rescue_entries.is_empty(),
-            "INVARIANT VIOLATED: method traversal finished with an active rescue-entry accumulator. This is a bug because every protected body must restore the accumulator stack before publishing inferred types. Fix: balance the push/pop in begin and rescue-modifier tracking."
+            what = "method traversal ended with an active rescue-entry accumulator",
+            why = "protected bodies restore the accumulator stack before publishing",
+            fix = "balance push/pop in begin and rescue-modifier tracking",
         );
 
         self.context.method = previous_method;
@@ -172,10 +179,12 @@ pub(in crate::inference::type_tracker) fn normalized_method_name(
         source_name.as_ref()
     };
     RubyMethod::new(semantic_name).unwrap_or_else(|error| {
-        panic!(
-            "INVARIANT VIOLATED: Prism produced invalid method name `{semantic_name}` while tracking a definition: {error}. \
-             This is a bug because FactCollector validates method names before type inference. \
-             Fix: keep method-name validation and TypeTracker invocation on the same definition."
+        unreachable_invariant!(
+            what = "Prism produced invalid method name `{semantic_name}` for a definition: {error}",
+            why = "FactCollector validates method names before inference",
+            fix = "keep name validation and TypeTracker on the same definition",
+            semantic_name = semantic_name,
+            error = error,
         )
     })
 }

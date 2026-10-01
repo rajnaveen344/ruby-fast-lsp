@@ -2,6 +2,7 @@
 
 use crate::core::{ConstantTypeDependency, RubyType, UnknownReason};
 use crate::inference::type_tracker::TypeTracker;
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Default)]
@@ -60,8 +61,10 @@ impl TypeTracker {
             if deduplicated.last().is_some_and(|previous| {
                 previous.start_offset == read.start_offset && previous.end_offset == read.end_offset
             }) {
-                *deduplicated.last_mut().expect(
-                    "INVARIANT VIOLATED: the final local-read entry disappeared after it was checked. This is a bug because no mutation occurs between the check and replacement. Fix: keep repeated-read collapse atomic.",
+                *deduplicated.last_mut().expect_invariant(
+                    "the final local-read entry disappeared after it was checked",
+                    "no mutation occurs between the check and replacement",
+                    "keep repeated-read collapse atomic",
                 ) = read;
             } else {
                 deduplicated.push(read);

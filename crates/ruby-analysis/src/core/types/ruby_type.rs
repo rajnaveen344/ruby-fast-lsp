@@ -1,5 +1,6 @@
 use crate::core::names::fully_qualified_name::FullyQualifiedName;
 use crate::core::types::shape_type::{LiteralValue, ShapeType, MAX_SHAPE_UNION_VARIANTS};
+use crate::invariant::ExpectInvariant;
 use std::fmt::{self, Display, Formatter};
 
 /// Represents Ruby types in the type inference system
@@ -428,19 +429,19 @@ impl RubyType {
     pub fn widen_literals(&self) -> RubyType {
         match self {
             RubyType::Literal(value) => value.widened_type(),
-            RubyType::Array(types) => {
-                RubyType::Array(Self::canonical_union_members(types.iter().map(Self::widen_literals)))
-            }
+            RubyType::Array(types) => RubyType::Array(Self::canonical_union_members(
+                types.iter().map(Self::widen_literals),
+            )),
             RubyType::Hash(keys, values) => RubyType::Hash(
                 Self::canonical_union_members(keys.iter().map(Self::widen_literals)),
                 Self::canonical_union_members(values.iter().map(Self::widen_literals)),
             ),
             RubyType::Shape(shape) => RubyType::Shape(Box::new(
-                shape
-                    .try_map_types(Self::widen_literals)
-                    .expect(
-                        "INVARIANT VIOLATED: widening proven shape literals produced an invalid shape. This is a bug because widening removes precision and cannot add Unknown, duplicate keys, or depth. Fix: keep ShapeType construction and RubyType::widen_literals aligned.",
-                    ),
+                shape.try_map_types(Self::widen_literals).expect_invariant(
+                    "widening proven shape literals produced an invalid shape",
+                    "widening removes precision and cannot add Unknown, duplicate keys, or depth",
+                    "keep ShapeType construction and RubyType::widen_literals aligned",
+                ),
             )),
             RubyType::Union(types) => RubyType::union(types.iter().map(Self::widen_literals)),
             RubyType::Class(_)
@@ -454,11 +455,12 @@ impl RubyType {
     /// Create a class type from a name
     pub fn class(name: &str) -> Self {
         RubyType::Class(FullyQualifiedName::try_from(name).unwrap_or_else(|error| {
-            panic!(
-                "INVARIANT VIOLATED: RubyType::class received invalid Ruby name `{name}`: \
-                 {error}. This is a bug because replacing an invalid type identity with Object \
-                 would publish a wrong concrete type. Fix: validate source names at the domain \
-                 boundary and construct RubyType only from a valid FullyQualifiedName."
+            unreachable_invariant!(
+                what = "RubyType::class received invalid Ruby name `{name}`: {error}",
+                why = "falling back to Object would publish a wrong concrete type",
+                fix = "validate names at the domain boundary; build RubyType from a FullyQualifiedName",
+                name = name,
+                error = error,
             )
         }))
     }
@@ -518,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "INVARIANT VIOLATED: RubyType::class received invalid Ruby name")]
+    #[should_panic(expected = "invariant violated: RubyType::class received invalid Ruby name")]
     fn invalid_class_name_does_not_fall_back_to_object() {
         let _ = RubyType::class("not::a::valid::constant");
     }

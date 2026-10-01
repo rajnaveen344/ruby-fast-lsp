@@ -2,6 +2,7 @@
 
 use super::IndexingCoordinator;
 use crate::indexer::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::info;
@@ -46,11 +47,10 @@ where
         }
         IndexingWorkClass::ProjectCompanionIo => (1, 256 * MIB, 1, false, false),
         IndexingWorkClass::ProjectParallelIo => {
-            let project_root = project_root.as_deref().expect(
-                "INVARIANT VIOLATED: project-parallel indexing has no project root. This is a \
-                 bug because active-document lane ownership cannot be determined without the \
-                 isolated project identity. Fix: pass the coordinator's canonical project root \
-                 for every project-parallel phase.",
+            let project_root = project_root.as_deref().expect_invariant(
+                "project-parallel indexing has no project root",
+                "lane ownership needs the isolated project identity",
+                "pass the canonical project root for every project-parallel phase",
             );
             let cpu_lanes = server
                 .indexing

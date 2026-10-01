@@ -1,5 +1,6 @@
 //! Production editor-latency benchmark over the deterministic sample corpus.
 
+use crate::invariant::ExpectInvariant;
 use devtools::metrics::{LatencySummary, ProductionBudget, ProductionMeasurements};
 use ruby_fast_lsp::lsp::capabilities::navigation::{definitions, references};
 use ruby_fast_lsp::lsp::capabilities::{editing::completion, indexing, presentation::hover};
@@ -35,9 +36,15 @@ pub(crate) async fn run_production_benchmark(
     const COMPLETION_CALL: &str = "@service.list_users";
     const COMPLETION_RECEIVER: &str = "@service.";
     let completion_call_count = original.match_indices(COMPLETION_CALL).count();
-    assert_eq!(
-        completion_call_count, 1,
-        "INVARIANT VIOLATED: benchmark corpus contains {completion_call_count} occurrences of {COMPLETION_CALL:?}. This is a bug because the completion edit must target one deterministic call. Fix: retain exactly one benchmark completion call or select it with a stronger unique marker."
+    invariant_eq!(
+        completion_call_count,
+        1,
+        what =
+            "benchmark corpus contains {completion_call_count} occurrences of {COMPLETION_CALL:?}",
+        why = "the completion edit must target one call",
+        fix = "keep exactly one benchmark completion call or use a unique marker",
+        completion_call_count = completion_call_count,
+        COMPLETION_CALL = COMPLETION_CALL,
     );
     let completion_source = original.replacen(COMPLETION_CALL, COMPLETION_RECEIVER, 1);
 
@@ -93,9 +100,12 @@ pub(crate) async fn run_production_benchmark(
                 .map(|item| item.label.as_str())
                 .collect::<Vec<_>>(),
         };
-        assert!(
+        invariant!(
             completion_labels.contains(&"list_users"),
-            "INVARIANT VIOLATED: benchmark completion did not include list_users; observed labels: {completion_labels:?}. This is a bug because timing an empty or semantically broken query would produce misleading evidence. Fix: repair the deterministic corpus or completion query position."
+            what = "benchmark completion lacks list_users; labels: {completion_labels:?}",
+            why = "timing a broken query produces misleading evidence",
+            fix = "repair the corpus or completion position",
+            completion_labels = completion_labels,
         );
     }
 
@@ -132,9 +142,11 @@ pub(crate) async fn run_production_benchmark(
         let start = Instant::now();
         let result = hover::handle_hover(server, hover_params()).await;
         hover_samples.push(start.elapsed());
-        assert!(
+        invariant!(
             result.is_some(),
-            "INVARIANT VIOLATED: benchmark hover returned no result. This is a bug because timing an empty query would produce misleading evidence. Fix: repair the deterministic corpus or hover position."
+            what = "benchmark hover returned no result",
+            why = "timing an empty query would produce misleading evidence",
+            fix = "repair the deterministic corpus or hover position",
         );
     }
 
@@ -144,11 +156,15 @@ pub(crate) async fn run_production_benchmark(
         let result =
             definitions::find_definition_at_position(server, uri.clone(), method_position).await;
         definition_samples.push(start.elapsed());
-        assert!(
+        invariant!(
             result
                 .as_ref()
-                .is_some_and(|response| !definitions::definition_locations(response.clone()).is_empty()),
-            "INVARIANT VIOLATED: benchmark definition returned no locations. This is a bug because timing an empty query would produce misleading evidence. Fix: repair the deterministic corpus or definition position."
+                .is_some_and(
+                    |response| !definitions::definition_locations(response.clone()).is_empty()
+                ),
+            what = "benchmark definition returned no locations",
+            why = "timing an empty query would produce misleading evidence",
+            fix = "repair the deterministic corpus or definition position",
         );
     }
 
@@ -157,9 +173,13 @@ pub(crate) async fn run_production_benchmark(
         let start = Instant::now();
         let result = references::find_references_at_position(server, &uri, method_position).await;
         reference_samples.push(start.elapsed());
-        assert!(
-            result.as_ref().is_some_and(|locations| !locations.is_empty()),
-            "INVARIANT VIOLATED: benchmark references returned no locations. This is a bug because timing an empty query would produce misleading evidence. Fix: repair the deterministic corpus or reference position."
+        invariant!(
+            result
+                .as_ref()
+                .is_some_and(|locations| !locations.is_empty()),
+            what = "benchmark references returned no locations",
+            why = "timing an empty query would produce misleading evidence",
+            fix = "repair the deterministic corpus or reference position",
         );
     }
 
@@ -184,8 +204,10 @@ pub(crate) async fn run_production_benchmark(
             DidChangeTextDocumentParams {
                 text_document: VersionedTextDocumentIdentifier {
                     uri: uri.clone(),
-                    version: i32::try_from(iteration + 3).expect(
-                        "INVARIANT VIOLATED: benchmark iteration count exceeds LSP document versions. This is a bug because the benchmark cannot represent that many edits. Fix: use fewer than i32::MAX iterations.",
+                    version: i32::try_from(iteration + 3).expect_invariant(
+                        "benchmark iteration count exceeds LSP document versions",
+                        "the benchmark cannot represent that many edits",
+                        "use fewer than i32::MAX iterations",
                     ),
                 },
                 content_changes: vec![TextDocumentContentChangeEvent {
@@ -229,17 +251,28 @@ fn position_inside(content: &str, needle: &str) -> anyhow::Result<Position> {
 }
 
 fn position_at_byte_offset(content: &str, offset: usize) -> Position {
-    assert!(
+    invariant!(
         content.is_char_boundary(offset),
-        "INVARIANT VIOLATED: benchmark byte offset {offset} is not a UTF-8 character boundary. This is a bug because LSP positions must be derived from valid source boundaries. Fix: choose a complete source token."
+        what = "benchmark byte offset {offset} is not a UTF-8 character boundary",
+        why = "LSP positions must be derived from valid source boundaries",
+        fix = "choose a complete source token",
+        offset = offset,
     );
     let prefix = &content[..offset];
     let line = prefix.bytes().filter(|byte| *byte == b'\n').count();
     let line_start = prefix.rfind('\n').map_or(0, |newline| newline + 1);
     let character = content[line_start..offset].encode_utf16().count();
     Position::new(
-        u32::try_from(line).expect("INVARIANT VIOLATED: benchmark line count exceeds u32"),
-        u32::try_from(character).expect("INVARIANT VIOLATED: benchmark UTF-16 column exceeds u32"),
+        u32::try_from(line).expect_invariant(
+            "benchmark line count exceeds u32",
+            "LSP positions are u32",
+            "use benchmark sources under 4G lines",
+        ),
+        u32::try_from(character).expect_invariant(
+            "benchmark UTF-16 column exceeds u32",
+            "LSP positions are u32",
+            "use benchmark sources with shorter lines",
+        ),
     )
 }
 

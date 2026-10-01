@@ -6,6 +6,7 @@
 use crate::environment::config::runtime::EffectiveRuntimeSelection;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::RuntimeImplementation;
+use crate::invariant::ExpectInvariant;
 use crate::lsp::capabilities::{self, indexing};
 use crate::server::RubyLanguageServer;
 use log::{debug, info, warn};
@@ -929,11 +930,11 @@ fn extension_watch_registration(globs: &[String]) -> Registration {
     Registration {
         id: "ruby-fast-lsp-extension-watchers".to_string(),
         method: "workspace/didChangeWatchedFiles".to_string(),
-        register_options: Some(
-            serde_json::to_value(options).expect(
-                "INVARIANT VIOLATED: typed watched-file registration options failed to serialize. This is a bug because lsp-types registration values must serialize. Fix: preserve serializable watcher option fields.",
-            ),
-        ),
+        register_options: Some(serde_json::to_value(options).expect_invariant(
+            "typed watched-file registration options failed to serialize",
+            "lsp-types registration values must serialize",
+            "preserve serializable watcher option fields",
+        )),
     }
 }
 

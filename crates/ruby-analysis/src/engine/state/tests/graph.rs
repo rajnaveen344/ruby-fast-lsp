@@ -485,12 +485,16 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
         &RubyMethod::new("object_mixin_method").unwrap(),
     ) {
         crate::engine::resolution::MethodLookupResult::Ambiguous { .. } => {}
-        crate::engine::resolution::MethodLookupResult::Unique(fact) => panic!(
-            "INVARIANT VIOLATED: an Object-only project mixin resolved concretely for unrelated Client through `{}`. This is a bug because workspace indexing does not prove that monkeypatch was loaded in Client's runtime. Fix: stop non-core ancestry proof at universal open roots.",
+        crate::engine::resolution::MethodLookupResult::Unique(fact) => unreachable_invariant!(
+            what = "an Object-only project mixin resolved concretely for unrelated Client through `{}`",
+            why = "workspace indexing does not prove that monkeypatch was loaded in Client's runtime",
+            fix = "stop non-core ancestry proof at universal open roots",
             fact.owner,
         ),
-        crate::engine::resolution::MethodLookupResult::Missing => panic!(
-            "INVARIANT VIOLATED: an unproven Object-only project mixin became definitely missing. This is a bug because the method may exist if the monkeypatch is loaded at runtime. Fix: preserve the lookup as ambiguous Unknown rather than emitting a false missing-method diagnostic."
+        crate::engine::resolution::MethodLookupResult::Missing => unreachable_invariant!(
+            what = "an unproven Object-only project mixin became definitely missing",
+            why = "the method may exist if the monkeypatch loads at runtime",
+            fix = "keep the lookup ambiguous Unknown; emit no missing-method diagnostic",
         ),
     }
     assert!(matches!(

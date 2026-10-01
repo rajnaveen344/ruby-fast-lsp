@@ -283,11 +283,11 @@ impl ReferenceCandidate {
         parts: Vec<RubyConstant>,
         current_namespace: Vec<RubyConstant>,
     ) -> Self {
-        assert!(
+        invariant!(
             !parts.is_empty(),
-            "INVARIANT VIOLATED: constant reference candidate has no parts. \
-             This is a bug because constant resolution requires at least one constant name. \
-             Fix: skip empty constant paths before constructing ReferenceCandidate."
+            what = "constant reference candidate has no parts",
+            why = "constant resolution requires at least one constant name",
+            fix = "skip empty constant paths before constructing ReferenceCandidate",
         );
         Self {
             range,
@@ -311,11 +311,13 @@ impl ReferenceCandidate {
 
     pub fn method(reference_range: TextRange, candidate: MethodReferenceCandidate) -> Self {
         if let Some(expression_range) = candidate.call_expression_range {
-            assert!(
+            invariant!(
                 expression_range.file_id == reference_range.file_id
                     && expression_range.start_byte <= reference_range.start_byte
                     && expression_range.end_byte >= reference_range.end_byte,
-                "INVARIANT VIOLATED: method reference range is outside its call expression. This is a bug because deferred call-type finalization must update the AST call that owns the referenced message. Fix: attach the full enclosing CallNode range to the candidate."
+                what = "method reference range is outside its call expression",
+                why = "call-type finalization updates the owning AST call",
+                fix = "attach the enclosing CallNode range to the candidate",
             );
         }
         Self {
@@ -341,11 +343,11 @@ impl ReferenceCandidate {
         method: RubyMethod,
         caller: Option<FullyQualifiedName>,
     ) -> Self {
-        assert!(
+        invariant!(
             !owner.is_empty(),
-            "INVARIANT VIOLATED: exact method reference target has no owner namespace. \
-             This is a bug because method resolution requires a concrete owner. \
-             Fix: validate extension method targets before constructing ReferenceCandidate."
+            what = "exact method reference target has no owner namespace",
+            why = "method resolution requires a concrete owner",
+            fix = "validate extension method targets before constructing ReferenceCandidate",
         );
         Self {
             range: reference_range,
@@ -392,11 +394,11 @@ impl ReferenceCandidateStore {
         let mut methods = Vec::new();
         let mut resolved = Vec::new();
         for candidate in candidates {
-            assert!(
+            invariant!(
                 candidate.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement reference candidate belongs to a different file id. \
-                 This is a bug because ReferenceCandidateStore::replace_file must only receive candidates for the target file. \
-                 Fix: partition candidates by SourceFileId before replacing."
+                what = "replacement reference candidate belongs to another file",
+                why = "replace_file receives only the target file's candidates",
+                fix = "partition candidates by SourceFileId first",
             );
             match candidate.kind {
                 StoredReferenceCandidateKind::Constant { lookup } => {
@@ -717,11 +719,11 @@ impl ReferenceStore {
     ) {
         self.remove_file(file_id);
         for (target, fact) in facts {
-            assert!(
+            invariant!(
                 fact.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement reference fact belongs to a different file id. \
-                 This is a bug because ReferenceStore::replace_file must only receive facts for the target file. \
-                 Fix: partition facts by SourceFileId before replacing."
+                what = "replacement reference fact belongs to a different file id",
+                why = "ReferenceStore::replace_file must only receive facts for the target file",
+                fix = "partition facts by SourceFileId before replacing",
             );
             self.add(target, fact);
         }

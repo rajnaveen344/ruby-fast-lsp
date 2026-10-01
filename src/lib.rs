@@ -1,3 +1,8 @@
+#[macro_use]
+#[allow(unused_macros)]
+#[path = "../crates/ruby-analysis/src/invariant.rs"]
+mod invariant;
+
 pub mod environment;
 pub mod indexer;
 pub mod lsp;

@@ -1,5 +1,6 @@
 //! Debug Query — LSP adapter over analysis-engine inspection commands.
 
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::engine::{AnalysisQuery, ExportGraphResponse, LookupResponse};
 
 use super::EngineQuery;
@@ -20,10 +21,10 @@ impl EngineQuery {
     fn debug_engine(
         &self,
     ) -> &std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>> {
-        self.analysis_engine.as_ref().expect(
-            "INVARIANT VIOLATED: debug query requested without analysis engine. \
-             This is a bug because debug LSP commands must inspect AnalysisEngine facts. \
-             Fix: construct EngineQuery with with_engine().",
+        self.analysis_engine.as_ref().expect_invariant(
+            "debug query requested without analysis engine",
+            "debug LSP commands must inspect AnalysisEngine facts",
+            "construct EngineQuery with with_engine()",
         )
     }
 }

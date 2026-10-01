@@ -170,9 +170,12 @@ impl FactCollector {
             .collect::<Vec<_>>();
         deferred_call_ranges.sort_unstable();
         for adjacent in deferred_call_ranges.windows(2) {
-            assert!(
+            invariant!(
                 adjacent[0] != adjacent[1],
-                "INVARIANT VIOLATED: one call expression produced multiple deferred method-return candidates. This is a bug because final resolution cannot choose one runtime dispatch from competing candidates. Fix: attach exactly one method candidate to each CallNode outcome."
+                what = "one call expression produced multiple deferred method-return candidates",
+                why =
+                    "final resolution cannot choose one runtime dispatch from competing candidates",
+                fix = "attach exactly one method candidate to each CallNode outcome",
             );
         }
 
@@ -184,9 +187,11 @@ impl FactCollector {
             .collect::<Vec<_>>();
         call_expression_outcomes.sort_unstable_by_key(|(range, _)| *range);
         for adjacent in call_expression_outcomes.windows(2) {
-            assert!(
+            invariant!(
                 adjacent[0].0 != adjacent[1].0,
-                "INVARIANT VIOLATED: one call expression produced more than one immediate proof outcome. This is a bug because one AST call has exactly one result. Fix: classify an immediate call once and leave all other calls to deferred engine resolution."
+                what = "one call expression produced more than one immediate proof outcome",
+                why = "one AST call has exactly one result",
+                fix = "classify an immediate call once; defer all others to the engine",
             );
         }
 
@@ -198,9 +203,11 @@ impl FactCollector {
             .collect::<Vec<_>>();
         expression_unknown_reasons.sort_unstable();
         for adjacent in expression_unknown_reasons.windows(2) {
-            assert!(
+            invariant!(
                 adjacent[0].0 != adjacent[1].0,
-                "INVARIANT VIOLATED: one expression range produced more than one Unknown reason. This is a bug because one AST expression has exactly one proof result. Fix: record expression evidence once during its node-entry callback."
+                what = "one expression range produced more than one Unknown reason",
+                why = "one AST expression has exactly one proof result",
+                fix = "record expression evidence once during its node-entry callback",
             );
         }
         let mut method_return_equations = self

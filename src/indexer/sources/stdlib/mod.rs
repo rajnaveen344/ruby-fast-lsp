@@ -63,25 +63,31 @@ impl IndexerStdlib {
 
     /// Select the exact runtime whose standard-library load path is authoritative.
     pub fn set_selected_runtime(&mut self, executable: PathBuf, java_home: Option<PathBuf>) {
-        assert!(
+        invariant!(
             executable.is_absolute(),
-            "INVARIANT VIOLATED: selected Ruby executable is not absolute: {}. This is a bug because project runtime resolution must produce one exact executable identity. Fix: validate and canonicalize the runtime catalog entry before configuring stdlib discovery.",
-            executable.display()
+            what = "selected Ruby executable is not absolute: {}",
+            why = "runtime resolution yields one exact executable",
+            fix = "canonicalize the runtime catalog entry before stdlib discovery",
+            executable.display(),
         );
-        assert!(
+        invariant!(
             java_home.as_ref().is_none_or(|path| path.is_absolute()),
-            "INVARIANT VIOLATED: selected Java home is not absolute: {:?}. This is a bug because JRuby subprocesses must inherit one exact JDK identity. Fix: validate and canonicalize Java home before configuring stdlib discovery.",
-            java_home
+            what = "selected Java home is not absolute: {:?}",
+            why = "JRuby subprocesses must inherit one exact JDK identity",
+            fix = "validate and canonicalize Java home before configuring stdlib discovery",
+            java_home,
         );
         self.runtime_executable = Some(executable);
         self.runtime_java_home = java_home;
     }
 
     pub(crate) fn set_runtime_stdlib_paths(&mut self, paths: RuntimeStdlibPaths) {
-        assert!(
+        invariant!(
             paths.paths().iter().all(|path| path.is_absolute()),
-            "INVARIANT VIOLATED: cached runtime stdlib product contains a relative path: {:?}. This is a bug because shared runtime products must retain canonical external provenance. Fix: canonicalize every exact-runtime load path before publication.",
-            paths.paths()
+            what = "cached runtime stdlib product contains a relative path: {:?}",
+            why = "shared runtime products must retain canonical external provenance",
+            fix = "canonicalize every exact-runtime load path before publication",
+            paths.paths(),
         );
         self.runtime_stdlib_paths = Some(paths);
     }
@@ -193,7 +199,7 @@ impl IndexerStdlib {
     ) -> Result<()> {
         let content = rbs_parser::core_rbs_file(CORE_RUNTIME_CONSTANTS_RBS).ok_or_else(|| {
             anyhow!(
-                "INVARIANT VIOLATED: embedded Ruby core RBS is missing {CORE_RUNTIME_CONSTANTS_RBS}. This is a bug because universal runtime constants require a version-independent proof source. Fix: keep crates/rbs-parser/rbs_types/core/{CORE_RUNTIME_CONSTANTS_RBS} embedded and exported."
+                "invariant violated: embedded Ruby core RBS lacks {CORE_RUNTIME_CONSTANTS_RBS} — bug: runtime constants need a version-independent proof source — fix: keep crates/rbs-parser/rbs_types/core/{CORE_RUNTIME_CONSTANTS_RBS} embedded and exported"
             )
         })?;
         let path = self.core_runtime_constants_path(stubs_path);
@@ -205,7 +211,7 @@ impl IndexerStdlib {
         );
         let facts = ruby_analysis::indexer::index_rbs(file_id, content).map_err(|error| {
             anyhow!(
-                "INVARIANT VIOLATED: embedded Ruby core RBS {CORE_RUNTIME_CONSTANTS_RBS} failed to parse: {error}. This is a bug because build-time bundled language semantics must always produce valid facts. Fix: validate the vendored RBS update before embedding it."
+                "invariant violated: embedded Ruby core RBS {CORE_RUNTIME_CONSTANTS_RBS} failed to parse: {error} — bug: bundled language semantics must produce valid facts — fix: validate vendored RBS updates before embedding"
             )
         })?;
         engine.replace_facts(
@@ -330,9 +336,11 @@ impl IndexerStdlib {
         let mut engine = analysis_engine.write();
         for ((path, _, _), template) in sources.iter().zip(templates) {
             let file_id = engine.file_id(path).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: deterministic stub collection lost registered file {}. This is a bug because both direct staging passes register every source before template collection. Fix: preserve the file registration lifecycle through batch commit.",
-                    path.display()
+                unreachable_invariant!(
+                    what = "deterministic stub collection lost registered file {}",
+                    why = "both direct staging passes register every source before template collection",
+                    fix = "preserve the file registration lifecycle through batch commit",
+                    path.display(),
                 )
             });
             engine.replace_facts(
@@ -461,10 +469,12 @@ impl IndexerStdlib {
                 return true;
             };
             let file = engine.file(file_id).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: stdlib collision lookup found file id {:?} for {} without a registered source file. This is a bug because file-path and file-record ownership must be updated atomically. Fix: preserve the AnalysisEngine file lifecycle.",
+                unreachable_invariant!(
+                    what = "stdlib collision lookup found file id {:?} for {} without a registered source file",
+                    why = "file-path and file-record ownership must be updated atomically",
+                    fix = "preserve the AnalysisEngine file lifecycle",
                     file_id,
-                    path.display()
+                    path.display(),
                 )
             });
             match file.kind {
@@ -480,10 +490,12 @@ impl IndexerStdlib {
                 | ruby_analysis::core::SourceKind::Excluded
                 | ruby_analysis::core::SourceKind::Signature
                 | ruby_analysis::core::SourceKind::External
-                | ruby_analysis::core::SourceKind::Gem => panic!(
-                    "INVARIANT VIOLATED: runtime stdlib path {} is already owned as {:?}. This is a bug because one physical source cannot have contradictory semantic provenance in one project engine. Fix: correct exact runtime load-path discovery or source registration before stdlib collection.",
+                | ruby_analysis::core::SourceKind::Gem => unreachable_invariant!(
+                    what = "runtime stdlib path {} is already owned as {:?}",
+                    why = "one source cannot have two provenances in one engine",
+                    fix = "fix runtime load-path discovery or source registration",
                     path.display(),
-                    file.kind
+                    file.kind,
                 ),
             }
         });
@@ -535,9 +547,11 @@ impl IndexerStdlib {
         let mut engine = analysis_engine.write();
         for ((path, _, _), template) in sources.iter().zip(templates) {
             let file_id = engine.file_id(path).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: deterministic stdlib collection lost registered file {}. This is a bug because the batch registers every source before template collection. Fix: preserve file registration through deterministic stdlib commit.",
-                    path.display()
+                unreachable_invariant!(
+                    what = "deterministic stdlib collection lost registered file {}",
+                    why = "the batch registers every source before template collection",
+                    fix = "preserve file registration through deterministic stdlib commit",
+                    path.display(),
                 )
             });
             engine.replace_facts(

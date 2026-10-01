@@ -327,8 +327,10 @@ fn execution_context_connection_validates_exact_targets_and_project_requirement(
 
     let mut invalid = patch;
     let IndexPatch::ConnectExecutionContext(connection) = &mut invalid else {
-        panic!(
-            "INVARIANT VIOLATED: connection fixture changed variant. This is a test bug because target mutation requires ConnectExecutionContext. Fix: preserve the fixture variant."
+        unreachable_invariant!(
+            what = "connection fixture changed variant",
+            why = "target mutation requires ConnectExecutionContext",
+            fix = "preserve the fixture variant",
         );
     };
     connection.application = ExecutionContextTarget::GeneratedOwner {

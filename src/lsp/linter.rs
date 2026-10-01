@@ -1,4 +1,5 @@
 use crate::environment::config::{FormatterKind, LinterKind, RubyFastLspConfig};
+use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::path::Path;
@@ -72,10 +73,10 @@ async fn lint_document_admitted(
     timeout: Duration,
 ) -> Result<Vec<Diagnostic>> {
     let command_argv = resolved_command(config);
-    let (program, initial_args) = command_argv.split_first().expect(
-        "INVARIANT VIOLATED: linter command argv is empty after default command resolution. \
-         This is a bug because enabled linters must always resolve to a program. \
-         Fix: preserve the default command or validate configured argv before execution.",
+    let (program, initial_args) = command_argv.split_first().expect_invariant(
+        "linter command argv is empty after default command resolution",
+        "enabled linters must always resolve to a program",
+        "preserve the default command or validate configured argv before execution",
     );
 
     let mut command = Command::new(program);
@@ -98,10 +99,10 @@ async fn lint_document_admitted(
             workspace_root.display()
         )
     })?;
-    let mut stdin = child.stdin.take().expect(
-        "INVARIANT VIOLATED: spawned linter has no piped stdin. \
-         This is a bug because the command is always configured with Stdio::piped(). \
-         Fix: keep stdin piped before taking the child handle.",
+    let mut stdin = child.stdin.take().expect_invariant(
+        "spawned linter has no piped stdin",
+        "the command is always configured with Stdio::piped()",
+        "keep stdin piped before taking the child handle",
     );
     stdin
         .write_all(content.as_bytes())
@@ -158,17 +159,19 @@ pub async fn fix_document(
     let fix_flag = match config.linter {
         LinterKind::RuboCop => "--autocorrect",
         LinterKind::Standard => "--fix",
-        LinterKind::None => unreachable!(
-            "INVARIANT VIOLATED: disabled linter reached safe fix flag selection. \
-             This is a bug because fix_document rejects LinterKind::None first. \
-             Fix: preserve the disabled-linter guard above."
+        LinterKind::None => unreachable_invariant!(
+            what = "disabled linter reached safe fix flag selection",
+            why = "fix_document rejects LinterKind::None first",
+            fix = "preserve the disabled-linter guard above",
         ),
     };
     run_correction_with_resources(
         indexing_resources,
         &command_argv,
-        config.linter.data_name().expect(
-            "INVARIANT VIOLATED: enabled linter has no data name. This is a bug because correction errors must identify their tool. Fix: add the LinterKind mapping.",
+        config.linter.data_name().expect_invariant(
+            "enabled linter has no data name",
+            "correction errors must identify their tool",
+            "add the LinterKind mapping",
         ),
         fix_flag,
         workspace_root,
@@ -199,8 +202,10 @@ pub async fn format_document(
             config
                 .formatter
                 .executable()
-                .expect(
-                    "INVARIANT VIOLATED: enabled formatter has no executable. This is a bug because every enabled formatter must resolve to a program. Fix: add the FormatterKind executable mapping.",
+                .expect_invariant(
+                    "enabled formatter has no executable",
+                    "every enabled formatter must resolve to a program",
+                    "add the FormatterKind executable mapping",
                 )
                 .to_string(),
         ]
@@ -210,15 +215,19 @@ pub async fn format_document(
     let fix_flag = match config.formatter {
         FormatterKind::RuboCop => "--autocorrect",
         FormatterKind::Standard => "--fix",
-        FormatterKind::None => unreachable!(
-            "INVARIANT VIOLATED: disabled formatter reached flag selection. This is a bug because format_document rejects FormatterKind::None first. Fix: preserve that guard."
+        FormatterKind::None => unreachable_invariant!(
+            what = "disabled formatter reached flag selection",
+            why = "format_document rejects FormatterKind::None first",
+            fix = "preserve that guard",
         ),
     };
     run_correction_with_resources(
         indexing_resources,
         &command_argv,
-        config.formatter.data_name().expect(
-            "INVARIANT VIOLATED: enabled formatter has no data name. This is a bug because formatter errors must identify their tool. Fix: add the FormatterKind mapping.",
+        config.formatter.data_name().expect_invariant(
+            "enabled formatter has no data name",
+            "formatter errors must identify their tool",
+            "add the FormatterKind mapping",
         ),
         fix_flag,
         workspace_root,
@@ -267,8 +276,10 @@ async fn run_correction(
     content: &str,
     timeout: Duration,
 ) -> Result<String> {
-    let (program, initial_args) = command_argv.split_first().expect(
-        "INVARIANT VIOLATED: correction command argv is empty after resolution. This is a bug because enabled tools must always resolve to a program. Fix: preserve default commands or validate configured argv before execution.",
+    let (program, initial_args) = command_argv.split_first().expect_invariant(
+        "correction command argv is empty after resolution",
+        "enabled tools must always resolve to a program",
+        "preserve default commands or validate configured argv before execution",
     );
     let stdin_path = file_path.strip_prefix(workspace_root).unwrap_or(file_path);
     let mut child = Command::new(program)
@@ -289,10 +300,10 @@ async fn run_correction(
                 workspace_root.display()
             )
         })?;
-    let mut stdin = child.stdin.take().expect(
-        "INVARIANT VIOLATED: spawned linter fix has no piped stdin. \
-         This is a bug because the command is always configured with Stdio::piped(). \
-         Fix: keep stdin piped before taking the child handle.",
+    let mut stdin = child.stdin.take().expect_invariant(
+        "spawned linter fix has no piped stdin",
+        "the command is always configured with Stdio::piped()",
+        "keep stdin piped before taking the child handle",
     );
     stdin
         .write_all(content.as_bytes())
@@ -351,10 +362,10 @@ fn resolved_command(config: &RubyFastLspConfig) -> Vec<String> {
         config
             .linter
             .executable()
-            .expect(
-                "INVARIANT VIOLATED: enabled linter has no executable. \
-                 This is a bug because every enabled linter kind must map to an executable. \
-                 Fix: add the executable mapping when adding a LinterKind variant.",
+            .expect_invariant(
+                "enabled linter has no executable",
+                "every enabled linter kind must map to an executable",
+                "add the executable mapping when adding a LinterKind variant",
             )
             .to_string(),
     ]
@@ -365,23 +376,23 @@ pub fn parse_linter_json(
     linter: LinterKind,
     content: &str,
 ) -> Result<Vec<Diagnostic>> {
-    assert!(
+    invariant!(
         linter != LinterKind::None,
-        "INVARIANT VIOLATED: linter JSON parsing was requested for LinterKind::None. \
-         This is a bug because disabled linters cannot produce reports. \
-         Fix: return before spawning or parsing when the linter is disabled."
+        what = "linter JSON parsing was requested for LinterKind::None",
+        why = "disabled linters cannot produce reports",
+        fix = "return before spawning or parsing when the linter is disabled",
     );
     let report: LinterReport =
         serde_json::from_str(output).context("linter returned malformed JSON")?;
-    let source = linter.diagnostic_source().expect(
-        "INVARIANT VIOLATED: enabled linter has no diagnostic source. \
-         This is a bug because published diagnostics must identify their provider. \
-         Fix: add the diagnostic source mapping for the enabled linter.",
+    let source = linter.diagnostic_source().expect_invariant(
+        "enabled linter has no diagnostic source",
+        "published diagnostics must identify their provider",
+        "add the diagnostic source mapping for the enabled linter",
     );
-    let data_name = linter.data_name().expect(
-        "INVARIANT VIOLATED: enabled linter has no stable data name. \
-         This is a bug because code actions need to identify the diagnostic provider. \
-         Fix: add the data name mapping for the enabled linter.",
+    let data_name = linter.data_name().expect_invariant(
+        "enabled linter has no stable data name",
+        "code actions need to identify the diagnostic provider",
+        "add the data name mapping for the enabled linter",
     );
 
     report

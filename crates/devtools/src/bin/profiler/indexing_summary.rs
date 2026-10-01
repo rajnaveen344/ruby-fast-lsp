@@ -1,5 +1,6 @@
 //! Machine-readable indexing timing and aggregate summary JSON.
 
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{InferenceTelemetry, SourceKind};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use sha2::{Digest, Sha256};
@@ -109,184 +110,255 @@ pub(crate) fn indexing_summary_json(
         let engine = workspace.analysis_engine.read();
         let stats = engine.stats();
         inference_telemetry.merge(&engine.inference_telemetry());
-        files = files.checked_add(stats.files).expect(
-            "INVARIANT VIOLATED: profiler aggregate file count overflowed usize. This is a bug because the measured process cannot contain more indexed files than addressable memory. Fix: inspect corrupt engine stats.",
+        files = files.checked_add(stats.files).expect_invariant(
+            "profiler aggregate file count overflowed usize",
+            "the measured process cannot contain more indexed files than addressable memory",
+            "inspect corrupt engine stats",
         );
-        source_bytes = source_bytes.checked_add(stats.source_bytes).expect(
-            "INVARIANT VIOLATED: profiler aggregate source bytes overflowed usize. This is a bug because the measured process cannot retain more source than addressable memory. Fix: inspect corrupt engine stats.",
-        );
+        source_bytes = source_bytes
+            .checked_add(stats.source_bytes)
+            .expect_invariant(
+                "profiler aggregate source bytes overflowed usize",
+                "the measured process cannot retain more source than addressable memory",
+                "inspect corrupt engine stats",
+            );
         reference_candidates = reference_candidates
             .checked_add(stats.reference_candidates)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate reference-candidate count overflowed usize. This is a bug because measured engine facts must fit the process address space. Fix: inspect corrupt engine stats.",
+            .expect_invariant(
+                "profiler aggregate reference-candidate count overflowed usize",
+                "measured engine facts must fit the process address space",
+                "inspect corrupt engine stats",
             );
         constant_reference_candidates = constant_reference_candidates
             .checked_add(stats.constant_reference_candidates)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate constant-candidate count overflowed usize. This is a bug because measured engine facts must fit the process address space. Fix: inspect corrupt engine stats.",
+            .expect_invariant(
+                "profiler aggregate constant-candidate count overflowed usize",
+                "measured engine facts must fit the process address space",
+                "inspect corrupt engine stats",
             );
         method_reference_candidates = method_reference_candidates
             .checked_add(stats.method_reference_candidates)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-candidate count overflowed usize. This is a bug because measured engine facts must fit the process address space. Fix: inspect corrupt engine stats.",
+            .expect_invariant(
+                "profiler aggregate method-candidate count overflowed usize",
+                "measured engine facts must fit the process address space",
+                "inspect corrupt engine stats",
             );
         resolved_reference_candidates = resolved_reference_candidates
             .checked_add(stats.resolved_reference_candidates)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate exact-resolved-candidate count overflowed usize. This is a bug because measured engine facts must fit the process address space. Fix: inspect corrupt engine stats.",
+            .expect_invariant(
+                "profiler aggregate exact-resolved-candidate count overflowed usize",
+                "measured engine facts must fit the process address space",
+                "inspect corrupt engine stats",
             );
         let resolve_pass = engine.last_resolve_stats();
         resolve_pass_graph_retry_ns = resolve_pass_graph_retry_ns
             .checked_add(resolve_pass.graph_retry_ns)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate resolve graph-retry timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate resolve graph-retry timing overflowed u64",
+                "measured resolve passes must fit u64 nanoseconds",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_diagnostic_seed_ns = resolve_pass_diagnostic_seed_ns
             .checked_add(resolve_pass.diagnostic_seed_ns)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate resolve diagnostic-seed timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate resolve diagnostic-seed timing overflowed u64",
+                "measured resolve passes must fit u64 nanoseconds",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_constant_candidates_ns = resolve_pass_constant_candidates_ns
             .checked_add(resolve_pass.constant_candidates_ns)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate resolve constant-candidate timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate resolve constant-candidate timing overflowed u64",
+                "measured resolve passes must fit u64 nanoseconds",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_candidates_ns = resolve_pass_method_candidates_ns
             .checked_add(resolve_pass.method_candidates_ns)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate resolve method-candidate timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate resolve method-candidate timing overflowed u64",
+                "measured resolve passes must fit u64 nanoseconds",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_sort_all_ns = resolve_pass_sort_all_ns
             .checked_add(resolve_pass.sort_all_ns)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate resolve sort_all timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate resolve sort_all timing overflowed u64",
+                "measured resolve passes must fit u64 nanoseconds",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_diagnostic_rebuild_ns = resolve_pass_diagnostic_rebuild_ns
             .checked_add(resolve_pass.diagnostic_rebuild_ns)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate resolve diagnostic-rebuild timing overflowed u64. This is a bug because measured resolve passes must fit u64 nanoseconds. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate resolve diagnostic-rebuild timing overflowed u64",
+                "measured resolve passes must fit u64 nanoseconds",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_constant_cache_hits = resolve_pass_constant_cache_hits
             .checked_add(resolve_pass.constant_cache_hits)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate constant-cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate constant-cache hits overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_constant_cache_misses = resolve_pass_constant_cache_misses
             .checked_add(resolve_pass.constant_cache_misses)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate constant-cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate constant-cache misses overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_constant_cache_unique_keys = resolve_pass_constant_cache_unique_keys
             .checked_add(resolve_pass.constant_cache_unique_keys)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate constant-cache unique keys overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate constant-cache unique keys overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_cache_hits = resolve_pass_method_cache_hits
             .checked_add(resolve_pass.method_cache_hits)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-cache hits overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_cache_misses = resolve_pass_method_cache_misses
             .checked_add(resolve_pass.method_cache_misses)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-cache misses overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_cache_unique_keys = resolve_pass_method_cache_unique_keys
             .checked_add(resolve_pass.method_cache_unique_keys)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-cache unique keys overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-cache unique keys overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_lookup_chain_cache_entries =
             resolve_pass_method_lookup_chain_cache_entries
                 .checked_add(resolve_pass.method_lookup_chain_cache_entries)
-                .expect(
-                    "INVARIANT VIOLATED: profiler aggregate method-lookup-chain cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                .expect_invariant(
+                    "profiler aggregate method-lookup-chain cache entries overflowed usize",
+                    "measured resolve passes must fit the process address space",
+                    "inspect corrupt resolve instrumentation",
                 );
         resolve_pass_method_namespace_exists_cache_entries =
             resolve_pass_method_namespace_exists_cache_entries
                 .checked_add(resolve_pass.method_namespace_exists_cache_entries)
-                .expect(
-                    "INVARIANT VIOLATED: profiler aggregate method-namespace-exists cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                .expect_invariant(
+                    "profiler aggregate method-namespace-exists cache entries overflowed usize",
+                    "measured resolve passes must fit the process address space",
+                    "inspect corrupt resolve instrumentation",
                 );
         resolve_pass_method_suggestion_cache_entries = resolve_pass_method_suggestion_cache_entries
             .checked_add(resolve_pass.method_suggestion_cache_entries)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-suggestion cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-suggestion cache entries overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_incomplete_method_chain_cache_entries =
             resolve_pass_incomplete_method_chain_cache_entries
                 .checked_add(resolve_pass.incomplete_method_chain_cache_entries)
-                .expect(
-                    "INVARIANT VIOLATED: profiler aggregate incomplete-method-chain cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                .expect_invariant(
+                    "profiler aggregate incomplete-method-chain cache entries overflowed usize",
+                    "measured resolve passes must fit the process address space",
+                    "inspect corrupt resolve instrumentation",
                 );
         resolve_pass_deferred_receiver_candidates = resolve_pass_deferred_receiver_candidates
             .checked_add(resolve_pass.deferred_receiver_candidates)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate deferred-receiver candidates overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate deferred-receiver candidates overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_deferred_receiver_proven = resolve_pass_deferred_receiver_proven
             .checked_add(resolve_pass.deferred_receiver_proven)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate proven deferred receivers overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate proven deferred receivers overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_deferred_receiver_unknown = resolve_pass_deferred_receiver_unknown
             .checked_add(resolve_pass.deferred_receiver_unknown)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate Unknown deferred receivers overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate Unknown deferred receivers overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_return_cache_hits = resolve_pass_method_return_cache_hits
             .checked_add(resolve_pass.method_return_cache_hits)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-return cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-return cache hits overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_return_cache_misses = resolve_pass_method_return_cache_misses
             .checked_add(resolve_pass.method_return_cache_misses)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-return cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-return cache misses overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_return_cache_entries = resolve_pass_method_return_cache_entries
             .checked_add(resolve_pass.method_return_cache_entries)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-return cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-return cache entries overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_visibility_cache_hits = resolve_pass_method_visibility_cache_hits
             .checked_add(resolve_pass.method_visibility_cache_hits)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-visibility cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-visibility cache hits overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
         resolve_pass_method_visibility_cache_misses = resolve_pass_method_visibility_cache_misses
             .checked_add(resolve_pass.method_visibility_cache_misses)
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate method-visibility cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+            .expect_invariant(
+                "profiler aggregate method-visibility cache misses overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
             );
-        resolve_pass_method_visibility_cache_entries =
-            resolve_pass_method_visibility_cache_entries
-                .checked_add(resolve_pass.method_visibility_cache_entries)
-                .expect(
-                    "INVARIANT VIOLATED: profiler aggregate method-visibility cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
-                );
+        resolve_pass_method_visibility_cache_entries = resolve_pass_method_visibility_cache_entries
+            .checked_add(resolve_pass.method_visibility_cache_entries)
+            .expect_invariant(
+                "profiler aggregate method-visibility cache entries overflowed usize",
+                "measured resolve passes must fit the process address space",
+                "inspect corrupt resolve instrumentation",
+            );
         resolve_pass_ambiguous_method_return_cache_hits =
             resolve_pass_ambiguous_method_return_cache_hits
                 .checked_add(resolve_pass.ambiguous_method_return_cache_hits)
-                .expect(
-                    "INVARIANT VIOLATED: profiler aggregate ambiguous method-return cache hits overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                .expect_invariant(
+                    "profiler aggregate ambiguous method-return cache hits overflowed usize",
+                    "measured resolve passes must fit the process address space",
+                    "inspect corrupt resolve instrumentation",
                 );
         resolve_pass_ambiguous_method_return_cache_misses =
             resolve_pass_ambiguous_method_return_cache_misses
                 .checked_add(resolve_pass.ambiguous_method_return_cache_misses)
-                .expect(
-                    "INVARIANT VIOLATED: profiler aggregate ambiguous method-return cache misses overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                .expect_invariant(
+                    "profiler aggregate ambiguous method-return cache misses overflowed usize",
+                    "measured resolve passes must fit the process address space",
+                    "inspect corrupt resolve instrumentation",
                 );
         resolve_pass_ambiguous_method_return_cache_entries =
             resolve_pass_ambiguous_method_return_cache_entries
                 .checked_add(resolve_pass.ambiguous_method_return_cache_entries)
-                .expect(
-                    "INVARIANT VIOLATED: profiler aggregate ambiguous method-return cache entries overflowed usize. This is a bug because measured resolve passes must fit the process address space. Fix: inspect corrupt resolve instrumentation.",
+                .expect_invariant(
+                    "profiler aggregate ambiguous method-return cache entries overflowed usize",
+                    "measured resolve passes must fit the process address space",
+                    "inspect corrupt resolve instrumentation",
                 );
         estimated_engine_heap_bytes = estimated_engine_heap_bytes
             .checked_add(engine.estimated_memory_stats().total())
-            .expect(
-                "INVARIANT VIOLATED: profiler aggregate engine heap overflowed usize. This is a bug because estimated live engine memory must fit the process address space. Fix: inspect memory accounting.",
+            .expect_invariant(
+                "profiler aggregate engine heap overflowed usize",
+                "estimated live engine memory must fit the process address space",
+                "inspect memory accounting",
             );
         let mut project_sources = engine
             .files()
@@ -301,9 +373,13 @@ pub(crate) fn indexing_summary_json(
                 source.as_bytes()
             } else {
                 disk_source = std::fs::read(&file.path).unwrap_or_else(|error| {
-                    panic!(
-                        "INVARIANT VIOLATED: profiler cannot read project-owned evidence file {}. This is a bug because exact dataset evidence must hash every indexed project byte. Fix: keep the indexed file readable for the measurement. Error: {error}",
-                        file.path.display()
+                    unreachable_invariant!(
+                        what =
+                            "profiler cannot read project-owned evidence file {} (error: {error})",
+                        why = "exact dataset evidence must hash every indexed project byte",
+                        fix = "keep the indexed file readable for the measurement",
+                        file.path.display(),
+                        error = error,
                     )
                 });
                 disk_source.as_slice()
@@ -313,26 +389,36 @@ pub(crate) fn indexing_summary_json(
                 file.path.to_string_lossy().as_bytes(),
             );
             hash_length_prefixed(&mut source_fingerprint, source);
-            project_source_bytes = project_source_bytes.checked_add(source.len()).expect(
-                "INVARIANT VIOLATED: profiler project source byte count overflowed usize. This is a bug because indexed source must fit the process address space. Fix: inspect corrupt file metadata.",
-            );
+            project_source_bytes = project_source_bytes
+                .checked_add(source.len())
+                .expect_invariant(
+                    "profiler project source byte count overflowed usize",
+                    "indexed source must fit the process address space",
+                    "inspect corrupt file metadata",
+                );
         }
         let status = status_by_root.get(&workspace.root_path).unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: profiler completed project {} without an indexing status snapshot. This is a bug because every scheduled project must retain its authoritative readiness state. Fix: register project status before scheduling indexing.",
-                workspace.root_path.display()
+            unreachable_invariant!(
+                what = "profiler completed project {} without an indexing status snapshot",
+                why = "every scheduled project must retain its authoritative readiness state",
+                fix = "register project status before scheduling indexing",
+                workspace.root_path.display(),
             )
         });
         let project_ready = status.project_navigation_ready_ms.unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: profiler completed project {} without a project-navigation readiness milestone. This is a bug because the coordinator must publish staged readiness before dependencies. Fix: transition through ProjectNavigationReady in every successful indexing run.",
-                workspace.root_path.display()
+            unreachable_invariant!(
+                what = "profiler completed project {} without a project-navigation readiness milestone",
+                why = "the coordinator must publish staged readiness before dependencies",
+                fix = "transition through ProjectNavigationReady in every successful indexing run",
+                workspace.root_path.display(),
             )
         });
         let dependencies_ready = status.dependency_navigation_ready_ms.unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: profiler completed project {} without a dependency-navigation readiness milestone. This is a bug because the coordinator must publish staged readiness before semantic completion. Fix: transition through DependencyNavigationReady in every successful indexing run.",
-                workspace.root_path.display()
+            unreachable_invariant!(
+                what = "profiler completed project {} without a dependency-navigation readiness milestone",
+                why = "the coordinator must publish staged readiness before semantic completion",
+                fix = "transition through DependencyNavigationReady in every successful indexing run",
+                workspace.root_path.display(),
             )
         });
         project_navigation_ready_ms.push(project_ready);
@@ -605,9 +691,12 @@ pub(crate) fn indexing_summary_json(
 }
 
 pub(crate) fn millisecond_summary(values: &[u64]) -> serde_json::Value {
-    assert!(
+    invariant!(
         !values.is_empty(),
-        "INVARIANT VIOLATED: profiler readiness summary received no measurements. This is a bug because an indexing aggregate is emitted only after at least one registered project completes. Fix: retain every project's staged readiness milestones."
+        what = "profiler readiness summary received no measurements",
+        why =
+            "an indexing aggregate is emitted only after at least one registered project completes",
+        fix = "retain every project's staged readiness milestones",
     );
     let mut sorted = values.to_vec();
     sorted.sort_unstable();

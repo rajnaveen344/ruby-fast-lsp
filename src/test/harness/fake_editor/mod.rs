@@ -174,11 +174,13 @@ impl FakeEditor {
 
     /// Assert a file is open, panicking with a clear message if not.
     fn assert_open(&self, filename: &str, method: &str) {
-        assert!(
+        invariant!(
             self.buffers.contains_key(filename),
-            "INVARIANT VIOLATED: File '{}' is not open. Call open() before {}().",
+            what = "file '{}' is not open",
+            why = "FakeEditor requests need an open buffer",
+            fix = "call open() before {}()",
             filename,
-            method
+            method,
         );
     }
 
@@ -210,8 +212,12 @@ impl FakeEditor {
 /// as an empty result that could satisfy a negative assertion.
 fn observe_response<T>(method: &str, response: tower_lsp::jsonrpc::Result<T>) -> T {
     response.unwrap_or_else(|error| {
-        panic!(
-            "INVARIANT VIOLATED: FakeEditor request `{method}` failed: {error:?}. This is a bug because a failed request cannot satisfy an observation. Fix: repair the request or explicitly test its error result through the server API."
+        unreachable_invariant!(
+            what = "FakeEditor request `{method}` failed: {error:?}",
+            why = "a failed request cannot satisfy an observation",
+            fix = "repair the request or explicitly test its error result through the server API",
+            method = method,
+            error = error,
         )
     })
 }

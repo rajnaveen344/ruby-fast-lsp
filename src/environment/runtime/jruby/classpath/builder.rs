@@ -1,5 +1,6 @@
 //! Ordered, bounded accumulation of one project's classpath artifacts and source roots.
 
+use crate::invariant::ExpectInvariant;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
@@ -306,10 +307,10 @@ impl ClasspathBuilder {
             }
             for entry in &product.manifest_class_path_entries {
                 let relative = validate_manifest_class_path_entry(&path, &entry)?;
-                let parent = path.parent().expect(
-                    "INVARIANT VIOLATED: canonical JAR path has no parent. \
-                     This is a bug because filesystem artifact paths are absolute files. \
-                     Fix: reject artifacts without a canonical parent before manifest expansion.",
+                let parent = path.parent().expect_invariant(
+                    "canonical JAR path has no parent",
+                    "filesystem artifact paths are absolute files",
+                    "reject artifacts without a canonical parent before manifest expansion",
                 );
                 let candidate = parent.join(relative);
                 if !candidate.is_file() {
@@ -472,11 +473,14 @@ fn is_sources_archive(path: &Path) -> bool {
 }
 
 fn sibling_sources_archive(path: &Path) -> PathBuf {
-    let stem = path.file_stem().and_then(|name| name.to_str()).expect(
-        "INVARIANT VIOLATED: accepted JAR artifact has no UTF-8 file stem. \
-         This is a bug because deterministic source attachment names require a stable path identity. \
-         Fix: reject non-UTF-8 JAR filenames during classpath discovery.",
-    );
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .expect_invariant(
+            "accepted JAR artifact has no UTF-8 file stem",
+            "deterministic source attachment names require a stable path identity",
+            "reject non-UTF-8 JAR filenames during classpath discovery",
+        );
     path.with_file_name(format!("{stem}-sources.jar"))
 }
 

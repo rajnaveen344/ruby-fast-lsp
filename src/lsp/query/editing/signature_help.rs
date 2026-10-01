@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::MethodReceiver;
@@ -97,8 +98,10 @@ impl EngineQuery {
         let query = AnalysisQuery::new(&engine);
         let facts = match &target.receiver {
             MethodReceiver::None => query.resolve_method_signature_facts(
-                namespace_fqn.as_ref().expect(
-                    "INVARIANT VIOLATED: an implicit receiver was classified as a union without a namespace. This is a bug because implicit self has one lexical runtime namespace. Fix: keep union receiver handling restricted to explicit typed expressions.",
+                namespace_fqn.as_ref().expect_invariant(
+                    "an implicit receiver was classified as a union without a namespace",
+                    "implicit self has one lexical runtime namespace",
+                    "keep union receiver handling restricted to explicit typed expressions",
                 ),
                 &target.method,
             ),
@@ -119,18 +122,20 @@ impl EngineQuery {
                     )
                 } else {
                     query.resolve_protected_method_signature_facts(
-                        namespace_fqn.as_ref().expect(
-                            "INVARIANT VIOLATED: a non-union explicit receiver lost its resolved namespace before signature lookup. This is a bug because receiver classification and namespace resolution use the same immutable target. Fix: retain the resolved namespace through signature selection.",
+                        namespace_fqn.as_ref().expect_invariant(
+                            "a non-union explicit receiver lost its resolved namespace before signature lookup",
+                            "receiver classification and namespace resolution use the same immutable target",
+                            "retain the resolved namespace through signature selection",
                         ),
                         &target.method,
                         &caller_namespace,
                     )
                 }
             }
-            MethodReceiver::Super => unreachable!(
-                "INVARIANT VIOLATED: super receiver reached ordinary signature resolution. \
-                 This is a bug because super calls are rejected before receiver resolution. \
-                 Fix: keep the early super return above the receiver match."
+            MethodReceiver::Super => unreachable_invariant!(
+                what = "super receiver reached ordinary signature resolution",
+                why = "super calls are rejected before receiver resolution",
+                fix = "keep the early super return above the receiver match",
             ),
         };
         let mut signatures = facts

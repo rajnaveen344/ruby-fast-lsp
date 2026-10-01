@@ -6,6 +6,7 @@ use crate::core::{
     MethodVisibilityOverrideFact, NamespaceKind, RubyConstant, RubyMethod, SymbolFact, SymbolKind,
     TextRange, TypeFact, TypeSubject,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_prism::CallNode;
 
 use super::syntax::{
@@ -277,10 +278,10 @@ impl AnalysisIndexer {
         let old_fqn = FullyQualifiedName::method(self.namespace_stack.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
             self.namespace_stack.clone(),
-            RubyMethod::new(&new_name).expect(
-                "INVARIANT VIOLATED: alias_method new method became invalid after validation. \
-                 This is a bug because the same string was already accepted. \
-                 Fix: keep alias_method validation single-sourced.",
+            RubyMethod::new(&new_name).expect_invariant(
+                "alias_method new method became invalid after validation",
+                "the same string was already accepted",
+                "keep alias_method validation single-sourced",
             ),
         );
         if let Some(old_type) = self

@@ -44,13 +44,19 @@ pub(super) fn select_locked_identity_for_engine(
     identities: &[LockedGemIdentity],
     engine: ActiveRubyEngine,
 ) -> Result<LockedGemIdentity> {
-    assert!(
+    invariant!(
         !identities.is_empty(),
-        "INVARIANT VIOLATED: lock identity selection received no candidates for `{name}`. This is a bug because grouping creates an entry only after parsing an identity. Fix: never call selection with an empty lockfile group."
+        what = "lock identity selection received no candidates for `{name}`",
+        why = "grouping creates an entry only after parsing an identity",
+        fix = "never call selection with an empty lockfile group",
+        name = name,
     );
-    assert!(
+    invariant!(
         identities.iter().all(|identity| identity.name == name),
-        "INVARIANT VIOLATED: lock identity group for `{name}` contains another gem name. This is a bug because lock identities are grouped by exact gem name. Fix: insert each parsed identity into its own name bucket."
+        what = "lock identity group for `{name}` contains another gem name",
+        why = "lock identities are grouped by exact gem name",
+        fix = "insert each parsed identity into its own name bucket",
+        name = name,
     );
 
     let source = identities[0].source;
@@ -285,9 +291,11 @@ impl IndexerGem {
         versions: &'a [GemInfo],
     ) -> Option<&'a GemInfo> {
         let name = versions.first()?.name.as_str();
-        assert!(
+        invariant!(
             versions.iter().all(|candidate| candidate.name == name),
-            "INVARIANT VIOLATED: gem candidate bucket contains multiple names. This is a bug because discovered_gems is keyed by gem name. Fix: insert every candidate under its own exact name."
+            what = "gem candidate bucket contains multiple names",
+            why = "discovered_gems is keyed by gem name",
+            fix = "insert every candidate under its own exact name",
         );
 
         if let Some(locked) = self.locked_gems.get(name) {

@@ -4,6 +4,7 @@
 //! clean source. Every tag is validated against [`TagKind::spec`], so a typo in
 //! a tag or attribute name fails the test instead of silently checking nothing.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::BTreeMap;
 
 use tower_lsp::lsp_types::{Position, Range};
@@ -163,7 +164,11 @@ impl TagKind {
         SPECS
             .iter()
             .find(|spec| spec.kind == self)
-            .expect("INVARIANT VIOLATED: TagKind has no TagSpec. This is a bug because every tag kind must be parseable. Fix: add the kind to SPECS.")
+            .expect_invariant(
+                "TagKind has no TagSpec",
+                "every tag kind must be parseable",
+                "add the kind to SPECS",
+            )
     }
 
     fn from_name(name: &str) -> Option<Self> {
@@ -188,18 +193,24 @@ impl Tag {
     fn shape(&self) -> Shape {
         let spec = self.kind.spec();
         if self.none {
-            spec.none_shape
-                .expect("INVARIANT VIOLATED: `none` parsed for a tag without none_shape. Fix: reject `none` in parse_attributes.")
+            spec.none_shape.expect_invariant(
+                "`none` parsed for a tag without none_shape",
+                "parse_attributes accepts `none` only for such tags",
+                "reject `none` in parse_attributes",
+            )
         } else {
             spec.shape
         }
     }
 
     pub fn attr(&self, name: &str) -> Option<&str> {
-        assert!(
+        invariant!(
             self.kind.spec().attributes.contains(&name),
-            "INVARIANT VIOLATED: harness read undeclared attribute `{name}` of <{}>. This is a bug because parse_fixture rejects undeclared attributes. Fix: declare it in the tag's TagSpec.",
-            self.kind.spec().name
+            what = "harness read undeclared attribute `{name}` of <{}>",
+            why = "parse_fixture rejects undeclared attributes",
+            fix = "declare it in the tag's TagSpec",
+            self.kind.spec().name,
+            name = name,
         );
         self.attributes.get(name).map(String::as_str)
     }

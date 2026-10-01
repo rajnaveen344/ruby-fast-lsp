@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Weak};
 
@@ -347,10 +348,10 @@ impl ExtensionRegistry {
         let mut engine_guard = engine.write();
         let file_id = engine_guard.register_file(SourceFileInput {
             path: std::path::absolute("/__ruby_fast_lsp_extension__/semantic_targets.rb")
-                .expect(
-                    "INVARIANT VIOLATED: extension semantic source has no absolute native path. \
-                     This is a bug because registered definitions need a valid file URI for navigation. \
-                     Fix: retain the filesystem root when constructing the synthetic source path.",
+                .expect_invariant(
+                    "extension semantic source has no absolute native path",
+                    "registered definitions need a valid file URI for navigation",
+                    "retain the filesystem root when constructing the synthetic source path",
                 ),
             content: String::new(),
             kind: SourceKind::Stub,
@@ -421,8 +422,10 @@ impl ExtensionApplicabilitySnapshot {
             .iter()
             .enumerate()
             .find(|(_, extension)| extension.metadata.id == extension_id)
-            .expect(
-                "INVARIANT VIOLATED: applicability test requested an unknown extension. This is a broken test because snapshots contain one decision per loaded registry extension. Fix: load the extension before querying its decision.",
+            .expect_invariant(
+                "applicability test requested an unknown extension",
+                "snapshots contain one decision per loaded registry extension",
+                "load the extension before querying its decision",
             );
         registry.extension_applies_to_source(index, extension, project, Some(self))
     }

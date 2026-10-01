@@ -7,6 +7,7 @@ mod products;
 mod projects;
 mod watched_files;
 
+use crate::invariant::ExpectInvariant;
 use diagnostics::DiagnosticPublisher;
 pub(crate) use documents::OpenDocuments;
 pub(crate) use extensions::ExtensionServices;
@@ -259,10 +260,16 @@ impl RubyLanguageServer {
 
 impl Default for RubyLanguageServer {
     fn default() -> Self {
-        let root = crate::utils::cache::ruby_fast_lsp_user_cache_root().expect(
-            "INVARIANT VIOLATED: the default server could not resolve an absolute user cache root. This is a bug because embedded construction requires deterministic derived-product ownership. Fix: configure an absolute user cache root.",
+        let root = crate::utils::cache::ruby_fast_lsp_user_cache_root().expect_invariant(
+            "the default server could not resolve an absolute user cache root",
+            "embedded construction requires deterministic derived-product ownership",
+            "configure an absolute user cache root",
         );
-        Self::with_user_cache_root(root).expect("INVARIANT VIOLATED: embedded server construction failed. This is a bug because the resolved cache root must support ordinary server construction. Fix: inspect the cache root and extension initialization.")
+        Self::with_user_cache_root(root).expect_invariant(
+            "embedded server construction failed",
+            "the resolved cache root must support ordinary server construction",
+            "inspect the cache root and extension initialization",
+        )
     }
 }
 

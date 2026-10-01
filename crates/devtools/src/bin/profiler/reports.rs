@@ -27,10 +27,12 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
                     file.path
                         .strip_prefix(&workspace.root_path)
                         .unwrap_or_else(|_| {
-                            panic!(
-                                "INVARIANT VIOLATED: project semantic export source {} is outside owning root {}. This is a bug because project source ownership must remain workspace-contained. Fix: route registration through the deepest owning project before exporting evidence.",
+                            unreachable_invariant!(
+                                what = "project semantic export source {} is outside owning root {}",
+                                why = "project source ownership must remain workspace-contained",
+                                fix = "route registration through the deepest owning project before exporting evidence",
                                 file.path.display(),
-                                workspace.root_path.display()
+                                workspace.root_path.display(),
                             )
                         })
                         .to_path_buf()
@@ -41,15 +43,19 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
                     .semantic_export_fingerprint(file.id)
                     .map(|fingerprint| stable_fingerprint_hex(fingerprint.stable_bytes()));
                 let result_fingerprint = result_fingerprints.get(&file.id).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: semantic result manifest omitted registered file {}. This is a bug because result fingerprinting seeds one partition for every source. Fix: keep source registration and semantic result partitioning aligned.",
+                    unreachable_invariant!(
+                        what = "semantic result manifest omitted registered file {}",
+                        why = "result fingerprinting seeds one partition for every source",
+                        fix = "keep source registration and semantic result partitioning aligned",
                         file.path.display(),
                     )
                 });
                 let [reference_fingerprint, context_fingerprint, local_read_fingerprint] =
                     resolution_fingerprints.get(&file.id).copied().unwrap_or_else(|| {
-                        panic!(
-                            "INVARIANT VIOLATED: semantic resolution manifest omitted registered file {}. This is a bug because category fingerprinting seeds one partition for every source. Fix: keep source registration and semantic resolution partitioning aligned.",
+                        unreachable_invariant!(
+                            what = "semantic resolution manifest omitted registered file {}",
+                            why = "category fingerprinting seeds one partition for every source",
+                            fix = "keep source registration and semantic resolution partitioning aligned",
                             file.path.display(),
                         )
                     });
@@ -94,20 +100,24 @@ pub(crate) fn print_diagnostic_manifest(server: &RubyLanguageServer) -> anyhow::
             .into_iter()
             .map(|diagnostic| {
                 let file = query.file(diagnostic.range.file_id).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: diagnostic {} references unknown file {:?}. This is a bug because resolved diagnostic facts must remain owned by a registered source. Fix: remove diagnostic facts through the ordinary per-file replacement lifecycle before unregistering their source.",
+                    unreachable_invariant!(
+                        what = "diagnostic {} references unknown file {:?}",
+                        why = "diagnostic facts must belong to a registered source",
+                        fix = "remove diagnostics through file replacement before unregistering",
                         diagnostic.code,
-                        diagnostic.range.file_id
+                        diagnostic.range.file_id,
                     )
                 });
                 let path = if file.kind == SourceKind::Project {
                     file.path
                         .strip_prefix(&workspace.root_path)
                         .unwrap_or_else(|_| {
-                            panic!(
-                                "INVARIANT VIOLATED: project diagnostic source {} is outside owning root {}. This is a bug because project diagnostic ownership must remain workspace-contained. Fix: route registration through the deepest owning project before exporting evidence.",
+                            unreachable_invariant!(
+                                what = "project diagnostic source {} is outside owning root {}",
+                                why = "project diagnostic ownership must remain workspace-contained",
+                                fix = "route registration through the deepest owning project before exporting evidence",
                                 file.path.display(),
-                                workspace.root_path.display()
+                                workspace.root_path.display(),
                             )
                         })
                         .to_path_buf()
@@ -117,21 +127,25 @@ pub(crate) fn print_diagnostic_manifest(server: &RubyLanguageServer) -> anyhow::
                 let (start_line, start_character) = file
                     .byte_offset_to_line_character(diagnostic.range.start_byte)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "INVARIANT VIOLATED: diagnostic {} start byte {} is outside source {}. This is a bug because resolved facts must retain valid source ranges. Fix: validate fact ranges before engine ingestion.",
+                        unreachable_invariant!(
+                            what = "diagnostic {} start byte {} is outside source {}",
+                            why = "resolved facts must retain valid source ranges",
+                            fix = "validate fact ranges before engine ingestion",
                             diagnostic.code,
                             diagnostic.range.start_byte,
-                            file.path.display()
+                            file.path.display(),
                         )
                     });
                 let (end_line, end_character) = file
                     .byte_offset_to_line_character(diagnostic.range.end_byte)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "INVARIANT VIOLATED: diagnostic {} end byte {} is outside source {}. This is a bug because resolved facts must retain valid source ranges. Fix: validate fact ranges before engine ingestion.",
+                        unreachable_invariant!(
+                            what = "diagnostic {} end byte {} is outside source {}",
+                            why = "resolved facts must retain valid source ranges",
+                            fix = "validate fact ranges before engine ingestion",
                             diagnostic.code,
                             diagnostic.range.end_byte,
-                            file.path.display()
+                            file.path.display(),
                         )
                     });
                 serde_json::json!({

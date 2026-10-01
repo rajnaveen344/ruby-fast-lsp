@@ -29,18 +29,18 @@ impl DiagnosticFact {
         message: impl Into<String>,
     ) -> Self {
         let code = code.into();
-        assert!(
+        invariant!(
             !code.is_empty(),
-            "INVARIANT VIOLATED: diagnostic fact code is empty. \
-             This is a bug because diagnostics must have stable machine-readable codes. \
-             Fix: pass a non-empty diagnostic code when creating DiagnosticFact."
+            what = "diagnostic fact code is empty",
+            why = "diagnostics must have stable machine-readable codes",
+            fix = "pass a non-empty diagnostic code when creating DiagnosticFact",
         );
         let message = message.into();
-        assert!(
+        invariant!(
             !message.is_empty(),
-            "INVARIANT VIOLATED: diagnostic fact message is empty. \
-             This is a bug because diagnostics without messages cannot guide users. \
-             Fix: pass a non-empty diagnostic message when creating DiagnosticFact."
+            what = "diagnostic fact message is empty",
+            why = "diagnostics without messages cannot guide users",
+            fix = "pass a non-empty diagnostic message when creating DiagnosticFact",
         );
         Self {
             range,
@@ -86,11 +86,11 @@ impl DiagnosticStore {
     ) {
         self.remove_file(file_id);
         for fact in facts {
-            assert!(
+            invariant!(
                 fact.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement diagnostic fact belongs to a different file id. \
-                 This is a bug because DiagnosticStore::replace_file must only receive facts for the target file. \
-                 Fix: partition diagnostic facts by SourceFileId before replacing."
+                what = "replacement diagnostic fact belongs to a different file id",
+                why = "DiagnosticStore::replace_file must only receive facts for the target file",
+                fix = "partition diagnostic facts by SourceFileId before replacing",
             );
             self.facts_by_file.entry(file_id).or_default().push(fact);
         }

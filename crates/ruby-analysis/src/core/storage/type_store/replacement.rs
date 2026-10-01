@@ -1,6 +1,7 @@
 //! File-owned fact removal and replacement with ordered index maintenance.
 
 use crate::core::storage::file_owned_index::place_appended_file_facts;
+use crate::invariant::ExpectInvariant;
 
 use super::{provenance_rank, SourceFileId, StoredTypeFact, TypeFact, TypeFactId, TypeStore};
 
@@ -33,11 +34,11 @@ impl TypeStore {
         self.remove_file(file_id);
         let mut touched_subjects = Vec::new();
         for fact in facts {
-            assert!(
+            invariant!(
                 fact.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement fact belongs to a different file id. \
-                 This is a bug because TypeStore::replace_file must only receive facts for the target file. \
-                 Fix: partition facts by SourceFileId before replacing."
+                what = "replacement fact belongs to a different file id",
+                why = "TypeStore::replace_file must only receive facts for the target file",
+                fix = "partition facts by SourceFileId before replacing",
             );
             let subject = self.store_subject(fact.subject, fact.range);
             if let Some(subject_id) = subject.interned_id() {
@@ -75,10 +76,10 @@ impl TypeStore {
                         |id| {
                             self.facts[id.index()]
                                 .as_ref()
-                                .expect(
-                                    "INVARIANT VIOLATED: type index points to missing fact. \
-                                     This is a bug because indexes must be removed before arena facts. \
-                                     Fix: remove stale ids from every TypeStore index.",
+                                .expect_invariant(
+                                    "type index points to missing fact",
+                                    "indexes must be removed before arena facts",
+                                    "remove stale ids from every TypeStore index",
                                 )
                                 .range
                                 .file_id
@@ -100,10 +101,10 @@ impl TypeStore {
 
 fn sort_type_ids(facts: &[Option<StoredTypeFact>], ids: &mut [TypeFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect(
-            "INVARIANT VIOLATED: type index points to missing fact. \
-             This is a bug because indexes must be removed before arena facts. \
-             Fix: remove stale ids from every TypeStore index.",
+        let fact = facts[id.index()].as_ref().expect_invariant(
+            "type index points to missing fact",
+            "indexes must be removed before arena facts",
+            "remove stale ids from every TypeStore index",
         );
         (
             fact.range.file_id,
@@ -116,10 +117,10 @@ fn sort_type_ids(facts: &[Option<StoredTypeFact>], ids: &mut [TypeFactId]) {
 
 fn sort_type_ids_by_file(facts: &[Option<StoredTypeFact>], ids: &mut [TypeFactId]) {
     ids.sort_by_key(|id| {
-        let fact = facts[id.index()].as_ref().expect(
-            "INVARIANT VIOLATED: type file index points to missing fact. \
-             This is a bug because indexes must be removed before arena facts. \
-             Fix: remove stale ids from every TypeStore index.",
+        let fact = facts[id.index()].as_ref().expect_invariant(
+            "type file index points to missing fact",
+            "indexes must be removed before arena facts",
+            "remove stale ids from every TypeStore index",
         );
         (
             fact.range.start_byte,

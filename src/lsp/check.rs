@@ -8,6 +8,7 @@
 use crate::environment::config::{IndexingConfig, RubyFastLspConfig};
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::analysis_source;
+use crate::invariant::ExpectInvariant;
 use crate::lsp::capabilities::diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use crate::utils::file_ops::should_index_file;
@@ -316,10 +317,10 @@ impl CheckSession {
                 {
                     continue;
                 }
-                files_checked = files_checked.checked_add(1).expect(
-                    "INVARIANT VIOLATED: checked file count exhausted usize. This is a bug \
-                     because one process cannot retain more files than addressable memory. \
-                     Fix: bound project discovery below usize::MAX.",
+                files_checked = files_checked.checked_add(1).expect_invariant(
+                    "checked file count exhausted usize",
+                    "one process cannot retain more files than addressable memory",
+                    "bound project discovery below usize::MAX",
                 );
                 if let Some(file_telemetry) = engine.inference_telemetry_in_file(file.id) {
                     inference.merge(file_telemetry);
@@ -420,8 +421,10 @@ fn solved_types_in_file(
                 type_label: ruby_type.to_string(),
             },
             None => CheckTypeOutcome::Unknown {
-                reason: outcome.unknown_reason().expect(
-                    "INVARIANT VIOLATED: a non-proven inference outcome has no Unknown reason. This is a bug because TypeInferenceOutcome must make unproven states explicit. Fix: construct every failed proof through TypeInferenceOutcome::unknown.",
+                reason: outcome.unknown_reason().expect_invariant(
+                    "a non-proven inference outcome has no Unknown reason",
+                    "TypeInferenceOutcome must make unproven states explicit",
+                    "construct every failed proof through TypeInferenceOutcome::unknown",
                 ),
             },
         };
@@ -512,8 +515,10 @@ fn solved_types_in_file(
                     type_label: ruby_type.to_string(),
                 },
                 None => CheckTypeOutcome::Unknown {
-                    reason: outcome.unknown_reason().expect(
-                        "INVARIANT VIOLATED: an unproven call expression has no Unknown reason. This is a bug because call outcomes must preserve why a concrete type was withheld. Fix: construct deferred failures through TypeInferenceOutcome::unknown.",
+                    reason: outcome.unknown_reason().expect_invariant(
+                        "an unproven call expression has no Unknown reason",
+                        "call outcomes must preserve why a concrete type was withheld",
+                        "construct deferred failures through TypeInferenceOutcome::unknown",
                     ),
                 },
             };
@@ -530,9 +535,12 @@ fn solved_types_in_file(
 }
 
 fn check_range(file: &ruby_analysis::engine::SourceFile, range: TextRange) -> Result<CheckRange> {
-    assert_eq!(
-        file.id, range.file_id,
-        "INVARIANT VIOLATED: inferred-type range belongs to a different file. This is a bug because per-file method facts must retain their owning SourceFileId. Fix: reject or rehome the fact during file replacement."
+    invariant_eq!(
+        file.id,
+        range.file_id,
+        what = "inferred-type range belongs to a different file",
+        why = "per-file method facts must retain their owning SourceFileId",
+        fix = "reject or rehome the fact during file replacement",
     );
     let start = file
         .byte_offset_to_line_character(range.start_byte)
@@ -636,15 +644,15 @@ fn report_path(root: &Path, path: &Path) -> PathBuf {
 
 fn one_based_position((line, character): (u32, u32)) -> CheckPosition {
     CheckPosition {
-        line: line.checked_add(1).expect(
-            "INVARIANT VIOLATED: check diagnostic line exhausted u32. This is a bug because \
-             source line indexes must fit the domain range representation. Fix: widen check \
-             positions before admitting a source with u32::MAX lines.",
+        line: line.checked_add(1).expect_invariant(
+            "check diagnostic line exhausted u32",
+            "source line indexes must fit the domain range representation",
+            "widen check positions before admitting a source with u32::MAX lines",
         ),
-        column: character.checked_add(1).expect(
-            "INVARIANT VIOLATED: check diagnostic column exhausted u32. This is a bug because \
-             source UTF-16 columns must fit the domain range representation. Fix: widen check \
-             positions before admitting a line with u32::MAX UTF-16 code units.",
+        column: character.checked_add(1).expect_invariant(
+            "check diagnostic column exhausted u32",
+            "source UTF-16 columns must fit the domain range representation",
+            "widen check positions before admitting a line with u32::MAX UTF-16 code units",
         ),
     }
 }
@@ -665,10 +673,11 @@ fn lsp_severity(severity: Option<LspSeverity>) -> CheckSeverity {
         Some(LspSeverity::INFORMATION) => CheckSeverity::Information,
         Some(LspSeverity::HINT) => CheckSeverity::Hint,
         None => CheckSeverity::Error,
-        Some(value) => panic!(
-            "INVARIANT VIOLATED: unsupported LSP diagnostic severity {value:?}. This is a bug \
-             because every protocol severity must map to a stable check severity. Fix: add the \
-             new protocol severity to lsp_severity."
+        Some(value) => unreachable_invariant!(
+            what = "unsupported LSP diagnostic severity {value:?}",
+            why = "every protocol severity must map to a stable check severity",
+            fix = "add the new protocol severity to lsp_severity",
+            value = value,
         ),
     }
 }

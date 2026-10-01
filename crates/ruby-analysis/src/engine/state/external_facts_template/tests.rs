@@ -97,8 +97,10 @@ fn persistent_callable_template_uses_postcard_compatible_enum_encoding() {
     let encoded = postcard::to_allocvec(&template).unwrap();
     let decoded: SnapshotCallableTypeTemplate = postcard::from_bytes(&encoded).unwrap();
     let SnapshotCallableTypeTemplate::Array(element) = decoded else {
-        panic!(
-            "INVARIANT VIOLATED: persistent callable template changed variant during Postcard round-trip. This is a bug because dependency products must restore exact higher-order signatures. Fix: keep the persistence DTO externally tagged and add explicit wire migration for representation changes."
+        unreachable_invariant!(
+            what = "callable template changed variant in a Postcard round-trip",
+            why = "dependency products must restore exact signatures",
+            fix = "keep the DTO externally tagged and migrate wire changes explicitly",
         );
     };
     assert!(matches!(

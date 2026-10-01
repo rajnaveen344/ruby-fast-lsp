@@ -94,9 +94,11 @@ impl MethodLookupResult {
 fn receiver_type_members(receiver_type: &RubyType) -> &[RubyType] {
     match receiver_type {
         RubyType::Union(members) => {
-            assert!(
+            invariant!(
                 members.len() >= 2,
-                "INVARIANT VIOLATED: method resolution received a RubyType::Union with fewer than two members. This is a bug because canonical union construction must collapse empty and singleton inputs. Fix: construct receiver unions only through RubyType::union helpers."
+                what = "method resolution received a RubyType::Union with fewer than two members",
+                why = "canonical union construction must collapse empty and singleton inputs",
+                fix = "construct receiver unions only through RubyType::union helpers",
             );
             members
         }
@@ -114,11 +116,11 @@ fn receiver_type_members(receiver_type: &RubyType) -> &[RubyType] {
 
 pub(in crate::engine) fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
     let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-        panic!(
-            "INVARIANT VIOLATED: method fact has non-method FQN `{}`. \
-             This is a bug because method facts must be keyed by method FQNs. \
-             Fix: only insert MethodFact values built from FullyQualifiedName::Method.",
-            fact.fqn
+        unreachable_invariant!(
+            what = "method fact has non-method FQN `{}`",
+            why = "method facts must be keyed by method FQNs",
+            fix = "only insert MethodFact values built from FullyQualifiedName::Method",
+            fact.fqn,
         );
     };
     *method

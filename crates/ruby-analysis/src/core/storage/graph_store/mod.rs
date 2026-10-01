@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
 
 use crate::core::names::fqn_id::ConstLookupId;
@@ -507,29 +508,29 @@ impl SemanticGraph {
     ) {
         self.remove_file(file_id);
         for node in nodes {
-            assert!(
+            invariant!(
                 node.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement graph node belongs to a different file id. \
-                 This is a bug because SemanticGraph::replace_file must only receive facts for the target file. \
-                 Fix: partition graph facts by SourceFileId before replacing."
+                what = "replacement graph node belongs to a different file id",
+                why = "SemanticGraph::replace_file must only receive facts for the target file",
+                fix = "partition graph facts by SourceFileId before replacing",
             );
             self.add_node(node);
         }
         for edge in edges {
-            assert!(
+            invariant!(
                 edge.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement graph edge belongs to a different file id. \
-                 This is a bug because SemanticGraph::replace_file must only receive facts for the target file. \
-                 Fix: partition graph facts by SourceFileId before replacing."
+                what = "replacement graph edge belongs to a different file id",
+                why = "SemanticGraph::replace_file must only receive facts for the target file",
+                fix = "partition graph facts by SourceFileId before replacing",
             );
             self.add_edge(edge);
         }
         for edge in unresolved {
-            assert!(
+            invariant!(
                 edge.range.file_id == file_id,
-                "INVARIANT VIOLATED: replacement unresolved graph edge belongs to a different file id. \
-                 This is a bug because SemanticGraph::replace_file must only receive facts for the target file. \
-                 Fix: partition unresolved graph edges by SourceFileId before replacing."
+                what = "replacement unresolved graph edge belongs to a different file id",
+                why = "SemanticGraph::replace_file must only receive facts for the target file",
+                fix = "partition unresolved graph edges by SourceFileId before replacing",
             );
             self.add_unresolved_edge(edge);
         }
@@ -664,16 +665,16 @@ impl SemanticGraph {
         let target = edge.target;
         let kind = edge.kind;
         let id = if let Some(id) = self.free_edges.pop() {
-            let slot = self.edges.get_mut(id.0).expect(
-                "INVARIANT VIOLATED: graph edge free list points outside edge arena. \
-                 This is a bug because free ids must come from previous arena slots. \
-                 Fix: only push ids returned by SemanticGraph::remove_edge.",
+            let slot = self.edges.get_mut(id.0).expect_invariant(
+                "graph edge free list points outside edge arena",
+                "free ids must come from previous arena slots",
+                "only push ids returned by SemanticGraph::remove_edge",
             );
-            assert!(
+            invariant!(
                 slot.is_none(),
-                "INVARIANT VIOLATED: graph edge free list points to occupied edge slot. \
-                 This is a bug because free ids must only reference removed graph edges. \
-                 Fix: push each removed graph edge id at most once."
+                what = "graph edge free list points to occupied edge slot",
+                why = "free ids must only reference removed graph edges",
+                fix = "push each removed graph edge id at most once",
             );
             *slot = Some(edge);
             id
@@ -696,11 +697,15 @@ impl SemanticGraph {
     }
 
     fn remove_edge(&mut self, id: GraphEdgeId) {
-        let edge = self.edges.get_mut(id.0).and_then(Option::take).expect(
-            "INVARIANT VIOLATED: graph edge file index points to missing edge. \
-             This is a bug because edge ids in edges_by_file must reference live edges. \
-             Fix: remove stale edge ids from edges_by_file when deleting edges.",
-        );
+        let edge = self
+            .edges
+            .get_mut(id.0)
+            .and_then(Option::take)
+            .expect_invariant(
+                "graph edge file index points to missing edge",
+                "edge ids in edges_by_file must reference live edges",
+                "remove stale edge ids from edges_by_file when deleting edges",
+            );
         if let Some(source) = self.nodes.get_mut(&edge.source) {
             source.retain_outgoing(edge.kind, id);
         }
@@ -851,8 +856,11 @@ fn bump_unresolved_source_count(
 ) {
     let count = counts.entry(source).or_default();
     *count = count.checked_add(1).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: {what} count overflowed usize. This is a bug because one graph cannot contain more edges than addressable memory. Fix: inspect duplicate unresolved edge insertion."
+        unreachable_invariant!(
+            what = "{what} count overflowed usize",
+            why = "one graph cannot contain more edges than addressable memory",
+            fix = "inspect duplicate unresolved edge insertion",
+            what = what,
         )
     });
 }
@@ -863,13 +871,19 @@ fn release_unresolved_source_count(
     what: &'static str,
 ) {
     let count = counts.get_mut(&source).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: {what} has no source count. This is a bug because the source index and file-owned edge were inserted atomically. Fix: update both indexes on every unresolved edge lifecycle operation."
+        unreachable_invariant!(
+            what = "{what} has no source count",
+            why = "the source index and file-owned edge were inserted atomically",
+            fix = "update both indexes on every unresolved edge lifecycle operation",
+            what = what,
         )
     });
     *count = count.checked_sub(1).unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: {what} count underflowed. This is a bug because an edge was removed more than once. Fix: remove each file-owned unresolved edge exactly once."
+        unreachable_invariant!(
+            what = "{what} count underflowed",
+            why = "an edge was removed more than once",
+            fix = "remove each file-owned unresolved edge exactly once",
+            what = what,
         )
     });
     if *count == 0 {

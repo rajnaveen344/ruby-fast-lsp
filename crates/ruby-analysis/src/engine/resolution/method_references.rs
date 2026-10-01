@@ -1,5 +1,6 @@
 //! Resolution of method references and their navigation targets.
 
+use crate::invariant::ExpectInvariant;
 use std::sync::Arc;
 
 use super::chain_methods::{
@@ -188,8 +189,10 @@ impl<'a> AnalysisQuery<'a> {
                             .engine
                             .names
                             .fqn(owner_id)
-                            .expect(
-                                "INVARIANT VIOLATED: cached method-chain owner ID is absent from the name registry. This is a bug because resolution-local chain IDs originate from that same immutable registry. Fix: invalidate all resolution-local chain caches whenever names can change.",
+                            .expect_invariant(
+                                "cached method-chain owner ID is absent from the name registry",
+                                "resolution-local chain IDs originate from that same immutable registry",
+                                "invalidate all resolution-local chain caches whenever names can change",
                             )
                             .clone(),
                         method: *method,
@@ -217,8 +220,10 @@ impl<'a> AnalysisQuery<'a> {
         // same metaclass chain to every cached owner multiplied transient work
         // on large projects without adding proof.
         if let Some(metaclass) = metaclass_namespace_for_object(self.engine, namespace_fqn) {
-            let metaclass_id = self.engine.names.fqn_id(&metaclass).expect(
-                "INVARIANT VIOLATED: proven metaclass namespace is absent from the name registry. This is a bug because metaclass fallback requires an indexed graph node. Fix: intern graph node FQNs before method resolution.",
+            let metaclass_id = self.engine.names.fqn_id(&metaclass).expect_invariant(
+                "proven metaclass namespace is absent from the name registry",
+                "metaclass fallback requires an indexed graph node",
+                "intern graph node FQNs before method resolution",
             );
             let cache_key = (metaclass_id, *method);
             let fallback = if let Some(cached) = chain_cache.metaclass_methods.get(&cache_key) {
@@ -255,8 +260,10 @@ impl<'a> AnalysisQuery<'a> {
                                     .engine
                                     .names
                                     .fqn(owner_id)
-                                    .expect(
-                                        "INVARIANT VIOLATED: cached metaclass-chain owner ID is absent from the name registry. This is a bug because resolution-local chain IDs originate from that same immutable registry. Fix: invalidate all resolution-local chain caches whenever names can change.",
+                                    .expect_invariant(
+                                        "cached metaclass-chain owner ID is absent from the name registry",
+                                        "resolution-local chain IDs originate from that same immutable registry",
+                                        "invalidate all resolution-local chain caches whenever names can change",
                                     )
                                     .clone(),
                                 method: *method,
@@ -265,12 +272,15 @@ impl<'a> AnalysisQuery<'a> {
                         }
                     }
                 }
-                assert!(
+                invariant!(
                     chain_cache
                         .metaclass_methods
                         .insert(cache_key, result.clone())
                         .is_none(),
-                    "INVARIANT VIOLATED: metaclass fallback cache replaced an entry after a confirmed miss. This is a bug because metaclass identity and method names are immutable during one resolve pass. Fix: keep fallback lookup and insertion in one resolution step."
+                    what = "metaclass fallback cache replaced an entry after a confirmed miss",
+                    why =
+                        "metaclass identity and method names are immutable during one resolve pass",
+                    fix = "keep fallback lookup and insertion in one resolution step",
                 );
                 result
             };
@@ -477,8 +487,10 @@ fn non_core_fact_requires_ancestry_proof(
     let source_kind = engine
         .file(fact.range.file_id)
         .unwrap_or_else(|| {
-            panic!(
-                "INVARIANT VIOLATED: method fact `{}` references missing source file {}. This is a bug because every fact must remain owned by a registered file. Fix: remove facts before unregistering their source.",
+            unreachable_invariant!(
+                what = "method fact `{}` references missing source file {}",
+                why = "every fact must remain owned by a registered file",
+                fix = "remove facts before unregistering their source",
                 fact.fqn,
                 fact.range.file_id.0,
             )

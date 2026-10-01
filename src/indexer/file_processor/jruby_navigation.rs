@@ -5,6 +5,7 @@ use super::FileProcessor;
 use super::{FileResolution, JrubyNavigationResolution};
 use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::environment::runtime::jruby::source_navigation::java_source_navigation_facts_with_declaration;
+use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use ruby_analysis::core::{FullyQualifiedName, SourceKind};
@@ -66,11 +67,10 @@ impl FileProcessor {
         if plan.signature_class_names.is_empty() {
             return Ok(());
         }
-        let provider = self.jruby_import_provider.as_ref().expect(
-            "INVARIANT VIOLATED: a JRuby navigation plan was materialized without an owning \
-             JRuby provider. This is a bug because plans are derived from one exact project \
-             classpath catalog. Fix: keep plan collection and materialization on the same \
-             project FileProcessor.",
+        let provider = self.jruby_import_provider.as_ref().expect_invariant(
+            "a JRuby navigation plan was materialized without an owning JRuby provider",
+            "plans are derived from one exact project classpath catalog",
+            "keep plan collection and materialization on the same project FileProcessor",
         );
         let cache_root = provider.signature_cache_root().ok_or_else(|| {
             anyhow!(
@@ -130,10 +130,10 @@ impl FileProcessor {
             generated_signatures += 1;
             let signature_cache_io_started = Instant::now();
             let signature_path = cache_root.join(format!("{internal_name}.rb"));
-            let signature_parent = signature_path.parent().expect(
-                "INVARIANT VIOLATED: generated JRuby signature path has no parent. \
-                 This is a bug because validated JVM names always produce a cache-relative path. \
-                 Fix: retain the isolated cache root and validated internal class name.",
+            let signature_parent = signature_path.parent().expect_invariant(
+                "generated JRuby signature path has no parent",
+                "validated JVM names always produce a cache-relative path",
+                "retain the isolated cache root and validated internal class name",
             );
             std::fs::create_dir_all(signature_parent).with_context(|| {
                 format!(
@@ -215,12 +215,13 @@ impl FileProcessor {
                 let entry = exact_sources
                     .entry(resolved.path)
                     .or_insert_with(|| (resolved.content.clone(), Vec::new()));
-                assert_eq!(
-                    entry.0, resolved.content,
-                    "INVARIANT VIOLATED: one exact Java source path resolved to different content \
-                     during a single classpath pass. This is a bug because the classpath and source \
-                     fingerprints are immutable for the pass. Fix: retain one verified source identity \
-                     for every materialized path."
+                invariant_eq!(
+                    entry.0,
+                    resolved.content,
+                    what =
+                        "one Java source path resolved to different content in one classpath pass",
+                    why = "classpath and source fingerprints are fixed for the pass",
+                    fix = "retain one verified source identity per materialized path",
                 );
                 entry
                     .1
@@ -261,10 +262,10 @@ impl FileProcessor {
                 )
             };
             for (internal_name, location, include_class_declaration) in classes {
-                let declaration = provider.class_declaration(&internal_name).expect(
-                    "INVARIANT VIOLATED: exact Java implementation resolved for a class absent \
-                     from its owning catalog. This is a bug because resolution starts from that exact \
-                     catalog declaration. Fix: keep provider catalog and resolver transactionally paired.",
+                let declaration = provider.class_declaration(&internal_name).expect_invariant(
+                    "exact Java implementation resolved for a class absent from its owning catalog",
+                    "resolution starts from that exact catalog declaration",
+                    "keep provider catalog and resolver transactionally paired",
                 );
                 provider.register_method_navigation_ranges(&internal_name, &location, file_id);
                 let new_facts = java_source_navigation_facts_with_declaration(

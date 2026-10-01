@@ -2,6 +2,7 @@ use super::{
     classpath::SourceOrigin, java_catalog::JavaClassDeclaration,
     source_navigation::ResolvedJavaSource,
 };
+use crate::invariant::ExpectInvariant;
 use ruby_fast_lsp_jvm_metadata::{
     locate_java_source_declarations, JavaSourceClassLocation, JavaSourceLimits,
 };
@@ -149,23 +150,23 @@ impl JavaDecompiler {
         if !asset.path.is_file() {
             return Err(JavaDecompilerError::MissingAsset(asset.path));
         }
-        assert!(
+        invariant!(
             limits.max_parallel_processes > 0,
-            "INVARIANT VIOLATED: Java decompiler process limit is zero. \
-             This is a configuration bug because no request could ever acquire a bounded permit. \
-             Fix: configure at least one bounded decompiler process."
+            what = "Java decompiler process limit is zero",
+            why = "no request could ever acquire a bounded permit",
+            fix = "configure at least one bounded decompiler process",
         );
-        assert!(
+        invariant!(
             !limits.timeout.is_zero(),
-            "INVARIANT VIOLATED: Java decompiler timeout is zero. \
-             This is a configuration bug because every valid process would time out before launch. \
-             Fix: configure a positive bounded wall-clock timeout."
+            what = "Java decompiler timeout is zero",
+            why = "every valid process would time out before launch",
+            fix = "configure a positive bounded wall-clock timeout",
         );
-        assert!(
+        invariant!(
             limits.max_process_resident_bytes > 0,
-            "INVARIANT VIOLATED: Java decompiler resident-memory limit is zero. \
-             This is a configuration bug because no valid JVM child could remain below the limit. \
-             Fix: configure a positive measured resident-memory bound."
+            what = "Java decompiler resident-memory limit is zero",
+            why = "no valid JVM child could remain below the limit",
+            fix = "configure a positive measured resident-memory bound",
         );
         Ok(Self {
             java_executable,
@@ -316,11 +317,11 @@ impl ProcessPermit {
 impl Drop for ProcessPermit {
     fn drop(&mut self) {
         let previous = ACTIVE_DECOMPILERS.fetch_sub(1, Ordering::AcqRel);
-        assert!(
+        invariant!(
             previous > 0,
-            "INVARIANT VIOLATED: Java decompiler process permit underflowed. \
-             This is a bug because every permit increments the global count exactly once. \
-             Fix: keep permit acquisition and RAII release paired."
+            what = "Java decompiler process permit underflowed",
+            why = "every permit increments the global count exactly once",
+            fix = "keep permit acquisition and RAII release paired",
         );
     }
 }
@@ -565,11 +566,11 @@ fn wait_for_bounded_child(
     timeout: Duration,
     max_process_resident_bytes: u64,
 ) -> Result<(), JavaDecompilerError> {
-    assert!(
+    invariant!(
         max_process_resident_bytes > 0,
-        "INVARIANT VIOLATED: bounded child wait received a zero resident-memory limit. \
-         This is a bug because every live process would violate the limit. \
-         Fix: validate a positive process limit before spawning the JVM."
+        what = "bounded child wait received a zero resident-memory limit",
+        why = "every live process would violate the limit",
+        fix = "validate a positive process limit before spawning the JVM",
     );
     let started = Instant::now();
     loop {
@@ -824,10 +825,10 @@ fn materialize_decompiled_source(
     content: &str,
 ) -> Result<PathBuf, JavaDecompilerError> {
     let path = root.join(relative);
-    let parent = path.parent().expect(
-        "INVARIANT VIOLATED: decompiled implementation path has no parent. \
-         This is a bug because the cache root and safe Java source path are non-empty. \
-         Fix: preserve both components during materialization.",
+    let parent = path.parent().expect_invariant(
+        "decompiled implementation path has no parent",
+        "the cache root and safe Java source path are non-empty",
+        "preserve both components during materialization",
     );
     fs::create_dir_all(parent).map_err(|error| JavaDecompilerError::Read {
         path: parent.to_path_buf(),

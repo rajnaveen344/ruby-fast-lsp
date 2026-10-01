@@ -5,6 +5,7 @@ use super::syntax::{
     dotted_call_name, is_java_class_name, java_package_prefix, static_symbol_or_string,
 };
 use super::JrubyImportProvider;
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, ReferenceCandidate, RubyConstant, RubyType,
     SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
@@ -194,10 +195,10 @@ impl JrubyImportProvider {
                     .ruby_namespace_parts()
                     .into_iter()
                     .map(|part| {
-                        RubyConstant::new(&part).expect(
-                            "INVARIANT VIOLATED: validated Java interface proxy part is not a Ruby constant. \
-                             This is a bug because JavaClassName owns proxy validation. \
-                             Fix: keep Java interface proxy conversion single-sourced.",
+                        RubyConstant::new(&part).expect_invariant(
+                            "validated Java interface proxy part is not a Ruby constant",
+                            "JavaClassName owns proxy validation",
+                            "keep Java interface proxy conversion single-sourced",
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -271,7 +272,11 @@ impl JrubyImportProvider {
             let alias = name
                 .rsplit('/')
                 .next()
-                .expect("INVARIANT VIOLATED: validated internal Java class has no class component")
+                .expect_invariant(
+                    "validated internal Java class has no class component",
+                    "rsplit always yields one component",
+                    "keep internal-name validation before aliasing",
+                )
                 .to_string();
             self.add_import(
                 visitor,
@@ -315,12 +320,12 @@ impl JrubyImportProvider {
             );
             return;
         };
-        assert_eq!(
+        invariant_eq!(
             declaration.class.name,
             java_name.internal_name(),
-            "INVARIANT VIOLATED: Java catalog key and declaration name disagree. \
-             This is a bug because archive ingestion validates class identity before catalog insertion. \
-             Fix: preserve the parsed internal name as the catalog key."
+            what = "Java catalog key and declaration name disagree",
+            why = "archive ingestion validates class identity before catalog insertion",
+            fix = "preserve the parsed internal name as the catalog key",
         );
 
         let mut alias_parts = visitor.scope_tracker().get_ns_stack();
@@ -352,10 +357,10 @@ impl JrubyImportProvider {
             .ruby_namespace_parts()
             .into_iter()
             .map(|part| {
-                RubyConstant::new(&part).expect(
-                    "INVARIANT VIOLATED: JRuby proxy name component is not a Ruby constant. \
-                     This is a bug because JavaClassName owns proxy constant validation. \
-                     Fix: keep proxy name generation Ruby-constant-safe.",
+                RubyConstant::new(&part).expect_invariant(
+                    "JRuby proxy name component is not a Ruby constant",
+                    "JavaClassName owns proxy constant validation",
+                    "keep proxy name generation Ruby-constant-safe",
                 )
             })
             .collect();

@@ -61,8 +61,11 @@ fn handle_response_event(
     let required_capability = match event_name {
         "request.document_symbol" => "document_symbol",
         "request.code_lens" => "code_lens",
-        other => panic!(
-            "INVARIANT VIOLATED: unsupported response event `{other}` reached extension dispatch. This is a host bug because response events must map to an explicit manifest capability. Fix: add the event-to-capability mapping before dispatching it."
+        other => unreachable_invariant!(
+            what = "unsupported response event `{other}` reached extension dispatch",
+            why = "response events must map to an explicit manifest capability",
+            fix = "add the event-to-capability mapping before dispatching it",
+            other = other,
         ),
     };
     let event = ExtensionEvent {

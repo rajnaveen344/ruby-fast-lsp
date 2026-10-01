@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Cursor, Read};
 use std::sync::Arc;
@@ -120,10 +121,11 @@ pub fn parse_archive(
         }
         let mut contents = Vec::with_capacity(declared_size);
         entry
-            .take(
-                u64::try_from(limits.max_entry_bytes)
-                    .expect("INVARIANT VIOLATED: archive entry bound must fit u64"),
-            )
+            .take(u64::try_from(limits.max_entry_bytes).expect_invariant(
+                "archive entry bound does not fit u64",
+                "usize limits fit u64 on supported targets",
+                "lower max_entry_bytes",
+            ))
             .read_to_end(&mut contents)
             .map_err(|error| ArchiveError::InvalidArchive(error.to_string()))?;
         if contents.len() != declared_size {
@@ -165,9 +167,11 @@ pub fn parse_archive(
             entry: entry_name.clone(),
             error,
         })?;
-        let expected = logical_name
-            .strip_suffix(".class")
-            .expect("INVARIANT VIOLATED: selected JVM entry must end in .class");
+        let expected = logical_name.strip_suffix(".class").expect_invariant(
+            "selected JVM entry does not end in .class",
+            "entry selection keeps only .class names",
+            "keep the .class filter in entry selection",
+        );
         if class.name != expected {
             return Err(ArchiveError::ClassPathMismatch {
                 entry: entry_name,

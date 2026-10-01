@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -123,7 +124,11 @@ fn discover_project_extension_packages(workspace_root: &Path) -> Vec<PathBuf> {
                         entry
                             .path()
                             .parent()
-                            .expect("INVARIANT VIOLATED: extension.toml discovered without a parent directory. This is a bug because WalkDir entries below a workspace root must have a parent. Fix: preserve the package-directory discovery depth.")
+                            .expect_invariant(
+                                "extension.toml discovered without a parent directory",
+                                "WalkDir entries below a workspace root must have a parent",
+                                "preserve the package-directory discovery depth",
+                            )
                             .to_path_buf(),
                     );
                 }
@@ -151,7 +156,11 @@ fn discover_project_extension_packages(workspace_root: &Path) -> Vec<PathBuf> {
                         entry
                             .path()
                             .parent()
-                            .expect("INVARIANT VIOLATED: extension.toml discovered without a parent directory. This is a bug because WalkDir entries below a workspace root must have a parent. Fix: preserve manifest-only project discovery.")
+                            .expect_invariant(
+                                "extension.toml discovered without a parent directory",
+                                "WalkDir entries below a workspace root must have a parent",
+                                "preserve manifest-only project discovery",
+                            )
                             .to_path_buf(),
                     );
                 }

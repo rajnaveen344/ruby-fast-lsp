@@ -74,7 +74,13 @@ pub(super) fn layers(
         layers.push(layer);
         ready = next;
     }
-    assert_eq!(emitted, owners.len(), "INVARIANT VIOLATED: definition ranking lost a target owner. This is a bug because the component graph must be acyclic. Fix: preserve every owner when collapsing conflicting lookup orders.");
+    invariant_eq!(
+        emitted,
+        owners.len(),
+        what = "definition ranking lost a target owner",
+        why = "the component graph must be acyclic",
+        fix = "preserve every owner when collapsing conflicting lookup orders",
+    );
     layers
 }
 

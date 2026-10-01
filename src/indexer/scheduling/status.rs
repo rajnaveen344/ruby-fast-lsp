@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -233,11 +234,15 @@ impl ProjectIndexingStatus {
     pub fn begin_run(&self) -> IndexingRun {
         let mut state = self.state.lock();
         state.cancellation.cancel();
-        state.generation = state.generation.checked_add(1).expect(
-            "INVARIANT VIOLATED: indexing generation overflowed. This is a bug because a project cannot start 2^64 indexing generations in one server lifetime. Fix: inspect the rebuild loop that exhausted the generation counter.",
+        state.generation = state.generation.checked_add(1).expect_invariant(
+            "indexing generation overflowed",
+            "a project cannot start 2^64 indexing generations in one server lifetime",
+            "inspect the rebuild loop that exhausted the generation counter",
         );
-        state.sequence = state.sequence.checked_add(1).expect(
-            "INVARIANT VIOLATED: indexing sequence overflowed. This is a bug because status updates must remain globally ordered for one project. Fix: inspect the progress loop that exhausted the sequence counter.",
+        state.sequence = state.sequence.checked_add(1).expect_invariant(
+            "indexing sequence overflowed",
+            "status updates must remain globally ordered for one project",
+            "inspect the progress loop that exhausted the sequence counter",
         );
         state.phase = IndexingPhase::Queued;
         state.completed = None;
@@ -267,14 +272,19 @@ impl ProjectIndexingStatus {
         if generation != state.generation || state.phase != IndexingPhase::IndexingProject {
             return None;
         }
-        assert!(
+        invariant!(
             completed <= total,
-            "INVARIANT VIOLATED: completed project files exceed total files. This is a bug because every collected file belongs to the discovered set. Fix: correct project collection accounting."
+            what = "completed project files exceed total files",
+            why = "every collected file belongs to the discovered set",
+            fix = "correct project collection accounting",
         );
         if let Some(previous_total) = state.total {
-            assert_eq!(
-                total, previous_total,
-                "INVARIANT VIOLATED: project file total changed within one indexing phase. This is a bug because worker counters must share a fixed discovered set. Fix: begin a new generation when project inputs change."
+            invariant_eq!(
+                total,
+                previous_total,
+                what = "project file total changed within one indexing phase",
+                why = "worker counters must share a fixed discovered set",
+                fix = "begin a new generation when project inputs change",
             );
         }
         if state
@@ -283,8 +293,10 @@ impl ProjectIndexingStatus {
         {
             return None;
         }
-        state.sequence = state.sequence.checked_add(1).expect(
-            "INVARIANT VIOLATED: indexing sequence overflowed. This is a bug because worker progress must stay ordered. Fix: inspect the progress loop that exhausted the sequence counter."
+        state.sequence = state.sequence.checked_add(1).expect_invariant(
+            "indexing sequence overflowed",
+            "worker progress must stay ordered",
+            "inspect the progress loop that exhausted the sequence counter",
         );
         state.completed = Some(completed);
         state.total = Some(total);
@@ -298,50 +310,64 @@ impl ProjectIndexingStatus {
         completed: Option<u64>,
         total: Option<u64>,
     ) -> Option<ProjectIndexingSnapshot> {
-        assert!(
+        invariant!(
             completed.is_some() == total.is_some(),
-            "INVARIANT VIOLATED: indexing progress has only one of completed/total. This is a bug because partial progress cannot define a defensible denominator. Fix: provide both counters or neither."
+            what = "indexing progress has only one of completed/total",
+            why = "partial progress cannot define a defensible denominator",
+            fix = "provide both counters or neither",
         );
         if let (Some(completed), Some(total)) = (completed, total) {
-            assert!(
+            invariant!(
                 completed <= total,
-                "INVARIANT VIOLATED: completed work exceeds total work. This is a bug because indexing progress cannot be greater than its known denominator. Fix: correct the phase counter before publishing status."
+                what = "completed work exceeds total work",
+                why = "indexing progress cannot be greater than its known denominator",
+                fix = "correct the phase counter before publishing status",
             );
         }
-        assert!(
+        invariant!(
             !matches!(phase, IndexingPhase::Discovered | IndexingPhase::Queued),
-            "INVARIANT VIOLATED: an active indexing generation transitioned back to discovery or queue state. This is a bug because only begin_generation may create queued work. Fix: begin a new generation instead of rewinding the current one."
+            what = "an active indexing generation transitioned back to discovery or queue state",
+            why = "only begin_generation may create queued work",
+            fix = "begin a new generation instead of rewinding the current one",
         );
 
         let mut state = self.state.lock();
         if generation != state.generation || state.phase.is_terminal() {
             return None;
         }
-        assert!(
+        invariant!(
             phase.rank() >= state.phase.rank(),
-            "INVARIANT VIOLATED: indexing phase moved backwards from {:?} to {:?}. This is a bug because status must be monotonic within a generation. Fix: publish the transition from the current coordinator phase or start a new generation.",
+            what = "indexing phase moved backwards from {:?} to {:?}",
+            why = "status must be monotonic within a generation",
+            fix = "publish the transition from the current coordinator phase or start a new generation",
             state.phase,
             phase,
         );
         if phase == state.phase {
             if let (Some(previous), Some(next)) = (state.completed, completed) {
-                assert!(
+                invariant!(
                     next >= previous,
-                    "INVARIANT VIOLATED: indexing progress moved backwards within phase {:?}. This is a bug because one phase's completed count must be monotonic. Fix: use a new phase or publish the cumulative completed count.",
+                    what = "indexing progress moved backwards within phase {:?}",
+                    why = "one phase's completed count must be monotonic",
+                    fix = "use a new phase or publish the cumulative completed count",
                     phase,
                 );
             }
             if let (Some(previous), Some(next)) = (state.total, total) {
-                assert!(
+                invariant!(
                     next == previous,
-                    "INVARIANT VIOLATED: indexing progress denominator changed within phase {:?}. This is a bug because a displayed percentage must have a stable meaning. Fix: discover the total before entering the phase or start a new phase.",
+                    what = "indexing progress denominator changed within phase {:?}",
+                    why = "a displayed percentage must have a stable meaning",
+                    fix = "discover the total before entering the phase or start a new phase",
                     phase,
                 );
             }
         }
 
-        state.sequence = state.sequence.checked_add(1).expect(
-            "INVARIANT VIOLATED: indexing sequence overflowed. This is a bug because status updates must remain globally ordered for one project. Fix: inspect the progress loop that exhausted the sequence counter.",
+        state.sequence = state.sequence.checked_add(1).expect_invariant(
+            "indexing sequence overflowed",
+            "status updates must remain globally ordered for one project",
+            "inspect the progress loop that exhausted the sequence counter",
         );
         state.phase = phase;
         state.completed = completed;
@@ -374,16 +400,20 @@ impl ProjectIndexingStatus {
     }
 
     pub fn fail(&self, generation: u64, failure: String) -> Option<ProjectIndexingSnapshot> {
-        assert!(
+        invariant!(
             !failure.trim().is_empty(),
-            "INVARIANT VIOLATED: failed indexing state has an empty error. This is a bug because users need an actionable terminal reason. Fix: pass the coordinator failure summary."
+            what = "failed indexing state has an empty error",
+            why = "users need an actionable terminal reason",
+            fix = "pass the coordinator failure summary",
         );
         let mut state = self.state.lock();
         if generation != state.generation || state.phase.is_terminal() {
             return None;
         }
-        state.sequence = state.sequence.checked_add(1).expect(
-            "INVARIANT VIOLATED: indexing sequence overflowed. This is a bug because status updates must remain globally ordered for one project. Fix: inspect the failure loop that exhausted the sequence counter.",
+        state.sequence = state.sequence.checked_add(1).expect_invariant(
+            "indexing sequence overflowed",
+            "status updates must remain globally ordered for one project",
+            "inspect the failure loop that exhausted the sequence counter",
         );
         state.phase = IndexingPhase::Failed;
         state.completed = None;
@@ -398,8 +428,10 @@ impl ProjectIndexingStatus {
         if generation != state.generation || state.phase.is_terminal() {
             return None;
         }
-        state.sequence = state.sequence.checked_add(1).expect(
-            "INVARIANT VIOLATED: indexing sequence overflowed. This is a bug because status updates must remain globally ordered for one project. Fix: inspect the cancellation loop that exhausted the sequence counter.",
+        state.sequence = state.sequence.checked_add(1).expect_invariant(
+            "indexing sequence overflowed",
+            "status updates must remain globally ordered for one project",
+            "inspect the cancellation loop that exhausted the sequence counter",
         );
         state.phase = IndexingPhase::Cancelled;
         state.completed = None;
@@ -449,8 +481,10 @@ fn elapsed_ms(state: &ProjectIndexingState) -> u64 {
     state
         .started_at
         .map(|started_at| {
-            u64::try_from(started_at.elapsed().as_millis()).expect(
-                "INVARIANT VIOLATED: one indexing generation elapsed longer than u64::MAX milliseconds. This is a bug because no server process can run for that duration. Fix: inspect the corrupted indexing start instant.",
+            u64::try_from(started_at.elapsed().as_millis()).expect_invariant(
+                "one indexing generation elapsed longer than u64::MAX milliseconds",
+                "no server process can run for that duration",
+                "inspect the corrupted indexing start instant",
             )
         })
         .unwrap_or(0)

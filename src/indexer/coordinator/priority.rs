@@ -1,5 +1,6 @@
 //! Open-document constant demand used to prioritize project files and gems.
 
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use ruby_prism::{ConstantPathNode, ConstantReadNode, Visit};
 use std::collections::{BTreeMap, HashSet, VecDeque};
@@ -43,11 +44,10 @@ impl<'pr> Visit<'pr> for ActiveDocumentConstantVisitor {
         }
         self.constant_path_depth += 1;
         ruby_prism::visit_constant_path_node(self, node);
-        self.constant_path_depth = self.constant_path_depth.checked_sub(1).expect(
-            "INVARIANT VIOLATED: active-document constant-path traversal depth underflowed. \
-                 This is a bug because every constant-path visit increments exactly once before \
-                 recursive traversal. Fix: keep traversal depth updates paired around the default \
-                 Prism visitor.",
+        self.constant_path_depth = self.constant_path_depth.checked_sub(1).expect_invariant(
+            "active-document constant-path traversal depth underflowed",
+            "every constant-path visit increments exactly once before recursive traversal",
+            "keep traversal depth updates paired around the default Prism visitor",
         );
     }
 }

@@ -315,11 +315,11 @@ end
         .await;
 
     let locations = editor.goto_def_at("plain_spec.rb", 16, 8).await;
-    assert!(
+    invariant!(
         locations.is_empty(),
-        "INVARIANT VIOLATED: RSpec extension treated non-RSpec describe as RSpec scope. \
-         This is a bug because extension hooks must use resolved callees, not call names alone. \
-         Fix: require an RSpec resolved callee before entering RSpec scope."
+        what = "RSpec extension treated non-RSpec describe as RSpec scope",
+        why = "extension hooks must use resolved callees, not call names alone",
+        fix = "require an RSpec resolved callee before entering RSpec scope",
     );
 }
 
@@ -347,11 +347,11 @@ end
         .await;
 
     let locations = editor.goto_def_at("inline_test.rb", 10, 8).await;
-    assert!(
+    invariant!(
         locations.is_empty(),
-        "INVARIANT VIOLATED: RSpec extension applied include outside confirmed RSpec scope. \
-         This is a bug because extension hooks must not mutate singleton lookup for plain Ruby. \
-         Fix: gate RSpec mixin patches on resolved RSpec enclosing calls."
+        what = "RSpec extension applied include outside confirmed RSpec scope",
+        why = "extension hooks must not mutate singleton lookup for plain Ruby",
+        fix = "gate RSpec mixin patches on resolved RSpec enclosing calls",
     );
 }
 
@@ -627,12 +627,14 @@ end
         )
         .await;
 
-    assert!(
+    invariant!(
         editor
             .goto_def_at("edit_context_spec.rb", 8, 8)
             .await
             .is_empty(),
-        "INVARIANT VIOLATED: an edited RSpec group retained its removed method. This is a bug because extension facts must use per-file replacement. Fix: remove stale generated-owner facts before resolving the replacement."
+        what = "an edited RSpec group retained its removed method",
+        why = "extension facts must use per-file replacement",
+        fix = "remove stale generated-owner facts before resolving the replacement",
     );
 
     editor
@@ -646,12 +648,14 @@ old_helper
         )
         .await;
 
-    assert!(
+    invariant!(
         editor
             .goto_def_at("edit_context_spec.rb", 3, 4)
             .await
             .is_empty(),
-        "INVARIANT VIOLATED: removing an RSpec group retained its execution context or generated method. This is a bug because contexts and facts must share the file replacement lifecycle. Fix: clear execution-context facts when replacing the file."
+        what = "removing an RSpec group retained its execution context or generated method",
+        why = "contexts and facts must share the file replacement lifecycle",
+        fix = "clear execution-context facts when replacing the file",
     );
 }
 

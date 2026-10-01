@@ -8,6 +8,7 @@ use crate::indexer::cache::dependency_product::{
 };
 use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::scheduling::resources::{IndexingResourcePriority, IndexingWorkSpec};
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
@@ -163,8 +164,10 @@ impl IndexerGem {
                 "gem dependency product requires the dependency-only core/runtime semantic seed"
             )
         })?;
-        let project_root = self.workspace_root.clone().expect(
-            "INVARIANT VIOLATED: shared gem product indexing has no owning project root. This is a bug because resource priority and semantic provenance must use the same isolated project. Fix: construct IndexerGem with the owning project root.",
+        let project_root = self.workspace_root.clone().expect_invariant(
+            "shared gem product indexing has no owning project root",
+            "resource priority and semantic provenance must use the same isolated project",
+            "construct IndexerGem with the owning project root",
         );
         let key = manifest.key().clone();
         let producer_manifest = manifest.clone();
@@ -187,89 +190,93 @@ impl IndexerGem {
         )
         .as_project_parallel();
         let producer_uses_shared_pool = producer_lanes == indexing_resources.policy().cpu_lanes();
-        let product = server
-            .products.gem_dependencies()
-            .get_or_try_init(key, move || async move {
-                let lookup_manifest = producer_manifest.clone();
-                let lookup = indexing_resources
-                    .run_with_resources(
-                        "persistent gem dependency product lookup",
-                        lookup_spec,
-                        None,
-                        move || persistent_cache.lookup_or_reserve(&lookup_manifest),
-                    )
-                    .await
-                    .map_err(|error| {
-                        format!("persistent gem-product lookup worker failed: {error}")
-                    })?
-                    .map_err(|error| format!("persistent gem-product lookup failed: {error:#}"))?;
-                let crate::indexer::cache::persistent::PersistentGemProductLookup::Reservation(
-                    reservation,
-                ) = lookup
-                else {
-                    let crate::indexer::cache::persistent::PersistentGemProductLookup::Hit(product) = lookup
-                    else {
-                        panic!(
-                            "INVARIANT VIOLATED: persistent gem-product lookup returned an unhandled state. This is a bug because lookup has exactly hit and reservation outcomes. Fix: handle every PersistentGemProductLookup variant explicitly."
-                        );
-                    };
-                    return Ok(Arc::try_unwrap(product)
-                        .unwrap_or_else(|shared| shared.as_ref().clone()));
-                };
-                let build_product = move || {
-                    build_gem_dependency_product(
-                        &producer_manifest,
-                        dependency_seed,
-                        processor,
-                    )
-                    .map_err(|error| error.to_string())
-                };
-                let product = if producer_uses_shared_pool {
-                    indexing_resources
-                        .run_parallel_with_resources(
-                            "gem dependency product construction",
-                            producer_spec,
+        let product =
+            server
+                .products
+                .gem_dependencies()
+                .get_or_try_init(key, move || async move {
+                    let lookup_manifest = producer_manifest.clone();
+                    let lookup = indexing_resources
+                        .run_with_resources(
+                            "persistent gem dependency product lookup",
+                            lookup_spec,
                             None,
-                            build_product,
+                            move || persistent_cache.lookup_or_reserve(&lookup_manifest),
                         )
                         .await
-                } else {
+                        .map_err(|error| {
+                            format!("persistent gem-product lookup worker failed: {error}")
+                        })?
+                        .map_err(|error| {
+                            format!("persistent gem-product lookup failed: {error:#}")
+                        })?;
+                    let crate::indexer::cache::persistent::PersistentGemProductLookup::Reservation(
+                        reservation,
+                    ) = lookup
+                    else {
+                        let crate::indexer::cache::persistent::PersistentGemProductLookup::Hit(
+                            product,
+                        ) = lookup
+                        else {
+                            unreachable_invariant!(
+                                what = "persistent gem-product lookup returned an unhandled state",
+                                why = "lookup has exactly hit and reservation outcomes",
+                                fix = "handle every PersistentGemProductLookup variant explicitly",
+                            );
+                        };
+                        return Ok(Arc::try_unwrap(product)
+                            .unwrap_or_else(|shared| shared.as_ref().clone()));
+                    };
+                    let build_product = move || {
+                        build_gem_dependency_product(&producer_manifest, dependency_seed, processor)
+                            .map_err(|error| error.to_string())
+                    };
+                    let product = if producer_uses_shared_pool {
+                        indexing_resources
+                            .run_parallel_with_resources(
+                                "gem dependency product construction",
+                                producer_spec,
+                                None,
+                                build_product,
+                            )
+                            .await
+                    } else {
+                        indexing_resources
+                            .run_partitioned_parallel_with_resources(
+                                "gem dependency product construction",
+                                producer_spec,
+                                None,
+                                build_product,
+                            )
+                            .await
+                    }
+                    .map_err(|error| format!("gem dependency product worker failed: {error}"))??;
+                    let publication_spec = IndexingWorkSpec::new(
+                        Some(project_root),
+                        IndexingResourcePriority::Background,
+                        1,
+                        GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
+                        1,
+                    );
                     indexing_resources
-                        .run_partitioned_parallel_with_resources(
-                        "gem dependency product construction",
-                        producer_spec,
-                        None,
-                        build_product,
-                    )
-                    .await
-                }
-                .map_err(|error| format!("gem dependency product worker failed: {error}"))??;
-                let publication_spec = IndexingWorkSpec::new(
-                    Some(project_root),
-                    IndexingResourcePriority::Background,
-                    1,
-                    GEM_PRODUCT_TRANSIENT_MEMORY_BYTES,
-                    1,
-                );
-                indexing_resources
-                    .run_with_resources(
-                        "persistent gem dependency product publication",
-                        publication_spec,
-                        None,
-                        move || {
-                            reservation.publish(&product).map_err(|error| {
-                                format!("persistent gem-product publication failed: {error:#}")
-                            })?;
-                            Ok(product)
-                        },
-                    )
-                    .await
-                    .map_err(|error| {
-                        format!("persistent gem-product publication worker failed: {error}")
-                    })?
-            })
-            .await
-            .map_err(anyhow::Error::msg)?;
+                        .run_with_resources(
+                            "persistent gem dependency product publication",
+                            publication_spec,
+                            None,
+                            move || {
+                                reservation.publish(&product).map_err(|error| {
+                                    format!("persistent gem-product publication failed: {error:#}")
+                                })?;
+                                Ok(product)
+                            },
+                        )
+                        .await
+                        .map_err(|error| {
+                            format!("persistent gem-product publication worker failed: {error}")
+                        })?
+                })
+                .await
+                .map_err(anyhow::Error::msg)?;
         Ok(LoadedGemDependencyProduct { manifest, product })
     }
 
@@ -280,8 +287,10 @@ impl IndexerGem {
         loaded: LoadedGemDependencyProduct,
         cancellation: Option<CancellationToken>,
     ) -> Result<Vec<Url>> {
-        let project_root = self.workspace_root.clone().expect(
-            "INVARIANT VIOLATED: shared gem product binding has no owning project root. This is a bug because resource priority and semantic provenance must use the same isolated project. Fix: construct IndexerGem with the owning project root.",
+        let project_root = self.workspace_root.clone().expect_invariant(
+            "shared gem product binding has no owning project root",
+            "resource priority and semantic provenance must use the same isolated project",
+            "construct IndexerGem with the owning project root",
         );
         let LoadedGemDependencyProduct { manifest, product } = loaded;
         let binding_engine = analysis_engine;
@@ -321,8 +330,10 @@ impl IndexerGem {
         analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
         cancellation: Option<CancellationToken>,
     ) -> Result<()> {
-        let project_root = self.workspace_root.clone().expect(
-            "INVARIANT VIOLATED: gem dependency resolution has no owning project root. This is a bug because resource priority and semantic provenance must use the same isolated project. Fix: construct IndexerGem with the owning project root.",
+        let project_root = self.workspace_root.clone().expect_invariant(
+            "gem dependency resolution has no owning project root",
+            "resource priority and semantic provenance must use the same isolated project",
+            "construct IndexerGem with the owning project root",
         );
         let resolving_engine = analysis_engine.clone();
         let resolution_spec = IndexingWorkSpec::new(

@@ -1,5 +1,6 @@
 //! Method return type queries, including cached receiver lookups.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 
 use crate::core::{
@@ -157,11 +158,11 @@ impl<'a> AnalysisQuery<'a> {
         }
 
         let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-            panic!(
-                "INVARIANT VIOLATED: method return lookup received a non-method fact {}. \
-                 This is a bug because MethodFact FQNs must always use the Method variant. \
-                 Fix: validate method facts before engine insertion.",
-                fact.fqn
+            unreachable_invariant!(
+                what = "method return lookup received a non-method fact {}",
+                why = "MethodFact FQNs must always use the Method variant",
+                fix = "validate method facts before engine insertion",
+                fact.fqn,
             );
         };
         let signatures = self
@@ -171,10 +172,10 @@ impl<'a> AnalysisQuery<'a> {
             .filter(|signature| {
                 self.engine
                     .file(signature.range.file_id)
-                    .expect(
-                        "INVARIANT VIOLATED: RBS method fact references an unregistered source file. \
-                         This is a bug because type overlay requires stable signature metadata. \
-                         Fix: remove signature facts through per-file replacement.",
+                    .expect_invariant(
+                        "RBS method fact references an unregistered source file",
+                        "type overlay requires stable signature metadata",
+                        "remove signature facts through per-file replacement",
                     )
                     .kind
                     == crate::core::SourceKind::Signature

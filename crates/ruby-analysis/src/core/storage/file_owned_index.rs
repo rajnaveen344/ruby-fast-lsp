@@ -9,22 +9,22 @@ pub(super) fn place_appended_file_facts<T: Copy>(
     file_id_for: impl Fn(T) -> SourceFileId,
     sort_facts: impl FnOnce(&mut [T]),
 ) {
-    assert!(
+    invariant!(
         appended_count > 0 && appended_count <= ids.len(),
-        "INVARIANT VIOLATED: appended file-fact count is zero or exceeds the shared index length. \
-         This is a bug because a store must record only facts it appended to that index. \
-         Fix: count the target file's appended facts before restoring index order."
+        what = "appended file-fact count is zero or exceeds the shared index length",
+        why = "a store must record only facts it appended to that index",
+        fix = "count the target file's appended facts before restoring index order",
     );
     let appended_start = ids.len() - appended_count;
     sort_facts(&mut ids[appended_start..]);
 
     let insertion = ids[..appended_start].partition_point(|id| file_id_for(*id) < file_id);
     if let Some(existing) = ids[..appended_start].get(insertion) {
-        assert!(
+        invariant!(
             file_id_for(*existing) != file_id,
-            "INVARIANT VIOLATED: a shared fact index still contains the file being replaced. \
-             This is a bug because stale file facts must be removed before replacement facts are appended. \
-             Fix: remove the target SourceFileId from every store index before reinsertion."
+            what = "a shared fact index still contains the file being replaced",
+            why = "stale file facts must be removed before replacement facts are appended",
+            fix = "remove the target SourceFileId from every store index before reinsertion",
         );
     }
     if insertion != appended_start {

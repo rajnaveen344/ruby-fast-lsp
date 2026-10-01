@@ -52,21 +52,27 @@ pub(super) fn validate_request_fits_policy(
     spec: &IndexingWorkSpec,
     policy: IndexingResourcePolicy,
 ) {
-    assert!(
+    invariant!(
         spec.cpu_lanes() <= policy.cpu_lanes(),
-        "INVARIANT VIOLATED: indexing work requested {} CPU lanes from a {}-lane budget. This is a bug because impossible work would remain queued forever. Fix: split the work or cap its declared CPU claim.",
+        what = "indexing work requested {} CPU lanes from a {}-lane budget",
+        why = "impossible work would remain queued forever",
+        fix = "split the work or cap its declared CPU claim",
         spec.cpu_lanes(),
         policy.cpu_lanes(),
     );
-    assert!(
+    invariant!(
         spec.transient_memory_bytes() <= policy.transient_memory_limit_bytes(),
-        "INVARIANT VIOLATED: indexing work requested {} transient-memory bytes from a {}-byte budget. This is a bug because impossible work would remain queued forever. Fix: split the product or cap its bounded input before admission.",
+        what = "indexing work requested {} transient-memory bytes from a {}-byte budget",
+        why = "impossible work would remain queued forever",
+        fix = "split the product or cap its bounded input before admission",
         spec.transient_memory_bytes(),
         policy.transient_memory_limit_bytes(),
     );
-    assert!(
+    invariant!(
         spec.io_slots() <= policy.io_slots(),
-        "INVARIANT VIOLATED: indexing work requested {} I/O slots from a {}-slot budget. This is a bug because impossible work would remain queued forever. Fix: split the scan or cap its declared I/O claim.",
+        what = "indexing work requested {} I/O slots from a {}-slot budget",
+        why = "impossible work would remain queued forever",
+        fix = "split the scan or cap its declared I/O claim",
         spec.io_slots(),
         policy.io_slots(),
     );
@@ -142,9 +148,11 @@ pub(super) fn reserve_resources(
     spec: &IndexingWorkSpec,
     policy: IndexingResourcePolicy,
 ) {
-    assert!(
+    invariant!(
         request_fits_available(spec, admission, policy),
-        "INVARIANT VIOLATED: weighted indexing resources were reserved after the request stopped fitting. This is a bug because CPU, memory, I/O, and task admission must be one atomic locked transition. Fix: never release the admission lock between selection and reservation."
+        what = "weighted indexing resources were reserved after the request stopped fitting",
+        why = "CPU, memory, I/O, and task admission must be one atomic locked transition",
+        fix = "never release the admission lock between selection and reservation",
     );
     admission.active_tasks = checked_add_usize(
         admission.active_tasks,

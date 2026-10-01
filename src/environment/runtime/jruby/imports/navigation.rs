@@ -19,11 +19,12 @@ impl JrubyImportProvider {
         location: &JavaSourceClassLocation,
         file_id: SourceFileId,
     ) {
-        assert_eq!(
-            internal_name, location.internal_name,
-            "INVARIANT VIOLATED: JRuby navigation registration received mismatched class identities. \
-             This is a bug because verified Java source locations belong to exactly one catalog class. \
-             Fix: register each location with the internal class name used to resolve it."
+        invariant_eq!(
+            internal_name,
+            location.internal_name,
+            what = "JRuby navigation registration received mismatched class identities",
+            why = "verified Java source locations belong to exactly one catalog class",
+            fix = "register each location with the internal class name used to resolve it",
         );
         self.registered_navigation_classes
             .write()
@@ -41,11 +42,12 @@ impl JrubyImportProvider {
                 method.declaration_range.end,
             );
             if let Some(previous) = ranges.insert(key.clone(), range) {
-                assert_eq!(
-                    previous, range,
-                    "INVARIANT VIOLATED: one JVM method identity mapped to two implementation ranges. \
-                     This is a bug because source/decompiler verification must select one exact member. \
-                     Fix: reject ambiguous Java source before navigation registration."
+                invariant_eq!(
+                    previous,
+                    range,
+                    what = "one JVM method identity mapped to two implementation ranges",
+                    why = "source/decompiler verification must select one exact member",
+                    fix = "reject ambiguous Java source before navigation registration",
                 );
             }
         }
@@ -241,11 +243,12 @@ pub(super) fn supplemental_implementation_location(
     exact: &JavaSourceClassLocation,
     mut decompiled: JavaSourceClassLocation,
 ) -> Option<JavaSourceClassLocation> {
-    assert_eq!(
-        exact.internal_name, decompiled.internal_name,
-        "INVARIANT VIOLATED: exact and decompiled Java locations identify different classes. \
-         This is a bug because per-member precedence can compare only one winning class identity. \
-         Fix: decompile the same catalog declaration selected by exact-source resolution."
+    invariant_eq!(
+        exact.internal_name,
+        decompiled.internal_name,
+        what = "exact and decompiled Java locations identify different classes",
+        why = "per-member precedence can compare only one winning class identity",
+        fix = "decompile the same catalog declaration selected by exact-source resolution",
     );
     decompiled.methods.retain(|candidate| {
         !exact.methods.iter().any(|preferred| {

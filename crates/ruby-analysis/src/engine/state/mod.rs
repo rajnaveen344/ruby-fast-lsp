@@ -10,6 +10,7 @@ mod inference;
 mod lifecycle;
 mod storage;
 
+use crate::invariant::ExpectInvariant;
 pub(in crate::engine) use facts::EffectiveMethodFactMatch;
 pub(in crate::engine) use inference::{resolve_constant_dependency_type, TypeInferenceOutcomeRef};
 
@@ -66,19 +67,18 @@ pub struct SourceLineIndex {
 
 impl SourceLineIndex {
     fn new(source: &str) -> Self {
-        let len = u32::try_from(source.len()).expect(
-            "INVARIANT VIOLATED: source file byte length exceeded u32. This is a bug because \
-             every analysis TextRange and SourceFileId-relative byte offset is represented as \
-             u32. Fix: reject or segment files larger than u32::MAX before registration.",
+        let len = u32::try_from(source.len()).expect_invariant(
+            "source file byte length exceeded u32",
+            "every analysis TextRange and SourceFileId-relative byte offset is represented as u32",
+            "reject or segment files larger than u32::MAX before registration",
         );
         let mut line_offsets = vec![0];
         for (idx, byte) in source.bytes().enumerate() {
             if byte == b'\n' {
-                line_offsets.push(u32::try_from(idx + 1).expect(
-                    "INVARIANT VIOLATED: source line offset exceeded u32 after the complete \
-                     source length fit u32. This is a bug because a position within a bounded \
-                     source cannot exceed its length. Fix: keep source length validation before \
-                     line-index construction.",
+                line_offsets.push(u32::try_from(idx + 1).expect_invariant(
+                    "source line offset exceeded u32 after the complete source length fit u32",
+                    "a position within a bounded source cannot exceed its length",
+                    "keep source length validation before line-index construction",
                 ));
             }
         }
@@ -141,10 +141,10 @@ impl SourceFile {
                 .ok()?
         };
         Some((
-            u32::try_from(line_index).expect(
-                "INVARIANT VIOLATED: source line index exceeded u32. \
-                 This is a bug because LSP positions require u32 lines. \
-                 Fix: reject or segment files with more than u32::MAX lines.",
+            u32::try_from(line_index).expect_invariant(
+                "source line index exceeded u32",
+                "LSP positions require u32 lines",
+                "reject or segment files with more than u32::MAX lines",
             ),
             character,
         ))
@@ -243,10 +243,10 @@ pub struct ResolvePassStats {
 
 pub(in crate::engine) fn elapsed_ns(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_nanos()).unwrap_or_else(|_| {
-        panic!(
-            "INVARIANT VIOLATED: resolve-pass elapsed nanoseconds overflowed u64. \
-             This is a bug because one resolution pass cannot exceed u64::MAX nanoseconds. \
-             Fix: inspect hung resolve instrumentation or widen the counter type."
+        unreachable_invariant!(
+            what = "resolve-pass elapsed nanoseconds overflowed u64",
+            why = "one resolution pass cannot exceed u64::MAX nanoseconds",
+            fix = "inspect hung resolve instrumentation or widen the counter type",
         )
     })
 }
@@ -318,10 +318,10 @@ fn next_analysis_engine_instance_id() -> u64 {
             current.checked_add(1)
         })
         .unwrap_or_else(|_| {
-            panic!(
-                "INVARIANT VIOLATED: analysis engine instance identity exhausted u64. \
-                 This is a bug because query caches require a unique engine identity. \
-                 Fix: widen the identity before creating u64::MAX engine instances."
+            unreachable_invariant!(
+                what = "analysis engine instance identity exhausted u64",
+                why = "query caches require a unique engine identity",
+                fix = "widen the identity before creating u64::MAX engine instances",
             )
         })
 }

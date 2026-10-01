@@ -171,17 +171,23 @@ impl PersistentDerivedProductCache {
     }
 
     pub fn with_limits(root: PathBuf, max_entries: usize, max_bytes: u64) -> Self {
-        assert!(
+        invariant!(
             root.is_absolute(),
-            "INVARIANT VIOLATED: persistent cache root is not absolute. This is a bug because cache ownership must never depend on the server's working directory. Fix: resolve the platform user-cache root before constructing the cache."
+            what = "persistent cache root is not absolute",
+            why = "cache ownership must never depend on the server's working directory",
+            fix = "resolve the platform user-cache root before constructing the cache",
         );
-        assert!(
+        invariant!(
             max_entries > 0,
-            "INVARIANT VIOLATED: persistent cache entry limit is zero. This is a bug because a persistent cache must have a positive ownership bound. Fix: configure at least one entry."
+            what = "persistent cache entry limit is zero",
+            why = "a persistent cache must have a positive ownership bound",
+            fix = "configure at least one entry",
         );
-        assert!(
+        invariant!(
             max_bytes > 0,
-            "INVARIANT VIOLATED: persistent cache byte limit is zero. This is a bug because a persistent cache must have a positive disk bound. Fix: configure a measured positive byte limit."
+            what = "persistent cache byte limit is zero",
+            why = "a persistent cache must have a positive disk bound",
+            fix = "configure a measured positive byte limit",
         );
         Self {
             inner: Arc::new(PersistentDerivedProductCacheInner {

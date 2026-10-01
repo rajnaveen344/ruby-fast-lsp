@@ -1,4 +1,5 @@
 use super::*;
+use crate::invariant::ExpectInvariant;
 
 #[test]
 fn rbs_method_matches_include_string_methods() {
@@ -16,13 +17,13 @@ fn rbs_method_matches_include_string_methods() {
 fn rbs_method_matches_filter_by_partial() {
     let matches = rbs_method_matches_for_type(&RubyType::string(), "up", NamespaceKind::Instance);
 
-    assert!(
+    invariant!(
         matches
             .iter()
             .all(|candidate| candidate.name.starts_with("up")),
-        "INVARIANT VIOLATED: RBS method completion returned a method outside the requested prefix. \
-         This is a bug because completion filtering must be deterministic before LSP mapping. \
-         Fix: apply the partial filter before returning completion candidates."
+        what = "RBS method completion returned a method outside the requested prefix",
+        why = "completion filtering must be deterministic before LSP mapping",
+        fix = "apply the partial filter before returning completion candidates",
     );
 }
 
@@ -55,10 +56,10 @@ fn rbs_method_match_carries_return_type() {
     let length = matches
         .iter()
         .find(|candidate| candidate.name == "length")
-        .expect(
-            "INVARIANT VIOLATED: String#length missing from RBS completion candidates. \
-             This is a bug because bundled RBS must expose String#length. \
-             Fix: check RBS loading and completion class-name mapping.",
+        .expect_invariant(
+            "String#length missing from RBS completion candidates",
+            "bundled RBS must expose String#length",
+            "check RBS loading and completion class-name mapping",
         );
 
     assert!(length.return_type.is_some());

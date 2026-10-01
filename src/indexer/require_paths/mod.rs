@@ -29,6 +29,7 @@
 //! - **Out of scope (intentional)**: `autoload`, `load`, interpolated/dynamic
 //!   arguments, non-`.rb` native extensions.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
@@ -224,21 +225,21 @@ impl RequireStringTarget {
     /// Used for Cmd-hover / definition origin underlines and unresolved-require
     /// diagnostics. Exotic delimiters (`%q{}`) fall back to the full node.
     pub fn content_byte_range(&self, source: &str) -> (usize, usize) {
-        assert!(
+        invariant!(
             self.end_byte >= self.start_byte,
-            "INVARIANT VIOLATED: require string end_byte ({}) is before start_byte ({}). \
-             This is a bug because Prism locations are half-open [start, end). \
-             Fix: construct RequireStringTarget only from string_node.location().",
+            what = "require string end_byte ({}) is before start_byte ({})",
+            why = "prism locations are half-open [start, end)",
+            fix = "construct RequireStringTarget only from string_node.location()",
             self.end_byte,
-            self.start_byte
+            self.start_byte,
         );
-        assert!(
+        invariant!(
             self.end_byte <= source.len(),
-            "INVARIANT VIOLATED: require string end_byte ({}) exceeds source length ({}). \
-             This is a bug because the target must come from this source buffer. \
-             Fix: pass the same content used for parsing.",
+            what = "require string end_byte ({}) exceeds source length ({})",
+            why = "the target must come from this source buffer",
+            fix = "pass the same content used for parsing",
             self.end_byte,
-            source.len()
+            source.len(),
         );
         let bytes = source.as_bytes();
         let slice = &bytes[self.start_byte..self.end_byte];
@@ -329,15 +330,15 @@ fn require_diagnostic_for_target(
     target: &RequireStringTarget,
 ) -> DiagnosticFact {
     let (content_start, content_end) = target.content_byte_range(content);
-    let start_byte = u32::try_from(content_start).expect(
-        "INVARIANT VIOLATED: require diagnostic start offset exceeded u32. \
-         This is a bug because TextRange stores u32 offsets. \
-         Fix: widen TextRange before indexing files larger than u32::MAX bytes.",
+    let start_byte = u32::try_from(content_start).expect_invariant(
+        "require diagnostic start offset exceeded u32",
+        "TextRange stores u32 offsets",
+        "widen TextRange before indexing files larger than u32::MAX bytes",
     );
-    let end_byte = u32::try_from(content_end).expect(
-        "INVARIANT VIOLATED: require diagnostic end offset exceeded u32. \
-         This is a bug because TextRange stores u32 offsets. \
-         Fix: widen TextRange before indexing files larger than u32::MAX bytes.",
+    let end_byte = u32::try_from(content_end).expect_invariant(
+        "require diagnostic end offset exceeded u32",
+        "TextRange stores u32 offsets",
+        "widen TextRange before indexing files larger than u32::MAX bytes",
     );
     DiagnosticFact::new(
         TextRange::new(file_id, start_byte, end_byte),
@@ -387,24 +388,27 @@ fn unresolved_require_message(kind: RequireKind, argument: &str) -> String {
 }
 
 fn require_target_from_unresolved_message(message: &str) -> (RequireKind, &str) {
-    let (kind, rest) =
-        if let Some(rest) = message.strip_prefix("Cannot resolve require_relative \"") {
-            (RequireKind::RequireRelative, rest)
-        } else if let Some(rest) = message.strip_prefix("Cannot resolve require \"") {
-            (RequireKind::Require, rest)
-        } else {
-            panic!(
-            "INVARIANT VIOLATED: unresolved-require diagnostic message `{message}` is not a \
-             require diagnostic. This is a bug because require refresh must only see facts \
-             emitted by unresolved_require_diagnostics. Fix: filter by code \
-             `{UNRESOLVED_REQUIRE_CODE}` and keep the message format in unresolved_require_message."
-        );
-        };
+    let (kind, rest) = if let Some(rest) =
+        message.strip_prefix("Cannot resolve require_relative \"")
+    {
+        (RequireKind::RequireRelative, rest)
+    } else if let Some(rest) = message.strip_prefix("Cannot resolve require \"") {
+        (RequireKind::Require, rest)
+    } else {
+        unreachable_invariant!(
+                what = "diagnostic message `{message}` is not an unresolved-require diagnostic",
+                why = "require refresh sees only unresolved_require_diagnostics facts",
+                fix = "filter by code `{UNRESOLVED_REQUIRE_CODE}`; keep unresolved_require_message's format",
+                message = message,
+                UNRESOLVED_REQUIRE_CODE = UNRESOLVED_REQUIRE_CODE,
+            );
+    };
     let argument = rest.strip_suffix('"').unwrap_or_else(|| {
-        panic!(
-            "INVARIANT VIOLATED: unresolved-require diagnostic message `{message}` is missing its \
-             closing quote. This is a bug because unresolved_require_message always quote-wraps \
-             the require argument. Fix: keep message construction and parsing in this module."
+        unreachable_invariant!(
+            what = "unresolved-require diagnostic message `{message}` is missing its closing quote",
+            why = "unresolved_require_message always quote-wraps the require argument",
+            fix = "keep message construction and parsing in this module",
+            message = message,
         )
     });
     (kind, argument)
@@ -503,11 +507,12 @@ fn range_from_engine_file(file: &ruby_analysis::engine::SourceFile) -> Range {
     if let Some(source) = file.source_text() {
         return full_document_range(source);
     }
-    let end_line = u32::try_from(file.line_index.line_offsets().len().saturating_sub(1)).expect(
-        "INVARIANT VIOLATED: require target line count exceeded u32. \
-         This is a bug because LSP positions require u32 lines. \
-         Fix: reject or segment files with more than u32::MAX lines.",
-    );
+    let end_line = u32::try_from(file.line_index.line_offsets().len().saturating_sub(1))
+        .expect_invariant(
+            "require target line count exceeded u32",
+            "LSP positions require u32 lines",
+            "reject or segment files with more than u32::MAX lines",
+        );
     Range::new(Position::new(0, 0), Position::new(end_line, 0))
 }
 

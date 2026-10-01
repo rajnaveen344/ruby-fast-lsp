@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::SourceKind;
 use ruby_fast_lsp_extension_api::{LockedGem, LockedGemSource, ProjectContext, ProjectSourceKind};
 use serde::Serialize;
@@ -148,8 +149,10 @@ impl ExtensionApplicabilityFingerprint {
                     locked_gems,
                 },
             );
-        let encoded = serde_json::to_vec(&input).expect(
-            "INVARIANT VIOLATED: extension applicability input failed serialization. This is a host ABI bug because locked gem applicability types derive Serialize. Fix: keep the semantic seed fingerprint limited to the exact fields used by extension applicability.",
+        let encoded = serde_json::to_vec(&input).expect_invariant(
+            "extension applicability input failed serialization",
+            "locked gem applicability types derive Serialize",
+            "keep the seed fingerprint to the fields applicability uses",
         );
         Self(Sha256::digest(encoded).into())
     }
@@ -222,8 +225,10 @@ fn parse_lockfile(content: &str) -> LockedGemSnapshot {
         gems.insert(LockedGem {
             name: name.to_string(),
             version: version.to_string(),
-            source: source.expect(
-                "INVARIANT VIOLATED: Bundler spec lost its source section. This is a parser bug because specs are accepted only while a source is active. Fix: keep section and spec parsing in one state machine.",
+            source: source.expect_invariant(
+                "Bundler spec lost its source section",
+                "specs are accepted only while a source is active",
+                "keep section and spec parsing in one state machine",
             ),
         });
     }

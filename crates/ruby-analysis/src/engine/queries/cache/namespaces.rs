@@ -1,5 +1,6 @@
 //! Namespace, constant, and constant hover queries.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 
 use crate::core::{FullyQualifiedName, GraphNodeKind, RubyConstant, RubyType, TypeSubject};
@@ -46,18 +47,18 @@ impl<'a> AnalysisQuery<'a> {
                 ))
             }
             RubyType::Array(_) => Some(FullyQualifiedName::namespace_with_kind(
-                vec![RubyConstant::new("Array").expect(
-                    "INVARIANT VIOLATED: built-in constant `Array` is invalid. \
-                     This is a bug because Ruby built-in constants must be valid Ruby constants. \
-                     Fix: correct the hard-coded built-in constant name.",
+                vec![RubyConstant::new("Array").expect_invariant(
+                    "built-in constant `Array` is invalid",
+                    "ruby built-in constants must be valid Ruby constants",
+                    "correct the hard-coded built-in constant name",
                 )],
                 crate::core::NamespaceKind::Instance,
             )),
             RubyType::Hash(_, _) => Some(FullyQualifiedName::namespace_with_kind(
-                vec![RubyConstant::new("Hash").expect(
-                    "INVARIANT VIOLATED: built-in constant `Hash` is invalid. \
-                     This is a bug because Ruby built-in constants must be valid Ruby constants. \
-                     Fix: correct the hard-coded built-in constant name.",
+                vec![RubyConstant::new("Hash").expect_invariant(
+                    "built-in constant `Hash` is invalid",
+                    "ruby built-in constants must be valid Ruby constants",
+                    "correct the hard-coded built-in constant name",
                 )],
                 crate::core::NamespaceKind::Instance,
             )),

@@ -5,6 +5,7 @@ use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::indexer::sources::project::IndexerProject;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Result};
 use log::info;
@@ -167,11 +168,10 @@ impl IndexingCoordinator {
         let priority_keys = self
             .project_indexer
             .as_ref()
-            .expect(
-                "INVARIANT VIOLATED: project frontier demand completion has no retained \
-                 IndexerProject. This is a coordinator bug because processed-file evidence \
-                 belongs to the exact frontier indexer. Fix: retain it before completing \
-                 request waiters.",
+            .expect_invariant(
+                "project frontier demand completion has no retained IndexerProject",
+                "processed-file evidence belongs to the exact frontier indexer",
+                "retain it before completing request waiters",
             )
             .processed_navigation_priority_keys();
         let completed_keys = priority_keys
@@ -245,11 +245,10 @@ impl IndexingCoordinator {
         let demands = workspace.navigation_demands.clone();
         let started = Instant::now();
         self.indexing_checkpoint(server)?;
-        let mut project_indexer = self.project_indexer.take().expect(
-            "INVARIANT VIOLATED: bounded project collection has no retained navigation \
-             frontier. This is a coordinator bug because dynamic demands and exhaustive batches \
-             must mutate the exact IndexerProject that discovered the file set. Fix: retain the \
-             frontier IndexerProject across every batch.",
+        let mut project_indexer = self.project_indexer.take().expect_invariant(
+            "bounded project collection has no retained navigation frontier",
+            "demands and batches mutate the IndexerProject that found the files",
+            "retain the frontier IndexerProject across every batch",
         );
         let worker_server = server.clone();
         let worker_demands = demands.clone();
@@ -285,8 +284,10 @@ impl IndexingCoordinator {
                             ));
                         }
                         if !provider_handoff_complete {
-                            let receiver = runtime_provider_ready_rx.as_mut().expect(
-                                "INVARIANT VIOLATED: an incomplete JRuby provider handoff has no receiver. This is a coordinator bug because the receiver and completion flag have one generation-owned lifecycle. Fix: retain the receiver until it yields one value or fails.",
+                            let receiver = runtime_provider_ready_rx.as_mut().expect_invariant(
+                                "an incomplete JRuby provider handoff has no receiver",
+                                "the receiver and completion flag have one generation-owned lifecycle",
+                                "retain the receiver until it yields one value or fails",
                             );
                             match receiver.try_recv() {
                                 Ok(Ok(Some(provider))) => {
@@ -337,33 +338,35 @@ impl IndexingCoordinator {
                         if provider_installed {
                             provider_aware_batch_count = provider_aware_batch_count
                                 .checked_add(1)
-                                .expect(
-                                    "INVARIANT VIOLATED: provider-aware project batch count overflowed. This is a bug because one generation cannot contain 2^64 bounded batches. Fix: inspect the batch loop for a failure to consume pending files.",
+                                .expect_invariant(
+                                    "provider-aware project batch count overflowed",
+                                    "one generation cannot contain 2^64 bounded batches",
+                                    "inspect the batch loop for a failure to consume pending files",
                                 );
                         } else {
                             providerless_batch_count = providerless_batch_count
                                 .checked_add(1)
-                                .expect(
-                                    "INVARIANT VIOLATED: providerless project batch count overflowed. This is a bug because one generation cannot contain 2^64 bounded batches. Fix: inspect the batch loop for a failure to consume pending files.",
+                                .expect_invariant(
+                                    "providerless project batch count overflowed",
+                                    "one generation cannot contain 2^64 bounded batches",
+                                    "inspect the batch loop for a failure to consume pending files",
                                 );
                         }
-                        batch_count = batch_count.checked_add(1).expect(
-                            "INVARIANT VIOLATED: project fact batch count overflowed. This is a \
-                             bug because one generation cannot contain 2^64 bounded batches. \
-                             Fix: inspect the batch loop for a failure to consume pending files.",
+                        batch_count = batch_count.checked_add(1).expect_invariant(
+                            "project fact batch count overflowed",
+                            "one generation cannot contain 2^64 bounded batches",
+                            "inspect the batch loop for a failure to consume pending files",
                         );
-                        collected_file_count = collected_file_count.checked_add(collected).expect(
-                            "INVARIANT VIOLATED: project fact batch file count overflowed. \
-                                 This is a bug because the deterministic pending set is bounded by \
-                                 the filesystem. Fix: inspect batch accounting and duplicate \
-                                 extraction.",
+                        collected_file_count = collected_file_count.checked_add(collected).expect_invariant(
+                            "project fact batch file count overflowed",
+                            "the deterministic pending set is bounded by the filesystem",
+                            "inspect batch accounting and duplicate extraction",
                         );
                         if demanded {
-                            demanded_batch_count = demanded_batch_count.checked_add(1).expect(
-                                "INVARIANT VIOLATED: demanded project batch count overflowed. \
-                                     This is a bug because the bounded request queue admits at \
-                                     most a fixed number of keys per drain. Fix: inspect demand \
-                                     completion and batch termination.",
+                            demanded_batch_count = demanded_batch_count.checked_add(1).expect_invariant(
+                                "demanded project batch count overflowed",
+                                "the bounded request queue admits at most a fixed number of keys per drain",
+                                "inspect demand completion and batch termination",
                             );
                         }
                         if !selection.completed_keys.is_empty() {
@@ -430,11 +433,10 @@ impl IndexingCoordinator {
         server: &RubyLanguageServer,
         exact_runtime_provider: Option<Arc<JrubyImportProvider>>,
     ) -> Result<()> {
-        let mut project_indexer = self.project_indexer.take().expect(
-            "INVARIANT VIOLATED: exhaustive project collection has no retained navigation \
-             frontier. This is a coordinator bug because the remaining file set belongs to the \
-             exact IndexerProject that discovered and indexed the priority files. Fix: retain \
-             the frontier IndexerProject until exhaustive collection completes.",
+        let mut project_indexer = self.project_indexer.take().expect_invariant(
+            "exhaustive project collection has no retained navigation frontier",
+            "remaining files belong to the IndexerProject that found them",
+            "retain the frontier IndexerProject until collection completes",
         );
         if let Some(provider) = exact_runtime_provider {
             project_indexer.install_jruby_import_provider(provider);
@@ -460,17 +462,15 @@ impl IndexingCoordinator {
         &mut self,
         server: &RubyLanguageServer,
     ) -> Result<usize> {
-        let mut project_indexer = self.project_indexer.take().expect(
-            "INVARIANT VIOLATED: JRuby catalog-sensitive replay started before the first project \
-             pass. This is a coordinator bug because replay candidates are compact evidence \
-             collected by the providerless active frontier. Fix: finish the exhaustive tail with \
-             the exact provider before replaying the bounded frontier candidates.",
+        let mut project_indexer = self.project_indexer.take().expect_invariant(
+            "JRuby catalog-sensitive replay started before the first project pass",
+            "replay candidates come from the providerless frontier",
+            "finish the exhaustive tail with the provider before replay",
         );
-        let file_processor = self.file_processor.clone().expect(
-            "INVARIANT VIOLATED: JRuby catalog-sensitive replay has no final FileProcessor. This \
-             is a coordinator bug because exact runtime facts must use the same extension and \
-             project context as the ordinary project pass. Fix: rebuild the processor with the \
-             completed provider before replay.",
+        let file_processor = self.file_processor.clone().expect_invariant(
+            "JRuby catalog-sensitive replay has no final FileProcessor",
+            "runtime facts need the same extension and project context as the project pass",
+            "rebuild the processor with the completed provider before replay",
         );
         let worker_server = server.clone();
         let (project_indexer, result) = run_cpu_indexing_task(
@@ -494,8 +494,10 @@ impl IndexingCoordinator {
         &mut self,
         server: &RubyLanguageServer,
     ) -> Result<()> {
-        let mut project_indexer = self.project_indexer.take().expect(
-            "INVARIANT VIOLATED: non-JRuby project completion has no retained project indexer. This is a coordinator bug because the immutable exhaustive read context belongs to that exact generation. Fix: retain the IndexerProject until replay context is consumed or discarded.",
+        let mut project_indexer = self.project_indexer.take().expect_invariant(
+            "non-JRuby project completion has no retained project indexer",
+            "the immutable exhaustive read context belongs to that exact generation",
+            "retain the IndexerProject until replay context is consumed or discarded",
         );
         let project_indexer = run_cpu_indexing_task(
             server,

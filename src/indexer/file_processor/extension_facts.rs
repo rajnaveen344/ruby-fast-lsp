@@ -1,6 +1,7 @@
 //! Conversion of extension-produced facts into analysis facts.
 
 use crate::environment::extensions::analysis_ruby_type_from_extension;
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::MethodVisibility as AnalysisMethodVisibility;
 use ruby_analysis::core::{
     FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
@@ -80,8 +81,10 @@ pub(super) fn add_extension_analysis_facts(
                         .graph_nodes
                         .push(GraphNodeFact::new(fqn.clone(), kind, range));
                     facts.graph_nodes.push(GraphNodeFact::new(
-                        fqn.to_singleton_namespace().expect(
-                            "INVARIANT VIOLATED: extension namespace could not convert to singleton. This is a bug because validated namespace declarations must produce namespace FQNs. Fix: construct DefineNamespace facts from FullyQualifiedName::namespace.",
+                        fqn.to_singleton_namespace().expect_invariant(
+                            "extension namespace could not convert to singleton",
+                            "validated namespace declarations must produce namespace FQNs",
+                            "construct DefineNamespace facts from FullyQualifiedName::namespace",
                         ),
                         kind,
                         range,
@@ -108,9 +111,12 @@ pub(super) fn add_extension_analysis_facts(
             IndexPatch::DefineConstant(constant) => {
                 let mut parts = ruby_constants(&constant.namespace, "DefineConstant namespace");
                 parts.push(RubyConstant::new(&constant.name).unwrap_or_else(|err| {
-                    panic!(
-                        "INVARIANT VIOLATED: extension emitted invalid constant `{}`: {}. This is a bug because constant patches must be validated before fact conversion. Fix: reject invalid DefineConstant patches at the extension boundary.",
-                        constant.name, err
+                    unreachable_invariant!(
+                        what = "extension emitted invalid constant `{}`: {}",
+                        why = "constant patches must be validated before fact conversion",
+                        fix = "reject invalid DefineConstant patches at the extension boundary",
+                        constant.name,
+                        err,
                     )
                 }));
                 let fqn = FullyQualifiedName::constant(parts);
@@ -127,8 +133,11 @@ pub(super) fn add_extension_analysis_facts(
                     ));
                 }
                 if let Some(ruby_type) =
-                    analysis_ruby_type_from_extension(constant.ruby_type.as_ref())
-                        .expect("INVARIANT VIOLATED: extension constant type reached fact conversion without validation. This is a bug because guest patches must be validated before collection. Fix: keep extension payload validation before patch application.")
+                    analysis_ruby_type_from_extension(constant.ruby_type.as_ref()).expect_invariant(
+                        "extension constant type reached fact conversion without validation",
+                        "guest patches must be validated before collection",
+                        "keep extension payload validation before patch application",
+                    )
                 {
                     let type_fact = TypeFact::new(
                         TypeSubject::Constant(fqn),
@@ -157,11 +166,12 @@ pub(super) fn add_extension_analysis_facts(
                     "DefineMethod owner",
                 );
                 let ruby_method = RubyMethod::new(&method.name).unwrap_or_else(|err| {
-                    panic!(
-                        "INVARIANT VIOLATED: extension emitted invalid analysis method `{}`: {}. \
-                         This is a bug because extension method patches must be validated before fact conversion. \
-                         Fix: reject invalid DefineMethod patches at the extension boundary.",
-                        method.name, err
+                    unreachable_invariant!(
+                        what = "extension emitted invalid analysis method `{}`: {}",
+                        why = "extension method patches must be validated before fact conversion",
+                        fix = "reject invalid DefineMethod patches at the extension boundary",
+                        method.name,
+                        err,
                     )
                 });
                 let fqn = FullyQualifiedName::method(namespace.clone(), ruby_method);
@@ -179,7 +189,11 @@ pub(super) fn add_extension_analysis_facts(
                     ));
                 }
                 let return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
-                    .expect("INVARIANT VIOLATED: extension return type reached fact conversion without validation. This is a bug because guest patches must be validated before collection. Fix: keep extension payload validation before patch application.");
+                    .expect_invariant(
+                        "extension return type reached fact conversion without validation",
+                        "guest patches must be validated before collection",
+                        "keep extension payload validation before patch application",
+                    );
                 let return_type_label = return_type.as_ref().map(ToString::to_string);
                 let method_fact = MethodFact::with_param_facts(
                     fqn.clone(),
@@ -220,8 +234,10 @@ pub(super) fn add_extension_analysis_facts(
                     superclass.absolute,
                     &context,
                 ) {
-                    let source_singleton = source.to_singleton_namespace().expect(
-                        "INVARIANT VIOLATED: generated class namespace could not convert to singleton. This is a bug because validated class declarations must support Ruby singleton inheritance. Fix: construct SetSuperclass sources from FullyQualifiedName::namespace.",
+                    let source_singleton = source.to_singleton_namespace().expect_invariant(
+                        "generated class namespace could not convert to singleton",
+                        "validated class declarations must support Ruby singleton inheritance",
+                        "construct SetSuperclass sources from FullyQualifiedName::namespace",
                     );
                     if let Some(target_singleton) = target.to_singleton_namespace() {
                         facts.graph_edges.push(GraphEdgeFact::new(
@@ -256,10 +272,10 @@ pub(super) fn add_extension_analysis_facts(
                     "ApplyMixin owner",
                 );
                 if source_parts.is_empty() && mixin.owner_target.is_none() {
-                    source_parts.push(RubyConstant::new("Object").expect(
-                        "INVARIANT VIOLATED: Object is not a valid Ruby constant. \
-                         This is a bug because root mixin patches normalize to Object. \
-                         Fix: keep RubyConstant validation compatible with Ruby class names.",
+                    source_parts.push(RubyConstant::new("Object").expect_invariant(
+                        "Object is not a valid Ruby constant",
+                        "root mixin patches normalize to Object",
+                        "keep RubyConstant validation compatible with Ruby class names",
                     ));
                     let object = FullyQualifiedName::namespace(source_parts.clone());
                     let range = text_range_from_source_range(document, mixin.location, "mixin");
@@ -269,10 +285,10 @@ pub(super) fn add_extension_analysis_facts(
                         range,
                     ));
                     facts.graph_nodes.push(GraphNodeFact::new(
-                        object.to_singleton_namespace().expect(
-                            "INVARIANT VIOLATED: Object namespace could not convert to singleton. \
-                             This is a bug because namespace graph nodes must support singleton variants. \
-                             Fix: update FullyQualifiedName singleton conversion.",
+                        object.to_singleton_namespace().expect_invariant(
+                            "Object namespace could not convert to singleton",
+                            "namespace graph nodes must support singleton variants",
+                            "update FullyQualifiedName singleton conversion",
                         ),
                         GraphNodeKind::Class,
                         range,
@@ -404,8 +420,10 @@ fn analysis_patch_owner(
             owner_kind,
         }) => {
             let owner = GeneratedOwnerId::new(extension_id, document.uri.as_str(), local_id)
-                .expect(
-                    "INVARIANT VIOLATED: invalid generated patch owner reached fact conversion. This is a bug because extension owner targets must be validated before collection. Fix: keep validate_patch_owner_target before add_extension_analysis_facts.",
+                .expect_invariant(
+                    "invalid generated patch owner reached fact conversion",
+                    "extension owner targets must be validated before collection",
+                    "keep validate_patch_owner_target before add_extension_analysis_facts",
                 );
             (
                 vec![RubyConstant::generated_owner(owner)],
@@ -420,12 +438,17 @@ fn analysis_patch_owner(
         }) => {
             let project_uri = project
                 .map(|project| project.project_uri.as_str())
-                .expect(
-                    "INVARIANT VIOLATED: project-generated patch owner reached fact conversion without ProjectContext. This is a host validation bug because project-scoped targets must be rejected before collection. Fix: preserve the owning project context through extension fact conversion.",
+                .expect_invariant(
+                    "project-generated patch owner reached fact conversion without ProjectContext",
+                    "project-scoped targets must be rejected before collection",
+                    "preserve the owning project context through extension fact conversion",
                 );
-            let owner = GeneratedOwnerId::new(extension_id, project_uri, local_id).expect(
-                "INVARIANT VIOLATED: invalid project-generated patch owner reached fact conversion. This is a bug because extension owner targets must be validated before collection. Fix: keep validate_patch_owner_target before add_extension_analysis_facts.",
-            );
+            let owner = GeneratedOwnerId::new(extension_id, project_uri, local_id)
+                .expect_invariant(
+                    "invalid project-generated patch owner reached fact conversion",
+                    "extension owner targets must be validated before collection",
+                    "keep validate_patch_owner_target before add_extension_analysis_facts",
+                );
             (
                 vec![RubyConstant::generated_owner(owner)],
                 owner_kind
@@ -501,11 +524,13 @@ fn ruby_constants(parts: &[String], label: &str) -> Vec<RubyConstant> {
         .iter()
         .map(|part| {
             RubyConstant::new(part).unwrap_or_else(|err| {
-                panic!(
-                    "INVARIANT VIOLATED: extension emitted invalid {label} constant `{}`: {}. \
-                     This is a bug because extension constant patches must be valid Ruby constants. \
-                     Fix: validate constants before emitting extension index patches.",
-                    part, err
+                unreachable_invariant!(
+                    what = "extension emitted invalid {label} constant `{}`: {}",
+                    why = "extension constant patches must be valid Ruby constants",
+                    fix = "validate constants before emitting extension index patches",
+                    part,
+                    err,
+                    label = label,
                 )
             })
         })
@@ -600,10 +625,11 @@ fn text_range_from_source_range(
 
 fn byte_offset_u32(byte_offset: usize, message: &str) -> u32 {
     u32::try_from(byte_offset).unwrap_or_else(|_| {
-        panic!(
-            "INVARIANT VIOLATED: {message}. \
-             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
+        unreachable_invariant!(
+            what = "{message}",
+            why = "ruby-analysis::core TextRange currently stores u32 offsets",
+            fix = "widen TextRange offsets before indexing files larger than u32::MAX bytes",
+            message = message,
         )
     })
 }

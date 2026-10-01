@@ -74,9 +74,11 @@ impl AnalysisEngine {
         let mismatch = if declares_keywords
             && effective_signature.trailing_positional_may_be_options_hash
         {
-            assert!(
+            invariant!(
                 effective_signature.positional_count > 0,
-                "INVARIANT VIOLATED: a trailing positional options-hash marker exists without a positional argument. This is a bug because the marker can only be set while counting the final positional argument. Fix: update positional_count and trailing_positional_may_be_options_hash atomically."
+                what = "a trailing positional options-hash marker exists without a positional argument",
+                why = "the marker can only be set while counting the final positional argument",
+                fix = "update positional_count and trailing_positional_may_be_options_hash atomically",
             );
             let direct_mismatch = arity_mismatch(&effective_signature, &arity);
             let mut converted_signature = effective_signature.clone();

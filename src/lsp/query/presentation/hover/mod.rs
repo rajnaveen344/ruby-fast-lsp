@@ -7,6 +7,7 @@
 
 pub mod generators;
 
+use crate::invariant::ExpectInvariant;
 use generators::HoverContext;
 pub use generators::HoverInfo;
 
@@ -32,8 +33,10 @@ impl EngineQuery {
     ) -> Option<HoverInfo> {
         // Step 1: Get identifier at position using existing analyzer
         let analyzer = self.analyzer_at_position(uri, content, position);
-        let byte_offset = u32::try_from(position_to_offset(content, position)).expect(
-            "INVARIANT VIOLATED: hover position exceeded u32 byte offsets. This is a bug because analysis TextRange offsets are u32. Fix: widen domain offsets before accepting larger source files.",
+        let byte_offset = u32::try_from(position_to_offset(content, position)).expect_invariant(
+            "hover position exceeded u32 byte offsets",
+            "analysis TextRange offsets are u32",
+            "widen domain offsets before accepting larger source files",
         );
         let (identifier_opt, identifier_type, namespace, scope_id, namespace_kind) =
             analyzer.get_identifier(byte_offset);

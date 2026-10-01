@@ -81,11 +81,11 @@ fn parses_checked_minimal_class_fixture() {
 fn default_limits_accept_large_bounded_aggregate_attribute_counts() {
     let mut bytes = decode_hex(include_str!("../../fixtures/minimal_class.hex"));
     let source_file_attribute = decode_hex("00 01 00 08 00 00 00 02 00 09");
-    assert!(
+    invariant!(
         bytes.ends_with(&source_file_attribute),
-        "INVARIANT VIOLATED: minimal class fixture shape changed. This is a bug because the \
-             aggregate-attribute regression must replace the exact checked class attribute table. \
-             Fix: update the regression builder for the new fixture shape."
+        what = "minimal class fixture shape changed",
+        why = "the regression must replace the checked attribute table",
+        fix = "update the regression builder for the new shape",
     );
     bytes.truncate(bytes.len() - source_file_attribute.len());
 

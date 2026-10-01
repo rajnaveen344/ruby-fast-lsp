@@ -1,5 +1,6 @@
 //! Workspace Symbol Query — LSP adapter over analysis-engine symbol search.
 
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
 use ruby_analysis::engine::AnalysisQuery;
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind};
@@ -9,10 +10,10 @@ use crate::lsp::query::EngineQuery;
 
 impl EngineQuery {
     pub fn get_top_level_symbols(&self) -> Vec<SymbolInformation> {
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: workspace symbols query requires an analysis engine. \
-             This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "workspace symbols query requires an analysis engine",
+            "LSP workspace/symbol should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_engine()",
         );
         let engine = engine_ref.read();
         AnalysisQuery::new(&engine)
@@ -23,10 +24,10 @@ impl EngineQuery {
     }
 
     pub fn search_workspace_symbols(&self, query: &str) -> Vec<SymbolInformation> {
-        let engine_ref = self.analysis_engine().expect(
-            "INVARIANT VIOLATED: workspace symbol search requires an analysis engine. \
-             This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. \
-             Fix: construct EngineQuery with with_engine().",
+        let engine_ref = self.analysis_engine().expect_invariant(
+            "workspace symbol search requires an analysis engine",
+            "LSP workspace/symbol should be a thin wrapper over AnalysisEngine",
+            "construct EngineQuery with with_engine()",
         );
         let engine = engine_ref.read();
         AnalysisQuery::new(&engine)
@@ -86,12 +87,12 @@ mod tests {
             content: source.into(),
             kind: SourceKind::Project,
         });
-        assert_eq!(
+        invariant_eq!(
             file_id,
             SourceFileId(0),
-            "INVARIANT VIOLATED: first test analysis file id changed. \
-             This is a bug because this test assumes a fresh AnalysisEngine. \
-             Fix: update the expected file id or avoid asserting it."
+            what = "first test analysis file id changed",
+            why = "this test assumes a fresh AnalysisEngine",
+            fix = "update the expected file id or avoid asserting it",
         );
 
         let user = RubyConstant::new("User").expect("test constant must be valid");

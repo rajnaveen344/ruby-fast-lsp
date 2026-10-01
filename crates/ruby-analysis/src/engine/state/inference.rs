@@ -1,6 +1,7 @@
 //! Equation solving and the stored inference outcomes, expression types, and
 //! local-read types owned by each file.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::core::storage::type_store::TypeStore;
@@ -101,8 +102,10 @@ impl StoredTypeInferenceOutcome {
         match outcome.unknown_reason() {
             Some(reason) => Self::Unknown(reason),
             None => Self::Proven(types.intern_ruby_type(
-                outcome.into_proven_type().expect(
-                    "INVARIANT VIOLATED: call-expression outcome is neither proven nor Unknown. This is a bug because TypeInferenceOutcome has exactly those two states. Fix: construct outcomes only through TypeInferenceOutcome::proven or TypeInferenceOutcome::unknown.",
+                outcome.into_proven_type().expect_invariant(
+                    "call-expression outcome is neither proven nor Unknown",
+                    "TypeInferenceOutcome has exactly those two states",
+                    "build outcomes via TypeInferenceOutcome::proven or ::unknown",
                 ),
             )),
         }
@@ -184,9 +187,13 @@ impl AnalysisEngine {
                         .facts
                         .types
                         .update_equation_target(&subject, range, ruby_type);
-                    assert!(
+                    invariant!(
                         updated > 0,
-                        "INVARIANT VIOLATED: constant equation target {subject:?} has no matching type fact at {range:?}. This is a bug because equations and facts must be replaced atomically with their file. Fix: emit the equation from the same write path as its target TypeFact."
+                        what = "constant equation target {subject:?} has no matching type fact at {range:?}",
+                        why = "equations and facts must be replaced atomically with their file",
+                        fix = "emit the equation from the same write path as its target TypeFact",
+                        subject = subject,
+                        range = range,
                     );
                 }
                 ConstantTypeTarget::LocalAssignment { name, range } => {
@@ -194,9 +201,13 @@ impl AnalysisEngine {
                         .facts
                         .types
                         .update_local_assignment_equation_target(&name, range, ruby_type);
-                    assert!(
+                    invariant!(
                         updated > 0,
-                        "INVARIANT VIOLATED: local constructor equation target {name:?} has no matching assignment fact at {range:?}. This is a bug because the stable source assignment and its equation must be replaced atomically. Fix: emit the target fact and equation from the same local-write path."
+                        what = "local constructor equation target {name:?} has no assignment fact at {range:?}",
+                        why = "the assignment and its equation are replaced atomically",
+                        fix = "emit the fact and equation from the same local-write path",
+                        name = name,
+                        range = range,
                     );
                 }
                 ConstantTypeTarget::LocalRead(range) => {
@@ -257,8 +268,10 @@ impl AnalysisEngine {
         let has_constant_dependencies = file_ids.iter().any(|file_id| {
             self.inference_by_file
                 .get(file_id)
-                .expect(
-                    "INVARIANT VIOLATED: a selected method-equation file disappeared while checking constant dependencies. This is a bug because resolution owns the engine write lock. Fix: keep equation selection and dependency inspection in one immutable phase.",
+                .expect_invariant(
+                    "a selected method-equation file disappeared while checking constant dependencies",
+                    "resolution owns the engine write lock",
+                    "keep equation selection and dependency inspection in one immutable phase",
                 )
                 .method_return_equations
                 .iter()
@@ -277,8 +290,10 @@ impl AnalysisEngine {
             .flat_map(|file_id| {
                 self.inference_by_file
                     .get(file_id)
-                    .expect(
-                        "INVARIANT VIOLATED: a selected method-equation file disappeared during immutable collection. This is a bug because resolution owns the engine write lock. Fix: keep equation collection inside one resolution pass.",
+                    .expect_invariant(
+                        "a selected method-equation file disappeared during immutable collection",
+                        "resolution owns the engine write lock",
+                        "keep equation collection inside one resolution pass",
                     )
                     .method_return_equations
                     .iter()
@@ -304,8 +319,10 @@ impl AnalysisEngine {
             let methods = self
                 .inference_by_file
                 .get(file_id)
-                .expect(
-                    "INVARIANT VIOLATED: a method-equation owner disappeared before result projection. This is a bug because resolution owns the engine write lock. Fix: keep equation solving and projection atomic.",
+                .expect_invariant(
+                    "a method-equation owner disappeared before result projection",
+                    "resolution owns the engine write lock",
+                    "keep equation solving and projection atomic",
                 )
                 .method_return_equations
                 .iter()
@@ -315,8 +332,11 @@ impl AnalysisEngine {
                 .iter()
                 .map(|method| {
                     let outcome = solve_result.outcomes.get(method).unwrap_or_else(|| {
-                        panic!(
-                            "INVARIANT VIOLATED: method-return solver omitted equation `{method}`. This is a bug because every grouped method must produce exactly one proof outcome. Fix: keep SCC emission and result insertion exhaustive."
+                        unreachable_invariant!(
+                            what = "method-return solver omitted equation `{method}`",
+                            why = "every grouped method must produce exactly one proof outcome",
+                            fix = "keep SCC emission and result insertion exhaustive",
+                            method = method,
                         )
                     });
                     (method.clone(), outcome.clone())
@@ -330,35 +350,45 @@ impl AnalysisEngine {
                         .iter()
                         .map(|(method, outcome)| (method, outcome.clone().into_ruby_type())),
                 );
-            let evidence = self.inference_by_file.get_mut(file_id).expect(
-                "INVARIANT VIOLATED: a method-equation owner disappeared before evidence replacement. This is a bug because resolution owns the engine write lock. Fix: keep equation solving and evidence projection atomic.",
+            let evidence = self.inference_by_file.get_mut(file_id).expect_invariant(
+                "a method-equation owner disappeared before evidence replacement",
+                "resolution owns the engine write lock",
+                "keep equation solving and evidence projection atomic",
             );
             evidence.method_return_outcomes = outcomes;
             let max_live_shape_aliases = evidence.telemetry.max_live_shape_aliases;
             evidence.telemetry = InferenceTelemetry::default();
-            evidence
-                .telemetry
-                .observe_max_live_shape_aliases(usize::try_from(max_live_shape_aliases).expect(
-                    "INVARIANT VIOLATED: retained shape alias telemetry did not fit usize. This is a bug because the configured alias bound is representable on every supported target. Fix: keep the telemetry representation aligned with MAX_SHAPE_ALIASES.",
-                ));
+            evidence.telemetry.observe_max_live_shape_aliases(
+                usize::try_from(max_live_shape_aliases).expect_invariant(
+                    "retained shape alias telemetry did not fit usize",
+                    "the configured alias bound is representable on every supported target",
+                    "keep the telemetry representation aligned with MAX_SHAPE_ALIASES",
+                ),
+            );
         }
 
-        let telemetry_owner = *file_ids.first().expect(
-            "INVARIANT VIOLATED: a non-empty method-equation solve has no file owner. This is a bug because equations are collected exclusively from sorted file evidence. Fix: preserve the owner while flattening equations.",
+        let telemetry_owner = *file_ids.first().expect_invariant(
+            "a non-empty method-equation solve has no file owner",
+            "equations are collected exclusively from sorted file evidence",
+            "preserve the owner while flattening equations",
         );
         let telemetry_evidence = self
             .inference_by_file
             .get_mut(&telemetry_owner)
-            .expect(
-                "INVARIANT VIOLATED: the deterministic method-solver telemetry owner disappeared. This is a bug because resolution owns the engine write lock. Fix: assign telemetry before leaving the atomic solve pass.",
+            .expect_invariant(
+                "the deterministic method-solver telemetry owner disappeared",
+                "resolution owns the engine write lock",
+                "assign telemetry before leaving the atomic solve pass",
             );
         let max_live_shape_aliases = telemetry_evidence.telemetry.max_live_shape_aliases;
         telemetry_evidence.telemetry = solve_result.telemetry;
-        telemetry_evidence
-            .telemetry
-            .observe_max_live_shape_aliases(usize::try_from(max_live_shape_aliases).expect(
-                "INVARIANT VIOLATED: retained shape alias telemetry did not fit usize. This is a bug because the configured alias bound is representable on every supported target. Fix: keep the telemetry representation aligned with MAX_SHAPE_ALIASES.",
-            ));
+        telemetry_evidence.telemetry.observe_max_live_shape_aliases(
+            usize::try_from(max_live_shape_aliases).expect_invariant(
+                "retained shape alias telemetry did not fit usize",
+                "the configured alias bound is representable on every supported target",
+                "keep the telemetry representation aligned with MAX_SHAPE_ALIASES",
+            ),
+        );
         for file_id in &file_ids {
             self.refresh_retained_shape_telemetry(*file_id);
         }
@@ -372,9 +402,17 @@ impl AnalysisEngine {
         file_ids.sort_unstable();
         let mut aggregate = InferenceTelemetry::default();
         for file_id in file_ids {
-            aggregate.merge(&self.inference_by_file.get(&file_id).expect(
-                "INVARIANT VIOLATED: inference telemetry file key disappeared during immutable aggregation. This is a bug because engine queries hold a stable shared borrow. Fix: keep telemetry replacement behind the engine write lock.",
-            ).telemetry);
+            aggregate.merge(
+                &self
+                    .inference_by_file
+                    .get(&file_id)
+                    .expect_invariant(
+                        "inference telemetry file key disappeared during immutable aggregation",
+                        "engine queries hold a stable shared borrow",
+                        "keep telemetry replacement behind the engine write lock",
+                    )
+                    .telemetry,
+            );
         }
         aggregate
     }
@@ -575,8 +613,10 @@ impl AnalysisEngine {
             let file_id = first_range.file_id;
             let first_outcome = StoredTypeInferenceOutcome::from_domain(
                 &mut self.facts.types,
-                outcomes.remove(&first_range).expect(
-                    "INVARIANT VIOLATED: sorted call-expression range has no resolved outcome. This is a bug because the range list is built directly from the owned outcome map. Fix: remove each map entry exactly once while grouping by file.",
+                outcomes.remove(&first_range).expect_invariant(
+                    "sorted call-expression range has no resolved outcome",
+                    "the range list is built directly from the owned outcome map",
+                    "remove each map entry exactly once while grouping by file",
                 ),
             );
             let mut incoming = vec![(first_range, first_outcome)];
@@ -584,20 +624,26 @@ impl AnalysisEngine {
                 .peek()
                 .is_some_and(|range| range.file_id == file_id)
             {
-                let range = ordered_ranges.next().expect(
-                    "INVARIANT VIOLATED: a peeked call-expression range disappeared before consumption. This is a bug because the local iterator is not shared. Fix: keep grouping and consumption in one loop.",
+                let range = ordered_ranges.next().expect_invariant(
+                    "a peeked call-expression range disappeared before consumption",
+                    "the local iterator is not shared",
+                    "keep grouping and consumption in one loop",
                 );
                 let outcome = StoredTypeInferenceOutcome::from_domain(
                     &mut self.facts.types,
-                    outcomes.remove(&range).expect(
-                        "INVARIANT VIOLATED: grouped call-expression range has no resolved outcome. This is a bug because each sorted range must still own one map entry. Fix: remove each map entry exactly once while grouping by file.",
+                    outcomes.remove(&range).expect_invariant(
+                        "grouped call-expression range has no resolved outcome",
+                        "each sorted range must still own one map entry",
+                        "remove each map entry exactly once while grouping by file",
                     ),
                 );
                 incoming.push((range, outcome));
             }
 
-            self.inference_by_file.get(&file_id).expect(
-                "INVARIANT VIOLATED: resolved call outcome belongs to a file without inference evidence. This is a bug because file facts are installed before their method candidates resolve. Fix: replace inference evidence atomically with reference candidates.",
+            self.inference_by_file.get(&file_id).expect_invariant(
+                "resolved call outcome belongs to a file without inference evidence",
+                "file facts are installed before their method candidates resolve",
+                "replace inference evidence atomically with reference candidates",
             );
             let mut existing = self
                 .call_expression_outcomes_by_file
@@ -612,19 +658,27 @@ impl AnalysisEngine {
                 match (existing.peek(), incoming.peek()) {
                     (Some((existing_range, _)), Some((incoming_range, _))) => {
                         match existing_range.cmp(incoming_range) {
-                            std::cmp::Ordering::Less => merged.push(existing.next().expect(
-                                "INVARIANT VIOLATED: a peeked existing call outcome disappeared before merge consumption. This is a bug because the local iterator is not shared. Fix: keep comparison and consumption atomic.",
+                            std::cmp::Ordering::Less => merged.push(existing.next().expect_invariant(
+                                "a peeked existing call outcome disappeared before merge consumption",
+                                "the local iterator is not shared",
+                                "keep comparison and consumption atomic",
                             )),
                             std::cmp::Ordering::Equal => {
-                                existing.next().expect(
-                                    "INVARIANT VIOLATED: an equal existing call outcome disappeared before replacement. This is a bug because the local iterator is not shared. Fix: keep comparison and consumption atomic.",
+                                existing.next().expect_invariant(
+                                    "an equal existing call outcome disappeared before replacement",
+                                    "the local iterator is not shared",
+                                    "keep comparison and consumption atomic",
                                 );
-                                merged.push(incoming.next().expect(
-                                    "INVARIANT VIOLATED: an equal incoming call outcome disappeared before replacement. This is a bug because the local iterator is not shared. Fix: keep comparison and consumption atomic.",
+                                merged.push(incoming.next().expect_invariant(
+                                    "an equal incoming call outcome disappeared before replacement",
+                                    "the local iterator is not shared",
+                                    "keep comparison and consumption atomic",
                                 ));
                             }
-                            std::cmp::Ordering::Greater => merged.push(incoming.next().expect(
-                                "INVARIANT VIOLATED: a peeked incoming call outcome disappeared before merge consumption. This is a bug because the local iterator is not shared. Fix: keep comparison and consumption atomic.",
+                            std::cmp::Ordering::Greater => merged.push(incoming.next().expect_invariant(
+                                "a peeked incoming call outcome disappeared before merge consumption",
+                                "the local iterator is not shared",
+                                "keep comparison and consumption atomic",
                             )),
                         }
                     }
@@ -642,9 +696,11 @@ impl AnalysisEngine {
             self.call_expression_outcomes_by_file
                 .insert(file_id, merged.into_boxed_slice());
         }
-        assert!(
+        invariant!(
             outcomes.is_empty(),
-            "INVARIANT VIOLATED: resolved call-expression outcomes remained after the complete sorted merge. This is a bug because every map key was copied into the ordered range list. Fix: keep range collection and map ownership in the same merge operation."
+            what = "resolved call-expression outcomes remained after the complete sorted merge",
+            why = "every map key was copied into the ordered range list",
+            fix = "keep range collection and map ownership in the same merge operation",
         );
     }
 

@@ -4,6 +4,7 @@
 //! alias identities, control-flow joins, and editor projection belong to their
 //! existing indexer, inference, engine, and adapter layers.
 
+use crate::invariant::ExpectInvariant;
 use std::fmt::{self, Display, Formatter};
 
 use crate::core::RubyType;
@@ -302,8 +303,10 @@ impl ShapeType {
             rest: rest.map(Box::new),
             exactness,
             stability,
-            depth: u8::try_from(depth).expect(
-                "INVARIANT VIOLATED: an accepted shape depth did not fit u8. This is a bug because MAX_SHAPE_DEPTH is required to fit u8. Fix: keep the public bound and stored depth representation aligned.",
+            depth: u8::try_from(depth).expect_invariant(
+                "an accepted shape depth did not fit u8",
+                "MAX_SHAPE_DEPTH is required to fit u8",
+                "keep the public bound and stored depth representation aligned",
             ),
         })
     }

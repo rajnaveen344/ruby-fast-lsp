@@ -332,10 +332,10 @@ fn effective_method_name(fact: &MethodFact) -> crate::core::RubyMethod {
         | FullyQualifiedName::LocalVariable(_)
         | FullyQualifiedName::InstanceVariable(_)
         | FullyQualifiedName::ClassVariable(_)
-        | FullyQualifiedName::GlobalVariable(_) => panic!(
-            "INVARIANT VIOLATED: method store returned a non-method FQN. \
-             This is a bug because availability composition is defined only for method identities. \
-             Fix: construct MethodFact with FullyQualifiedName::Method before engine insertion."
+        | FullyQualifiedName::GlobalVariable(_) => unreachable_invariant!(
+            what = "method store returned a non-method FQN",
+            why = "availability composition is defined only for method identities",
+            fix = "construct MethodFact with FullyQualifiedName::Method before engine insertion",
         ),
     }
 }

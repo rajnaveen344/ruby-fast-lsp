@@ -1,4 +1,5 @@
 use crate::core::{FullyQualifiedName, SymbolKind, TypeFact, TypeProvenance, TypeSubject};
+use crate::invariant::ExpectInvariant;
 use log::error;
 use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
@@ -109,11 +110,15 @@ impl FactCollector {
 
         let location = self.document.prism_location_to_text_range(&name_loc);
         if let Some(reason) = inferred_unknown_reason {
-            assert_eq!(
+            invariant_eq!(
                 inferred_type,
                 RubyType::Unknown,
-                "INVARIANT VIOLATED: local assignment retained shape construction reason `{}` with concrete type `{inferred_type}`. This is a bug because a proof failure and a concrete result cannot describe the same assignment. Fix: return exactly one state from assignment inference.",
-                reason.code()
+                what =
+                    "local assignment kept shape reason `{}` with concrete type `{inferred_type}`",
+                why = "a proof failure and a concrete result cannot describe one assignment",
+                fix = "return exactly one state from assignment inference",
+                reason.code(),
+                inferred_type = inferred_type,
             );
             self.expressions.unknown_reasons.insert(location, reason);
         }
@@ -139,10 +144,10 @@ impl FactCollector {
                 location,
                 inferred_type.clone(),
             );
-            let scope_id = u32::try_from(current_scope_id).expect(
-                "INVARIANT VIOLATED: local variable scope id exceeded u32. \
-                 This is a bug because ruby-analysis::core TypeSubject::Local stores u32 scope ids. \
-                 Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
+            let scope_id = u32::try_from(current_scope_id).expect_invariant(
+                "local variable scope id exceeded u32",
+                "ruby-analysis::core TypeSubject::Local stores u32 scope ids",
+                "widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes",
             );
             let subject = TypeSubject::Local {
                 scope_id,

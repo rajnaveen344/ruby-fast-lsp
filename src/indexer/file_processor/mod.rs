@@ -19,6 +19,7 @@ use crate::environment::runtime::jruby::imports::{
     JrubyImportProvider, StaticJavaNavigationPlan, StaticJavaSourceHint,
 };
 use crate::indexer::require_paths::{unresolved_require_diagnostics, RequireFeatureIndex};
+use crate::invariant::ExpectInvariant;
 use crate::lsp::capabilities::diagnostics::generate_diagnostics;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
@@ -472,8 +473,10 @@ impl FileProcessor {
         let current_export_fingerprint = analysis_engine
             .read()
             .semantic_export_fingerprint(analysis_file_id)
-            .expect(
-                "INVARIANT VIOLATED: processed file has no semantic export fingerprint. This is a bug because every engine fact replacement must record its exported API. Fix: route final file facts through AnalysisEngine::replace_facts.",
+            .expect_invariant(
+                "processed file has no semantic export fingerprint",
+                "every engine fact replacement must record its exported API",
+                "route final file facts through AnalysisEngine::replace_facts",
             );
         let semantic_change =
             SemanticChange::classify(previous_export_fingerprint, current_export_fingerprint);

@@ -2,6 +2,7 @@
 
 use crate::core::{FullyQualifiedName, MethodFact, RubyMethod, TypeFact, TypeSubject};
 use crate::engine::AnalysisQuery;
+use crate::invariant::ExpectInvariant;
 use log::trace;
 use ruby_prism::CallNode;
 
@@ -44,10 +45,10 @@ impl FactCollector {
                 fqn,
                 owner,
                 range,
-                RubyMethod::new(&receiver_method).expect(
-                        "INVARIANT VIOLATED: delegate receiver method became invalid after validation. \
-                         This is a bug because the same string was already accepted. \
-                         Fix: keep delegate receiver validation single-sourced.",
+                RubyMethod::new(&receiver_method).expect_invariant(
+                    "delegate receiver method became invalid after validation",
+                    "the same string was already accepted",
+                    "keep delegate receiver validation single-sourced",
                 ),
             ));
 
@@ -64,10 +65,10 @@ impl FactCollector {
             };
             let delegated_fqn = FullyQualifiedName::method(
                 namespace.clone(),
-                RubyMethod::new(&method_name).expect(
-                    "INVARIANT VIOLATED: delegate method became invalid after validation. \
-                     This is a bug because the same string was already accepted. \
-                     Fix: keep delegate method validation single-sourced.",
+                RubyMethod::new(&method_name).expect_invariant(
+                    "delegate method became invalid after validation",
+                    "the same string was already accepted",
+                    "keep delegate method validation single-sourced",
                 ),
             );
             self.facts.types.add(TypeFact::new(

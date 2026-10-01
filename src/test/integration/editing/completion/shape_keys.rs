@@ -213,8 +213,10 @@ async fn shape_key_completion_maps_the_exact_utf16_replacement_range() {
         .text_edit
         .expect("shape-key completion must replace the existing partial literal")
     else {
-        panic!(
-            "INVARIANT VIOLATED: shape-key completion emitted an insert/replace edit. This is a bug because the adapter owns one exact literal-content range. Fix: map the domain replacement range to CompletionTextEdit::Edit."
+        unreachable_invariant!(
+            what = "shape-key completion emitted an insert/replace edit",
+            why = "the adapter owns one exact literal-content range",
+            fix = "map the domain replacement range to CompletionTextEdit::Edit",
         );
     };
     let expected_start = u32::try_from(source[..replacement_start_byte].encode_utf16().count())

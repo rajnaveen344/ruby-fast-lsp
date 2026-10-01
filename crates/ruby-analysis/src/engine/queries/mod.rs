@@ -9,6 +9,7 @@ pub(in crate::engine) mod workspace_symbols;
 #[cfg(test)]
 mod type_at_tests;
 
+use crate::invariant::ExpectInvariant;
 use std::path::Path;
 
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
@@ -207,8 +208,11 @@ impl<'a> AnalysisQuery<'a> {
             else {
                 continue;
             };
-            let owner = self.engine.names.const_lookup(owner).expect(
-                "INVARIANT VIOLATED: module call has no interned owner. This is a bug because candidates retain owner identity. Fix: intern the owner before storing its candidate.");
+            let owner = self.engine.names.const_lookup(owner).expect_invariant(
+                "module call has no interned owner",
+                "candidates retain owner identity",
+                "intern the owner before storing its candidate",
+            );
             let owner = FullyQualifiedName::namespace_with_kind(owner.path.to_vec(), owner_kind);
             if crate::engine::resolution::module_instance_receivers(self.engine, &owner).is_empty()
             {

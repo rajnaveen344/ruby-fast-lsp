@@ -5,6 +5,7 @@ use crate::environment::runtime::catalog::{
     DiscoveredRuntime, ProjectRuntimeStatus, RuntimeCatalog, RuntimeDiscoverParams, RuntimeStatus,
     RuntimeStatusParams,
 };
+use crate::invariant::ExpectInvariant;
 use anyhow::Result;
 use log::warn;
 use ruby_analysis::engine::AnalysisEngine;
@@ -25,8 +26,10 @@ fn new_core_engine_cache() -> crate::utils::single_flight::BoundedSingleFlightCa
         CORE_ENGINE_CACHE_MAX_ENTRIES,
         CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES,
         |engine: &ruby_analysis::engine::AnalysisEngine| {
-            u64::try_from(engine.estimated_memory_stats().total()).expect(
-                "INVARIANT VIOLATED: a core template heap estimate does not fit u64. This is a bug because one in-memory engine cannot exceed the process address space. Fix: inspect engine memory estimation overflow.",
+            u64::try_from(engine.estimated_memory_stats().total()).expect_invariant(
+                "a core template heap estimate does not fit u64",
+                "one in-memory engine cannot exceed the process address space",
+                "inspect engine memory estimation overflow",
             )
         },
     )
@@ -221,9 +224,14 @@ impl RubyLanguageServer {
 
     #[cfg(test)]
     pub(crate) fn set_discovered_runtimes_for_tests(&self, runtimes: Vec<DiscoveredRuntime>) {
-        self.products.discovered_runtimes.set(runtimes).expect(
-            "INVARIANT VIOLATED: test runtime catalog was initialized more than once. This is a bug because each test server must own one immutable discovery snapshot. Fix: create a fresh RubyLanguageServer per runtime test.",
-        );
+        self.products
+            .discovered_runtimes
+            .set(runtimes)
+            .expect_invariant(
+                "test runtime catalog was initialized more than once",
+                "each test server must own one immutable discovery snapshot",
+                "create a fresh RubyLanguageServer per runtime test",
+            );
     }
 
     pub(crate) async fn resolve_auto_runtime(

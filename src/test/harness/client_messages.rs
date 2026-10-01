@@ -64,11 +64,21 @@ impl ClientMessages {
                         return delivered;
                     }
                 }
-                changed.changed().await.expect("test diagnostic observer stays connected");
+                changed
+                    .changed()
+                    .await
+                    .expect("test diagnostic observer stays connected");
             }
-        }).await.unwrap_or_else(|_| panic!(
-            "INVARIANT VIOLATED: submitted diagnostics for {uri} were not delivered through the LSP client. This is a bug because production publication must reach the editor, including empty clears. Fix: inspect the queue, sender, and captured transport output; do not recompute diagnostics in the observer."
-        ))
+        })
+        .await
+        .unwrap_or_else(|_| {
+            unreachable_invariant!(
+                what = "diagnostics for {uri} were not delivered through the LSP client",
+                why = "publication must reach the editor, including empty clears",
+                fix = "inspect the queue, sender, and transport; do not recompute in the observer",
+                uri = uri,
+            )
+        })
     }
 
     pub(super) fn notification_count(&self) -> u64 {

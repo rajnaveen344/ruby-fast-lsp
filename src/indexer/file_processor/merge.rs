@@ -1,5 +1,6 @@
 //! Direct-fact collection and precise merging of visitor and inferred type facts.
 
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{
     FullyQualifiedName, RubyType, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact,
     TypeProvenance, TypeSubject,
@@ -284,9 +285,15 @@ pub(super) fn merge_precise_visitor_type_facts(
                 && visitor_fact.provenance == TypeProvenance::Inferred
                 && !same_slot_indexes.is_empty()
                 && same_slot_indexes.iter().all(|&index| {
-                    slots[index].as_ref().expect(
-                        "INVARIANT VIOLATED: merge selected a tombstoned type-fact slot. This is a bug because live_subject_slot_indexes must skip cleared entries. Fix: keep slot liveness and subject indexes in the same merge step.",
-                    ).provenance == TypeProvenance::Inferred
+                    slots[index]
+                        .as_ref()
+                        .expect_invariant(
+                            "merge selected a tombstoned type-fact slot",
+                            "live_subject_slot_indexes must skip cleared entries",
+                            "keep slot liveness and subject indexes in the same merge step",
+                        )
+                        .provenance
+                        == TypeProvenance::Inferred
                 })
             {
                 tombstone_merged_slots(&mut slots, &same_slot_indexes);
@@ -315,9 +322,15 @@ pub(super) fn merge_precise_visitor_type_facts(
             continue;
         }
         if matching_slot_indexes.iter().any(|&index| {
-            slots[index].as_ref().expect(
-                "INVARIANT VIOLATED: merge selected a tombstoned type-fact slot while comparing assignment types. This is a bug because live_subject_slot_indexes must skip cleared entries. Fix: keep slot liveness and subject indexes in the same merge step.",
-            ).ruby_type == visitor_fact.ruby_type
+            slots[index]
+                .as_ref()
+                .expect_invariant(
+                    "merge selected a tombstoned type-fact slot while comparing assignment types",
+                    "live_subject_slot_indexes must skip cleared entries",
+                    "keep slot liveness and subject indexes in the same merge step",
+                )
+                .ruby_type
+                == visitor_fact.ruby_type
         }) {
             continue;
         }
@@ -365,9 +378,11 @@ fn push_merged_type_fact(
 
 fn tombstone_merged_slots(slots: &mut [Option<TypeFact>], indexes: &[usize]) {
     for &index in indexes {
-        assert!(
+        invariant!(
             slots[index].is_some(),
-            "INVARIANT VIOLATED: merge tombstoned a type-fact slot twice. This is a bug because each live slot may be replaced at most once per visitor fact. Fix: filter live indexes before replacement."
+            what = "merge tombstoned a type-fact slot twice",
+            why = "each live slot may be replaced at most once per visitor fact",
+            fix = "filter live indexes before replacement",
         );
         slots[index] = None;
     }

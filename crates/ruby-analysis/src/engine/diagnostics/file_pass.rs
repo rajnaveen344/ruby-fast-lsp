@@ -1,6 +1,7 @@
 //! Single-file resolve pass: re-resolves one file's reference candidates and
 //! replaces its references, call outcomes, and diagnostics.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 
 use super::grouped_methods::grouped_method_targets;
@@ -42,16 +43,16 @@ impl AnalysisEngine {
                     resolved_refs.push((target, ReferenceFact::new(candidate.range, caller)));
                 }
                 StoredReferenceCandidateKind::Constant { lookup } => {
-                    let lookup = self.names.const_lookup(lookup).expect(
-                        "INVARIANT VIOLATED: reference candidate points to missing constant lookup. \
-                         This is a bug because stored reference candidates must only contain interned lookup ids. \
-                         Fix: intern constant lookups before inserting candidates.",
+                    let lookup = self.names.const_lookup(lookup).expect_invariant(
+                        "reference candidate points to missing constant lookup",
+                        "stored reference candidates must only contain interned lookup ids",
+                        "intern constant lookups before inserting candidates",
                     );
                     let parts = lookup.path.to_vec();
-                    let context = self.names.fqn(lookup.context).expect(
-                        "INVARIANT VIOLATED: constant lookup points to missing context FQN id. \
-                         This is a bug because constant lookups must only store interned context FQN ids. \
-                         Fix: intern lookup contexts before inserting candidates.",
+                    let context = self.names.fqn(lookup.context).expect_invariant(
+                        "constant lookup points to missing context FQN id",
+                        "constant lookups must only store interned context FQN ids",
+                        "intern lookup contexts before inserting candidates",
                     );
                     if let Some(target) = self.resolve_constant_reference(
                         &parts,
@@ -207,8 +208,10 @@ impl AnalysisEngine {
                             }
                             continue;
                         };
-                        let owner_kind = owner_fqn.namespace_kind().expect(
-                            "INVARIANT VIOLATED: a proven receiver namespace has no namespace kind. This is a bug because type-to-namespace conversion must return a Namespace FQN. Fix: keep receiver proof conversion in AnalysisQuery::type_to_namespace.",
+                        let owner_kind = owner_fqn.namespace_kind().expect_invariant(
+                            "a proven receiver namespace has no namespace kind",
+                            "type-to-namespace conversion must return a Namespace FQN",
+                            "keep receiver proof conversion in AnalysisQuery::type_to_namespace",
                         );
                         let root = self
                             .names
@@ -222,10 +225,10 @@ impl AnalysisEngine {
                     } else {
                         (owner, owner_kind)
                     };
-                    let owner_lookup = self.names.const_lookup(owner_lookup_id).expect(
-                        "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
-                         This is a bug because stored reference candidates must only contain interned lookup ids. \
-                         Fix: intern constant lookups before inserting candidates.",
+                    let owner_lookup = self.names.const_lookup(owner_lookup_id).expect_invariant(
+                        "method reference candidate points to missing owner lookup",
+                        "stored reference candidates must only contain interned lookup ids",
+                        "intern constant lookups before inserting candidates",
                     );
                     let owner = owner_lookup.path.to_vec();
                     let owner_fqn = FullyQualifiedName::namespace_with_kind(owner, owner_kind);

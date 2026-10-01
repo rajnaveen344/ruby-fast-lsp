@@ -1,3 +1,9 @@
+#[macro_use]
+#[allow(unused_macros)]
+#[path = "../../ruby-analysis/src/invariant.rs"]
+mod invariant;
+
+use crate::invariant::ExpectInvariant;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -81,8 +87,10 @@ impl Drop for EpochTicker {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
-            thread.join().expect(
-                "INVARIANT VIOLATED: extension epoch ticker thread panicked. This is a bug because the ticker only sleeps and increments a Wasmtime engine epoch. Fix: remove panicking work from the ticker loop.",
+            thread.join().expect_invariant(
+                "extension epoch ticker thread panicked",
+                "the ticker only sleeps and increments a Wasmtime engine epoch",
+                "remove panicking work from the ticker loop",
             );
         }
     }

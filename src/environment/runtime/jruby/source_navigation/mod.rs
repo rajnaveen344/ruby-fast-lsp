@@ -3,6 +3,7 @@ use super::{
     imports::ruby_type_for_jvm,
     java_catalog::JavaClassDeclaration,
 };
+use crate::invariant::ExpectInvariant;
 use parking_lot::{Mutex, MutexGuard};
 use ruby_analysis::core::MethodVisibility;
 use ruby_analysis::core::{
@@ -288,10 +289,10 @@ fn source_relative_path(class: &ClassFile) -> Result<PathBuf, JavaSourceResoluti
         .name
         .rsplit_once('/')
         .map_or(("", class.name.as_str()), |(package, name)| (package, name));
-    let outer_name = simple_name.split('$').next().expect(
-        "INVARIANT VIOLATED: accepted JVM internal class name has no outer component. \
-         This is a bug because classfile parsing rejects empty class names. \
-         Fix: preserve the validated class name from Java catalog construction.",
+    let outer_name = simple_name.split('$').next().expect_invariant(
+        "accepted JVM internal class name has no outer component",
+        "classfile parsing rejects empty class names",
+        "preserve the validated class name from Java catalog construction",
     );
     let source_file = class.source_file.as_deref().unwrap_or_else(|| {
         // Stored below after validation; this closure cannot return an owned fallback.
@@ -385,10 +386,10 @@ fn source_from_archive<R: Read + Seek>(
     let suffix = format!("/{expected}");
     let mut candidate_indexes = Vec::new();
     for index in 0..archive.len() {
-        let name = archive.name_for_index(index).expect(
-            "INVARIANT VIOLATED: ZIP central-directory index disappeared while resolving Java \
-             source. This is a bug because the archive is immutably borrowed and the index is \
-             bounded by ZipArchive::len. Fix: inspect the zip crate archive metadata lifecycle.",
+        let name = archive.name_for_index(index).expect_invariant(
+            "ZIP central-directory index disappeared while resolving Java source",
+            "the archive is immutably borrowed and the index is bounded by ZipArchive::len",
+            "inspect the zip crate archive metadata lifecycle",
         );
         if name == expected
             || (matches!(root.origin, SourceOrigin::Jdk | SourceOrigin::Explicit)
@@ -453,10 +454,10 @@ fn materialize_archive_source(
         .join("exact-source")
         .join(fingerprint)
         .join(relative_path);
-    let parent = path.parent().expect(
-        "INVARIANT VIOLATED: source cache path has no parent. \
-         This is a bug because cache root and source-relative path are both non-empty. \
-         Fix: preserve both components during source materialization.",
+    let parent = path.parent().expect_invariant(
+        "source cache path has no parent",
+        "cache root and source-relative path are both non-empty",
+        "preserve both components during source materialization",
     );
     fs::create_dir_all(parent).map_err(|error| JavaSourceResolutionError::Read {
         path: parent.to_path_buf(),
@@ -502,25 +503,26 @@ pub fn java_source_navigation_facts_with_declaration(
     file_id: SourceFileId,
     include_class_declaration: bool,
 ) -> FileFacts {
-    assert_eq!(
-        class.name, location.internal_name,
-        "INVARIANT VIOLATED: Java source location identity differs from classfile metadata. \
-         This is a bug because source locations must be verified against the exact winning class. \
-         Fix: call java_source_navigation_facts only with the ClassFile used for source matching."
+    invariant_eq!(
+        class.name,
+        location.internal_name,
+        what = "Java source location identity differs from classfile metadata",
+        why = "source locations must be verified against the exact winning class",
+        fix = "call java_source_navigation_facts only with the ClassFile used for source matching",
     );
-    let java_name = JavaClassName::parse(&class.name).expect(
-        "INVARIANT VIOLATED: Java catalog class has an invalid internal name. \
-         This is a bug because catalog construction accepts only parsed class metadata. \
-         Fix: validate class identity before source-navigation projection.",
+    let java_name = JavaClassName::parse(&class.name).expect_invariant(
+        "Java catalog class has an invalid internal name",
+        "catalog construction accepts only parsed class metadata",
+        "validate class identity before source-navigation projection",
     );
     let owner_parts = java_name
         .ruby_namespace_parts()
         .into_iter()
         .map(|part| {
-            RubyConstant::new(&part).expect(
-                "INVARIANT VIOLATED: validated Java proxy component is not a Ruby constant. \
-                 This is a bug because JavaClassName owns proxy validation. \
-                 Fix: keep Java source proxy conversion single-sourced.",
+            RubyConstant::new(&part).expect_invariant(
+                "validated Java proxy component is not a Ruby constant",
+                "JavaClassName owns proxy validation",
+                "keep Java source proxy conversion single-sourced",
             )
         })
         .collect::<Vec<_>>();
@@ -546,15 +548,15 @@ pub fn java_source_navigation_facts_with_declaration(
             .find(|method| {
                 method.name == source_method.name && method.descriptor == source_method.descriptor
             })
-            .expect(
-                "INVARIANT VIOLATED: verified Java source method has no exact classfile member. \
-                 This is a bug because the source locator emits only metadata-backed identities. \
-                 Fix: preserve method name+descriptor while projecting source locations.",
+            .expect_invariant(
+                "verified Java source method has no exact classfile member",
+                "the source locator emits only metadata-backed identities",
+                "preserve method name+descriptor while projecting source locations",
             );
-        let descriptor = parse_method_descriptor(&method.descriptor).expect(
-            "INVARIANT VIOLATED: selected classfile method descriptor is invalid. \
-             This is a bug because classfile parsing validates descriptors before catalog insertion. \
-             Fix: retain the validated descriptor from JVM metadata.",
+        let descriptor = parse_method_descriptor(&method.descriptor).expect_invariant(
+            "selected classfile method descriptor is invalid",
+            "classfile parsing validates descriptors before catalog insertion",
+            "retain the validated descriptor from JVM metadata",
         );
         let method_name = if method.name == "<init>" {
             "new"
@@ -636,18 +638,18 @@ pub fn java_source_navigation_facts_with_declaration(
             .find(|field| {
                 field.name == source_field.name && field.descriptor == source_field.descriptor
             })
-            .expect(
-                "INVARIANT VIOLATED: verified Java source field has no exact classfile member. \
-                 This is a bug because the source locator emits only metadata-backed identities. \
-                 Fix: preserve field name+descriptor while projecting source locations.",
+            .expect_invariant(
+                "verified Java source field has no exact classfile member",
+                "the source locator emits only metadata-backed identities",
+                "preserve field name+descriptor while projecting source locations",
             );
         let Ok(field_name) = RubyMethod::new(&field.name) else {
             continue;
         };
-        let field_type = parse_field_descriptor(&field.descriptor).expect(
-            "INVARIANT VIOLATED: selected classfile field descriptor is invalid. \
-             This is a bug because classfile parsing validates descriptors before catalog insertion. \
-             Fix: retain the validated descriptor from JVM metadata.",
+        let field_type = parse_field_descriptor(&field.descriptor).expect_invariant(
+            "selected classfile field descriptor is invalid",
+            "classfile parsing validates descriptors before catalog insertion",
+            "retain the validated descriptor from JVM metadata",
         );
         let field_range = text_range(file_id, source_field.declaration_range);
         let field_name_range = text_range(file_id, source_field.name_range);

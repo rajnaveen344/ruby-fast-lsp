@@ -4,6 +4,7 @@ use super::IndexerProject;
 use super::ProjectNavigationDemandSelection;
 use super::MAX_PROJECT_NAVIGATION_DEMAND_KEYS;
 use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use crate::utils;
 use anyhow::Result;
@@ -22,12 +23,11 @@ pub(super) fn select_navigation_demand_files(
     processed_files: &HashSet<PathBuf>,
     keys: &[String],
 ) -> ProjectNavigationDemandSelection {
-    assert!(
+    invariant!(
         keys.len() <= MAX_PROJECT_NAVIGATION_DEMAND_KEYS,
-        "INVARIANT VIOLATED: one project navigation demand drain contained {} keys, above the \
-         bounded maximum of {}. This is a bug because the server queue must apply backpressure \
-         before the coordinator selects project files. Fix: keep demand admission and \
-         coordinator drain limits identical.",
+        what = "project demand drain held {} keys, above the maximum of {}",
+        why = "the server queue applies backpressure before selection",
+        fix = "keep demand admission and drain limits identical",
         keys.len(),
         MAX_PROJECT_NAVIGATION_DEMAND_KEYS,
     );
@@ -35,12 +35,12 @@ pub(super) fn select_navigation_demand_files(
     let mut completed_keys = Vec::new();
     let mut deferred_keys = Vec::new();
     for key in keys {
-        assert!(
+        invariant!(
             !key.is_empty() && key.chars().all(char::is_alphanumeric),
-            "INVARIANT VIOLATED: project navigation demand key `{key}` is not a normalized \
-             alphanumeric identifier. This is a bug because file selection must never \
-             reinterpret arbitrary request text or paths. Fix: normalize identifiers at the \
-             definition-query boundary before enqueueing a bounded demand."
+            what = "project demand key `{key}` is not a normalized identifier",
+            why = "file selection must not reinterpret request text or paths",
+            fix = "normalize identifiers at the definition-query boundary",
+            key = key,
         );
         let candidates = files
             .iter()
@@ -124,11 +124,11 @@ impl IndexerProject {
         server: &RubyLanguageServer,
     ) -> Result<()> {
         let selection = self.collect_initial_project_navigation_demand_facts(&[], server)?;
-        assert!(
+        invariant!(
             selection == ProjectNavigationDemandSelection::default(),
-            "INVARIANT VIOLATED: an empty project-demand frontier produced a non-empty selection. \
-             This is a bug because demand selection must be driven only by normalized queued \
-             keys. Fix: inspect the initial project frontier partitioning."
+            what = "an empty project-demand frontier produced a non-empty selection",
+            why = "demand selection must be driven only by normalized queued keys",
+            fix = "inspect the initial project frontier partitioning",
         );
         self.finish_project_navigation_facts(server)
     }
@@ -138,14 +138,13 @@ impl IndexerProject {
         demand_keys: &[String],
         server: &RubyLanguageServer,
     ) -> Result<ProjectNavigationDemandSelection> {
-        assert!(
+        invariant!(
             self.pending_project_navigation_files.is_none()
                 && self.pending_project_files.is_none()
                 && self.project_navigation_started_at.is_none(),
-            "INVARIANT VIOLATED: a project navigation frontier started while exhaustive source \
-             files from the previous frontier remained pending. This is a bug because two \
-             generations could replace facts in the same isolated engine concurrently. Fix: \
-             complete or discard the prior IndexerProject before starting a new frontier."
+            what = "navigation frontier started while the previous frontier's files were pending",
+            why = "two generations could replace facts in one engine concurrently",
+            fix = "complete or discard the prior IndexerProject first",
         );
         let start_time = Instant::now();
         self.project_navigation_started_at = Some(start_time);
@@ -194,11 +193,16 @@ impl IndexerProject {
 
         self.collect_signature_facts(&signature_files, server);
         self.initialize_project_collection_semantic_context(server, &all_project_files)?;
-        let collection_known_namespaces = self.exhaustive_known_namespaces.clone().expect(
-            "INVARIANT VIOLATED: project collection baseline has no namespace set after initialization. This is a bug because every project file must use one generation-owned semantic universe. Fix: initialize the baseline before collecting the first project batch.",
-        );
-        let collection_analysis_engine = self.exhaustive_analysis_engine.clone().expect(
-            "INVARIANT VIOLATED: project collection baseline has no analysis engine after initialization. This is a bug because every project file must use one generation-owned semantic universe. Fix: initialize the baseline before collecting the first project batch.",
+        let collection_known_namespaces =
+            self.exhaustive_known_namespaces.clone().expect_invariant(
+                "project collection baseline has no namespace set after initialization",
+                "every project file must use one generation-owned semantic universe",
+                "initialize the baseline before collecting the first project batch",
+            );
+        let collection_analysis_engine = self.exhaustive_analysis_engine.clone().expect_invariant(
+            "project collection baseline has no analysis engine after initialization",
+            "every project file must use one generation-owned semantic universe",
+            "initialize the baseline before collecting the first project batch",
         );
         self.collect_facts_and_track_dependencies(
             &selection.files,
@@ -228,28 +232,33 @@ impl IndexerProject {
         &mut self,
         server: &RubyLanguageServer,
     ) -> Result<()> {
-        let start_time = self.project_navigation_started_at.take().expect(
-            "INVARIANT VIOLATED: project navigation completion started without a matching \
-             initial frontier. This is a coordinator bug because queued demand collection and \
-             the remaining active frontier are one generation-owned lifecycle. Fix: start the \
-             initial project demand frontier before completing active project candidates.",
+        let start_time = self.project_navigation_started_at.take().expect_invariant(
+            "navigation completion started without a matching initial frontier",
+            "demand collection and the active frontier are one lifecycle",
+            "start the initial demand frontier first",
         );
-        let ruby_files = self.pending_project_navigation_files.take().expect(
-            "INVARIANT VIOLATED: project navigation completion has no retained active source \
-             files. This is a coordinator bug because initial demand selection must retain the \
-             deterministic active-file complement. Fix: preserve the same IndexerProject \
-             between initial demand collection and frontier completion.",
-        );
+        let ruby_files = self
+            .pending_project_navigation_files
+            .take()
+            .expect_invariant(
+                "navigation completion has no retained active source files",
+                "initial selection retains the active-file complement",
+                "keep the same IndexerProject between demand collection and completion",
+            );
         self.collect_facts_and_track_dependencies(
             &ruby_files,
             ruby_files.len(),
             server,
             true,
-            Some(self.exhaustive_known_namespaces.clone().expect(
-                "INVARIANT VIOLATED: active project frontier lost the generation-owned namespace baseline. This is a bug because frontier ordering must not change collected facts. Fix: retain the baseline through project completion.",
+            Some(self.exhaustive_known_namespaces.clone().expect_invariant(
+                "active project frontier lost the generation-owned namespace baseline",
+                "frontier ordering must not change collected facts",
+                "retain the baseline through project completion",
             )),
-            Some(self.exhaustive_analysis_engine.clone().expect(
-                "INVARIANT VIOLATED: active project frontier lost the generation-owned analysis baseline. This is a bug because frontier ordering must not change collected facts. Fix: retain the baseline through project completion.",
+            Some(self.exhaustive_analysis_engine.clone().expect_invariant(
+                "active project frontier lost the generation-owned analysis baseline",
+                "frontier ordering must not change collected facts",
+                "retain the baseline through project completion",
             )),
         )?;
         self.record_processed_project_files(&ruby_files, server);
@@ -268,21 +277,18 @@ impl IndexerProject {
         &mut self,
         keys: &[String],
     ) -> ProjectNavigationDemandSelection {
-        assert!(
+        invariant!(
             self.pending_project_navigation_files.is_none()
                 && self.project_navigation_started_at.is_none()
                 && self.exhaustive_known_namespaces.is_some(),
-            "INVARIANT VIOLATED: post-navigation-frontier demand selection ran before the active \
-             project frontier completed. This is a coordinator bug because promoted tail files \
-             require the immutable pre-collection namespace baseline. Fix: finish the active \
-             frontier and retain that baseline before draining newly queued project demands."
+            what = "post-frontier demand selection ran before the active frontier completed",
+            why = "promoted tail files need the pre-collection namespace baseline",
+            fix = "finish the frontier and keep the baseline before draining demands",
         );
-        let pending_files = self.pending_project_files.as_mut().expect(
-            "INVARIANT VIOLATED: project navigation demand selection started without an \
-             exhaustive project tail. This is a coordinator bug because request-driven \
-             promotion is valid only after the deterministic project frontier discovers the \
-             exact file set. Fix: retain and pass the same IndexerProject through the complete \
-             project-source lifecycle.",
+        let pending_files = self.pending_project_files.as_mut().expect_invariant(
+            "project demand selection started without an exhaustive project tail",
+            "promotion is valid only after the frontier finds the file set",
+            "pass the same IndexerProject through the project-source lifecycle",
         );
         select_navigation_demand_files(pending_files, &self.processed_project_files, keys)
     }

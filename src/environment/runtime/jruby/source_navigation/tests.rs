@@ -138,12 +138,12 @@ fn archive_resolution_streams_only_the_selected_entry() {
     .expect("selected source entry must resolve");
 
     assert_eq!(resolved.0, source);
-    assert!(
-            bytes_read.load(Ordering::Relaxed) < 1024 * 1024,
-            "INVARIANT VIOLATED: resolving one Java source entry read the complete source archive. \
-             This is a performance bug because classpath discovery already verified the archive identity. \
-             Fix: keep ZipArchive backed by a seekable file and read only the selected entry."
-        );
+    invariant!(
+        bytes_read.load(Ordering::Relaxed) < 1024 * 1024,
+        what = "resolving one Java source entry read the complete source archive",
+        why = "classpath discovery already verified the archive identity",
+        fix = "keep ZipArchive backed by a seekable file and read only the selected entry",
+    );
 }
 
 #[test]
@@ -244,11 +244,11 @@ fn reuses_one_parsed_archive_for_repeated_source_resolution() {
         .get()
         .expect("second source resolution must retain the archive");
 
-    assert!(
+    invariant!(
         std::ptr::eq(first_archive, second_archive),
-        "INVARIANT VIOLATED: repeated Java source resolution replaced the parsed archive. \
-             This is a performance bug because every replacement reparses the immutable central \
-             directory. Fix: retain one verified ZipArchive per prepared source root."
+        what = "repeated Java source resolution replaced the parsed archive",
+        why = "every replacement reparses the immutable central directory",
+        fix = "retain one verified ZipArchive per prepared source root",
     );
 }
 

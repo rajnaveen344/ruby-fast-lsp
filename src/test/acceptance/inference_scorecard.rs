@@ -7,6 +7,7 @@
 //! cargo test inference_scorecard::report_m0_scorecard -- --nocapture
 //! ```
 
+use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::AssertUnwindSafe;
 
@@ -143,30 +144,34 @@ const fn one() -> usize {
 }
 
 fn parse_scorecard() -> Scorecard {
-    toml::from_str(SCORECARD_SOURCE).expect(
-        "INVARIANT VIOLATED: support/type_inference/scorecard.toml is invalid. This is a bug \
-         because the conformance baseline must remain machine-readable. Fix: update the \
-         manifest to match the versioned scorecard schema.",
+    toml::from_str(SCORECARD_SOURCE).expect_invariant(
+        "support/type_inference/scorecard.toml is invalid",
+        "the conformance baseline must remain machine-readable",
+        "update the manifest to match the versioned scorecard schema",
     )
 }
 
 fn validate_scorecard(scorecard: &Scorecard) {
-    assert_eq!(
-        scorecard.schema_version, 1,
-        "INVARIANT VIOLATED: the type inference scorecard schema is unsupported. This is a bug \
-         because the reporter cannot interpret scoring changes implicitly. Fix: add explicit \
-         migration support before changing schema_version."
+    invariant_eq!(
+        scorecard.schema_version,
+        1,
+        what = "the type inference scorecard schema is unsupported",
+        why = "the reporter cannot interpret scoring changes implicitly",
+        fix = "add explicit migration support before changing schema_version",
     );
-    assert_eq!(
-        scorecard.target_score, 90,
-        "INVARIANT VIOLATED: the 9/10 score target changed. This is a bug because the checked-in \
-         scorecard contract fixes acceptance at 90/100. Fix: retain target_score = 90 or revise \
-         the reviewed scorecard and reporter together."
+    invariant_eq!(
+        scorecard.target_score,
+        90,
+        what = "the 9/10 score target changed",
+        why = "the checked-in scorecard contract fixes acceptance at 90/100",
+        fix = "retain target_score = 90 or revise the reviewed scorecard and reporter together",
     );
-    assert_eq!(
-        scorecard.critical_category_minimum, 85,
-        "INVARIANT VIOLATED: the critical category floor changed. This is a bug because a high \
-         aggregate must not hide a weak semantic area. Fix: retain the reviewed 85 percent floor."
+    invariant_eq!(
+        scorecard.critical_category_minimum,
+        85,
+        what = "the critical category floor changed",
+        why = "a high aggregate must not hide a weak semantic area",
+        fix = "retain the reviewed 85 percent floor",
     );
 
     let mut category_ids = BTreeSet::new();
@@ -175,134 +180,148 @@ fn validate_scorecard(scorecard: &Scorecard) {
         .categories
         .iter()
         .map(|category| {
-            assert!(
+            invariant!(
                 category_ids.insert(category.id.as_str()),
-                "INVARIANT VIOLATED: duplicate scorecard category `{}`. This is a bug because \
-                 case ownership and category totals would be ambiguous. Fix: use one unique id \
-                 per category.",
-                category.id
+                what = "duplicate scorecard category `{}`",
+                why = "case ownership and category totals would be ambiguous",
+                fix = "use one unique id per category",
+                category.id,
             );
-            assert!(
+            invariant!(
                 category.critical,
-                "INVARIANT VIOLATED: scorecard category `{}` is not critical. This is a bug \
-                 because the reviewed scorecard requires every category to meet the floor. Fix: \
-                 mark every current category critical or revise the scoring contract.",
-                category.id
+                what = "scorecard category `{}` is not critical",
+                why = "the reviewed scorecard requires every category to meet the floor",
+                fix = "mark every current category critical or revise the scoring contract",
+                category.id,
             );
             category_points.insert(category.id.as_str(), category.points);
             category.points
         })
         .sum::<u32>();
-    assert_eq!(
-        total_category_points, 100,
-        "INVARIANT VIOLATED: scorecard category weights total {total_category_points}, not 100. \
-         This is a bug because the 9/10 threshold would no longer be meaningful. Fix: restore \
-         category weights to exactly 100 points."
+    invariant_eq!(
+        total_category_points,
+        100,
+        what = "scorecard category weights total {total_category_points}, not 100",
+        why = "the 9/10 threshold would no longer be meaningful",
+        fix = "restore category weights to exactly 100 points",
+        total_category_points = total_category_points,
     );
 
     let mut case_ids = BTreeSet::new();
     let mut assigned_points: BTreeMap<&str, u32> = BTreeMap::new();
     let mut has_unscored_safety_case = false;
     for case in &scorecard.cases {
-        assert!(
+        invariant!(
             case_ids.insert(case.id.as_str()),
-            "INVARIANT VIOLATED: duplicate scorecard case `{}`. This is a bug because baseline \
-             outcomes would be ambiguous. Fix: give each semantic assertion a stable unique id.",
-            case.id
-        );
-        assert!(
-            category_points.contains_key(case.category.as_str()),
-            "INVARIANT VIOLATED: scorecard case `{}` references unknown category `{}`. This is a \
-             bug because its points cannot be assigned. Fix: use a declared category id.",
+            what = "duplicate scorecard case `{}`",
+            why = "baseline outcomes would be ambiguous",
+            fix = "give each semantic assertion a stable unique id",
             case.id,
-            case.category
         );
-        assert!(
+        invariant!(
+            category_points.contains_key(case.category.as_str()),
+            what = "scorecard case `{}` references unknown category `{}`",
+            why = "its points cannot be assigned",
+            fix = "use a declared category id",
+            case.id,
+            case.category,
+        );
+        invariant!(
             !case.files.is_empty(),
-            "INVARIANT VIOLATED: scorecard case `{}` has no project files. This is a bug because \
-             no inference assertion can execute. Fix: add at least one fixture file.",
-            case.id
+            what = "scorecard case `{}` has no project files",
+            why = "no inference assertion can execute",
+            fix = "add at least one fixture file",
+            case.id,
         );
-        assert!(
+        invariant!(
             case.repeat > 0,
-            "INVARIANT VIOLATED: scorecard case `{}` has repeat = 0. This is a bug because the \
-             case would receive a result without executing. Fix: use repeat >= 1.",
-            case.id
+            what = "scorecard case `{}` has repeat = 0",
+            why = "the case would receive a result without executing",
+            fix = "use repeat >= 1",
+            case.id,
         );
-        assert!(
+        invariant!(
             case.files
                 .iter()
                 .chain(case.edits.iter())
                 .any(|file| fixture_has_assertion(&file.fixture)),
-            "INVARIANT VIOLATED: scorecard case `{}` has no fixture assertion. This is a bug \
-             because syntax-only input could receive credit without checking a type or diagnostic. \
-             Fix: add a supported check() tag to a query site.",
-            case.id
+            what = "scorecard case `{}` has no fixture assertion",
+            why = "syntax-only input could receive credit without checking a type or diagnostic",
+            fix = "add a supported check() tag to a query site",
+            case.id,
         );
         if !case.edits.is_empty() {
-            assert_eq!(
+            invariant_eq!(
                 case.files.len(),
                 1,
-                "INVARIANT VIOLATED: lifecycle scorecard case `{}` has {} initial files. This is a bug because the current lifecycle runner owns one explicit buffer. Fix: use one initial file or extend the runner with reviewed multi-file edit semantics.",
+                what = "lifecycle scorecard case `{}` has {} initial files",
+                why = "the current lifecycle runner owns one explicit buffer",
+                fix = "use one initial file or extend the runner with reviewed multi-file edit semantics",
                 case.id,
-                case.files.len()
+                case.files.len(),
             );
-            assert!(
-                case.edits.iter().all(|edit| edit.path == case.files[0].path),
-                "INVARIANT VIOLATED: lifecycle scorecard case `{}` edits a different path. This is a bug because the current runner must route every generation through one FakeEditor buffer. Fix: keep edit paths equal to the initial path or add multi-file lifecycle support.",
-                case.id
+            invariant!(
+                case.edits
+                    .iter()
+                    .all(|edit| edit.path == case.files[0].path),
+                what = "lifecycle scorecard case `{}` edits a different path",
+                why =
+                    "the current runner must route every generation through one FakeEditor buffer",
+                fix =
+                    "keep edit paths equal to the initial path or add multi-file lifecycle support",
+                case.id,
             );
         }
 
         match case.expectation {
             Expectation::ConcreteType => {
-                assert!(
+                invariant!(
                     !case.allow_unknown && case.points > 0,
-                    "INVARIANT VIOLATED: concrete scorecard case `{}` permits Unknown or has no \
-                     points. This is a bug because supported-site Unknown must not receive accuracy \
-                     credit. Fix: set allow_unknown = false and assign reviewed points.",
-                    case.id
+                    what = "concrete scorecard case `{}` permits Unknown or has no points",
+                    why = "supported-site Unknown must not receive accuracy credit",
+                    fix = "set allow_unknown = false and assign reviewed points",
+                    case.id,
                 );
             }
             Expectation::Coverage => {
-                assert!(
+                invariant!(
                     !case.allow_unknown && case.points == 0,
-                    "INVARIANT VIOLATED: coverage case `{}` permits Unknown or carries score. \
-                     This is a bug because supplemental breadth must validate an exact result \
-                     without silently changing the reviewed 100-point weighting. Fix: set \
-                     allow_unknown = false and points = 0.",
-                    case.id
+                    what = "coverage case `{}` permits Unknown or carries score",
+                    why = "breadth cases must not change the reviewed 100-point weighting",
+                    fix = "set allow_unknown = false and points = 0",
+                    case.id,
                 );
             }
             Expectation::UnknownSafety => {
-                assert!(
+                invariant!(
                     case.allow_unknown,
-                    "INVARIANT VIOLATED: Unknown safety case `{}` rejects Unknown. This is a bug \
-                     because its purpose is to prove fail-closed behavior. Fix: set \
-                     allow_unknown = true.",
-                    case.id
+                    what = "Unknown safety case `{}` rejects Unknown",
+                    why = "its purpose is to prove fail-closed behavior",
+                    fix = "set allow_unknown = true",
+                    case.id,
                 );
                 if case.points == 0 {
                     has_unscored_safety_case = true;
                 }
             }
             Expectation::ProofSafety => {
-                assert_eq!(
-                    case.points, 0,
-                    "INVARIANT VIOLATED: proof-safety case `{}` has accuracy points. This is a \
-                     bug because conservative refusal and filtering must not inflate inference \
-                     accuracy. Fix: set points = 0.",
-                    case.id
+                invariant_eq!(
+                    case.points,
+                    0,
+                    what = "proof-safety case `{}` has accuracy points",
+                    why = "conservative refusal and filtering must not inflate inference accuracy",
+                    fix = "set points = 0",
+                    case.id,
                 );
                 has_unscored_safety_case = true;
             }
             Expectation::Diagnostic => {
-                assert!(
+                invariant!(
                     !case.allow_unknown && case.points == 0,
-                    "INVARIANT VIOLATED: diagnostic case `{}` permits Unknown or carries type \
-                     accuracy points. This is a bug because M0 diagnostic evidence is a separate \
-                     precision signal. Fix: set allow_unknown = false and points = 0.",
-                    case.id
+                    what = "diagnostic case `{}` permits Unknown or carries type accuracy points",
+                    why = "M0 diagnostic evidence is a separate precision signal",
+                    fix = "set allow_unknown = false and points = 0",
+                    case.id,
                 );
             }
         }
@@ -315,27 +334,31 @@ fn validate_scorecard(scorecard: &Scorecard) {
             .get(category.id.as_str())
             .copied()
             .unwrap_or(0);
-        assert_eq!(
-            assigned, category.points,
-            "INVARIANT VIOLATED: scorecard category `{}` assigns {assigned} of {} points to \
-             cases. This is a bug because unassigned or excess points distort the measured score. \
-             Fix: make scored cases sum exactly to the category weight.",
-            category.id, category.points
+        invariant_eq!(
+            assigned,
+            category.points,
+            what = "scorecard category `{}` assigns {assigned} of {} points to cases",
+            why = "unassigned or excess points distort the measured score",
+            fix = "make scored cases sum exactly to the category weight",
+            category.id,
+            category.points,
+            assigned = assigned,
         );
     }
-    assert!(
+    invariant!(
         has_unscored_safety_case,
-        "INVARIANT VIOLATED: the scorecard has no zero-point Unknown safety case. This is a bug \
-         because refusing an unproven type must be tested without inflating inference accuracy. \
-         Fix: retain at least one explicit fail-closed case with points = 0."
+        what = "the scorecard has no zero-point Unknown safety case",
+        why = "refusing an unproven type must be tested without inflating inference accuracy",
+        fix = "retain at least one explicit fail-closed case with points = 0",
     );
-    assert!(
+    invariant!(
         !scorecard.score_eligible || scorecard.cases.len() >= scorecard.minimum_cases_for_claim,
-        "INVARIANT VIOLATED: the scorecard is claim-eligible with only {} cases, below its \
-         reviewed minimum of {}. This is a bug because a seed corpus cannot substantiate 9/10. \
-         Fix: add representative reviewed cases or keep score_eligible = false.",
+        what =
+            "the scorecard is claim-eligible with only {} cases, below its reviewed minimum of {}",
+        why = "a seed corpus cannot substantiate 9/10",
+        fix = "add representative reviewed cases or keep score_eligible = false",
         scorecard.cases.len(),
-        scorecard.minimum_cases_for_claim
+        scorecard.minimum_cases_for_claim,
     );
 }
 
@@ -487,24 +510,26 @@ async fn report_m0_scorecard() {
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&report).expect(
-            "INVARIANT VIOLATED: the scorecard report could not be serialized. This is a bug \
-             because M0 results must be machine-readable. Fix: keep report fields serializable."
+        serde_json::to_string_pretty(&report).expect_invariant(
+            "the scorecard report could not be serialized",
+            "M0 results must be machine-readable",
+            "keep report fields serializable",
         )
     );
-    assert!(
+    invariant!(
         baseline_matches,
-        "INVARIANT VIOLATED: current scorecard outcomes differ from the recorded M0 baseline. \
-         This may be an improvement or regression, but it must be reviewed explicitly. Fix: \
-         inspect the JSON report and update only the affected baseline entries with a semantic \
-         rationale."
+        what = "scorecard outcomes differ from the recorded M0 baseline",
+        why = "improvements and regressions must be reviewed explicitly",
+        fix = "inspect the JSON report and update only affected baseline entries with a rationale",
     );
 }
 
 async fn run_case(case: &Case) {
     if !case.edits.is_empty() {
-        let initial = case.files.first().expect(
-            "INVARIANT VIOLATED: validated lifecycle scorecard case lost its initial file. This is a bug because validation and execution use the same immutable manifest. Fix: retain the validated case files through execution.",
+        let initial = case.files.first().expect_invariant(
+            "validated lifecycle scorecard case lost its initial file",
+            "validation and execution use the same immutable manifest",
+            "retain the validated case files through execution",
         );
         let mut editor = FakeEditor::new().await;
         editor

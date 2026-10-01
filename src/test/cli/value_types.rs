@@ -1,6 +1,7 @@
 //! Variable, expression, structural shape, constant, and nonlocal types shared by `check` and LSP projections.
 
 use super::support::hover_text;
+use crate::invariant::ExpectInvariant;
 use crate::lsp::check::{CheckSession, CheckTypeOutcome, CheckTypeSubjectKind};
 use crate::test::harness::{get_hint_label, get_hint_tooltip, FakeEditor};
 use ruby_analysis::core::UnknownReason;
@@ -350,11 +351,15 @@ VALUE = 1.0
             )
             .then(|| {
                 (
-                    hint.position.line.checked_add(1).expect(
-                        "INVARIANT VIOLATED: LSP line exhausted u32 during parity normalization. This is a bug because source positions must fit u32. Fix: reject sources whose normalized line cannot be one-based.",
+                    hint.position.line.checked_add(1).expect_invariant(
+                        "LSP line exhausted u32 during parity normalization",
+                        "source positions must fit u32",
+                        "reject sources whose normalized line cannot be one-based",
                     ),
-                    hint.position.character.checked_add(1).expect(
-                        "INVARIANT VIOLATED: LSP column exhausted u32 during parity normalization. This is a bug because source positions must fit u32. Fix: reject sources whose normalized column cannot be one-based.",
+                    hint.position.character.checked_add(1).expect_invariant(
+                        "LSP column exhausted u32 during parity normalization",
+                        "source positions must fit u32",
+                        "reject sources whose normalized column cannot be one-based",
                     ),
                     label,
                 )

@@ -1,5 +1,6 @@
 use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind, NamespaceKind, RubyConstant};
 use crate::indexer::LocalScopeKind as LVScopeKind;
+use crate::invariant::ExpectInvariant;
 use ruby_prism::{BlockNode, CallNode, NumberedParametersNode, ParametersNode};
 
 use crate::indexer::fact_collector::FactCollector;
@@ -231,10 +232,10 @@ impl FactCollector {
             return None;
         }
 
-        let class_methods = RubyConstant::new("ClassMethods").expect(
-            "INVARIANT VIOLATED: static Concern ClassMethods constant is invalid. \
-             This is a bug because `ClassMethods` is a valid Ruby constant. \
-             Fix: inspect RubyConstant validation.",
+        let class_methods = RubyConstant::new("ClassMethods").expect_invariant(
+            "static Concern ClassMethods constant is invalid",
+            "`ClassMethods` is a valid Ruby constant",
+            "inspect RubyConstant validation",
         );
         let mut target_namespace = current_namespace.clone();
         target_namespace.push(class_methods);

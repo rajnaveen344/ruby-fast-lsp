@@ -1,5 +1,6 @@
 //! Compiled Wasm product identity and its persistent payload codec.
 
+use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 
@@ -15,8 +16,10 @@ pub struct CompiledWasmProductKey {
 
 impl CompiledWasmProductKey {
     pub fn new(wasm_bytes: &[u8], compiler_identity: u64) -> Self {
-        let source_length = u64::try_from(wasm_bytes.len()).expect(
-            "INVARIANT VIOLATED: Wasm extension length does not fit u64. This is a bug because a source artifact cannot exceed the process address space. Fix: reject corrupt extension metadata before constructing a persistent product key.",
+        let source_length = u64::try_from(wasm_bytes.len()).expect_invariant(
+            "Wasm extension length does not fit u64",
+            "a source artifact cannot exceed the process address space",
+            "reject corrupt extension metadata before constructing a persistent product key",
         );
         let source_sha256: [u8; 32] = Sha256::digest(wasm_bytes).into();
         let mut digest = Sha256::new();

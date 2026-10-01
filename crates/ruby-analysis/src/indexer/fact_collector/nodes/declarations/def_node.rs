@@ -4,6 +4,7 @@ use crate::core::{
     RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
 };
 use crate::indexer::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
+use crate::invariant::ExpectInvariant;
 use log::warn;
 use ruby_prism::*;
 
@@ -171,10 +172,11 @@ impl FactCollector {
                     reason: reason.clone(),
                 },
                 (None, None) => MethodAvailability::Available,
-                (Some(_), Some(_)) => panic!(
-                    "INVARIANT VIOLATED: method `{method}` is marked both @unavailable and @absent. \
-                     This is a bug because a runtime API cannot simultaneously exist-but-fail and not exist. \
-                     Fix: retain exactly one availability annotation in the owning stub."
+                (Some(_), Some(_)) => unreachable_invariant!(
+                    what = "method `{method}` is marked both @unavailable and @absent",
+                    why = "a runtime API cannot simultaneously exist-but-fail and not exist",
+                    fix = "retain exactly one availability annotation in the owning stub",
+                    method = method,
                 ),
             },
             None => MethodAvailability::Available,
@@ -498,9 +500,15 @@ impl FactCollector {
         if reads.is_empty() {
             return;
         }
-        let scope_id = self.document.variable_scopes().current_scope().expect(
-            "INVARIANT VIOLATED: TypeTracker local-read results have no active method scope. This is a bug because process_def_node_entry enters the scope before collecting its return equation. Fix: install flow evidence before exiting the definition.",
-        );
+        let scope_id = self
+            .document
+            .variable_scopes()
+            .current_scope()
+            .expect_invariant(
+                "TypeTracker local-read results have no active method scope",
+                "process_def_node_entry enters the scope before collecting its return equation",
+                "install flow evidence before exiting the definition",
+            );
         let mut installed_reads = Vec::with_capacity(reads.len());
         let mut replace_reasons = HashMap::new();
         let mut remove_reasons = HashSet::new();
@@ -528,10 +536,13 @@ impl FactCollector {
                     installed_reads.push((read.name, range, ruby_type));
                 }
                 (ruby_type, Some(reason)) => {
-                    assert!(
+                    invariant!(
                         RubyType::contains_unknown(&ruby_type),
-                        "INVARIANT VIOLATED: fully proven local-read type `{ruby_type}` carried Unknown reason `{}`. This is a bug because only a partially known outer container may coexist with a nested proof failure. Fix: synchronize FlowEnvironment type and unknown_reasons atomically.",
-                        reason.code()
+                        what = "fully proven local-read type `{ruby_type}` carried Unknown reason `{}`",
+                        why = "only a partially known outer container may coexist with a nested proof failure",
+                        fix = "synchronize FlowEnvironment type and unknown_reasons atomically",
+                        reason.code(),
+                        ruby_type = ruby_type,
                     );
                     replace_reasons.insert(range, reason);
                     installed_reads.push((read.name, range, ruby_type));

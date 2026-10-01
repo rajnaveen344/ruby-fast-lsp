@@ -1,6 +1,7 @@
 //! Source and name registries, the fact arena, conversion between domain facts
 //! and their interned stored representations, and storage compaction.
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
@@ -62,22 +63,23 @@ impl NameRegistry {
     pub(in crate::engine) fn intern_fqn(&mut self, fqn: FullyQualifiedName) -> FqnId {
         let state = &mut self.state;
         let (index, _) = state.fqns.insert_full(fqn);
-        FqnId(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: FQN interner exceeded u32 ids. \
-                 This is a bug because FqnId stores u32. \
-                 Fix: widen FqnId before interning more than u32::MAX names.",
+        FqnId(u32::try_from(index).expect_invariant(
+            "FQN interner exceeded u32 ids",
+            "FqnId stores u32",
+            "widen FqnId before interning more than u32::MAX names",
         ))
     }
 
     pub(in crate::engine) fn fqn_id(&self, fqn: &FullyQualifiedName) -> Option<FqnId> {
         #[cfg(test)]
         self.fqn_lookup_count.fetch_add(1, Ordering::Relaxed);
-        self.state
-            .fqns
-            .get_index_of(fqn)
-            .map(|index| FqnId(u32::try_from(index).expect(
-                "INVARIANT VIOLATED: FQN interner returned an index above u32. This is a bug because every inserted index is validated before becoming an FqnId. Fix: widen FqnId and its insertion boundary together.",
-            )))
+        self.state.fqns.get_index_of(fqn).map(|index| {
+            FqnId(u32::try_from(index).expect_invariant(
+                "FQN interner returned an index above u32",
+                "every inserted index is validated before becoming an FqnId",
+                "widen FqnId and its insertion boundary together",
+            ))
+        })
     }
 
     pub(in crate::engine) fn fqn(&self, id: FqnId) -> Option<&FullyQualifiedName> {
@@ -97,10 +99,10 @@ impl NameRegistry {
     pub(in crate::engine) fn intern_const_lookup(&mut self, lookup: ConstLookup) -> ConstLookupId {
         let state = &mut self.state;
         let (index, _) = state.const_lookups.insert_full(lookup);
-        ConstLookupId(u32::try_from(index).expect(
-            "INVARIANT VIOLATED: constant lookup interner exceeded u32 ids. \
-                 This is a bug because ConstLookupId stores u32. \
-                 Fix: widen ConstLookupId before interning more than u32::MAX lookups.",
+        ConstLookupId(u32::try_from(index).expect_invariant(
+            "constant lookup interner exceeded u32 ids",
+            "ConstLookupId stores u32",
+            "widen ConstLookupId before interning more than u32::MAX lookups",
         ))
     }
 
@@ -225,10 +227,10 @@ impl AnalysisEngine {
     pub(in crate::engine) fn expand_interned_fqn(&self, id: FqnId) -> FullyQualifiedName {
         self.names
             .fqn(id)
-            .expect(
-                "INVARIANT VIOLATED: graph edge points to missing FQN id. \
-                 This is a bug because graph edges must only store interned FQN ids. \
-                 Fix: intern graph edge FQNs before inserting facts.",
+            .expect_invariant(
+                "graph edge points to missing FQN id",
+                "graph edges must only store interned FQN ids",
+                "intern graph edge FQNs before inserting facts",
             )
             .clone()
     }
@@ -245,11 +247,12 @@ impl AnalysisEngine {
     }
 
     pub(super) fn assert_known_file_id(&self, file_id: SourceFileId, message: &str) {
-        assert!(
+        invariant!(
             self.sources.files.contains_key(&file_id),
-            "INVARIANT VIOLATED: {message}. \
-             This is a bug because analysis facts and ranges must only reference registered files. \
-             Fix: call AnalysisEngine::register_file before adding file facts."
+            what = "{message}",
+            why = "analysis facts and ranges must only reference registered files",
+            fix = "call AnalysisEngine::register_file before adding file facts",
+            message = message,
         );
     }
 
@@ -409,10 +412,10 @@ impl AnalysisEngine {
         let fqn = self
             .names
             .fqn(fact.fqn)
-            .expect(
-                "INVARIANT VIOLATED: symbol fact points to missing FQN id. \
-                 This is a bug because symbol facts must only store interned FQN ids. \
-                 Fix: intern symbol FQNs before inserting facts.",
+            .expect_invariant(
+                "symbol fact points to missing FQN id",
+                "symbol facts must only store interned FQN ids",
+                "intern symbol FQNs before inserting facts",
             )
             .clone();
         SymbolFact::new(fqn, fact.kind, fact.range).with_name_range(fact.name_range)
@@ -422,19 +425,19 @@ impl AnalysisEngine {
         let fqn = self
             .names
             .fqn(fact.fqn)
-            .expect(
-                "INVARIANT VIOLATED: method fact points to missing FQN id. \
-                 This is a bug because method facts must only store interned FQN ids. \
-                 Fix: intern method FQNs before inserting facts.",
+            .expect_invariant(
+                "method fact points to missing FQN id",
+                "method facts must only store interned FQN ids",
+                "intern method FQNs before inserting facts",
             )
             .clone();
         let owner = self
             .names
             .fqn(fact.owner)
-            .expect(
-                "INVARIANT VIOLATED: method fact points to missing owner FQN id. \
-                 This is a bug because method facts must only store interned owner FQN ids. \
-                 Fix: intern method owners before inserting facts.",
+            .expect_invariant(
+                "method fact points to missing owner FQN id",
+                "method facts must only store interned owner FQN ids",
+                "intern method owners before inserting facts",
             )
             .clone();
         MethodFact {
@@ -458,10 +461,10 @@ impl AnalysisEngine {
         let fqn = self
             .names
             .fqn(fact.fqn)
-            .expect(
-                "INVARIANT VIOLATED: graph node points to missing FQN id. \
-                 This is a bug because graph nodes must only store interned FQN ids. \
-                 Fix: intern graph node FQNs before inserting facts.",
+            .expect_invariant(
+                "graph node points to missing FQN id",
+                "graph nodes must only store interned FQN ids",
+                "intern graph node FQNs before inserting facts",
             )
             .clone();
         GraphNodeFact::new(fqn, fact.kind, fact.range)
@@ -484,24 +487,24 @@ impl AnalysisEngine {
         let source = self
             .names
             .fqn(fact.source)
-            .expect(
-                "INVARIANT VIOLATED: unresolved graph edge points to missing source FQN id. \
-                 This is a bug because unresolved graph edges must only store interned source FQN ids. \
-                 Fix: intern unresolved graph edge sources before inserting facts.",
+            .expect_invariant(
+                "unresolved graph edge points to missing source FQN id",
+                "unresolved graph edges must only store interned source FQN ids",
+                "intern unresolved graph edge sources before inserting facts",
             )
             .clone();
-        let lookup = self.names.const_lookup(fact.target).expect(
-            "INVARIANT VIOLATED: unresolved graph edge points to missing constant lookup id. \
-             This is a bug because unresolved graph edges must only store interned constant lookup ids. \
-             Fix: intern unresolved graph edge targets before inserting facts.",
+        let lookup = self.names.const_lookup(fact.target).expect_invariant(
+            "unresolved graph edge points to missing constant lookup id",
+            "unresolved graph edges must only store interned constant lookup ids",
+            "intern unresolved graph edge targets before inserting facts",
         );
         let context = self
             .names
             .fqn(lookup.context)
-            .expect(
-                "INVARIANT VIOLATED: unresolved graph edge lookup points to missing context FQN id. \
-                 This is a bug because constant lookups must only store interned context FQN ids. \
-                 Fix: intern constant lookup contexts before inserting facts.",
+            .expect_invariant(
+                "unresolved graph edge lookup points to missing context FQN id",
+                "constant lookups must only store interned context FQN ids",
+                "intern constant lookup contexts before inserting facts",
             )
             .clone();
         UnresolvedGraphEdgeFact::new(

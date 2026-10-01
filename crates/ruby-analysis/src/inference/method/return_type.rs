@@ -355,13 +355,12 @@ mod tests {
 
         let outcome = method_call_type_outcome(None, &receiver, "length");
 
-        assert_eq!(
+        invariant_eq!(
             outcome.unknown_reason(),
             Some(UnknownReason::IncompleteUnionMember),
-            "INVARIANT VIOLATED: an incomplete union call did not retain its Unknown reason. \
-             This is a bug because CLI and LSP consumers need one shared, deterministic \
-             explanation for withheld concrete types. Fix: return a TypeOutcome carrying \
-             IncompleteUnionMember when any reachable receiver member cannot resolve."
+            what = "an incomplete union call lost its Unknown reason",
+            why = "CLI and LSP need one explanation for withheld types",
+            fix = "return IncompleteUnionMember when any receiver member is unresolved",
         );
         assert_eq!(
             outcome
@@ -376,13 +375,12 @@ mod tests {
     fn union_receiver_requires_a_return_type_for_every_member() {
         let receiver = RubyType::Union(vec![RubyType::string(), RubyType::integer()]);
 
-        assert_eq!(
+        invariant_eq!(
             method_call_return_type(None, &receiver, "length"),
             None,
-            "INVARIANT VIOLATED: a union call discarded the unresolved Integer#length branch. \
-             This is a bug because a concrete chained-call type requires proof for every \
-             reachable receiver member. Fix: return Unknown/None when any union member cannot \
-             resolve the method return type."
+            what = "a union call discarded the unresolved Integer#length branch",
+            why = "a concrete chained-call type requires proof for every reachable receiver member",
+            fix = "return Unknown/None when any union member cannot resolve the method return type",
         );
     }
 
@@ -390,13 +388,12 @@ mod tests {
     fn union_receiver_combines_returns_when_every_member_is_proven() {
         let receiver = RubyType::Union(vec![RubyType::string(), RubyType::integer()]);
 
-        assert_eq!(
+        invariant_eq!(
             method_call_return_type(None, &receiver, "to_s"),
             Some(RubyType::string()),
-            "INVARIANT VIOLATED: a union call with two proven String returns did not resolve. \
-             This is a bug because proof-first inference must retain complete evidence rather \
-             than degrading all union receivers to Unknown. Fix: combine the return type from \
-             every union member after all members resolve."
+            what = "a union call with two proven String returns did not resolve",
+            why = "complete union evidence must not degrade to Unknown",
+            fix = "combine returns from every member once all resolve",
         );
     }
 }

@@ -2,6 +2,7 @@
 //! releases its producer, including when an assertion unwinds. Production builds
 //! contain neither these gates nor their calls.
 
+use crate::invariant::ExpectInvariant;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -37,10 +38,17 @@ pub(crate) struct Pause {
 
 impl Pause {
     pub(crate) async fn wait(&mut self) {
-        tokio::time::timeout(Duration::from_secs(15), self.reached.take().expect(
-            "INVARIANT VIOLATED: a simulation pause was awaited twice. This is a test bug because each boundary has one arrival. Fix: arm another pause for another operation."
-        )).await.expect("production lifecycle did not reach the armed simulation boundary")
-            .expect("production lifecycle dropped its armed simulation boundary");
+        tokio::time::timeout(
+            Duration::from_secs(15),
+            self.reached.take().expect_invariant(
+                "a simulation pause was awaited twice",
+                "each boundary has one arrival",
+                "arm another pause for another operation",
+            ),
+        )
+        .await
+        .expect("production lifecycle did not reach the armed simulation boundary")
+        .expect("production lifecycle dropped its armed simulation boundary");
     }
 
     pub(crate) fn release(mut self) {
@@ -56,8 +64,21 @@ impl TestSchedule {
     pub(crate) fn arm(&self, point: Point, path: PathBuf) -> Pause {
         let (arrive, reached) = oneshot::channel();
         let (release, wait) = oneshot::channel();
-        assert!(self.gates.lock().insert((point, path), Gate { reached: arrive, release: wait }).is_none(),
-            "INVARIANT VIOLATED: duplicate simulation gate. This is a test bug because a second gate would hide the first waiter. Fix: await and release the existing boundary before arming it again.");
+        invariant!(
+            self.gates
+                .lock()
+                .insert(
+                    (point, path),
+                    Gate {
+                        reached: arrive,
+                        release: wait
+                    }
+                )
+                .is_none(),
+            what = "duplicate simulation gate",
+            why = "a second gate would hide the first waiter",
+            fix = "await and release the existing boundary before arming it again",
+        );
         Pause {
             reached: Some(reached),
             release: Some(release),

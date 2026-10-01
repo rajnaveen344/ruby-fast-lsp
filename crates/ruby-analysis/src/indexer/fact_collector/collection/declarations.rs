@@ -7,6 +7,7 @@ use crate::core::{
 };
 use crate::indexer::fact_collector::context::source::u32_offset;
 use crate::indexer::fact_collector::FactCollector;
+use crate::invariant::ExpectInvariant;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -25,10 +26,10 @@ impl FactCollector {
         name: &[u8],
     ) -> TextRange {
         let end = path.end_offset();
-        let start = end.checked_sub(name.len()).expect(
-            "INVARIANT VIOLATED: constant name is longer than its Prism path location. \
-             This is a bug because the terminal name must be contained in the constant path. \
-             Fix: inspect Prism constant path locations before deriving declaration ranges.",
+        let start = end.checked_sub(name.len()).expect_invariant(
+            "constant name is longer than its Prism path location",
+            "the terminal name must be contained in the constant path",
+            "inspect Prism constant path locations before deriving declaration ranges",
         );
         TextRange::new(
             self.document.analysis_file_id(),
@@ -71,10 +72,10 @@ impl FactCollector {
             TypeProvenance::Inferred,
         ));
 
-        let singleton_fqn = fqn.to_singleton_namespace().expect(
-            "INVARIANT VIOLATED: namespace fact could not convert to singleton namespace. \
-             This is a bug because class/module graph nodes must be namespace FQNs. \
-             Fix: only call direct_push_namespace_facts with Namespace facts.",
+        let singleton_fqn = fqn.to_singleton_namespace().expect_invariant(
+            "namespace fact could not convert to singleton namespace",
+            "class/module graph nodes must be namespace FQNs",
+            "only call direct_push_namespace_facts with Namespace facts",
         );
         self.semantics
             .known_namespaces
@@ -493,9 +494,11 @@ impl FactCollector {
             .iter()
             .filter(|fact| &fact.fqn == fqn)
             .peekable();
-        assert!(
+        invariant!(
             matching.peek().is_some(),
-            "INVARIANT VIOLATED: public-method candidate refresh has no matching direct method fact. This is a bug because refresh must run only after insertion or visibility mutation. Fix: pass the exact inserted method FQN to refresh_local_public_method_candidate."
+            what = "public-method candidate refresh has no matching direct method fact",
+            why = "refresh must run only after insertion or visibility mutation",
+            fix = "pass the exact inserted method FQN to refresh_local_public_method_candidate",
         );
         let proven_public = matching.all(|fact| {
             fact.visibility == MethodVisibility::Public
@@ -555,14 +558,18 @@ impl FactCollector {
         fact: TypeFact,
     ) {
         let TypeSubject::Expression(subject_range) = &fact.subject else {
-            panic!(
-                "INVARIANT VIOLATED: the direct expression index received a named type subject. This is a bug because the range index may only point to TypeSubject::Expression facts. Fix: route named facts through direct_push_type and expression facts through push_direct_expression_fact."
+            unreachable_invariant!(
+                what = "the direct expression index received a named type subject",
+                why = "the range index points only at TypeSubject::Expression facts",
+                fix = "route named facts via direct_push_type, expressions via push_direct_expression_fact",
             );
         };
-        assert_eq!(
+        invariant_eq!(
             *subject_range,
             fact.range,
-            "INVARIANT VIOLATED: a direct expression subject differs from its fact range. This is a bug because the compact range index uses that identity for exact lookup. Fix: construct both ranges from the same Prism node location."
+            what = "a direct expression subject differs from its fact range",
+            why = "the compact range index uses that identity for exact lookup",
+            fix = "construct both ranges from the same Prism node location",
         );
         let range = *subject_range;
         let index = self.facts.direct.types.len();
@@ -584,13 +591,17 @@ impl FactCollector {
             .iter()
             .rev()
             .find_map(|index| {
-                let fact = self.facts.direct.types.get(*index).expect(
-                    "INVARIANT VIOLATED: the direct expression index points outside the append-only fact vector. This is a bug because direct facts are never removed during collection. Fix: record each index only after appending its owning fact and never reorder direct_facts.types.",
+                let fact = self.facts.direct.types.get(*index).expect_invariant(
+                    "the direct expression index points outside the fact vector",
+                    "direct facts are never removed during collection",
+                    "record each index after appending its fact; never reorder direct_facts.types",
                 );
-                assert!(
+                invariant!(
                     matches!(&fact.subject, TypeSubject::Expression(subject_range) if *subject_range == range)
                         && fact.range == range,
-                    "INVARIANT VIOLATED: the direct expression range index points to a different semantic fact. This is a bug because an indexed lookup would return evidence for the wrong AST node. Fix: update the range index atomically with every expression-fact append."
+                    what = "the direct expression range index points to a different semantic fact",
+                    why = "an indexed lookup would return evidence for the wrong AST node",
+                    fix = "update the range index atomically with every expression-fact append",
                 );
                 provenance
                     .is_none_or(|expected| fact.provenance == expected)

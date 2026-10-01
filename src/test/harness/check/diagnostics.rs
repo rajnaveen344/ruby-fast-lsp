@@ -1,5 +1,6 @@
 //! Published diagnostics for one file.
 
+use crate::invariant::ExpectInvariant;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 
 use super::ranges_overlap;
@@ -15,8 +16,10 @@ pub(super) fn check_diagnostics(
     err_tags: &[&Tag],
     warn_tags: &[&Tag],
 ) {
-    let published = server.last_diagnostic_publication(uri).expect(
-        "INVARIANT VIOLATED: tagged diagnostic assertion has no published result. This is a bug because observing an open document must not fabricate an empty clear. Fix: inspect the publication lifecycle; never collect or replace facts in an assertion.",
+    let published = server.last_diagnostic_publication(uri).expect_invariant(
+        "tagged diagnostic assertion has no published result",
+        "observing an open document must not fabricate an empty clear",
+        "inspect the publication lifecycle; never collect or replace facts in an assertion",
     );
     check_severity("error", DiagnosticSeverity::ERROR, &published, err_tags);
     check_severity(

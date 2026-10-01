@@ -3,6 +3,7 @@
 
 mod stable_hash;
 
+use crate::invariant::ExpectInvariant;
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -235,8 +236,10 @@ impl AnalysisEngine {
             .semantic_export_fingerprints
             .iter()
             .map(|(file_id, fingerprint)| {
-                let source = self.sources.files.get(file_id).expect(
-                    "INVARIANT VIOLATED: semantic export fingerprint has no registered source file. This is a bug because replace_facts validates every file id before recording semantic state. Fix: remove fingerprints through the same file lifecycle as source registration.",
+                let source = self.sources.files.get(file_id).expect_invariant(
+                    "semantic export fingerprint has no registered source file",
+                    "replace_facts validates every file id before recording semantic state",
+                    "remove fingerprints through the same file lifecycle as source registration",
                 );
                 export_hash(|hasher| {
                     stable_source_kind(hasher, source.kind);
@@ -265,12 +268,17 @@ impl AnalysisEngine {
             file_id: SourceFileId,
             component: SemanticExportFingerprint,
         ) {
-            components.get_mut(&file_id).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: semantic result fact belongs to unknown file id {:?}. This is a bug because every stored fact must be owned by one registered source. Fix: remove and replace facts through the same file lifecycle.",
-                    file_id
-                )
-            }).push(component);
+            components
+                .get_mut(&file_id)
+                .unwrap_or_else(|| {
+                    unreachable_invariant!(
+                        what = "semantic result fact belongs to unknown file id {:?}",
+                        why = "every stored fact must be owned by one registered source",
+                        fix = "remove and replace facts through the same file lifecycle",
+                        file_id,
+                    )
+                })
+                .push(component);
         }
 
         let mut components = self
@@ -396,16 +404,20 @@ impl AnalysisEngine {
         }
         for (target, fact) in self.facts.references.resolved.iter_facts_with_targets() {
             let target = self.names.fqn(target).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: resolved reference target {:?} has no interned FQN. This is a bug because stored references must retain a valid semantic target. Fix: intern targets before resolving references and remove them only with their facts.",
-                    target
+                unreachable_invariant!(
+                    what = "resolved reference target {:?} has no interned FQN",
+                    why = "stored references must retain a valid semantic target",
+                    fix = "intern targets before resolving references and remove them only with their facts",
+                    target,
                 )
             });
             let caller = fact.caller.map(|caller| {
                 self.names.fqn(caller).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: resolved reference caller {:?} has no interned FQN. This is a bug because caller provenance must remain valid while the reference exists. Fix: intern callers before resolving references and remove them only with their facts.",
-                        caller
+                    unreachable_invariant!(
+                        what = "resolved reference caller {:?} has no interned FQN",
+                        why = "caller provenance must remain valid while the reference exists",
+                        fix = "intern callers before resolving references and remove them only with their facts",
+                        caller,
                     )
                 })
             });
@@ -470,8 +482,10 @@ impl AnalysisEngine {
         components
             .into_iter()
             .map(|(file_id, mut facts)| {
-                let source = self.sources.files.get(&file_id).expect(
-                    "INVARIANT VIOLATED: semantic result component owner has no registered source file. This is a bug because the component map is seeded exclusively from registered sources. Fix: keep source removal and semantic fact removal atomic.",
+                let source = self.sources.files.get(&file_id).expect_invariant(
+                    "semantic result component owner has no registered source file",
+                    "the component map is seeded exclusively from registered sources",
+                    "keep source removal and semantic fact removal atomic",
                 );
                 facts.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
                 (
@@ -517,15 +531,19 @@ impl AnalysisEngine {
 
         for (target, fact) in self.facts.references.resolved.iter_facts_with_targets() {
             let target = self.names.fqn(target).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: per-file reference fingerprint target {:?} has no interned FQN. This is a bug because resolved references retain their target identity. Fix: remove references before removing interned names.",
+                unreachable_invariant!(
+                    what = "per-file reference fingerprint target {:?} has no interned FQN",
+                    why = "resolved references retain their target identity",
+                    fix = "remove references before removing interned names",
                     target,
                 )
             });
             let caller = fact.caller.map(|caller| {
                 self.names.fqn(caller).unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: per-file reference fingerprint caller {:?} has no interned FQN. This is a bug because resolved references retain caller provenance. Fix: remove references before removing interned names.",
+                    unreachable_invariant!(
+                        what = "per-file reference fingerprint caller {:?} has no interned FQN",
+                        why = "resolved references retain caller provenance",
+                        fix = "remove references before removing interned names",
                         caller,
                     )
                 })
@@ -536,25 +554,25 @@ impl AnalysisEngine {
                 stable_method_reference_access(hasher, fact.access);
                 stable_range_offsets(hasher, fact.range);
             });
-            components
-                .get_mut(&fact.range.file_id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: per-file reference fingerprint belongs to unknown file {:?}. This is a bug because resolved references cannot outlive their registered source. Fix: remove references before unregistering files.",
-                        fact.range.file_id,
-                    )
-                })[0]
+            components.get_mut(&fact.range.file_id).unwrap_or_else(|| {
+                unreachable_invariant!(
+                    what = "per-file reference fingerprint belongs to unknown file {:?}",
+                    why = "resolved references cannot outlive their registered source",
+                    fix = "remove references before unregistering files",
+                    fact.range.file_id,
+                )
+            })[0]
                 .push(component);
         }
         for (file_id, contexts) in &self.execution_contexts {
-            let output = &mut components
-                .get_mut(file_id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: execution-context fingerprint belongs to unknown file {:?}. This is a bug because execution contexts cannot outlive their registered source. Fix: remove contexts before unregistering files.",
-                        file_id,
-                    )
-                })[1];
+            let output = &mut components.get_mut(file_id).unwrap_or_else(|| {
+                unreachable_invariant!(
+                    what = "execution-context fingerprint belongs to unknown file {:?}",
+                    why = "execution contexts cannot outlive their registered source",
+                    fix = "remove contexts before unregistering files",
+                    file_id,
+                )
+            })[1];
             output.extend(contexts.iter().map(|context| {
                 export_hash(|hasher| {
                     stable_fqn(hasher, &context.lexical_namespace);
@@ -568,14 +586,14 @@ impl AnalysisEngine {
             }));
         }
         for (file_id, reads) in &self.local_read_types_by_file {
-            let output = &mut components
-                .get_mut(file_id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "INVARIANT VIOLATED: local-read fingerprint belongs to unknown file {:?}. This is a bug because flow evidence cannot outlive its registered source. Fix: remove inference evidence before unregistering files.",
-                        file_id,
-                    )
-                })[2];
+            let output = &mut components.get_mut(file_id).unwrap_or_else(|| {
+                unreachable_invariant!(
+                    what = "local-read fingerprint belongs to unknown file {:?}",
+                    why = "flow evidence cannot outlive its registered source",
+                    fix = "remove inference evidence before unregistering files",
+                    file_id,
+                )
+            })[2];
             output.extend(reads.iter().map(|(range, ruby_type)| {
                 export_hash(|hasher| {
                     stable_range_offsets(hasher, *range);

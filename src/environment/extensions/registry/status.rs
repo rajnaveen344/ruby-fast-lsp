@@ -1,3 +1,4 @@
+use crate::invariant::ExpectInvariant;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -127,38 +128,50 @@ impl ExtensionTelemetry {
         if let Some(output) = output {
             saturating_increment(
                 &self.emitted_index_patches,
-                u64::try_from(output.index_patches.len()).expect(
-                    "INVARIANT VIOLATED: index patch count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                u64::try_from(output.index_patches.len()).expect_invariant(
+                    "index patch count does not fit in u64",
+                    "extension output is bounded far below u64::MAX",
+                    "enforce output bounds before telemetry recording",
                 ),
             );
             saturating_increment(
                 &self.emitted_execution_contexts,
-                u64::try_from(output.execution_contexts.len()).expect(
-                    "INVARIANT VIOLATED: execution-context count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                u64::try_from(output.execution_contexts.len()).expect_invariant(
+                    "execution-context count does not fit in u64",
+                    "extension output is bounded far below u64::MAX",
+                    "enforce output bounds before telemetry recording",
                 ),
             );
             saturating_increment(
                 &self.emitted_response_patches,
-                u64::try_from(output.response_patches.len()).expect(
-                    "INVARIANT VIOLATED: response patch count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                u64::try_from(output.response_patches.len()).expect_invariant(
+                    "response patch count does not fit in u64",
+                    "extension output is bounded far below u64::MAX",
+                    "enforce output bounds before telemetry recording",
                 ),
             );
             saturating_increment(
                 &self.emitted_command_patches,
-                u64::try_from(output.command_patches.len()).expect(
-                    "INVARIANT VIOLATED: command patch count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                u64::try_from(output.command_patches.len()).expect_invariant(
+                    "command patch count does not fit in u64",
+                    "extension output is bounded far below u64::MAX",
+                    "enforce output bounds before telemetry recording",
                 ),
             );
             saturating_increment(
                 &self.emitted_process_requests,
-                u64::try_from(output.process_requests.len()).expect(
-                    "INVARIANT VIOLATED: process request count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                u64::try_from(output.process_requests.len()).expect_invariant(
+                    "process request count does not fit in u64",
+                    "extension output is bounded far below u64::MAX",
+                    "enforce output bounds before telemetry recording",
                 ),
             );
             saturating_increment(
                 &self.requested_reindex_files,
-                u64::try_from(output.reindex_files.len()).expect(
-                    "INVARIANT VIOLATED: reindex file count does not fit in u64. This is a bug because extension output is bounded far below u64::MAX. Fix: enforce output bounds before telemetry recording.",
+                u64::try_from(output.reindex_files.len()).expect_invariant(
+                    "reindex file count does not fit in u64",
+                    "extension output is bounded far below u64::MAX",
+                    "enforce output bounds before telemetry recording",
                 ),
             );
         }
@@ -241,18 +254,16 @@ impl ExtensionTelemetry {
             requested_reindex_files: self.requested_reindex_files.load(Ordering::Relaxed),
             total_guest_time_ns: self.total_guest_time_ns.load(Ordering::Relaxed),
             max_guest_time_ns: self.max_guest_time_ns.load(Ordering::Relaxed),
-            project_instance_creations: self
-                .project_instance_creations
-                .load(Ordering::Relaxed),
+            project_instance_creations: self.project_instance_creations.load(Ordering::Relaxed),
             project_instance_failures: self.project_instance_failures.load(Ordering::Relaxed),
             total_project_instance_time_ns: self
                 .total_project_instance_time_ns
                 .load(Ordering::Relaxed),
-            max_project_instance_time_ns: self
-                .max_project_instance_time_ns
-                .load(Ordering::Relaxed),
-            project_instances: u64::try_from(project_instances).expect(
-                "INVARIANT VIOLATED: project extension instance count does not fit in u64. This is a bug because process address space cannot contain that many Wasm instances. Fix: keep project instance accounting bounded by host memory limits.",
+            max_project_instance_time_ns: self.max_project_instance_time_ns.load(Ordering::Relaxed),
+            project_instances: u64::try_from(project_instances).expect_invariant(
+                "project extension instance count does not fit in u64",
+                "process address space cannot contain that many Wasm instances",
+                "keep project instance accounting bounded by host memory limits",
             ),
         }
     }

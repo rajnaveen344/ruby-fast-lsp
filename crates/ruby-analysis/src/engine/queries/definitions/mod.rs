@@ -11,6 +11,7 @@ use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, ResolvedMethodCallee, RubyMethod, RubyType,
     SourceFileId, SymbolKind, TextRange,
 };
+use crate::invariant::ExpectInvariant;
 
 pub(in crate::engine) type DefinitionLookupChains = Vec<Vec<FullyQualifiedName>>;
 
@@ -97,17 +98,23 @@ impl AnalysisQuery<'_> {
                 StoredReferenceCandidateKind::Resolved { target, .. } => vec![self
                     .engine
                     .fqn_for_id(target)
-                    .expect(
-                        "INVARIANT VIOLATED: exact resolved reference points to a missing target FQN. This is a bug because resolved candidates contain only interned target ids. Fix: intern the target before storing the reference candidate and keep the name arena append-only.",
+                    .expect_invariant(
+                        "resolved reference points to a missing target FQN",
+                        "resolved candidates hold only interned target ids",
+                        "intern the target before storing the candidate; keep the arena append-only",
                     )
                     .clone()],
                 StoredReferenceCandidateKind::Method { .. } => Vec::new(),
                 StoredReferenceCandidateKind::Constant { lookup } => {
-                    let lookup = self.engine.names.const_lookup(lookup).expect(
-                        "INVARIANT VIOLATED: exact constant reference points to a missing lookup. This is a bug because candidates contain only interned lookup ids. Fix: intern constant lookups before storing reference candidates.",
+                    let lookup = self.engine.names.const_lookup(lookup).expect_invariant(
+                        "exact constant reference points to a missing lookup",
+                        "candidates contain only interned lookup ids",
+                        "intern constant lookups before storing reference candidates",
                     );
-                    let context = self.engine.names.fqn(lookup.context).expect(
-                        "INVARIANT VIOLATED: exact constant reference lookup points to a missing context FQN. This is a bug because constant lookups must retain their interned lexical context. Fix: intern the context before storing the lookup.",
+                    let context = self.engine.names.fqn(lookup.context).expect_invariant(
+                        "exact constant reference lookup points to a missing context FQN",
+                        "constant lookups must retain their interned lexical context",
+                        "intern the context before storing the lookup",
                     );
                     self.resolve_constant_in_context(
                         lookup.path.as_slice(),
@@ -264,19 +271,32 @@ impl AnalysisQuery<'_> {
     }
 
     fn definition_source_priority(&self, range: TextRange) -> u8 {
-        self.engine.file(range.file_id).expect(
-            "INVARIANT VIOLATED: a definition destination has no registered source. This is a bug because navigation must retain source ownership. Fix: register sources before publishing definition facts.",
-        ).kind.definition_precedence()
+        self.engine
+            .file(range.file_id)
+            .expect_invariant(
+                "a definition destination has no registered source",
+                "navigation must retain source ownership",
+                "register sources before publishing definition facts",
+            )
+            .kind
+            .definition_precedence()
     }
 
     /// Order already selected destinations independently of source registration.
     /// This is a presentation tie-breaker, never Ruby load order or dispatch priority.
     pub(in crate::engine) fn sort_definition_ranges(&self, ranges: &mut [TextRange]) {
         ranges.sort_by_key(|range| {
-            let file = self.engine.file(range.file_id).expect(
-                "INVARIANT VIOLATED: a definition destination has no registered source. This is a bug because navigation must retain source ownership. Fix: register sources before publishing definition facts.",
+            let file = self.engine.file(range.file_id).expect_invariant(
+                "a definition destination has no registered source",
+                "navigation must retain source ownership",
+                "register sources before publishing definition facts",
             );
-            (file.kind.definition_precedence(), file.path.as_path(), range.start_byte, range.end_byte)
+            (
+                file.kind.definition_precedence(),
+                file.path.as_path(),
+                range.start_byte,
+                range.end_byte,
+            )
         });
     }
 }

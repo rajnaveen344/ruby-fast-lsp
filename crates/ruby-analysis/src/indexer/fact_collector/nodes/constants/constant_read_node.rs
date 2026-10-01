@@ -79,10 +79,12 @@ fn u32_text_range_offset(offset: usize, kind: &str, boundary: TextRangeBoundary)
                 TextRangeBoundary::Start => "start",
                 TextRangeBoundary::End => "end",
             };
-            panic!(
-                "INVARIANT VIOLATED: {kind} {boundary} offset exceeded u32. \
-                 This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
-                 Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
+            unreachable_invariant!(
+                what = "{kind} {boundary} offset exceeded u32",
+                why = "ruby-analysis::core TextRange currently stores u32 offsets",
+                fix = "widen TextRange offsets before indexing files larger than u32::MAX bytes",
+                kind = kind,
+                boundary = boundary,
             )
         }
     }

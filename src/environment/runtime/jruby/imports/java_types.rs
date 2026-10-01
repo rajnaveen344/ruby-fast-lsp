@@ -3,6 +3,7 @@
 
 use super::syntax::{collect_ruby_constant_path, dotted_call_name, static_symbol_or_string};
 use super::JrubyImportProvider;
+use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyType, TypeProvenance};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_fast_lsp_jruby_support::JavaClassName;
@@ -22,10 +23,10 @@ impl JrubyImportProvider {
                 visitor.direct_push_expression_type(
                     &node.as_node(),
                     RubyType::array_of(RubyType::Class(
-                        FullyQualifiedName::try_from("Java::JavaLang::Object").expect(
-                            "INVARIANT VIOLATED: Java Object proxy FQN is invalid. \
-                             This is a bug because it is a canonical JRuby proxy name. \
-                             Fix: keep built-in Java proxy identities valid Ruby constants.",
+                        FullyQualifiedName::try_from("Java::JavaLang::Object").expect_invariant(
+                            "Java Object proxy FQN is invalid",
+                            "it is a canonical JRuby proxy name",
+                            "keep built-in Java proxy identities valid Ruby constants",
                         ),
                     )),
                     TypeProvenance::Runtime,
@@ -210,10 +211,10 @@ fn ruby_type_for_to_java_scalar(ty: &JvmType) -> RubyType {
             return JavaClassName::parse(name)
                 .map(|name| {
                     RubyType::Class(
-                        FullyQualifiedName::try_from(name.ruby_fqn().as_str()).expect(
-                            "INVARIANT VIOLATED: validated Java class produced an invalid JRuby proxy FQN. \
-                             This is a bug because JavaClassName owns proxy validation. \
-                             Fix: keep Java-to-Ruby proxy conversion single-sourced.",
+                        FullyQualifiedName::try_from(name.ruby_fqn().as_str()).expect_invariant(
+                            "validated Java class produced an invalid JRuby proxy FQN",
+                            "JavaClassName owns proxy validation",
+                            "keep Java-to-Ruby proxy conversion single-sourced",
                         ),
                     )
                 })
@@ -221,10 +222,10 @@ fn ruby_type_for_to_java_scalar(ty: &JvmType) -> RubyType {
         }
         JvmType::Array(element) => return RubyType::array_of(ruby_type_for_jvm(element)),
     };
-    RubyType::Class(FullyQualifiedName::try_from(proxy).expect(
-        "INVARIANT VIOLATED: Java primitive wrapper proxy FQN is invalid. \
-         This is a bug because wrapper mappings are static canonical JRuby names. \
-         Fix: keep primitive wrapper proxy names valid Ruby constants.",
+    RubyType::Class(FullyQualifiedName::try_from(proxy).expect_invariant(
+        "Java primitive wrapper proxy FQN is invalid",
+        "wrapper mappings are static canonical JRuby names",
+        "keep primitive wrapper proxy names valid Ruby constants",
     ))
 }
 
@@ -242,10 +243,10 @@ pub(crate) fn ruby_type_for_jvm(ty: &JvmType) -> RubyType {
                     name.ruby_namespace_parts()
                         .into_iter()
                         .map(|part| {
-                            RubyConstant::new(&part).expect(
-                                "INVARIANT VIOLATED: validated Java proxy part is not a Ruby constant. \
-                                 This is a bug because JavaClassName owns proxy validation. \
-                                 Fix: keep Java-to-Ruby proxy conversion single-sourced.",
+                            RubyConstant::new(&part).expect_invariant(
+                                "validated Java proxy part is not a Ruby constant",
+                                "JavaClassName owns proxy validation",
+                                "keep Java-to-Ruby proxy conversion single-sourced",
                             )
                         })
                         .collect::<Vec<_>>(),
