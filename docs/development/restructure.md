@@ -73,8 +73,26 @@ Delete this file when the last task is done. Git history keeps the record.
   didOpen re-analysis (which reruns the collector to rebuild local variable
   scopes) is a separate follow-up after C1: either a bounded scope cache keyed
   by source snapshot, or a scope-only walk.
-- [ ] B2. Add `FileOwned<T>` for rows that belong to a file. Port the existing
+- [x] B2. Add `FileOwned<T>` for rows that belong to a file. Port the existing
       stores to it, one store per commit.
+
+  Notes: `core/storage/file_owned` holds three shapes. `FileOwned<T>` keeps
+  each file's rows in one sorted vector (diagnostics, diagnostic candidates,
+  reference candidates). `FileArena<T>` gives rows stable ids for stores
+  with cross-file lookups, and `FileIndex<K>` keeps each key's ids grouped
+  by file so replacement cuts and splices one run (symbols, methods). Not
+  ported:
+  - `TypeStore` is also the collector's append-only working store. `add`
+    appends one fact at a time in source order, and the in-place equation
+    updates rewrite facts by subject. Moving it needs the collector to own
+    a separate append buffer, which belongs with D2.
+  - `SemanticGraph` merges node definitions from many files under one FQN,
+    and graph resolution adds edges and re-queues unresolved edges one at a
+    time after the file's replacement. Its adjacency lists are per node,
+    not per file. B3's `Hierarchy` should redesign it rather than wrap it.
+  - `ReferenceStore` is keyed by target, not file. Each workspace pass
+    rebuilds it, and `facts_for` returns borrowed slices on the
+    references hot path.
 - [ ] B3. Extract the `AnalysisEngine` components one at a time: `Files`,
       `Names`, `DeclIndex`, `Hierarchy`, `UseIndex`, `TypeTable`, `Solver`,
       `Diagnostics`. Each owns its impls in its own module.

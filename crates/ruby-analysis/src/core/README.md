@@ -11,7 +11,7 @@ Implementation modules and stored representations remain crate-private.
 | `types/` | Canonical Ruby values, structural shapes, and proof outcomes |
 | `callables/` | AST-free callable bodies and parameter/signature contracts |
 | `equations/` | Constant and method-return dependency equations |
-| `storage/` | Compact file-owned stores, insertion helpers, and memory accounting |
+| `storage/` | Compact file-owned stores and memory accounting. `storage/file_owned` owns per-file row bookkeeping: `FileOwned` for rows read by file, `FileArena` and `FileIndex` for rows also found by a cross-file key |
 | `method_resolution.rs` | Domain result of resolving a callable method |
 
 Core does not traverse Prism trees, schedule indexing, or decide Ruby lookup
