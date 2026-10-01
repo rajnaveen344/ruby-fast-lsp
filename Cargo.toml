@@ -27,12 +27,30 @@ description = "A fast Language Server Protocol implementation for Ruby"
 license = "MIT"
 
 [[bin]]
+name = "profile_single_file"
+path = "src/bin/profile_single_file.rs"
+test = false
+
+[[bin]]
+name = "profile_file_open"
+path = "src/bin/profile_file_open.rs"
+test = false
+
+[[bin]]
+name = "ruby-fast-lsp"
+path = "src/main.rs"
+test = false
+
+# Bins without tests skip their empty test harness builds.
+[[bin]]
 name = "profile_indexer"
 path = "src/bin/profile_indexer.rs"
+test = false
 
 [[bin]]
 name = "profile_project_collection"
 path = "src/bin/profile_project_collection.rs"
+test = false
 
 [[bin]]
 name = "profiler"
@@ -41,18 +59,22 @@ path = "src/bin/profiler/main.rs"
 [[bin]]
 name = "ast"
 path = "src/bin/ast.rs"
+test = false
 
 [[bin]]
 name = "bench_references"
 path = "src/bin/bench_references.rs"
+test = false
 
 [[bin]]
 name = "extension"
 path = "src/bin/extension.rs"
+test = false
 
 [[bin]]
 name = "simulation"
 path = "src/bin/simulation.rs"
+test = false
 required-features = ["simulation"]
 
 # Separate test executable: verifies the real CLI process, alongside internal CLI tests.
