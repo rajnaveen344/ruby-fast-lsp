@@ -2,6 +2,7 @@
 
 mod compact;
 mod facts;
+mod ordered_append;
 mod replacement;
 mod updates;
 

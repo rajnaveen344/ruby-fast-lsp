@@ -5,7 +5,6 @@
 //! owns that bookkeeping so stores only describe their rows and lookups.
 
 pub(in crate::core::storage) mod arena;
-pub(in crate::core::storage) mod ordered_append;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;

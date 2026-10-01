@@ -1,6 +1,6 @@
 //! File-owned fact removal and replacement with ordered index maintenance.
 
-use crate::core::storage::file_owned::ordered_append::place_appended_file_facts;
+use super::ordered_append::place_appended_file_facts;
 use crate::invariant::ExpectInvariant;
 
 use super::{provenance_rank, SourceFileId, StoredTypeFact, TypeFact, TypeFactId, TypeStore};
