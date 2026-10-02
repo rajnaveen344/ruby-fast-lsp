@@ -1,7 +1,8 @@
 //! Method inputs and semantic lookup context supplied before traversal.
 
 use crate::core::{FullyQualifiedName, RubyMethod, RubyType};
-use crate::engine::{AnalysisQueryCache, Semantics};
+use crate::engine::AnalysisQueryCache;
+use crate::inference::semantics::Semantics;
 use crate::inference::type_tracker::TypeTracker;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

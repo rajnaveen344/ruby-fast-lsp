@@ -1,7 +1,7 @@
 //! ActiveSupport `delegate` and Forwardable `def_delegator(s)` method facts.
 
 use crate::core::{FullyQualifiedName, MethodFact, RubyMethod, TypeFact, TypeSubject};
-use crate::engine::ReceiverAccess;
+use crate::inference::semantics::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
 use log::trace;
 use ruby_prism::CallNode;

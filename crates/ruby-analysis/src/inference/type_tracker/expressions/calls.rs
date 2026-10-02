@@ -2,10 +2,10 @@ use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, RubyType, TypeInferenceOutcome,
     UnknownReason,
 };
-use crate::engine::ReceiverAccess;
 use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::r#type::literal::project_immediate_hash_receiver_type;
 use crate::inference::r#type::shape as shape_reads;
+use crate::inference::semantics::ReceiverAccess;
 use crate::inference::type_tracker::flow::shapes::values::type_is_shape_only;
 use crate::inference::type_tracker::returns::dependencies::call_is_direct_recursive;
 use crate::inference::type_tracker::TypeTracker;

@@ -15,7 +15,7 @@ Construct with `TypeTracker::new()`. The tracker takes Prism nodes in its
 tracking methods and does not retain source bytes or a source lifetime. The
 collector supplies method contracts, same-file evidence, and optional project
 reads through builders and context setters. Project reads go through the
-read-only `engine::Semantics` trait, never the engine lock. Local tracking
+read-only `inference::semantics::Semantics` trait, never the engine lock. Local tracking
 without it remains supported; unavailable lookup evidence stays unproven.
 
 | Entry point | Responsibility |

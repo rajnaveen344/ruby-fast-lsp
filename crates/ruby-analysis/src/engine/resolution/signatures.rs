@@ -5,7 +5,7 @@ use crate::core::{FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMe
 use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess};
 use crate::engine::queries::View;
-use crate::engine::ReceiverAccess;
+use crate::inference::semantics::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
 use std::sync::Arc;
 

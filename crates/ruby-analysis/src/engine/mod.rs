@@ -10,8 +10,9 @@
 //! this module. Stores and their compact representations are internal.
 //!
 //! A file walk reads project semantics only through the read-only
-//! `Semantics` trait (`semantics.rs`). Any new mid-walk read must become an
-//! equation or be added to `Semantics` with a reason.
+//! `inference::semantics::Semantics` trait; `semantics.rs` holds the engine's
+//! implementations. Any new mid-walk read must become an equation or be added
+//! to `Semantics` with a reason.
 
 mod debug;
 mod diagnostics;
@@ -48,8 +49,6 @@ pub use queries::namespace_tree::types::{
 pub use queries::workspace_symbols::types::WorkspaceSymbolMatch;
 pub use queries::View;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
-pub use semantics::ReceiverAccess;
-pub(crate) use semantics::Semantics;
 pub use state::{
     AnalysisStat, Project, ResolveMode, ResolveStat, SourceFile, SourceFileInput,
     SourceFileSnapshot,

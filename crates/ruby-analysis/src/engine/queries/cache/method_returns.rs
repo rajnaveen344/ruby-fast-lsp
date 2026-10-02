@@ -13,7 +13,7 @@ use crate::engine::resolution::{
     chain_has_custom_method_missing, execution_context_application_targets, method_facts_in_chain,
     method_lookup_chain, method_missing_method, module_instance_receivers, namespace_target_exists,
 };
-use crate::engine::ReceiverAccess;
+use crate::inference::semantics::ReceiverAccess;
 
 use super::memo::{AnalysisQueryCache, MethodReturnQueryAccess, MethodReturnQueryKey};
 use super::thread_memo::thread_receiver_has_non_public;

@@ -1,7 +1,8 @@
 use crate::core::FullyQualifiedName;
-use crate::engine::{AnalysisQueryCache, Semantics};
+use crate::engine::AnalysisQueryCache;
 use crate::indexer::fact_collector::FactCollector;
 use crate::indexer::RubyDocument;
+use crate::inference::semantics::Semantics;
 use std::collections::HashSet;
 use std::sync::Arc;
 

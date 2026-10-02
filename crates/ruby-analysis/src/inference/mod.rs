@@ -220,6 +220,7 @@ pub mod control_flow;
 pub(crate) mod higher_order;
 pub mod method;
 pub mod rbs;
+pub mod semantics;
 pub mod r#type;
 pub mod type_tracker;
 

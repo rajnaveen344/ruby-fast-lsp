@@ -17,7 +17,7 @@ use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::queries::cache::AnalysisQueryCache;
 use crate::engine::queries::definitions::DefinitionLookupChains;
 use crate::engine::queries::View;
-use crate::engine::ReceiverAccess;
+use crate::inference::semantics::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
 
 impl<'a> View<'a> {

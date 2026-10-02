@@ -14,11 +14,10 @@ use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceKind,
 };
 use crate::engine::resolution::{method_facts_in_chain, method_lookup_chain, MethodLookupResult};
-use crate::engine::{
-    AnalysisQueryCache, Project, ReceiverAccess, ResolveMode, Semantics, SourceFileInput,
-};
+use crate::engine::{AnalysisQueryCache, Project, ResolveMode, SourceFileInput};
 use crate::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use crate::indexer::RubyDocument;
+use crate::inference::semantics::{ReceiverAccess, Semantics};
 
 const FIXTURE: &str = r#"
 class Base

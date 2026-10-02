@@ -3,13 +3,13 @@ use crate::core::{
     MethodReturnEquation, RubyConstant, RubyMethod, RubyType, TextRange, TypeInferenceOutcome,
     TypeProvenance, TypeResolution, TypeSubject, UnknownReason,
 };
-use crate::engine::ReceiverAccess;
 use crate::indexer::fact_collector::FactCollector;
 use crate::inference::method::recursive::solve_method_return_equations_with_telemetry;
 use crate::inference::r#type::shape as shape_reads;
 use crate::inference::rbs::{
     get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
 };
+use crate::inference::semantics::ReceiverAccess;
 use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, HashMap, HashSet};
 

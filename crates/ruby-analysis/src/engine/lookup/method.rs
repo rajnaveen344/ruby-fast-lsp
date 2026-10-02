@@ -12,7 +12,8 @@ use crate::engine::resolution::{
     method_lookup_chain_has_unresolved_dependency_from_graph, module_instance_receivers,
     namespace_target_exists, MethodLookupChainCache,
 };
-use crate::engine::{ReceiverAccess, View};
+use crate::engine::View;
+use crate::inference::semantics::ReceiverAccess;
 
 /// Where a method lookup starts.
 #[derive(Debug, Clone, Copy)]

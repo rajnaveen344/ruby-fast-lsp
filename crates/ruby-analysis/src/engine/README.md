@@ -18,7 +18,7 @@ Implementation folders are private to the engine.
 | `lookup/` | `lookup::method(view, MethodRequest)` and `method_cached`: one request (receiver, method, `ReceiverAccess`, wanted product) answered as `MethodAnswer::{Found, Ambiguous, Missing, Unknown}`. `Unknown` means an unknown lookup edge (unindexed receiver, unresolved ancestor, no proven product, or an unsupported want) and suppresses missing-method claims; only `Missing` proves absence. `MethodLookupResult` (a method reference) is `MethodAnswer<Arc<MethodFact>>`, and the per-owner `EffectiveMethodFactMatch` is `MethodAnswer<MethodFact, Infallible>`, since one owner has no unknown edge. The access-flavoured callee, return-type, and signature wrappers on `View` are one-line views of `method`/`method_cached`; cached wrappers keep the existing memo maps. Answers are derived data and never enter fingerprints |
 | `resolution/` | Ruby lookup chains and MRO (`lookup_chain`), chain method facts and visibility (`chain_methods`), callees, signatures, method references, reference ranges, definitions, and rename policy |
 | `queries/` | Common reads and the `View` entry point |
-| `semantics.rs` | The read-only `Semantics` trait the fact collector and `TypeTracker` use for mid-walk reads, implemented for `View` and for the shared engine lock, which takes one short read guard per call and delegates to a `View` |
+| `semantics.rs` | The engine's implementations of `inference::semantics::Semantics`, the read-only trait the fact collector and `TypeTracker` use for mid-walk reads: one for `View` and one for the shared engine lock, which takes one short read guard per call and delegates to a `View` |
 | `queries/cache/` | Per-source and thread-local method lookup memos (`memo`, `thread_memo`), and expression, binding, namespace/constant, and method-return type queries |
 | `queries/definitions/` | Definition source selection and partial ordering from participating Ruby lookup chains |
 | `queries/completion/` | Completion receiver/type probing over documents, exported as `engine::completion`; editor trigger routing and snippets stay in the server |
@@ -61,7 +61,7 @@ owning folder unless a sibling engine area needs them through a narrow re-export
 ## Mid-walk reads
 
 A file walk (the fact collector and `TypeTracker`) never holds the engine lock.
-It reads other files through `Semantics`, whose methods each answer one
+It reads other files through `inference::semantics::Semantics`, whose methods each answer one
 question and return plain domain values. They come in two kinds: reads that
 decide which facts get emitted (namespace or singleton receivers, `initialize`
 inside a class, extension call targets) and reads that feed local flow (RBS
