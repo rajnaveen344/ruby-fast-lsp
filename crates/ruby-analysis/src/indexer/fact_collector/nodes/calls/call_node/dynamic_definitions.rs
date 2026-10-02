@@ -4,7 +4,9 @@ use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, TypeFact, TypeProvenance,
     TypeSubject,
 };
-use crate::indexer::documents::scope_rules::resolve_receiver_namespace;
+use crate::indexer::documents::scope_rules::{
+    implicit_singleton_namespace, resolve_receiver_namespace,
+};
 use ruby_prism::{CallNode, Node};
 
 use crate::indexer::yard::converter::YardTypeConverter;
@@ -131,9 +133,12 @@ impl FactCollector {
         &self,
         receiver: &Node<'_>,
     ) -> Option<Vec<RubyConstant>> {
-        resolve_receiver_namespace(receiver, &self.scope_tracker.get_ns_stack(), &|fqn| {
-            self.namespace_is_known(fqn)
-        })
+        resolve_receiver_namespace(
+            receiver,
+            implicit_singleton_namespace(&self.scope_tracker).as_deref(),
+            &self.scope_tracker.get_ns_stack(),
+            &|fqn| self.namespace_is_known(fqn),
+        )
     }
 
     fn push_direct_define_method_return_type(

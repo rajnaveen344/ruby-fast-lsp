@@ -154,9 +154,19 @@ impl AnalysisIndexer {
         &self,
         receiver: &Node<'_>,
     ) -> Option<Vec<RubyConstant>> {
-        resolve_receiver_namespace(receiver, &self.lexical_stack, &|fqn| {
-            self.known_namespaces.contains(fqn)
-        })
+        resolve_receiver_namespace(
+            receiver,
+            self.namespace_body_owner(),
+            &self.lexical_stack,
+            &|fqn| self.known_namespaces.contains(fqn),
+        )
+    }
+
+    /// The class or module `self` names at a namespace body, including an
+    /// eval block body, where `self` is the evaluated receiver.
+    fn namespace_body_owner(&self) -> Option<&[RubyConstant]> {
+        (!self.owner_stack.is_empty() && self.method_context_stack.is_empty())
+            .then_some(self.owner_stack.as_slice())
     }
 
     /// Whether `receiver` is the bare name of the enclosing class or module,
@@ -183,15 +193,9 @@ impl AnalysisIndexer {
         };
         node.block()?;
         let namespace = match node.receiver() {
-            Some(receiver) if receiver.as_self_node().is_none() => {
-                self.resolve_constant_receiver_namespace(&receiver)?
-            }
-            // An implicit or `self` receiver evaluates in the current owner.
-            None | Some(_) => {
-                let at_namespace_body =
-                    !self.owner_stack.is_empty() && self.method_context_stack.is_empty();
-                at_namespace_body.then(|| self.owner_stack.clone())?
-            }
+            Some(receiver) => self.resolve_constant_receiver_namespace(&receiver)?,
+            // An implicit receiver evaluates in the current owner.
+            None => self.namespace_body_owner()?.to_vec(),
         };
         Some((namespace, definition_scope))
     }

@@ -623,10 +623,11 @@ Delete this file when the last task is done. Git history keeps the record.
     - The seed turns every `initialize` into singleton `new`, including in
       modules. The collector requires a proven class. Decide what a module's
       `initialize` should navigate to before writing the test.
-    - `self.define_singleton_method(:x) { }` and `self.send(:define_method,
-      :x) { }` open a block context only in the cursor walk: its receiver
-      resolver handles `self`, while the collector's
-      (`resolve_receiver_namespace`) rejects it.
+    - [x] `self.define_singleton_method(:x) { }` and
+      `self.send(:define_method, :x) { }` opened a block context only in the
+      cursor walk, and neither the seed nor the collector defined the
+      method. `resolve_receiver_namespace` now takes the namespace `self`
+      names in each walk.
     - Concern `class_methods` inside an eval block: the seed nests
       `ClassMethods` under the eval receiver; the collector and cursor walk
       nest it under the lexical namespace.

@@ -103,17 +103,28 @@ pub fn resolve_lexical_namespace(
         .find(|fqn| is_known(fqn))
 }
 
-/// The known namespace a constant or `Const.const_get(:Name)` receiver names.
+/// The known namespace a constant, `self`, or `Const.const_get(:Name)`
+/// receiver names. `self_namespace` is the class or module `self` names at
+/// this point, when the walk knows it is one.
 pub fn resolve_receiver_namespace(
     receiver: &Node<'_>,
+    self_namespace: Option<&[RubyConstant]>,
     lexical_context: &[RubyConstant],
     is_known: &impl Fn(&FullyQualifiedName) -> bool,
 ) -> Option<Vec<RubyConstant>> {
+    if receiver.as_self_node().is_some() {
+        return self_namespace.map(<[RubyConstant]>::to_vec);
+    }
     if let Some(call) = receiver.as_call_node() {
         if call.name().as_slice() != b"const_get" {
             return None;
         }
-        let base = resolve_receiver_namespace(&call.receiver()?, lexical_context, is_known)?;
+        let base = resolve_receiver_namespace(
+            &call.receiver()?,
+            self_namespace,
+            lexical_context,
+            is_known,
+        )?;
         let arguments = call.arguments()?;
         let name = static_name(&arguments.arguments().iter().next()?)?;
         let mut namespace = base;
@@ -159,7 +170,8 @@ pub fn implicit_singleton_namespace(scope_tracker: &ScopeTracker) -> Option<Vec<
 }
 
 /// `Target.class_eval do … end` and its `module_*`/`instance_*` forms.
-/// `resolve_receiver` is the walk's knowledge of constant receivers.
+/// `resolve_receiver` is the walk's knowledge of constant and `self`
+/// receivers.
 pub fn eval_block(
     node: &CallNode<'_>,
     scope_tracker: &ScopeTracker,
@@ -172,8 +184,8 @@ pub fn eval_block(
     };
     node.block()?;
     let namespace = match node.receiver() {
-        Some(receiver) if receiver.as_self_node().is_none() => resolve_receiver(&receiver)?,
-        None | Some(_) => implicit_singleton_namespace(scope_tracker)?,
+        Some(receiver) => resolve_receiver(&receiver)?,
+        None => implicit_singleton_namespace(scope_tracker)?,
     };
     Some(BlockExecution {
         implicit_namespace: namespace.clone(),
