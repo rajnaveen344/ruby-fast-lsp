@@ -6,11 +6,7 @@ pub mod snippets;
 pub mod variable;
 
 use log::debug;
-use ruby_analysis::core::RubyType;
-
-use ruby_analysis::core::{
-    FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, SourceFileId,
-};
+use ruby_analysis::core::NamespaceKind;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
     CompletionContext, CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
@@ -18,11 +14,9 @@ use tower_lsp::lsp_types::{
 };
 
 use ruby_analysis::core::MethodReceiver;
-use ruby_analysis::engine::completion::{CompletionSemanticQuery, CompletionVariableKind};
-use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
-use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
+use ruby_analysis::indexer::Identifier;
 
-use crate::features::cursor::{analyzer_for_document, EngineQuery};
+use crate::features::cursor::{Cursor, EngineQuery};
 use crate::server::RubyLanguageServer;
 use crate::utils::ast::is_in_statement_position;
 use crate::utils::lsp::{lsp_position, source_position};
@@ -63,36 +57,38 @@ pub async fn find_completion_at_position(
     let semantic_lock = server.document_semantic_lock(&uri);
     let _semantic_guard = semantic_lock.lock().await;
 
-    // Use unified document access to ensure we get the latest in-memory content
-    let document = match server.get_doc(&uri) {
-        Some(doc) => doc,
-        None => {
-            // Return empty completion response if document not found
-            return CompletionResponse::Array(vec![]);
-        }
+    let Some(document) = server.documents.read().get(&uri).cloned() else {
+        return CompletionResponse::Array(Vec::new());
+    };
+    EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri))
+        .with_view(|cursor| completion_at(cursor, &uri, position, context.as_ref()))
+}
+
+/// Completions at `position`: shape keys, then `::` constants, receiver
+/// methods, or variables, constants, top-level methods, and snippets.
+pub fn completion_at(
+    cursor: Cursor<'_>,
+    uri: &Url,
+    position: Position,
+    context: Option<&CompletionContext>,
+) -> CompletionResponse {
+    let Some(document) = cursor.document else {
+        return CompletionResponse::Array(Vec::new());
     };
     if !document.is_ruby_position(source_position(position)) {
         return CompletionResponse::Array(Vec::new());
     }
-    let analyzer = analyzer_for_document(
-        RubyPrismAnalyzer::new(uri.clone(), document.content.clone()),
-        &document,
-        &server.analysis_engine_for_uri(&uri).read().view(),
-        position,
-    );
+    let analyzer = cursor.analyzer(uri, &document.content, position);
     let byte_offset = document.position_to_analysis_offset(source_position(position));
     let (
         (partial_name, _, _, _lv_scope_id, namespace_kind),
         shape_key_completion_target,
         completion_receiver_target,
     ) = analyzer.get_completion_context(byte_offset);
-    let semantic_query = ServerCompletionSemanticQuery {
-        analysis_engine: server.analysis_engine_for_uri(&uri),
-    };
     if let Some(target) = shape_key_completion_target {
         let shape_keys = ruby_analysis::engine::completion::shape_key_completions_for_target(
-            &semantic_query,
-            &document,
+            cursor.view,
+            document,
             &target,
         );
         let replacement_range = Range::new(
@@ -125,12 +121,10 @@ pub async fn find_completion_at_position(
 
     // Check if completion was triggered by a trigger character
     let is_trigger_character = context
-        .as_ref()
         .map(|ctx| ctx.trigger_kind == CompletionTriggerKind::TRIGGER_CHARACTER)
         .unwrap_or(false);
 
     let trigger_character = context
-        .as_ref()
         .and_then(|ctx| ctx.trigger_character.as_ref())
         .map(|s| s.as_str());
 
@@ -307,17 +301,17 @@ pub async fn find_completion_at_position(
     // Prioritize constant completions when in scope resolution context (::)
     if is_scope_resolution_context {
         // Focus on constant completions for scope resolution
-        let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-        let constant_completions =
-            query.find_constant_completions(&analyzer, position, partial_string);
-        completions.extend(constant_completions);
+        completions.extend(candidates::constant_completions(
+            cursor.view,
+            &partial_string,
+        ));
     } else if is_method_call_context {
         // Method call context: provide type-aware method completions
 
         // Get receiver type using type snapshots
         let receiver_type = ruby_analysis::engine::completion::receiver_type_from_context(
-            &semantic_query,
-            &document,
+            cursor.view,
+            document,
             &document.content,
             byte_offset,
             namespace_kind,
@@ -339,27 +333,31 @@ pub async fn find_completion_at_position(
                 NamespaceKind::Instance
             };
 
-            let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-            let method_completions =
-                query.find_method_completions(&receiver_type, &partial_string, kind);
-            completions.extend(method_completions);
+            completions.extend(candidates::method_completions(
+                cursor.view,
+                &receiver_type,
+                &partial_string,
+                kind,
+            ));
         }
     } else {
         // Normal completion: include variables, constants, methods, and snippets
 
         // Add local variable completions
-        let variable_completions = variable::find_variable_completions(&document, position);
+        let variable_completions = variable::find_variable_completions(document, position);
         completions.extend(variable_completions);
 
         // Add constant completions
-        let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-        let constant_completions =
-            query.find_constant_completions(&analyzer, position, partial_string.clone());
-        completions.extend(constant_completions);
+        completions.extend(candidates::constant_completions(
+            cursor.view,
+            &partial_string,
+        ));
 
         // Add top-level method completions (methods defined outside any class/module).
-        let top_level_methods = query.find_top_level_method_completions(&partial_string);
-        completions.extend(top_level_methods);
+        completions.extend(candidates::top_level_method_completions(
+            cursor.view,
+            &partial_string,
+        ));
 
         // Add snippet completions with context awareness
         // Only include snippets in statement positions (not in value positions like
@@ -387,83 +385,4 @@ pub async fn find_completion_at_position(
     }
 
     CompletionResponse::Array(completions)
-}
-struct ServerCompletionSemanticQuery {
-    analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
-}
-
-impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
-    fn constant_type_in_context(
-        &self,
-        path: &[RubyConstant],
-        current_namespace: &[RubyConstant],
-    ) -> Option<RubyType> {
-        let engine = self.analysis_engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let resolved = query.resolve_constant_in_context(path, current_namespace)?;
-        let constant = FullyQualifiedName::constant(resolved.namespace_parts().to_vec());
-        query
-            .constant_value_type(&constant)
-            .or_else(|| query.constant_reference_type(resolved.namespace_parts_slice()))
-    }
-
-    fn method_return_type_for_receiver(
-        &self,
-        namespace: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<RubyType> {
-        let engine = self.analysis_engine.read();
-        let request = MethodRequest::new(
-            LookupReceiver::Namespace(namespace),
-            *method,
-            MethodWant::Return,
-        );
-        lookup::method(&engine.view(), request).into_return_type()
-    }
-
-    fn variable_type_before(
-        &self,
-        kind: CompletionVariableKind,
-        name: &str,
-        owner: &FullyQualifiedName,
-        file_id: SourceFileId,
-        byte_offset: u32,
-    ) -> Option<RubyType> {
-        let kind = match kind {
-            CompletionVariableKind::Instance => ruby_analysis::core::VariableTypeKind::Instance,
-            CompletionVariableKind::Class => ruby_analysis::core::VariableTypeKind::Class,
-            CompletionVariableKind::Global => ruby_analysis::core::VariableTypeKind::Global,
-        };
-        let engine = self.analysis_engine.read();
-        ruby_analysis::engine::AnalysisQuery::new(&engine).variable_type_before_in_owner(
-            kind,
-            name,
-            owner,
-            file_id,
-            byte_offset,
-        )
-    }
-
-    fn implicit_receiver_at(
-        &self,
-        file_id: SourceFileId,
-        byte_offset: u32,
-    ) -> Option<FullyQualifiedName> {
-        let engine = self.analysis_engine.read();
-        ruby_analysis::engine::AnalysisQuery::new(&engine)
-            .execution_context_at(file_id, byte_offset)
-            .map(|context| context.implicit_receiver.clone())
-    }
-
-    fn exact_expression_type(
-        &self,
-        file_id: SourceFileId,
-        start_byte: u32,
-        end_byte: u32,
-    ) -> Option<RubyType> {
-        let engine = self.analysis_engine.read();
-        ruby_analysis::engine::AnalysisQuery::new(&engine).exact_expression_type(
-            ruby_analysis::core::TextRange::new(file_id, start_byte, end_byte),
-        )
-    }
 }

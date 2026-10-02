@@ -1,116 +1,62 @@
-//! Completion candidates: engine-backed constant and method lookups.
-//!
-//! Wraps constant and method completion logic behind `EngineQuery`,
-//! keeping lock management in one place.
+//! Completion candidates: constant and method matches read from one engine
+//! view and converted to protocol items.
 
 use ruby_analysis::core::RubyType;
-use tower_lsp::lsp_types::{CompletionItem, Position};
+use tower_lsp::lsp_types::CompletionItem;
 use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
 use ruby_analysis::engine::completion::rbs_method_matches_for_type;
-use ruby_analysis::engine::{ConstantLookupRequest, ConstantMatch, MethodMatch};
-use ruby_analysis::indexer::RubyPrismAnalyzer;
+use ruby_analysis::engine::{ConstantLookupRequest, ConstantMatch, MethodMatch, View};
 
-use crate::features::cursor::EngineQuery;
-
-impl EngineQuery {
-    /// Find constant completions by locking the analysis engine.
-    pub fn find_constant_completions(
-        &self,
-        analyzer: &RubyPrismAnalyzer,
-        position: Position,
-        partial: String,
-    ) -> Vec<CompletionItem> {
-        let items = self
-            .find_constant_completions_from_analysis(analyzer, position, &partial)
-            .unwrap_or_default();
-        dedupe_completion_items(items)
+/// Constants whose names match `partial`, sorted by label.
+pub(super) fn constant_completions(view: &View<'_>, partial: &str) -> Vec<CompletionItem> {
+    if !view.has_symbols() {
+        return Vec::new();
     }
+    let mut items = view
+        .constant_matches(&ConstantLookupRequest::new(partial, 50))
+        .into_iter()
+        .map(constant_completion_item)
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| left.label.cmp(&right.label));
+    dedupe_completion_items(items)
+}
 
-    fn find_constant_completions_from_analysis(
-        &self,
-        _analyzer: &RubyPrismAnalyzer,
-        _position: Position,
-        partial: &str,
-    ) -> Option<Vec<CompletionItem>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        if !query.has_symbols() {
-            return None;
-        }
-
-        let mut items = query
-            .constant_matches(&ConstantLookupRequest::new(partial, 50))
+/// Methods on `receiver_type`: indexed definitions, then RBS built-ins.
+pub(super) fn method_completions(
+    view: &View<'_>,
+    receiver_type: &RubyType,
+    partial_method: &str,
+    kind: NamespaceKind,
+) -> Vec<CompletionItem> {
+    let mut items = view
+        .method_matches_for_type(receiver_type, partial_method, kind)
+        .into_iter()
+        .map(method_completion_item_from_analysis)
+        .collect::<Vec<_>>();
+    items.extend(
+        rbs_method_matches_for_type(receiver_type, partial_method, kind)
             .into_iter()
-            .map(constant_completion_item)
-            .collect::<Vec<_>>();
+            .map(|candidate| {
+                method_completion_item(candidate.name, candidate.params, candidate.return_type)
+            }),
+    );
+    dedupe_completion_items(items)
+}
 
-        items.sort_by(|left, right| left.label.cmp(&right.label));
-        Some(items)
-    }
-
-    /// Find method completions for a receiver type.
-    ///
-    /// Delegates to `method::find_method_completions` which handles
-    /// both RBS (built-in) and index (user-defined) methods.
-    pub fn find_method_completions(
-        &self,
-        receiver_type: &RubyType,
-        partial_method: &str,
-        kind: NamespaceKind,
-    ) -> Vec<CompletionItem> {
-        let mut items = self.method_completions_from_analysis(receiver_type, partial_method, kind);
-        items.extend(
-            rbs_method_matches_for_type(receiver_type, partial_method, kind)
-                .into_iter()
-                .map(|candidate| {
-                    method_completion_item(candidate.name, candidate.params, candidate.return_type)
-                }),
-        );
-        dedupe_completion_items(items)
-    }
-
-    fn method_completions_from_analysis(
-        &self,
-        receiver_type: &RubyType,
-        partial_method: &str,
-        kind: NamespaceKind,
-    ) -> Vec<CompletionItem> {
-        let Some(engine) = self.analysis_engine() else {
-            return Vec::new();
-        };
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        query
-            .method_matches_for_type(receiver_type, partial_method, kind)
+/// Methods defined outside any class or module.
+pub(super) fn top_level_method_completions(
+    view: &View<'_>,
+    partial_method: &str,
+) -> Vec<CompletionItem> {
+    dedupe_completion_items(
+        view.top_level_method_matches(partial_method)
             .into_iter()
             .map(method_completion_item_from_analysis)
-            .collect()
-    }
-
-    pub fn find_top_level_method_completions(&self, partial_method: &str) -> Vec<CompletionItem> {
-        let items = self.top_level_method_completions_from_analysis(partial_method);
-        dedupe_completion_items(items)
-    }
-
-    fn top_level_method_completions_from_analysis(
-        &self,
-        partial_method: &str,
-    ) -> Vec<CompletionItem> {
-        let Some(engine) = self.analysis_engine() else {
-            return Vec::new();
-        };
-        let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        query
-            .top_level_method_matches(partial_method)
-            .into_iter()
-            .map(method_completion_item_from_analysis)
-            .collect()
-    }
+            .collect(),
+    )
 }
 
 fn method_completion_item_from_analysis(candidate: MethodMatch) -> CompletionItem {

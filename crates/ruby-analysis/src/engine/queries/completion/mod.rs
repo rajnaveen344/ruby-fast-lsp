@@ -4,6 +4,7 @@ mod literal_text;
 mod method_matches;
 mod method_return;
 mod shape_keys;
+mod view;
 
 use crate::invariant::ExpectInvariant;
 pub use literal_text::{
