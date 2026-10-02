@@ -387,7 +387,7 @@ end
 
 #[cfg(test)]
 mod cross_file_tests {
-    use crate::lsp::capabilities::navigation::type_hierarchy;
+    use crate::features::navigation::type_hierarchy;
     use crate::test::harness::{fixture_uri, FakeEditor};
     use tower_lsp::lsp_types::{
         PartialResultParams, Position, TextDocumentIdentifier, TextDocumentPositionParams,
@@ -434,8 +434,9 @@ mod cross_file_tests {
                     work_done_progress_params: WorkDoneProgressParams::default(),
                 };
 
-                if let Some(items) =
-                    type_hierarchy::handle_prepare_type_hierarchy(server, prepare_params).await
+                if let Some(items) = type_hierarchy::handle_prepare(server, prepare_params)
+                    .await
+                    .unwrap()
                 {
                     if !items.is_empty() && items[0].name == type_name {
                         return items.into_iter().next().unwrap();
@@ -489,6 +490,7 @@ end
 
         let supertypes = type_hierarchy::handle_supertypes(&server, supertypes_params)
             .await
+            .unwrap()
             .expect("Should get supertypes");
 
         // Should have both ModuleA and ModuleB
@@ -569,6 +571,7 @@ end
 
         let supertypes = type_hierarchy::handle_supertypes(&server, supertypes_params)
             .await
+            .unwrap()
             .expect("Should get supertypes");
 
         // Should have both mixins
@@ -642,6 +645,7 @@ end
 
         let supertypes = type_hierarchy::handle_supertypes(&server, supertypes_params)
             .await
+            .unwrap()
             .expect("Should get supertypes");
 
         // Should have all three
@@ -715,6 +719,7 @@ end
 
         let supertypes = type_hierarchy::handle_supertypes(&server, supertypes_params)
             .await
+            .unwrap()
             .expect("Should get supertypes");
 
         // Should have the unresolved include with warning
@@ -773,6 +778,7 @@ end
 
         let supertypes = type_hierarchy::handle_supertypes(&server, supertypes_params)
             .await
+            .unwrap()
             .expect("Should get supertypes");
 
         // Collect details

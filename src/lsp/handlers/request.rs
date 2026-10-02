@@ -8,9 +8,7 @@ use crate::lsp::capabilities::debug;
 use crate::lsp::capabilities::editing::{
     code_actions, completion, formatting, rename, signature_help,
 };
-use crate::lsp::capabilities::navigation::{
-    call_hierarchy, namespace_tree, type_hierarchy, workspace_symbols,
-};
+use crate::lsp::capabilities::navigation::{namespace_tree, workspace_symbols};
 use crate::lsp::capabilities::presentation::{
     code_lens, document_symbols, folding_range, hover, inlay_hints, selection_ranges,
     semantic_tokens,
@@ -192,116 +190,6 @@ pub async fn handle_extension_status(
     Ok(ExtensionStatusResponse {
         extensions: lang_server.extensions.registry().status_reports(),
     })
-}
-
-// ============================================================================
-// Type Hierarchy Handlers
-// ============================================================================
-
-pub async fn handle_prepare_type_hierarchy(
-    lang_server: &RubyLanguageServer,
-    params: TypeHierarchyPrepareParams,
-) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
-    info!(
-        "Prepare type hierarchy request received for {:?}",
-        params
-            .text_document_position_params
-            .text_document
-            .uri
-            .path()
-    );
-    let start_time = std::time::Instant::now();
-    let result = type_hierarchy::handle_prepare_type_hierarchy(lang_server, params).await;
-    info!(
-        "[PERF] Prepare type hierarchy completed in {:?}",
-        start_time.elapsed()
-    );
-    Ok(result)
-}
-
-pub async fn handle_supertypes(
-    lang_server: &RubyLanguageServer,
-    params: TypeHierarchySupertypesParams,
-) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
-    info!("Supertypes request received for: {}", params.item.name);
-    let start_time = std::time::Instant::now();
-    let result = type_hierarchy::handle_supertypes(lang_server, params).await;
-    let count = result.as_ref().map(|v| v.len()).unwrap_or(0);
-    info!(
-        "[PERF] Supertypes completed in {:?}, returned {} items",
-        start_time.elapsed(),
-        count
-    );
-    Ok(result)
-}
-
-pub async fn handle_subtypes(
-    lang_server: &RubyLanguageServer,
-    params: TypeHierarchySubtypesParams,
-) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
-    info!("Subtypes request received for: {}", params.item.name);
-    let start_time = std::time::Instant::now();
-    let result = type_hierarchy::handle_subtypes(lang_server, params).await;
-    let count = result.as_ref().map(|v| v.len()).unwrap_or(0);
-    info!(
-        "[PERF] Subtypes completed in {:?}, returned {} items",
-        start_time.elapsed(),
-        count
-    );
-    Ok(result)
-}
-
-pub async fn handle_prepare_call_hierarchy(
-    lang_server: &RubyLanguageServer,
-    params: CallHierarchyPrepareParams,
-) -> LspResult<Option<Vec<CallHierarchyItem>>> {
-    info!(
-        "Prepare call hierarchy request received for {:?}",
-        params
-            .text_document_position_params
-            .text_document
-            .uri
-            .path()
-    );
-    let start_time = std::time::Instant::now();
-    let result = call_hierarchy::handle_prepare_call_hierarchy(lang_server, params).await;
-    info!(
-        "[PERF] Prepare call hierarchy completed in {:?}",
-        start_time.elapsed()
-    );
-    Ok(result)
-}
-
-pub async fn handle_incoming_calls(
-    lang_server: &RubyLanguageServer,
-    params: CallHierarchyIncomingCallsParams,
-) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
-    info!("Incoming calls request received for: {}", params.item.name);
-    let start_time = std::time::Instant::now();
-    let result = call_hierarchy::handle_incoming_calls(lang_server, params).await;
-    let count = result.as_ref().map(|v| v.len()).unwrap_or(0);
-    info!(
-        "[PERF] Incoming calls completed in {:?}, returned {} items",
-        start_time.elapsed(),
-        count
-    );
-    Ok(result)
-}
-
-pub async fn handle_outgoing_calls(
-    lang_server: &RubyLanguageServer,
-    params: CallHierarchyOutgoingCallsParams,
-) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
-    info!("Outgoing calls request received for: {}", params.item.name);
-    let start_time = std::time::Instant::now();
-    let result = call_hierarchy::handle_outgoing_calls(lang_server, params).await;
-    let count = result.as_ref().map(|v| v.len()).unwrap_or(0);
-    info!(
-        "[PERF] Outgoing calls completed in {:?}, returned {} items",
-        start_time.elapsed(),
-        count
-    );
-    Ok(result)
 }
 
 pub async fn handle_rename(

@@ -1,4 +1,4 @@
-//! Call Hierarchy Query — Resolves incoming/outgoing calls from analysis facts.
+//! Call hierarchy: prepare, incoming, and outgoing calls from analysis facts.
 //!
 //! Implements the LSP Call Hierarchy feature for Ruby methods:
 //! 1. `prepare` — Find the method at cursor position
@@ -13,16 +13,93 @@ use crate::invariant::ExpectInvariant;
 use log::info;
 use ruby_analysis::engine::{AnalysisQuery, CallHierarchyMethod};
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
-    CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, SymbolKind,
-    SymbolTag, Url,
+    CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
+    CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
+    Position, SymbolKind, SymbolTag, Url,
 };
 
 use ruby_analysis::indexer::Identifier;
 
 use crate::features::cursor::analysis_location::{location_for_range, lsp_ranges_for_ranges};
 use crate::features::cursor::EngineQuery;
+use crate::server::RubyLanguageServer;
 use crate::utils::lsp::source_position;
+
+/// Handle `textDocument/prepareCallHierarchy`.
+pub async fn handle_prepare(
+    server: &RubyLanguageServer,
+    params: CallHierarchyPrepareParams,
+) -> LspResult<Option<Vec<CallHierarchyItem>>> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+    info!(
+        "Prepare call hierarchy request received for {:?}",
+        uri.path()
+    );
+    let start_time = Instant::now();
+    let result = server.get_doc(&uri).and_then(|doc| {
+        EngineQuery::with_engine(server.analysis_engine_for_uri(&uri)).prepare_call_hierarchy(
+            &uri,
+            position,
+            doc.content.clone(),
+        )
+    });
+    info!(
+        "[PERF] Prepare call hierarchy completed in {:?}",
+        start_time.elapsed()
+    );
+    Ok(result)
+}
+
+/// Handle `callHierarchy/incomingCalls`.
+pub async fn handle_incoming(
+    server: &RubyLanguageServer,
+    params: CallHierarchyIncomingCallsParams,
+) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
+    info!("Incoming calls request received for: {}", params.item.name);
+    let start_time = Instant::now();
+    let result =
+        item_query(server, &params.item).and_then(|(query, data)| query.get_incoming_calls(&data));
+    info!(
+        "[PERF] Incoming calls completed in {:?}, returned {} items",
+        start_time.elapsed(),
+        result.as_ref().map_or(0, Vec::len)
+    );
+    Ok(result)
+}
+
+/// Handle `callHierarchy/outgoingCalls`.
+pub async fn handle_outgoing(
+    server: &RubyLanguageServer,
+    params: CallHierarchyOutgoingCallsParams,
+) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
+    info!("Outgoing calls request received for: {}", params.item.name);
+    let start_time = Instant::now();
+    let result =
+        item_query(server, &params.item).and_then(|(query, data)| query.get_outgoing_calls(&data));
+    info!(
+        "[PERF] Outgoing calls completed in {:?}, returned {} items",
+        start_time.elapsed(),
+        result.as_ref().map_or(0, Vec::len)
+    );
+    Ok(result)
+}
+
+/// The owning engine and stored identity of a follow-up request's item.
+fn item_query(
+    server: &RubyLanguageServer,
+    item: &CallHierarchyItem,
+) -> Option<(EngineQuery, CallHierarchyData)> {
+    let analysis_engine = server.analysis_engine_for_uri(&item.uri);
+    let data: CallHierarchyData = item
+        .data
+        .as_ref()
+        .and_then(|d| serde_json::from_value(d.clone()).ok())?;
+    Some((EngineQuery::with_engine(analysis_engine), data))
+}
 
 // ============================================================================
 // Data Structures

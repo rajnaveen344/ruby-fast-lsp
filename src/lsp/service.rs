@@ -3,7 +3,9 @@
 //! server itself keeps state and state operations only.
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
-use crate::features::navigation::{definition, document_highlights, implementation, references};
+use crate::features::navigation::{
+    call_hierarchy, definition, document_highlights, implementation, references, type_hierarchy,
+};
 use crate::lsp::capabilities::debug::{self, LookupParams, LookupResponse};
 use crate::lsp::handlers::{notification, request};
 use crate::lsp::query::navigation::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
@@ -441,42 +443,42 @@ impl LanguageServer for RubyLanguageServer {
         &self,
         params: TypeHierarchyPrepareParams,
     ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
-        request::handle_prepare_type_hierarchy(self, params).await
+        type_hierarchy::handle_prepare(self, params).await
     }
 
     async fn supertypes(
         &self,
         params: TypeHierarchySupertypesParams,
     ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
-        request::handle_supertypes(self, params).await
+        type_hierarchy::handle_supertypes(self, params).await
     }
 
     async fn subtypes(
         &self,
         params: TypeHierarchySubtypesParams,
     ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
-        request::handle_subtypes(self, params).await
+        type_hierarchy::handle_subtypes(self, params).await
     }
 
     async fn prepare_call_hierarchy(
         &self,
         params: CallHierarchyPrepareParams,
     ) -> LspResult<Option<Vec<CallHierarchyItem>>> {
-        request::handle_prepare_call_hierarchy(self, params).await
+        call_hierarchy::handle_prepare(self, params).await
     }
 
     async fn incoming_calls(
         &self,
         params: CallHierarchyIncomingCallsParams,
     ) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
-        request::handle_incoming_calls(self, params).await
+        call_hierarchy::handle_incoming(self, params).await
     }
 
     async fn outgoing_calls(
         &self,
         params: CallHierarchyOutgoingCallsParams,
     ) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
-        request::handle_outgoing_calls(self, params).await
+        call_hierarchy::handle_outgoing(self, params).await
     }
 
     async fn rename(&self, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {

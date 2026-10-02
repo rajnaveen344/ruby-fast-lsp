@@ -1,4 +1,4 @@
-//! Type Hierarchy Query — LSP adapter over analysis-engine graph facts.
+//! Type hierarchy: prepare, supertypes, and subtypes over analysis-engine graph facts.
 //!
 //! Implements the LSP Type Hierarchy feature for Ruby classes and modules.
 //! This provides functionality similar to Ruby's `Class.ancestors` and finding
@@ -25,13 +25,92 @@ use ruby_analysis::engine::{
     AnalysisQuery, TypeHierarchyEntry, TypeHierarchyNode, TypeHierarchyRelation,
 };
 use serde::{Deserialize, Serialize};
-use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
+use std::time::Instant;
+use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::lsp_types::{
+    Position, SymbolKind, TypeHierarchyItem, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
+};
 
 use ruby_analysis::indexer::Identifier;
 
 use crate::features::cursor::analysis_location::location_for_range;
 use crate::features::cursor::EngineQuery;
+use crate::server::RubyLanguageServer;
 use crate::utils::lsp::source_position;
+
+/// Handle `textDocument/prepareTypeHierarchy`.
+pub async fn handle_prepare(
+    server: &RubyLanguageServer,
+    params: TypeHierarchyPrepareParams,
+) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+    info!(
+        "Prepare type hierarchy request received for {:?}",
+        uri.path()
+    );
+    let start_time = Instant::now();
+    let result = server.get_doc(&uri).and_then(|doc| {
+        EngineQuery::with_engine(server.analysis_engine_for_uri(&uri)).prepare_type_hierarchy(
+            &uri,
+            position,
+            doc.content.clone(),
+        )
+    });
+    info!(
+        "[PERF] Prepare type hierarchy completed in {:?}",
+        start_time.elapsed()
+    );
+    Ok(result)
+}
+
+/// Handle `typeHierarchy/supertypes`.
+pub async fn handle_supertypes(
+    server: &RubyLanguageServer,
+    params: TypeHierarchySupertypesParams,
+) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+    info!("Supertypes request received for: {}", params.item.name);
+    let start_time = Instant::now();
+    let result =
+        item_query(server, &params.item).and_then(|(query, data)| query.get_supertypes(&data));
+    info!(
+        "[PERF] Supertypes completed in {:?}, returned {} items",
+        start_time.elapsed(),
+        result.as_ref().map_or(0, Vec::len)
+    );
+    Ok(result)
+}
+
+/// Handle `typeHierarchy/subtypes`.
+pub async fn handle_subtypes(
+    server: &RubyLanguageServer,
+    params: TypeHierarchySubtypesParams,
+) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+    info!("Subtypes request received for: {}", params.item.name);
+    let start_time = Instant::now();
+    let result =
+        item_query(server, &params.item).and_then(|(query, data)| query.get_subtypes(&data));
+    info!(
+        "[PERF] Subtypes completed in {:?}, returned {} items",
+        start_time.elapsed(),
+        result.as_ref().map_or(0, Vec::len)
+    );
+    Ok(result)
+}
+
+/// The owning engine and stored identity of a follow-up request's item.
+fn item_query(
+    server: &RubyLanguageServer,
+    item: &TypeHierarchyItem,
+) -> Option<(EngineQuery, TypeHierarchyData)> {
+    let analysis_engine = server.analysis_engine_for_uri(&item.uri);
+    let data: TypeHierarchyData = item
+        .data
+        .as_ref()
+        .and_then(|d| serde_json::from_value(d.clone()).ok())?;
+    Some((EngineQuery::with_engine(analysis_engine), data))
+}
 
 // ============================================================================
 // Data Structures

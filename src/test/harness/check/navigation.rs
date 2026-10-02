@@ -9,9 +9,8 @@ use tower_lsp::lsp_types::{
 };
 
 use super::{assert_same_locations, position_params};
-use crate::features::navigation::{definition, implementation, references};
+use crate::features::navigation::{call_hierarchy, definition, implementation, references};
 use crate::lsp::capabilities::editing::rename::handle_rename;
-use crate::lsp::handlers::request;
 use crate::server::RubyLanguageServer;
 use crate::test::harness::fixture::{Tag, TagKind};
 
@@ -77,7 +76,7 @@ pub(super) async fn check_calls(
     kind: TagKind,
     expected: &[Location],
 ) {
-    let items = request::handle_prepare_call_hierarchy(
+    let items = call_hierarchy::handle_prepare(
         server,
         CallHierarchyPrepareParams {
             text_document_position_params: position_params(&cursor.uri, cursor.range.start),
@@ -95,7 +94,7 @@ pub(super) async fn check_calls(
     );
     let item = items[0].clone();
     let actual: Vec<Location> = match kind {
-        TagKind::Incoming => request::handle_incoming_calls(
+        TagKind::Incoming => call_hierarchy::handle_incoming(
             server,
             CallHierarchyIncomingCallsParams {
                 item,
@@ -109,7 +108,7 @@ pub(super) async fn check_calls(
         .into_iter()
         .map(|call| Location::new(call.from.uri, call.from.range))
         .collect(),
-        TagKind::Outgoing => request::handle_outgoing_calls(
+        TagKind::Outgoing => call_hierarchy::handle_outgoing(
             server,
             CallHierarchyOutgoingCallsParams {
                 item,
