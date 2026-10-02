@@ -771,15 +771,12 @@ fn reopened_method_return_requires_every_definition_to_resolve() {
         ResolveMode::Immediate,
     );
 
-    let callees = engine
-        .view()
-        .resolve_method_callees(&owner, &method_name)
+    let callees = ask_any(&engine.view(), &owner, &method_name, MethodWant::Callees)
+        .into_callees()
         .expect("reopened Service#value must resolve");
     assert_eq!(callees.len(), 1);
     invariant_eq!(
-        engine
-            .view()
-            .method_return_type_for_receiver(&owner, &method_name),
+        ask_any(&engine.view(), &owner, &method_name, MethodWant::Return).into_return_type(),
         None,
         what = "receiver return inference discarded an unresolved reopened method definition",
         why = "every definition is a reachable static outcome",
@@ -894,18 +891,14 @@ fn default_basic_object_method_missing_is_not_a_return_type() {
         "Widget must inherit BasicObject so the stub method_missing is on the lookup chain"
     );
     invariant_eq!(
-        engine
-            .view()
-            .method_return_type_for_receiver(&widget, &ghost),
+        ask_any(&engine.view(), &widget, &ghost, MethodWant::Return).into_return_type(),
         None,
         what = "Widget#ghost inherited BasicObject#method_missing's stub return",
         why = "default language fallback is not a proven return",
         fix = "skip stub/signature BasicObject#method_missing in receiver return lookup",
     );
     assert_eq!(
-        engine
-            .view()
-            .method_return_type_for_receiver(&dynamic, &ghost),
+        ask_any(&engine.view(), &dynamic, &ghost, MethodWant::Return).into_return_type(),
         Some(RubyType::integer()),
         "a project method_missing must still prove the fallback return"
     );

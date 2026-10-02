@@ -14,12 +14,14 @@ use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, MethodReferenceAccess, NamespaceKind,
     ResolvedMethodCallee, RubyMethod, RubyType, TextRange, TypeInferenceOutcome, UnknownReason,
 };
+use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::resolution::{
     effective_method_visibility_for_chain, method_lookup_chain, protected_method_visible_from,
     MethodLookupChainCache, MethodLookupResult,
 };
 use crate::engine::state::TypeInferenceOutcomeRef;
 use crate::engine::{Project, View};
+use crate::inference::semantics::ReceiverAccess;
 
 impl Project {
     pub(super) fn proven_deferred_receiver_type(
@@ -364,30 +366,26 @@ impl Project {
         );
         let owner = FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind);
         let query = View::new(self);
+        let ask = |access: ReceiverAccess<'_>, want| {
+            let request = MethodRequest::new(LookupReceiver::Namespace(&owner), method, want);
+            lookup::method(&query, request.with_access(access))
+        };
+        // A restricted receiver reuses the return only when the restriction
+        // hides none of the callees.
+        let visible_return = |access: ReceiverAccess<'_>| {
+            let all_callees = ask(ReceiverAccess::Any, MethodWant::Callees).into_callees();
+            (all_callees == ask(access, MethodWant::Callees).into_callees())
+                .then(|| ask(access, MethodWant::Return).into_return_type())
+                .flatten()
+        };
         let result = match access {
             AmbiguousMethodReturnAccess::Private => {
-                query.method_return_type_for_receiver(&owner, &method)
+                ask(ReceiverAccess::Any, MethodWant::Return).into_return_type()
             }
-            AmbiguousMethodReturnAccess::Public => {
-                let all_callees = query.resolve_method_callees(&owner, &method);
-                let visible_callees = query.resolve_public_method_callees(&owner, &method);
-                (all_callees == visible_callees)
-                    .then(|| query.method_return_type_for_public_receiver(&owner, &method))
-                    .flatten()
-            }
+            AmbiguousMethodReturnAccess::Public => visible_return(ReceiverAccess::Public),
             AmbiguousMethodReturnAccess::Protected(caller) => self
                 .call_expression_caller_namespace(caller)
-                .and_then(|caller| {
-                    let all_callees = query.resolve_method_callees(&owner, &method);
-                    let visible_callees =
-                        query.resolve_protected_method_callees(&owner, &method, &caller);
-                    (all_callees == visible_callees)
-                        .then(|| {
-                            query
-                                .method_return_type_for_protected_receiver(&owner, &method, &caller)
-                        })
-                        .flatten()
-                }),
+                .and_then(|caller| visible_return(ReceiverAccess::Protected { caller: &caller })),
         };
         invariant!(
             caches

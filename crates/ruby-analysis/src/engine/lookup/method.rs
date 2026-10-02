@@ -60,6 +60,23 @@ pub struct MethodRequest<'a> {
     pub want: MethodWant,
 }
 
+impl<'a> MethodRequest<'a> {
+    /// A request for `want` from `receiver` with [`ReceiverAccess::Any`].
+    pub fn new(receiver: LookupReceiver<'a>, method: RubyMethod, want: MethodWant) -> Self {
+        Self {
+            receiver,
+            method,
+            access: ReceiverAccess::Any,
+            want,
+        }
+    }
+
+    /// This request with `access` instead.
+    pub fn with_access(self, access: ReceiverAccess<'a>) -> Self {
+        Self { access, ..self }
+    }
+}
+
 /// A found method product; the variant matches [`MethodRequest::want`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum MethodFound {

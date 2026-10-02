@@ -10,6 +10,7 @@ use ruby_analysis::core::{
     FullyQualifiedName, MethodReceiver, NamespaceKind, RubyConstant, RubyMethod, UnknownReason,
     VariableTypeKind,
 };
+use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ConstantHover, ConstantHoverKind};
 use ruby_analysis::indexer::yard::parser::YardParser;
 use ruby_analysis::indexer::RubyDocument;
@@ -585,10 +586,20 @@ fn super_method_return_type_from_analysis(
 ) -> Option<RubyType> {
     let method = RubyMethod::new(method_name).ok()?;
     let engine = context.analysis_engine?.read();
-    let query = AnalysisQuery::new(&engine);
+    let view = engine.view();
     let owner = FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind);
-    let callee = query.resolve_super_method_callee(&owner, &method)?;
-    query.method_return_type_for_receiver(&callee.owner, &method)
+    let super_request = MethodRequest::new(
+        LookupReceiver::Super { owner: &owner },
+        method,
+        MethodWant::Callees,
+    );
+    let callee = lookup::method(&view, super_request).into_callees()?.pop()?;
+    let request = MethodRequest::new(
+        LookupReceiver::Namespace(&callee.owner),
+        method,
+        MethodWant::Return,
+    );
+    lookup::method(&view, request).into_return_type()
 }
 
 fn generate_method_definition_hover(
@@ -673,7 +684,12 @@ fn method_definition_hover_from_analysis(
         .or_else(|| {
             let method = RubyMethod::new(method_name).ok()?;
             let owner = FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind);
-            query.method_return_type_for_receiver(&owner, &method)
+            let request = MethodRequest::new(
+                LookupReceiver::Namespace(&owner),
+                method,
+                MethodWant::Return,
+            );
+            lookup::method(&query, request).into_return_type()
         })?;
     if return_type == RubyType::Unknown {
         return None;

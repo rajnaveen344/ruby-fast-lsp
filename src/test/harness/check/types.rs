@@ -133,7 +133,13 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                                 fqn.namespace_parts(),
                                 kind,
                             );
-                            query.method_return_type_for_receiver(&receiver, &method)
+                            let request = ruby_analysis::engine::lookup::MethodRequest::new(
+                                ruby_analysis::engine::lookup::LookupReceiver::Namespace(&receiver),
+                                method,
+                                ruby_analysis::engine::lookup::MethodWant::Return,
+                            );
+                            ruby_analysis::engine::lookup::method(&query, request)
+                                .into_return_type()
                         })
                 };
                 (TypeKind::Return, inferred)

@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::{
 
 use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::engine::completion::{CompletionSemanticQuery, CompletionVariableKind};
+use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 
 use crate::lsp::query::{analyzer_for_document, EngineQuery};
@@ -384,8 +385,12 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery {
         method: &RubyMethod,
     ) -> Option<RubyType> {
         let engine = self.analysis_engine.read();
-        ruby_analysis::engine::AnalysisQuery::new(&engine)
-            .method_return_type_for_receiver(namespace, method)
+        let request = MethodRequest::new(
+            LookupReceiver::Namespace(namespace),
+            *method,
+            MethodWant::Return,
+        );
+        lookup::method(&engine.view(), request).into_return_type()
     }
 
     fn variable_type_before(

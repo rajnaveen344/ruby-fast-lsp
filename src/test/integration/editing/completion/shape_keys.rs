@@ -136,9 +136,15 @@ end
     );
     let build = ruby_analysis::core::RubyMethod::new("build")
         .expect("the synthetic method name must be valid");
-    let method_return = AnalysisQuery::new(&engine.read())
-        .method_return_type_for_receiver(&payload_factory, &build)
-        .map(|ruby_type| ruby_type.to_string());
+    let request = ruby_analysis::engine::lookup::MethodRequest::new(
+        ruby_analysis::engine::lookup::LookupReceiver::Namespace(&payload_factory),
+        build,
+        ruby_analysis::engine::lookup::MethodWant::Return,
+    );
+    let method_return =
+        ruby_analysis::engine::lookup::method(&AnalysisQuery::new(&engine.read()), request)
+            .into_return_type()
+            .map(|ruby_type| ruby_type.to_string());
     assert_eq!(
         method_return,
         Some("{ id: Integer, name: String }".to_string()),

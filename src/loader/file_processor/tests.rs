@@ -406,8 +406,13 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
         query.namespace_exists(&platform_app),
         "reindexing class PlatformApp must keep its graph node so mixin lookup remains possible"
     );
-    let callees = query
-        .resolve_method_callees(&platform_app, &method)
+    let request = ruby_analysis::engine::lookup::MethodRequest::new(
+        ruby_analysis::engine::lookup::LookupReceiver::Namespace(&platform_app),
+        method,
+        ruby_analysis::engine::lookup::MethodWant::Callees,
+    );
+    let callees = ruby_analysis::engine::lookup::method(&query, request)
+        .into_callees()
         .expect("PlatformApp must remain a resolvable method owner after reindex");
     assert!(
         callees.iter().any(|callee| {

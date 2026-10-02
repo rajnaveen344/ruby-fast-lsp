@@ -184,13 +184,14 @@ Delete this file when the last task is done. Git history keeps the record.
         `method_facts_in_chain`. Profiler comparison.
   - [x] B5e. Replace the three method memo maps with one keyed on
         `MethodRequest`. Profiler comparison.
-  - [ ] B5f. Migrate server callers; delete the remaining legacy wrappers.
+  - [x] B5f. Migrate server callers; delete the remaining legacy wrappers.
   - [ ] B5g. Make `Semantics` method reads call `lookup::method`. Profiler
         comparison.
 
-  Notes: once B5f deletes the legacy wrappers, turn the B5a equality tests
-  in `engine/lookup/tests.rs` into expected-value assertions (several now
-  compare the lookup with itself). B5d decision on the builtin constructor
+  Notes: B5f turned the B5a equality tests in `engine/lookup/tests.rs` into
+  an expected-answer table (`lookup/expected_answers.txt`, one line per
+  receiver, method, and want over the four accesses; regenerate with
+  `LOOKUP_EXPECTED_BLESS=1` and review the diff). B5d decision on the builtin constructor
   check in `call_outcomes.rs`, which treats `Unknown` like `Missing`: keep
   it for now. The fallback also requires the instance namespace to be an
   indexed class, so `Unknown(Receiver)` never yields a type there. With

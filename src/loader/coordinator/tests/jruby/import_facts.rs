@@ -308,8 +308,15 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
              indexed types: {indexed_types:?}"
     );
     let combine_method = ruby_analysis::core::RubyMethod::new("combine").unwrap();
-    let combine_return = AnalysisQuery::new(&engine)
-        .method_return_type_for_receiver(&rich_proxy_namespace, &combine_method);
+    let combine_return = ruby_analysis::engine::lookup::method(
+        &AnalysisQuery::new(&engine),
+        ruby_analysis::engine::lookup::MethodRequest::new(
+            ruby_analysis::engine::lookup::LookupReceiver::Namespace(&rich_proxy_namespace),
+            combine_method,
+            ruby_analysis::engine::lookup::MethodWant::Return,
+        ),
+    )
+    .into_return_type();
     assert_eq!(
         combine_return,
         Some(RubyType::Class(

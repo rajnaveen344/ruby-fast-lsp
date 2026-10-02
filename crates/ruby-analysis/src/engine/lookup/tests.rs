@@ -1,5 +1,5 @@
-//! `lookup::method` answers equal the legacy access-flavoured wrappers for
-//! every receiver, access, and want they cover, and classify absence.
+//! `lookup::method` answers match an expected table for every receiver,
+//! method, access, and want over one fixture, and classify absence.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,16 +8,15 @@ use parking_lot::RwLock;
 use ruby_prism::Visit;
 use url::Url;
 
-use super::{method, method_cached, LookupReceiver, LookupUnknown, MethodAnswer, MethodFound};
+use super::{method, LookupReceiver, LookupUnknown, MethodAnswer, MethodFound};
 use super::{MethodRequest, MethodWant};
 use crate::core::{
     FullyQualifiedName, MethodFact, NamespaceKind, RubyConstant, RubyMethod, RubyType, SourceKind,
 };
-use crate::engine::resolution::{method_facts_in_chain, method_lookup_chain, MethodLookupResult};
-use crate::engine::{AnalysisQueryCache, Project, ResolveMode, SourceFileInput};
+use crate::engine::{Project, ResolveMode, SourceFileInput, View};
 use crate::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use crate::indexer::RubyDocument;
-use crate::inference::semantics::{ReceiverAccess, Semantics};
+use crate::inference::semantics::ReceiverAccess;
 
 const FIXTURE: &str = r#"
 class Base
@@ -174,74 +173,6 @@ fn request<'a>(
     }
 }
 
-fn is_any(access: ReceiverAccess<'_>) -> bool {
-    matches!(access, ReceiverAccess::Any)
-}
-
-/// A comparable projection of the legacy reference result.
-fn legacy_reference(
-    result: MethodLookupResult,
-) -> Option<(Option<Arc<MethodFact>>, FullyQualifiedName)> {
-    match result {
-        MethodLookupResult::Found(fact) => Some((Some(fact.clone()), fact.owner.clone())),
-        MethodLookupResult::Ambiguous { owner, .. } => Some((None, owner)),
-        MethodLookupResult::Missing | MethodLookupResult::Unknown(_) => None,
-    }
-}
-
-fn answer_reference(answer: MethodAnswer) -> Option<(Option<Arc<MethodFact>>, FullyQualifiedName)> {
-    match answer.into_reference() {
-        MethodAnswer::Found(fact) => Some((Some(fact.clone()), fact.owner.clone())),
-        MethodAnswer::Ambiguous { owner, .. } => Some((None, owner)),
-        MethodAnswer::Missing | MethodAnswer::Unknown(_) => None,
-    }
-}
-
-#[test]
-fn namespace_callees_equal_legacy_wrappers() {
-    let engine = project();
-    let view = engine.view();
-    let cache = AnalysisQueryCache::default();
-    let (child, other) = (namespace("Child"), namespace("Other"));
-    for owner in namespaces() {
-        for name in methods() {
-            for access in accesses(&child, &other) {
-                let legacy = match access {
-                    ReceiverAccess::Any => view.resolve_method_callees(&owner, &name),
-                    ReceiverAccess::Public => view.resolve_public_method_callees(&owner, &name),
-                    ReceiverAccess::Protected { caller } => {
-                        view.resolve_protected_method_callees(&owner, &name, caller)
-                    }
-                };
-                let request = request(
-                    LookupReceiver::Namespace(&owner),
-                    name,
-                    access,
-                    MethodWant::Callees,
-                );
-                assert_eq!(
-                    method(&view, request).into_callees(),
-                    legacy,
-                    "{owner} {name} {access:?}"
-                );
-                assert_eq!(
-                    method_cached(&view, request, &cache).into_callees(),
-                    legacy,
-                    "cached {owner} {name} {access:?}"
-                );
-            }
-            let cached = view.resolve_method_callees_cached(&owner, &name, &cache);
-            let request = request(
-                LookupReceiver::Namespace(&owner),
-                name,
-                ReceiverAccess::Any,
-                MethodWant::Callees,
-            );
-            assert_eq!(method_cached(&view, request, &cache).into_callees(), cached);
-        }
-    }
-}
-
 #[test]
 fn top_level_receiver_is_the_root_namespace() {
     let engine = project();
@@ -283,333 +214,180 @@ fn top_level_receiver_is_the_root_namespace() {
     ));
 }
 
-#[test]
-fn type_callees_and_signatures_equal_legacy_wrappers() {
-    let engine = project();
-    let view = engine.view();
-    let cache = AnalysisQueryCache::default();
-    let (child, other) = (namespace("Child"), namespace("Other"));
-    for receiver_type in receiver_types() {
-        for name in methods() {
-            for access in accesses(&child, &other) {
-                let legacy = match access {
-                    ReceiverAccess::Any => {
-                        view.resolve_method_callees_for_type(&receiver_type, &name)
-                    }
-                    ReceiverAccess::Public => {
-                        view.resolve_public_method_callees_for_type(&receiver_type, &name)
-                    }
-                    ReceiverAccess::Protected { caller } => view
-                        .resolve_protected_method_callees_for_type(&receiver_type, &name, caller),
-                };
-                let callees = request(
-                    LookupReceiver::Type(&receiver_type),
-                    name,
-                    access,
-                    MethodWant::Callees,
-                );
-                assert_eq!(
-                    method(&view, callees).into_callees(),
-                    legacy,
-                    "{receiver_type:?} {name} {access:?}"
-                );
+/// The expected answers for the fixture, one line per receiver, method, and
+/// want. Regenerate with `LOOKUP_EXPECTED_BLESS=1` and review the diff.
+const EXPECTED: &str = include_str!("expected_answers.txt");
 
-                let legacy = match access {
-                    ReceiverAccess::Any => {
-                        view.resolve_method_signature_facts_for_type(&receiver_type, &name)
-                    }
-                    ReceiverAccess::Public => view.resolve_method_signature_facts_for_type_inner(
-                        &receiver_type,
-                        &name,
-                        ReceiverAccess::Public,
-                    ),
-                    ReceiverAccess::Protected { caller } => view
-                        .resolve_protected_method_signature_facts_for_type(
-                            &receiver_type,
-                            &name,
-                            caller,
-                        ),
-                };
-                let signatures = request(
-                    LookupReceiver::Type(&receiver_type),
-                    name,
-                    access,
-                    MethodWant::Signatures,
-                );
-                assert_eq!(*method(&view, signatures).into_signatures(), legacy);
-                assert_eq!(
-                    *method_cached(&view, signatures, &cache).into_signatures(),
-                    legacy
-                );
-            }
-            let cached =
-                view.resolve_method_signature_facts_for_type_cached(&receiver_type, &name, &cache);
-            let signatures = request(
-                LookupReceiver::Type(&receiver_type),
-                name,
-                ReceiverAccess::Any,
-                MethodWant::Signatures,
-            );
-            assert_eq!(
-                *method_cached(&view, signatures, &cache).into_signatures(),
-                cached
-            );
+const WANTS: [MethodWant; 5] = [
+    MethodWant::Callees,
+    MethodWant::Facts,
+    MethodWant::Return,
+    MethodWant::Reference,
+    MethodWant::Signatures,
+];
+
+fn fact_label(fact: &MethodFact) -> String {
+    format!("{}@{}", fact.fqn, fact.range.start_byte)
+}
+
+fn facts_label<'a>(facts: impl IntoIterator<Item = &'a MethodFact>) -> String {
+    let facts = facts.into_iter().map(fact_label).collect::<Vec<_>>();
+    format!("[{}]", facts.join(", "))
+}
+
+/// A stable text form of an answer that keeps every field the lookup chose.
+fn render(answer: &MethodAnswer) -> String {
+    match answer {
+        MethodAnswer::Found(MethodFound::Callees(callees)) => {
+            let callees = callees
+                .iter()
+                .map(|callee| {
+                    let starts = callee
+                        .definition_ranges
+                        .iter()
+                        .map(|range| range.start_byte.to_string())
+                        .collect::<Vec<_>>();
+                    format!(
+                        "{}#{} {:?}@[{}]",
+                        callee.owner,
+                        callee.method,
+                        callee.resolution,
+                        starts.join(",")
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!("callees [{}]", callees.join(", "))
+        }
+        MethodAnswer::Found(MethodFound::Facts { owner, facts }) => {
+            format!("facts {owner} {}", facts_label(facts))
+        }
+        MethodAnswer::Found(MethodFound::Return(return_type)) => format!("return {return_type}"),
+        MethodAnswer::Found(MethodFound::Reference(fact)) => {
+            format!("reference {}", fact_label(fact))
+        }
+        MethodAnswer::Found(MethodFound::Signatures(facts)) => {
+            format!("signatures {}", facts_label(facts.iter()))
+        }
+        MethodAnswer::Ambiguous { owner, method } => format!("ambiguous {owner}#{method}"),
+        MethodAnswer::Missing => "missing".to_string(),
+        MethodAnswer::Unknown(reason) => format!("unknown {reason:?}"),
+    }
+}
+
+fn access_label(access: ReceiverAccess<'_>) -> String {
+    match access {
+        ReceiverAccess::Any => "any".to_string(),
+        ReceiverAccess::Public => "public".to_string(),
+        ReceiverAccess::Protected { caller } => format!("protected({caller})"),
+    }
+}
+
+/// One line per want; accesses that share an answer collapse into `all`, and
+/// `any only` means every restricted access is unsupported. `accesses` starts
+/// with `Any`. A want that is unsupported for every access has no line.
+fn render_receiver(
+    view: &View<'_>,
+    label: &str,
+    receiver: LookupReceiver<'_>,
+    accesses: &[ReceiverAccess<'_>],
+    lines: &mut Vec<String>,
+) {
+    for name in methods() {
+        for want in WANTS {
+            let answers = accesses
+                .iter()
+                .map(|access| render(&method(view, request(receiver, name, *access, want))))
+                .collect::<Vec<_>>();
+            let unsupported = render(&MethodAnswer::Unknown(LookupUnknown::Unsupported));
+            let answers = if answers.iter().all(|answer| *answer == answers[0]) {
+                if answers[0] == unsupported {
+                    continue;
+                }
+                format!("all: {}", answers[0])
+            } else if answers[1..].iter().all(|answer| *answer == unsupported) {
+                format!("any only: {}", answers[0])
+            } else {
+                let answers = accesses
+                    .iter()
+                    .zip(&answers)
+                    .map(|(access, answer)| format!("{}: {answer}", access_label(*access)))
+                    .collect::<Vec<_>>();
+                answers.join(" | ")
+            };
+            lines.push(format!("{label} {name} {want:?} => {answers}"));
         }
     }
 }
 
-#[test]
-fn namespace_returns_equal_legacy_wrappers() {
-    let engine = project();
-    let view = engine.view();
-    let cache = AnalysisQueryCache::default();
+fn expected_table(view: &View<'_>) -> String {
     let (child, other) = (namespace("Child"), namespace("Other"));
+    let accesses = accesses(&child, &other);
+    let mut lines = Vec::new();
     for owner in namespaces() {
-        for name in methods() {
-            for access in accesses(&child, &other) {
-                let (legacy, legacy_cached) = match access {
-                    ReceiverAccess::Any => (
-                        view.method_return_type_for_receiver(&owner, &name),
-                        view.method_return_type_for_receiver_cached(&owner, &name, &cache),
-                    ),
-                    ReceiverAccess::Public => (
-                        view.method_return_type_for_public_receiver(&owner, &name),
-                        view.method_return_type_for_public_receiver_cached(&owner, &name, &cache),
-                    ),
-                    ReceiverAccess::Protected { caller } => (
-                        view.method_return_type_for_protected_receiver(&owner, &name, caller),
-                        view.method_return_type_for_protected_receiver_cached(
-                            &owner, &name, caller, &cache,
-                        ),
-                    ),
-                };
-                let request = request(
-                    LookupReceiver::Namespace(&owner),
-                    name,
-                    access,
-                    MethodWant::Return,
-                );
-                assert_eq!(
-                    method(&view, request).into_return_type(),
-                    legacy,
-                    "{owner} {name} {access:?}"
-                );
-                assert_eq!(
-                    method_cached(&view, request, &cache).into_return_type(),
-                    legacy_cached
-                );
-            }
+        let receivers = [
+            ("namespace", LookupReceiver::Namespace(&owner)),
+            ("reflection", LookupReceiver::Reflection(&owner)),
+            ("super", LookupReceiver::Super { owner: &owner }),
+        ];
+        for (kind, receiver) in receivers {
+            render_receiver(
+                view,
+                &format!("{kind}({owner})"),
+                receiver,
+                &accesses,
+                &mut lines,
+            );
         }
     }
+    for receiver_type in receiver_types() {
+        let label = format!("type({receiver_type})");
+        let receiver = LookupReceiver::Type(&receiver_type);
+        render_receiver(view, &label, receiver, &accesses, &mut lines);
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+#[test]
+fn answers_match_expected_table() {
+    let engine = project();
+    let actual = expected_table(&engine.view());
+    if std::env::var_os("LOOKUP_EXPECTED_BLESS").is_some() {
+        let path = PathBuf::from(file!());
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(path.with_file_name("expected_answers.txt"));
+        std::fs::write(path, &actual).unwrap();
+        return;
+    }
+    for (line, (actual, expected)) in actual.lines().zip(EXPECTED.lines()).enumerate() {
+        assert_eq!(actual, expected, "expected_answers.txt line {}", line + 1);
+    }
+    assert_eq!(actual.lines().count(), EXPECTED.lines().count());
+}
+
+#[test]
+fn table_anchors_prove_returns() {
+    let engine = project();
+    let view = engine.view();
     let greet = RubyMethod::new("greet").unwrap();
-    assert_eq!(
+    let (base, child) = (namespace("Base"), namespace("Child"));
+    let answer = |receiver| {
         method(
             &view,
-            request(
-                LookupReceiver::Namespace(&namespace("Base")),
-                greet,
-                ReceiverAccess::Any,
-                MethodWant::Return
-            )
-        ),
+            request(receiver, greet, ReceiverAccess::Any, MethodWant::Return),
+        )
+    };
+    assert_eq!(
+        answer(LookupReceiver::Namespace(&base)),
         MethodAnswer::Found(MethodFound::Return(RubyType::string())),
         "the fixture must prove at least one return"
     );
-}
-
-#[test]
-fn namespace_signatures_and_facts_equal_legacy_paths() {
-    let engine = project();
-    let view = engine.view();
-    let cache = AnalysisQueryCache::default();
-    let (child, other) = (namespace("Child"), namespace("Other"));
-    for owner in namespaces() {
-        for name in methods() {
-            for access in accesses(&child, &other) {
-                let (allow_private, caller) = access.visibility();
-                let legacy = match access {
-                    ReceiverAccess::Any => view.resolve_method_signature_facts(&owner, &name),
-                    ReceiverAccess::Public => {
-                        view.resolve_method_signature_facts_inner(&owner, &name, false, None)
-                    }
-                    ReceiverAccess::Protected { caller } => {
-                        view.resolve_protected_method_signature_facts(&owner, &name, caller)
-                    }
-                };
-                let signatures = request(
-                    LookupReceiver::Namespace(&owner),
-                    name,
-                    access,
-                    MethodWant::Signatures,
-                );
-                assert_eq!(
-                    *method(&view, signatures).into_signatures(),
-                    legacy,
-                    "{owner} {name} {access:?}"
-                );
-                assert_eq!(
-                    *method_cached(&view, signatures, &cache).into_signatures(),
-                    legacy
-                );
-
-                let chain = method_lookup_chain(&engine, &owner);
-                let legacy = method_facts_in_chain(&engine, &chain, &name, allow_private, caller);
-                for receiver in [
-                    LookupReceiver::Namespace(&owner),
-                    LookupReceiver::Reflection(&owner),
-                ] {
-                    let facts = request(receiver, name, access, MethodWant::Facts);
-                    assert_eq!(
-                        method(&view, facts).into_facts(),
-                        legacy.clone(),
-                        "{owner} {name} {access:?}"
-                    );
-                }
-            }
-            assert_eq!(
-                *method_cached(
-                    &view,
-                    request(
-                        LookupReceiver::Namespace(&owner),
-                        name,
-                        ReceiverAccess::Any,
-                        MethodWant::Signatures
-                    ),
-                    &cache
-                )
-                .into_signatures(),
-                view.resolve_method_signature_facts_cached(&owner, &name, &cache)
-            );
-            assert_eq!(
-                *method_cached(
-                    &view,
-                    request(
-                        LookupReceiver::Namespace(&owner),
-                        name,
-                        ReceiverAccess::Any,
-                        MethodWant::Signatures
-                    ),
-                    &cache
-                )
-                .into_signatures(),
-                *view.resolve_method_signature_facts_cached_arc(&owner, &name, &cache)
-            );
-        }
-    }
-}
-
-#[test]
-fn super_and_reflection_equal_legacy_paths() {
-    let engine = project();
-    let view = engine.view();
-    let (child, other) = (namespace("Child"), namespace("Other"));
-    for owner in namespaces() {
-        for name in methods() {
-            let super_callee = view.resolve_super_method_callee(&owner, &name);
-            let reflected = view.resolve_reflected_method_callee(&owner, &name);
-            let super_return = Semantics::super_method_return_type(&view, &owner, &name, &|_| None);
-            for access in accesses(&child, &other) {
-                let super_receiver = LookupReceiver::Super { owner: &owner };
-                let reflection = LookupReceiver::Reflection(&owner);
-                let callees = method(
-                    &view,
-                    request(super_receiver, name, access, MethodWant::Callees),
-                );
-                let reflected_callees = method(
-                    &view,
-                    request(reflection, name, access, MethodWant::Callees),
-                );
-                let returns = method(
-                    &view,
-                    request(super_receiver, name, access, MethodWant::Return),
-                );
-                if is_any(access) {
-                    assert_eq!(
-                        callees.into_callees(),
-                        super_callee.clone().map(|callee| vec![callee])
-                    );
-                    assert_eq!(
-                        reflected_callees.into_callees(),
-                        reflected.clone().map(|callee| vec![callee])
-                    );
-                    assert_eq!(returns.into_return_type(), super_return, "{owner} {name}");
-                } else {
-                    for answer in [callees, reflected_callees, returns] {
-                        assert_eq!(answer, MethodAnswer::Unknown(LookupUnknown::Unsupported));
-                    }
-                }
-                for (receiver, want) in [
-                    (super_receiver, MethodWant::Signatures),
-                    (super_receiver, MethodWant::Facts),
-                    (reflection, MethodWant::Return),
-                    (reflection, MethodWant::Signatures),
-                ] {
-                    assert_eq!(
-                        method(&view, request(receiver, name, access, want)),
-                        MethodAnswer::Unknown(LookupUnknown::Unsupported)
-                    );
-                }
-            }
-        }
-    }
-    let greet = RubyMethod::new("greet").unwrap();
     assert_eq!(
-        method(
-            &view,
-            request(
-                LookupReceiver::Super { owner: &child },
-                greet,
-                ReceiverAccess::Any,
-                MethodWant::Return
-            )
-        ),
+        answer(LookupReceiver::Super { owner: &child }),
         MethodAnswer::Found(MethodFound::Return(RubyType::string())),
         "`super` from Child#greet must reach Base#greet"
     );
-}
-
-#[test]
-fn references_equal_legacy_paths() {
-    let engine = project();
-    let view = engine.view();
-    let (child, other) = (namespace("Child"), namespace("Other"));
-    for owner in namespaces() {
-        for name in methods() {
-            let mut chain_cache = crate::engine::resolution::MethodLookupChainCache::new();
-            let cases = [
-                (
-                    LookupReceiver::Namespace(&owner),
-                    view.resolve_method_reference(&owner, &name),
-                ),
-                (
-                    LookupReceiver::Reflection(&owner),
-                    view.resolve_instance_method_reference_with_chain_cache(
-                        &owner,
-                        &name,
-                        &mut chain_cache,
-                    ),
-                ),
-                (
-                    LookupReceiver::Super { owner: &owner },
-                    view.resolve_super_method_reference(&owner, &name),
-                ),
-            ];
-            for (receiver, legacy) in cases {
-                let legacy = legacy_reference(legacy);
-                for access in accesses(&child, &other) {
-                    let answer = method(
-                        &view,
-                        request(receiver, name, access, MethodWant::Reference),
-                    );
-                    if is_any(access) {
-                        assert_eq!(answer_reference(answer), legacy, "{owner} {name}");
-                    } else {
-                        assert_eq!(answer, MethodAnswer::Unknown(LookupUnknown::Unsupported));
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[test]

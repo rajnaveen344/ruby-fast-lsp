@@ -253,9 +253,8 @@ fn references_and_callees_no_longer_reach_removed_methods() {
     assert_eq!(engine.reference_facts_for(&greet_fqn()).len(), 1);
     assert_eq!(engine.reference_facts_for(&parent).len(), 1);
     assert_eq!(
-        engine
-            .view()
-            .resolve_method_callees(&parent, &greet())
+        ask_any(&engine.view(), &parent, &greet(), MethodWant::Callees)
+            .into_callees()
             .map(|callees| callees.len()),
         Some(1)
     );
@@ -265,12 +264,13 @@ fn references_and_callees_no_longer_reach_removed_methods() {
     assert!(engine.reference_facts_for(&greet_fqn()).is_empty());
     assert!(engine.reference_facts_for(&parent).is_empty());
     assert!(engine.view().references_in_file(child_file).is_empty());
-    assert!(engine
-        .view()
-        .resolve_method_callees(&parent, &greet())
-        .unwrap_or_default()
-        .iter()
-        .all(|callee| callee.definition_ranges.is_empty()));
+    assert!(
+        ask_any(&engine.view(), &parent, &greet(), MethodWant::Callees)
+            .into_callees()
+            .unwrap_or_default()
+            .iter()
+            .all(|callee| callee.definition_ranges.is_empty())
+    );
     assert!(engine.view().method_facts_in_file(parent_file).is_empty());
     assert!(engine.diagnostic_facts_in_file(parent_file).is_empty());
 }

@@ -11,9 +11,11 @@ use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::core::TextRange;
+use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use ruby_analysis::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use ruby_analysis::indexer::yard::converter::YardTypeConverter;
 use ruby_analysis::indexer::Identifier;
+use ruby_analysis::inference::semantics::ReceiverAccess;
 use ruby_prism::Visit;
 use std::path::Path;
 use std::sync::Arc;
@@ -255,11 +257,16 @@ impl EngineQuery {
             return false;
         };
         let engine = engine.read();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let receiver_fqn =
             FullyQualifiedName::namespace_with_kind(receiver_parts, NamespaceKind::Instance);
-        query
-            .resolve_public_method_callees(&receiver_fqn, method)
+        let request = MethodRequest::new(
+            LookupReceiver::Namespace(&receiver_fqn),
+            *method,
+            MethodWant::Callees,
+        )
+        .with_access(ReceiverAccess::Public);
+        lookup::method(&engine.view(), request)
+            .into_callees()
             .is_some_and(|callees| {
                 callees
                     .iter()

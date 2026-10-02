@@ -10,7 +10,9 @@ use crate::core::{
     DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, MethodFact, MethodReferenceAccess,
     ResolvedMethodCallee, RubyConstant, RubyMethod, RubyType, SourceFileId,
 };
+use crate::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use crate::engine::{Project, View};
+use crate::inference::semantics::ReceiverAccess;
 
 impl Project {
     pub(super) fn resolve_grouped_method_callees(
@@ -27,18 +29,22 @@ impl Project {
             fix = "enter grouped resolution only after validating a canonical RubyType::Union",
         );
         let query = View::new(self);
+        let callees = |access: ReceiverAccess<'_>| {
+            let request = MethodRequest::new(
+                LookupReceiver::Type(receiver_type),
+                method,
+                MethodWant::Callees,
+            );
+            lookup::method(&query, request.with_access(access)).into_callees()
+        };
         match access {
             MethodReferenceAccess::Normal
             | MethodReferenceAccess::VisibilityBypass
-            | MethodReferenceAccess::InstanceMethodReflection => {
-                query.resolve_method_callees_for_type(receiver_type, &method)
-            }
+            | MethodReferenceAccess::InstanceMethodReflection => callees(ReceiverAccess::Any),
             MethodReferenceAccess::ExplicitReceiver => caller
                 .and_then(|caller| self.call_expression_caller_namespace(caller))
-                .and_then(|caller| {
-                    query.resolve_protected_method_callees_for_type(receiver_type, &method, &caller)
-                })
-                .or_else(|| query.resolve_public_method_callees_for_type(receiver_type, &method)),
+                .and_then(|caller| callees(ReceiverAccess::Protected { caller: &caller }))
+                .or_else(|| callees(ReceiverAccess::Public)),
         }
     }
 
@@ -152,8 +158,13 @@ impl Project {
         }
         let query = View::new(self);
         if namespaces.iter().any(|owner| {
-            query
-                .resolve_method_callees(owner, &method)
+            let request = MethodRequest::new(
+                LookupReceiver::Namespace(owner),
+                method,
+                MethodWant::Callees,
+            );
+            lookup::method(&query, request)
+                .into_callees()
                 .is_some_and(|callees| {
                     callees
                         .iter()
@@ -188,7 +199,7 @@ pub(super) fn grouped_method_targets(
             invariant!(
                 callee.method == method && !callee.definition_ranges.is_empty(),
                 what = "complete grouped dispatch contains a non-exact method callee",
-                why = "resolve_method_callees_for_type returns Some only when every member resolves exactly",
+                why = "type-receiver callee lookups answer Found only when every member resolves exactly",
                 fix = "keep exact-callee filtering in the shared type resolver",
             );
             FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method)

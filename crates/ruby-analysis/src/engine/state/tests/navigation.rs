@@ -89,38 +89,35 @@ fn union_method_completion_requires_every_receiver_member() {
 
     let query = engine.view();
     let shared = RubyMethod::new("shared").unwrap();
-    let exact_callees = query
-        .resolve_protected_method_callees_for_type(&receiver, &shared, &alpha)
+    let protected = ReceiverAccess::Protected { caller: &alpha };
+    let ask = |method, want| {
+        let request = MethodRequest::new(LookupReceiver::Type(&receiver), method, want);
+        lookup::method(&query, request.with_access(protected))
+    };
+    let exact_callees = ask(shared, MethodWant::Callees)
+        .into_callees()
         .expect("shared must resolve exactly for every union receiver member");
     assert_eq!(exact_callees.len(), 2);
     assert!(exact_callees
         .iter()
         .all(|callee| callee.resolution == MethodCalleeResolution::Exact));
 
-    let signature_facts =
-        query.resolve_protected_method_signature_facts_for_type(&receiver, &shared, &alpha);
+    let signature_facts = ask(shared, MethodWant::Signatures).into_signature_vec();
     assert_eq!(signature_facts.len(), 2);
     assert!(signature_facts
         .iter()
         .all(|fact| fact.params == vec!["value"]));
 
+    let alpha_only = RubyMethod::new("alpha_only").unwrap();
     assert!(
-        query
-            .resolve_protected_method_callees_for_type(
-                &receiver,
-                &RubyMethod::new("alpha_only").unwrap(),
-                &alpha,
-            )
+        ask(alpha_only, MethodWant::Callees)
+            .into_callees()
             .is_none(),
         "a partial union method must not return one member's navigation target"
     );
     assert!(
-        query
-            .resolve_protected_method_signature_facts_for_type(
-                &receiver,
-                &RubyMethod::new("alpha_only").unwrap(),
-                &alpha,
-            )
+        ask(alpha_only, MethodWant::Signatures)
+            .into_signatures()
             .is_empty(),
         "a partial union method must not return one member's signature"
     );
@@ -736,22 +733,18 @@ fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
         ResolveMode::Immediate,
     );
 
-    let callees = engine
-        .view()
-        .resolve_method_callees(&owner, &method_name)
+    let callees = ask_any(&engine.view(), &owner, &method_name, MethodWant::Callees)
+        .into_callees()
         .expect("method owner must resolve");
     assert_eq!(callees.len(), 1);
     assert_eq!(callees[0].definition_ranges, vec![implementation_range]);
-    let signatures = engine
-        .view()
-        .resolve_method_signature_facts(&owner, &method_name);
+    let signatures =
+        ask_any(&engine.view(), &owner, &method_name, MethodWant::Signatures).into_signature_vec();
     assert_eq!(signatures.len(), 1);
     assert_eq!(signatures[0].range, signature_range);
     assert_eq!(signatures[0].return_type_label.as_deref(), Some("String"));
     assert_eq!(
-        engine
-            .view()
-            .method_return_type_for_receiver(&owner, &method_name),
+        ask_any(&engine.view(), &owner, &method_name, MethodWant::Return).into_return_type(),
         Some(RubyType::string())
     );
     assert_eq!(
@@ -810,9 +803,8 @@ fn inherited_method_callee_keeps_the_defining_parent_owner() {
         ResolveMode::Immediate,
     );
 
-    let callees = engine
-        .view()
-        .resolve_method_callees(&child, &method)
+    let callees = ask_any(&engine.view(), &child, &method, MethodWant::Callees)
+        .into_callees()
         .expect("Child must resolve Parent#value through ordinary ancestry");
     assert_eq!(callees.len(), 1);
     assert_eq!(callees[0].owner, parent);
@@ -850,18 +842,22 @@ fn public_lookup_of_a_private_method_is_receiver_only() {
         ResolveMode::Immediate,
     );
 
-    let private_callees = engine
-        .view()
-        .resolve_method_callees(&owner, &method)
+    let private_callees = ask_any(&engine.view(), &owner, &method, MethodWant::Callees)
+        .into_callees()
         .expect("private lookup must still see User#secret");
     assert_eq!(private_callees.len(), 1);
     assert_eq!(private_callees[0].resolution, MethodCalleeResolution::Exact);
     assert_eq!(private_callees[0].definition_ranges, vec![definition_range]);
 
-    let public_callees = engine
-        .view()
-        .resolve_public_method_callees(&owner, &method)
-        .expect("public lookup must retain the receiver when the method is private");
+    let public_callees = ask(
+        &engine.view(),
+        &owner,
+        &method,
+        ReceiverAccess::Public,
+        MethodWant::Callees,
+    )
+    .into_callees()
+    .expect("public lookup must retain the receiver when the method is private");
     assert_eq!(public_callees.len(), 1);
     assert_eq!(
         public_callees[0].resolution,

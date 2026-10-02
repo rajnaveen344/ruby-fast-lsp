@@ -17,11 +17,9 @@
 //! Requests delegate to the engine's resolution functions. A `View` that
 //! carries an `AnalysisQueryCache` memoizes namespace callee, return-type,
 //! and signature answers in it, keyed on the request and the engine
-//! identity; [`method_cached`] attaches a cache to a view. The
-//! access-flavoured callee, return-type, and signature wrappers on `View` are
-//! one-line views of [`method`] and [`method_cached`]; the tests compare
-//! answers with those wrappers and the remaining legacy paths per want,
-//! access, and receiver.
+//! identity; [`method_cached`] attaches a cache to a view. The tests pin
+//! every answer for one fixture in an expected table per receiver, method,
+//! access, and want.
 
 mod method;
 #[cfg(test)]

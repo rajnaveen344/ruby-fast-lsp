@@ -119,57 +119,9 @@ impl EngineQuery {
         namespace_kind: NamespaceKind,
         position: Position,
     ) -> Vec<ResolvedMethodCallee> {
-        self.resolve_method_callees_with_private(
-            receiver,
-            method,
-            namespace,
-            namespace_kind,
-            position,
-            true,
-            None,
-        )
-    }
-
-    fn resolve_method_callees_with_private(
-        &self,
-        receiver: &MethodReceiver,
-        method: &RubyMethod,
-        namespace: &[RubyConstant],
-        namespace_kind: NamespaceKind,
-        position: Position,
-        allow_private: bool,
-        protected_caller: Option<&FullyQualifiedName>,
-    ) -> Vec<ResolvedMethodCallee> {
-        let Some(receiver) =
-            self.method_lookup_receiver(receiver, namespace, namespace_kind, position)
-        else {
-            return Vec::new();
-        };
-        match receiver {
-            MethodLookupReceiver::Super(owner) => {
-                analysis::resolve_super_method_callee(self, &owner, method)
-                    .into_iter()
-                    .collect()
-            }
-            MethodLookupReceiver::Type(receiver_type) => analysis::resolve_method_callees_for_type(
-                self,
-                &receiver_type,
-                method,
-                allow_private,
-                protected_caller,
-            )
-            .unwrap_or_default(),
-            MethodLookupReceiver::Namespace(owner) => {
-                let callees = if allow_private {
-                    analysis::resolve_method_callees(self, &owner, method)
-                } else if let Some(caller) = protected_caller {
-                    analysis::resolve_protected_method_callees(self, &owner, method, caller)
-                } else {
-                    analysis::resolve_public_method_callees(self, &owner, method)
-                };
-                callees.unwrap_or_default()
-            }
-        }
+        self.method_lookup_receiver(receiver, namespace, namespace_kind, position)
+            .and_then(|receiver| analysis::resolve_method_callees(self, &receiver, method))
+            .unwrap_or_default()
     }
 
     fn method_lookup_receiver(

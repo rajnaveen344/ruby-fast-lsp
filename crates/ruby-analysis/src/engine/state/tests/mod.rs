@@ -9,6 +9,7 @@ use crate::core::{
 
 use super::*;
 use crate::core::{SourceFileId, SourceKind, TextRange, TypeResolution};
+use crate::engine::lookup::{self, LookupReceiver, MethodAnswer, MethodRequest, MethodWant};
 use crate::engine::persist::fingerprint::SemanticChange;
 use crate::engine::resolution::{
     method_lookup_chain, method_lookup_chain_for_reference_cached,
@@ -17,6 +18,8 @@ use crate::engine::resolution::{
 };
 use crate::engine::AnalysisQueryCache;
 use crate::engine::ConstantLookupRequest;
+use crate::engine::View;
+use crate::inference::semantics::ReceiverAccess;
 use std::path::PathBuf;
 
 mod caches;
@@ -27,6 +30,28 @@ mod inference_outcomes;
 mod lifecycle;
 mod navigation;
 mod remove;
+
+/// Ask `view` for `want` of `method` on the `owner` namespace with `access`.
+fn ask(
+    view: &View<'_>,
+    owner: &FullyQualifiedName,
+    method: &RubyMethod,
+    access: ReceiverAccess<'_>,
+    want: MethodWant,
+) -> MethodAnswer {
+    let request = MethodRequest::new(LookupReceiver::Namespace(owner), *method, want);
+    lookup::method(view, request.with_access(access))
+}
+
+/// [`ask`] with an unrestricted receiver.
+fn ask_any(
+    view: &View<'_>,
+    owner: &FullyQualifiedName,
+    method: &RubyMethod,
+    want: MethodWant,
+) -> MethodAnswer {
+    ask(view, owner, method, ReceiverAccess::Any, want)
+}
 
 fn constant_subject(name: &str) -> TypeSubject {
     TypeSubject::Constant(FullyQualifiedName::constant(vec![

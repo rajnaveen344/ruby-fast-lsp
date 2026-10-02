@@ -130,10 +130,13 @@ async fn mixin_dispatch_unknown_override_does_not_reuse_default_type() {
             .server()
             .analysis_engine_for_uri(&crate::test::harness::fixture_uri("/feature.rb"));
         let engine = engine.read();
-        engine.view().method_return_type_for_receiver(
-            &FullyQualifiedName::namespace(vec![RubyConstant::new("Feature").unwrap()]),
-            &RubyMethod::new("registry").unwrap(),
-        )
+        let feature = FullyQualifiedName::namespace(vec![RubyConstant::new("Feature").unwrap()]);
+        let request = ruby_analysis::engine::lookup::MethodRequest::new(
+            ruby_analysis::engine::lookup::LookupReceiver::Namespace(&feature),
+            RubyMethod::new("registry").unwrap(),
+            ruby_analysis::engine::lookup::MethodWant::Return,
+        );
+        ruby_analysis::engine::lookup::method(&engine.view(), request).into_return_type()
     };
     assert_eq!(return_type(&editor), Some(RubyType::string()));
 

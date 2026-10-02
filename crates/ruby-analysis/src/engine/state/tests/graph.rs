@@ -674,21 +674,21 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
 
     let query = engine.view();
     assert_eq!(
-        query
-            .resolve_method_callees(&parent, &helper)
+        ask_any(&query, &parent, &helper, MethodWant::Callees)
+            .into_callees()
             .expect("parent helper must resolve")[0]
             .definition_ranges,
         vec![helper_range]
     );
     assert_eq!(
-        query
-            .resolve_method_callees(&child, &helper)
+        ask_any(&query, &child, &helper, MethodWant::Callees)
+            .into_callees()
             .expect("nested generated owner must inherit its parent helper")[0]
             .definition_ranges,
         vec![helper_range]
     );
-    let sibling_callees = query
-        .resolve_method_callees(&sibling, &helper)
+    let sibling_callees = ask_any(&query, &sibling, &helper, MethodWant::Callees)
+        .into_callees()
         .expect("known sibling owner must produce a conservative receiver-only result");
     assert_eq!(sibling_callees.len(), 1);
     assert_eq!(sibling_callees[0].owner, sibling);
@@ -705,14 +705,16 @@ fn generated_owners_use_normal_mro_but_isolate_siblings_and_replace_per_file() {
         .is_none());
 
     engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
-    assert!(engine
-        .view()
-        .resolve_method_callees(&parent, &helper)
-        .is_none());
-    assert!(engine
-        .view()
-        .resolve_method_callees(&child, &helper)
-        .is_none());
+    assert!(
+        ask_any(&engine.view(), &parent, &helper, MethodWant::Callees)
+            .into_callees()
+            .is_none()
+    );
+    assert!(
+        ask_any(&engine.view(), &child, &helper, MethodWant::Callees)
+            .into_callees()
+            .is_none()
+    );
 }
 
 #[test]
@@ -831,19 +833,19 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
     );
 
     let query = engine.view();
-    let shared_callees = query
-        .resolve_method_callees(&template, &shared)
+    let shared_callees = ask_any(&query, &template, &shared, MethodWant::Callees)
+        .into_callees()
         .expect("template-local helper must resolve");
     assert_eq!(shared_callees.len(), 1);
     assert_eq!(shared_callees[0].definition_ranges, vec![shared_range]);
-    let application_callees = query
-        .resolve_method_callees(&template, &consumer)
+    let application_callees = ask_any(&query, &template, &consumer, MethodWant::Callees)
+        .into_callees()
         .expect("application helpers must resolve through the template");
     assert_eq!(application_callees.len(), 2);
     assert_eq!(application_callees[0].definition_ranges, vec![first_range]);
     assert_eq!(application_callees[1].definition_ranges, vec![second_range]);
     assert_eq!(
-        query.method_return_type_for_receiver(&template, &consumer),
+        ask_any(&query, &template, &consumer, MethodWant::Return).into_return_type(),
         Some(RubyType::union(vec![
             RubyType::integer(),
             RubyType::string()
@@ -869,9 +871,8 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
         application_facts(false),
         ResolveMode::Immediate,
     );
-    let one = engine
-        .view()
-        .resolve_method_callees(&template, &consumer)
+    let one = ask_any(&engine.view(), &template, &consumer, MethodWant::Callees)
+        .into_callees()
         .expect("remaining application helper must resolve");
     assert_eq!(one.len(), 1);
     assert_eq!(one[0].definition_ranges, vec![first_range]);
@@ -881,9 +882,8 @@ fn execution_context_applications_resolve_independently_and_replace_per_file() {
         FileAnalysis::default(),
         ResolveMode::Immediate,
     );
-    let removed = engine
-        .view()
-        .resolve_method_callees(&template, &consumer)
+    let removed = ask_any(&engine.view(), &template, &consumer, MethodWant::Callees)
+        .into_callees()
         .expect("known template must retain receiver-only fallback");
     assert_eq!(removed.len(), 1);
     assert_eq!(removed[0].resolution, MethodCalleeResolution::ReceiverOnly);

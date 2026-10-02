@@ -108,7 +108,7 @@ fn resolved_callee_to_abi(callee: ruby_analysis::core::ResolvedMethodCallee) -> 
         unreachable_invariant!(
             what = "analysis resolved extension callee owner `{}` is not a namespace",
             why = "extension callee owners must be namespaces",
-            fix = "keep AnalysisQuery::resolve_method_callees returning namespace owners",
+            fix = "keep lookup::method callee answers owned by namespaces",
             callee.owner,
         )
     });

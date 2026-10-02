@@ -49,7 +49,12 @@ fn assert_shared_dependency_semantics(engine: &AnalysisEngine, expected_path: &P
         SourceKind::Gem
     );
 
-    let signatures = query.resolve_method_signature_facts(&owner, &method);
+    let request = ruby_analysis::engine::lookup::MethodRequest::new(
+        ruby_analysis::engine::lookup::LookupReceiver::Namespace(&owner),
+        method,
+        ruby_analysis::engine::lookup::MethodWant::Signatures,
+    );
+    let signatures = ruby_analysis::engine::lookup::method(&query, request).into_signature_vec();
     assert_eq!(signatures.len(), 1);
     assert_eq!(signatures[0].params, ["prefix"]);
     assert_eq!(signatures[0].return_type_label.as_deref(), Some("String"));

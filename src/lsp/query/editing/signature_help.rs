@@ -1,9 +1,11 @@
 use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind};
+use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::inference::method::return_type::rbs_method_signatures_for_type;
 use ruby_analysis::inference::rbs::{RbsMethodSignature, RbsSignatureParameter};
+use ruby_analysis::inference::semantics::ReceiverAccess;
 use tower_lsp::lsp_types::{Position, Url};
 
 use crate::lsp::query::EngineQuery;
@@ -96,14 +98,19 @@ impl EngineQuery {
         );
         let engine = self.analysis_engine()?.read();
         let query = AnalysisQuery::new(&engine);
+        let signatures = |receiver, access| {
+            let request = MethodRequest::new(receiver, target.method, MethodWant::Signatures)
+                .with_access(access);
+            lookup::method(&query, request).into_signature_vec()
+        };
         let facts = match &target.receiver {
-            MethodReceiver::None => query.resolve_method_signature_facts(
-                namespace_fqn.as_ref().expect_invariant(
+            MethodReceiver::None => signatures(
+                LookupReceiver::Namespace(namespace_fqn.as_ref().expect_invariant(
                     "an implicit receiver was classified as a union without a namespace",
                     "implicit self has one lexical runtime namespace",
                     "keep union receiver handling restricted to explicit typed expressions",
-                ),
-                &target.method,
+                )),
+                ReceiverAccess::Any,
             ),
             MethodReceiver::SelfReceiver
             | MethodReceiver::Constant(_)
@@ -114,23 +121,21 @@ impl EngineQuery {
             | MethodReceiver::MethodCall { .. }
             | MethodReceiver::Literal(_)
             | MethodReceiver::Expression => {
-                if union_receiver {
-                    query.resolve_protected_method_signature_facts_for_type(
-                        &receiver_type,
-                        &target.method,
-                        &caller_namespace,
-                    )
+                let receiver = if union_receiver {
+                    LookupReceiver::Type(&receiver_type)
                 } else {
-                    query.resolve_protected_method_signature_facts(
-                        namespace_fqn.as_ref().expect_invariant(
-                            "a non-union explicit receiver lost its resolved namespace before signature lookup",
-                            "receiver classification and namespace resolution use the same immutable target",
-                            "retain the resolved namespace through signature selection",
-                        ),
-                        &target.method,
-                        &caller_namespace,
-                    )
-                }
+                    LookupReceiver::Namespace(namespace_fqn.as_ref().expect_invariant(
+                        "a non-union explicit receiver lost its resolved namespace before signature lookup",
+                        "receiver classification and namespace resolution use the same immutable target",
+                        "retain the resolved namespace through signature selection",
+                    ))
+                };
+                signatures(
+                    receiver,
+                    ReceiverAccess::Protected {
+                        caller: &caller_namespace,
+                    },
+                )
             }
             MethodReceiver::Super => unreachable_invariant!(
                 what = "super receiver reached ordinary signature resolution",

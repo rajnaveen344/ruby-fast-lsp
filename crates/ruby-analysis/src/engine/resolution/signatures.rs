@@ -27,25 +27,6 @@ impl<'a> View<'a> {
         .into_signature_vec()
     }
 
-    pub fn resolve_method_signature_facts_cached(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        cache: &AnalysisQueryCache,
-    ) -> Vec<MethodFact> {
-        lookup::method_cached(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Any,
-                want: MethodWant::Signatures,
-            },
-            cache,
-        )
-        .into_signature_vec()
-    }
-
     pub(crate) fn resolve_method_signature_facts_cached_arc(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -63,46 +44,6 @@ impl<'a> View<'a> {
             cache,
         )
         .into_signatures()
-    }
-
-    pub fn resolve_protected_method_signature_facts(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Vec<MethodFact> {
-        lookup::method(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Namespace(namespace_fqn),
-                method: *method,
-                access: ReceiverAccess::Protected {
-                    caller: caller_namespace_fqn,
-                },
-                want: MethodWant::Signatures,
-            },
-        )
-        .into_signature_vec()
-    }
-
-    pub fn resolve_protected_method_signature_facts_for_type(
-        &self,
-        receiver_type: &RubyType,
-        method: &RubyMethod,
-        caller_namespace_fqn: &FullyQualifiedName,
-    ) -> Vec<MethodFact> {
-        lookup::method(
-            self,
-            MethodRequest {
-                receiver: LookupReceiver::Type(receiver_type),
-                method: *method,
-                access: ReceiverAccess::Protected {
-                    caller: caller_namespace_fqn,
-                },
-                want: MethodWant::Signatures,
-            },
-        )
-        .into_signature_vec()
     }
 
     pub fn resolve_method_signature_facts_for_type(
