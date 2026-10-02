@@ -5,10 +5,11 @@ and locks. The semantic database remains isolated per Ruby project.
 
 Start with [server.rs](../../src/server/mod.rs): it constructs the owners. The LSP
 protocol facade (`impl LanguageServer` and the debug and namespace-tree custom
-requests) lives in [service.rs](../../src/lsp/service.rs) and routes to the
-handlers; the server keeps state and state operations only and does not import
-`crate::lsp`. The cached namespace-tree response is the engine's
-`NamespaceTreeResponse`; the request parameters stay with the lsp feature. Each module under `src/server/` keeps related state and
+requests) lives in [service.rs](../../src/lsp/service.rs) and routes to
+[feature](../../src/features/README.md) `handle` functions and the lifecycle
+handlers; the server keeps state and state operations only and imports neither
+`crate::lsp` nor `crate::features`. The cached namespace-tree response is the engine's
+`NamespaceTreeResponse`; the request parameters stay with the namespace-tree feature. Each module under `src/server/` keeps related state and
 operations together. The semantic database remains
 [AnalysisEngine](../../crates/ruby-analysis/src/engine/state/mod.rs), isolated per Ruby
 project, with a separate orphan engine for unowned documents.

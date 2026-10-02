@@ -14,7 +14,7 @@ src/
 ├── environment/    - Configuration, Ruby runtime discovery, and extension hosts
 ├── features/       - Editor features, one module per feature, over a shared cursor context
 ├── loader/         - Workspace discovery, fact collection, scheduling, and caches
-├── lsp/            - Editor projections: service facade, capabilities, query adapters, handlers, check
+├── lsp/            - Protocol layer: service facade, lifecycle notifications and document indexing, check report
 ├── server/         - Server state: documents, project routing, products, and publication
 ├── utils/          - Shared helpers, single-flight, the resource admission governor, and the persistent product cache
 └── main.rs         - Application entry point
@@ -26,7 +26,8 @@ editors/
 ```
 
 Module dependencies point down: `loader`, `environment`, and `utils` never
-import `server`, `lsp`, or `features`, and `server` never imports `lsp`. The
+import `server`, `lsp`, or `features`; `server` never imports `lsp` or
+`features`; and `features` never imports `lsp`. The
 structure check enforces this; see
 [source folder organization](../support/structure/README.md#module-layering).
 `environment` produces facts and never mutates project semantic state: the
@@ -112,58 +113,46 @@ The Analyzer is responsible for understanding Ruby code structure using the Pris
 - Separates analysis logic from feature implementation (Capabilities)
 - Stateless analysis: processes one document at a time
 
-### 3. Capabilities (`src/lsp/capabilities/`)
+### 3. Features (`src/features/`)
 
-Capabilities implement LSP/editor feature entry points by coordinating query
-adapters, analysis APIs, and editor-specific behavior.
+Each feature owns one editor capability end to end: the request body, cursor
+and document context, the query adapter over `ruby-analysis`, and conversion
+to protocol values. See the [feature guide](features/README.md).
 
-- **Primary Responsibility**: Implement LSP feature endpoints, trigger routing, snippets, and editor-only behavior
-- **Secondary Responsibility**: Convert between LSP types and internal types
+- **Primary Responsibility**: Implement each request as `handle(server, params)`
+- **Secondary Responsibility**: Convert between LSP types and analysis-domain types
 
 #### Layout:
 
+- `cursor/`: `EngineQuery` (document plus owning engine), method lookup at the
+  cursor, and range conversion (`analysis_location.rs`)
 - `navigation/`: definitions, references, implementations, call and type
   hierarchies, document highlights, workspace symbols, and the namespace tree
 - `editing/`: completion (with snippets and trigger handling), signature help,
   rename, code actions, and formatting
 - `presentation/`: hover, inlay hints, code lenses, semantic tokens, document
   symbols, folding ranges, and selection ranges
-- `indexing/`, `debug.rs`: document lifecycle indexing (syntax diagnostics come
-  from `src/loader/file_processor/syntax_diagnostics.rs`) and debug requests
+- `diagnostics/`: the engine's unresolved-entry diagnostics for a document
+  over the server-owned projection in `server/diagnostics.rs`, and the
+  external linter and formatter runner
+- `debug.rs`: FQN lookup, graph export, and extension status requests
 
 #### Design Decisions:
 
-- Each capability is self-contained in its own module
-- Capabilities stay thin; reusable semantic analysis belongs in `ruby-analysis`
-- For engine-backed queries, capabilities delegate to the **Query Engine**
-- Capabilities handle LSP-specific concerns (request/validation/shaping)
+- The `lsp` layer reaches a feature only through its `handle` functions, the
+  request types they take and return, and static capability descriptors
+- Features may read `server` state and `loader` products and never name `lsp`
+- Reusable semantic analysis belongs in `ruby-analysis`; a feature only adapts
+  it and does not duplicate MRO, identity, ranking, or missing-method policy
+- Syntax diagnostics come from
+  `src/loader/file_processor/syntax_diagnostics.rs`
 
-### 4. Query Engine (`src/lsp/query/`)
+### 4. Lifecycle (`src/lsp/lifecycle/`)
 
-The Query Engine provides a unified service layer for querying the `AnalysisEngine`.
-
-- **Primary Responsibility**: Consolidate business logic for engine-backed queries
-- **Secondary Responsibility**: Provide composable helpers for complex resolution (e.g., method return types)
-
-#### Key Files:
-
-- `src/features/cursor/mod.rs`: Defines the `EngineQuery` struct and entry points
-- `navigation/`: definition, reference, implementation, hierarchy, and symbol lookups
-- `editing/`: completion candidates and signature help
-- `presentation/`: hover, inlay hints, and code lenses
-- `src/features/cursor/method/`: Method resolution and dispatch logic
-- `src/features/cursor/analysis_location.rs`: shared range conversion
-- `diagnostics.rs`: `get_unresolved_diagnostics`, a query entry point over the
-  server-owned engine diagnostic projection in `server/diagnostics.rs`
-
-Both folders use the same `navigation/`, `editing/`, and `presentation/`
-families, so a feature's handler and query adapter sit in matching places.
-
-#### Design Decisions:
-
-- Consolidates all "index-aware" logic into one place
-- Provides a stable API for capabilities to query project-wide information
-- Enables complex "chained" queries through composable helpers
+- `notification/`: initialize (server capabilities), initialized, shutdown,
+  configuration, workspace folders, and watched files
+- `indexing/`: document open, change, save, and close indexing, workspace
+  initialization, and diagnostic publication
 
 ### Project Containers and Engine Isolation
 
@@ -495,7 +484,8 @@ diagnostic publisher, watched-file changes, and namespace-tree cache. Focused
 modules under `src/server/` keep state with its operations; `server/mod.rs` retains
 common construction. The `tower-lsp` protocol facade (`impl LanguageServer`
 and the debug and namespace-tree custom requests) lives in
-`src/lsp/service.rs` and routes to `lsp/handlers`. See
+`src/lsp/service.rs` and routes to feature `handle` functions and
+`lsp/lifecycle`. See
 [server state ownership](../docs/development/server-state.md) for field counts,
 responsibilities, shared lifetimes, and test boundaries.
 
@@ -505,7 +495,7 @@ responsibilities, shared lifetimes, and test boundaries.
   complete `ruby-analysis` crate is editor-independent and exposes domain
   positions, ranges, symbols, tokens, and source identities; no reusable
   analysis module imports or depends on `tower-lsp`.
-- The server delegates actual implementation to capability modules
+- The server delegates actual implementation to feature modules
 - Server clones share owner handles and preserve existing lock identities.
   Each project still owns a separate `AnalysisEngine`; unowned documents use
   the registry's orphan engine. Open buffers are distinct from indexed facts.
@@ -681,12 +671,11 @@ measurements live under `support/performance/`; they are evidence, not a second
 architecture document. Mandatory release and memory gates are summarized in
 `AGENTS.md`.
 
-### 7. Handlers (`src/lsp/handlers/`)
+### 7. Service facade (`src/lsp/service.rs`)
 
-Handlers manage the routing of LSP requests and notifications.
-
-- **Primary Responsibility**: Receive requests from the service facade (`src/lsp/service.rs`) and route them to capabilities
-- **Secondary Responsibility**: Handle document lifecycle notifications (open, change, save)
+The service facade implements `tower_lsp::LanguageServer` and the custom
+requests. It logs and times each request, then calls the feature's `handle`
+function or the lifecycle handler.
 
 ### 8. Ruby Runtime and Version (`src/environment/runtime/`)
 
@@ -759,8 +748,8 @@ from its effective runtime selection.
 
 The Ruby Fast LSP follows a clear 3-layer architecture:
 
-1. **API Layer** (`lsp/service.rs`, `lsp/handlers/`): Handles LSP protocol, request validation, and routing over `server/` state.
-2. **Service Layer** (`src/lsp/query/`, `src/lsp/capabilities/`): Implements business logic for LSP features. `EngineQuery` acts as the primary service interface for data lookups.
+1. **API Layer** (`lsp/service.rs`, `lsp/lifecycle/`): Handles LSP protocol, lifecycle notifications, and routing over `server/` state.
+2. **Feature Layer** (`src/features/`): Implements each editor feature. `EngineQuery` is the shared cursor context for engine lookups.
 3. **Data Layer** (`ruby-analysis::engine`): Owns symbols, graph facts, references, diagnostics, and type facts.
 
 ### Analyzer, Query Engine, and Indexer Relationship
@@ -777,11 +766,11 @@ This separation allows:
 2. Clearer testing boundaries
 3. Better caching strategies (indexer can be persistent, analyzer is on-demand)
 
-### Capability and Query Engine Relationship
+### Feature and Query Engine Relationship
 
-Capabilities use the Query Engine as their primary data service:
+Features use the Query Engine as their primary data service:
 
-1. Capabilities handle the AST traversal and identifying _what_ the user is interacting with.
+1. Features handle the AST traversal and identifying _what_ the user is interacting with.
 2. They call the Query Engine to resolve _where_ that thing is defined or referenced across the workspace.
 3. They translate the results back into LSP-specific formats.
 

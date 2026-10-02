@@ -25,6 +25,10 @@ lsp/service -> features::<family>::<feature>::handle -> ruby-analysis engine
 - A feature exposes `handle(server, params)`. The `lsp` layer reaches a
   feature only through its `handle` functions, the request types they take
   and return, and static capability descriptors.
+- Open debt (B7e/B7f): `lsp/lifecycle/indexing` still composes published
+  diagnostics itself from `diagnostics::linter::lint_document` and
+  `EngineQuery::get_unresolved_diagnostics`. That composition moves into
+  `diagnostics/` with B7f.
 - A feature may read `server` state and `loader` products. It never names
   `lsp`; an item a feature needs from `lsp` moves to its proper owner.
 - Query adapters convert cursor positions to analysis offsets and domain
