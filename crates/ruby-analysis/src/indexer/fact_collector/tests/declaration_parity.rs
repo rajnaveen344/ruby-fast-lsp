@@ -302,3 +302,20 @@ fn dynamic_definitions_need_a_class_object_self() {
         "{seed:#?}"
     );
 }
+
+#[test]
+fn extend_edges_do_not_join_the_instance_ancestry() {
+    // `extend` adds a module to the singleton class's ancestors, not the
+    // receiver's own, so `extend self` and a module that extends one of its
+    // includers form no inheritance cycle.
+    let source = "module Shapes\n  module Tools\n    extend self\n  end\n  module Sized\n    \
+                  extend Tools\n  end\n  module Tools\n    include Sized\n  end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "edge Shapes::Tools Extend Shapes::Tools",
+            "edge Shapes::Sized Extend Shapes::Tools",
+            "edge Shapes::Tools Include Shapes::Sized",
+        ],
+    );
+}

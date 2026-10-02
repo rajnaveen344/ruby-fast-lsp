@@ -572,12 +572,11 @@ impl FactCollector {
     }
 }
 
+/// Whether an edge joins its source's own ancestor chain. `extend` adds to
+/// the singleton class's ancestors instead, so `extend self` is no cycle.
 pub(in crate::indexer::fact_collector) fn ancestry_edge_kind(kind: GraphEdgeKind) -> bool {
     match kind {
-        GraphEdgeKind::Superclass
-        | GraphEdgeKind::Include
-        | GraphEdgeKind::Prepend
-        | GraphEdgeKind::Extend => true,
-        GraphEdgeKind::ExecutionContextApplication => false,
+        GraphEdgeKind::Superclass | GraphEdgeKind::Include | GraphEdgeKind::Prepend => true,
+        GraphEdgeKind::Extend | GraphEdgeKind::ExecutionContextApplication => false,
     }
 }
