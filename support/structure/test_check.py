@@ -15,6 +15,13 @@ def policy():
         'version': 1, 'limit': 10, 'line_limit': 1000, 'roots': ['src', 'crates'],
         'strict_roots': ['crates/analysis'], 'excluded': {},
         'legacy': {}, 'legacy_lines': {}, 'exceptions': {},
+        'layering': {
+            'rules': [
+                {'sources': ['src/loader', 'src/utils'], 'forbidden': ['server', 'lsp']},
+                {'sources': ['src/server'], 'forbidden': ['lsp']},
+            ],
+            'test_exemptions': {},
+        },
     }
 
 
@@ -172,6 +179,48 @@ class FileLineLimitTests(unittest.TestCase):
         config = policy()
         config['line_limit'] = 2000
         with self.assertRaisesRegex(ValueError, 'line limit must remain 1000'):
+            check.validate_policy(config)
+
+
+class LayeringTests(unittest.TestCase):
+    def run_audit(self, contents, configuration=None):
+        return check.audit(sorted(contents), configuration or policy(), contents.__getitem__)['violations']
+
+    def test_forbidden_crate_paths_fail_with_their_line(self):
+        failures = self.run_audit({'src/loader/a.rs': 'use std::fs;\nuse crate::server::Server;\n'})
+        self.assertEqual(len(failures), 1)
+        self.assertIn('src/loader/a.rs:2: imports crate::server', failures[0])
+        self.assertIn('crate::lsp', self.run_audit({'src/server/a.rs': 'fn f() { crate::lsp::handle(); }\n'})[0])
+
+    def test_grouped_imports_are_checked_by_their_top_level_module(self):
+        failures = self.run_audit({'src/utils/a.rs': 'use crate::{\n    utils::lsp::x,\n    lsp::{a, b},\n};\n'})
+        self.assertEqual(len(failures), 1)
+        self.assertIn('crate::lsp', failures[0])
+
+    def test_allowed_layers_comments_and_nested_names_pass(self):
+        contents = {
+            'src/loader/a.rs': 'use crate::utils::lsp::x;\n// crate::server is described here\nuse crate::environment::y;\n',
+            'src/server/a.rs': 'use crate::loader::z;\n',
+            'src/lsp/a.rs': 'use crate::server::Server;\n',
+            'src/loader/b.py': 'crate::server\n',
+        }
+        self.assertEqual(self.run_audit(contents), [])
+
+    def test_exempt_test_module_passes_until_it_stops_violating(self):
+        config = policy()
+        config['layering']['test_exemptions']['src/loader/tests/mod.rs'] = 'Drives the server.'
+        self.assertEqual(self.run_audit({'src/loader/tests/mod.rs': 'use crate::server::S;\n'}, config), [])
+        self.assertIn('obsolete layering test exemption', self.run_audit({'src/loader/tests/mod.rs': ''}, config)[0])
+
+    def test_only_test_modules_under_a_rule_may_be_exempt(self):
+        for path in ['src/loader/a.rs', 'src/lsp/tests.rs', 'src/loader/tests.py']:
+            config = policy()
+            config['layering']['test_exemptions'][path] = 'Reason.'
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                check.validate_policy(config)
+        config = policy()
+        config['layering']['test_exemptions']['src/loader/tests.rs'] = ' '
+        with self.assertRaisesRegex(ValueError, 'needs a reason'):
             check.validate_policy(config)
 
 

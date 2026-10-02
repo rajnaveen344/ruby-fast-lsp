@@ -24,6 +24,11 @@ editors/
 └── npm/            - npm package manifests and platform package directories
 ```
 
+Module dependencies point down: `loader`, `environment`, and `utils` never
+import `server`, `lsp`, or `features`, and `server` never imports `lsp`. The
+structure check enforces this; see
+[source folder organization](../support/structure/README.md#module-layering).
+
 ### Analysis Library
 
 `ruby-analysis` exposes four ownership modules: `core` for domain contracts,

@@ -84,5 +84,29 @@
     ]
   },
   "legacy_lines": {},
-  "exceptions": {}
+  "exceptions": {},
+  "layering": {
+    "rules": [
+      {
+        "sources": ["src/loader", "src/environment", "src/utils"],
+        "forbidden": ["server", "lsp", "features"]
+      },
+      {
+        "sources": ["src/server"],
+        "forbidden": ["lsp"]
+      }
+    ],
+    "test_exemptions": {
+      "src/loader/coordinator/tests/jruby/import_facts.rs": "Loader test fixture: asserts editor-visible results through lsp handlers or query adapters over private loader internals reached through super.",
+      "src/loader/coordinator/tests/mod.rs": "Loader test fixture: loads run through the server-built LoadContext and LoadSink, the only LoadSink implementation, and the test reaches private loader internals through super.",
+      "src/loader/coordinator/tests/workflow/mod.rs": "Loader test fixture: asserts editor-visible results through lsp handlers or query adapters over private loader internals reached through super.",
+      "src/loader/coordinator/tests/workflow/project_files.rs": "Loader test fixture: asserts editor-visible results through lsp handlers or query adapters over private loader internals reached through super.",
+      "src/loader/file_processor/tests.rs": "Loader test fixture: loads run through the server-built LoadContext and LoadSink, the only LoadSink implementation, and the test reaches private loader internals through super.",
+      "src/loader/sources/gems/tests/mod.rs": "Loader test fixture: loads run through the server-built LoadContext and LoadSink, the only LoadSink implementation, and the test reaches private loader internals through super.",
+      "src/loader/sources/project/tests/cross_file_constants.rs": "Loader test fixture: asserts editor-visible results through lsp handlers or query adapters over private loader internals reached through super.",
+      "src/loader/sources/project/tests/mod.rs": "Loader test fixture: loads run through the server-built LoadContext and LoadSink, the only LoadSink implementation, and the test reaches private loader internals through super.",
+      "src/loader/sources/project/tests/open_documents.rs": "Loader test fixture: asserts editor-visible results through lsp handlers or query adapters over private loader internals reached through super.",
+      "src/loader/sources/stdlib/tests.rs": "Loader test fixture: asserts editor-visible results through lsp handlers or query adapters over private loader internals reached through super."
+    }
+  }
 }

@@ -1,11 +1,7 @@
 use std::fs;
 
 use tempfile::TempDir;
-use tower_lsp::lsp_types::{
-    DidChangeWatchedFilesParams, DidChangeWorkspaceFoldersParams, FileChangeType, FileEvent,
-    InitializeParams, Url, WorkspaceFolder, WorkspaceFoldersChangeEvent,
-};
-use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::{FileChangeType, FileEvent, Url};
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -59,7 +55,6 @@ use crate::environment::extensions::registry::status::{
 };
 use crate::environment::extensions::responses::response_patch_to_document_symbol;
 use crate::environment::extensions::{ProjectContextSeed, MAX_EXTENSION_WASM_BYTES};
-use crate::server::RubyLanguageServer;
 use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
@@ -73,7 +68,7 @@ mod manifest;
 mod patches;
 mod processes;
 
-fn copy_rspec_package(destination: &Path, version: &str) {
+pub(crate) fn copy_rspec_package(destination: &Path, version: &str) {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
     let wasm_relative = Path::new("target/wasm32-wasip1/release/rspec-ruby.wasm");
     fs::create_dir_all(destination.join(wasm_relative).parent().unwrap())
@@ -318,7 +313,7 @@ call_names = []
     .expect("test settings manifest must be written");
 }
 
-fn write_watched_file_failure_package(destination: &Path) {
+pub(crate) fn write_watched_file_failure_package(destination: &Path) {
     fs::create_dir_all(destination).expect("test package directory must be created");
     let wasm = wat::parse_str(
         r#"

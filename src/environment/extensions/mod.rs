@@ -6,7 +6,7 @@ mod project_context;
 mod registry;
 mod responses;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::invariant::ExpectInvariant;
 pub use dispatch::call_context::resolved_call_for_stack;

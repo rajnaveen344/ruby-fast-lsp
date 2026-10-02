@@ -1,7 +1,8 @@
-"""Check semantic source-folder and source-file limits without counting local build output."""
+"""Check semantic source-folder and source-file limits and module layering without counting local build output."""
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from collections import defaultdict
@@ -32,9 +33,9 @@ def in_scope(path, policy):
 
 
 def validate_policy(policy):
-    fields = {'version', 'limit', 'line_limit', 'roots', 'strict_roots', 'excluded', 'legacy', 'legacy_lines', 'exceptions'}
+    fields = {'version', 'limit', 'line_limit', 'roots', 'strict_roots', 'excluded', 'legacy', 'legacy_lines', 'exceptions', 'layering'}
     if not isinstance(policy, dict) or set(policy) != fields:
-        raise ValueError('policy must contain exactly version, limit, line_limit, roots, strict_roots, excluded, legacy, legacy_lines, and exceptions')
+        raise ValueError('policy must contain exactly version, limit, line_limit, roots, strict_roots, excluded, legacy, legacy_lines, exceptions, and layering')
     if type(policy['version']) is not int or policy['version'] != 1 or policy['limit'] != LIMIT:
         raise ValueError('policy version must be 1 and the source-folder limit must remain 10')
     if policy['line_limit'] != LINE_LIMIT:
@@ -82,7 +83,124 @@ def validate_policy(policy):
             raise ValueError(f'{path}: exception needs a finite entry bound above 10')
         if not isinstance(exception['readme_excerpt'], str) or not exception['readme_excerpt'].strip():
             raise ValueError(f'{path}: exception needs its local README justification')
+    validate_layering(policy['layering'])
     return policy
+
+
+LAYER_NAME = re.compile(r'^[a-z_][a-z0-9_]*$')
+CRATE_PATH = re.compile(r'\bcrate::([a-z_][a-z0-9_]*)\b')
+CRATE_GROUP = re.compile(r'\bcrate::\{')
+
+
+def is_test_module(path):
+    parts = PurePosixPath(path).parts
+    return 'tests' in parts[:-1] or parts[-1] == 'tests.rs' or parts[-1].endswith('_tests.rs')
+
+
+def validate_layering(layering):
+    if not isinstance(layering, dict) or set(layering) != {'rules', 'test_exemptions'}:
+        raise ValueError('layering must contain exactly rules and test_exemptions')
+    rules = layering['rules']
+    if not isinstance(rules, list):
+        raise ValueError('layering rules must be a list')
+    for rule in rules:
+        if not isinstance(rule, dict) or set(rule) != {'sources', 'forbidden'}:
+            raise ValueError('each layering rule needs exactly sources and forbidden')
+        for name in ['sources', 'forbidden']:
+            values = rule[name]
+            if not isinstance(values, list) or not values or not all(isinstance(value, str) for value in values) or len(values) != len(set(values)):
+                raise ValueError(f'layering {name} must be a nonempty list of distinct names')
+        for source in rule['sources']:
+            relative_path(source)
+        for module in rule['forbidden']:
+            if not LAYER_NAME.match(module):
+                raise ValueError(f'layering forbids crate modules by name, got {module!r}')
+    exemptions = layering['test_exemptions']
+    if not isinstance(exemptions, dict):
+        raise ValueError('layering test_exemptions must be a path-keyed object')
+    for path, reason in exemptions.items():
+        relative_path(path)
+        if not path.endswith('.rs') or not is_test_module(path):
+            raise ValueError(f'{path}: only test modules may be exempt from layering')
+        if not any(beneath(path, source) for rule in rules for source in rule['sources']):
+            raise ValueError(f'{path}: layering exemption must be under a rule source')
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f'{path}: layering exemption needs a reason')
+
+
+def strip_line_comment(line):
+    index = line.find('//')
+    return line if index < 0 else line[:index]
+
+
+def group_heads(text, start):
+    """Top-level module names inside a `crate::{...}` group starting at `start`."""
+    heads, depth, expecting = [], 0, True
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char == '{':
+            depth += 1
+            expecting = depth == 1
+        elif char == '}':
+            depth -= 1
+            if depth == 0:
+                break
+        elif char == ',' and depth == 1:
+            expecting = True
+        elif depth == 1 and expecting and not char.isspace():
+            match = LAYER_NAME.match(re.split(r'[^a-z0-9_]', text[index:], maxsplit=1)[0])
+            if match:
+                heads.append(match.group(0))
+            expecting = False
+        index += 1
+    return heads
+
+
+def crate_modules(text):
+    """Crate root modules named by `crate::` paths, with their 1-based lines."""
+    found = []
+    lines = [strip_line_comment(line) for line in text.splitlines()]
+    code = '\n'.join(lines)
+    for match in CRATE_PATH.finditer(code):
+        found.append((code.count('\n', 0, match.start()) + 1, match.group(1)))
+    for match in CRATE_GROUP.finditer(code):
+        line = code.count('\n', 0, match.start()) + 1
+        found.extend((line, head) for head in group_heads(code, match.end() - 1))
+    return sorted(found)
+
+
+def audit_layering(sources, policy, read_text):
+    layering = policy['layering']
+    exemptions = layering['test_exemptions']
+    violations = []
+    exempt_used = set()
+    for path in sources:
+        if not path.endswith('.rs'):
+            continue
+        forbidden = {
+            module
+            for rule in layering['rules']
+            if any(beneath(path, source) for source in rule['sources'])
+            for module in rule['forbidden']
+        }
+        if not forbidden:
+            continue
+        try:
+            text = read_text(path)
+        except (OSError, UnicodeError):
+            continue
+        hits = [(line, module) for line, module in crate_modules(text) if module in forbidden]
+        if not hits:
+            continue
+        if path in exemptions:
+            exempt_used.add(path)
+            continue
+        for line, module in hits:
+            violations.append(f'{path}:{line}: imports crate::{module}, which this layer must not depend on')
+    for path in sorted(set(exemptions) - exempt_used):
+        violations.append(f'{path}: remove the obsolete layering test exemption')
+    return violations
 
 
 def inventory(files):
@@ -125,6 +243,7 @@ def audit(files, policy, read_text):
     directories = {path: entries for path, entries in inventory(files).items() if in_scope(path, policy)}
     sources = sorted(path for path in files if path.endswith(SOURCE_SUFFIXES) and in_scope(path, policy))
     violations = audit_lines(sources, policy, read_text)
+    violations += audit_layering(sources, policy, read_text)
     for path, entries in sorted(directories.items()):
         if len(entries) <= LIMIT:
             continue
@@ -157,6 +276,7 @@ def audit(files, policy, read_text):
         'legacy_directories': len(policy['legacy']),
         'legacy_files': len(policy['legacy_lines']),
         'exceptions': len(policy['exceptions']),
+        'layering_test_exemptions': len(policy['layering']['test_exemptions']),
         'violations': violations,
     }
 
@@ -198,11 +318,11 @@ def main(argv=None):
     if args.json:
         print(json.dumps(report, indent=2))
     else:
-        print(f"Audited {report['audited_directories']} source folders and {report['audited_sources']} source files; {report['legacy_directories']} legacy folders, {report['legacy_files']} legacy files, {report['exceptions']} approved exceptions.")
+        print(f"Audited {report['audited_directories']} source folders and {report['audited_sources']} source files; {report['legacy_directories']} legacy folders, {report['legacy_files']} legacy files, {report['exceptions']} approved exceptions, {report['layering_test_exemptions']} layering test exemptions.")
         for violation in report['violations']:
             print(violation, file=sys.stderr)
         if not report['violations']:
-            print('Directory and file limits passed.')
+            print('Directory, file, and layering limits passed.')
     return 1 if report['violations'] else 0
 
 

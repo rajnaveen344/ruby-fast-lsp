@@ -16,7 +16,8 @@ are grouped by the same feature families as `src/lsp/capabilities/` and
 - `editing/` - `completion/`, `rename/`, `formatting.rs`, `signature_help.rs`
 - `lifecycle/` - Deterministic schedules around collection, commit, dependency
   refresh, and diagnostic publication; observer controls; exact results and
-  method targets across edits, partial opens, and closed buffers
+  method targets across edits, partial opens, and closed buffers; server-driven
+  extension workspace discovery and watched-file routing
 - `presentation/` - `hover/`, `inlay_hints/`, `code_lens/`, `folding_range/`,
   `selection_ranges.rs`
   - `inlay_hints/variable_type/assigned_values/` - Hints from literals, constants,

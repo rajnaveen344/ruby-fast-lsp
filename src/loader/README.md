@@ -41,7 +41,9 @@ constant-path module and class definitions map to namespaces.
 
 The loader is a function of a `LoadContext` that writes through a `LoadSink`.
 It never sees the server: no loader entry point takes `RubyLanguageServer`,
-and non-test loader code has no `crate::server` import.
+and loader code has no `crate::server`, `crate::lsp`, or `crate::features`
+import. The structure check enforces this; the loader test modules that still
+build their load through the server are named in its policy.
 
 ## Inputs
 

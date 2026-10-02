@@ -322,11 +322,17 @@ Delete this file when the last task is done. Git history keeps the record.
         the engine's `NamespaceTreeResponse`, so the server imports it from
         `ruby_analysis` and `NamespaceTreeParams` stays with the lsp feature;
         the refresh reads only server-retained linter output, so it stays.
-  - [ ] C2i. Add a layering check to `support/structure/check.py`: no
+  - [x] C2i. Add a layering check to `support/structure/check.py`: no
         `crate::server`, `crate::lsp`, or `crate::features` in `src/loader`,
         `src/environment`, or `src/utils`, and no `crate::lsp` in
         `src/server`. Move loader and environment tests that drive lsp
-        handlers to `src/test/integration/`.
+        handlers to `src/test/integration/`. Done: the three server-driven
+        extension tests moved to `integration/lifecycle/extension_workspaces.rs`,
+        so environment is clean, tests included. Ten loader test modules
+        build loads through the server's `LoadSink` or assert through lsp
+        adapters while reaching private loader internals through `super`;
+        they are named exemptions in `policy.json`, and the check fails once
+        an exempt file stops violating, so the list can only shrink.
 - [ ] C3. Merge the handler, capability, and query layers into one `features/`
       module per feature.
   - [ ] C3a. Add `src/features/` with `mod.rs` and a README. Move `lsp/query`

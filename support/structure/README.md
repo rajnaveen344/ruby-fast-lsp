@@ -36,6 +36,22 @@ audited roots are limited to 1,000 lines, tests included. No file currently
 has a ceiling under `legacy_lines`. Do not add one to admit new work; split the
 file by responsibility instead.
 
+## Module layering
+
+The `layering` policy forbids upward imports by crate root module. Rust files
+under `src/loader`, `src/environment`, and `src/utils` may not name
+`crate::server`, `crate::lsp`, or `crate::features`; files under `src/server`
+may not name `crate::lsp`. The check reads `crate::` paths, including
+`crate::{...}` groups by their top-level module, and ignores `//` comments.
+Each violation reports its file and line.
+
+Tests are held to the same rule. A test that drives the server or lsp
+handlers belongs in `src/test/integration/`. The only escape is
+`test_exemptions`, an exact list of test-module files (under a `tests/`
+folder, or named `tests.rs` or `*_tests.rs`), each with a reason. An
+exemption that no longer violates fails the check, so remove it when the test
+moves. Do not add an exemption for production code or to admit new work.
+
 Grouping decisions remain a code-review responsibility. This check cannot tell
 whether a name is meaningful or whether unrelated code was merged into one file
 under the line limit. Preserve module ownership, use semantic groups, and update source-path
