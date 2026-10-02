@@ -370,6 +370,16 @@ impl ExtensionRegistry {
             });
         }
     }
+
+    /// Forget that `engine` holds any semantic seed, so the next file pass
+    /// commits one again.
+    pub(super) fn forget_semantic_seed(&self, engine: &Arc<dyn Send + Sync>) {
+        self.semantic_seeded_engines.lock().retain(|seeded| {
+            seeded.engine.upgrade().is_some_and(|seeded_engine| {
+                !std::ptr::addr_eq(Arc::as_ptr(&seeded_engine), Arc::as_ptr(engine))
+            })
+        });
+    }
 }
 
 #[cfg(test)]

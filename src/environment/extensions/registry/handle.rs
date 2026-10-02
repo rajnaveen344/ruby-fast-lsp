@@ -198,6 +198,12 @@ impl ExtensionRegistryHandle {
             .with_semantic_seed(engine, project, applicability_fingerprint, commit);
     }
 
+    /// Forget the seed recorded for `engine` after its owner emptied it, so
+    /// the next file pass seeds the emptied engine again.
+    pub(crate) fn forget_semantic_seed(&self, engine: &Arc<dyn Send + Sync>) {
+        self.inner.read().forget_semantic_seed(engine);
+    }
+
     /// [`Self::with_semantic_seed`] for a cached project context snapshot.
     pub(crate) fn with_semantic_seed_for_snapshot(
         &self,

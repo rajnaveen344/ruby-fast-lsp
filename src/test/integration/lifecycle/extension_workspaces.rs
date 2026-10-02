@@ -153,3 +153,77 @@ async fn matching_watched_file_change_is_routed_to_manifest_extension() {
         fix = "retain files.changed in extension status",
     );
 }
+
+fn project_holds_rspec_describe(server: &RubyLanguageServer, root_uri: &Url) -> bool {
+    server.project_for_uri(root_uri).view(|view| {
+        view.all_method_facts().iter().any(|fact| {
+            matches!(
+                &fact.fqn,
+                ruby_analysis::core::FullyQualifiedName::Method(namespace, method)
+                    if namespace.len() == 1
+                        && namespace[0].to_string() == "RSpec"
+                        && method.as_str() == "describe"
+            )
+        })
+    })
+}
+
+#[tokio::test]
+async fn runtime_rebuild_restores_extension_semantic_seed() {
+    let temp_dir = TempDir::new().expect("test temp dir must be created");
+    std::fs::write(temp_dir.path().join("Gemfile"), "gem \"rspec-core\"\n")
+        .expect("test Gemfile must be written");
+    std::fs::write(
+        temp_dir.path().join("Gemfile.lock"),
+        "GEM\n  specs:\n    rspec-core (3.13.1)\n",
+    )
+    .expect("test lockfile must be written");
+    std::fs::create_dir_all(temp_dir.path().join("spec")).expect("spec dir must be created");
+    let spec_path = temp_dir.path().join("spec/example_spec.rb");
+    let spec_source = "RSpec.describe \"example\" do\nend\n";
+    std::fs::write(&spec_path, spec_source).expect("test spec must be written");
+    let root_uri = Url::from_directory_path(temp_dir.path())
+        .expect("test workspace path must convert to a file URI");
+    let package = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
+    let config = RubyFastLspConfig {
+        extension_packages: vec![package.to_string_lossy().into_owned()],
+        ..RubyFastLspConfig::default()
+    };
+    let server = RubyLanguageServer::default();
+    *server.config.lock() = config.clone();
+    server.add_workspace(root_uri.clone());
+    server.extensions.registry().configure_from_config(&config);
+    crate::lsp::lifecycle::notification::handle_did_open(
+        &server,
+        tower_lsp::lsp_types::DidOpenTextDocumentParams {
+            text_document: tower_lsp::lsp_types::TextDocumentItem {
+                uri: Url::from_file_path(&spec_path).expect("spec path must convert to URI"),
+                language_id: "ruby".to_string(),
+                version: 1,
+                text: spec_source.to_string(),
+            },
+        },
+    )
+    .await;
+    assert!(
+        project_holds_rspec_describe(&server, &root_uri),
+        "an applicable project must hold the extension semantic seed after a file pass"
+    );
+
+    crate::lsp::lifecycle::notification::handle_did_change_watched_files(
+        &server,
+        DidChangeWatchedFilesParams {
+            changes: vec![FileEvent::new(
+                Url::from_file_path(temp_dir.path().join("Gemfile.lock"))
+                    .expect("test lockfile path must convert to URI"),
+                FileChangeType::CHANGED,
+            )],
+        },
+    )
+    .await;
+
+    assert!(
+        project_holds_rspec_describe(&server, &root_uri),
+        "a runtime rebuild clears the project engine, so it must seed the extension semantics again"
+    );
+}

@@ -223,6 +223,13 @@ pub(super) async fn rebuild_runtime_owned_project_state(
     server.set_effective_runtime(&workspace.root_path, None);
     server.set_extension_project_ruby_version(&workspace.root_path, None);
     workspace.handle().reset();
+    // The reset empties the engine in place, so its identity is unchanged.
+    // Forget its seed after the reset, so no seed can land in between, or the
+    // rebuild would skip seeding the empty engine.
+    server
+        .extensions
+        .registry()
+        .forget_semantic_seed(&workspace.handle().load_target().engine_identity());
     let rebuild =
         indexing::init_workspace_for_run(server, workspace.root_uri.clone(), run.clone()).await;
     for text_document in open_documents {
