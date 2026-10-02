@@ -1,6 +1,7 @@
 //! Open and change notifications keep engine facts and diagnostics current.
 
 use super::*;
+use std::time::Duration;
 
 #[tokio::test]
 async fn did_open_registers_source_in_analysis_engine() {

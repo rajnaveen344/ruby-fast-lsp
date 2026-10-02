@@ -134,14 +134,17 @@ to protocol values. See the [feature guide](features/README.md).
 - `presentation/`: hover, inlay hints, code lenses, semantic tokens, document
   symbols, folding ranges, and selection ranges
 - `diagnostics/`: the engine's diagnostics for a document (`engine_diagnostics`,
-  a free function over one `&View` owned by `server/diagnostics.rs`), and the
-  external linter and formatter runner
+  a free function over one `&View` owned by `server/diagnostics.rs`),
+  `run_linter` (the didOpen/didSave entry point that lints a document and
+  retains the output for its current source), and the external linter and
+  formatter runner
 - `debug.rs`: FQN lookup, graph export, and extension status requests
 
 #### Design Decisions:
 
 - The `lsp` layer reaches a feature only through its `handle` functions, the
-  request types they take and return, and static capability descriptors
+  request types they take and return, static capability descriptors, and
+  `diagnostics::run_linter`
 - Features may read `server` state and `loader` products and never name `lsp`
 - Reusable semantic analysis belongs in `ruby-analysis`; a feature only adapts
   it and does not duplicate MRO, identity, ranking, or missing-method policy

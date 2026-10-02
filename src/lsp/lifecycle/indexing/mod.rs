@@ -1,4 +1,4 @@
-use crate::features::diagnostics::linter::lint_document;
+use crate::features::diagnostics;
 use crate::invariant::ExpectInvariant;
 use crate::loader::coordinator::IndexingCoordinator;
 use crate::loader::file_processor::syntax_diagnostics::generate_diagnostics;
@@ -12,7 +12,7 @@ use ruby_analysis::engine::{ResolveMode, SourceFileInput};
 use log::{debug, info};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tower_lsp::lsp_types::*;
 
 const MAX_OPEN_DIAGNOSTIC_REFRESH_FILES: usize = 8;
@@ -248,7 +248,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let cache_elapsed = cache_start.elapsed();
 
     let diagnostics_start = Instant::now();
-    run_external_linter(server, &uri, &content).await;
+    diagnostics::run_linter(server, &uri, &content).await;
     if source_kind.is_editable() {
         server.publish_document_diagnostics(uri.clone(), syntax);
     } else {
@@ -510,63 +510,11 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     // Invalidate namespace tree cache
     server.invalidate_namespace_tree_cache_debounced();
 
-    run_external_linter(server, &uri, &content).await;
+    diagnostics::run_linter(server, &uri, &content).await;
     server.publish_document_diagnostics(uri, syntax);
 
     // Request the client to refresh inlay hints after save
     server.refresh_inlay_hints().await;
-}
-
-/// Lint an editable document and retain the output for its exact current
-/// source, where every later composition of its diagnostics reads it.
-async fn run_external_linter(server: &RubyLanguageServer, uri: &Url, content: &str) {
-    server.clear_external_linter_diagnostics(uri);
-    if !analysis_file_kind(server, uri).is_some_and(SourceKind::is_editable) {
-        return;
-    }
-    if ruby_analysis::indexer::is_erb_path(uri.path()) {
-        return;
-    }
-    let config = server.config.lock().clone();
-    if config.linter == crate::environment::config::LinterKind::None {
-        return;
-    }
-    let Ok(file_path) = uri.to_file_path() else {
-        log::warn!(
-            "Skipping {} diagnostics for non-file URI {}",
-            config.linter.data_name().unwrap_or("external linter"),
-            uri
-        );
-        return;
-    };
-    let workspace_root = server
-        .workspace_for_uri(uri)
-        .map(|workspace| workspace.root_path)
-        .or_else(|| file_path.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| Path::new(".").to_path_buf());
-    let Some(snapshot) = server.diagnostic_source_snapshot(uri) else {
-        return;
-    };
-
-    match lint_document(
-        &config,
-        server.indexing.resources().clone(),
-        &workspace_root,
-        &file_path,
-        content,
-        Duration::from_secs(10),
-    )
-    .await
-    {
-        Ok(linter_diagnostics) => {
-            server.retain_external_linter_diagnostics(uri, snapshot, &linter_diagnostics);
-        }
-        Err(error) => log::warn!(
-            "External linter diagnostics unavailable for {}: {error:#}. \
-             Ensure the selected linter is available through the owning project's bundle.",
-            file_path.display()
-        ),
-    }
 }
 
 pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextDocumentParams) {

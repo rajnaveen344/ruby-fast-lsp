@@ -43,7 +43,7 @@ struct LinterLocation {
     last_column: u32,
 }
 
-pub async fn lint_document(
+pub(super) async fn lint_document(
     config: &RubyFastLspConfig,
     indexing_resources: IndexingResourceGovernor,
     workspace_root: &Path,

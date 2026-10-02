@@ -267,7 +267,15 @@ Delete this file when the last task is done. Git history keeps the record.
         (keep the faster implementation). Measure open-project publish.
   - [x] B7e. One composition function for syntax, engine, and linter
         diagnostics; replace the hand-assembled publish sites.
-  - [ ] B7f. Move composition with C3e; the linter stays a runner.
+  - [x] B7f. Move composition with C3e; the linter stays a runner.
+
+  Notes (B7d-f): one projection (`engine_diagnostics` over a `&View`) and one
+  composition (`compose_diagnostics`: syntax, engine, retained linter output)
+  serve every publish site. The composition stays in `server` because the
+  load coordinator and require refresh publish from there and `server` never
+  names `features`; `features::diagnostics::run_linter` is lifecycle's only
+  diagnostics entry point. The semantic-token legend stays in
+  `features/presentation/semantic_tokens.rs` beside its encoder.
 
   Notes (B7b): rename and absence claims share `AncestryCompleteness`, the
   walk that answers `Unknown(IncompleteChain)` for an unresolved lookup edge
