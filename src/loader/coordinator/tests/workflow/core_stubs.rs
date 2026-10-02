@@ -21,7 +21,7 @@ async fn test_coordinator_complete_indexing_workflow() {
     );
 
     let engine = server.orphan_project().test_read();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+    let query = engine.view();
     for path in [
         fixture.project_root().join("Thorfile"),
         fixture.project_root().join("config.ru"),

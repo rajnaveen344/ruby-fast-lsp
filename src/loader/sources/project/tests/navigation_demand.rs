@@ -105,7 +105,7 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
     let report = ruby_analysis::core::RubyConstant::new("Report").unwrap();
     {
         let engine = workspace_state.handle().test_read();
-        let query = AnalysisQuery::new(&engine);
+        let query = engine.view();
         assert!(
             !query
                 .constant_definition_ranges(&[user.clone()], &[])
@@ -126,7 +126,8 @@ fn project_navigation_frontier_releases_before_exhaustive_source_collection() {
 
     let engine = workspace_state.handle().test_read();
     assert!(
-        !AnalysisQuery::new(&engine)
+        !engine
+            .view()
             .constant_definition_ranges(&[report], &[])
             .is_empty(),
         "the exhaustive stage must complete the same isolated project engine"
@@ -162,7 +163,7 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
     let report = ruby_analysis::core::RubyConstant::new("Report").unwrap();
     {
         let engine = workspace_state.handle().test_read();
-        let query = AnalysisQuery::new(&engine);
+        let query = engine.view();
         assert!(
             !query
                 .constant_definition_ranges(&[user.clone()], &[])
@@ -182,7 +183,8 @@ fn queued_exact_demand_is_queryable_before_unrelated_active_candidates() {
         .unwrap();
     let engine = workspace_state.handle().test_read();
     assert!(
-        !AnalysisQuery::new(&engine)
+        !engine
+            .view()
             .constant_definition_ranges(&[report], &[])
             .is_empty(),
         "the rest of the active frontier must remain semantically complete"

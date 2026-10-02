@@ -414,13 +414,15 @@ async fn opening_default_external_workspace_file_does_not_make_it_project_owned(
         "default-external workspace files must not become project-owned when opened"
     );
     assert!(
-        !AnalysisQuery::new(&engine)
+        !engine
+            .view()
             .symbol_facts_for(&namespace("OpenedVendor"))
             .is_empty(),
         "opened excluded files must still receive interactive semantic analysis"
     );
     assert!(
-        AnalysisQuery::new(&engine)
+        engine
+            .view()
             .search_workspace_symbols("OpenedVendor", 100)
             .is_empty(),
         "default-external workspace files must stay out of workspace symbols"
@@ -455,7 +457,8 @@ async fn opening_default_external_workspace_file_does_not_make_it_project_owned(
         "didChange must preserve excluded workspace ownership"
     );
     assert!(
-        AnalysisQuery::new(&engine)
+        engine
+            .view()
             .search_workspace_symbols("ChangedVendor", 100)
             .is_empty(),
         "changed excluded workspace files must stay out of workspace symbols"

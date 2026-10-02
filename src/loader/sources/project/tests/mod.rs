@@ -8,7 +8,6 @@ use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::environment::runtime::jruby::java_catalog::{JavaClassDeclaration, ProjectJavaCatalog};
 use crate::server::RubyLanguageServer;
 use ruby_analysis::core::SourceKind;
-use ruby_analysis::engine::AnalysisQuery;
 use ruby_fast_lsp_jvm_metadata::ClassFile;
 use std::collections::BTreeMap;
 use tempfile::TempDir;

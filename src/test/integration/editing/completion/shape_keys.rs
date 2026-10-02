@@ -1,6 +1,5 @@
 use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::{check, FakeEditor};
-use ruby_analysis::engine::AnalysisQuery;
 
 #[tokio::test]
 async fn symbol_shape_key_completion_uses_proven_literal_fields() {
@@ -141,17 +140,18 @@ end
         build,
         ruby_analysis::engine::lookup::MethodWant::Return,
     );
-    let method_return =
-        ruby_analysis::engine::lookup::method(&AnalysisQuery::new(&engine.test_read()), request)
-            .into_return_type()
-            .map(|ruby_type| ruby_type.to_string());
+    let method_return = ruby_analysis::engine::lookup::method(&engine.test_read().view(), request)
+        .into_return_type()
+        .map(|ruby_type| ruby_type.to_string());
     assert_eq!(
         method_return,
         Some("{ id: Integer, name: String }".to_string()),
         "the cross-file method equation must retain its structural return"
     );
     assert_eq!(
-        AnalysisQuery::new(&engine.test_read())
+        engine
+            .test_read()
+            .view()
             .expression_type_ending_at(document.analysis_file_id(), 20)
             .map(|ruby_type| ruby_type.to_string()),
         Some("{ id: Integer, name: String }".to_string()),

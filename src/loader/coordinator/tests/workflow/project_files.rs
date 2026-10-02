@@ -52,7 +52,7 @@ async fn project_rbs_declarations_enter_engine_method_facts() {
         .expect("workspace indexing must succeed");
 
     let engine = server.orphan_project().test_read();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+    let query = engine.view();
     assert!(
         query.file_id(&signature_path).is_some(),
         "conventional sig/**/*.rbs files must be registered"

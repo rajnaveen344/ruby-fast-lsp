@@ -31,7 +31,7 @@ fn build_gem_dependency_product(
     let producer_engine = std::sync::Arc::new(parking_lot::RwLock::new(dependency_seed));
     let known_namespaces = std::sync::Arc::new({
         let engine = producer_engine.read();
-        ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+        engine.view().known_namespace_fqns()
     });
     let chunk_size = manifest
         .sources()

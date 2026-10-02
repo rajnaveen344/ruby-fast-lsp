@@ -109,16 +109,18 @@ async fn source_less_jruby_import_navigates_to_verified_decompiled_implementatio
 
     let engine = server.project_for_uri(&uri);
     let engine = engine.test_read();
-    let source_file = AnalysisQuery::new(&engine)
+    let source_file = engine
+        .view()
         .file_id(&source_path)
         .expect("project source must be registered");
     let offset = u32::try_from(source.find(":combine").unwrap() + 1).unwrap();
-    let targets =
-        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, offset);
+    let targets = engine
+        .view()
+        .resolved_reference_definition_ranges_at(source_file, offset);
     let (implementation, target_range) = targets
         .iter()
         .find_map(|target| {
-            let file = AnalysisQuery::new(&engine).file(target.file_id)?;
+            let file = engine.view().file(target.file_id)?;
             (file.kind == ruby_analysis::core::SourceKind::External)
                 .then(|| (file.path.clone(), *target))
         })
@@ -138,7 +140,8 @@ async fn source_less_jruby_import_navigates_to_verified_decompiled_implementatio
     );
     assert!(
         targets.iter().all(|target| {
-            AnalysisQuery::new(&engine)
+            engine
+                .view()
                 .file(target.file_id)
                 .is_none_or(|file| file.kind != ruby_analysis::core::SourceKind::Signature)
         }),

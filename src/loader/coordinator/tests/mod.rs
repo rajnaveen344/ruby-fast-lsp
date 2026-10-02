@@ -19,7 +19,7 @@ use crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache;
 use crate::server::RubyLanguageServer;
 use crate::utils::persistent_cache::PersistentDerivedProductCache;
 use ruby_analysis::core::{FullyQualifiedName, RubyType, TypeSubject};
-use ruby_analysis::engine::{AnalysisQuery, SourceFileInput};
+use ruby_analysis::engine::SourceFileInput;
 use ruby_fast_lsp_jvm_metadata::ArchiveLimits;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;

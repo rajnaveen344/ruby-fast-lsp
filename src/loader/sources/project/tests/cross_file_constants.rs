@@ -96,7 +96,7 @@ end
         let file_id = engine.view().file_id(&first_consumer_path).unwrap();
         let assignment_start = u32::try_from(first_consumer.find("code =").unwrap()).unwrap();
         assert_eq!(
-            AnalysisQuery::new(&engine).variable_assignment_type_at(
+            engine.view().variable_assignment_type_at(
                 ruby_analysis::core::VariableTypeKind::Local,
                 "code",
                 file_id,
@@ -125,7 +125,7 @@ end
     workspace_state.handle().test_write().resolve();
 
     let engine = workspace_state.handle().test_read();
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     for parts in [
         vec!["BaseCodes", "RETRY"],
         vec!["Marketplace", "Platform", "Errors", "PaymentCodes", "RETRY"],
@@ -158,7 +158,7 @@ end
         let assignment_start = u32::try_from(source.find(&format!("{name} =")).unwrap()).unwrap();
         let assignment_end = assignment_start + u32::try_from(name.len()).unwrap();
         assert_eq!(
-            AnalysisQuery::new(&engine).variable_assignment_type_at(
+            engine.view().variable_assignment_type_at(
                 ruby_analysis::core::VariableTypeKind::Local,
                 name,
                 file_id,
@@ -277,7 +277,7 @@ end
         let engine = workspace_state.handle().test_read();
         let file_id = engine.view().file_id(&consumer_path).unwrap();
         assert_eq!(
-            AnalysisQuery::new(&engine).variable_assignment_type_at(
+            engine.view().variable_assignment_type_at(
                 ruby_analysis::core::VariableTypeKind::Local,
                 "tags",
                 file_id,
@@ -311,7 +311,7 @@ end
         ruby_analysis::core::RubyConstant::new("Registry").unwrap(),
     ]));
     assert_eq!(
-        AnalysisQuery::new(&engine).variable_assignment_type_at(
+        engine.view().variable_assignment_type_at(
             ruby_analysis::core::VariableTypeKind::Local,
             "tags",
             file_id,
@@ -323,7 +323,9 @@ end
     );
     let method_offset = u32::try_from(consumer.find("build").unwrap()).unwrap();
     assert_eq!(
-        AnalysisQuery::new(&engine).method_return_type_at("build", file_id, method_offset),
+        engine
+            .view()
+            .method_return_type_at("build", file_id, method_offset),
         Some(ruby_analysis::core::RubyType::Class(
             FullyQualifiedName::constant(vec![
                 ruby_analysis::core::RubyConstant::new("Registry").unwrap(),

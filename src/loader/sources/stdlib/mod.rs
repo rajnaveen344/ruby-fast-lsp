@@ -305,7 +305,7 @@ impl IndexerStdlib {
         // each file remain visible through the collector's local overlay.
         let known_namespaces = std::sync::Arc::new({
             let engine = analysis_engine.read();
-            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+            engine.view().known_namespace_fqns()
         });
         let templates = sources
             .par_iter()
@@ -515,7 +515,7 @@ impl IndexerStdlib {
         }
         let known_namespaces = std::sync::Arc::new({
             let engine = analysis_engine.read();
-            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+            engine.view().known_namespace_fqns()
         });
         let templates = sources
             .par_iter()

@@ -304,7 +304,7 @@ fn immediate_hash_literal_keeps_established_generic_read_methods() {
         ResolveMode::Immediate,
     );
     let engine = engine.read();
-    let query = crate::engine::View::new(&engine);
+    let query = engine.view();
     assert_eq!(
         query
             .call_expression_outcome_at_position(file_id, 10)

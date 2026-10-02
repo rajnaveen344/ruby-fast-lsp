@@ -36,7 +36,7 @@ fn shared_dependency_indexer(project_root: &Path, gem_root: &Path) -> IndexerGem
 fn assert_shared_dependency_semantics(engine: &AnalysisEngine, expected_path: &Path) {
     let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("SharedWidget").unwrap()]);
     let method = RubyMethod::new("label").unwrap();
-    let query = AnalysisQuery::new(engine);
+    let query = engine.view();
     let definitions =
         query.constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[]);
     assert_eq!(definitions.len(), 1);
@@ -192,7 +192,9 @@ async fn concurrent_isolated_projects_share_one_flight_with_exact_provenance() {
         ResolveMode::Immediate,
     );
     assert!(
-        AnalysisQuery::new(&first_engine.read())
+        first_engine
+            .read()
+            .view()
             .constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[],)
             .is_empty(),
         "ordinary replacement must remove rebound facts from only the first consumer"

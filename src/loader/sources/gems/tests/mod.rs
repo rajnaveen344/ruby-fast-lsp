@@ -16,7 +16,7 @@ use flate2::Compression;
 use ruby_analysis::core::{
     FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, RubyType, SourceKind,
 };
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ResolveMode};
+use ruby_analysis::engine::{AnalysisEngine, ResolveMode};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;

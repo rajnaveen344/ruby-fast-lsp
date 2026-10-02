@@ -9,7 +9,7 @@ use crate::environment::config::RubyFastLspConfig;
 use crate::environment::runtime::catalog::RuntimeDiscoverySource;
 use crate::environment::runtime::catalog::RuntimeImplementation;
 use ruby_analysis::core::{FullyQualifiedName, RubyConstant, SourceKind};
-use ruby_analysis::engine::{AnalysisQuery, SourceFileInput};
+use ruby_analysis::engine::SourceFileInput;
 use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use zip::write::SimpleFileOptions;
@@ -104,7 +104,7 @@ async fn watcher_storm_processes_only_the_newest_complete_batch() {
     let stale = FullyQualifiedName::namespace(vec![RubyConstant::new("StaleService").unwrap()]);
     let current = FullyQualifiedName::namespace(vec![RubyConstant::new("CurrentService").unwrap()]);
     let engine = workspace.handle().test_read();
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     assert!(query.symbol_facts_for(&stale).is_empty());
     assert_eq!(query.symbol_facts_for(&current).len(), 1);
 }

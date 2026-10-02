@@ -252,7 +252,8 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B6f. Inlay hints, signature help, rename, hierarchies, code lens,
         workspace symbols.
   - [x] B6g. Diagnostics projection takes `&View` (with B7d).
-  - [ ] B6h. Only `Project::view()` constructs views outside `engine/`.
+  - [x] B6h. Only `Project::view()` constructs views outside `engine/`.
+        `View::new` is engine-private and `Project::query()` is gone.
 
   Notes: B6 changes signatures and C3 moves files; never mix them in one
   commit. Do B6 for a feature before its C3 move, or after it lands.

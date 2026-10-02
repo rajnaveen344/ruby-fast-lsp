@@ -118,7 +118,7 @@ impl IndexerProject {
         let semantic_context = Arc::new(parking_lot::RwLock::new(snapshot));
         let baseline_known_namespaces = Arc::new({
             let engine = semantic_context.read();
-            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+            engine.view().known_namespace_fqns()
         });
         let requires_direct_semantic_seed = !project_files.is_empty();
         if requires_direct_semantic_seed {
@@ -177,7 +177,7 @@ impl IndexerProject {
         }
         let known_namespaces = Arc::new({
             let engine = semantic_context.read();
-            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+            engine.view().known_namespace_fqns()
         });
         let estimated_bytes = semantic_context
             .read()

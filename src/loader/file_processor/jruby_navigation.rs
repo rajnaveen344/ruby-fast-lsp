@@ -9,7 +9,7 @@ use crate::invariant::ExpectInvariant;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use ruby_analysis::core::{FileAnalysis, FullyQualifiedName, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, SourceFileInput};
+use ruby_analysis::engine::{AnalysisEngine, SourceFileInput};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -248,7 +248,7 @@ impl FileProcessor {
                     content,
                     kind: SourceKind::External,
                 });
-                let query = AnalysisQuery::new(&engine);
+                let query = engine.view();
                 (
                     file_id,
                     FileAnalysis {

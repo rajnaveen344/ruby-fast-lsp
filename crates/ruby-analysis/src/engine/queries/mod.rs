@@ -27,7 +27,8 @@ pub struct View<'a> {
 }
 
 impl<'a> View<'a> {
-    pub fn new(engine: &'a Project) -> Self {
+    /// Outside the engine, views come only from [`Project::view`].
+    pub(in crate::engine) fn new(engine: &'a Project) -> Self {
         Self { engine, memo: None }
     }
 

@@ -314,7 +314,7 @@ async fn did_open_preserves_known_external_file_without_reprocessing() {
         .file(file_id)
         .expect("registered file must exist");
     assert_eq!(file.kind, SourceKind::Stub);
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     assert_eq!(query.method_facts_for(&puts_fqn).len(), 1);
     let generated_fqn = FullyQualifiedName::method(
         vec![kernel],
@@ -575,7 +575,7 @@ async fn did_open_mirrors_reference_facts_into_analysis_engine() {
 
     let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let engine = server.orphan_project().test_read();
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     assert_eq!(query.reference_facts_for(&user_fqn).len(), 2);
 }
 
@@ -600,7 +600,7 @@ async fn did_open_mirrors_graph_facts_into_analysis_engine() {
     let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
     let engine = server.orphan_project().test_read();
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     let edges = query.graph_edges_from(&user_fqn);
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].target, auth_fqn);
@@ -641,7 +641,7 @@ async fn did_open_refreshes_late_resolved_graph_facts_into_analysis_engine() {
     let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
     let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
     let engine = server.orphan_project().test_read();
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     let edges = query.graph_edges_from(&user_fqn);
     assert!(
         edges
@@ -673,7 +673,7 @@ async fn did_open_mirrors_normalized_extend_edges_into_analysis_engine() {
         FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
     let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
     let engine = server.orphan_project().test_read();
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     let edges = query.graph_edges_from(&user_singleton);
     assert!(
         edges
@@ -712,7 +712,7 @@ async fn did_open_mirrors_method_facts_into_analysis_engine() {
     );
 
     let engine = server.orphan_project().test_read();
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     let name_facts = query.method_facts_for(&name_fqn);
     assert_eq!(name_facts.len(), 1);
     assert_eq!(

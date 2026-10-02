@@ -116,7 +116,10 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
     let imported =
         ruby_analysis::core::FullyQualifiedName::try_from("Demo").expect("valid fixture FQN");
     assert!(
-        !AnalysisQuery::new(&workspace_state.handle().test_read())
+        !workspace_state
+            .handle()
+            .test_read()
+            .view()
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == imported),
@@ -136,7 +139,10 @@ fn exact_jruby_provider_replays_only_catalog_sensitive_project_files() {
 
     assert_eq!(replayed, 1, "ordinary Ruby files must not be replayed");
     assert!(
-        AnalysisQuery::new(&workspace_state.handle().test_read())
+        workspace_state
+            .handle()
+            .test_read()
+            .view()
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == imported),
@@ -180,7 +186,10 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
     let active = FullyQualifiedName::try_from("Active").unwrap();
     let tail = FullyQualifiedName::try_from("Tail").unwrap();
     assert!(
-        !AnalysisQuery::new(&workspace_state.handle().test_read())
+        !workspace_state
+            .handle()
+            .test_read()
+            .view()
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == active),
@@ -198,7 +207,7 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
 
     {
         let engine = workspace_state.handle().test_read();
-        let symbols = AnalysisQuery::new(&engine).all_symbol_facts();
+        let symbols = engine.view().all_symbol_facts();
         assert!(
             symbols.iter().any(|fact| fact.fqn == tail),
             "the exhaustive tail must be collected once with the exact provider"
@@ -222,7 +231,10 @@ fn exact_jruby_provider_installed_before_tail_replays_only_active_frontier_files
         .unwrap();
     assert_eq!(replayed, 1);
     assert!(
-        AnalysisQuery::new(&workspace_state.handle().test_read())
+        workspace_state
+            .handle()
+            .test_read()
+            .view()
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == active),
@@ -299,7 +311,10 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
     );
     let second = FullyQualifiedName::try_from("Second").unwrap();
     assert!(
-        AnalysisQuery::new(&workspace_state.handle().test_read())
+        workspace_state
+            .handle()
+            .test_read()
+            .view()
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == second),
@@ -315,7 +330,10 @@ fn exact_jruby_provider_handoff_between_batches_replays_only_providerless_files(
     assert_eq!(replayed, 1);
     let first = FullyQualifiedName::try_from("First").unwrap();
     assert!(
-        AnalysisQuery::new(&workspace_state.handle().test_read())
+        workspace_state
+            .handle()
+            .test_read()
+            .view()
             .all_symbol_facts()
             .iter()
             .any(|fact| fact.fqn == first),
@@ -520,7 +538,7 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
             "keep the fixture inside the project root and finish the batch",
         );
         (
-            engine.query().diagnostic_facts_in_file(ordinary_id),
+            engine.view().diagnostic_facts_in_file(ordinary_id),
             engine.view().semantic_result_fingerprint(),
         )
     };
@@ -602,7 +620,7 @@ fn exact_jruby_replay_is_independent_of_exhaustive_batch_boundaries() {
         assert_eq!(replayed, 2);
         workspace_state.handle().test_write().resolve();
         let engine = workspace_state.handle().test_read();
-        let symbols = AnalysisQuery::new(&engine).all_symbol_facts();
+        let symbols = engine.view().all_symbol_facts();
         assert!(symbols.iter().any(|fact| fact.fqn == first));
         assert!(symbols.iter().any(|fact| fact.fqn == second));
         let actual = engine.view().semantic_result_fingerprint();

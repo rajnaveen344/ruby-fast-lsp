@@ -5,7 +5,6 @@ use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, RubyMethod, RubyType, TypeResolution, TypeSubject,
 };
-use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use ruby_prism::{DefNode, Visit};
 use tower_lsp::lsp_types::Url;
@@ -66,7 +65,7 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                         "TypeSubject::Local stores u32 scope ids",
                         "widen TypeSubject::Local scope_id",
                     );
-                    AnalysisQuery::new(&engine).local_variable_type_at(
+                    engine.view().local_variable_type_at(
                         name,
                         scope,
                         document.analysis_file_id(),
@@ -77,7 +76,7 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
             }
             Identifier::RubyConstant { iden, .. } => {
                 let constant = FullyQualifiedName::constant(iden.clone());
-                let inferred = match AnalysisQuery::new(&engine).type_at(
+                let inferred = match engine.view().type_at(
                     &TypeSubject::Constant(constant),
                     document.analysis_file_id(),
                     byte_offset,
@@ -93,7 +92,7 @@ pub(super) fn check_types(server: &RubyLanguageServer, uri: &Url, content: &str,
                 receiver,
                 namespace,
             } => {
-                let query = AnalysisQuery::new(&engine);
+                let query = engine.view();
                 let method = RubyMethod::new(&iden.to_string()).ok();
                 let inferred = if is_def_name_at(content, byte_offset as usize) {
                     method.and_then(|method| {

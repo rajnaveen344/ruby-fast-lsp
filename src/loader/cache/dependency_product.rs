@@ -684,7 +684,7 @@ mod tests {
         FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId,
         SymbolFact, SymbolKind, TextRange,
     };
-    use ruby_analysis::engine::{AnalysisQuery, ProjectNeutralFileFactsTemplate};
+    use ruby_analysis::engine::ProjectNeutralFileFactsTemplate;
 
     fn empty_seed() -> SemanticExportFingerprint {
         AnalysisEngine::new().view().semantic_context_fingerprint()
@@ -897,10 +897,8 @@ mod tests {
         product.bind_into(&second_manifest, &mut second).unwrap();
 
         let parts = [RubyConstant::new("Widget").unwrap()];
-        let first_definition =
-            AnalysisQuery::new(&first).constant_definition_ranges(&parts, &[])[0];
-        let second_definition =
-            AnalysisQuery::new(&second).constant_definition_ranges(&parts, &[])[0];
+        let first_definition = first.view().constant_definition_ranges(&parts, &[])[0];
+        let second_definition = second.view().constant_definition_ranges(&parts, &[])[0];
         assert_eq!(
             first.view().file(first_definition.file_id).unwrap().path,
             crate::test::harness::fixture_path("/projects/one/vendor/widget.rb")

@@ -4,7 +4,7 @@ use ruby_analysis::core::{
     FileAnalysis, FullyQualifiedName, GraphEdgeKind, MethodFact, NamespaceKind, RubyConstant,
     RubyMethod, SymbolKind, TextRange,
 };
-use ruby_analysis::engine::{AnalysisQuery, ResolveMode};
+use ruby_analysis::engine::ResolveMode;
 use tower_lsp::LanguageServer;
 
 use super::*;
@@ -18,9 +18,7 @@ fn namespace(name: &str) -> FullyQualifiedName {
 fn has_namespace(server: &RubyLanguageServer, uri: &Url, name: &str) -> bool {
     let analysis_engine = server.project_for_uri(uri);
     let engine = analysis_engine.test_read();
-    !AnalysisQuery::new(&engine)
-        .symbol_facts_for(&namespace(name))
-        .is_empty()
+    !engine.view().symbol_facts_for(&namespace(name)).is_empty()
 }
 
 mod document_lifecycle;

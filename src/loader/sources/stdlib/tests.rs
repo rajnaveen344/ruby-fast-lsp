@@ -6,7 +6,7 @@ use ruby_analysis::core::{
     FullyQualifiedName, GraphEdgeKind, MethodParamKind, NamespaceKind, RubyConstant, RubyMethod,
     RubyType,
 };
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
+use ruby_analysis::engine::AnalysisEngine;
 use std::fs;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -85,7 +85,7 @@ async fn bundled_ruby_25_signatures_match_observed_runtime_arities() {
         .expect("bundled Ruby 2.5 core stubs must index");
 
     let query_guard = engine.read();
-    let query = AnalysisQuery::new(&query_guard);
+    let query = query_guard.view();
     let string = RubyConstant::new("String").expect("String must be a valid constant");
     let concat = FullyQualifiedName::method(
         vec![string],
@@ -215,16 +215,12 @@ async fn every_supported_jruby_series_composes_its_exact_runtime_overlay() {
             FullyQualifiedName::constant(vec![RubyConstant::new("JRUBY_VERSION").unwrap()]);
         let engine = engine.read();
         assert!(
-            !AnalysisQuery::new(&engine)
-                .method_facts_for(&java_import)
-                .is_empty(),
+            !engine.view().method_facts_for(&java_import).is_empty(),
             "{} must compose the shared JRuby java_import contract",
             series.label()
         );
         assert!(
-            !AnalysisQuery::new(&engine)
-                .symbol_facts_for(&jruby_version)
-                .is_empty(),
+            !engine.view().symbol_facts_for(&jruby_version).is_empty(),
             "{} must compose JRUBY_VERSION",
             series.label()
         );
@@ -261,7 +257,8 @@ async fn bundled_stub_navigation_retains_source_positions() {
     let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
     indexer.index_core_stubs(engine.clone()).await.unwrap();
     let engine = engine.read();
-    let ranges = AnalysisQuery::new(&engine)
+    let ranges = engine
+        .view()
         .constant_definition_ranges(&[RubyConstant::new("Thread").unwrap()], &[]);
     assert_eq!(ranges.len(), 1);
     let range = ranges[0];
@@ -313,9 +310,7 @@ async fn unknown_runtime_still_loads_default_core_stubs() {
         RubyConstant::new("Thread").expect("Thread must be a valid Ruby constant")
     ]);
     assert!(
-        !AnalysisQuery::new(&engine.read())
-            .symbol_facts_for(&thread)
-            .is_empty(),
+        !engine.read().view().symbol_facts_for(&thread).is_empty(),
         "Thread must resolve from default bundled core stubs when runtime detection fails"
     );
 
@@ -324,7 +319,7 @@ async fn unknown_runtime_still_loads_default_core_stubs() {
     ]);
     {
         let engine = engine.read();
-        let query = AnalysisQuery::new(&engine);
+        let query = engine.view();
         assert!(
             !query.symbol_facts_for(&argv).is_empty(),
             "ARGV must resolve from embedded core RBS when runtime detection fails"
@@ -356,7 +351,7 @@ async fn unknown_runtime_still_loads_default_core_stubs() {
         .view()
         .file_id(&project)
         .expect("project source must remain registered");
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     assert_eq!(
         query.expression_type_at(file_id, 14),
         Some(RubyType::string()),
@@ -523,7 +518,9 @@ fn runtime_stdlib_deferred_collection_leaves_resolution_to_the_coordinator() {
     let runtime_base_fqn =
         FullyQualifiedName::namespace_with_kind(vec![runtime_base], NamespaceKind::Instance);
     assert!(
-        AnalysisQuery::new(&engine.read())
+        engine
+            .read()
+            .view()
             .graph_edges_from(&runtime_child)
             .iter()
             .any(|edge| edge.kind == GraphEdgeKind::Superclass && edge.target == runtime_base_fqn),
@@ -582,7 +579,9 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
         .await
         .expect("JRuby core and overlay stubs must index");
     assert!(
-        !AnalysisQuery::new(&jruby_engine.read())
+        !jruby_engine
+            .read()
+            .view()
             .method_facts_for(&method)
             .is_empty(),
         "JRuby 9.2 must expose Object#java_import from its implementation overlay"
@@ -605,7 +604,7 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
         ("String", "to_java_bytes", MethodVisibility::Public),
     ];
     let jruby_engine_guard = jruby_engine.read();
-    let query = AnalysisQuery::new(&jruby_engine_guard);
+    let query = jruby_engine_guard.view();
     for (owner_name, method_name, visibility) in required_instance_methods {
         let owner_part =
             RubyConstant::new(owner_name).expect("test owner must be a valid Ruby constant");
@@ -682,7 +681,9 @@ async fn jruby_9_2_loads_jruby_overlay_without_exposing_it_to_mri() {
         .await
         .expect("MRI core stubs must index");
     assert!(
-        AnalysisQuery::new(&mri_engine.read())
+        mri_engine
+            .read()
+            .view()
             .method_facts_for(&method)
             .is_empty(),
         "MRI must not receive JRuby-only methods"

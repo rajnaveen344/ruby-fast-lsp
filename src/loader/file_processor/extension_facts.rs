@@ -10,7 +10,7 @@ use ruby_analysis::core::{
     SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
+use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_extension_api::{
     IndexPatch, MixinKind, NamespaceDeclarationKind, ProjectContext, SourceRange,
@@ -40,7 +40,7 @@ pub(super) fn add_extension_analysis_facts(
 
     let mut known_namespaces = {
         let engine = analysis_engine.read();
-        AnalysisQuery::new(&engine).known_namespace_fqns()
+        engine.view().known_namespace_fqns()
     };
     for node in &facts.graph_nodes {
         if let Some(namespace) = node.fqn.to_instance_namespace() {

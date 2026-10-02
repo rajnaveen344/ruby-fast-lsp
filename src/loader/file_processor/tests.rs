@@ -6,7 +6,7 @@ use ruby_analysis::core::{
     RubyMethod, RubyType, SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
     TypeFact, TypeProvenance, TypeSubject,
 };
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ResolveMode, SemanticChange};
+use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SemanticChange};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -391,7 +391,7 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
         FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
     let method = RubyMethod::new("get_images").unwrap();
     let engine = server.orphan_project().test_read();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+    let query = engine.view();
     assert!(
         query.namespace_exists(&platform_app),
         "reindexing class PlatformApp must keep its graph node so mixin lookup remains possible"
@@ -581,7 +581,8 @@ fn external_gem_collection_can_emit_a_rebindable_project_neutral_template() {
         ResolveMode::Immediate,
     );
 
-    let definitions = AnalysisQuery::new(&consumer)
+    let definitions = consumer
+        .view()
         .constant_definition_ranges(&[RubyConstant::new("SharedWidget").unwrap()], &[]);
     assert_eq!(definitions.len(), 1);
     assert_eq!(definitions[0].file_id, dependency_file);

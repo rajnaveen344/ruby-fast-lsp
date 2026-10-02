@@ -126,7 +126,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             &Url::from_file_path(signature_cache_root.join("com/example/Demo.rb")).unwrap(),
         );
         let engine = engine.test_read();
-        let symbols = AnalysisQuery::new(&engine).all_symbol_facts();
+        let symbols = engine.view().all_symbol_facts();
         assert_eq!(
             symbols.iter().filter(|fact| fact.fqn == proxy).count(),
             1,
@@ -154,11 +154,12 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
     let engine = server.project_for_uri(&uri);
     let engine = engine.test_read();
     assert_eq!(
-        AnalysisQuery::new(&engine).symbol_facts_for(&alias).len(),
+        engine.view().symbol_facts_for(&alias).len(),
         1,
         "the selected project's Java catalog must flow through ordinary engine facts"
     );
-    let source_file = AnalysisQuery::new(&engine)
+    let source_file = engine
+        .view()
         .file_id(&source_path)
         .expect("project source must be registered");
     let import_target_offset = u32::try_from(
@@ -168,22 +169,21 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             + "fixtures.".len(),
     )
     .unwrap();
-    let import_targets = AnalysisQuery::new(&engine)
+    let import_targets = engine
+        .view()
         .resolved_reference_definition_ranges_at(source_file, import_target_offset);
     assert!(
         import_targets.iter().any(|target| {
-            AnalysisQuery::new(&engine)
-                .file(target.file_id)
-                .is_some_and(|file| {
-                    file.kind == ruby_analysis::core::SourceKind::External
-                        && file.path.ends_with("fixtures/RichFixture.java")
-                })
+            engine.view().file(target.file_id).is_some_and(|file| {
+                file.kind == ruby_analysis::core::SourceKind::External
+                    && file.path.ends_with("fixtures/RichFixture.java")
+            })
         }),
         "a catalog-proven java_import target must resolve to its exact Java source; \
              targets: {import_targets:?}"
     );
     assert!(
-        !AnalysisQuery::new(&engine).navigation_must_fail_closed_at(
+        !engine.view().navigation_must_fail_closed_at(
             source_file,
             import_target_offset,
             !import_targets.is_empty(),
@@ -197,11 +197,13 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             .expect("fixture constructor call must exist"),
     )
     .unwrap();
-    let constructor_targets = AnalysisQuery::new(&engine)
+    let constructor_targets = engine
+        .view()
         .resolved_reference_definition_ranges_at(source_file, new_offset);
     assert!(
         constructor_targets.iter().any(|target| {
-            AnalysisQuery::new(&engine)
+            engine
+                .view()
                 .file(target.file_id)
                 .is_some_and(|file| file.kind == ruby_analysis::core::SourceKind::Signature)
         }),
@@ -215,16 +217,15 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             + "RichFixture.".len(),
     )
     .unwrap();
-    let rich_constructor_targets = AnalysisQuery::new(&engine)
+    let rich_constructor_targets = engine
+        .view()
         .resolved_reference_definition_ranges_at(source_file, rich_constructor_offset);
     assert!(
         rich_constructor_targets.iter().any(|target| {
-            AnalysisQuery::new(&engine)
-                .file(target.file_id)
-                .is_some_and(|file| {
-                    file.kind == ruby_analysis::core::SourceKind::External
-                        && file.path.ends_with("fixtures/RichFixture.java")
-                })
+            engine.view().file(target.file_id).is_some_and(|file| {
+                file.kind == ruby_analysis::core::SourceKind::External
+                    && file.path.ends_with("fixtures/RichFixture.java")
+            })
         }),
         "a source-backed constructor must navigate to the exact Java implementation source, \
              not its generated signature; targets: {rich_constructor_targets:?}"
@@ -235,7 +236,8 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             .expect("fixture alias call must exist"),
     )
     .unwrap();
-    let alias_targets = AnalysisQuery::new(&engine)
+    let alias_targets = engine
+        .view()
         .resolved_reference_definition_ranges_at(source_file, alias_call_offset);
     assert!(
         alias_targets
@@ -251,16 +253,15 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
             + 1,
     )
     .unwrap();
-    let run_targets = AnalysisQuery::new(&engine)
+    let run_targets = engine
+        .view()
         .resolved_reference_definition_ranges_at(source_file, run_offset);
     assert!(
         run_targets.iter().any(|target| {
-            AnalysisQuery::new(&engine)
-                .file(target.file_id)
-                .is_some_and(|file| {
-                    file.kind == ruby_analysis::core::SourceKind::External
-                        && file.path.ends_with("fixtures/RichFixture.java")
-                })
+            engine.view().file(target.file_id).is_some_and(|file| {
+                file.kind == ruby_analysis::core::SourceKind::External
+                    && file.path.ends_with("fixtures/RichFixture.java")
+            })
         }),
         "java_send method-name navigation must resolve to the exact Java implementation source; \
              targets: {run_targets:?}"
@@ -277,7 +278,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         ),
     ] {
         let constant = FullyQualifiedName::try_from(constant).unwrap();
-        let indexed_types = AnalysisQuery::new(&engine).type_facts_in_file(source_file);
+        let indexed_types = engine.view().type_facts_in_file(source_file);
         assert!(
             indexed_types.iter().any(|fact| {
                 fact.subject == TypeSubject::Constant(constant.clone())
@@ -297,7 +298,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         document,
         server.project_for_uri(&uri),
     );
-    let indexed_types = AnalysisQuery::new(&engine).type_facts_in_file(source_file);
+    let indexed_types = engine.view().type_facts_in_file(source_file);
     let rich_constant = FullyQualifiedName::try_from("Admin::RICH").unwrap();
     let rich_proxy = FullyQualifiedName::try_from("Java::Fixtures::RichFixture").unwrap();
     let rich_proxy_namespace = FullyQualifiedName::namespace(rich_proxy.namespace_parts().to_vec());
@@ -311,7 +312,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
     );
     let combine_method = ruby_analysis::core::RubyMethod::new("combine").unwrap();
     let combine_return = ruby_analysis::engine::lookup::method(
-        &AnalysisQuery::new(&engine),
+        &engine.view(),
         ruby_analysis::engine::lookup::MethodRequest::new(
             ruby_analysis::engine::lookup::LookupReceiver::Namespace(&rich_proxy_namespace),
             combine_method,
@@ -367,9 +368,7 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
     let engine = server.project_for_uri(&uri);
     let engine = engine.test_read();
     assert!(
-        AnalysisQuery::new(&engine)
-            .symbol_facts_for(&alias)
-            .is_empty(),
+        engine.view().symbol_facts_for(&alias).is_empty(),
         "removing java_import must remove its file-owned alias through ordinary replacement"
     );
     let java_alias = FullyQualifiedName::method(
@@ -380,13 +379,12 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
         ruby_analysis::core::RubyMethod::new("merged").unwrap(),
     );
     assert!(
-        AnalysisQuery::new(&engine)
-            .method_facts_for(&java_alias)
-            .is_empty(),
+        engine.view().method_facts_for(&java_alias).is_empty(),
         "removing java_alias must remove its proxy-owned method through ordinary replacement"
     );
     assert!(
-        AnalysisQuery::new(&engine)
+        engine
+            .view()
             .resolved_reference_definition_ranges_at(source_file, run_offset)
             .is_empty(),
         "removing JRuby dispatch calls must remove their file-owned Java method candidates"
@@ -508,19 +506,18 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     );
     let engine = server.project_for_uri(&uri);
     let engine = engine.test_read();
-    let source_file = AnalysisQuery::new(&engine).file_id(&source_path).unwrap();
+    let source_file = engine.view().file_id(&source_path).unwrap();
     let constructor_offset =
         u32::try_from(added.find("RichFixture.new").unwrap() + "RichFixture.".len()).unwrap();
-    let targets = AnalysisQuery::new(&engine)
+    let targets = engine
+        .view()
         .resolved_reference_definition_ranges_at(source_file, constructor_offset);
     assert!(
         targets.iter().any(|target| {
-            AnalysisQuery::new(&engine)
-                .file(target.file_id)
-                .is_some_and(|file| {
-                    file.kind == ruby_analysis::core::SourceKind::External
-                        && file.path.ends_with("fixtures/RichFixture.java")
-                })
+            engine.view().file(target.file_id).is_some_and(|file| {
+                file.kind == ruby_analysis::core::SourceKind::External
+                    && file.path.ends_with("fixtures/RichFixture.java")
+            })
         }),
         "a newly added import must navigate to its exact Java source in the same edit pass; \
              targets: {targets:?}"
@@ -528,7 +525,7 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     let rich = FullyQualifiedName::try_from("RICH").unwrap();
     let expected_rich_type =
         RubyType::Class(FullyQualifiedName::try_from("Java::Fixtures::RichFixture").unwrap());
-    let indexed_types = AnalysisQuery::new(&engine).type_facts_in_file(source_file);
+    let indexed_types = engine.view().type_facts_in_file(source_file);
     assert!(
         indexed_types.iter().any(|fact| {
             fact.subject == TypeSubject::Constant(rich.clone())
@@ -557,7 +554,8 @@ async fn adding_a_java_import_after_cold_index_materializes_navigation_inputs_on
     let engine = server.project_for_uri(&uri);
     let engine = engine.test_read();
     assert!(
-        AnalysisQuery::new(&engine)
+        engine
+            .view()
             .resolved_reference_definition_ranges_at(source_file, constructor_offset)
             .is_empty(),
         "removing the newly added import and constructor call must clear their reference facts"

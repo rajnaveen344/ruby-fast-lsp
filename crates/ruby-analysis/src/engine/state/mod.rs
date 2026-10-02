@@ -217,12 +217,6 @@ impl Project {
         View::new(self)
     }
 
-    /// Former name of [`Project::view`]; removed once loader callers migrate.
-    #[inline]
-    pub fn query(&self) -> View<'_> {
-        self.view()
-    }
-
     pub fn shrink_to_fit(&mut self) {
         self.files.shrink_to_fit();
         self.names.shrink_to_fit();

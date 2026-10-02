@@ -5,7 +5,7 @@ use ruby_analysis::core::{
     FullyQualifiedName, RubyType, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact,
     TypeProvenance, TypeSubject,
 };
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
+use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::AnalysisIndexer;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -465,7 +465,7 @@ pub(super) fn collect_known_namespaces(
     analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
 ) -> HashSet<FullyQualifiedName> {
     let engine = analysis_engine.read();
-    AnalysisQuery::new(&engine).known_namespace_fqns()
+    engine.view().known_namespace_fqns()
 }
 
 fn collect_known_constant_types(
@@ -475,7 +475,7 @@ fn collect_known_constant_types(
     let engine = analysis_engine.read();
     let mut candidates = HashMap::<FullyQualifiedName, Option<RubyType>>::new();
     for fact in engine
-        .query()
+        .view()
         .all_type_facts()
         .into_iter()
         .filter(|fact| fact.range.file_id != current_file)

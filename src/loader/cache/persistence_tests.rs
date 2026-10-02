@@ -14,7 +14,7 @@ use ruby_analysis::core::{
     FileAnalysis, FullyQualifiedName, GraphNodeFact, GraphNodeKind, RubyConstant, SourceFileId,
     SymbolFact, SymbolKind, TextRange,
 };
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ProjectNeutralFileFactsTemplate};
+use ruby_analysis::engine::{AnalysisEngine, ProjectNeutralFileFactsTemplate};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -155,7 +155,7 @@ fn fresh_cache_load_rebinds_exact_path_and_corruption_recovers() {
         .bind_into(&second_manifest, &mut second_engine)
         .unwrap();
     let parts = [RubyConstant::new("Widget").unwrap()];
-    let definition = AnalysisQuery::new(&second_engine).constant_definition_ranges(&parts, &[])[0];
+    let definition = second_engine.view().constant_definition_ranges(&parts, &[])[0];
     assert_eq!(
         second_engine.view().file(definition.file_id).unwrap().path,
         second_path

@@ -17,7 +17,6 @@ use crate::test::harness::{check, check_multi_file, FakeEditor};
 use ruby_analysis::core::{
     FullyQualifiedName, MethodAvailability, NamespaceKind, RubyConstant, RubyMethod, SourceKind,
 };
-use ruby_analysis::engine::AnalysisQuery;
 use tower_lsp::lsp_types::{NumberOrString, Url};
 
 #[tokio::test]
@@ -271,7 +270,7 @@ end
         RubyMethod::new("fork").expect("fork must be a valid Ruby method"),
     );
     let engine = editor.server().orphan_project().test_read();
-    let facts = AnalysisQuery::new(&engine).method_facts_for(&fork);
+    let facts = engine.view().method_facts_for(&fork);
     assert!(
         facts.iter().any(|fact| {
             fact.owner

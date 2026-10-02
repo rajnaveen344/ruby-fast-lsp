@@ -522,13 +522,13 @@ impl IndexerProject {
                 known_namespaces.unwrap_or_else(|| {
                     Arc::new({
                         let engine = semantic_read_engine.read();
-                        ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+                        engine.view().known_namespace_fqns()
                     })
                 })
             } else {
                 Arc::new({
                     let engine = semantic_read_engine.read();
-                    ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+                    engine.view().known_namespace_fqns()
                 })
             };
 
@@ -585,7 +585,7 @@ impl IndexerProject {
         let known_namespaces = if requires_direct_semantic_seed {
             Arc::new({
                 let engine = semantic_read_engine.read();
-                ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+                engine.view().known_namespace_fqns()
             })
         } else {
             baseline_known_namespaces

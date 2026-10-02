@@ -764,7 +764,7 @@ async fn cross_file_instance_variable_constructor_receiver_has_engine_proof() {
     let document = editor.server().get_doc(&uri).unwrap();
     let engine = editor.server().project_for_uri(&uri);
     let engine = engine.test_read();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+    let query = engine.view();
     let owner = ruby_analysis::core::FullyQualifiedName::namespace_with_kind(
         vec![ruby_analysis::core::RubyConstant::new("Client").unwrap()],
         ruby_analysis::core::NamespaceKind::Instance,

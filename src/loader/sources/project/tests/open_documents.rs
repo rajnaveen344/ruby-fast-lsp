@@ -68,7 +68,7 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
     let engine = workspace.handle().test_read();
     let open_file = engine.view().file_id(&open_path).unwrap();
     let closed_file = engine.view().file_id(&closed_path).unwrap();
-    let query = AnalysisQuery::new(&engine);
+    let query = engine.view();
     assert!(
         !query.references_in_file(open_file).is_empty(),
         "the open document must have its project references resolved"
@@ -81,7 +81,10 @@ async fn project_stage_resolves_open_documents_and_defers_closed_candidates() {
 
     workspace.handle().test_write().resolve();
     assert!(
-        !AnalysisQuery::new(&workspace.handle().test_read())
+        !workspace
+            .handle()
+            .test_read()
+            .view()
             .references_in_file(closed_file)
             .is_empty(),
         "the final complete resolution must materialize the deferred closed-file candidate"
@@ -124,7 +127,10 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
         .file_id(&caller_path)
         .unwrap();
     assert!(
-        !AnalysisQuery::new(&workspace_state.handle().test_read())
+        !workspace_state
+            .handle()
+            .test_read()
+            .view()
             .resolved_reference_definition_ranges_at(caller_file, 19)
             .is_empty(),
         "the open-document pass must initially resolve the singleton method"
@@ -149,7 +155,8 @@ async fn cold_project_collection_cannot_overwrite_newer_open_document_facts() {
         "cold indexing must retain the editor's newer source snapshot"
     );
     assert!(
-        !AnalysisQuery::new(&engine)
+        !engine
+            .view()
             .resolved_reference_definition_ranges_at(caller_file, 19)
             .is_empty(),
         "a stale cold-index batch must not erase method facts from a newer open document"
