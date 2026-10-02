@@ -232,7 +232,7 @@ fn mixin_usages_from_analysis(
         .into_iter()
         .filter_map(|usage| {
             let mixin_type = mixin_type_from_usage_kind(usage.kind);
-            let location = location_for_range(engine, usage.range)?;
+            let location = location_for_range(&engine.view(), usage.range)?;
             Some((mixin_type, location))
         })
         .collect::<Vec<_>>();
@@ -255,7 +255,7 @@ fn class_definition_locations_from_analysis(
     let mut result = query
         .module_including_class_definition_ranges(module_fqn)
         .into_iter()
-        .filter_map(|range| location_for_range(engine, range))
+        .filter_map(|range| location_for_range(&engine.view(), range))
         .collect::<Vec<_>>();
     result.sort_by_key(|location| {
         (

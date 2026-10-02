@@ -310,7 +310,7 @@ fn type_hierarchy_item_from_parts(
     range: ruby_analysis::core::TextRange,
     detail: Option<String>,
 ) -> Option<TypeHierarchyItem> {
-    let location = location_for_range(engine, range)?;
+    let location = location_for_range(&engine.view(), range)?;
     Some(TypeHierarchyItem {
         name: fqn.name(),
         kind,

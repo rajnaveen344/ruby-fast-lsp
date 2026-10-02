@@ -278,7 +278,7 @@ async fn bundled_stub_navigation_retains_source_positions() {
         "the complete declaration range must convert even after non-ASCII comments"
     );
     let locations =
-        crate::features::cursor::analysis_location::locations_for_ranges(&engine, ranges);
+        crate::features::cursor::analysis_location::locations_for_ranges(&engine.view(), ranges);
     assert_eq!(locations.len(), 1);
     assert_eq!(
         locations[0].range,

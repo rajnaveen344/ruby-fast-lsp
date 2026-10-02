@@ -121,7 +121,7 @@ impl EngineQuery {
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.method_implementation_ranges(owner_fqn, method),
         ))
     }
@@ -138,7 +138,7 @@ impl EngineQuery {
         let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.namespace_implementation_ranges(fqn),
         ))
     }

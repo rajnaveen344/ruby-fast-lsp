@@ -130,7 +130,7 @@ impl EngineQuery {
             query.module_call_reference_ranges_at(file_id, byte_offset)?
         };
         Some(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(&engine, ranges),
+            locations_for_ranges(&engine.view(), ranges),
         ))
     }
 
@@ -611,7 +611,7 @@ impl EngineQuery {
             .filter(|range| range.file_id == file_id)
             .collect::<Vec<_>>();
         non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(&engine, ranges),
+            locations_for_ranges(&engine.view(), ranges),
         ))
     }
 
@@ -625,7 +625,7 @@ impl EngineQuery {
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let ranges = same_file_reference_ranges(&query, fqn, file_id);
         non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(&engine, ranges),
+            locations_for_ranges(&engine.view(), ranges),
         ))
     }
 
@@ -741,7 +741,7 @@ impl EngineQuery {
             ranges.extend(same_file_reference_ranges(&query, &target, file_id));
         }
         non_empty_locations(crate::utils::lsp::deduplicate_locations(
-            locations_for_ranges(&engine, ranges),
+            locations_for_ranges(&engine.view(), ranges),
         ))
     }
 
@@ -755,7 +755,7 @@ impl EngineQuery {
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(crate::utils::lsp::deduplicate_locations(
             locations_for_ranges(
-                &engine,
+                &engine.view(),
                 query.method_reference_ranges(namespace_fqn, method),
             ),
         ))
@@ -772,7 +772,7 @@ impl EngineQuery {
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(crate::utils::lsp::deduplicate_locations(
             locations_for_ranges(
-                &engine,
+                &engine.view(),
                 query.method_reference_ranges_protected_receiver(
                     namespace_fqn,
                     method,
@@ -793,7 +793,7 @@ impl EngineQuery {
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(crate::utils::lsp::deduplicate_locations(
             locations_for_ranges(
-                &engine,
+                &engine.view(),
                 query.method_reference_ranges_for_constant_receiver_public(
                     receiver_path,
                     ancestors,
@@ -816,7 +816,7 @@ impl EngineQuery {
             FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
         non_empty_locations(crate::utils::lsp::deduplicate_locations(
             locations_for_ranges(
-                &engine,
+                &engine.view(),
                 query.method_reference_ranges(&namespace_fqn, method),
             ),
         ))
@@ -835,7 +835,7 @@ impl EngineQuery {
             FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
         non_empty_locations(crate::utils::lsp::deduplicate_locations(
             locations_for_ranges(
-                &engine,
+                &engine.view(),
                 query.super_method_reference_ranges(&namespace_fqn, method),
             ),
         ))
@@ -850,7 +850,7 @@ impl EngineQuery {
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.constant_reference_ranges(constant_path, ancestors),
         ))
     }
@@ -863,7 +863,7 @@ impl EngineQuery {
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.variable_reference_ranges(fqn),
         ))
     }
@@ -876,7 +876,7 @@ impl EngineQuery {
         let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.reference_ranges_for_fqn(fqn),
         ))
     }

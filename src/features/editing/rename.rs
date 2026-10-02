@@ -81,7 +81,7 @@ fn prepare_rename(
     if let Some(target) =
         AnalysisQuery::new(&engine).method_rename_target_at(analysis_file_id, analysis_offset)
     {
-        let location = locations_for_ranges(&engine, target.ranges)
+        let location = locations_for_ranges(&engine.view(), target.ranges)
             .into_iter()
             .find(|location| location.uri == uri && range_contains(location.range, position))?;
         return Some(PrepareRenameResponse::RangeWithPlaceholder {
@@ -99,7 +99,7 @@ fn prepare_rename(
     let analysis_engine = server.analysis_engine_for_uri(&uri);
     let engine = analysis_engine.read();
     let target = AnalysisQuery::new(&engine).constant_rename_target(&iden, &ancestors)?;
-    let location = locations_for_ranges(&engine, target.ranges)
+    let location = locations_for_ranges(&engine.view(), target.ranges)
         .into_iter()
         .find(|location| location.uri == uri && range_contains(location.range, position))?;
     Some(PrepareRenameResponse::RangeWithPlaceholder {
@@ -155,7 +155,7 @@ fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<Workspace
                 analysis_offset,
                 new_method,
             ) {
-                for location in locations_for_ranges(&engine, target.ranges) {
+                for location in locations_for_ranges(&engine.view(), target.ranges) {
                     changes
                         .entry(location.uri)
                         .or_insert_with(Vec::new)
@@ -186,7 +186,7 @@ fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<Workspace
         let engine = analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         let target = query.constant_rename_target_for_name(&iden, &ancestors, new_constant)?;
-        for location in locations_for_ranges(&engine, target.ranges) {
+        for location in locations_for_ranges(&engine.view(), target.ranges) {
             changes
                 .entry(location.uri)
                 .or_insert_with(Vec::new)

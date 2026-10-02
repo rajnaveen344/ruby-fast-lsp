@@ -106,7 +106,7 @@ fn symbol_information_from_engine_symbol(
         tags: None,
         #[allow(deprecated)]
         deprecated: Some(false),
-        location: location_for_range(engine, symbol.range)?,
+        location: location_for_range(&engine.view(), symbol.range)?,
         container_name: symbol.container_name,
     })
 }

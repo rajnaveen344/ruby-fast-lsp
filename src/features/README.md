@@ -13,7 +13,7 @@ lsp/service -> features::<family>::<feature>::handle -> ruby-analysis engine
 
 | Module        | Owns                                                                                                                |
 | :------------ | :------------------------------------------------------------------------------------------------------------------ |
-| `cursor/`     | `EngineQuery` (document plus owning engine), method lookup, range conversion                                        |
+| `cursor/`     | `EngineQuery` (document plus owning engine), `Cursor` (one request's document and `View`), method lookup, range conversion |
 | `navigation/` | Definition (with indexing demand waits), implementation, references, document highlights, type and call hierarchies, workspace symbols, namespace tree |
 | `editing/`     | Completion (constant, method, variable, snippet candidates), signature help, rename, code actions, formatting |
 | `diagnostics/`  | Engine diagnostics for a document (`engine_diagnostics` over one `&View`); `run_linter`, the lifecycle entry point that lints and retains output for the current source; the external linter and formatter runner |
@@ -36,6 +36,11 @@ lsp/service -> features::<family>::<feature>::handle -> ruby-analysis engine
   refresh publish too, and `server` never names `features`. `diagnostics/`
   owns the engine projection's feature name, the linter run that feeds the
   retained output, and the linter runner itself.
+- A request reads the engine through `EngineQuery::with_view`, which takes
+  the document read guard and the engine read guard once each and passes a
+  `Cursor` (document plus `View`) to plain functions. Functions over a cursor
+  never lock the engine or the document again, and the closure is
+  synchronous, so no guard is held across an `.await`.
 - A feature may read `server` state and `loader` products. It never names
   `lsp`; an item a feature needs from `lsp` moves to its proper owner.
 - Query adapters convert cursor positions to analysis offsets and domain

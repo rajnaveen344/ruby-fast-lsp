@@ -193,7 +193,7 @@ impl EngineQuery {
                 .filter_map(|call| {
                     Some(CallHierarchyIncomingCall {
                         from: call_hierarchy_item_from_engine_method(&engine, call.from)?,
-                        from_ranges: lsp_ranges_for_ranges(&engine, call.from_ranges),
+                        from_ranges: lsp_ranges_for_ranges(&engine.view(), call.from_ranges),
                     })
                 })
                 .collect(),
@@ -220,7 +220,7 @@ impl EngineQuery {
                 .filter_map(|call| {
                     Some(CallHierarchyOutgoingCall {
                         to: call_hierarchy_item_from_engine_method(&engine, call.to)?,
-                        from_ranges: lsp_ranges_for_ranges(&engine, call.from_ranges),
+                        from_ranges: lsp_ranges_for_ranges(&engine.view(), call.from_ranges),
                     })
                 })
                 .collect(),
@@ -236,7 +236,7 @@ fn call_hierarchy_item_from_engine_method(
     engine: &ruby_analysis::engine::AnalysisEngine,
     method: CallHierarchyMethod,
 ) -> Option<CallHierarchyItem> {
-    let location = location_for_range(engine, method.range)?;
+    let location = location_for_range(&engine.view(), method.range)?;
     Some(CallHierarchyItem {
         name: method.fqn.name(),
         kind: SymbolKind::METHOD,

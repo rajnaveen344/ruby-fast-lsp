@@ -27,7 +27,7 @@ pub(super) fn type_hint_label(
                 AnalysisQuery::new(engine)
                     .type_name_definition_ranges(target)
                     .into_iter()
-                    .find_map(|range| location_for_range(engine, range))
+                    .find_map(|range| location_for_range(&engine.view(), range))
             });
         parts.push(InlayHintLabelPart {
             value: part.value,

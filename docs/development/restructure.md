@@ -242,7 +242,7 @@ Delete this file when the last task is done. Git history keeps the record.
 - [ ] B6. Move `AnalysisQuery` methods to free functions over `View`, one
       feature at a time: definition, references, hover, completion, inlay
       hints, diagnostics.
-  - [ ] B6a. `EngineQuery::with_view` takes exactly one read guard per
+  - [x] B6a. `EngineQuery::with_view` takes exactly one read guard per
         request.
   - [ ] B6b. Definition, implementation, and the shared method module.
   - [ ] B6c. References and document highlights.

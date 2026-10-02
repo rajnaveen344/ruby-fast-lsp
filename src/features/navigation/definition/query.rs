@@ -103,7 +103,7 @@ impl EngineQuery {
         if query.navigation_must_fail_closed_at(file_id, byte_offset, !resolved.is_empty()) {
             return Some(Vec::new());
         }
-        let locations = locations_for_ranges(&engine, resolved);
+        let locations = locations_for_ranges(&engine.view(), resolved);
         if !locations.is_empty() {
             return Some(locations);
         }
@@ -284,7 +284,7 @@ impl EngineQuery {
         let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.constant_definition_ranges(constant_path, ancestors),
         ))
     }
@@ -298,7 +298,7 @@ impl EngineQuery {
         let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.yard_type_definition_ranges(type_name, ancestors),
         ))
     }
@@ -311,7 +311,7 @@ impl EngineQuery {
         let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.instance_variable_definition_ranges(name),
         ))
     }
@@ -324,7 +324,7 @@ impl EngineQuery {
         let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.class_variable_definition_ranges(name),
         ))
     }
@@ -337,7 +337,7 @@ impl EngineQuery {
         let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
-            &engine,
+            &engine.view(),
             query.global_variable_definition_ranges(name),
         ))
     }
@@ -360,6 +360,6 @@ impl EngineQuery {
             .filter(|fact| fact.range.start_byte < byte_offset)
             .max_by_key(|fact| fact.range.start_byte)
             .map(|fact| fact.range)?;
-        non_empty_locations(locations_for_ranges(&engine, vec![range]))
+        non_empty_locations(locations_for_ranges(&engine.view(), vec![range]))
     }
 }

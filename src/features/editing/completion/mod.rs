@@ -77,7 +77,7 @@ pub async fn find_completion_at_position(
     let analyzer = analyzer_for_document(
         RubyPrismAnalyzer::new(uri.clone(), document.content.clone()),
         &document,
-        &server.analysis_engine_for_uri(&uri),
+        &server.analysis_engine_for_uri(&uri).read().view(),
         position,
     );
     let byte_offset = document.position_to_analysis_offset(source_position(position));

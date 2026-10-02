@@ -46,5 +46,5 @@ pub(super) fn find_method_definitions(
         ),
         MethodLookupReceiver::Super(owner) => analysis.super_definition_ranges(owner, method),
     }?;
-    non_empty_locations(locations_for_ranges(&engine, ranges))
+    non_empty_locations(locations_for_ranges(&engine.view(), ranges))
 }
