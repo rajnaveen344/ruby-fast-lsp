@@ -11,7 +11,10 @@ use ruby_prism::{
     visit_alias_method_node, visit_block_node, visit_call_node, visit_class_node,
     visit_class_variable_and_write_node, visit_class_variable_operator_write_node,
     visit_class_variable_or_write_node, visit_class_variable_target_node,
-    visit_class_variable_write_node, visit_constant_path_target_node,
+    visit_class_variable_write_node, visit_constant_and_write_node,
+    visit_constant_operator_write_node, visit_constant_or_write_node,
+    visit_constant_path_and_write_node, visit_constant_path_operator_write_node,
+    visit_constant_path_or_write_node, visit_constant_path_target_node,
     visit_constant_path_write_node, visit_constant_write_node, visit_def_node,
     visit_global_variable_and_write_node, visit_global_variable_operator_write_node,
     visit_global_variable_or_write_node, visit_global_variable_target_node,
@@ -23,7 +26,9 @@ use ruby_prism::{
     visit_local_variable_write_node, visit_module_node, visit_singleton_class_node,
     AliasMethodNode, BlockNode, CallNode, ClassNode, ClassVariableAndWriteNode,
     ClassVariableOperatorWriteNode, ClassVariableOrWriteNode, ClassVariableTargetNode,
-    ClassVariableWriteNode, ConstantPathTargetNode, ConstantPathWriteNode, ConstantTargetNode,
+    ClassVariableWriteNode, ConstantAndWriteNode, ConstantOperatorWriteNode, ConstantOrWriteNode,
+    ConstantPathAndWriteNode, ConstantPathNode, ConstantPathOperatorWriteNode,
+    ConstantPathOrWriteNode, ConstantPathTargetNode, ConstantPathWriteNode, ConstantTargetNode,
     ConstantWriteNode, DefNode, GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode,
     GlobalVariableOrWriteNode, GlobalVariableTargetNode, GlobalVariableWriteNode,
     InstanceVariableAndWriteNode, InstanceVariableOperatorWriteNode, InstanceVariableOrWriteNode,
@@ -64,6 +69,26 @@ impl AnalysisIndexer {
                 .push_scope_kind(LocalScopeKind::FrameworkInstanceBlock);
             self.visit(&block);
             self.scope.pop_scope_kind();
+        }
+    }
+}
+
+impl AnalysisIndexer {
+    /// Declare the constant a `Parent::NAME` write site names.
+    fn push_constant_path_write(
+        &mut self,
+        target: &ConstantPathNode<'_>,
+        full_location: ruby_prism::Location<'_>,
+        value: Option<&ruby_prism::Node<'_>>,
+    ) {
+        if let Some(name) = target.name() {
+            self.push_constant_path_declaration(
+                target.parent().as_ref(),
+                name.as_slice(),
+                target.location(),
+                full_location,
+                value,
+            );
         }
     }
 }
@@ -413,17 +438,65 @@ impl Visit<'_> for AnalysisIndexer {
     }
 
     fn visit_constant_path_write_node(&mut self, node: &ConstantPathWriteNode<'_>) {
-        let target = node.target();
-        if let Some(name) = target.name() {
-            self.push_constant_path_declaration(
-                target.parent().as_ref(),
-                name.as_slice(),
-                target.location(),
-                node.location(),
-                Some(&node.value()),
-            );
-        }
+        let value = node.value();
+        self.push_constant_path_write(&node.target(), node.location(), Some(&value));
         visit_constant_path_write_node(self, node);
+    }
+
+    // A compound write is a write site of the constant it names, as `X = v`
+    // is, and both walks seed its type from the written operand `v`.
+    fn visit_constant_or_write_node(&mut self, node: &ConstantOrWriteNode<'_>) {
+        let value = node.value();
+        self.push_constant_declaration(
+            node.name().as_slice(),
+            node.name_loc(),
+            node.location(),
+            Some(&value),
+        );
+        visit_constant_or_write_node(self, node);
+    }
+
+    fn visit_constant_and_write_node(&mut self, node: &ConstantAndWriteNode<'_>) {
+        let value = node.value();
+        self.push_constant_declaration(
+            node.name().as_slice(),
+            node.name_loc(),
+            node.location(),
+            Some(&value),
+        );
+        visit_constant_and_write_node(self, node);
+    }
+
+    fn visit_constant_operator_write_node(&mut self, node: &ConstantOperatorWriteNode<'_>) {
+        let value = node.value();
+        self.push_constant_declaration(
+            node.name().as_slice(),
+            node.name_loc(),
+            node.location(),
+            Some(&value),
+        );
+        visit_constant_operator_write_node(self, node);
+    }
+
+    fn visit_constant_path_or_write_node(&mut self, node: &ConstantPathOrWriteNode<'_>) {
+        let value = node.value();
+        self.push_constant_path_write(&node.target(), node.location(), Some(&value));
+        visit_constant_path_or_write_node(self, node);
+    }
+
+    fn visit_constant_path_and_write_node(&mut self, node: &ConstantPathAndWriteNode<'_>) {
+        let value = node.value();
+        self.push_constant_path_write(&node.target(), node.location(), Some(&value));
+        visit_constant_path_and_write_node(self, node);
+    }
+
+    fn visit_constant_path_operator_write_node(
+        &mut self,
+        node: &ConstantPathOperatorWriteNode<'_>,
+    ) {
+        let value = node.value();
+        self.push_constant_path_write(&node.target(), node.location(), Some(&value));
+        visit_constant_path_operator_write_node(self, node);
     }
 
     fn visit_constant_target_node(&mut self, node: &ConstantTargetNode<'_>) {

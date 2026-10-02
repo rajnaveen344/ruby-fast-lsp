@@ -344,3 +344,36 @@ fn declarations_in_eval_blocks_land_on_the_receiver() {
         ],
     );
 }
+
+#[test]
+fn compound_constant_writes_are_write_sites() {
+    // `X ||= v` assigns `v` when `X` is undefined, and `X op= v` and
+    // `X &&= v` reassign `X` as `X = X op v` does, so each is a write site of
+    // the constant it names, found by the same lexical path as `X = v`.
+    let source = "module Shapes\n  module Inner; end\n  LIMIT ||= 3\n  Inner::DEPTH ||= 4\n  \
+                  COUNT = 1\n  COUNT += 1\n  COUNT &&= 2\n  Inner::DEPTH += 1\n  \
+                  SCALE += 2\n  Inner::SPAN += 2\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "symbol Shapes::LIMIT Constant",
+            "symbol Shapes::Inner::DEPTH Constant",
+            "constant type Shapes::LIMIT",
+            "constant type Shapes::Inner::DEPTH",
+            // An operator write seeds the operand's type, the approximation
+            // the constant inlay contract already shows for `A += 1`.
+            "symbol Shapes::SCALE Constant",
+            "symbol Shapes::Inner::SPAN Constant",
+            "constant type Shapes::SCALE",
+            "constant type Shapes::Inner::SPAN",
+        ],
+    );
+    let (seed, _) = walk_declarations(source);
+    assert_eq!(
+        seed.iter()
+            .filter(|declaration| declaration.starts_with("symbol Shapes::COUNT "))
+            .count(),
+        3,
+        "{seed:#?}"
+    );
+}
