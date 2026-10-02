@@ -181,6 +181,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
 
     assert!(engine.view().reference_facts_for(&user).is_empty());
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .any(|fact| fact.code == "unresolved-constant"));
@@ -205,6 +206,7 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
 
     assert_eq!(engine.view().reference_facts_for(&user).len(), 1);
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .all(|fact| fact.code != "unresolved-constant"));
@@ -605,6 +607,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
 
     assert_eq!(engine.view().reference_facts_for(&method_fqn).len(), 1);
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .any(|fact| fact.code == "unresolved-method"));
@@ -632,6 +635,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
 
     assert_eq!(engine.view().reference_facts_for(&method_fqn).len(), 1);
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .all(|fact| fact.code != "unresolved-method"));

@@ -589,7 +589,7 @@ fn domain_diagnostics(
     selected_file: Option<&Path>,
 ) -> Result<Vec<CheckDiagnostic>> {
     let mut diagnostics = Vec::new();
-    for diagnostic in engine.all_diagnostic_facts() {
+    for diagnostic in engine.view().all_diagnostic_facts() {
         let file = engine
             .view()
             .file(diagnostic.range.file_id)

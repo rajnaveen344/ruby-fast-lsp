@@ -114,6 +114,7 @@ fn constant_reference_resolves_a_value_constant_without_a_namespace_node() {
 
     assert_eq!(engine.view().reference_facts_for(&status).len(), 1);
     assert!(engine
+        .view()
         .diagnostic_facts_in_file(ref_file)
         .iter()
         .all(|fact| fact.code != "unresolved-constant"));

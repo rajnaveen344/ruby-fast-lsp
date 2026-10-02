@@ -213,6 +213,7 @@ fn edges_into_the_removed_file_become_unresolved_again() {
     let child = namespace("Child");
     let unresolved_constants = |engine: &Project| {
         engine
+            .view()
             .diagnostic_facts_in_file(child_file)
             .into_iter()
             .filter(|fact| fact.code == "unresolved-constant")
@@ -282,7 +283,10 @@ fn references_and_callees_no_longer_reach_removed_methods() {
             .all(|callee| callee.definition_ranges.is_empty())
     );
     assert!(engine.view().method_facts_in_file(parent_file).is_empty());
-    assert!(engine.diagnostic_facts_in_file(parent_file).is_empty());
+    assert!(engine
+        .view()
+        .diagnostic_facts_in_file(parent_file)
+        .is_empty());
 }
 
 #[test]
@@ -343,7 +347,10 @@ fn reregistering_a_removed_path_starts_empty_with_a_new_id() {
     assert_ne!(reregistered, parent_file);
     assert_eq!(engine.view().file_id("parent.rb"), Some(reregistered));
     assert!(engine.view().method_facts_in_file(reregistered).is_empty());
-    assert!(engine.diagnostic_facts_in_file(reregistered).is_empty());
+    assert!(engine
+        .view()
+        .diagnostic_facts_in_file(reregistered)
+        .is_empty());
     assert!(engine.view().references_in_file(reregistered).is_empty());
     assert!(!engine
         .hierarchy

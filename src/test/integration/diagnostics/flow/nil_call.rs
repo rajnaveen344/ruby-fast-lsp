@@ -121,6 +121,7 @@ async fn cold_nil_call_facts_survive_byte_identical_open_and_save() {
             .file_id(&path)
             .expect("cold source registered");
         let diagnostics = engine
+            .view()
             .diagnostic_facts_in_file(file_id)
             .into_iter()
             .filter(|diagnostic| diagnostic.code == "nil-call")

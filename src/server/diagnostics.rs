@@ -198,6 +198,7 @@ impl RubyLanguageServer {
                 .filter(|file| file.kind.contributes_project_diagnostics())
                 .filter_map(|file| {
                     let candidates = engine
+                        .view()
                         .diagnostic_facts_in_file(file.id)
                         .into_iter()
                         .filter(|fact| fact.code == UNRESOLVED_REQUIRE_CODE)
@@ -373,6 +374,7 @@ pub(crate) fn unresolved_diagnostics_from_engine(
     };
 
     engine
+        .view()
         .diagnostic_facts_in_file(file_id)
         .into_iter()
         .filter_map(|fact| diagnostic_from_fact(engine, &fact))
@@ -502,6 +504,7 @@ impl RubyLanguageServer {
                 }
                 diagnostics.extend(
                     engine
+                        .view()
                         .diagnostic_facts_in_file(file.id)
                         .iter()
                         .filter_map(|fact| diagnostic_from_fact_fast(file, fact)),

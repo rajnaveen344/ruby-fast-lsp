@@ -14,8 +14,7 @@ use crate::invariant::ExpectInvariant;
 
 use crate::core::storage::reference_store::StoredReferenceCandidateKind;
 use crate::core::{
-    DiagnosticFact, FullyQualifiedName, MethodCalleeResolution, RubyType, SourceFileId, TextRange,
-    UnknownReason,
+    FullyQualifiedName, MethodCalleeResolution, RubyType, SourceFileId, TextRange, UnknownReason,
 };
 
 use crate::engine::{AnalysisQueryCache, Project};
@@ -243,13 +242,5 @@ impl<'a> View<'a> {
                 && self
                     .expression_unknown_reason_at(file_id, byte_offset)
                     .is_some_and(unknown_reason_blocks_dispatch))
-    }
-
-    pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
-        self.engine.diagnostic_facts_in_file(file_id)
-    }
-
-    pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {
-        self.engine.all_diagnostic_facts()
     }
 }
