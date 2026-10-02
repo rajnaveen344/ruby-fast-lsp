@@ -8,7 +8,7 @@ use crate::core::{
     RubyType,
 };
 use crate::invariant::ExpectInvariant;
-use ruby_prism::{CallNode, Node};
+use ruby_prism::{CallNode, MultiWriteNode, Node};
 
 use super::scope_tracker::{mixin_ref_from_node, ScopeTracker};
 
@@ -394,4 +394,96 @@ pub fn static_name(node: &Node<'_>) -> Option<String> {
     }
     let string = node.as_string_node()?;
     Some(String::from_utf8_lossy(string.unescaped()).to_string())
+}
+
+/// The constant a `Parent::NAME` write or assignment target declares. Ruby
+/// writes `::NAME` at the top level and looks `Parent` up like any constant
+/// receiver, so `Shapes::Inner::NAME` lands on the `Inner` that lexical lookup
+/// finds. A parent no walk knows stays where a declaration of the same path
+/// would be named; a `self` whose namespace is unknown declares nothing.
+pub fn constant_path_write_target(
+    parent: Option<&Node<'_>>,
+    name: &[u8],
+    self_namespace: Option<&[RubyConstant]>,
+    lexical_context: &[RubyConstant],
+    is_known: &impl Fn(&FullyQualifiedName) -> bool,
+) -> Option<FullyQualifiedName> {
+    let constant = RubyConstant::new(&String::from_utf8_lossy(name)).ok()?;
+    let mut parts = match parent {
+        None => Vec::new(),
+        Some(parent) => {
+            match resolve_receiver_namespace(parent, self_namespace, lexical_context, is_known) {
+                Some(owner) => owner,
+                None => {
+                    let reference = mixin_ref_from_node(parent)?;
+                    declaration_candidates(&reference.parts, reference.absolute, lexical_context)
+                        .swap_remove(0)
+                }
+            }
+        }
+    };
+    parts.push(constant);
+    Some(FullyQualifiedName::constant(parts))
+}
+
+/// Every target a multiple assignment writes, each with the value Ruby
+/// assigns to it when syntax alone decides that value: a leading target of a
+/// literal array without splats. Nested, splat, and trailing targets, and
+/// targets of any other value, get `None`.
+pub fn multi_write_targets<'pr>(node: &MultiWriteNode<'pr>) -> Vec<(Node<'pr>, Option<Node<'pr>>)> {
+    let mut values = node
+        .value()
+        .as_array_node()
+        .map(|array| array.elements().iter().collect::<Vec<_>>())
+        .filter(|elements| {
+            elements
+                .iter()
+                .all(|element| element.as_splat_node().is_none())
+        })
+        .unwrap_or_default()
+        .into_iter();
+    let mut targets = Vec::new();
+    for left in node.lefts().iter() {
+        let value = values.next();
+        if left.as_multi_target_node().is_some() {
+            push_unvalued_targets(left, &mut targets);
+        } else {
+            targets.push((left, value));
+        }
+    }
+    if let Some(rest) = node.rest() {
+        push_unvalued_targets(rest, &mut targets);
+    }
+    for right in node.rights().iter() {
+        push_unvalued_targets(right, &mut targets);
+    }
+    targets
+}
+
+fn push_unvalued_targets<'pr>(
+    target: Node<'pr>,
+    targets: &mut Vec<(Node<'pr>, Option<Node<'pr>>)>,
+) {
+    if let Some(nested) = target.as_multi_target_node() {
+        for left in nested.lefts().iter() {
+            push_unvalued_targets(left, targets);
+        }
+        if let Some(rest) = nested.rest() {
+            push_unvalued_targets(rest, targets);
+        }
+        for right in nested.rights().iter() {
+            push_unvalued_targets(right, targets);
+        }
+        return;
+    }
+    if let Some(splat) = target.as_splat_node() {
+        if let Some(expression) = splat.expression() {
+            push_unvalued_targets(expression, targets);
+        }
+        return;
+    }
+    if target.as_implicit_rest_node().is_some() {
+        return;
+    }
+    targets.push((target, None));
 }

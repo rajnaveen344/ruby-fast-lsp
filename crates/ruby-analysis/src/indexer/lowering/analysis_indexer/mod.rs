@@ -7,11 +7,15 @@ use crate::core::{
     FileAnalysis, FullyQualifiedName, NamespaceKind, RubyConstant, RubyType, SourceFileId,
     TextRange,
 };
-use ruby_prism::{ConstantPathWriteNode, ConstantWriteNode, Node, Visit};
+use ruby_prism::{
+    ConstantPathTargetNode, ConstantPathWriteNode, ConstantTargetNode, ConstantWriteNode, Node,
+    Visit,
+};
 
 use self::syntax::{constant_parts, u32_offset};
 use crate::indexer::documents::scope_tracker::ScopeTracker;
 
+mod constants;
 mod methods;
 mod namespaces;
 mod syntax;
@@ -45,6 +49,14 @@ impl AnalysisIndexer {
             }
 
             fn visit_constant_path_write_node(&mut self, _node: &ConstantPathWriteNode<'pr>) {
+                self.0 = true;
+            }
+
+            fn visit_constant_target_node(&mut self, _node: &ConstantTargetNode<'pr>) {
+                self.0 = true;
+            }
+
+            fn visit_constant_path_target_node(&mut self, _node: &ConstantPathTargetNode<'pr>) {
                 self.0 = true;
             }
         }

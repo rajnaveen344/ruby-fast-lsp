@@ -11,35 +11,36 @@ use ruby_prism::{
     visit_alias_method_node, visit_call_node, visit_class_node,
     visit_class_variable_and_write_node, visit_class_variable_operator_write_node,
     visit_class_variable_or_write_node, visit_class_variable_target_node,
-    visit_class_variable_write_node, visit_constant_path_write_node, visit_constant_write_node,
-    visit_def_node, visit_global_variable_and_write_node,
-    visit_global_variable_operator_write_node, visit_global_variable_or_write_node,
-    visit_global_variable_target_node, visit_global_variable_write_node,
-    visit_instance_variable_and_write_node, visit_instance_variable_operator_write_node,
-    visit_instance_variable_or_write_node, visit_instance_variable_target_node,
-    visit_instance_variable_write_node, visit_local_variable_and_write_node,
-    visit_local_variable_operator_write_node, visit_local_variable_or_write_node,
-    visit_local_variable_target_node, visit_local_variable_write_node, visit_module_node,
-    visit_singleton_class_node, AliasMethodNode, CallNode, ClassNode, ClassVariableAndWriteNode,
+    visit_class_variable_write_node, visit_constant_path_target_node,
+    visit_constant_path_write_node, visit_constant_write_node, visit_def_node,
+    visit_global_variable_and_write_node, visit_global_variable_operator_write_node,
+    visit_global_variable_or_write_node, visit_global_variable_target_node,
+    visit_global_variable_write_node, visit_instance_variable_and_write_node,
+    visit_instance_variable_operator_write_node, visit_instance_variable_or_write_node,
+    visit_instance_variable_target_node, visit_instance_variable_write_node,
+    visit_local_variable_and_write_node, visit_local_variable_operator_write_node,
+    visit_local_variable_or_write_node, visit_local_variable_target_node,
+    visit_local_variable_write_node, visit_module_node, visit_singleton_class_node,
+    AliasMethodNode, CallNode, ClassNode, ClassVariableAndWriteNode,
     ClassVariableOperatorWriteNode, ClassVariableOrWriteNode, ClassVariableTargetNode,
-    ClassVariableWriteNode, ConstantPathWriteNode, ConstantWriteNode, DefNode,
-    GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode, GlobalVariableOrWriteNode,
-    GlobalVariableTargetNode, GlobalVariableWriteNode, InstanceVariableAndWriteNode,
-    InstanceVariableOperatorWriteNode, InstanceVariableOrWriteNode, InstanceVariableTargetNode,
-    InstanceVariableWriteNode, LocalVariableAndWriteNode, LocalVariableOperatorWriteNode,
-    LocalVariableOrWriteNode, LocalVariableTargetNode, LocalVariableWriteNode, ModuleNode,
-    SingletonClassNode, Visit,
+    ClassVariableWriteNode, ConstantPathTargetNode, ConstantPathWriteNode, ConstantTargetNode,
+    ConstantWriteNode, DefNode, GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode,
+    GlobalVariableOrWriteNode, GlobalVariableTargetNode, GlobalVariableWriteNode,
+    InstanceVariableAndWriteNode, InstanceVariableOperatorWriteNode, InstanceVariableOrWriteNode,
+    InstanceVariableTargetNode, InstanceVariableWriteNode, LocalVariableAndWriteNode,
+    LocalVariableOperatorWriteNode, LocalVariableOrWriteNode, LocalVariableTargetNode,
+    LocalVariableWriteNode, ModuleNode, MultiWriteNode, SingletonClassNode, Visit,
 };
 
 use super::syntax::{
     alias_method_names, class_implicitly_inherits_object, constant_parts_and_absolute,
-    constant_path_parts, method_param_facts, terminal_name_range,
+    method_param_facts, terminal_name_range,
 };
 use super::types::{literal_type, method_body_literal_type};
 use super::AnalysisIndexer;
 use crate::indexer::documents::scope_rules::{
-    alias_reopen_target, eval_block, method_declaration, namespace_is_proven_class,
-    DefinitionVisibility, MethodDeclaration,
+    alias_reopen_target, eval_block, method_declaration, multi_write_targets,
+    namespace_is_proven_class, DefinitionVisibility, MethodDeclaration,
 };
 use crate::indexer::yard::parser::YardParser;
 use crate::indexer::yard::types::YardMethodDoc;
@@ -362,56 +363,45 @@ impl Visit<'_> for AnalysisIndexer {
     }
 
     fn visit_constant_write_node(&mut self, node: &ConstantWriteNode<'_>) {
-        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        if let Ok(constant) = RubyConstant::new(&name) {
-            let mut parts = self.scope.get_ns_stack();
-            parts.push(constant);
-            let fqn = FullyQualifiedName::constant(parts);
-            self.facts.symbols.push(
-                SymbolFact::new(
-                    fqn.clone(),
-                    SymbolKind::Constant,
-                    self.range(&node.location()),
-                )
-                .with_name_range(self.range(&node.name_loc())),
-            );
-            self.push_type_fact(
-                TypeSubject::Constant(fqn),
-                self.assignment_type(&node.value()),
-                node.name_loc(),
-            );
-        }
+        self.push_constant_declaration(
+            node.name().as_slice(),
+            node.name_loc(),
+            node.location(),
+            Some(&node.value()),
+        );
         visit_constant_write_node(self, node);
     }
 
     fn visit_constant_path_write_node(&mut self, node: &ConstantPathWriteNode<'_>) {
         let target = node.target();
-        if let Some(parts) = constant_path_parts(&target) {
-            let fqn = FullyQualifiedName::constant(parts);
-            let name = target.name().expect_invariant(
-                "constant path write target has no terminal name",
-                "constant_path_parts accepted the same target",
-                "keep constant path extraction and name range derivation aligned",
-            );
-            self.facts.symbols.push(
-                SymbolFact::new(
-                    fqn.clone(),
-                    SymbolKind::Constant,
-                    self.range(&node.location()),
-                )
-                .with_name_range(terminal_name_range(
-                    self.file_id,
-                    &target.location(),
-                    name.as_slice(),
-                )),
-            );
-            self.push_type_fact(
-                TypeSubject::Constant(fqn),
-                self.assignment_type(&node.value()),
+        if let Some(name) = target.name() {
+            self.push_constant_path_declaration(
+                target.parent().as_ref(),
+                name.as_slice(),
                 target.location(),
+                node.location(),
+                Some(&node.value()),
             );
         }
         visit_constant_path_write_node(self, node);
+    }
+
+    fn visit_constant_target_node(&mut self, node: &ConstantTargetNode<'_>) {
+        self.push_constant_target_declaration(&node.as_node(), None);
+    }
+
+    fn visit_constant_path_target_node(&mut self, node: &ConstantPathTargetNode<'_>) {
+        self.push_constant_target_declaration(&node.as_node(), None);
+        visit_constant_path_target_node(self, node);
+    }
+
+    fn visit_multi_write_node(&mut self, node: &MultiWriteNode<'_>) {
+        for (target, value) in multi_write_targets(node) {
+            if !self.push_constant_target_declaration(&target, value.as_ref()) {
+                self.visit(&target);
+            }
+        }
+        self.visit(&node.value());
     }
 
     fn visit_call_node(&mut self, node: &CallNode<'_>) {

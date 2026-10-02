@@ -13,9 +13,9 @@ use std::collections::HashMap;
 pub(in crate::indexer::fact_collector) struct FlowState {
     pub(in crate::indexer::fact_collector) block_parameters: Vec<Vec<RubyType>>,
     pub(in crate::indexer::fact_collector) pattern_captures: Vec<HashMap<String, RubyType>>,
-    /// Positional RHS element types for the active `MultiWriteNode`, consumed by
-    /// `ConstantTargetNode` in left-to-right order.
-    pub(in crate::indexer::fact_collector) assignment_elements: Vec<Vec<RubyType>>,
+    /// The value type of each multiple-assignment target being visited,
+    /// innermost last; a constant target outside one has no known value.
+    pub(in crate::indexer::fact_collector) assignment_target_types: Vec<RubyType>,
     pub(in crate::indexer::fact_collector) method_yields:
         HashMap<FullyQualifiedName, Vec<RubyType>>,
     pub(in crate::indexer::fact_collector) local_callables:
@@ -254,23 +254,6 @@ impl FactCollector {
                 TypeInferenceOutcome::proven(ruby_type.clone())
             }
         }
-    }
-
-    /// Positional RHS element types for `A, B = 1, "x"` / `A, B = [1, "x"]`.
-    ///
-    /// Non-array RHS (e.g. method call) yields an empty vec so targets stay untyped.
-    pub(in crate::indexer::fact_collector) fn multi_write_element_types(
-        &self,
-        value: &Node<'_>,
-    ) -> Vec<RubyType> {
-        let Some(array) = value.as_array_node() else {
-            return Vec::new();
-        };
-        array
-            .elements()
-            .iter()
-            .map(|element| self.infer_assignment_type_from_value(&element))
-            .collect()
     }
 
     pub(in crate::indexer::fact_collector) fn pattern_capture_types_for_value(

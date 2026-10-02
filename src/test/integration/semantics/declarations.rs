@@ -137,3 +137,51 @@ Gauge.new.clamp$0<def none>(1)
     )
     .await;
 }
+
+/// Each constant target of a multiple assignment declares a constant, and the
+/// parent of `Parent::NAME` resolves lexically from the enclosing namespace.
+#[tokio::test]
+async fn multi_write_constant_path_target_resolves_parent_lexically() {
+    check(
+        r#"
+module Shapes
+  module Inner; end
+  <def>Inner::DEPTH</def>, WIDTH = 3, 4
+end
+
+Shapes::Inner::DEPTH$0
+"#,
+    )
+    .await;
+}
+
+/// A leading `::` writes a top-level constant even inside a namespace.
+#[tokio::test]
+async fn multi_write_top_level_constant_target() {
+    check(
+        r#"
+module Shapes
+  <def>::ORIGIN</def>, WIDTH = 0, 4
+end
+
+ORIGIN$0
+"#,
+    )
+    .await;
+}
+
+/// A plain constant target in a multiple assignment declares a constant in
+/// the current namespace.
+#[tokio::test]
+async fn multi_write_constant_target_declares_namespaced_constant() {
+    check(
+        r#"
+module Shapes
+  WIDTH, <def>HEIGHT</def> = 3, 4
+end
+
+Shapes::HEIGHT$0
+"#,
+    )
+    .await;
+}

@@ -415,6 +415,11 @@ impl Visit<'_> for FactCollector {
         self.process_constant_target_node_exit(node);
     }
 
+    fn visit_constant_path_target_node(&mut self, node: &ConstantPathTargetNode) {
+        self.process_constant_path_target_node_entry(node);
+        visit_constant_path_target_node(self, node);
+    }
+
     fn visit_constant_path_write_node(&mut self, node: &ConstantPathWriteNode) {
         self.process_constant_path_write_node_entry(node);
         visit_constant_path_write_node(self, node);
@@ -441,24 +446,21 @@ impl Visit<'_> for FactCollector {
 
     fn visit_multi_write_node(&mut self, node: &MultiWriteNode) {
         // Visit the RHS first so expression/method-return facts exist, then
-        // push positional element types for ConstantTarget consumers.
+        // give each target the value type Ruby assigns to it, when syntax
+        // decides one, for constant-target consumers.
         self.visit(&node.value());
-        let element_types = self.multi_write_element_types(&node.value());
-        self.flow.assignment_elements.push(element_types);
-        for target in node.lefts().iter() {
+        for (target, value) in crate::indexer::documents::scope_rules::multi_write_targets(node) {
+            let value_type = value
+                .map(|value| self.infer_assignment_type_from_value(&value))
+                .unwrap_or(crate::core::RubyType::Unknown);
+            self.flow.assignment_target_types.push(value_type);
             self.visit(&target);
+            self.flow.assignment_target_types.pop().expect_invariant(
+                "multi-write target type stack underflow",
+                "each multi-write target push must be balanced by one pop",
+                "keep FactCollector::visit_multi_write_node stack frames paired",
+            );
         }
-        if let Some(rest) = node.rest() {
-            self.visit(&rest);
-        }
-        for target in node.rights().iter() {
-            self.visit(&target);
-        }
-        self.flow.assignment_elements.pop().expect_invariant(
-            "multi-write LHS type stack underflow",
-            "each MultiWriteNode push must be balanced by one pop",
-            "keep FactCollector::visit_multi_write_node stack frames paired",
-        );
     }
 
     fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode) {

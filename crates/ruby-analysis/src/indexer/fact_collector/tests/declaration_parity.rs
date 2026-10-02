@@ -166,3 +166,33 @@ fn visibility_call_in_ordinary_block_applies_to_lexical_owner() {
         &["visibility Holder Some(Instance) helper Protected"],
     );
 }
+
+#[test]
+fn multi_write_constant_targets_follow_lexical_paths() {
+    // `Inner::DEPTH` finds `Inner` lexically, `::TOP` is top level, and
+    // `self::LEFT` is the current module. A splat target collects the rest
+    // into an array, so it takes no positional element type.
+    let source = "module Shapes\n  module Inner; end\n  WIDTH, HEIGHT = 1, 2\n  \
+                  Inner::DEPTH, ::TOP, self::LEFT = 3, 4, 5\n  FIRST, *REST = [1, 2, 3]\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "symbol Shapes::WIDTH Constant",
+            "symbol Shapes::HEIGHT Constant",
+            "symbol Shapes::Inner::DEPTH Constant",
+            "symbol TOP Constant",
+            "symbol Shapes::LEFT Constant",
+            "symbol Shapes::FIRST Constant",
+            "symbol Shapes::REST Constant",
+            "constant type Shapes::Inner::DEPTH",
+        ],
+    );
+}
+
+#[test]
+fn constant_path_write_finds_parent_lexically() {
+    // `Kernel::LIMIT = 1` inside `Shapes` writes `::Kernel::LIMIT` when no
+    // `Shapes::Kernel` exists, since `Kernel` resolves through lexical scope.
+    let source = "module Shapes\n  Kernel::LIMIT = 1\nend\n";
+    assert_walks_declare(source, &["symbol Kernel::LIMIT Constant"]);
+}

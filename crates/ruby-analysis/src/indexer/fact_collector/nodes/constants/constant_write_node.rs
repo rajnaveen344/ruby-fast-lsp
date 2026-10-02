@@ -65,7 +65,15 @@ impl FactCollector {
         }
     }
 
-    fn record_constant_value_type_explicit(
+    pub(in crate::indexer::fact_collector) fn current_assignment_target_type(&self) -> RubyType {
+        self.flow
+            .assignment_target_types
+            .last()
+            .cloned()
+            .unwrap_or(RubyType::Unknown)
+    }
+
+    pub(in crate::indexer::fact_collector) fn record_constant_value_type_explicit(
         &mut self,
         fqn: FullyQualifiedName,
         inferred_type: RubyType,
@@ -204,18 +212,7 @@ impl FactCollector {
         };
         self.record_constant_symbol(fqn.clone(), &node.location(), &node.location());
 
-        let inferred_type = self
-            .flow
-            .assignment_elements
-            .last_mut()
-            .and_then(|types| {
-                if types.is_empty() {
-                    None
-                } else {
-                    Some(types.remove(0))
-                }
-            })
-            .unwrap_or(RubyType::Unknown);
+        let inferred_type = self.current_assignment_target_type();
         self.record_constant_value_type_explicit(
             fqn,
             inferred_type,
