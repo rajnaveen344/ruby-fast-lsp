@@ -182,9 +182,9 @@ impl Project {
 
     fn resolution_uses_builtin_constructor(&self, resolution: &MethodLookupResult) -> bool {
         match resolution {
-            MethodLookupResult::Missing => true,
+            MethodLookupResult::Missing | MethodLookupResult::Unknown(_) => true,
             MethodLookupResult::Ambiguous { .. } => false,
-            MethodLookupResult::Unique(fact) => {
+            MethodLookupResult::Found(fact) => {
                 let FullyQualifiedName::Method(_, resolved_method) = &fact.fqn else {
                     unreachable_invariant!(
                         what = "method lookup returned a fact whose FQN is not a method",
@@ -224,9 +224,9 @@ impl Project {
         let return_type = match (access, resolution) {
             (
                 MethodReferenceAccess::Normal | MethodReferenceAccess::VisibilityBypass | MethodReferenceAccess::InstanceMethodReflection,
-                MethodLookupResult::Unique(fact),
+                MethodLookupResult::Found(fact),
             ) => self.cached_method_return_type(fact, caches),
-            (MethodReferenceAccess::ExplicitReceiver, MethodLookupResult::Unique(fact)) => {
+            (MethodReferenceAccess::ExplicitReceiver, MethodLookupResult::Found(fact)) => {
                 match self.cached_method_visibility(
                     method_cache_key,
                     fact,
@@ -271,7 +271,7 @@ impl Project {
                 | MethodReferenceAccess::ExplicitReceiver
                 | MethodReferenceAccess::VisibilityBypass
                 | MethodReferenceAccess::InstanceMethodReflection,
-                MethodLookupResult::Missing,
+                MethodLookupResult::Missing | MethodLookupResult::Unknown(_),
             ) => None,
         };
         // Core Class#new is intentionally generic/untyped in the bundled

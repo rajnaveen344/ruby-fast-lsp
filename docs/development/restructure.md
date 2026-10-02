@@ -171,7 +171,7 @@ Delete this file when the last task is done. Git history keeps the record.
         access, want }` and `MethodAnswer { Found, Ambiguous, Missing,
         Unknown }`, delegating to the existing inner functions. Equality tests
         against the legacy functions per want × access × receiver.
-  - [ ] B5b. Fold `MethodLookupResult` and `EffectiveMethodFactMatch` into
+  - [x] B5b. Fold `MethodLookupResult` and `EffectiveMethodFactMatch` into
         `MethodAnswer`.
   - [ ] B5c. Make the public/protected/`_for_type`/`_cached` wrappers
         one-liners over `lookup::method`; delete those with no callers.

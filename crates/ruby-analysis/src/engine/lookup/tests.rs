@@ -184,9 +184,9 @@ fn legacy_reference(
     result: MethodLookupResult,
 ) -> Option<(Option<Arc<MethodFact>>, FullyQualifiedName)> {
     match result {
-        MethodLookupResult::Unique(fact) => Some((Some(fact.clone()), fact.owner.clone())),
+        MethodLookupResult::Found(fact) => Some((Some(fact.clone()), fact.owner.clone())),
         MethodLookupResult::Ambiguous { owner, .. } => Some((None, owner)),
-        MethodLookupResult::Missing => None,
+        MethodLookupResult::Missing | MethodLookupResult::Unknown(_) => None,
     }
 }
 

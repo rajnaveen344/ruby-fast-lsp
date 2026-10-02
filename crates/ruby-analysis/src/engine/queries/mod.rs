@@ -133,11 +133,12 @@ impl<'a> View<'a> {
         byte_offset: u32,
     ) -> Option<Vec<TextRange>> {
         match self.module_call_reference_lookup_at(file_id, byte_offset)? {
-            crate::engine::MethodLookupResult::Unique(fact) => {
+            crate::engine::MethodLookupResult::Found(fact) => {
                 let method = crate::engine::resolution::method_name_from_fact(&fact);
                 Some(self.method_reference_ranges_for_exact_target(&fact.owner, &method, &fact.fqn))
             }
             crate::engine::MethodLookupResult::Missing
+            | crate::engine::MethodLookupResult::Unknown(_)
             | crate::engine::MethodLookupResult::Ambiguous { .. } => Some(Vec::new()),
         }
     }
@@ -148,7 +149,7 @@ impl<'a> View<'a> {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> Option<Vec<TextRange>> {
-        let crate::engine::MethodLookupResult::Unique(fact) =
+        let crate::engine::MethodLookupResult::Found(fact) =
             self.module_call_reference_lookup_at(file_id, byte_offset)?
         else {
             return Some(Vec::new());
@@ -225,7 +226,9 @@ impl<'a> View<'a> {
             return None;
         }
         let [(owner, method)] = lookups.as_slice() else {
-            return Some(crate::engine::MethodLookupResult::Missing);
+            return Some(crate::engine::MethodLookupResult::Unknown(
+                crate::engine::lookup::LookupUnknown::Receiver,
+            ));
         };
         Some(self.resolve_method_reference(owner, method))
     }

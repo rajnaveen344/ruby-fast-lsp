@@ -31,6 +31,7 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodFact, RubyConstant, RubyMethod,
     RubyType, TextRange,
 };
+use crate::engine::lookup::MethodAnswer;
 
 #[derive(Default)]
 pub(crate) struct MethodLookupChainCache {
@@ -65,31 +66,23 @@ pub struct ConstantRenameTarget {
     pub ranges: Vec<TextRange>,
 }
 
-#[derive(Clone)]
-pub enum MethodLookupResult {
-    Unique(Arc<MethodFact>),
-    Ambiguous {
-        owner: FullyQualifiedName,
-        method: RubyMethod,
-    },
-    Missing,
-}
+/// A method reference outcome: the single referenced definition, an
+/// ambiguous owner, proven absence, or absence that cannot be proven.
+pub type MethodLookupResult = MethodAnswer<Arc<MethodFact>>;
 
-impl MethodLookupResult {
+impl MethodAnswer<Arc<MethodFact>> {
+    /// The referenced owner and method, with the fact when it is unique;
+    /// `None` when no definition was selected.
     pub fn reference_parts(
         &self,
     ) -> Option<(&FullyQualifiedName, RubyMethod, Option<&MethodFact>)> {
         match self {
-            MethodLookupResult::Unique(fact) => {
+            MethodAnswer::Found(fact) => {
                 Some((&fact.owner, method_name_from_fact(fact), Some(fact)))
             }
-            MethodLookupResult::Ambiguous { owner, method } => Some((owner, *method, None)),
-            MethodLookupResult::Missing => None,
+            MethodAnswer::Ambiguous { owner, method } => Some((owner, *method, None)),
+            MethodAnswer::Missing | MethodAnswer::Unknown(_) => None,
         }
-    }
-
-    pub fn is_missing(&self) -> bool {
-        matches!(self, MethodLookupResult::Missing)
     }
 }
 

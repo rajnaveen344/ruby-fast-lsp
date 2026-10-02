@@ -4,6 +4,7 @@
 
 use crate::invariant::ExpectInvariant;
 use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
 
 use crate::core::names::fqn_id::FqnId;
 use crate::core::storage::memory_estimate::{
@@ -18,12 +19,11 @@ use crate::core::{
 
 use super::names::Names;
 use super::Project;
+use crate::engine::lookup::MethodAnswer;
 
-pub(in crate::engine) enum EffectiveMethodFactMatch {
-    Missing,
-    Unique(MethodFact),
-    Ambiguous,
-}
+/// The effective declaration of one method on one owner. A single owner has
+/// no unresolved lookup edges, so absence here is proven, never unknown.
+pub(in crate::engine) type EffectiveMethodFactMatch = MethodAnswer<MethodFact, Infallible>;
 
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine) struct DeclIndex {
@@ -236,9 +236,19 @@ impl DeclIndex {
         {
             StoredMethodFactMatch::Missing => EffectiveMethodFactMatch::Missing,
             StoredMethodFactMatch::Unique(fact) => {
-                EffectiveMethodFactMatch::Unique(expand_method_fact(names, fact.clone()))
+                EffectiveMethodFactMatch::Found(expand_method_fact(names, fact.clone()))
             }
-            StoredMethodFactMatch::Ambiguous => EffectiveMethodFactMatch::Ambiguous,
+            StoredMethodFactMatch::Ambiguous => EffectiveMethodFactMatch::Ambiguous {
+                owner: names
+                    .fqn(owner_id)
+                    .expect_invariant(
+                        "an ambiguous method owner id is absent from the name registry",
+                        "method stores key owners by ids interned in that same registry",
+                        "intern method owners before storing their facts",
+                    )
+                    .clone(),
+                method: *method,
+            },
         }
     }
 

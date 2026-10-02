@@ -582,20 +582,21 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
         engine
             .view()
             .resolve_method_reference(&client, &RubyMethod::new("to_s").unwrap()),
-        crate::engine::resolution::MethodLookupResult::Unique(_)
+        crate::engine::resolution::MethodLookupResult::Found(_)
     ));
     match engine.view().resolve_method_reference(
         &client_instance,
         &RubyMethod::new("object_mixin_method").unwrap(),
     ) {
         crate::engine::resolution::MethodLookupResult::Ambiguous { .. } => {}
-        crate::engine::resolution::MethodLookupResult::Unique(fact) => unreachable_invariant!(
+        crate::engine::resolution::MethodLookupResult::Found(fact) => unreachable_invariant!(
             what = "an Object-only project mixin resolved concretely for unrelated Client through `{}`",
             why = "workspace indexing does not prove that monkeypatch was loaded in Client's runtime",
             fix = "stop non-core ancestry proof at universal open roots",
             fact.owner,
         ),
-        crate::engine::resolution::MethodLookupResult::Missing => unreachable_invariant!(
+        crate::engine::resolution::MethodLookupResult::Missing
+        | crate::engine::resolution::MethodLookupResult::Unknown(_) => unreachable_invariant!(
             what = "an unproven Object-only project mixin became definitely missing",
             why = "the method may exist if the monkeypatch loads at runtime",
             fix = "keep the lookup ambiguous Unknown; emit no missing-method diagnostic",
@@ -606,7 +607,7 @@ fn non_core_object_monkeypatch_requires_load_proof_for_unrelated_receivers() {
             &client_instance,
             &RubyMethod::new("direct_mixin_method").unwrap()
         ),
-        crate::engine::resolution::MethodLookupResult::Unique(_)
+        crate::engine::resolution::MethodLookupResult::Found(_)
     ));
 }
 

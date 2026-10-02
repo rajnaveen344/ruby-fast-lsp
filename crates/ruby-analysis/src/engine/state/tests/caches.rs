@@ -711,8 +711,8 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
     let cloned_resolution = first_resolution.clone();
     match (&first_resolution, &cloned_resolution) {
         (
-            crate::engine::resolution::MethodLookupResult::Unique(first),
-            crate::engine::resolution::MethodLookupResult::Unique(cloned),
+            crate::engine::resolution::MethodLookupResult::Found(first),
+            crate::engine::resolution::MethodLookupResult::Found(cloned),
         ) => assert!(
             std::sync::Arc::ptr_eq(first, cloned),
             "a cached method resolution clone must share its immutable MethodFact; deep cloning facts multiplies resolve-pass memory by reference count"
@@ -731,7 +731,7 @@ fn method_reference_chain_cache_reuses_interned_owner_ids() {
         engine
             .view()
             .resolve_method_reference_with_chain_cache(&child, &second, &mut cache),
-        crate::engine::resolution::MethodLookupResult::Unique(_)
+        crate::engine::resolution::MethodLookupResult::Found(_)
     ));
     assert_eq!(
         engine.names.fqn_lookup_count_for_test(),
@@ -788,14 +788,15 @@ fn metaclass_fallback_cache_keeps_ambiguous_owner_receiver_independent() {
                 crate::engine::resolution::MethodLookupResult::Ambiguous { owner, method } => {
                     (owner, method)
                 }
-                crate::engine::resolution::MethodLookupResult::Unique(fact) => unreachable_invariant!(
+                crate::engine::resolution::MethodLookupResult::Found(fact) => unreachable_invariant!(
                     what = "project-defined Class fallback resolved concretely for `{receiver}` through `{}`",
                     why = "indexing the defining file does not prove the runtime monkeypatch was loaded",
                     fix = "keep non-language metaclass fallbacks Unknown",
                     fact.owner,
                     receiver = receiver,
                 ),
-                crate::engine::resolution::MethodLookupResult::Missing => unreachable_invariant!(
+                crate::engine::resolution::MethodLookupResult::Missing
+                | crate::engine::resolution::MethodLookupResult::Unknown(_) => unreachable_invariant!(
                     what = "indexed Class fallback became definitely missing for `{receiver}`",
                     why = "the runtime load state is unknown",
                     fix = "retain an ambiguous canonical metaclass candidate",

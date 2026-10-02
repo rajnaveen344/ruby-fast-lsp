@@ -305,7 +305,7 @@ impl Project {
                                 candidate.range,
                             )
                         {
-                            fact = MethodLookupResult::Unique(source_ordered);
+                            fact = MethodLookupResult::Found(source_ordered);
                         }
                     }
                     if let Some(expression_range) = candidate.call_expression_range {
@@ -357,7 +357,7 @@ impl Project {
                                 }
                             }
                         }
-                    } else if fact.is_missing() {
+                    } else if fact.has_no_target() {
                         let namespace_exists = *method_namespace_exists_cache
                             .entry(owner_fqn.clone())
                             .or_insert_with_key(|owner_fqn| {

@@ -10,7 +10,7 @@ use crate::engine::queries::cache::{AnalysisQueryCache, MethodReturnQueryAccess}
 use crate::engine::resolution::{
     method_facts_in_chain, method_lookup_chain,
     method_lookup_chain_has_unresolved_dependency_from_graph, module_instance_receivers,
-    namespace_target_exists, MethodLookupChainCache, MethodLookupResult,
+    namespace_target_exists, MethodLookupChainCache,
 };
 use crate::engine::{ReceiverAccess, View};
 
@@ -314,12 +314,14 @@ fn reference(
         Target::Super(owner) => (owner, view.resolve_super_method_reference(owner, method)),
         Target::Type(_) => return MethodAnswer::Unknown(LookupUnknown::Unsupported),
     };
-    match result {
-        MethodLookupResult::Unique(fact) => MethodAnswer::Found(MethodFound::Reference(fact)),
-        MethodLookupResult::Ambiguous { owner, method } => {
-            MethodAnswer::Ambiguous { owner, method }
-        }
-        MethodLookupResult::Missing => absence(view, namespace),
+    // Reference resolution reports its own unknown edges; a plain miss is
+    // still re-checked because the super path stops at a missing callee
+    // without classifying why.
+    match result.map_found(MethodFound::Reference) {
+        MethodAnswer::Missing => absence(view, namespace),
+        answer @ (MethodAnswer::Found(_)
+        | MethodAnswer::Ambiguous { .. }
+        | MethodAnswer::Unknown(_)) => answer,
     }
 }
 

@@ -20,6 +20,7 @@ use super::{
 use crate::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodFact, RubyMethod, SourceKind, TextRange,
 };
+use crate::engine::lookup::{LookupUnknown, MethodAnswer};
 use crate::engine::queries::View;
 use crate::engine::state::EffectiveMethodFactMatch;
 
@@ -75,7 +76,7 @@ impl<'a> View<'a> {
             Vec::new(),
             crate::core::NamespaceKind::Instance,
         );
-        let EffectiveMethodFactMatch::Unique(fact) = self
+        let EffectiveMethodFactMatch::Found(fact) = self
             .engine
             .effective_method_fact_matching_owner_name(&root, method)
         else {
@@ -111,7 +112,7 @@ impl<'a> View<'a> {
         dispatch_to_includers: bool,
     ) -> MethodLookupResult {
         if !namespace_target_exists(self.engine, namespace_fqn) {
-            return MethodLookupResult::Missing;
+            return MethodLookupResult::Unknown(LookupUnknown::Receiver);
         }
 
         if dispatch_to_includers {
@@ -123,14 +124,19 @@ impl<'a> View<'a> {
             if !includers.is_empty() {
                 let mut facts = Vec::new();
                 let mut incomplete = false;
+                let mut unknown = None;
                 for includer in includers.iter() {
                     match self.resolve_method_reference_with_chain_cache(
                         includer,
                         method,
                         chain_cache,
                     ) {
-                        MethodLookupResult::Unique(fact) => facts.push(fact),
+                        MethodLookupResult::Found(fact) => facts.push(fact),
                         MethodLookupResult::Missing => incomplete = true,
+                        MethodLookupResult::Unknown(reason) => {
+                            incomplete = true;
+                            unknown.get_or_insert(reason);
+                        }
                         MethodLookupResult::Ambiguous { .. } => {
                             return MethodLookupResult::Ambiguous {
                                 owner: namespace_fqn.clone(),
@@ -142,8 +148,8 @@ impl<'a> View<'a> {
                 facts.sort_by_key(|fact| (fact.owner.clone(), fact.range));
                 facts.dedup();
                 return match facts.as_slice() {
-                    [] => MethodLookupResult::Missing,
-                    [fact] if !incomplete => MethodLookupResult::Unique(fact.clone()),
+                    [] => absent(unknown),
+                    [fact] if !incomplete => MethodLookupResult::Found(fact.clone()),
                     [_] | [_, _, ..] => MethodLookupResult::Ambiguous {
                         owner: namespace_fqn.clone(),
                         method: *method,
@@ -169,7 +175,7 @@ impl<'a> View<'a> {
                 .effective_method_fact_matching_owner_id(owner_id, method)
             {
                 EffectiveMethodFactMatch::Missing => continue,
-                EffectiveMethodFactMatch::Unique(fact) => {
+                EffectiveMethodFactMatch::Found(fact) => {
                     if non_core_fact_requires_ancestry_proof(
                         self.engine,
                         namespace_fqn,
@@ -181,22 +187,10 @@ impl<'a> View<'a> {
                             method: *method,
                         };
                     }
-                    return MethodLookupResult::Unique(Arc::new(fact));
+                    return MethodLookupResult::Found(Arc::new(fact));
                 }
-                EffectiveMethodFactMatch::Ambiguous => {
-                    return MethodLookupResult::Ambiguous {
-                        owner: self
-                            .engine
-                            .names
-                            .fqn(owner_id)
-                            .expect_invariant(
-                                "cached method-chain owner ID is absent from the name registry",
-                                "resolution-local chain IDs originate from that same immutable registry",
-                                "invalidate all resolution-local chain caches whenever names can change",
-                            )
-                            .clone(),
-                        method: *method,
-                    };
+                EffectiveMethodFactMatch::Ambiguous { owner, method } => {
+                    return MethodLookupResult::Ambiguous { owner, method };
                 }
             }
         }
@@ -211,7 +205,7 @@ impl<'a> View<'a> {
             namespace_fqn,
             chain_cache,
         ) {
-            return MethodLookupResult::Missing;
+            return MethodLookupResult::Unknown(LookupUnknown::IncompleteChain);
         }
 
         // Class and module objects share one language-defined fallback through
@@ -238,7 +232,7 @@ impl<'a> View<'a> {
                         .effective_method_fact_matching_owner_id(owner_id, method)
                     {
                         EffectiveMethodFactMatch::Missing => continue,
-                        EffectiveMethodFactMatch::Unique(fact) => {
+                        EffectiveMethodFactMatch::Found(fact) => {
                             if non_core_fact_requires_ancestry_proof(
                                 self.engine,
                                 namespace_fqn,
@@ -251,23 +245,11 @@ impl<'a> View<'a> {
                                 };
                                 break;
                             }
-                            result = MethodLookupResult::Unique(Arc::new(fact));
+                            result = MethodLookupResult::Found(Arc::new(fact));
                             break;
                         }
-                        EffectiveMethodFactMatch::Ambiguous => {
-                            result = MethodLookupResult::Ambiguous {
-                                owner: self
-                                    .engine
-                                    .names
-                                    .fqn(owner_id)
-                                    .expect_invariant(
-                                        "cached metaclass-chain owner ID is absent from the name registry",
-                                        "resolution-local chain IDs originate from that same immutable registry",
-                                        "invalidate all resolution-local chain caches whenever names can change",
-                                    )
-                                    .clone(),
-                                method: *method,
-                            };
+                        EffectiveMethodFactMatch::Ambiguous { owner, method } => {
+                            result = MethodLookupResult::Ambiguous { owner, method };
                             break;
                         }
                     }
@@ -285,8 +267,8 @@ impl<'a> View<'a> {
                 result
             };
             match fallback {
-                MethodLookupResult::Missing => {}
-                MethodLookupResult::Unique(_) | MethodLookupResult::Ambiguous { .. } => {
+                MethodLookupResult::Missing | MethodLookupResult::Unknown(_) => {}
+                MethodLookupResult::Found(_) | MethodLookupResult::Ambiguous { .. } => {
                     return fallback;
                 }
             }
@@ -294,12 +276,16 @@ impl<'a> View<'a> {
 
         let mut application_facts = Vec::new();
         let mut application_ambiguous = false;
+        let mut application_unknown = None;
         for application in execution_context_application_targets(self.engine, namespace_fqn) {
             match self.resolve_method_reference_with_chain_cache(&application, method, chain_cache)
             {
-                MethodLookupResult::Unique(fact) => application_facts.push(fact),
+                MethodLookupResult::Found(fact) => application_facts.push(fact),
                 MethodLookupResult::Ambiguous { .. } => application_ambiguous = true,
                 MethodLookupResult::Missing => {}
+                MethodLookupResult::Unknown(reason) => {
+                    application_unknown.get_or_insert(reason);
+                }
             }
         }
         application_facts.sort_by_key(|fact| {
@@ -318,7 +304,7 @@ impl<'a> View<'a> {
             };
         }
         if let Some(fact) = application_facts.pop() {
-            return MethodLookupResult::Unique(fact);
+            return MethodLookupResult::Found(fact);
         }
 
         if unproven_universal_method_exists(self.engine, &universal_roots, method, chain_cache) {
@@ -336,15 +322,20 @@ impl<'a> View<'a> {
             );
             if matches!(
                 &fallback,
-                MethodLookupResult::Unique(fact)
+                MethodLookupResult::Found(fact)
                     if default_basic_object_method_missing_fact(self.engine, fact)
             ) {
-                return MethodLookupResult::Missing;
+                return absent(application_unknown);
             }
-            return fallback;
+            return match fallback {
+                MethodLookupResult::Missing => absent(application_unknown),
+                MethodLookupResult::Found(_)
+                | MethodLookupResult::Ambiguous { .. }
+                | MethodLookupResult::Unknown(_) => fallback,
+            };
         }
 
-        MethodLookupResult::Missing
+        absent(application_unknown)
     }
 
     pub(crate) fn resolve_super_method_reference(
@@ -360,11 +351,10 @@ impl<'a> View<'a> {
             .effective_method_fact_matching_owner_name(&callee.owner, method)
         {
             EffectiveMethodFactMatch::Missing => MethodLookupResult::Missing,
-            EffectiveMethodFactMatch::Unique(fact) => MethodLookupResult::Unique(Arc::new(fact)),
-            EffectiveMethodFactMatch::Ambiguous => MethodLookupResult::Ambiguous {
-                owner: callee.owner,
-                method: *method,
-            },
+            EffectiveMethodFactMatch::Found(fact) => MethodLookupResult::Found(Arc::new(fact)),
+            EffectiveMethodFactMatch::Ambiguous { owner, method } => {
+                MethodLookupResult::Ambiguous { owner, method }
+            }
         }
     }
 
@@ -471,6 +461,15 @@ impl<'a> View<'a> {
     ) -> Option<FullyQualifiedName> {
         self.resolve_super_method_callee(namespace_fqn, method)
             .map(|callee| FullyQualifiedName::method(callee.owner.namespace_parts(), *method))
+    }
+}
+
+/// No reference was selected: proven missing unless an edge consulted on the
+/// way was unknown.
+fn absent(unknown: Option<LookupUnknown>) -> MethodLookupResult {
+    match unknown {
+        Some(reason) => MethodAnswer::Unknown(reason),
+        None => MethodAnswer::Missing,
     }
 }
 
