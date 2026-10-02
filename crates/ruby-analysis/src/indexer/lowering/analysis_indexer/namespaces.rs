@@ -9,9 +9,10 @@ use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, Node};
 
 use super::syntax::{constant_parts_and_absolute, included_hook_mixin_call_kind};
-use super::{AnalysisIndexer, ScopeKind};
+use super::AnalysisIndexer;
 use crate::indexer::documents::scope_rules::{
-    class_methods_block, resolve_lexical_namespace, resolve_receiver_namespace,
+    class_methods_block, implicit_singleton_namespace, resolve_lexical_namespace,
+    resolve_receiver_namespace, BlockExecution,
 };
 
 impl AnalysisIndexer {
@@ -64,7 +65,7 @@ impl AnalysisIndexer {
         parts: &[RubyConstant],
         absolute: bool,
     ) -> Option<FullyQualifiedName> {
-        self.resolve_namespace_from(parts, absolute, &self.lexical_stack)
+        self.resolve_namespace_from(parts, absolute, &self.scope.get_ns_stack())
     }
 
     pub(super) fn resolve_namespace_from(
@@ -111,7 +112,7 @@ impl AnalysisIndexer {
                     source,
                     parts.to_vec(),
                     absolute,
-                    FullyQualifiedName::namespace(self.lexical_stack.clone()),
+                    FullyQualifiedName::namespace(self.scope.get_ns_stack()),
                     kind,
                     range,
                 )
@@ -140,7 +141,7 @@ impl AnalysisIndexer {
             return;
         };
 
-        let source = FullyQualifiedName::namespace(self.owner_stack.clone());
+        let source = FullyQualifiedName::namespace(self.owner_namespace());
         let range = self.range(&node.location());
         for arg in arguments.arguments().iter().skip(first_mixin_index) {
             let Some((parts, absolute)) = constant_parts_and_absolute(&arg) else {
@@ -156,35 +157,10 @@ impl AnalysisIndexer {
     ) -> Option<Vec<RubyConstant>> {
         resolve_receiver_namespace(
             receiver,
-            self.namespace_body_owner(),
-            &self.lexical_stack,
+            implicit_singleton_namespace(&self.scope).as_deref(),
+            &self.scope.get_ns_stack(),
             &|fqn| self.known_namespaces.contains(fqn),
         )
-    }
-
-    /// The class or module `self` names at a namespace body, including an
-    /// eval block body, where `self` is the evaluated receiver.
-    fn namespace_body_owner(&self) -> Option<&[RubyConstant]> {
-        (!self.owner_stack.is_empty() && self.method_context_stack.is_empty())
-            .then_some(self.owner_stack.as_slice())
-    }
-
-    pub(super) fn static_eval_block_context(
-        &self,
-        node: &CallNode<'_>,
-    ) -> Option<(Vec<RubyConstant>, ScopeKind)> {
-        let definition_scope = match node.name().as_slice() {
-            b"class_eval" | b"module_eval" | b"class_exec" | b"module_exec" => ScopeKind::Instance,
-            b"instance_eval" | b"instance_exec" => ScopeKind::Singleton,
-            _ => return None,
-        };
-        node.block()?;
-        let namespace = match node.receiver() {
-            Some(receiver) => self.resolve_constant_receiver_namespace(&receiver)?,
-            // An implicit receiver evaluates in the current owner.
-            None => self.namespace_body_owner()?.to_vec(),
-        };
-        Some((namespace, definition_scope))
     }
 
     /// A Concern `class_methods` block: declares the `ClassMethods` module,
@@ -192,9 +168,9 @@ impl AnalysisIndexer {
     pub(super) fn push_concern_class_methods_block(
         &mut self,
         node: &CallNode<'_>,
-    ) -> Option<Vec<RubyConstant>> {
-        let target = class_methods_block(node, self.namespace_body_owner().map(<[_]>::to_vec))?
-            .definition_namespace;
+    ) -> Option<BlockExecution> {
+        let execution = class_methods_block(node, implicit_singleton_namespace(&self.scope))?;
+        let target = execution.definition_namespace.clone();
         let owner = FullyQualifiedName::namespace(target[..target.len() - 1].to_vec());
         let range = self.range(&node.location());
         self.push_namespace_facts(
@@ -204,6 +180,6 @@ impl AnalysisIndexer {
             range,
         );
         self.push_edge(owner, &target, true, GraphEdgeKind::Extend, range);
-        Some(target)
+        Some(execution)
     }
 }

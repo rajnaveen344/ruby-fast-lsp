@@ -196,6 +196,13 @@ impl ScopeTracker {
         self.current_execution_context().is_some()
     }
 
+    /// Whether the active execution context was opened by a block call such
+    /// as `class_eval`, rather than by a method definition.
+    pub fn block_execution_context_active(&self) -> bool {
+        self.current_execution_context()
+            .is_some_and(|context| context.origin == ExecutionContextOrigin::Block)
+    }
+
     pub fn implicit_receiver_context(&self) -> (Vec<RubyConstant>, NamespaceKind) {
         self.current_execution_context()
             .map(|context| {

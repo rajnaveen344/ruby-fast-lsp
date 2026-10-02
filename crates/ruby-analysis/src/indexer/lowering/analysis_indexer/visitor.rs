@@ -36,14 +36,14 @@ use super::syntax::{
     constant_path_parts, method_param_facts, terminal_name_range,
 };
 use super::types::{literal_type, method_body_literal_type};
-use super::{AnalysisIndexer, ScopeKind};
-use crate::indexer::documents::scope_rules::alias_reopen_target;
+use super::AnalysisIndexer;
+use crate::indexer::documents::scope_rules::{alias_reopen_target, eval_block};
 use crate::indexer::yard::parser::YardParser;
 use crate::indexer::yard::types::YardMethodDoc;
 
 impl Visit<'_> for AnalysisIndexer {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {
-        let lexical_context = self.lexical_stack.clone();
+        let lexical_context = self.scope.get_ns_stack();
         let has_explicit_superclass = node.superclass().is_some();
         let superclass = node.superclass().and_then(|superclass| {
             let (parts, absolute) = constant_parts_and_absolute(&superclass)?;
@@ -61,13 +61,12 @@ impl Visit<'_> for AnalysisIndexer {
             |candidates| self.first_constant_value_type(candidates),
         );
         if let Some(target) = &reopened_target {
-            let parts = target.namespace_parts().to_vec();
-            self.enter_namespace_frame(parts.clone(), parts);
+            self.scope.push_absolute_ns_scopes(target.namespace_parts());
         } else if !self.enter_namespace_from_node(&node.constant_path()) {
             return;
         }
 
-        let fqn = FullyQualifiedName::namespace(self.owner_stack.clone());
+        let fqn = FullyQualifiedName::namespace(self.scope.get_ns_stack());
         let range = self.range(&node.location());
         let name_range = terminal_name_range(
             self.file_id,
@@ -128,10 +127,8 @@ impl Visit<'_> for AnalysisIndexer {
             );
         }
 
-        self.scope_stack.push(ScopeKind::Instance);
         visit_class_node(self, node);
-        self.scope_stack.pop();
-        self.exit_namespace_frame();
+        self.scope.pop_ns_scope();
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode<'_>) {
@@ -139,17 +136,16 @@ impl Visit<'_> for AnalysisIndexer {
             &node.constant_path(),
             GraphNodeKind::Module,
             None,
-            &self.lexical_stack,
+            &self.scope.get_ns_stack(),
             |candidates| self.first_constant_value_type(candidates),
         );
         if let Some(target) = &reopened_target {
-            let parts = target.namespace_parts().to_vec();
-            self.enter_namespace_frame(parts.clone(), parts);
+            self.scope.push_absolute_ns_scopes(target.namespace_parts());
         } else if !self.enter_namespace_from_node(&node.constant_path()) {
             return;
         }
 
-        let fqn = FullyQualifiedName::namespace(self.owner_stack.clone());
+        let fqn = FullyQualifiedName::namespace(self.scope.get_ns_stack());
         let range = self.range(&node.location());
         let name_range = terminal_name_range(
             self.file_id,
@@ -160,10 +156,8 @@ impl Visit<'_> for AnalysisIndexer {
             self.push_namespace_facts(fqn, GraphNodeKind::Module, range, name_range);
         }
 
-        self.scope_stack.push(ScopeKind::Instance);
         visit_module_node(self, node);
-        self.scope_stack.pop();
-        self.exit_namespace_frame();
+        self.scope.pop_ns_scope();
     }
 
     fn visit_def_node(&mut self, node: &DefNode<'_>) {
@@ -173,11 +167,9 @@ impl Visit<'_> for AnalysisIndexer {
             return;
         };
 
-        let mut owner_kind = match self.current_scope_kind() {
-            ScopeKind::Instance => NamespaceKind::Instance,
-            ScopeKind::Singleton => NamespaceKind::Singleton,
-        };
-        let mut owner_namespace = self.owner_stack.clone();
+        let (definition_namespace, definition_kind) = self.scope.method_definition_context();
+        let mut owner_kind = definition_kind;
+        let mut owner_namespace = definition_namespace.clone();
         if let Some(receiver) = node.receiver() {
             if receiver.as_self_node().is_some() {
                 owner_kind = NamespaceKind::Singleton;
@@ -251,20 +243,18 @@ impl Visit<'_> for AnalysisIndexer {
                         .and_then(YardMethodDoc::format_return_type),
                 )
                 .with_availability(availability.clone())
-                .with_visibility(self.current_visibility())
+                .with_visibility(self.scope.current_visibility())
                 .with_forwarded_block_call(forwarded_block_call.clone())
                 .with_direct_yield_call(direct_yield_call.clone()),
         );
         if node.receiver().is_none()
             && owner_kind == NamespaceKind::Instance
-            && self
-                .module_function_mode_stack
-                .last()
-                .copied()
-                .unwrap_or(false)
+            && self.scope.module_function_mode_enabled()
         {
-            let owner =
-                FullyQualifiedName::namespace_with_kind(owner_namespace, NamespaceKind::Singleton);
+            let owner = FullyQualifiedName::namespace_with_kind(
+                owner_namespace.clone(),
+                NamespaceKind::Singleton,
+            );
             self.facts.methods.push(
                 MethodFact::with_param_facts(fqn.clone(), owner, range, params)
                     .with_name_range(name_range)
@@ -275,7 +265,7 @@ impl Visit<'_> for AnalysisIndexer {
                             .and_then(YardMethodDoc::format_return_type),
                     )
                     .with_availability(availability)
-                    .with_visibility(self.current_visibility())
+                    .with_visibility(self.scope.current_visibility())
                     .with_forwarded_block_call(forwarded_block_call)
                     .with_direct_yield_call(direct_yield_call),
             );
@@ -289,13 +279,18 @@ impl Visit<'_> for AnalysisIndexer {
             ));
         }
 
-        self.method_context_stack.push((method, owner_kind));
-        visit_def_node(self, node);
-        self.method_context_stack.pop().expect_invariant(
-            "analysis indexer method context stack underflow",
-            "each pushed method context must pop after visiting the method body",
-            "keep visit_def_node method context push/pop balanced",
+        // `self` in the body is the receiver; a nested definition still
+        // lands in the enclosing owner.
+        self.scope.push_method_fqn(fqn, owner_kind);
+        self.scope.push_method_execution_context(
+            owner_namespace,
+            owner_kind,
+            definition_namespace,
+            definition_kind,
         );
+        visit_def_node(self, node);
+        self.scope.pop_execution_context();
+        self.scope.pop_method_fqn();
     }
 
     fn visit_alias_method_node(&mut self, node: &AliasMethodNode<'_>) {
@@ -312,21 +307,18 @@ impl Visit<'_> for AnalysisIndexer {
             return;
         };
 
-        let owner_kind = match self.current_scope_kind() {
-            ScopeKind::Instance => crate::core::NamespaceKind::Instance,
-            ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
-        };
+        let owner_kind = self.owner_kind();
         let range = self.range(&node.location());
         self.push_method_fact_without_parameter_shape(
-            self.owner_stack.clone(),
+            self.owner_namespace(),
             owner_kind,
             new_method,
             range,
         );
 
-        let old_fqn = FullyQualifiedName::method(self.owner_stack.clone(), old_method);
+        let old_fqn = FullyQualifiedName::method(self.owner_namespace(), old_method);
         let new_fqn = FullyQualifiedName::method(
-            self.owner_stack.clone(),
+            self.owner_namespace(),
             RubyMethod::new(&new_name).expect_invariant(
                 "alias new method became invalid after validation",
                 "the same string was already accepted",
@@ -354,7 +346,7 @@ impl Visit<'_> for AnalysisIndexer {
     fn visit_constant_write_node(&mut self, node: &ConstantWriteNode<'_>) {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         if let Ok(constant) = RubyConstant::new(&name) {
-            let mut parts = self.lexical_stack.clone();
+            let mut parts = self.scope.get_ns_stack();
             parts.push(constant);
             let fqn = FullyQualifiedName::constant(parts);
             self.facts.symbols.push(
@@ -405,7 +397,10 @@ impl Visit<'_> for AnalysisIndexer {
     }
 
     fn visit_call_node(&mut self, node: &CallNode<'_>) {
-        if let Some((eval_namespace, definition_scope)) = self.static_eval_block_context(node) {
+        let eval = eval_block(node, &self.scope, |receiver| {
+            self.resolve_constant_receiver_namespace(receiver)
+        });
+        if let Some(execution) = eval {
             if let Some(receiver) = node.receiver() {
                 self.visit(&receiver);
             }
@@ -413,37 +408,20 @@ impl Visit<'_> for AnalysisIndexer {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                let old_owner = std::mem::replace(&mut self.owner_stack, eval_namespace);
-                self.eval_context_depths.push((
-                    self.scope_stack.len().checked_add(1).expect_invariant(
-                        "analysis indexer scope depth overflowed while entering an eval block",
-                        "source nesting cannot exceed usize address space",
-                        "reject impossibly deep source before traversal",
-                    ),
-                    self.method_context_stack.len(),
-                ));
-                self.scope_stack.push(definition_scope);
+                execution.enter(&mut self.scope);
                 self.visit(&block);
-                self.scope_stack.pop();
-                self.eval_context_depths.pop().expect_invariant(
-                    "analysis indexer eval-context stack underflow",
-                    "every static eval block context must be popped exactly once",
-                    "keep AnalysisIndexer::visit_call_node eval traversal balanced",
-                );
-                self.owner_stack = old_owner;
+                self.scope.pop_execution_context();
             }
             return;
         }
-        if let Some(class_methods) = self.push_concern_class_methods_block(node) {
+        if let Some(execution) = self.push_concern_class_methods_block(node) {
             if let Some(arguments) = node.arguments() {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.enter_namespace_frame(self.lexical_stack.clone(), class_methods);
-                self.scope_stack.push(ScopeKind::Instance);
+                execution.enter(&mut self.scope);
                 self.visit(&block);
-                self.scope_stack.pop();
-                self.exit_namespace_frame();
+                self.scope.pop_execution_context();
             }
             return;
         }
@@ -481,8 +459,8 @@ impl Visit<'_> for AnalysisIndexer {
                 _ => None,
             };
             if let (Some(kind), Some(arguments)) = (kind, node.arguments()) {
-                let source = FullyQualifiedName::namespace(self.owner_stack.clone());
-                let in_singleton = self.current_scope_kind() == ScopeKind::Singleton;
+                let source = FullyQualifiedName::namespace(self.owner_namespace());
+                let in_singleton = self.owner_kind() == NamespaceKind::Singleton;
                 let source_for_edge = if in_singleton {
                     source.to_singleton_namespace().expect_invariant(
                         "singleton class mixin source could not convert to singleton namespace",
@@ -525,15 +503,9 @@ impl Visit<'_> for AnalysisIndexer {
     }
 
     fn visit_singleton_class_node(&mut self, node: &SingletonClassNode<'_>) {
-        self.scope_stack.push(ScopeKind::Singleton);
-        self.visibility_stack.push(MethodVisibility::Public);
+        self.scope.enter_singleton();
         visit_singleton_class_node(self, node);
-        self.visibility_stack.pop().expect_invariant(
-            "analysis indexer visibility stack underflow on singleton exit",
-            "every singleton class visit must pop exactly one visibility flag",
-            "keep singleton visitor enter/exit balanced",
-        );
-        self.scope_stack.pop();
+        self.scope.exit_singleton();
     }
 
     fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode<'_>) {

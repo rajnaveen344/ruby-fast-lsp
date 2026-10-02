@@ -31,8 +31,11 @@ candidates, the class or module a constant alias reopens, the namespace a static
 an eval, `define_method`, or Concern `class_methods` block opens) live in
 `documents/scope_rules.rs`, beside `ScopeTracker`. A walk passes in only which
 namespaces it knows or how it resolves a receiver; do not copy a rule into a
-walker. Inside an eval block, definitions follow the receiver while constant
-writes and nested `class`/`module` bodies stay in the lexical scope.
+walker. Every declaration walk, including the seed `AnalysisIndexer`, keeps its
+scope in a `ScopeTracker`: frames give the lexical scope, and execution contexts
+give the definition owner. Inside an eval block, definitions follow the receiver
+while constant writes and nested `class`/`module` bodies stay in the lexical
+scope.
 
 All directories meet the ten-entry limit. The query folder is at the limit;
 another query file needs a meaningful subdivision. For collector state and

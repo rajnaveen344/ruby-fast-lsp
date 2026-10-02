@@ -1,5 +1,7 @@
 use super::*;
-use crate::core::{GraphEdgeKind, GraphNodeKind, MethodParamKind, SymbolKind, TypeSubject};
+use crate::core::{
+    GraphEdgeKind, GraphNodeKind, MethodParamKind, RubyMethod, SymbolKind, TypeSubject,
+};
 use crate::invariant::ExpectInvariant;
 
 fn file() -> SourceFileId {

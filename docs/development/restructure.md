@@ -603,8 +603,8 @@ Delete this file when the last task is done. Git history keeps the record.
         collector.
   - [x] D1b. Share the call-block classifier (eval, dynamic definition,
         `class_methods`) between the collector and the cursor walk, with
-        receiver resolution passed in. The seed keeps its own eval classifier
-        until D1d, and the framework instance block test stays a one-line
+        receiver resolution passed in. The seed adopted the shared eval
+        classifier in D1d, and the framework instance block test stays a one-line
         name check in both walks.
   - [x] D1c. Fix the scope disagreements, each with a failing generic test
         first:
@@ -661,9 +661,13 @@ Delete this file when the last task is done. Git history keeps the record.
       only, so the seed reopened `X = Y; class X < Y` as `Y` with a
       self-superclass edge. Both walks now share
       `scope_rules::alias_reopen_target`.
-  - [ ] D1d. Port `AnalysisIndexer` onto `ScopeTracker`. Its `lexical_stack`
+  - [x] D1d. Port `AnalysisIndexer` onto `ScopeTracker`. Its `lexical_stack`
         maps to `ScopeTracker` frames and its eval `owner_stack` maps to the
-        block execution context's method-definition owner.
+        block execution context's method-definition owner. A `def` opens a
+        method context whose implicit receiver is the method's receiver and
+        whose definition owner stays the enclosing owner. The seed now uses
+        `scope_rules::eval_block`, so a bare `class_eval` inside a singleton
+        method evaluates in the class, as in the other walks.
   - [ ] D1e. Make the collector take its declarations from the seed's
         declaration sink in the same walk. Delete the collector's declaration
         recording (`collection/declarations.rs`, the `nodes/declarations`
