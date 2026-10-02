@@ -13,8 +13,8 @@ crates/
 src/
 ├── environment/    - Configuration, Ruby runtime discovery, and extension hosts
 ├── loader/         - Workspace discovery, fact collection, scheduling, and caches
-├── lsp/            - Editor projections: capabilities, query adapters, handlers, check
-├── server/         - LSP protocol facade, documents, project routing, and publication
+├── lsp/            - Editor projections: service facade, capabilities, query adapters, handlers, check
+├── server/         - Server state: documents, project routing, products, and publication
 ├── utils/          - Shared helpers and single-flight
 └── main.rs         - Application entry point
 src/test/           - Test harnesses and integration tests
@@ -469,7 +469,9 @@ The server has ten production fields: client, configuration, open documents,
 project registry, indexing services, runtime products, extension services,
 diagnostic publisher, watched-file changes, and namespace-tree cache. Focused
 modules under `src/server/` keep state with its operations; `server/mod.rs` retains
-common construction and the LSP protocol facade. See
+common construction. The `tower-lsp` protocol facade (`impl LanguageServer`
+and the debug and namespace-tree custom requests) lives in
+`src/lsp/service.rs` and routes to `lsp/handlers`. See
 [server state ownership](../docs/development/server-state.md) for field counts,
 responsibilities, shared lifetimes, and test boundaries.
 
@@ -659,7 +661,7 @@ architecture document. Mandatory release and memory gates are summarized in
 
 Handlers manage the routing of LSP requests and notifications.
 
-- **Primary Responsibility**: Receive requests from the server and route them to capabilities
+- **Primary Responsibility**: Receive requests from the service facade (`src/lsp/service.rs`) and route them to capabilities
 - **Secondary Responsibility**: Handle document lifecycle notifications (open, change, save)
 
 ### 8. Ruby Version (`src/loader/version/`)
@@ -728,7 +730,7 @@ Ruby version detection and version-manager integration.
 
 The Ruby Fast LSP follows a clear 3-layer architecture:
 
-1. **API Layer** (`server/`, `lsp/handlers/`): Handles LSP protocol, request validation, and routing.
+1. **API Layer** (`lsp/service.rs`, `lsp/handlers/`): Handles LSP protocol, request validation, and routing over `server/` state.
 2. **Service Layer** (`src/lsp/query/`, `src/lsp/capabilities/`): Implements business logic for LSP features. `EngineQuery` acts as the primary service interface for data lookups.
 3. **Data Layer** (`ruby-analysis::engine`): Owns symbols, graph facts, references, diagnostics, and type facts.
 

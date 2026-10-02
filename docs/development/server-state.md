@@ -3,8 +3,10 @@
 `RubyLanguageServer` groups protocol state into owners with separate lifetimes
 and locks. The semantic database remains isolated per Ruby project.
 
-Start with [server.rs](../../src/server/mod.rs): it constructs the owners and implements
-the LSP protocol facade. Each module under `src/server/` keeps related state and
+Start with [server.rs](../../src/server/mod.rs): it constructs the owners. The LSP
+protocol facade (`impl LanguageServer` and the debug and namespace-tree custom
+requests) lives in [service.rs](../../src/lsp/service.rs) and routes to the
+handlers; the server keeps state and state operations only. Each module under `src/server/` keeps related state and
 operations together. The semantic database remains
 [AnalysisEngine](../../crates/ruby-analysis/src/engine/state/mod.rs), isolated per Ruby
 project, with a separate orphan engine for unowned documents.
@@ -13,7 +15,7 @@ project, with a separate orphan engine for unowned documents.
 
 | Field | Responsibility | Where to read next |
 | --- | --- | --- |
-| `client` | Outbound LSP notifications, registration, and refresh requests. | Protocol methods in `server.rs`. |
+| `client` | Outbound LSP notifications, registration, and refresh requests. | Protocol methods in [service.rs](../../src/lsp/service.rs). |
 | `config` | One shared accepted server configuration. | `environment/config/` and initialization handlers. |
 | `documents` | Open buffers, versions, document handles, and per-URI lifecycle locks. | [documents.rs](../../src/server/documents.rs) |
 | `projects` | Longest-root routing, isolated project engines, orphan engine, and retained external-document provenance. | [projects](../../src/server/projects/mod.rs), [load sink](../../src/server/projects/load_sink.rs) |
@@ -24,7 +26,7 @@ project, with a separate orphan engine for unowned documents.
 | `file_changes` | Latest filesystem events and debounce generation. | [watched_files.rs](../../src/server/watched_files.rs) |
 | `namespace_tree` | Cached Ruby Index projection and debounced invalidation. | [namespace_tree.rs](../../src/server/namespace_tree.rs) |
 
-No facade field is public outside the crate. Fields used by sibling modules
+No server field is public outside the crate. Fields used by sibling modules
 are explicitly `pub(crate)`; server-owned fields are explicitly `pub(self)`.
 This keeps the declaration visually consistent without widening access. Separate
 executables use server operations instead of replacing internal state bags.
@@ -55,7 +57,7 @@ schema and counter fields remain unchanged.
 
 ```mermaid
 flowchart TD
-    LSP[Editor requests and notifications] --> Server[RubyLanguageServer: protocol facade]
+    LSP[Editor requests and notifications] --> Service[lsp/service.rs: protocol facade] --> Server[RubyLanguageServer: state owners]
     Server --> Documents[OpenDocuments: buffers and lifecycle locks]
     Server --> Projects[ProjectRegistry: routing and provenance]
     Projects --> A[Project A: isolated AnalysisEngine]
@@ -118,7 +120,7 @@ measured total process memory budget.
 
 ## Tests follow production paths
 
-There is no generic test-state bag and no test-only field on the server facade.
+There is no generic test-state bag and no test-only field on the server.
 Three narrow fields remain under their actual owners, only in test builds:
 
 | Field | Why it remains |

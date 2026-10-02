@@ -296,7 +296,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [ ] C2f. Make the extension registry return the seed `FileAnalysis`
         instead of writing the engine. The loader commits it through
         `LoadSink::commit_seed`.
-  - [ ] C2g. Move `impl LanguageServer` and the debug and namespace-tree
+  - [x] C2g. Move `impl LanguageServer` and the debug and namespace-tree
         request methods from `server/mod.rs` to `src/lsp/service.rs`. The
         server keeps state only.
   - [ ] C2h. Move the namespace-tree response types to
