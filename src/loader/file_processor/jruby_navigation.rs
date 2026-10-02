@@ -1,15 +1,15 @@
 //! JRuby Java-import navigation inputs and deferred plan materialization.
 
-use super::collection::replace_file_analysis;
 use super::FileProcessor;
 use super::{FileResolution, JrubyNavigationResolution};
 use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::environment::runtime::jruby::source_navigation::java_source_navigation_facts_with_declaration;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadTarget;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
-use ruby_analysis::core::{FileAnalysis, FullyQualifiedName, SourceKind};
-use ruby_analysis::engine::{AnalysisEngine, SourceFileInput};
+use ruby_analysis::core::{FullyQualifiedName, SourceKind};
+use ruby_analysis::engine::SourceFileInput;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ impl FileProcessor {
     pub(super) fn ensure_jruby_navigation_inputs(
         &self,
         content: &str,
-        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: &Arc<dyn LoadTarget>,
     ) -> Result<()> {
         let Some(provider) = &self.jruby_import_provider else {
             return Ok(());
@@ -48,7 +48,7 @@ impl FileProcessor {
     pub(crate) fn materialize_jruby_navigation_plan_as_deferred_resolution(
         &self,
         plan: StaticJavaNavigationPlan,
-        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: &Arc<dyn LoadTarget>,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<()> {
         self.materialize_jruby_navigation_plan(
@@ -61,7 +61,7 @@ impl FileProcessor {
     fn materialize_jruby_navigation_plan(
         &self,
         plan: StaticJavaNavigationPlan,
-        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: &Arc<dyn LoadTarget>,
         resolution: JrubyNavigationResolution,
     ) -> Result<()> {
         if plan.signature_class_names.is_empty() {
@@ -157,11 +157,8 @@ impl FileProcessor {
                     signature_path.display()
                 )
             })?;
-            let signature_already_indexed = analysis_engine
-                .read()
-                .view()
-                .file_id(&signature_path)
-                .is_some();
+            let signature_already_indexed =
+                analysis_engine.view(|view| view.file_id(&signature_path).is_some());
             if !signature_already_indexed {
                 let signature_index_started = Instant::now();
                 match &deferred_signature_known_namespaces {
@@ -241,29 +238,12 @@ impl FileProcessor {
                     .then_with(|| left.1.internal_name.cmp(&right.1.internal_name))
             });
             classes.dedup_by(|left, right| left.0 == right.0);
-            let (file_id, mut facts) = {
-                let mut engine = analysis_engine.write();
-                let file_id = engine.register_file(SourceFileInput {
+            let (file_id, mut facts) =
+                analysis_engine.register_source_with_facts(SourceFileInput {
                     path,
                     content,
                     kind: SourceKind::External,
                 });
-                let query = engine.view();
-                (
-                    file_id,
-                    FileAnalysis {
-                        symbols: query.symbol_facts_in_file(file_id),
-                        methods: query.method_facts_in_file(file_id),
-                        method_visibility_overrides: query
-                            .method_visibility_overrides_in_file(file_id),
-                        types: query.type_facts_in_file(file_id),
-                        graph_nodes: query.graph_nodes_in_file(file_id),
-                        graph_edges: query.graph_edges_in_file(file_id),
-                        diagnostics: query.diagnostic_facts_in_file(file_id),
-                        ..FileAnalysis::default()
-                    },
-                )
-            };
             for (internal_name, location, include_class_declaration) in classes {
                 let declaration = provider.class_declaration(&internal_name).expect_invariant(
                     "exact Java implementation resolved for a class absent from its owning catalog",
@@ -281,7 +261,7 @@ impl FileProcessor {
                 extend_unique(&mut facts.methods, new_facts.methods);
                 extend_unique(&mut facts.types, new_facts.types);
             }
-            replace_file_analysis(analysis_engine, file_id, facts, file_resolution);
+            analysis_engine.replace_file_facts(file_id, facts, file_resolution);
         }
         info!(
             "[PERF][JRuby navigation materialization] classpath={} generated_signatures={} \

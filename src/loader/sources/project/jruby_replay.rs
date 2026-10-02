@@ -45,7 +45,7 @@ impl IndexerProject {
                 self.workspace_root.display()
             )
         })?;
-        let analysis_engine = ctx.sink.engine_for_uri(&project_uri);
+        let analysis_engine = ctx.sink.target_for_uri(&project_uri);
         let known_namespaces = self.jruby_replay_known_namespaces.take().expect_invariant(
             "JRuby replay has no immutable pre-collection namespace baseline",
             "replayed files use the same context as provider-aware batches",
@@ -73,9 +73,8 @@ impl IndexerProject {
                             file_path.display()
                         )
                     })?;
-                    let source_snapshot = {
-                        let engine = analysis_engine.read();
-                        let Some(file_id) = engine.view().file_id(file_path) else {
+                    let source_snapshot = analysis_engine.view(|view| {
+                        let Some(file_id) = view.file_id(file_path) else {
                             unreachable_invariant!(
                                 what = "JRuby project replay received an unregistered source {}",
                                 why = "replay is selected only from the completed project pass",
@@ -83,21 +82,24 @@ impl IndexerProject {
                                 file_path.display(),
                             );
                         };
-                        if open_document && !engine.view().file_content_matches(file_id, &content) {
+                        if open_document && !view.file_content_matches(file_id, &content) {
                             info!(
                                 "Skipping stale JRuby replay snapshot for open document {}",
                                 file_path.display()
                             );
-                            return Ok(None);
+                            return None;
                         }
-                        engine.view().source_snapshot_for_path(file_path).unwrap_or_else(|| {
+                        Some(view.source_snapshot_for_path(file_path).unwrap_or_else(|| {
                             unreachable_invariant!(
                                 what = "JRuby project replay lost source revision for {}",
                                 why = "every registered source has one monotonic revision",
                                 fix = "keep source registration and revision capture atomic",
                                 file_path.display(),
                             )
-                        })
+                        }))
+                    });
+                    let Some(source_snapshot) = source_snapshot else {
+                        return Ok(None);
                     };
                     let uri = Url::from_file_path(file_path).map_err(|_| {
                         anyhow!(

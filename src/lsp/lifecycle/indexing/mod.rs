@@ -140,7 +140,7 @@ async fn init_workspace_inner(
         .into_iter()
         .find(|workspace| workspace.root_uri == folder_uri)
     {
-        coordinator.set_analysis_engine(workspace.handle().shared_engine().clone());
+        coordinator.set_load_target(workspace.handle().load_target());
     }
     coordinator.set_cache_root(server.products.cache_root());
     coordinator.set_extension_registry(server.extensions.registry().clone());

@@ -23,7 +23,7 @@ use crate::environment::runtime::jruby::source_navigation::{
     JavaSourceResolutionLimits, JavaSourceResolver,
 };
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::LoadContext;
+use crate::loader::context::{LoadContext, LoadTarget};
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::gems::discover_locked_java_gem_roots;
 use crate::utils::persistent_cache::{PersistentDerivedProductCache, PersistentProductLookup};
@@ -415,7 +415,7 @@ fn index_jruby_runtime_sources_blocking(
     provider: Arc<JrubyImportProvider>,
     user_cache_root_override: Option<PathBuf>,
     processor: FileProcessor,
-    analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+    analysis_engine: Arc<dyn LoadTarget>,
     dependency_seed_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
 ) -> Result<()> {
     let cache_root = jruby_cache_root_for_project(
@@ -490,7 +490,7 @@ impl IndexingCoordinator {
         );
         let workspace_root = self.workspace_root.clone();
         let user_cache_root_override = self.cache_root.clone();
-        let analysis_engine = self.analysis_engine(ctx);
+        let analysis_engine = self.load_target(ctx);
         run_cpu_indexing_task(
             &ctx.resources,
             Some(self.workspace_root.clone()),

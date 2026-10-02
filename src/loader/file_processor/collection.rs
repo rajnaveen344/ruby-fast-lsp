@@ -10,15 +10,13 @@ use super::{
 use crate::environment::extensions::{ExtensionSemanticSeed, ProjectContextSnapshot};
 use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::LoadSink;
+use crate::loader::context::{LoadSink, LoadTarget};
 use anyhow::{anyhow, Context, Result};
 use log::debug;
 use ruby_analysis::core::{
     FileAnalysis, FullyQualifiedName, SourceKind, SymbolKind as AnalysisSymbolKind, TypeSubject,
 };
-use ruby_analysis::engine::{
-    AnalysisEngine, ProjectNeutralFileFactsTemplate, ResolveMode, SemanticChange,
-};
+use ruby_analysis::engine::ProjectNeutralFileFactsTemplate;
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::AnalysisIndexer;
 use ruby_analysis::indexer::RubyDocument;
@@ -31,23 +29,18 @@ use std::time::Instant;
 use tower_lsp::lsp_types::Url;
 
 pub(super) fn replace_analysis_facts_for_file(
-    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+    target: &dyn LoadTarget,
     file_id: ruby_analysis::core::SourceFileId,
     facts: &ruby_analysis::core::FileAnalysis,
     resolve_references: bool,
 ) {
     let mut file_facts = facts.clone();
     if file_facts.inference == ruby_analysis::core::InferenceEvidence::default() {
-        if let Some(previous) = analysis_engine
-            .read()
-            .view()
-            .inference_evidence_in_file(file_id)
-        {
+        if let Some(previous) = target.view(|view| view.inference_evidence_in_file(file_id)) {
             file_facts.inference = previous;
         }
     }
-    replace_file_analysis(
-        analysis_engine,
+    target.replace_file_facts(
         file_id,
         file_facts,
         if resolve_references {
@@ -58,46 +51,17 @@ pub(super) fn replace_analysis_facts_for_file(
     );
 }
 
-pub(super) fn replace_file_analysis(
-    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
-    file_id: ruby_analysis::core::SourceFileId,
-    facts: FileAnalysis,
-    resolution: FileResolution,
-) -> SemanticChange {
-    let mut engine = analysis_engine.write();
-    match resolution {
-        FileResolution::Full => engine.replace_facts(file_id, facts, ResolveMode::Immediate),
-        FileResolution::CurrentFile => {
-            let semantic_change = engine.replace_facts(file_id, facts, ResolveMode::Deferred);
-            engine.resolve_file(file_id);
-            semantic_change
-        }
-        FileResolution::Deferred => engine.replace_facts(file_id, facts, ResolveMode::Deferred),
-    }
-}
-
-/// Register the extension semantic seed source in `engine` and replace its
-/// facts with `seed`. Resolution is deferred: the seed only has to be visible
-/// to the file walk that follows it.
-pub(crate) fn commit_extension_seed(
-    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
-    seed: ExtensionSemanticSeed,
-) {
-    let mut engine = analysis_engine.write();
-    let file_id = engine.register_file(seed.source());
-    engine.update(file_id, seed.analysis(file_id), ResolveMode::Deferred);
-}
-
 impl FileProcessor {
-    /// Commit the extension semantic seed `engine` lacks for `snapshot`'s
+    /// Commit the extension semantic seed `target` lacks for `snapshot`'s
     /// project (or for no project) through `commit`, before a file walk
     /// consults it.
     pub(super) fn seed_extension_semantics(
         &self,
-        engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        target: &Arc<dyn LoadTarget>,
         snapshot: Option<&ProjectContextSnapshot>,
         commit: impl FnOnce(ExtensionSemanticSeed),
     ) {
+        let engine = &target.clone().engine_identity();
         match snapshot {
             Some(snapshot) => self
                 .extension_registry
@@ -128,7 +92,7 @@ impl FileProcessor {
         sink: &dyn LoadSink,
         source_kind: SourceKind,
     ) -> Result<()> {
-        let analysis_engine = sink.engine_for_uri(uri);
+        let analysis_engine = sink.target_for_uri(uri);
         self.collect_file_facts_as_with_resolution(
             uri,
             content,
@@ -150,7 +114,7 @@ impl FileProcessor {
         sink: &dyn LoadSink,
         source_kind: SourceKind,
     ) -> Result<()> {
-        let analysis_engine = sink.engine_for_uri(uri);
+        let analysis_engine = sink.target_for_uri(uri);
         self.collect_file_facts_as_with_resolution(
             uri,
             content,
@@ -168,7 +132,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         source_kind: SourceKind,
     ) -> Result<()> {
         self.collect_file_facts_as_with_resolution(
@@ -209,7 +173,7 @@ impl FileProcessor {
         sink: &dyn LoadSink,
         resolution: FileResolution,
     ) -> Result<()> {
-        let analysis_engine = sink.engine_for_uri(uri);
+        let analysis_engine = sink.target_for_uri(uri);
         let analysis_file_id =
             sink.register_source(uri, content.to_string(), SourceKind::Signature);
         let facts = match ruby_analysis::indexer::index_rbs(analysis_file_id, content) {
@@ -217,8 +181,7 @@ impl FileProcessor {
             Err(error) => {
                 // The signature file exists but does not parse: keep it
                 // registered with no facts rather than removing it.
-                replace_file_analysis(
-                    &analysis_engine,
+                analysis_engine.replace_file_facts(
                     analysis_file_id,
                     FileAnalysis::default(),
                     resolution,
@@ -229,7 +192,7 @@ impl FileProcessor {
                 ));
             }
         };
-        replace_file_analysis(&analysis_engine, analysis_file_id, facts, resolution);
+        analysis_engine.replace_file_facts(analysis_file_id, facts, resolution);
         Ok(())
     }
 
@@ -237,7 +200,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         source_kind: SourceKind,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<()> {
@@ -258,7 +221,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: String,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<CollectedProjectAnalysis> {
         let output = self.collect_file_facts_as_with_resolution_output_owned(
@@ -296,7 +259,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: &Arc<dyn LoadTarget>,
         known_namespaces: &HashSet<FullyQualifiedName>,
     ) -> Option<FileAnalysis> {
         let extension_namespace_seed = self.requires_extension_namespace_seed(uri);
@@ -310,7 +273,7 @@ impl FileProcessor {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let file_id = analysis_engine.read().view().file_id(&path).unwrap_or_else(|| {
+        let file_id = analysis_engine.view(|view| view.file_id(&path)).unwrap_or_else(|| {
             unreachable_invariant!(
                 what = "project semantic seed received an unregistered source {}",
                 why = "batch file identities must be fixed before declaration collection",
@@ -326,7 +289,7 @@ impl FileProcessor {
             return None;
         }
         let direct = collect_direct_facts(
-            analysis_engine,
+            &**analysis_engine,
             &parse.node(),
             source.as_ref(),
             file_id,
@@ -377,7 +340,7 @@ impl FileProcessor {
     pub(crate) fn ensure_project_semantic_seed(
         &self,
         uri: &Url,
-        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: &Arc<dyn LoadTarget>,
         sink: &dyn LoadSink,
     ) {
         let project_context_snapshot = self.extension_project_context_seed.as_ref().map(|seed| {
@@ -392,13 +355,11 @@ impl FileProcessor {
     pub fn replace_collected_project_file_facts_as_deferred_resolution(
         &self,
         path: &Path,
-        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: &Arc<dyn LoadTarget>,
         facts: FileAnalysis,
     ) {
         let file_id = analysis_engine
-            .read()
-            .view()
-            .file_id(path)
+            .view(|view| view.file_id(path))
             .unwrap_or_else(|| {
                 unreachable_invariant!(
                     what =
@@ -408,30 +369,24 @@ impl FileProcessor {
                     path.display(),
                 )
             });
-        replace_file_analysis(analysis_engine, file_id, facts, FileResolution::Deferred);
+        analysis_engine.replace_file_facts(file_id, facts, FileResolution::Deferred);
     }
 
     pub fn replace_collected_project_file_facts_if_source_snapshot_as_deferred_resolution(
         &self,
         path: &Path,
-        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: &Arc<dyn LoadTarget>,
         source_snapshot: ruby_analysis::engine::SourceFileSnapshot,
         facts: FileAnalysis,
     ) -> bool {
-        let mut engine = analysis_engine.write();
-        if engine.view().source_snapshot_for_path(path) != Some(source_snapshot) {
-            return false;
-        }
-        engine
-            .replace_facts_if_source_snapshot(source_snapshot, facts, ResolveMode::Deferred)
-            .is_some()
+        analysis_engine.replace_facts_if_source_snapshot(path, source_snapshot, facts)
     }
 
     pub fn collect_project_neutral_file_template_as_deferred_resolution_in_engine(
         &self,
         uri: &Url,
         content: &str,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         source_kind: SourceKind,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<ProjectNeutralFileFactsTemplate> {
@@ -463,7 +418,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         source_kind: SourceKind,
         known_namespaces: Arc<HashSet<FullyQualifiedName>>,
     ) -> Result<ProjectNeutralFileFactsTemplate> {
@@ -495,7 +450,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         source_kind: SourceKind,
         resolve_references: bool,
         known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
@@ -521,7 +476,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         source_kind: SourceKind,
         resolve_references: bool,
         known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
@@ -547,7 +502,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: String,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         source_kind: SourceKind,
         resolve_references: bool,
         known_namespaces: Option<Arc<HashSet<FullyQualifiedName>>>,
@@ -580,7 +535,7 @@ impl FileProcessor {
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         let registration_started = Instant::now();
         let analysis_file_id = if retain_collected_facts {
-            analysis_engine.read().view().file_id(&path).unwrap_or_else(|| {
+            analysis_engine.view(|view| view.file_id(&path)).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "deterministic project batch collection received an unregistered source {}",
                         why = "every batch file must be pre-registered before parallel semantic reads begin",
@@ -588,21 +543,10 @@ impl FileProcessor {
                         path.display(),
                     )
                 })
+        } else if !insert_collected_facts {
+            analysis_engine.register_path_if_absent(path, source_kind)
         } else {
-            let mut engine = analysis_engine.write();
-            if !insert_collected_facts {
-                if let Some(file_id) = engine.view().file_id(&path) {
-                    file_id
-                } else {
-                    engine.register_file(ruby_analysis::engine::SourceFileInput {
-                        path,
-                        content: String::new(),
-                        kind: source_kind,
-                    })
-                }
-            } else {
-                engine.register_file_borrowed(path, &content, source_kind)
-            }
+            analysis_engine.register_source_borrowed(path, &content, source_kind)
         };
         let document =
             RubyDocument::with_analysis_file_id(uri.clone(), content, 0, analysis_file_id);
@@ -643,7 +587,7 @@ impl FileProcessor {
         let semantic_seed_started = Instant::now();
         let direct_facts_seed = resolve_references.then(|| {
             collect_direct_facts(
-                &analysis_engine,
+                &*analysis_engine,
                 &node,
                 analysis_source.as_ref(),
                 analysis_file_id,
@@ -652,7 +596,7 @@ impl FileProcessor {
         });
         if let Some(direct_facts_seed) = direct_facts_seed.as_ref() {
             replace_analysis_facts_for_file(
-                &analysis_engine,
+                &*analysis_engine,
                 analysis_file_id,
                 direct_facts_seed,
                 resolve_references,
@@ -676,21 +620,21 @@ impl FileProcessor {
             self.seed_extension_semantics(
                 &analysis_engine,
                 extension_project_context_snapshot.as_ref(),
-                |seed| commit_extension_seed(&analysis_engine, seed),
+                |seed| analysis_engine.commit_extension_seed(seed),
             );
         }
 
         let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
             self.fact_collector_host(extensions_enabled, !source_kind.is_dependency_source()),
-            analysis_engine.clone(),
+            analysis_engine.clone().semantics(),
         );
         if source_kind.is_dependency_source() {
             fact_collector = fact_collector.without_body_inference();
         }
         fact_collector.set_extension_project_context(extension_project_context.clone());
         let shared_direct_known_namespaces = known_namespaces
-            .unwrap_or_else(|| Arc::new(collect_known_namespaces(&analysis_engine)));
+            .unwrap_or_else(|| Arc::new(collect_known_namespaces(&*analysis_engine)));
         fact_collector =
             fact_collector.with_shared_direct_known_namespaces(shared_direct_known_namespaces);
         fact_collector.extend_direct_known_namespaces(
@@ -710,7 +654,7 @@ impl FileProcessor {
                 content: document.content.as_str(),
                 file_id: analysis_file_id,
                 source_kind,
-                analysis_engine: &analysis_engine,
+                analysis_engine: &*analysis_engine,
                 extension_project_context: extension_project_context.as_ref(),
                 declarations: direct_facts_seed,
                 extension_document: ExtensionDocument::Original(&document),
@@ -737,8 +681,7 @@ impl FileProcessor {
             Some(analysis)
         } else {
             if insert_collected_facts {
-                replace_file_analysis(
-                    &analysis_engine,
+                analysis_engine.replace_file_facts(
                     analysis_file_id,
                     analysis,
                     if resolve_references {
@@ -778,13 +721,12 @@ impl FileProcessor {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let analysis_engine = sink.engine_for_uri(uri);
-        let engine = analysis_engine.read();
-        engine
-            .view()
-            .file_id(&path)
-            .and_then(|file_id| engine.view().file(file_id))
-            .map(|file| file.kind)
+        sink.target_for_uri(uri)
+            .view(|view| {
+                view.file_id(&path)
+                    .and_then(|file_id| view.file(file_id))
+                    .map(|file| file.kind)
+            })
             .unwrap_or(SourceKind::Project)
     }
 }

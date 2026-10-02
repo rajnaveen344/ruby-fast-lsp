@@ -20,10 +20,14 @@ Each project's engine is reached only through a
 closure, so an answer reflects one semantic revision and no guard crosses an
 `.await`. Lifecycle writes use named operations (`register_source`, `remove_path`, `remove_path_of_kind`, `clear_path_facts_of_kind`, `resolve`, `reset`); the conditional require-diagnostic commit still uses `update(|engine| ..)`. Handles are compared with
 `is_same`. The server routes with `project_for_uri`, `projects`, and
-`orphan_project`. The loader alone receives the shared engine
-(`ProjectHandle::shared_engine`) through `LoadSink::engine_for_uri` and the
-coordinator's engine override; it is not a reader or writer API for features
-or lifecycle code.
+`orphan_project`. The loader reaches a project through
+`ProjectHandle::load_target`, an `Arc<dyn LoadTarget>` returned by
+`LoadSink::target_for_uri` or fixed by `IndexingCoordinator::set_load_target`.
+`LoadTarget` is defined in `src/loader/context/target.rs`; the handle
+implements its read and write primitives over the engine lock, and the loader
+calls only the named operations built on them (fact replacement, conditional
+snapshot commits, registration, extension seeds, gem binding, resolve, and
+compaction). `is_target` tells whether a target is this project.
 
 ## The ten server fields
 

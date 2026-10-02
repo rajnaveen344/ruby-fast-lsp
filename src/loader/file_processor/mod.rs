@@ -18,18 +18,17 @@
 use crate::environment::extensions::{ExtensionRegistryHandle, ProjectContextSeed};
 use crate::environment::runtime::jruby::imports::{JrubyImportProvider, StaticJavaNavigationPlan};
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::LoadContext;
+use crate::loader::context::{FileResolution, LoadContext, LoadTarget};
 use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::require_paths::RequireFeatureIndex;
 use anyhow::Result;
-pub(crate) use collection::commit_extension_seed;
-use collection::{replace_analysis_facts_for_file, replace_file_analysis};
+use collection::replace_analysis_facts_for_file;
 use compose::{ExtensionDocument, FileComposition, RequireDiagnosticRoots};
 use log::{debug, info};
 use merge::collect_direct_facts;
 use ruby_analysis::core::{FileAnalysis, FullyQualifiedName, SourceFileId, SourceKind};
 use ruby_analysis::engine::{
-    AnalysisEngine, ProjectNeutralFileFactsTemplate, SemanticChange, SemanticExportFingerprint,
+    ProjectNeutralFileFactsTemplate, SemanticChange, SemanticExportFingerprint,
 };
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
@@ -85,13 +84,6 @@ pub struct CollectedProjectAnalysis {
     pub jruby_navigation_plan: StaticJavaNavigationPlan,
     pub jruby_source_hint: StaticJavaSourceHint,
     pub timing: ProjectFileCollectionTiming,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FileResolution {
-    Full,
-    CurrentFile,
-    Deferred,
 }
 
 enum JrubyNavigationResolution {
@@ -278,7 +270,7 @@ impl FileProcessor {
         let parse_start = Instant::now();
         // 1. Parse ONLY ONCE
         let analysis_source = analysis_source(uri, content);
-        let analysis_engine = ctx.sink.engine_for_uri(uri);
+        let analysis_engine = ctx.sink.target_for_uri(uri);
         self.ensure_jruby_navigation_inputs(content, &analysis_engine)?;
         let parse_result = ruby_prism::parse(analysis_source.as_bytes());
         let node = parse_result.node();
@@ -297,10 +289,8 @@ impl FileProcessor {
             document_version,
             analysis_file_id,
         );
-        let previous_export_fingerprint = analysis_engine
-            .read()
-            .view()
-            .semantic_export_fingerprint(analysis_file_id);
+        let previous_export_fingerprint =
+            analysis_engine.view(|view| view.semantic_export_fingerprint(analysis_file_id));
 
         // 2. Generate Syntax Diagnostics
         let diagnostics = generate_diagnostics(&parse_result, &document);
@@ -323,14 +313,14 @@ impl FileProcessor {
         // 3. Collect facts.
         let direct_start = Instant::now();
         let direct_facts_seed = collect_direct_facts(
-            &analysis_engine,
+            &*analysis_engine,
             &node,
             analysis_source.as_ref(),
             document.analysis_file_id(),
             None,
         );
         replace_analysis_facts_for_file(
-            &analysis_engine,
+            analysis_engine.as_ref(),
             document.analysis_file_id(),
             &direct_facts_seed,
             false,
@@ -355,7 +345,7 @@ impl FileProcessor {
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
             self.fact_collector_host(extensions_enabled, !source_kind.is_dependency_source()),
-            analysis_engine.clone(),
+            analysis_engine.clone().semantics(),
         );
         if source_kind.is_dependency_source() {
             visitor = visitor.without_body_inference();
@@ -370,7 +360,7 @@ impl FileProcessor {
                 content,
                 file_id: analysis_file_id,
                 source_kind,
-                analysis_engine: &analysis_engine,
+                analysis_engine: &*analysis_engine,
                 extension_project_context: extension_project_context.as_ref(),
                 declarations: Some(direct_facts_seed),
                 extension_document: ExtensionDocument::Collected,
@@ -412,7 +402,7 @@ enum LoadedCommit {
     AlreadyIndexed,
     /// Too broken to analyze: the file stays registered with no facts.
     Unanalyzable {
-        engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        engine: Arc<dyn LoadTarget>,
         file_id: SourceFileId,
         resolution: FileResolution,
     },
@@ -422,7 +412,7 @@ enum LoadedCommit {
 
 struct AnalyzedFile {
     uri: Url,
-    engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+    engine: Arc<dyn LoadTarget>,
     analysis: FileAnalysis,
     document: RubyDocument,
     resolution: FileResolution,
@@ -453,7 +443,7 @@ impl LoadedFile {
                 engine,
                 file_id,
                 resolution,
-            } => replace_file_analysis(&engine, file_id, FileAnalysis::default(), resolution),
+            } => engine.replace_file_facts(file_id, FileAnalysis::default(), resolution),
             LoadedCommit::Analyzed(file) => file.commit(ctx),
         };
         ProcessResult {
@@ -476,12 +466,10 @@ impl AnalyzedFile {
         } = self;
         let file_id = document.analysis_file_id();
         let replace_start = Instant::now();
-        replace_file_analysis(&engine, file_id, analysis, resolution);
+        engine.replace_file_facts(file_id, analysis, resolution);
         let replace_elapsed = replace_start.elapsed();
         let current_export_fingerprint = engine
-            .read()
-            .view()
-            .semantic_export_fingerprint(file_id)
+            .view(|view| view.semantic_export_fingerprint(file_id))
             .expect_invariant(
                 "processed file has no semantic export fingerprint",
                 "every engine fact replacement must record its exported API",

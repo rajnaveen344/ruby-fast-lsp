@@ -6,6 +6,8 @@
 //! consults them, exactly as reads through the server were. Writes and owner
 //! lookups (source registration, document version marks, runtime selections,
 //! status, progress, and the facts-ready publication hook) go through [`LoadSink`].
+//! Engine writes go through the named operations of a [`LoadTarget`]
+//! (`target.rs`): the sink hands out each project's target, never its lock.
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::config::RubyFastLspConfig;
 use crate::environment::extensions::{
@@ -34,6 +36,10 @@ use ruby_analysis::stats::StatsRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
+
+mod target;
+pub(crate) use target::{FileResolution, PathFacts, ProjectSourceCandidate};
+pub use target::{LoadTarget, NamedWrite};
 
 /// Everything the loader reads from its owner, as cloneable shared handles.
 #[derive(Clone)]
@@ -311,9 +317,9 @@ pub(crate) enum IndexingRunState {
 /// the owner observes exactly the write sequence of the load.
 #[tower_lsp::async_trait]
 pub(crate) trait LoadSink: Send + Sync {
-    /// The isolated engine that owns `uri`; files outside every project use
-    /// the orphan engine.
-    fn engine_for_uri(&self, uri: &Url) -> Arc<RwLock<AnalysisEngine>>;
+    /// The load target of the isolated project engine that owns `uri`; files
+    /// outside every project use the orphan engine.
+    fn target_for_uri(&self, uri: &Url) -> Arc<dyn LoadTarget>;
     /// Whether `run` is still the live generation of the project at `root`.
     fn indexing_run_state(&self, root: &Path, run: &IndexingRun) -> IndexingRunState;
     /// Advance the status of the project at `root` to `phase` and publish it.
@@ -336,11 +342,11 @@ pub(crate) trait LoadSink: Send + Sync {
     /// an open document.
     async fn refresh_inlay_hints(&self, root: &Path);
     /// Publish the dependency require roots and feature index of the project
-    /// at `root`, only while `engine` is still that project's engine.
+    /// at `root`, only while `target` is still that project's engine.
     fn publish_require_roots(
         &self,
         root: &Path,
-        engine: &Arc<RwLock<AnalysisEngine>>,
+        target: &Arc<dyn LoadTarget>,
         paths: Vec<PathBuf>,
         index: Arc<RequireFeatureIndex>,
     );
@@ -359,11 +365,11 @@ pub(crate) trait LoadSink: Send + Sync {
         uri: &Url,
         kind: SourceKind,
     ) -> Option<ProjectContextSnapshot>;
-    /// Commit the extension semantic seed into `engine` before a file walk
+    /// Commit the extension semantic seed into `target` before a file walk
     /// reads it. The registry hands a seed over only while it records that
-    /// seed as the one `engine` holds, so the commit runs synchronously
+    /// seed as the one `target` holds, so the commit runs synchronously
     /// inside that window and is never a late write.
-    fn commit_seed(&self, engine: &Arc<RwLock<AnalysisEngine>>, seed: ExtensionSemanticSeed);
+    fn commit_seed(&self, target: &Arc<dyn LoadTarget>, seed: ExtensionSemanticSeed);
     /// Retain `document` as the processed document of `uri` and mark its
     /// current version indexed.
     fn mark_document_indexed(&self, uri: &Url, document: RubyDocument);
@@ -375,14 +381,14 @@ pub(crate) trait LoadSink: Send + Sync {
         completed: u64,
         total: u64,
     );
-    /// Final resolution of the project at `root` completed in `engine`:
+    /// Final resolution of the project at `root` completed in `target`:
     /// publish a complete diagnostic projection for each open document that
-    /// engine owns. Publication stops as soon as `run` is no longer current
+    /// target owns. Publication stops as soon as `run` is no longer current
     /// and returns that state; a load without a run publishes every document.
     async fn project_facts_ready(
         &self,
         root: &Path,
-        engine: &Arc<RwLock<AnalysisEngine>>,
+        target: &Arc<dyn LoadTarget>,
         run: Option<&IndexingRun>,
     ) -> IndexingRunState;
     /// Replace the JRuby add-on of the project at `root` in one write. A run

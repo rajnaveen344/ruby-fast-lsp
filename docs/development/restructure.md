@@ -465,7 +465,7 @@ Delete this file when the last task is done. Git history keeps the record.
         (a writer task with a command channel and oneshot replies, the
         `LoadSink` adapter sending commands) bundles three changes of very
         different risk:
-    - [ ] C4c1. Loader writes go through named handle operations instead of
+    - [x] C4c1. Loader writes go through named handle operations instead of
           the shared engine: file-fact commit, deferred registration,
           whole-project resolve, and compaction. `LoadSink::engine_for_uri`,
           `set_analysis_engine`, and `ProjectHandle::shared_engine` go away.
@@ -499,7 +499,9 @@ Delete this file when the last task is done. Git history keeps the record.
   server routes with `project_for_uri`, `projects`, and `orphan_project`, and
   `EngineQuery` holds a handle. The loader still receives the shared engine
   through `ProjectHandle::shared_engine` (sink, coordinator override, and the
-  analysis-only collector) until C4c1. Tests that inspect state across many
+  analysis-only collector) until C4c1. Since C4c1 the loader receives an
+  `Arc<dyn LoadTarget>` (`src/loader/context/target.rs`), which the handle
+  implements; only `target.rs` can name an engine write. Tests that inspect state across many
   statements use the test-only owned guards `test_read` and `test_write`.
 
   Decision needed for C4c2. A writer task alone does not shorten reader

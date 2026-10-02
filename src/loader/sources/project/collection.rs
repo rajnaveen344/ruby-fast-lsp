@@ -5,12 +5,14 @@ use super::ProjectFileInput;
 use super::RegisteredProjectFileInput;
 use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::{LoadContext, LoadSink};
+use crate::loader::context::{
+    LoadContext, LoadSink, LoadTarget, PathFacts, ProjectSourceCandidate,
+};
 use crate::loader::file_processor::ProjectFileCollectionTiming;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use rayon::prelude::*;
-use ruby_analysis::core::{FileAnalysis, FullyQualifiedName, SourceKind};
+use ruby_analysis::core::{FileAnalysis, FullyQualifiedName};
 use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileSnapshot};
 use ruby_fast_lsp_jruby_support::StaticJavaSourceHint;
 use std::collections::HashSet;
@@ -338,17 +340,17 @@ impl IndexerProject {
                 self.workspace_root.display()
             )
         })?;
-        let analysis_engine = ctx.sink.engine_for_uri(&project_uri);
+        let analysis_engine = ctx.sink.target_for_uri(&project_uri);
         let uses_immutable_semantic_context = semantic_context_engine.is_some();
-        let base_semantic_read_engine =
-            semantic_context_engine.unwrap_or_else(|| analysis_engine.clone());
+        let base_semantic_read_engine: Arc<dyn LoadTarget> = match &semantic_context_engine {
+            Some(engine) => engine.clone(),
+            None => analysis_engine.clone(),
+        };
 
         let collect_start = Instant::now();
         let read_file = |file_path: &PathBuf| -> Result<ProjectFileInput> {
-            let expected_snapshot = analysis_engine
-                .read()
-                .view()
-                .source_snapshot_for_path(file_path);
+            let expected_snapshot =
+                analysis_engine.view(|view| view.source_snapshot_for_path(file_path));
             let read_started = Instant::now();
             let (content, open_document) = Self::read_authoritative_project_source(ctx, file_path)?;
             let read_elapsed = read_started.elapsed();
@@ -395,84 +397,29 @@ impl IndexerProject {
         let batch_registration_started = Instant::now();
         let mut registered_inputs = Vec::with_capacity(inputs.len());
         let mut registered_priority_file_count = 0usize;
-        if uses_immutable_semantic_context {
-            let mut engine = analysis_engine.write();
-            let mut semantic_engine = base_semantic_read_engine.write();
-            for (index, input) in inputs.into_iter().enumerate() {
-                if input.open_document {
-                    if let Some(file_id) = engine.view().file_id(&input.path) {
-                        if !engine.view().file_content_matches(file_id, &input.content) {
-                            info!(
-                                "Skipping stale project snapshot for open document {}",
-                                input.path.display()
-                            );
-                            continue;
-                        }
-                    }
-                }
-                let Some(source_snapshot) = engine.register_file_borrowed_if_snapshot(
-                    input.path.clone(),
-                    &input.content,
-                    SourceKind::Project,
-                    input.expected_snapshot,
-                ) else {
-                    info!(
-                        "Skipping project snapshot superseded before registration: {}",
-                        input.path.display()
-                    );
-                    continue;
-                };
-                let semantic_id = semantic_engine.register_file_borrowed(
-                    input.path.clone(),
-                    &input.content,
-                    SourceKind::Project,
-                );
-                invariant_eq!(
-                    engine.view().file_id(&input.path).unwrap(),
-                    semantic_id,
-                    what = "immutable semantic context assigned a different file id for {}",
-                    why = "retained FileAnalysis ranges must be valid in the live engine",
-                    fix = "pre-register the tail in identical order in both engines",
-                    input.path.display(),
-                );
-                registered_priority_file_count += usize::from(index < priority_file_count);
-                registered_inputs.push(RegisteredProjectFileInput {
-                    input,
-                    source_snapshot,
-                });
-            }
-        } else {
-            let mut engine = analysis_engine.write();
-            for (index, input) in inputs.into_iter().enumerate() {
-                if input.open_document {
-                    if let Some(file_id) = engine.view().file_id(&input.path) {
-                        if !engine.view().file_content_matches(file_id, &input.content) {
-                            info!(
-                                "Skipping stale project snapshot for open document {}",
-                                input.path.display()
-                            );
-                            continue;
-                        }
-                    }
-                }
-                let Some(source_snapshot) = engine.register_file_borrowed_if_snapshot(
-                    input.path.clone(),
-                    &input.content,
-                    SourceKind::Project,
-                    input.expected_snapshot,
-                ) else {
-                    info!(
-                        "Skipping project snapshot superseded before registration: {}",
-                        input.path.display()
-                    );
-                    continue;
-                };
-                registered_priority_file_count += usize::from(index < priority_file_count);
-                registered_inputs.push(RegisteredProjectFileInput {
-                    input,
-                    source_snapshot,
-                });
-            }
+        // In an immutable semantic context every registration is mirrored
+        // into the context so retained ranges keep one file identity.
+        let candidates = inputs
+            .iter()
+            .map(|input| ProjectSourceCandidate {
+                path: &input.path,
+                content: &input.content,
+                open_document: input.open_document,
+                expected_snapshot: input.expected_snapshot,
+            })
+            .collect::<Vec<_>>();
+        let snapshots = analysis_engine
+            .register_project_sources_if_snapshot(&candidates, semantic_context_engine.as_deref());
+        drop(candidates);
+        for (index, (input, source_snapshot)) in inputs.into_iter().zip(snapshots).enumerate() {
+            let Some(source_snapshot) = source_snapshot else {
+                continue;
+            };
+            registered_priority_file_count += usize::from(index < priority_file_count);
+            registered_inputs.push(RegisteredProjectFileInput {
+                input,
+                source_snapshot,
+            });
         }
         let batch_registration_elapsed = batch_registration_started.elapsed();
 
@@ -483,54 +430,49 @@ impl IndexerProject {
         // fixed point that a clean cold index cannot observe. Sanitize the
         // whole batch in one bounded snapshot so parallel workers share the
         // same file-order-independent semantic universe.
-        let semantic_read_engine = if uses_immutable_semantic_context {
-            // This generation-owned context was sanitized before the project
-            // skeleton was installed. Clearing one batch here would remove
-            // exact cross-batch inheritance and mixin edges and restore
-            // traversal-order-dependent extension dispatch.
-            base_semantic_read_engine.clone()
-        } else {
-            let engine = base_semantic_read_engine.read();
-            let stale_file_ids = registered_inputs
-                .iter()
-                .filter_map(|registered| {
-                    let file_id = engine.view().file_id(&registered.input.path)?;
-                    engine
-                        .view()
-                        .semantic_export_fingerprint(file_id)
-                        .map(|_| file_id)
-                })
-                .collect::<Vec<_>>();
-            if stale_file_ids.is_empty() {
-                drop(engine);
-                base_semantic_read_engine.clone()
+        let (semantic_read_engine, reads_base_engine): (Arc<dyn LoadTarget>, bool) =
+            if uses_immutable_semantic_context {
+                // This generation-owned context was sanitized before the project
+                // skeleton was installed. Clearing one batch here would remove
+                // exact cross-batch inheritance and mixin edges and restore
+                // traversal-order-dependent extension dispatch.
+                (base_semantic_read_engine.clone(), true)
             } else {
-                let mut snapshot = engine.clone();
-                drop(engine);
-                // These files still exist and are about to be collected; only
-                // their prior facts are withheld. They keep their identity
-                // because the seed below addresses them by path, so this is
-                // an empty update rather than a removal.
-                for file_id in stale_file_ids {
-                    snapshot.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Deferred);
+                let stale = base_semantic_read_engine.snapshot_with(|view| {
+                    let stale_file_ids = registered_inputs
+                        .iter()
+                        .filter_map(|registered| {
+                            let file_id = view.file_id(&registered.input.path)?;
+                            view.semantic_export_fingerprint(file_id).map(|_| file_id)
+                        })
+                        .collect::<Vec<_>>();
+                    (!stale_file_ids.is_empty()).then_some(stale_file_ids)
+                });
+                match stale {
+                    None => (base_semantic_read_engine.clone(), true),
+                    Some((mut snapshot, stale_file_ids)) => {
+                        // These files still exist and are about to be collected;
+                        // only their prior facts are withheld. They keep their
+                        // identity because the seed below addresses them by
+                        // path, so this is an empty update rather than a removal.
+                        for file_id in stale_file_ids {
+                            snapshot.replace_facts(
+                                file_id,
+                                FileAnalysis::default(),
+                                ResolveMode::Deferred,
+                            );
+                        }
+                        (Arc::new(parking_lot::RwLock::new(snapshot)), false)
+                    }
                 }
-                Arc::new(parking_lot::RwLock::new(snapshot))
-            }
-        };
-        let baseline_known_namespaces =
-            if Arc::ptr_eq(&semantic_read_engine, &base_semantic_read_engine) {
-                known_namespaces.unwrap_or_else(|| {
-                    Arc::new({
-                        let engine = semantic_read_engine.read();
-                        engine.view().known_namespace_fqns()
-                    })
-                })
-            } else {
-                Arc::new({
-                    let engine = semantic_read_engine.read();
-                    engine.view().known_namespace_fqns()
-                })
             };
+        let baseline_known_namespaces = if reads_base_engine {
+            known_namespaces.unwrap_or_else(|| {
+                Arc::new(semantic_read_engine.view(|view| view.known_namespace_fqns()))
+            })
+        } else {
+            Arc::new(semantic_read_engine.view(|view| view.known_namespace_fqns()))
+        };
 
         // Before body inference, publish the same direct declaration skeleton
         // for every worker. Value-constant receiver and block types must not
@@ -559,34 +501,38 @@ impl IndexerProject {
                     ))
                 })
                 .collect::<Vec<_>>();
-            let mut engine = semantic_read_engine.write();
-            let mut seeded = false;
+            // Commit the seeds that precede the first failure, and resolve
+            // only a complete batch that seeded at least one file.
+            let mut seed_paths = Vec::with_capacity(semantic_seed_outcomes.len());
+            let mut seed_facts = Vec::with_capacity(semantic_seed_outcomes.len());
+            let mut failure = None;
             for outcome in semantic_seed_outcomes {
-                let (path, facts) = outcome?;
-                let Some(facts) = facts else { continue };
-                let file_id = engine.view().file_id(&path).unwrap_or_else(|| {
-                    unreachable_invariant!(
-                        what = "project semantic seed lost the registered identity for {}",
-                        why = "declaration collection and replacement must address the same batch file",
-                        fix = "preserve batch registration in the semantic snapshot",
-                        path.display(),
-                    )
-                });
-                engine.replace_facts(file_id, facts, ResolveMode::Deferred);
-                seeded = true;
+                match outcome {
+                    Ok((path, Some(facts))) => {
+                        seed_paths.push(path);
+                        seed_facts.push(PathFacts::Facts(facts));
+                    }
+                    Ok((_, None)) => {}
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                }
             }
-            if seeded {
-                engine.resolve();
+            let resolve = failure.is_none() && !seed_paths.is_empty();
+            semantic_read_engine.replace_facts_by_path(
+                seed_paths.iter().map(PathBuf::as_path).zip(seed_facts),
+                resolve,
+            );
+            if let Some(error) = failure {
+                return Err(error);
             }
         }
         let semantic_seed_elapsed = requires_direct_semantic_seed
             .then(|| semantic_seed_started.elapsed())
             .unwrap_or_default();
         let known_namespaces = if requires_direct_semantic_seed {
-            Arc::new({
-                let engine = semantic_read_engine.read();
-                engine.view().known_namespace_fqns()
-            })
+            Arc::new(semantic_read_engine.view(|view| view.known_namespace_fqns()))
         } else {
             baseline_known_namespaces
         };

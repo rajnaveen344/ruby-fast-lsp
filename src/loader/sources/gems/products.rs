@@ -7,7 +7,7 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::cache::dependency_product::{
     GemDependencyFileTemplate, GemDependencyManifest, GemDependencyProduct, GemDependencySource,
 };
-use crate::loader::context::LoadContext;
+use crate::loader::context::{LoadContext, LoadTarget};
 use crate::loader::file_processor::FileProcessor;
 use crate::utils;
 use crate::utils::admission::{IndexingResourcePriority, IndexingWorkSpec};
@@ -110,7 +110,7 @@ impl IndexerGem {
     async fn index_prepared_required_gems_with_shared_product(
         &self,
         ctx: &LoadContext,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
         manifests: Vec<GemDependencyManifest>,
         cancellation: Option<CancellationToken>,
     ) -> Result<Vec<Url>> {
@@ -140,7 +140,7 @@ impl IndexerGem {
     pub(crate) async fn bind_prepared_required_gem_with_shared_product(
         &self,
         ctx: &LoadContext,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
         manifest: GemDependencyManifest,
         cancellation: Option<CancellationToken>,
     ) -> Result<Vec<Url>> {
@@ -283,7 +283,7 @@ impl IndexerGem {
     pub(crate) async fn bind_loaded_required_gem_product(
         &self,
         ctx: &LoadContext,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
         loaded: LoadedGemDependencyProduct,
         cancellation: Option<CancellationToken>,
     ) -> Result<Vec<Url>> {
@@ -307,9 +307,7 @@ impl IndexerGem {
                 "gem dependency product binding",
                 binding_spec,
                 cancellation,
-                move || {
-                    product.bind_owned_deferred_into_measured(manifest, &mut binding_engine.write())
-                },
+                move || binding_engine.bind_gem_product(&product, manifest),
             )
             .await?
         {
@@ -328,7 +326,7 @@ impl IndexerGem {
     pub(crate) async fn resolve_bound_required_gems(
         &self,
         ctx: &LoadContext,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
         cancellation: Option<CancellationToken>,
     ) -> Result<()> {
         let project_root = self.workspace_root.clone().expect_invariant(
@@ -350,7 +348,7 @@ impl IndexerGem {
                 resolution_spec,
                 cancellation,
                 move || {
-                    resolving_engine.write().resolve();
+                    resolving_engine.resolve();
                 },
             )
             .await?;
@@ -361,7 +359,7 @@ impl IndexerGem {
     pub(super) async fn index_required_gems_with_shared_product(
         &self,
         ctx: &LoadContext,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<Vec<Url>> {
         let seed = self
             .dependency_seed_engine

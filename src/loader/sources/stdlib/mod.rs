@@ -9,6 +9,7 @@
 
 use crate::environment::runtime::catalog::RuntimeImplementation;
 use crate::environment::runtime::version::RubyVersion;
+use crate::loader::context::{LoadTarget, PathFacts};
 use crate::loader::file_processor::FileProcessor;
 use crate::utils;
 use crate::utils::stub_loader::find_stubs_directory;
@@ -123,14 +124,14 @@ impl IndexerStdlib {
     #[cfg(test)]
     async fn index_core_stubs(
         &self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<()> {
         self.index_core_stubs_blocking(analysis_engine)
     }
 
     pub(crate) fn index_core_stubs_blocking(
         &self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<()> {
         let version = self
             .ruby_version
@@ -150,7 +151,7 @@ impl IndexerStdlib {
                 if stub_files.is_empty() {
                     warn!("No stub files found in: {:?}", stubs_dir);
                     self.index_core_runtime_constants(Some(&stubs_dir), analysis_engine.clone())?;
-                    analysis_engine.write().resolve();
+                    analysis_engine.resolve();
                     return Ok(());
                 }
 
@@ -172,7 +173,7 @@ impl IndexerStdlib {
         // Fall back to finding stubs relative to executable (development path)
         let Some(stubs_path) = self.find_core_stubs_path(version) else {
             self.index_core_runtime_constants(None, analysis_engine.clone())?;
-            analysis_engine.write().resolve();
+            analysis_engine.resolve();
             return Ok(());
         };
 
@@ -196,7 +197,7 @@ impl IndexerStdlib {
     pub(crate) fn index_core_runtime_constants(
         &self,
         stubs_path: Option<&Path>,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<()> {
         let content = rbs_parser::core_rbs_file(CORE_RUNTIME_CONSTANTS_RBS).ok_or_else(|| {
             anyhow!(
@@ -204,19 +205,13 @@ impl IndexerStdlib {
             )
         })?;
         let path = self.core_runtime_constants_path(stubs_path);
-        let mut engine = analysis_engine.write();
-        let file_id = engine.register_file_borrowed(
-            path,
-            content,
-            ruby_analysis::core::SourceKind::Signature,
-        );
-        let facts = ruby_analysis::indexer::index_rbs(file_id, content).map_err(|error| {
-            anyhow!(
-                "invariant violated: embedded Ruby core RBS {CORE_RUNTIME_CONSTANTS_RBS} failed to parse: {error} — bug: bundled language semantics must produce valid facts — fix: validate vendored RBS updates before embedding"
-            )
-        })?;
-        engine.replace_facts(file_id, facts, ruby_analysis::engine::ResolveMode::Deferred);
-        Ok(())
+        analysis_engine.commit_signature_source(path, content, |file_id| {
+            ruby_analysis::indexer::index_rbs(file_id, content).map_err(|error| {
+                anyhow!(
+                    "invariant violated: embedded Ruby core RBS {CORE_RUNTIME_CONSTANTS_RBS} failed to parse: {error} — bug: bundled language semantics must produce valid facts — fix: validate vendored RBS updates before embedding"
+                )
+            })
+        })
     }
 
     fn core_runtime_constants_path(&self, stubs_path: Option<&Path>) -> PathBuf {
@@ -266,7 +261,7 @@ impl IndexerStdlib {
     fn index_stub_files_deterministically(
         &self,
         stub_files: &[PathBuf],
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<()> {
         let sources = stub_files
             .par_iter()
@@ -286,16 +281,12 @@ impl IndexerStdlib {
         // Reserve stable file identities with the actual source before
         // template-only collection. Its fallback reservation has no content;
         // that would leave valid declaration ranges without an LSP position.
-        {
-            let mut engine = analysis_engine.write();
-            for (path, _, content) in &sources {
-                engine.register_file_borrowed(
-                    path.clone(),
-                    content,
-                    ruby_analysis::core::SourceKind::Stub,
-                );
-            }
-        }
+        analysis_engine.register_sources_borrowed(
+            sources
+                .iter()
+                .map(|(path, _, content)| (path.as_path(), content.as_str())),
+            ruby_analysis::core::SourceKind::Stub,
+        );
 
         // Every collector observes the same immutable pre-batch engine and
         // namespace snapshot. Core-stub files are independent declaration
@@ -303,10 +294,8 @@ impl IndexerStdlib {
         // become another sibling's input makes both the output and its cache
         // identity depend on Rayon scheduling. Declarations and aliases within
         // each file remain visible through the collector's local overlay.
-        let known_namespaces = std::sync::Arc::new({
-            let engine = analysis_engine.read();
-            engine.view().known_namespace_fqns()
-        });
+        let known_namespaces =
+            std::sync::Arc::new(analysis_engine.view(|view| view.known_namespace_fqns()));
         let templates = sources
             .par_iter()
             .map(|(_, uri, content)| {
@@ -321,36 +310,26 @@ impl IndexerStdlib {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let mut engine = analysis_engine.write();
-        for ((path, _, _), template) in sources.iter().zip(templates) {
-            let file_id = engine.view().file_id(path).unwrap_or_else(|| {
-                unreachable_invariant!(
-                    what = "deterministic stub collection lost registered file {}",
-                    why = "both direct staging passes register every source before template collection",
-                    fix = "preserve the file registration lifecycle through batch commit",
-                    path.display(),
-                )
-            });
-            engine.replace_facts(
-                file_id,
-                template.instantiate(file_id),
-                ruby_analysis::engine::ResolveMode::Deferred,
-            );
-        }
-        engine.resolve();
+        analysis_engine.replace_facts_by_path(
+            sources
+                .iter()
+                .zip(templates)
+                .map(|((path, _, _), template)| (path.as_path(), PathFacts::Template(template))),
+            true,
+        );
         Ok(())
     }
 
     pub(crate) fn index_runtime_stdlib_deferred_blocking(
         &mut self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<()> {
         self.index_runtime_stdlib_blocking_with_resolution(analysis_engine, false)
     }
 
     fn index_runtime_stdlib_blocking_with_resolution(
         &mut self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
         resolve: bool,
     ) -> Result<()> {
         let start = Instant::now();
@@ -366,7 +345,7 @@ impl IndexerStdlib {
 
     fn index_jruby_overlay_stubs(
         &self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
     ) -> Result<()> {
         let Some(version) = self.ruby_version else {
             return Ok(());
@@ -417,7 +396,7 @@ impl IndexerStdlib {
 
     fn index_required_modules_blocking_with_resolution(
         &self,
-        analysis_engine: std::sync::Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: std::sync::Arc<dyn LoadTarget>,
         resolve: bool,
     ) -> Result<()> {
         if self.required_modules.is_empty() {
@@ -452,11 +431,11 @@ impl IndexerStdlib {
         // Other ownership collisions are invalid: one physical file cannot be
         // both project/dependency truth and runtime stdlib truth in one engine.
         files.retain(|path| {
-            let engine = analysis_engine.read();
-            let Some(file_id) = engine.view().file_id(path) else {
+            analysis_engine.view(|view| {
+            let Some(file_id) = view.file_id(path) else {
                 return true;
             };
-            let file = engine.view().file(file_id).unwrap_or_else(|| {
+            let file = view.file(file_id).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "stdlib collision lookup found file id {:?} for {} without a registered source file",
                     why = "file-path and file-record ownership must be updated atomically",
@@ -486,6 +465,7 @@ impl IndexerStdlib {
                     file.kind,
                 ),
             }
+            })
         });
 
         let sources = files
@@ -503,20 +483,15 @@ impl IndexerStdlib {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        {
-            let mut engine = analysis_engine.write();
-            for (path, _, content) in &sources {
-                engine.register_file(ruby_analysis::engine::SourceFileInput {
-                    path: path.clone(),
-                    content: content.clone(),
-                    kind: ruby_analysis::core::SourceKind::Stdlib,
-                });
+        analysis_engine.register_sources(sources.iter().map(|(path, _, content)| {
+            ruby_analysis::engine::SourceFileInput {
+                path: path.clone(),
+                content: content.clone(),
+                kind: ruby_analysis::core::SourceKind::Stdlib,
             }
-        }
-        let known_namespaces = std::sync::Arc::new({
-            let engine = analysis_engine.read();
-            engine.view().known_namespace_fqns()
-        });
+        }));
+        let known_namespaces =
+            std::sync::Arc::new(analysis_engine.view(|view| view.known_namespace_fqns()));
         let templates = sources
             .par_iter()
             .map(|(_, uri, content)| {
@@ -532,26 +507,13 @@ impl IndexerStdlib {
             .collect::<Result<Vec<_>>>()?;
 
         let indexed_count = sources.len();
-        let mut engine = analysis_engine.write();
-        for ((path, _, _), template) in sources.iter().zip(templates) {
-            let file_id = engine.view().file_id(path).unwrap_or_else(|| {
-                unreachable_invariant!(
-                    what = "deterministic stdlib collection lost registered file {}",
-                    why = "the batch registers every source before template collection",
-                    fix = "preserve file registration through deterministic stdlib commit",
-                    path.display(),
-                )
-            });
-            engine.replace_facts(
-                file_id,
-                template.instantiate(file_id),
-                ruby_analysis::engine::ResolveMode::Deferred,
-            );
-        }
-
-        if resolve && indexed_count > 0 {
-            engine.resolve();
-        }
+        analysis_engine.replace_facts_by_path(
+            sources
+                .iter()
+                .zip(templates)
+                .map(|((path, _, _), template)| (path.as_path(), PathFacts::Template(template))),
+            resolve && indexed_count > 0,
+        );
 
         info!(
             "Indexed {} stdlib files for required modules",

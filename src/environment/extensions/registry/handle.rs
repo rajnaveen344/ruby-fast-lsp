@@ -180,13 +180,15 @@ impl ExtensionRegistryHandle {
     }
 
     /// Hand `commit` the extension semantic seed that `engine` lacks for
-    /// `project`. The registry never writes the engine: the caller commits
+    /// `project`. `engine` is the identity of the engine the seed commits
+    /// into: two engines are the same exactly when their identities share
+    /// one allocation. The registry never writes the engine: the caller commits
     /// the seed, and the registry records it as applied once `commit`
     /// returns. Nothing is produced when the engine already holds the seed
     /// for this project applicability.
     pub(crate) fn with_semantic_seed(
         &self,
-        engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        engine: &Arc<dyn Send + Sync>,
         project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
         commit: impl FnOnce(ExtensionSemanticSeed),
     ) {
@@ -199,7 +201,7 @@ impl ExtensionRegistryHandle {
     /// [`Self::with_semantic_seed`] for a cached project context snapshot.
     pub(crate) fn with_semantic_seed_for_snapshot(
         &self,
-        engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        engine: &Arc<dyn Send + Sync>,
         snapshot: &ProjectContextSnapshot,
         commit: impl FnOnce(ExtensionSemanticSeed),
     ) {

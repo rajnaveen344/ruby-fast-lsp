@@ -2,6 +2,7 @@
 
 use crate::environment::extensions::analysis_ruby_type_from_extension;
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::LoadTarget;
 use ruby_analysis::core::MethodVisibility as AnalysisMethodVisibility;
 use ruby_analysis::core::{
     FullyQualifiedName, GeneratedOwnerId, GraphEdgeFact, GraphEdgeKind, GraphNodeFact,
@@ -10,13 +11,11 @@ use ruby_analysis::core::{
     SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
-use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_extension_api::{
     IndexPatch, MixinKind, NamespaceDeclarationKind, ProjectContext, SourceRange,
 };
 use std::collections::HashSet;
-use std::sync::Arc;
 
 struct ExtensionGraphEdge<'a> {
     source: FullyQualifiedName,
@@ -28,7 +27,7 @@ struct ExtensionGraphEdge<'a> {
 }
 
 pub(super) fn add_extension_analysis_facts(
-    analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+    analysis_engine: &dyn LoadTarget,
     document: &RubyDocument,
     patches: &[IndexPatch],
     project: Option<&ProjectContext>,
@@ -38,10 +37,7 @@ pub(super) fn add_extension_analysis_facts(
         return;
     }
 
-    let mut known_namespaces = {
-        let engine = analysis_engine.read();
-        engine.view().known_namespace_fqns()
-    };
+    let mut known_namespaces = analysis_engine.view(|view| view.known_namespace_fqns());
     for node in &facts.graph_nodes {
         if let Some(namespace) = node.fqn.to_instance_namespace() {
             known_namespaces.insert(namespace);

@@ -360,7 +360,7 @@ fn rebuild_local_variable_scopes(document: &Arc<RwLock<RubyDocument>>, project: 
     let mut collector = FactCollector::analysis_only(
         snapshot,
         Arc::new(NullFactCollectorExtensionHost),
-        project.shared_engine().clone(),
+        project.semantics(),
     )
     .without_analysis_method_return_resolution()
     .without_expression_receiver_inference()

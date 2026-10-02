@@ -11,15 +11,13 @@ use super::merge::{
     merge_collected_type_facts, merge_execution_context_direct_facts, merge_runtime_direct_facts,
 };
 use super::FileProcessor;
-use crate::loader::context::LoadContext;
+use crate::loader::context::{LoadContext, LoadTarget};
 use crate::loader::require_paths::unresolved_require_diagnostics;
 use ruby_analysis::core::{FileAnalysis, SourceFileId, SourceKind};
-use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::fact_collector::FactCollectorOutput;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_extension_api::ProjectContext;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
 /// Where unresolved-require diagnostics find their project root and load paths.
@@ -45,7 +43,7 @@ pub(super) struct FileComposition<'a> {
     pub content: &'a str,
     pub file_id: SourceFileId,
     pub source_kind: SourceKind,
-    pub analysis_engine: &'a Arc<parking_lot::RwLock<AnalysisEngine>>,
+    pub analysis_engine: &'a dyn LoadTarget,
     pub extension_project_context: Option<&'a ProjectContext>,
     /// Direct declarations that replace the collector's declarations, if any.
     pub declarations: Option<FileAnalysis>,
@@ -124,7 +122,7 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         file_id: SourceFileId,
-        analysis_engine: &Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: &dyn LoadTarget,
         require_roots: RequireDiagnosticRoots<'_>,
         analysis: &mut FileAnalysis,
     ) {
@@ -143,31 +141,35 @@ impl FileProcessor {
                 };
                 let load_paths = ctx.config.load_paths_for_project(&project_root);
                 let feature_index = ctx.requires.feature_index();
-                let engine = analysis_engine.read();
-                analysis.diagnostics.extend(unresolved_require_diagnostics(
-                    content,
-                    file_id,
-                    &current_path,
-                    &project_root,
-                    &load_paths,
-                    &feature_index,
-                    Some(&engine.view()),
-                ));
+                let diagnostics = analysis_engine.view(|view| {
+                    unresolved_require_diagnostics(
+                        content,
+                        file_id,
+                        &current_path,
+                        &project_root,
+                        &load_paths,
+                        &feature_index,
+                        Some(view),
+                    )
+                });
+                analysis.diagnostics.extend(diagnostics);
             }
             RequireDiagnosticRoots::Processor => {
                 let Some(project_root) = self.require_project_root.as_ref() else {
                     return;
                 };
-                let engine = analysis_engine.read();
-                analysis.diagnostics.extend(unresolved_require_diagnostics(
-                    content,
-                    file_id,
-                    &current_path,
-                    project_root,
-                    &self.require_load_paths,
-                    &self.require_feature_index,
-                    Some(&engine.view()),
-                ));
+                let diagnostics = analysis_engine.view(|view| {
+                    unresolved_require_diagnostics(
+                        content,
+                        file_id,
+                        &current_path,
+                        project_root,
+                        &self.require_load_paths,
+                        &self.require_feature_index,
+                        Some(view),
+                    )
+                });
+                analysis.diagnostics.extend(diagnostics);
             }
         }
     }

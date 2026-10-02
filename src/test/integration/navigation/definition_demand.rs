@@ -173,7 +173,7 @@ async fn dependency_demand_can_resolve_before_the_project_stage_completes() {
         .collect_file_facts_as_deferred_resolution_in_engine(
             &target_uri,
             target,
-            workspace.handle().shared_engine().clone(),
+            workspace.handle().load_target(),
             ruby_analysis::core::SourceKind::Gem,
         )
         .unwrap();

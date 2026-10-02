@@ -27,7 +27,7 @@ fn new_orphan_project() -> ProjectHandle {
         crate::loader::file_processor::FileProcessor::new(),
         None,
     )
-    .index_core_runtime_constants(None, project.shared_engine().clone())
+    .index_core_runtime_constants(None, project.load_target())
     .expect_invariant(
         "the orphan engine could not seed embedded Ruby core runtime constants",
         "loose files require the same universal constant facts as project engines",

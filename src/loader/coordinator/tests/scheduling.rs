@@ -272,7 +272,7 @@ async fn superseded_coordinator_cannot_advance_replacement_generation() {
     let mut old_coordinator =
         IndexingCoordinator::new(project.clone(), RubyFastLspConfig::default());
     old_coordinator.set_indexing_run(old_run.clone());
-    old_coordinator.set_analysis_engine(workspace.handle().shared_engine().clone());
+    old_coordinator.set_load_target(workspace.handle().load_target());
 
     let replacement = workspace.indexing_status.begin_run();
     let result = old_coordinator
@@ -300,12 +300,11 @@ fn removed_coordinator_keeps_detached_engine_instead_of_orphan_project() {
     let server = RubyLanguageServer::default();
     let workspace = server.add_workspace(Url::from_directory_path(&project).unwrap());
     let mut coordinator = IndexingCoordinator::new(project, RubyFastLspConfig::default());
-    coordinator.set_analysis_engine(workspace.handle().shared_engine().clone());
+    coordinator.set_load_target(workspace.handle().load_target());
 
     server.remove_workspace(&workspace.root_uri);
 
-    let selected =
-        coordinator.analysis_engine(&server.load_context_for_project(&workspace.root_path));
-    assert!(workspace.handle().owns_engine(&selected));
-    assert!(!server.orphan_project().owns_engine(&selected));
+    let selected = coordinator.load_target(&server.load_context_for_project(&workspace.root_path));
+    assert!(workspace.handle().is_target(&selected));
+    assert!(!server.orphan_project().is_target(&selected));
 }

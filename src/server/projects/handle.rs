@@ -9,12 +9,16 @@
 //!
 //! Lifecycle code writes through the named operations below (register,
 //! remove, clear, resolve, reset); `update` remains for the conditional
-//! require-diagnostic commit, fixtures, and tools. The named operations are
-//! the vocabulary a single project writer would accept as commands.
+//! require-diagnostic commit, fixtures, and tools. The loader writes through
+//! the named operations of the [`LoadTarget`] that [`ProjectHandle::load_target`]
+//! returns, and never receives the engine lock. The named operations are the
+//! vocabulary a single project writer would accept as commands.
 use crate::invariant::ExpectInvariant;
+use crate::loader::context::{LoadTarget, NamedWrite};
 use parking_lot::RwLock;
 use ruby_analysis::core::{FileAnalysis, SourceFileId, SourceKind};
 use ruby_analysis::engine::{AnalysisEngine, ResolveMode, SourceFileInput, View};
+use ruby_analysis::inference::semantics::Semantics;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -127,16 +131,23 @@ impl ProjectHandle {
         Arc::ptr_eq(&self.engine, &other.engine)
     }
 
-    /// Whether `engine` is this project's engine, as handed to the loader.
-    pub(crate) fn owns_engine(&self, engine: &Arc<RwLock<AnalysisEngine>>) -> bool {
-        Arc::ptr_eq(&self.engine, engine)
+    /// The target the loader reads and writes while it loads this project.
+    pub fn load_target(&self) -> Arc<dyn LoadTarget> {
+        Arc::new(self.clone())
     }
 
-    /// The shared engine the loader writes while it loads this project. The
-    /// loader receives it only through `LoadSink::engine_for_uri` and the
-    /// coordinator's engine override.
-    pub fn shared_engine(&self) -> &Arc<RwLock<AnalysisEngine>> {
-        &self.engine
+    /// Whether `target` addresses this project's engine.
+    pub(crate) fn is_target(&self, target: &Arc<dyn LoadTarget>) -> bool {
+        std::ptr::addr_eq(
+            Arc::as_ptr(&target.clone().engine_identity()),
+            Arc::as_ptr(&self.engine),
+        )
+    }
+
+    /// Read-only semantics over the project's current state, for a file walk
+    /// that runs outside one view.
+    pub(crate) fn semantics(&self) -> Arc<dyn Semantics> {
+        self.engine.clone()
     }
 
     /// Test-only owned read guard, for assertions that inspect engine state
@@ -151,6 +162,24 @@ impl ProjectHandle {
     #[cfg(test)]
     pub(crate) fn test_write(&self) -> ArcRwLockWriteGuard<RawRwLock, AnalysisEngine> {
         self.engine.write_arc()
+    }
+}
+
+impl LoadTarget for ProjectHandle {
+    fn read_engine(&self, read: &mut dyn FnMut(&AnalysisEngine)) {
+        read(&self.engine.read());
+    }
+
+    fn write_engine(&self, _proof: NamedWrite, write: &mut dyn FnMut(&mut AnalysisEngine)) {
+        self.update(|engine| write(engine));
+    }
+
+    fn semantics(self: Arc<Self>) -> Arc<dyn Semantics> {
+        self.engine.clone()
+    }
+
+    fn engine_identity(self: Arc<Self>) -> Arc<dyn Send + Sync> {
+        self.engine.clone()
     }
 }
 

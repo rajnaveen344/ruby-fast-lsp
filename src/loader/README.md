@@ -14,10 +14,11 @@ reference candidates, resolved references, and diagnostics.
   `GemDependencyProduct` implements `PersistentProduct`, the codec the
   persistent derived-product cache in `src/utils/persistent_cache/` stores it
   through
-- `context.rs`: `LoadContext`, the owner-supplied inputs the loader reads
+- `context/`: `LoadContext`, the owner-supplied inputs the loader reads
   (live configuration, published require roots, shared products, the
   resource governor, runtime discovery, and open buffers through
-  `SourceReader`), and `LoadSink`, the owner operations it performs
+  `SourceReader`), `LoadSink`, the owner operations it performs, and
+  `LoadTarget` (`context/target.rs`), the named engine writes of one project
 - `jruby_add_on.rs`: `JrubyAddOn`, the per-project JRuby add-on the owner
   holds. The owner sees only its classpath fingerprint and hands it back
   through `FileProcessor::with_jruby_add_on`; the import provider behind it is
@@ -71,8 +72,21 @@ provider and classpath fingerprint together), source registration, processed-doc
 require-root publication and require-diagnostic refresh, navigation demand
 queues, inlay-hint refresh, and extension registry and context. The loader
 calls them in its own order, so the owner observes the load's write sequence.
-Fact commits and resolution still run on the engine handle returned by
-`engine_for_uri`.
+Engine reads and writes go through the `LoadTarget` that
+`LoadSink::target_for_uri` returns for a project. The trait is defined here and
+the server implements it for `ProjectHandle`; a scratch engine
+(`parking_lot::RwLock<AnalysisEngine>`) implements it too, for semantic
+contexts and dependency products the loader builds privately. The loader
+writes only through the named operations on `dyn LoadTarget`: fact replacement
+(`replace_file_facts`, `replace_facts_by_path`, and
+`replace_facts_if_source_snapshot`, which checks the source snapshot and
+replaces under one write guard), source registration (`register_*`, including
+the snapshot-conditional batch `register_project_sources_if_snapshot`),
+`commit_signature_source`, `commit_extension_seed`, `bind_gem_product`,
+`install_template_if_empty`, `resolve`, `resolve_files`, and `compact`. Only
+`target.rs` can construct the `NamedWrite` token the raw write primitive
+requires, so no other loader module can take an engine write guard. Reads use
+`view(|view| ..)`.
 
 A single-file pass is split into analysis and commit. `FileProcessor::analyze_file*`
 parses the file, walks it, and composes its `FileAnalysis`, writing only what

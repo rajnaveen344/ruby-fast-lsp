@@ -129,7 +129,7 @@ async fn compact_inlay_navigation_retains_external_project_context() {
                 .collect_file_facts_as_deferred_resolution_in_engine(
                     &uri,
                     content,
-                    workspace.handle().shared_engine().clone(),
+                    workspace.handle().load_target(),
                     SourceKind::Gem,
                 )
                 .unwrap();

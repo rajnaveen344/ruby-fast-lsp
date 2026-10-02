@@ -4,7 +4,7 @@ use super::resources::{run_cpu_indexing_task, IndexingWorkClass, MIB};
 use super::runtime::runtime_stdlib_paths_for_project;
 use super::IndexingCoordinator;
 use crate::environment::runtime::version::RubyVersion;
-use crate::loader::context::LoadContext;
+use crate::loader::context::{LoadContext, LoadTarget};
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::sources::stdlib::IndexerStdlib;
@@ -21,7 +21,7 @@ async fn index_core_stubs_additively_off_reactor(
     ctx: &LoadContext,
     project_root: PathBuf,
     cancellation: Option<CancellationToken>,
-    analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+    analysis_engine: Arc<dyn LoadTarget>,
     ruby_version: Option<RubyVersion>,
     extension_path: Option<String>,
 ) -> Result<()> {
@@ -58,11 +58,9 @@ impl IndexingCoordinator {
             !path.as_os_str().is_empty() && path.is_absolute() && seen.insert(path.clone())
         });
         let index_started = Instant::now();
-        let index = {
-            let analysis_engine = self.analysis_engine(ctx);
-            let engine = analysis_engine.read();
-            RequireFeatureIndex::build(&paths, Some(&engine.view()))
-        };
+        let index = self
+            .load_target(ctx)
+            .view(|view| RequireFeatureIndex::build(&paths, Some(view)));
         let features = index.feature_count();
         let index = std::sync::Arc::new(index);
         info!(
@@ -75,7 +73,7 @@ impl IndexingCoordinator {
         self.indexing_checkpoint(ctx)?;
         ctx.sink.publish_require_roots(
             &self.workspace_root,
-            &self.analysis_engine(ctx),
+            &self.load_target(ctx),
             paths.clone(),
             index.clone(),
         );
@@ -92,7 +90,7 @@ impl IndexingCoordinator {
         ctx: &LoadContext,
         ruby_version: Option<RubyVersion>,
     ) -> Result<AnalysisEngine> {
-        let analysis_engine = self.analysis_engine(ctx);
+        let analysis_engine = self.load_target(ctx);
         let extension_path = self.config.extension_path.clone();
         let key = format!(
             "core-stubs:{}:{ruby_version:?}:{}",
@@ -140,16 +138,7 @@ impl IndexingCoordinator {
             .await
             .map_err(anyhow::Error::msg)?;
         let dependency_seed = template.as_ref().clone();
-        let installed_template = {
-            let mut engine = analysis_engine.write();
-            if engine.view().file_count() == 0 {
-                *engine = template.as_ref().clone();
-                true
-            } else {
-                false
-            }
-        };
-        if installed_template {
+        if analysis_engine.install_template_if_empty(template.as_ref()) {
             return Ok(dependency_seed);
         }
 
@@ -193,7 +182,7 @@ impl IndexingCoordinator {
         }
 
         stdlib_indexer.set_required_modules(required_stdlib);
-        let analysis_engine = self.analysis_engine(ctx);
+        let analysis_engine = self.load_target(ctx);
         let (stdlib_indexer, result) = run_cpu_indexing_task(
             &ctx.resources,
             Some(self.workspace_root.clone()),

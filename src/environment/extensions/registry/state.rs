@@ -3,7 +3,7 @@ use crate::invariant::ExpectInvariant;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Weak};
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::FactCollector;
@@ -43,8 +43,10 @@ pub(crate) struct ExtensionApplicabilitySnapshot {
     applies_to_source: Vec<bool>,
 }
 
+/// The engine identity the ledger records a seed against: an allocation
+/// that lives exactly as long as the engine it identifies.
 struct SeededExtensionEngine {
-    engine: Weak<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+    engine: Weak<dyn Send + Sync>,
     applicability_fingerprint: ExtensionApplicabilityFingerprint,
 }
 
@@ -332,7 +334,7 @@ impl ExtensionRegistry {
     /// last recorded applicability is the one the engine holds.
     pub(super) fn with_semantic_seed(
         &self,
-        engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        engine: &Arc<dyn Send + Sync>,
         project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
         applicability_fingerprint: ExtensionApplicabilityFingerprint,
         commit: impl FnOnce(ExtensionSemanticSeed),
@@ -340,10 +342,9 @@ impl ExtensionRegistry {
         let mut seeded_engines = self.semantic_seeded_engines.lock();
         seeded_engines.retain(|seeded| seeded.engine.strong_count() > 0);
         if let Some(seeded) = seeded_engines.iter_mut().find(|seeded| {
-            seeded
-                .engine
-                .upgrade()
-                .is_some_and(|seeded_engine| Arc::ptr_eq(&seeded_engine, engine))
+            seeded.engine.upgrade().is_some_and(|seeded_engine| {
+                std::ptr::addr_eq(Arc::as_ptr(&seeded_engine), Arc::as_ptr(engine))
+            })
         }) {
             if seeded.applicability_fingerprint == applicability_fingerprint {
                 return;
@@ -359,10 +360,9 @@ impl ExtensionRegistry {
         );
         commit(seed);
         if !seeded_engines.iter().any(|seeded| {
-            seeded
-                .engine
-                .upgrade()
-                .is_some_and(|seeded_engine| Arc::ptr_eq(&seeded_engine, engine))
+            seeded.engine.upgrade().is_some_and(|seeded_engine| {
+                std::ptr::addr_eq(Arc::as_ptr(&seeded_engine), Arc::as_ptr(engine))
+            })
         }) {
             seeded_engines.push(SeededExtensionEngine {
                 engine: Arc::downgrade(engine),

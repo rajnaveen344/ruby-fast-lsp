@@ -60,7 +60,8 @@ fn produced_seed(
     project: Option<&ruby_fast_lsp_extension_api::ProjectContext>,
 ) -> Option<ExtensionSemanticSeed> {
     let mut produced = None;
-    registry.with_semantic_seed(engine, project, |seed| produced = Some(seed));
+    let identity: Arc<dyn Send + Sync> = engine.clone();
+    registry.with_semantic_seed(&identity, project, |seed| produced = Some(seed));
     produced
 }
 
@@ -182,7 +183,8 @@ fn cached_project_snapshot_replaces_semantic_seed_after_dependency_refresh() {
         true,
         Some("3.3.0".to_string()),
     );
-    let engine = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+    let engine: Arc<dyn Send + Sync> =
+        Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
 
     let eligible = seed.context_snapshot(
         "file:///umbrella/app/spec/example_spec.rb".to_string(),

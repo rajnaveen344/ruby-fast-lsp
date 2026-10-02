@@ -467,7 +467,7 @@ fn explicit_project_engine_owns_external_gem_source() {
         .collect_file_facts_as_deferred_resolution_in_engine(
             &dependency_uri,
             "class PBKDF2\nend\n",
-            project.handle().shared_engine().clone(),
+            project.handle().load_target(),
             SourceKind::Gem,
         )
         .unwrap();

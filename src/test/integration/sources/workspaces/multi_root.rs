@@ -254,7 +254,7 @@ async fn navigation_into_external_dependency_retains_originating_project_context
         .collect_file_facts_as_deferred_resolution_in_engine(
             &entry_uri,
             entry_source,
-            workspace.handle().shared_engine().clone(),
+            workspace.handle().load_target(),
             SourceKind::Gem,
         )
         .expect("entry dependency facts must index");
@@ -262,7 +262,7 @@ async fn navigation_into_external_dependency_retains_originating_project_context
         .collect_file_facts_as_deferred_resolution_in_engine(
             &inner_uri,
             "module DemoGem\n  class Inner\n  end\nend\n",
-            workspace.handle().shared_engine().clone(),
+            workspace.handle().load_target(),
             SourceKind::Gem,
         )
         .expect("inner dependency facts must index");
@@ -320,7 +320,7 @@ async fn directly_opened_dependency_uses_its_unique_indexed_project_owner() {
             .collect_file_facts_as_deferred_resolution_in_engine(
                 uri,
                 source,
-                workspace.handle().shared_engine().clone(),
+                workspace.handle().load_target(),
                 SourceKind::Gem,
             )
             .expect("dependency facts must index");
@@ -393,7 +393,7 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
             .collect_file_facts_as_deferred_resolution_in_engine(
                 &entry_uri,
                 entry_source,
-                workspace.handle().shared_engine().clone(),
+                workspace.handle().load_target(),
                 SourceKind::Gem,
             )
             .expect("entry dependency facts must index");
@@ -401,7 +401,7 @@ async fn closing_external_document_releases_ambiguous_project_provenance() {
             .collect_file_facts_as_deferred_resolution_in_engine(
                 &inner_uri,
                 "module SharedGem\n  class Inner\n  end\nend\n",
-                workspace.handle().shared_engine().clone(),
+                workspace.handle().load_target(),
                 SourceKind::Gem,
             )
             .expect("inner dependency facts must index");

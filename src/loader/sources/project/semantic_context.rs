@@ -2,7 +2,7 @@
 
 use super::IndexerProject;
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::LoadContext;
+use crate::loader::context::{LoadContext, LoadTarget};
 use anyhow::{anyhow, Context, Result};
 use log::info;
 use rayon::prelude::*;
@@ -72,7 +72,7 @@ impl IndexerProject {
                 self.workspace_root.display()
             )
         })?;
-        let analysis_engine = ctx.sink.engine_for_uri(&project_uri);
+        let analysis_engine = ctx.sink.target_for_uri(&project_uri);
         if let Some(path) = project_files.first() {
             let uri = Url::from_file_path(path).map_err(|_| {
                 anyhow!(
@@ -87,15 +87,7 @@ impl IndexerProject {
             );
         }
 
-        let mut snapshot = {
-            let mut engine = analysis_engine.write();
-            for path in project_files {
-                if engine.view().file_id(path).is_none() {
-                    engine.register_file_borrowed(path.clone(), "", SourceKind::Project);
-                }
-            }
-            engine.clone()
-        };
+        let mut snapshot = analysis_engine.register_project_paths_and_snapshot(project_files);
         let stale_project_file_ids = snapshot
             .view()
             .files()
@@ -116,6 +108,7 @@ impl IndexerProject {
             snapshot.replace_facts(file_id, FileAnalysis::default(), ResolveMode::Deferred);
         }
         let semantic_context = Arc::new(parking_lot::RwLock::new(snapshot));
+        let semantic_target: Arc<dyn LoadTarget> = semantic_context.clone();
         let baseline_known_namespaces = Arc::new({
             let engine = semantic_context.read();
             engine.view().known_namespace_fqns()
@@ -144,7 +137,7 @@ impl IndexerProject {
                         self.file_processor.collect_project_direct_semantic_seed(
                             &uri,
                             &content,
-                            &semantic_context,
+                            &semantic_target,
                             baseline_known_namespaces.as_ref(),
                         ),
                     ))
@@ -207,7 +200,7 @@ impl IndexerProject {
     pub(super) fn resolve_open_project_files(
         &self,
         ctx: &LoadContext,
-        analysis_engine: &Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>>,
+        analysis_engine: &Arc<dyn LoadTarget>,
     ) {
         let resolve_start = Instant::now();
         let mut open_project_paths = ctx
@@ -223,12 +216,11 @@ impl IndexerProject {
             .collect::<Vec<_>>();
         open_project_paths.sort();
         open_project_paths.dedup();
-        let open_project_file_ids = {
-            let engine = analysis_engine.read();
+        let open_project_file_ids = analysis_engine.view(|view| {
             open_project_paths
                 .iter()
                 .map(|path| {
-                    engine.view().file_id(path).unwrap_or_else(|| {
+                    view.file_id(path).unwrap_or_else(|| {
                         unreachable_invariant!(
                             what = "open document {} has no registered analysis file after collection",
                             why = "didOpen and the project pass share one engine",
@@ -238,10 +230,8 @@ impl IndexerProject {
                     })
                 })
                 .collect::<Vec<_>>()
-        };
-        analysis_engine
-            .write()
-            .resolve_files(&open_project_file_ids);
+        });
+        analysis_engine.resolve_files(&open_project_file_ids);
         let resolve_elapsed = resolve_start.elapsed();
         info!(
             "Open project reference/diagnostic resolution completed in {:?} for {} document(s); \

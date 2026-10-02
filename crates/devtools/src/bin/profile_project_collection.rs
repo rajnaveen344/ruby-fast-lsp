@@ -85,7 +85,7 @@ fn main() -> Result<()> {
     let server = RubyLanguageServer::default();
     server.add_workspace(project_uri.clone());
     let project = server.project_for_uri(&project_uri);
-    let analysis_engine = project.shared_engine().clone();
+    let analysis_engine = project.load_target();
     let processor = FileProcessor::new();
 
     let read_started = Instant::now();

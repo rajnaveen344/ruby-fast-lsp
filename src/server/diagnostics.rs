@@ -2,13 +2,13 @@
 use super::projects::ProjectRegistry;
 use super::{RubyLanguageServer, Workspace};
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::{IndexingRunState, LoadSink, SourceReader};
+use crate::loader::context::{IndexingRunState, LoadSink, LoadTarget, SourceReader};
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::utils::lsp::lsp_file_range;
 use log::{info, warn};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use ruby_analysis::core::DiagnosticSeverity as AnalysisDiagnosticSeverity;
-use ruby_analysis::engine::{AnalysisEngine, View};
+use ruby_analysis::engine::View;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -403,7 +403,7 @@ fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSe
 
 impl RubyLanguageServer {
     /// Publish a current, complete diagnostic projection for every open
-    /// document that `engine`, the engine of the project at `root`, owns.
+    /// document that `target`, the engine of the project at `root`, owns.
     ///
     /// Documents publish in URI order. Each projection is read under the
     /// document's semantic lock and enqueued while the engine read lock is
@@ -413,7 +413,7 @@ impl RubyLanguageServer {
     pub(super) async fn publish_project_facts_diagnostics(
         &self,
         root: &Path,
-        engine: &Arc<RwLock<AnalysisEngine>>,
+        target: &Arc<dyn LoadTarget>,
         run: Option<&IndexingRun>,
     ) -> IndexingRunState {
         let run_state = || {
@@ -422,7 +422,7 @@ impl RubyLanguageServer {
             })
         };
         let mut open_uris = self.documents.open_uris();
-        open_uris.retain(|uri| self.project_for_uri(uri).owns_engine(engine));
+        open_uris.retain(|uri| self.project_for_uri(uri).is_target(target));
         open_uris.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
 
         for uri in open_uris {
@@ -454,7 +454,7 @@ impl RubyLanguageServer {
                     return state;
                 }
                 let project = self.project_for_uri(&uri);
-                if !project.owns_engine(engine) {
+                if !project.is_target(target) {
                     continue;
                 }
                 let Some(document) = self.documents.open_document(&uri) else {

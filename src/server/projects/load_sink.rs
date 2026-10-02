@@ -5,8 +5,7 @@ use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{
     ExtensionRegistryHandle, ExtensionSemanticSeed, ProjectContextSeed, ProjectContextSnapshot,
 };
-use crate::loader::context::{IndexingRunState, LoadSink};
-use crate::loader::file_processor::commit_extension_seed;
+use crate::loader::context::{IndexingRunState, LoadSink, LoadTarget};
 use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
@@ -14,7 +13,6 @@ use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::server::RubyLanguageServer;
 use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
-use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::RubyDocument;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,8 +29,8 @@ impl RubyLanguageServer {
 
 #[tower_lsp::async_trait]
 impl LoadSink for RubyLanguageServer {
-    fn engine_for_uri(&self, uri: &Url) -> Arc<RwLock<AnalysisEngine>> {
-        self.project_for_uri(uri).shared_engine().clone()
+    fn target_for_uri(&self, uri: &Url) -> Arc<dyn LoadTarget> {
+        self.project_for_uri(uri).load_target()
     }
 
     fn indexing_run_state(&self, root: &Path, run: &IndexingRun) -> IndexingRunState {
@@ -88,12 +86,12 @@ impl LoadSink for RubyLanguageServer {
     fn publish_require_roots(
         &self,
         root: &Path,
-        engine: &Arc<RwLock<AnalysisEngine>>,
+        target: &Arc<dyn LoadTarget>,
         paths: Vec<PathBuf>,
         index: Arc<RequireFeatureIndex>,
     ) {
         if let Some(workspace) = self.project_at_root(root) {
-            if workspace.handle().owns_engine(engine) {
+            if workspace.handle().is_target(target) {
                 workspace.set_dependency_require_resolution(paths, index);
             }
         }
@@ -128,8 +126,8 @@ impl LoadSink for RubyLanguageServer {
         self.extension_project_context_snapshot_for_uri(uri, kind)
     }
 
-    fn commit_seed(&self, engine: &Arc<RwLock<AnalysisEngine>>, seed: ExtensionSemanticSeed) {
-        commit_extension_seed(engine, seed);
+    fn commit_seed(&self, target: &Arc<dyn LoadTarget>, seed: ExtensionSemanticSeed) {
+        target.commit_extension_seed(seed);
     }
 
     fn mark_document_indexed(&self, uri: &Url, document: RubyDocument) {
@@ -154,10 +152,10 @@ impl LoadSink for RubyLanguageServer {
     async fn project_facts_ready(
         &self,
         root: &Path,
-        engine: &Arc<RwLock<AnalysisEngine>>,
+        target: &Arc<dyn LoadTarget>,
         run: Option<&IndexingRun>,
     ) -> IndexingRunState {
-        self.publish_project_facts_diagnostics(root, engine, run)
+        self.publish_project_facts_diagnostics(root, target, run)
             .await
     }
 

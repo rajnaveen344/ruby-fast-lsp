@@ -1,11 +1,11 @@
 //! Controlled collection/commit schedules over the production snapshot guard.
 //! No timing sleeps decide which result wins: channels release each producer.
 
+use crate::loader::context::LoadTarget;
 use crate::loader::file_processor::FileProcessor;
 use crate::test::harness::FakeEditor;
-use parking_lot::RwLock;
 use ruby_analysis::core::FileAnalysis;
-use ruby_analysis::engine::{AnalysisEngine, SourceFileSnapshot};
+use ruby_analysis::engine::SourceFileSnapshot;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -24,17 +24,11 @@ struct Collected {
 fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
     let uri = crate::test::harness::fixture_uri(format!("/{filename}"));
     let path = uri.to_file_path().unwrap();
-    let engine = editor
-        .server()
-        .project_for_uri(&uri)
-        .shared_engine()
-        .clone();
+    let engine = editor.server().project_for_uri(&uri).load_target();
     let snapshot = engine
-        .read()
-        .view()
-        .source_snapshot_for_path(&path)
+        .view(|view| view.source_snapshot_for_path(&path))
         .unwrap();
-    let known = Arc::new(engine.read().view().known_namespace_fqns());
+    let known = Arc::new(engine.view(|view| view.known_namespace_fqns()));
     let facts = FileProcessor::new()
         .collect_project_file_facts_and_jruby_navigation_plan_as_deferred_resolution(
             &uri,
@@ -45,7 +39,7 @@ fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
         .expect("controlled background collection must succeed")
         .analysis;
     assert_eq!(
-        engine.read().view().source_snapshot_for_path(&path),
+        engine.view(|view| view.source_snapshot_for_path(&path)),
         Some(snapshot),
         "collection must not replace the live source identity"
     );
@@ -58,7 +52,7 @@ fn collect(editor: &FakeEditor, filename: &str, source: &str) -> Collected {
 
 fn pending_commit(
     collected: Collected,
-    engine: Arc<RwLock<AnalysisEngine>>,
+    engine: Arc<dyn LoadTarget>,
 ) -> (oneshot::Sender<()>, tokio::task::JoinHandle<Option<bool>>) {
     let (release, wait) = oneshot::channel();
     let task = tokio::spawn(async move {
@@ -73,7 +67,7 @@ fn pending_commit(
                 collected.facts,
             );
         if accepted {
-            engine.write().resolve();
+            engine.resolve();
         }
         Some(accepted)
     });
@@ -166,11 +160,7 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
         editor.open(FILE, OLD).await;
         let old = collect(&editor, FILE, OLD);
         let uri = crate::test::harness::fixture_uri(format!("/{FILE}"));
-        let engine = editor
-            .server()
-            .project_for_uri(&uri)
-            .shared_engine()
-            .clone();
+        let engine = editor.server().project_for_uri(&uri).load_target();
         match seed {
             0 => {
                 assert!(release_commit(pending_commit(old, engine)).await);
@@ -205,11 +195,7 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
                 let mut replacement = FakeEditor::new().await;
                 replacement.add_workspace("release_alpha");
                 replacement.open(FILE, NEW).await;
-                let target = replacement
-                    .server()
-                    .project_for_uri(&uri)
-                    .shared_engine()
-                    .clone();
+                let target = replacement.server().project_for_uri(&uri).load_target();
                 assert!(
                     !release_commit(pending_commit(old, target)).await,
                     "source snapshots must not survive engine replacement"
@@ -220,11 +206,7 @@ async fn controlled_background_schedules_preserve_edits_isolation_and_recovery()
                 let other_file = "release_beta/service.rb";
                 editor.open(other_file, NEW).await;
                 let other_uri = crate::test::harness::fixture_uri(format!("/{other_file}"));
-                let other_engine = editor
-                    .server()
-                    .project_for_uri(&other_uri)
-                    .shared_engine()
-                    .clone();
+                let other_engine = editor.server().project_for_uri(&other_uri).load_target();
                 assert!(
                     !release_commit(pending_commit(old, other_engine)).await,
                     "project-specific facts must never cross isolated engines"

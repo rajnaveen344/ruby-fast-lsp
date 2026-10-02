@@ -7,7 +7,7 @@ use super::resources::{run_cpu_indexing_task, IndexingWorkClass};
 use super::IndexingCoordinator;
 use crate::environment::config::IndexingConfig;
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::LoadContext;
+use crate::loader::context::{LoadContext, LoadTarget};
 use crate::loader::sources::gems::IndexerGem;
 use anyhow::{anyhow, Result};
 use futures::stream::{self, StreamExt};
@@ -131,7 +131,7 @@ impl IndexingCoordinator {
         ctx: &LoadContext,
         workspace_root: PathBuf,
         cancellation: Option<CancellationToken>,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         gem_indexer: IndexerGem,
         dependency_seed: AnalysisEngine,
         priority_keys: HashSet<String>,
@@ -308,7 +308,7 @@ impl IndexingCoordinator {
         ctx: &LoadContext,
         workspace_root: PathBuf,
         cancellation: Option<CancellationToken>,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
+        analysis_engine: Arc<dyn LoadTarget>,
         mut gem_indexer: IndexerGem,
         priority_keys: HashSet<String>,
         navigation_demands: Option<(

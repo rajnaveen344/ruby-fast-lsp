@@ -130,10 +130,9 @@ pub(super) fn release_allocator_free_pages() {}
 
 impl IndexingCoordinator {
     pub(super) fn log_analysis_memory_stats(&self, ctx: &LoadContext) {
-        let analysis_engine = self.analysis_engine(ctx);
-        let engine = analysis_engine.read();
-        let stats = engine.view().stats();
-        let memory = engine.view().estimated_memory_stats();
+        let (stats, memory) = self
+            .load_target(ctx)
+            .view(|view| (view.stats(), view.estimated_memory_stats()));
         let total = memory.total();
 
         info!(

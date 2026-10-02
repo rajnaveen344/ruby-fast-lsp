@@ -293,7 +293,7 @@ impl CheckSession {
         for workspace in &workspaces {
             let mut coordinator =
                 IndexingCoordinator::new(workspace.root_path.clone(), config.clone());
-            coordinator.set_analysis_engine(workspace.handle().shared_engine().clone());
+            coordinator.set_load_target(workspace.handle().load_target());
             coordinator
                 .run_complete_indexing(
                     &server.load_context_for_project(coordinator.workspace_root()),

@@ -6,7 +6,7 @@ use crate::environment::runtime::jruby::classpath::ClasspathArtifact;
 use crate::environment::runtime::jruby::imports::JrubyImportProvider;
 use crate::environment::runtime::version::RubyVersion;
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::{IndexingRunState, LoadContext};
+use crate::loader::context::{IndexingRunState, LoadContext, LoadTarget};
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::jruby_add_on::JrubyAddOn;
 use crate::loader::sources::gems::IndexerGem;
@@ -104,23 +104,22 @@ pub struct IndexingCoordinator {
     /// Timings from the most recent `run_complete_indexing` call.
     last_timings: IndexingTimings,
     indexing_run: Option<crate::loader::scheduling::status::IndexingRun>,
-    analysis_engine_override: Option<Arc<parking_lot::RwLock<AnalysisEngine>>>,
+    load_target_override: Option<Arc<dyn LoadTarget>>,
 }
 
 impl IndexingCoordinator {
-    fn analysis_engine(
-        &self,
-        ctx: &LoadContext,
-    ) -> Arc<parking_lot::RwLock<ruby_analysis::engine::AnalysisEngine>> {
-        if let Some(engine) = &self.analysis_engine_override {
-            return engine.clone();
+    /// The project this run loads: the target fixed when the run started,
+    /// or else the project that owns the workspace root.
+    fn load_target(&self, ctx: &LoadContext) -> Arc<dyn LoadTarget> {
+        if let Some(target) = &self.load_target_override {
+            return target.clone();
         }
         let uri = Url::from_directory_path(&self.workspace_root).expect_invariant(
             "workspace root cannot be represented as a file URI",
             "indexing only accepts filesystem workspace roots",
             "register a canonical filesystem project root before creating the coordinator",
         );
-        ctx.sink.engine_for_uri(&uri)
+        ctx.sink.target_for_uri(&uri)
     }
     /// Creates a new IndexingCoordinator for the given workspace.
     ///
@@ -148,7 +147,7 @@ impl IndexingCoordinator {
             gem_indexer: None,
             last_timings: IndexingTimings::default(),
             indexing_run: None,
-            analysis_engine_override: None,
+            load_target_override: None,
         }
     }
 
@@ -172,11 +171,10 @@ impl IndexingCoordinator {
             .map(crate::loader::scheduling::status::IndexingRun::cancellation)
     }
 
-    pub fn set_analysis_engine(
-        &mut self,
-        analysis_engine: Arc<parking_lot::RwLock<AnalysisEngine>>,
-    ) {
-        self.analysis_engine_override = Some(analysis_engine);
+    /// Fix the project this run loads, so a run keeps writing the project it
+    /// started for even if the workspace registry changes underneath it.
+    pub fn set_load_target(&mut self, target: Arc<dyn LoadTarget>) {
+        self.load_target_override = Some(target);
     }
 
     pub(crate) fn set_cache_root(&mut self, root: PathBuf) {
@@ -308,7 +306,7 @@ impl IndexingCoordinator {
         let gem_indexer = self.new_gem_indexer();
         let startup_gem_root = self.workspace_root.clone();
         let startup_gem_cancellation = self.resource_cancellation();
-        let startup_gem_analysis_engine = self.analysis_engine(ctx);
+        let startup_gem_analysis_engine = self.load_target(ctx);
         let startup_gem_priority_keys = active_priority_keys.dependency_roots.clone();
         let (_, startup_excluded_gems) =
             configured_gem_selection(Vec::new(), &self.config.indexing);
@@ -441,7 +439,7 @@ impl IndexingCoordinator {
         let gem_indexer = self.configure_discovered_gem_indexer(gem_indexer);
         let gem_workspace_root = self.workspace_root.clone();
         let gem_cancellation = self.resource_cancellation();
-        let gem_analysis_engine = self.analysis_engine(ctx);
+        let gem_analysis_engine = self.load_target(ctx);
         let gem_priority_keys = self
             .project_indexer
             .as_ref()
@@ -524,7 +522,7 @@ impl IndexingCoordinator {
         )
         .await?;
         let resolve_start = Instant::now();
-        let analysis_engine = self.analysis_engine(ctx);
+        let analysis_engine = self.load_target(ctx);
         let resolve_project = self.workspace_root.clone();
         run_cpu_indexing_task(
             &ctx.resources,
@@ -542,7 +540,7 @@ impl IndexingCoordinator {
                 release_allocator_free_pages();
                 let malloc_elapsed = malloc_started.elapsed();
                 let resolve_started = Instant::now();
-                analysis_engine.write().resolve();
+                analysis_engine.resolve();
                 info!(
                     "[PERF][final semantic resolution] project={} malloc_relief={:?} resolve={:?}",
                     resolve_project.display(),
@@ -588,7 +586,7 @@ impl IndexingCoordinator {
 
         let total_dur = start_time.elapsed();
         info!("Complete indexing finished in {:?}", total_dur);
-        let analysis_engine = self.analysis_engine(ctx);
+        let analysis_engine = self.load_target(ctx);
         run_cpu_indexing_task(
             &ctx.resources,
             Some(self.workspace_root.clone()),
@@ -596,7 +594,7 @@ impl IndexingCoordinator {
             IndexingWorkClass::HeavyCpu,
             "analysis engine compaction",
             move || {
-                analysis_engine.write().shrink_to_fit();
+                analysis_engine.compact();
                 release_allocator_free_pages();
             },
         )
@@ -638,7 +636,7 @@ impl IndexingCoordinator {
     /// diagnostics. The owner stops once this run is no longer current.
     async fn announce_project_facts_ready(&self, ctx: &LoadContext) -> Result<()> {
         self.indexing_checkpoint(ctx)?;
-        let analysis_engine = self.analysis_engine(ctx);
+        let analysis_engine = self.load_target(ctx);
         let state = ctx
             .sink
             .project_facts_ready(
