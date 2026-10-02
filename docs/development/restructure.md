@@ -574,6 +574,56 @@ Delete this file when the last task is done. Git history keeps the record.
 ## Phase D: one walk, one flow engine
 
 - [ ] D1. Merge the three declaration walkers into one `Walk`.
+
+  The three walkers that track declaration scope:
+  1. `lowering::AnalysisIndexer` builds the declaration seed. It keeps its own
+     namespace, `Instance`/`Singleton`, method, eval-depth, module_function,
+     and visibility stacks.
+  2. `fact_collector::FactCollector` records the same declarations through
+     `ScopeTracker`. `compose_file_analysis` then replaces them with the seed,
+     except for generated-owner and runtime facts.
+  3. `identifiers::IdentifierVisitor` rebuilds the scope at the cursor through
+     `ScopeTracker`. It keeps its own copy of the call-block classifiers.
+     `DocumentSymbolsVisitor` is a fourth, smaller `ScopeTracker` user.
+
+  Design: `Walk` is one recursive Prism traversal. It owns a single scope
+  state: lexical namespaces, singleton frames, method and execution contexts,
+  visibility, and module_function. It classifies what each node opens (class
+  or module reopen through an alias, `class << self`, `def self.x`, eval and
+  dynamic-definition blocks, Concern `class_methods`, framework instance
+  blocks). It sends enter, exit, and declaration events to sinks. The
+  declaration sink produces the seed. The body sink is the collector's flow
+  and reference work. The cursor sink prunes to the cursor. Scope rules live
+  only in `indexer/documents/scope_rules.rs` and `ScopeTracker`. Walks differ
+  only in which namespaces they know, and that knowledge is passed in as a
+  predicate.
+
+  - [x] D1a. Share the lexical lookup, declaration-reopen, and
+        receiver-namespace rules (`scope_rules.rs`) between the seed and the
+        collector.
+  - [ ] D1b. Share the call-block classifier (eval, dynamic definition,
+        `class_methods`, framework instance block) between the collector and
+        the cursor walk, with receiver resolution passed in.
+  - [ ] D1c. Fix the scope disagreements, each with a failing generic test
+        first:
+    - Constants assigned inside an eval block belong to the lexical scope.
+      The seed puts them in the receiver.
+    - `const_get` eval receivers are accepted by the cursor walk only.
+    - Module alias reopening is followed by the seed only. Class alias
+      reopening is followed by everything except the cursor walk.
+    - The seed turns every `initialize` into singleton `new`, including in
+      modules. The collector requires a proven class.
+    - The seed accepts only `self` as a `def` receiver.
+    - The superclass-equals-reopen-target check exists in the collector only.
+  - [ ] D1d. Port `AnalysisIndexer` onto `ScopeTracker`. This needs D1c's eval
+        rule, because the seed currently replaces the namespace stack inside
+        eval blocks instead of pushing an execution context.
+  - [ ] D1e. Make the collector take its declarations from the seed's
+        declaration sink in the same walk. Delete the collector's declaration
+        recording (`collection/declarations.rs`, the `nodes/declarations`
+        emission) and the replace step in `compose_file_analysis`.
+  - [ ] D1f. Run the cursor walk and document symbols on the `Walk` scope with
+        pruning sinks, then delete the remaining copies.
 - [ ] D2. Merge collector flow inference and `TypeTracker` into one `Flow`.
       Compare the profiler output before and after.
 - [ ] D3. Rewrite `src/ARCHITECTURE.md`, the analysis README, and `AGENTS.md`

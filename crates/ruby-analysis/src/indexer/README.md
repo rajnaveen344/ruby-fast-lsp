@@ -26,6 +26,11 @@ Receiver resolution (`queries/receivers.rs`) and the fact collector read project
 state only through `inference::semantics::Semantics`; outside tests the indexer
 names no engine type, and callers pass a `View` or the shared engine.
 
+Scope rules shared by every walk (lexical constant lookup, declaration reopen
+candidates, and the namespace a static receiver names) live in
+`documents/scope_rules.rs`, beside `ScopeTracker`. A walk passes in only which
+namespaces it knows; do not copy the lookup loop into a walker.
+
 All directories meet the ten-entry limit. The query folder is at the limit;
 another query file needs a meaningful subdivision. For collector state and
 traversal details, continue with `fact_collector/README.md`.

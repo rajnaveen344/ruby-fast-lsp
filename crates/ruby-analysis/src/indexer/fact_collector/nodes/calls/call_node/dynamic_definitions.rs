@@ -4,7 +4,7 @@ use crate::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, TypeFact, TypeProvenance,
     TypeSubject,
 };
-use crate::indexer::mixin_ref_from_node;
+use crate::indexer::documents::scope_rules::resolve_receiver_namespace;
 use ruby_prism::{CallNode, Node};
 
 use crate::indexer::yard::converter::YardTypeConverter;
@@ -131,55 +131,9 @@ impl FactCollector {
         &self,
         receiver: &Node<'_>,
     ) -> Option<Vec<RubyConstant>> {
-        if let Some(namespace) = self.resolve_const_get_receiver_namespace(receiver) {
-            return Some(namespace);
-        }
-
-        let receiver_ref = mixin_ref_from_node(receiver)?;
-        let mut search = if receiver_ref.absolute {
-            Vec::new()
-        } else {
-            self.scope_tracker.get_ns_stack()
-        };
-
-        loop {
-            let mut candidate = search.clone();
-            candidate.extend(receiver_ref.parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.namespace_is_known(&fqn) {
-                return Some(candidate);
-            }
-            if receiver_ref.absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(receiver_ref.parts.clone());
-        self.namespace_is_known(&fqn).then_some(receiver_ref.parts)
-    }
-
-    fn resolve_const_get_receiver_namespace(
-        &self,
-        receiver: &Node<'_>,
-    ) -> Option<Vec<RubyConstant>> {
-        let call = receiver.as_call_node()?;
-        if call.name().as_slice() != b"const_get" {
-            return None;
-        }
-        let Some(base_receiver) = call.receiver() else {
-            return None;
-        };
-        let arguments = call.arguments()?;
-        let first = arguments.arguments().iter().next()?;
-        let (name, _) = direct_attr_name_and_range(self, &first)?;
-        let Ok(constant) = RubyConstant::new(&name) else {
-            return None;
-        };
-        let mut namespace = self.resolve_constant_receiver_namespace(&base_receiver)?;
-        namespace.push(constant);
-        let fqn = FullyQualifiedName::namespace(namespace.clone());
-        self.namespace_is_known(&fqn).then_some(namespace)
+        resolve_receiver_namespace(receiver, &self.scope_tracker.get_ns_stack(), &|fqn| {
+            self.namespace_is_known(fqn)
+        })
     }
 
     fn push_direct_define_method_return_type(

@@ -8,7 +8,7 @@ use crate::core::{
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{AliasMethodNode, CallNode, ConstantPathNode, DefNode, Node};
 
-use crate::indexer::constant_path_is_absolute;
+use crate::indexer::{collect_namespaces, constant_path_is_absolute};
 
 pub(super) fn constant_parts(node: &Node<'_>) -> Option<Vec<RubyConstant>> {
     if let Some(read) = node.as_constant_read_node() {
@@ -210,7 +210,7 @@ pub(super) fn constant_parts_and_absolute(node: &Node<'_>) -> Option<(Vec<RubyCo
 
 pub(super) fn constant_path_parts(path: &ConstantPathNode<'_>) -> Option<Vec<RubyConstant>> {
     let mut parts = Vec::new();
-    collect_constant_path_parts(path, &mut parts);
+    collect_namespaces(path, &mut parts);
     (!parts.is_empty()).then_some(parts)
 }
 
@@ -308,25 +308,6 @@ pub(super) fn method_param_facts(node: &DefNode<'_>) -> Vec<MethodParamFact> {
     }
 
     params
-}
-
-fn collect_constant_path_parts(path: &ConstantPathNode<'_>, parts: &mut Vec<RubyConstant>) {
-    if let Some(parent) = path.parent() {
-        if let Some(parent_path) = parent.as_constant_path_node() {
-            collect_constant_path_parts(&parent_path, parts);
-        } else if let Some(parent_read) = parent.as_constant_read_node() {
-            let name = String::from_utf8_lossy(parent_read.name().as_slice()).to_string();
-            if let Ok(constant) = RubyConstant::new(&name) {
-                parts.push(constant);
-            }
-        }
-    }
-    if let Some(name) = path.name() {
-        let name = String::from_utf8_lossy(name.as_slice()).to_string();
-        if let Ok(constant) = RubyConstant::new(&name) {
-            parts.push(constant);
-        }
-    }
 }
 
 pub(super) fn text_range(file_id: SourceFileId, location: &ruby_prism::Location<'_>) -> TextRange {

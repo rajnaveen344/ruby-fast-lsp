@@ -8,10 +8,11 @@ use crate::core::{
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{CallNode, Node};
 
-use super::syntax::{
-    attr_name_and_range, constant_parts_and_absolute, included_hook_mixin_call_kind,
-};
+use super::syntax::{constant_parts_and_absolute, included_hook_mixin_call_kind};
 use super::{AnalysisIndexer, ScopeKind};
+use crate::indexer::documents::scope_rules::{
+    resolve_lexical_namespace, resolve_receiver_namespace,
+};
 
 impl AnalysisIndexer {
     pub(super) fn push_namespace_facts(
@@ -72,27 +73,9 @@ impl AnalysisIndexer {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let mut search = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(probe);
-            if self.known_namespaces.contains(&fqn) {
-                return Some(fqn);
-            }
-            if absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.known_namespaces.contains(&fqn).then_some(fqn)
+        resolve_lexical_namespace(parts, absolute, lexical_context, |fqn| {
+            self.known_namespaces.contains(fqn)
+        })
     }
 
     pub(super) fn push_edge(
@@ -171,55 +154,9 @@ impl AnalysisIndexer {
         &self,
         receiver: &Node<'_>,
     ) -> Option<Vec<RubyConstant>> {
-        if let Some(namespace) = self.resolve_const_get_receiver_namespace(receiver) {
-            return Some(namespace);
-        }
-
-        let (parts, absolute) = constant_parts_and_absolute(receiver)?;
-        if absolute {
-            let fqn = FullyQualifiedName::namespace(parts.clone());
-            return self.known_namespaces.contains(&fqn).then_some(parts);
-        }
-
-        let mut search = self.namespace_stack.clone();
-        loop {
-            let mut candidate = search.clone();
-            candidate.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.known_namespaces.contains(&fqn) {
-                return Some(candidate);
-            }
-            if search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.clone());
-        self.known_namespaces.contains(&fqn).then_some(parts)
-    }
-
-    fn resolve_const_get_receiver_namespace(
-        &self,
-        receiver: &Node<'_>,
-    ) -> Option<Vec<RubyConstant>> {
-        let call = receiver.as_call_node()?;
-        if call.name().as_slice() != b"const_get" {
-            return None;
-        }
-        let Some(base_receiver) = call.receiver() else {
-            return None;
-        };
-        let arguments = call.arguments()?;
-        let first = arguments.arguments().iter().next()?;
-        let (name, _) = attr_name_and_range(&first, self.file_id)?;
-        let Ok(constant) = RubyConstant::new(&name) else {
-            return None;
-        };
-        let mut namespace = self.resolve_constant_receiver_namespace(&base_receiver)?;
-        namespace.push(constant);
-        let fqn = FullyQualifiedName::namespace(namespace.clone());
-        self.known_namespaces.contains(&fqn).then_some(namespace)
+        resolve_receiver_namespace(receiver, &self.namespace_stack, &|fqn| {
+            self.known_namespaces.contains(fqn)
+        })
     }
 
     pub(super) fn static_eval_block_context(
@@ -241,41 +178,10 @@ impl AnalysisIndexer {
             }
             Some(receiver) => {
                 let (parts, absolute) = constant_parts_and_absolute(&receiver)?;
-                self.resolve_static_eval_namespace(&parts, absolute)?
+                self.resolve_namespace(&parts, absolute)?.namespace_parts()
             }
         };
         Some((namespace, definition_scope))
-    }
-
-    fn resolve_static_eval_namespace(
-        &self,
-        parts: &[RubyConstant],
-        absolute: bool,
-    ) -> Option<Vec<RubyConstant>> {
-        if parts.is_empty() {
-            return None;
-        }
-        if absolute {
-            let fqn = FullyQualifiedName::namespace(parts.to_vec());
-            return self.known_namespaces.contains(&fqn).then(|| parts.to_vec());
-        }
-
-        let mut search = self.namespace_stack.clone();
-        loop {
-            let mut candidate = search.clone();
-            candidate.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.known_namespaces.contains(&fqn) {
-                return Some(candidate);
-            }
-            if search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.known_namespaces.contains(&fqn).then(|| parts.to_vec())
     }
 
     pub(super) fn push_concern_class_methods_block(

@@ -1,4 +1,5 @@
 use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind, NamespaceKind, RubyConstant};
+use crate::indexer::documents::scope_rules::resolve_lexical_namespace;
 use crate::indexer::LocalScopeKind as LVScopeKind;
 use crate::invariant::ExpectInvariant;
 use ruby_prism::{BlockNode, CallNode, NumberedParametersNode, ParametersNode};
@@ -134,7 +135,13 @@ impl FactCollector {
             }
             Some(receiver) => {
                 let eval_ref = crate::indexer::mixin_ref_from_node(&receiver)?;
-                self.resolve_static_eval_namespace(&eval_ref.parts, eval_ref.absolute)?
+                resolve_lexical_namespace(
+                    &eval_ref.parts,
+                    eval_ref.absolute,
+                    &self.scope_tracker.get_ns_stack(),
+                    |fqn| self.namespace_is_known(fqn),
+                )?
+                .namespace_parts()
             }
         };
         Some((namespace, implicit_receiver_kind, method_definition_kind))
@@ -251,38 +258,5 @@ impl FactCollector {
         );
 
         Some(vec![class_methods])
-    }
-
-    pub(in crate::indexer::fact_collector) fn resolve_static_eval_namespace(
-        &self,
-        parts: &[RubyConstant],
-        absolute: bool,
-    ) -> Option<Vec<RubyConstant>> {
-        if parts.is_empty() {
-            return None;
-        }
-
-        let current_namespace = self.scope_tracker.get_ns_stack();
-        if absolute {
-            let fqn = FullyQualifiedName::namespace(parts.to_vec());
-            return self.namespace_is_known(&fqn).then(|| parts.to_vec());
-        }
-
-        let mut search = current_namespace.clone();
-        loop {
-            let mut candidate = search.clone();
-            candidate.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(candidate.clone());
-            if self.namespace_is_known(&fqn) {
-                return Some(candidate);
-            }
-            if search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.namespace_is_known(&fqn).then(|| parts.to_vec())
     }
 }

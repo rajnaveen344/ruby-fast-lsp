@@ -5,6 +5,9 @@ use crate::core::{
     RubyMethod, RubyType, SymbolFact, SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
+use crate::indexer::documents::scope_rules::{
+    declaration_candidates, lexical_candidates, resolve_lexical_namespace,
+};
 use crate::indexer::fact_collector::context::source::u32_offset;
 use crate::indexer::fact_collector::FactCollector;
 use crate::invariant::ExpectInvariant;
@@ -100,27 +103,9 @@ impl FactCollector {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let mut search = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-            let fqn = FullyQualifiedName::namespace(probe);
-            if self.direct_namespace_is_known(&fqn) {
-                return Some(fqn);
-            }
-            if absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        let fqn = FullyQualifiedName::namespace(parts.to_vec());
-        self.direct_namespace_is_known(&fqn).then_some(fqn)
+        resolve_lexical_namespace(parts, absolute, lexical_context, |fqn| {
+            self.direct_namespace_is_known(fqn)
+        })
     }
 
     pub fn namespace_is_known(&self, fqn: &FullyQualifiedName) -> bool {
@@ -136,27 +121,7 @@ impl FactCollector {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<(FullyQualifiedName, RubyType)> {
-        let mut search = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-        let mut candidates = Vec::new();
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-            candidates.push(FullyQualifiedName::constant(probe));
-            if absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        self.semantics
-            .project
-            .first_constant_value_type(&candidates, &|constant| {
-                self.direct_constant_value_type(constant)
-            })
+        self.first_constant_value_type(lexical_candidates(parts, absolute, lexical_context))
     }
 
     pub fn resolve_declaration_constant_value_type_from(
@@ -165,18 +130,13 @@ impl FactCollector {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<(FullyQualifiedName, RubyType)> {
-        let mut candidates = Vec::new();
-        let mut exact = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-        exact.extend(parts.iter().cloned());
-        candidates.push(exact);
-        if !absolute && parts.len() > 1 && !lexical_context.is_empty() {
-            candidates.push(parts.to_vec());
-        }
+        self.first_constant_value_type(declaration_candidates(parts, absolute, lexical_context))
+    }
 
+    fn first_constant_value_type(
+        &self,
+        candidates: impl IntoIterator<Item = Vec<RubyConstant>>,
+    ) -> Option<(FullyQualifiedName, RubyType)> {
         let candidates = candidates
             .into_iter()
             .map(FullyQualifiedName::constant)

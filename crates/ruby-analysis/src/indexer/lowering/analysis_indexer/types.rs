@@ -8,6 +8,7 @@ use ruby_prism::{DefNode, Node};
 
 use super::syntax::{constant_parts, constant_parts_and_absolute, constant_path_parts};
 use super::AnalysisIndexer;
+use crate::indexer::documents::scope_rules::{declaration_candidates, lexical_candidates};
 use crate::inference::method::constructor::seed_constructor_type;
 use crate::inference::r#type::literal::{infer_array_literal_type, infer_hash_literal_type};
 
@@ -18,36 +19,8 @@ impl AnalysisIndexer {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<RubyType> {
-        let mut search = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-            let constant = FullyQualifiedName::constant(probe);
-            let subject = TypeSubject::Constant(constant.clone());
-            if let Some(fact) = self
-                .facts
-                .types
-                .iter()
-                .rev()
-                .find(|fact| fact.subject == subject)
-            {
-                return Some(fact.ruby_type.clone());
-            }
-            if let Some(ruby_type) = self.known_constant_types.get(&constant) {
-                return Some(ruby_type.clone());
-            }
-            if absolute || search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        None
+        lexical_candidates(parts, absolute, lexical_context)
+            .find_map(|candidate| self.constant_value_type(candidate))
     }
 
     pub(super) fn resolve_declaration_constant_value_type_from(
@@ -56,29 +29,21 @@ impl AnalysisIndexer {
         absolute: bool,
         lexical_context: &[RubyConstant],
     ) -> Option<RubyType> {
-        let mut candidates = Vec::new();
-        let mut exact = if absolute {
-            Vec::new()
-        } else {
-            lexical_context.to_vec()
-        };
-        exact.extend(parts.iter().cloned());
-        candidates.push(exact);
-        if !absolute && parts.len() > 1 && !lexical_context.is_empty() {
-            candidates.push(parts.to_vec());
-        }
+        declaration_candidates(parts, absolute, lexical_context)
+            .into_iter()
+            .find_map(|candidate| self.constant_value_type(candidate))
+    }
 
-        candidates.into_iter().find_map(|candidate| {
-            let constant = FullyQualifiedName::constant(candidate);
-            let subject = TypeSubject::Constant(constant.clone());
-            self.facts
-                .types
-                .iter()
-                .rev()
-                .find(|fact| fact.subject == subject)
-                .map(|fact| fact.ruby_type.clone())
-                .or_else(|| self.known_constant_types.get(&constant).cloned())
-        })
+    fn constant_value_type(&self, parts: Vec<RubyConstant>) -> Option<RubyType> {
+        let constant = FullyQualifiedName::constant(parts);
+        let subject = TypeSubject::Constant(constant.clone());
+        self.facts
+            .types
+            .iter()
+            .rev()
+            .find(|fact| fact.subject == subject)
+            .map(|fact| fact.ruby_type.clone())
+            .or_else(|| self.known_constant_types.get(&constant).cloned())
     }
 
     pub(super) fn assignment_type(&self, node: &Node<'_>) -> Option<RubyType> {
