@@ -606,18 +606,19 @@ Delete this file when the last task is done. Git history keeps the record.
         the cursor walk, with receiver resolution passed in.
   - [ ] D1c. Fix the scope disagreements, each with a failing generic test
         first:
-    - Constants assigned inside an eval block belong to the lexical scope.
-      The seed puts them in the receiver.
-    - `const_get` eval receivers are accepted by the cursor walk only.
+    - [x] Constants assigned and classes opened inside an eval block belong to
+      the lexical scope. The seed put them in the receiver; it now keeps a
+      lexical stack and a separate definition-owner stack.
+    - [x] `const_get` eval receivers were accepted by the cursor walk only.
     - Module alias reopening is followed by the seed only. Class alias
       reopening is followed by everything except the cursor walk.
     - The seed turns every `initialize` into singleton `new`, including in
       modules. The collector requires a proven class.
     - The seed accepts only `self` as a `def` receiver.
     - The superclass-equals-reopen-target check exists in the collector only.
-  - [ ] D1d. Port `AnalysisIndexer` onto `ScopeTracker`. This needs D1c's eval
-        rule, because the seed currently replaces the namespace stack inside
-        eval blocks instead of pushing an execution context.
+  - [ ] D1d. Port `AnalysisIndexer` onto `ScopeTracker`. Its `lexical_stack`
+        maps to `ScopeTracker` frames and its eval `owner_stack` maps to the
+        block execution context's method-definition owner.
   - [ ] D1e. Make the collector take its declarations from the seed's
         declaration sink in the same walk. Delete the collector's declaration
         recording (`collection/declarations.rs`, the `nodes/declarations`

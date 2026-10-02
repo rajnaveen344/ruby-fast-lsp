@@ -293,3 +293,42 @@ PushUnit.const_defined?(:TYPE$0)
     )
     .await;
 }
+
+#[tokio::test]
+async fn constant_assigned_in_class_eval_block_belongs_to_lexical_scope() {
+    check(
+        r#"
+class MetaTarget
+end
+
+module LexicalOwner
+  ::MetaTarget.class_eval do
+    <def>LIMIT = 1</def>
+  end
+end
+
+LexicalOwner::LIMIT$0
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn class_opened_in_class_eval_block_nests_in_lexical_scope() {
+    check(
+        r#"
+class MetaTarget
+end
+
+module LexicalOwner
+  ::MetaTarget.class_eval do
+    <def>class Nested
+    end</def>
+  end
+end
+
+LexicalOwner::Nested$0
+"#,
+    )
+    .await;
+}

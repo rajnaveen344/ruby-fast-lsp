@@ -75,7 +75,7 @@ impl AnalysisIndexer {
                 return match self.resolve_constant_value_type_from(
                     &parts,
                     absolute,
-                    &self.namespace_stack,
+                    &self.lexical_stack,
                 ) {
                     Some(RubyType::ClassReference(target)) => seed_constructor_type(&target),
                     Some(
@@ -95,7 +95,7 @@ impl AnalysisIndexer {
         }
 
         if let Some((parts, absolute)) = constant_parts_and_absolute(node) {
-            return self.resolve_constant_value_type_from(&parts, absolute, &self.namespace_stack);
+            return self.resolve_constant_value_type_from(&parts, absolute, &self.lexical_stack);
         }
 
         literal_type(node)

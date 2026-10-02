@@ -85,14 +85,14 @@ impl AnalysisIndexer {
 
             if reader {
                 if let Ok(method) = RubyMethod::new(&name) {
-                    self.push_method_fact(self.namespace_stack.clone(), owner_kind, method, range);
+                    self.push_method_fact(self.owner_stack.clone(), owner_kind, method, range);
                 }
             }
 
             if writer {
                 if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
                     self.push_method_fact_with_params(
-                        self.namespace_stack.clone(),
+                        self.owner_stack.clone(),
                         owner_kind,
                         method,
                         range,
@@ -111,7 +111,7 @@ impl AnalysisIndexer {
         let namespace = node
             .receiver()
             .and_then(|receiver| self.resolve_constant_receiver_namespace(&receiver))
-            .unwrap_or_else(|| self.namespace_stack.clone());
+            .unwrap_or_else(|| self.owner_stack.clone());
 
         for arg in arguments.arguments().iter() {
             let Some((name, range)) = attr_name_and_range(&arg, self.file_id) else {
@@ -174,9 +174,9 @@ impl AnalysisIndexer {
             let Ok(method) = RubyMethod::new(&name) else {
                 continue;
             };
-            let fqn = FullyQualifiedName::method(self.namespace_stack.clone(), method);
+            let fqn = FullyQualifiedName::method(self.owner_stack.clone(), method);
             let instance_owner = FullyQualifiedName::namespace_with_kind(
-                self.namespace_stack.clone(),
+                self.owner_stack.clone(),
                 crate::core::NamespaceKind::Instance,
             );
             let range = self
@@ -187,7 +187,7 @@ impl AnalysisIndexer {
                 .map(|fact| fact.range)
                 .unwrap_or(fallback_range);
             let owner = FullyQualifiedName::namespace_with_kind(
-                self.namespace_stack.clone(),
+                self.owner_stack.clone(),
                 crate::core::NamespaceKind::Singleton,
             );
             self.facts.methods.push(
@@ -228,7 +228,7 @@ impl AnalysisIndexer {
         range: TextRange,
     ) {
         let owner = FullyQualifiedName::namespace_with_kind(
-            self.namespace_stack.clone(),
+            self.owner_stack.clone(),
             match self.current_scope_kind() {
                 ScopeKind::Instance => NamespaceKind::Instance,
                 ScopeKind::Singleton => NamespaceKind::Singleton,
@@ -269,15 +269,15 @@ impl AnalysisIndexer {
         };
         let range = self.range(&node.location());
         self.push_method_fact_without_parameter_shape(
-            self.namespace_stack.clone(),
+            self.owner_stack.clone(),
             owner_kind,
             new_method,
             range,
         );
 
-        let old_fqn = FullyQualifiedName::method(self.namespace_stack.clone(), old_method);
+        let old_fqn = FullyQualifiedName::method(self.owner_stack.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
-            self.namespace_stack.clone(),
+            self.owner_stack.clone(),
             RubyMethod::new(&new_name).expect_invariant(
                 "alias_method new method became invalid after validation",
                 "the same string was already accepted",
@@ -307,7 +307,7 @@ impl AnalysisIndexer {
         let Ok(method) = RubyMethod::new(&name) else {
             return;
         };
-        if self.namespace_stack.is_empty() {
+        if self.owner_stack.is_empty() {
             return;
         }
         let owner_kind = if self.eval_context_active() {
@@ -323,7 +323,7 @@ impl AnalysisIndexer {
             crate::core::NamespaceKind::Instance
         };
         self.push_method_fact_without_parameter_shape(
-            self.namespace_stack.clone(),
+            self.owner_stack.clone(),
             owner_kind,
             method,
             range,
@@ -331,10 +331,10 @@ impl AnalysisIndexer {
     }
 
     pub(super) fn push_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
-        if self.namespace_stack.is_empty() || !self.method_context_stack.is_empty() {
+        if self.owner_stack.is_empty() || !self.method_context_stack.is_empty() {
             return;
         }
-        self.push_define_singleton_method_for_namespace(node, self.namespace_stack.clone());
+        self.push_define_singleton_method_for_namespace(node, self.owner_stack.clone());
     }
 
     pub(super) fn push_receiver_define_singleton_method_fact(&mut self, node: &CallNode<'_>) {
@@ -425,9 +425,9 @@ impl AnalysisIndexer {
             let Ok(method) = RubyMethod::new(&method_name) else {
                 continue;
             };
-            let fqn = FullyQualifiedName::method(self.namespace_stack.clone(), method);
+            let fqn = FullyQualifiedName::method(self.owner_stack.clone(), method);
             let owner =
-                FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
+                FullyQualifiedName::namespace_with_kind(self.owner_stack.clone(), owner_kind);
             self.facts
                 .symbols
                 .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
@@ -456,9 +456,9 @@ impl AnalysisIndexer {
             let Ok(method) = RubyMethod::new(&defined_name) else {
                 continue;
             };
-            let fqn = FullyQualifiedName::method(self.namespace_stack.clone(), method);
+            let fqn = FullyQualifiedName::method(self.owner_stack.clone(), method);
             let owner =
-                FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
+                FullyQualifiedName::namespace_with_kind(self.owner_stack.clone(), owner_kind);
             self.facts
                 .symbols
                 .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));

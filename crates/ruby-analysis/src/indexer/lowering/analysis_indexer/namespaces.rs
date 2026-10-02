@@ -64,7 +64,7 @@ impl AnalysisIndexer {
         parts: &[RubyConstant],
         absolute: bool,
     ) -> Option<FullyQualifiedName> {
-        self.resolve_namespace_from(parts, absolute, &self.namespace_stack)
+        self.resolve_namespace_from(parts, absolute, &self.lexical_stack)
     }
 
     pub(super) fn resolve_namespace_from(
@@ -111,7 +111,7 @@ impl AnalysisIndexer {
                     source,
                     parts.to_vec(),
                     absolute,
-                    FullyQualifiedName::namespace(self.namespace_stack.clone()),
+                    FullyQualifiedName::namespace(self.lexical_stack.clone()),
                     kind,
                     range,
                 )
@@ -140,7 +140,7 @@ impl AnalysisIndexer {
             return;
         };
 
-        let source = FullyQualifiedName::namespace(self.namespace_stack.clone());
+        let source = FullyQualifiedName::namespace(self.owner_stack.clone());
         let range = self.range(&node.location());
         for arg in arguments.arguments().iter().skip(first_mixin_index) {
             let Some((parts, absolute)) = constant_parts_and_absolute(&arg) else {
@@ -154,7 +154,7 @@ impl AnalysisIndexer {
         &self,
         receiver: &Node<'_>,
     ) -> Option<Vec<RubyConstant>> {
-        resolve_receiver_namespace(receiver, &self.namespace_stack, &|fqn| {
+        resolve_receiver_namespace(receiver, &self.lexical_stack, &|fqn| {
             self.known_namespaces.contains(fqn)
         })
     }
@@ -170,13 +170,15 @@ impl AnalysisIndexer {
         };
         node.block()?;
         let namespace = match node.receiver() {
-            None => (!self.namespace_stack.is_empty() && self.method_context_stack.is_empty())
-                .then(|| self.namespace_stack.clone())?,
-            Some(receiver) if receiver.as_self_node().is_some() => {
-                (!self.namespace_stack.is_empty() && self.method_context_stack.is_empty())
-                    .then(|| self.namespace_stack.clone())?
+            Some(receiver) if receiver.as_self_node().is_none() => {
+                self.resolve_constant_receiver_namespace(&receiver)?
             }
-            Some(receiver) => self.resolve_constant_receiver_namespace(&receiver)?,
+            // An implicit or `self` receiver evaluates in the current owner.
+            None | Some(_) => {
+                let at_namespace_body =
+                    !self.owner_stack.is_empty() && self.method_context_stack.is_empty();
+                at_namespace_body.then(|| self.owner_stack.clone())?
+            }
         };
         Some((namespace, definition_scope))
     }
@@ -189,7 +191,7 @@ impl AnalysisIndexer {
             return None;
         }
         node.block()?;
-        if self.namespace_stack.is_empty() {
+        if self.owner_stack.is_empty() {
             return None;
         }
 
@@ -198,7 +200,7 @@ impl AnalysisIndexer {
             "`ClassMethods` is a valid Ruby constant",
             "inspect RubyConstant validation",
         );
-        let mut target_namespace = self.namespace_stack.clone();
+        let mut target_namespace = self.owner_stack.clone();
         target_namespace.push(class_methods);
         let range = self.range(&node.location());
         self.push_namespace_facts(
@@ -208,7 +210,7 @@ impl AnalysisIndexer {
             range,
         );
         self.push_edge(
-            FullyQualifiedName::namespace(self.namespace_stack.clone()),
+            FullyQualifiedName::namespace(self.owner_stack.clone()),
             &[class_methods],
             false,
             GraphEdgeKind::Extend,

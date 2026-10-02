@@ -43,7 +43,7 @@ use crate::indexer::yard::types::YardMethodDoc;
 
 impl Visit<'_> for AnalysisIndexer {
     fn visit_class_node(&mut self, node: &ClassNode<'_>) {
-        let lexical_context = self.namespace_stack.clone();
+        let lexical_context = self.lexical_stack.clone();
         let syntactic_fqn = syntactic_namespace(&node.constant_path(), &lexical_context);
         let mut reopened_target = constant_parts_and_absolute(&node.constant_path())
             .and_then(|(parts, absolute)| {
@@ -68,7 +68,7 @@ impl Visit<'_> for AnalysisIndexer {
         if syntactic_fqn.as_ref() == reopened_target.as_ref() {
             reopened_target = None;
         }
-        let (parts, previous_namespace) = if let Some(target) = &reopened_target {
+        if let Some(target) = &reopened_target {
             let parts = target.namespace_parts().to_vec();
             invariant!(
                 !parts.is_empty(),
@@ -76,18 +76,12 @@ impl Visit<'_> for AnalysisIndexer {
                 why = "a Ruby class object must have a constant identity",
                 fix = "reject root namespace values before class alias reopening",
             );
-            let previous = std::mem::replace(&mut self.namespace_stack, parts.clone());
-            self.module_function_mode_stack.push(false);
-            self.visibility_stack.push(MethodVisibility::Public);
-            (parts, Some(previous))
-        } else {
-            let Some(parts) = self.push_namespace_from_node(&node.constant_path()) else {
-                return;
-            };
-            (parts, None)
-        };
+            self.enter_namespace_frame(parts.clone(), parts);
+        } else if !self.enter_namespace_from_node(&node.constant_path()) {
+            return;
+        }
 
-        let fqn = FullyQualifiedName::namespace(self.namespace_stack.clone());
+        let fqn = FullyQualifiedName::namespace(self.owner_stack.clone());
         let range = self.range(&node.location());
         let name_range = terminal_name_range(
             self.file_id,
@@ -158,25 +152,11 @@ impl Visit<'_> for AnalysisIndexer {
         self.scope_stack.push(ScopeKind::Instance);
         visit_class_node(self, node);
         self.scope_stack.pop();
-        if let Some(previous) = previous_namespace {
-            self.module_function_mode_stack.pop().expect_invariant(
-                "module_function mode stack underflow after an aliased class reopening",
-                "each aliased namespace frame owns one module_function flag",
-                "keep aliased class visitor enter/exit balanced",
-            );
-            self.visibility_stack.pop().expect_invariant(
-                "analysis indexer visibility stack underflow after an aliased class reopening",
-                "every aliased namespace frame owns one visibility flag",
-                "keep aliased class visitor enter/exit balanced",
-            );
-            self.namespace_stack = previous;
-        } else {
-            self.pop_namespace_parts(&parts);
-        }
+        self.exit_namespace_frame();
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode<'_>) {
-        let lexical_context = self.namespace_stack.clone();
+        let lexical_context = self.lexical_stack.clone();
         let syntactic_fqn = syntactic_namespace(&node.constant_path(), &lexical_context);
         let mut reopened_target = constant_parts_and_absolute(&node.constant_path())
             .and_then(|(parts, absolute)| {
@@ -201,7 +181,7 @@ impl Visit<'_> for AnalysisIndexer {
         if syntactic_fqn.as_ref() == reopened_target.as_ref() {
             reopened_target = None;
         }
-        let (parts, previous_namespace) = if let Some(target) = &reopened_target {
+        if let Some(target) = &reopened_target {
             let parts = target.namespace_parts().to_vec();
             invariant!(
                 !parts.is_empty(),
@@ -209,18 +189,12 @@ impl Visit<'_> for AnalysisIndexer {
                 why = "a Ruby module object must have a constant identity",
                 fix = "reject root namespace values before module alias reopening",
             );
-            let previous = std::mem::replace(&mut self.namespace_stack, parts.clone());
-            self.module_function_mode_stack.push(false);
-            self.visibility_stack.push(MethodVisibility::Public);
-            (parts, Some(previous))
-        } else {
-            let Some(parts) = self.push_namespace_from_node(&node.constant_path()) else {
-                return;
-            };
-            (parts, None)
-        };
+            self.enter_namespace_frame(parts.clone(), parts);
+        } else if !self.enter_namespace_from_node(&node.constant_path()) {
+            return;
+        }
 
-        let fqn = FullyQualifiedName::namespace(self.namespace_stack.clone());
+        let fqn = FullyQualifiedName::namespace(self.owner_stack.clone());
         let range = self.range(&node.location());
         let name_range = terminal_name_range(
             self.file_id,
@@ -234,21 +208,7 @@ impl Visit<'_> for AnalysisIndexer {
         self.scope_stack.push(ScopeKind::Instance);
         visit_module_node(self, node);
         self.scope_stack.pop();
-        if let Some(previous) = previous_namespace {
-            self.module_function_mode_stack.pop().expect_invariant(
-                "module_function mode stack underflow after an aliased module reopening",
-                "each aliased namespace frame owns one module_function flag",
-                "keep aliased module visitor enter/exit balanced",
-            );
-            self.visibility_stack.pop().expect_invariant(
-                "analysis indexer visibility stack underflow after an aliased module reopening",
-                "every aliased namespace frame owns one visibility flag",
-                "keep aliased module visitor enter/exit balanced",
-            );
-            self.namespace_stack = previous;
-        } else {
-            self.pop_namespace_parts(&parts);
-        }
+        self.exit_namespace_frame();
     }
 
     fn visit_def_node(&mut self, node: &DefNode<'_>) {
@@ -279,9 +239,8 @@ impl Visit<'_> for AnalysisIndexer {
             owner_kind = NamespaceKind::Singleton;
         }
 
-        let fqn = FullyQualifiedName::method(self.namespace_stack.clone(), method);
-        let owner =
-            FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
+        let fqn = FullyQualifiedName::method(self.owner_stack.clone(), method);
+        let owner = FullyQualifiedName::namespace_with_kind(self.owner_stack.clone(), owner_kind);
         let range = self.range(&node.location());
         let name_range = self.range(&node.name_loc());
         let yard_doc = self.source.as_deref().and_then(|source| {
@@ -346,7 +305,7 @@ impl Visit<'_> for AnalysisIndexer {
                 .unwrap_or(false)
         {
             let owner = FullyQualifiedName::namespace_with_kind(
-                self.namespace_stack.clone(),
+                self.owner_stack.clone(),
                 NamespaceKind::Singleton,
             );
             self.facts.methods.push(
@@ -402,15 +361,15 @@ impl Visit<'_> for AnalysisIndexer {
         };
         let range = self.range(&node.location());
         self.push_method_fact_without_parameter_shape(
-            self.namespace_stack.clone(),
+            self.owner_stack.clone(),
             owner_kind,
             new_method,
             range,
         );
 
-        let old_fqn = FullyQualifiedName::method(self.namespace_stack.clone(), old_method);
+        let old_fqn = FullyQualifiedName::method(self.owner_stack.clone(), old_method);
         let new_fqn = FullyQualifiedName::method(
-            self.namespace_stack.clone(),
+            self.owner_stack.clone(),
             RubyMethod::new(&new_name).expect_invariant(
                 "alias new method became invalid after validation",
                 "the same string was already accepted",
@@ -438,7 +397,7 @@ impl Visit<'_> for AnalysisIndexer {
     fn visit_constant_write_node(&mut self, node: &ConstantWriteNode<'_>) {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         if let Ok(constant) = RubyConstant::new(&name) {
-            let mut parts = self.namespace_stack.clone();
+            let mut parts = self.lexical_stack.clone();
             parts.push(constant);
             let fqn = FullyQualifiedName::constant(parts);
             self.facts.symbols.push(
@@ -497,7 +456,7 @@ impl Visit<'_> for AnalysisIndexer {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                let old_namespace = std::mem::replace(&mut self.namespace_stack, eval_namespace);
+                let old_owner = std::mem::replace(&mut self.owner_stack, eval_namespace);
                 self.eval_context_depths.push((
                     self.scope_stack.len().checked_add(1).expect_invariant(
                         "analysis indexer scope depth overflowed while entering an eval block",
@@ -514,7 +473,7 @@ impl Visit<'_> for AnalysisIndexer {
                     "every static eval block context must be popped exactly once",
                     "keep AnalysisIndexer::visit_call_node eval traversal balanced",
                 );
-                self.namespace_stack = old_namespace;
+                self.owner_stack = old_owner;
             }
             return;
         }
@@ -523,14 +482,15 @@ impl Visit<'_> for AnalysisIndexer {
                 self.visit_arguments_node(&arguments);
             }
             if let Some(block) = node.block() {
-                self.namespace_stack
-                    .extend(class_methods_namespace.iter().cloned());
-                self.module_function_mode_stack.push(false);
-                self.visibility_stack.push(MethodVisibility::Public);
+                let mut lexical = self.lexical_stack.clone();
+                lexical.extend(class_methods_namespace.iter().cloned());
+                let mut owner = self.owner_stack.clone();
+                owner.extend(class_methods_namespace);
+                self.enter_namespace_frame(lexical, owner);
                 self.scope_stack.push(ScopeKind::Instance);
                 self.visit(&block);
                 self.scope_stack.pop();
-                self.pop_namespace_parts(&class_methods_namespace);
+                self.exit_namespace_frame();
             }
             return;
         }
@@ -568,7 +528,7 @@ impl Visit<'_> for AnalysisIndexer {
                 _ => None,
             };
             if let (Some(kind), Some(arguments)) = (kind, node.arguments()) {
-                let source = FullyQualifiedName::namespace(self.namespace_stack.clone());
+                let source = FullyQualifiedName::namespace(self.owner_stack.clone());
                 let in_singleton = self.current_scope_kind() == ScopeKind::Singleton;
                 let source_for_edge = if in_singleton {
                     source.to_singleton_namespace().expect_invariant(

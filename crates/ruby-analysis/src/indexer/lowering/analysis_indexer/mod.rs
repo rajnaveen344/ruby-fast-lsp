@@ -28,7 +28,13 @@ enum ScopeKind {
 #[derive(Debug)]
 pub struct AnalysisIndexer {
     file_id: SourceFileId,
-    namespace_stack: Vec<RubyConstant>,
+    /// Constant nesting (`Module.nesting`): constant writes, constant lookup,
+    /// and the parent of nested `class`/`module` bodies.
+    lexical_stack: Vec<RubyConstant>,
+    /// Namespace that owns definitions (`def`, `attr_*`, mixins, visibility).
+    /// Equal to `lexical_stack` except inside a static eval block.
+    owner_stack: Vec<RubyConstant>,
+    saved_frames: Vec<(Vec<RubyConstant>, Vec<RubyConstant>)>,
     scope_stack: Vec<ScopeKind>,
     method_context_stack: Vec<(RubyMethod, NamespaceKind)>,
     eval_context_depths: Vec<(usize, usize)>,
@@ -79,7 +85,9 @@ impl AnalysisIndexer {
     ) -> Self {
         Self {
             file_id,
-            namespace_stack: Vec::new(),
+            lexical_stack: Vec::new(),
+            owner_stack: Vec::new(),
+            saved_frames: Vec::new(),
             scope_stack: Vec::new(),
             method_context_stack: Vec::new(),
             eval_context_depths: Vec::new(),
@@ -136,22 +144,35 @@ impl AnalysisIndexer {
         )
     }
 
-    fn push_namespace_from_node(&mut self, node: &Node<'_>) -> Option<Vec<RubyConstant>> {
-        let parts = constant_parts(node)?;
-        self.namespace_stack.extend(parts.iter().cloned());
-        self.module_function_mode_stack.push(false);
-        self.visibility_stack.push(MethodVisibility::Public);
-        Some(parts)
+    /// Opens a `class`/`module` body named by `node`. The body nests inside the
+    /// current lexical scope, never inside an eval receiver, and owns the
+    /// definitions it contains.
+    fn enter_namespace_from_node(&mut self, node: &Node<'_>) -> bool {
+        let Some(parts) = constant_parts(node) else {
+            return false;
+        };
+        let mut namespace = self.lexical_stack.clone();
+        namespace.extend(parts);
+        self.enter_namespace_frame(namespace.clone(), namespace);
+        true
     }
 
-    fn pop_namespace_parts(&mut self, parts: &[RubyConstant]) {
-        for _ in parts {
-            self.namespace_stack.pop().expect_invariant(
-                "analysis indexer namespace stack underflow",
-                "each class/module entry must pop exactly the pushed parts",
-                "keep class/module visitor enter/exit balanced",
-            );
-        }
+    fn enter_namespace_frame(&mut self, lexical: Vec<RubyConstant>, owner: Vec<RubyConstant>) {
+        let previous_lexical = std::mem::replace(&mut self.lexical_stack, lexical);
+        let previous_owner = std::mem::replace(&mut self.owner_stack, owner);
+        self.saved_frames.push((previous_lexical, previous_owner));
+        self.module_function_mode_stack.push(false);
+        self.visibility_stack.push(MethodVisibility::Public);
+    }
+
+    fn exit_namespace_frame(&mut self) {
+        let (lexical, owner) = self.saved_frames.pop().expect_invariant(
+            "analysis indexer namespace frame stack underflow",
+            "each class/module body restores exactly the frame it entered",
+            "keep class/module visitor enter/exit balanced",
+        );
+        self.lexical_stack = lexical;
+        self.owner_stack = owner;
         self.module_function_mode_stack.pop().expect_invariant(
             "analysis indexer module_function mode stack underflow",
             "each namespace frame must pop exactly one module_function flag",
@@ -187,7 +208,7 @@ impl AnalysisIndexer {
 
     fn current_owner_fqn(&self) -> FullyQualifiedName {
         FullyQualifiedName::namespace_with_kind(
-            self.namespace_stack.clone(),
+            self.owner_stack.clone(),
             match self.current_scope_kind() {
                 ScopeKind::Instance => crate::core::NamespaceKind::Instance,
                 ScopeKind::Singleton => crate::core::NamespaceKind::Singleton,
