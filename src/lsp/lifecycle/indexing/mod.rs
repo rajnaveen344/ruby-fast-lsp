@@ -1,4 +1,3 @@
-use crate::features::cursor::EngineQuery;
 use crate::features::diagnostics::linter::lint_document;
 use crate::invariant::ExpectInvariant;
 use crate::loader::coordinator::IndexingCoordinator;
@@ -199,7 +198,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let indexer = interactive_file_processor(server, &uri);
 
     let process_start = Instant::now();
-    let (affected_uris, mut diagnostics) = if skip_processing {
+    let syntax = if skip_processing {
         let diagnostics = if source_kind.is_editable() {
             let document = server
                 .documents
@@ -213,8 +212,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
                 .read()
                 .clone();
             let parse_result = document.parse();
-            let diagnostics = generate_diagnostics(&parse_result, &document);
-            diagnostics
+            generate_diagnostics(&parse_result, &document)
         } else {
             Vec::new()
         };
@@ -223,7 +221,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
             uri.path(),
             process_start.elapsed()
         );
-        (std::collections::HashSet::new(), diagnostics)
+        diagnostics
     } else {
         match process_interactive_file(
             &indexer,
@@ -234,8 +232,8 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         )
         .await
         {
-            Ok(result) => (result.affected_uris, result.diagnostics),
-            Err(_) => (std::collections::HashSet::new(), Vec::new()),
+            Ok(result) => result.diagnostics,
+            Err(_) => Vec::new(),
         }
     };
     if !skip_processing {
@@ -249,46 +247,22 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
     let cache_elapsed = cache_start.elapsed();
 
-    // Add unresolved entry diagnostics from the analysis engine.
-    let diag_start = Instant::now();
-    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-    diagnostics.extend(query.get_unresolved_diagnostics(&uri));
-    append_external_linter_diagnostics(server, &uri, &content, &mut diagnostics).await;
-    if !source_kind.is_editable() {
-        diagnostics.clear();
+    let diagnostics_start = Instant::now();
+    run_external_linter(server, &uri, &content).await;
+    if source_kind.is_editable() {
+        server.publish_document_diagnostics(uri.clone(), syntax);
+    } else {
+        server.queue_diagnostics(uri.clone(), Vec::new());
     }
-    let diag_count = diagnostics.len();
-    let diag_elapsed = diag_start.elapsed();
-    let publish_start = Instant::now();
-    server.publish_diagnostics(uri.clone(), diagnostics).await;
-    let publish_elapsed = publish_start.elapsed();
-
-    let affected_start = Instant::now();
-    let mut affected_count = 0usize;
-    // Publish diagnostics for files affected by removed definitions (cross-file propagation)
-    for affected_uri in affected_uris {
-        if affected_uri != uri {
-            affected_count += 1;
-            let affected_diagnostics = query.get_unresolved_diagnostics(&affected_uri);
-            server
-                .publish_diagnostics(affected_uri, affected_diagnostics)
-                .await;
-        }
-    }
-    let affected_elapsed = affected_start.elapsed();
     info!(
-        "[PERF][didOpen waterfall] file={} total={:?} register={:?} doc_cache={:?} process={:?} cache_invalidate={:?} diag_query={}@{:?} publish={:?} affected_publish={}@{:?}",
+        "[PERF][didOpen waterfall] file={} total={:?} register={:?} doc_cache={:?} process={:?} cache_invalidate={:?} diagnostics={:?}",
         uri.path(),
         total_start.elapsed(),
         register_elapsed,
         doc_elapsed,
         process_elapsed,
         cache_elapsed,
-        diag_count,
-        diag_elapsed,
-        publish_elapsed,
-        affected_count,
-        affected_elapsed
+        diagnostics_start.elapsed()
     );
 }
 
@@ -320,15 +294,7 @@ async fn refresh_open_project_files_after_dependency_open(
 
     for (uri, content) in open_docs {
         match reanalyze_open_file(indexer, server, &uri, &content) {
-            Ok(result) => {
-                let mut diagnostics = result.diagnostics;
-                diagnostics.extend(
-                    EngineQuery::with_engine(owning_engine.clone())
-                        .get_unresolved_diagnostics(&uri),
-                );
-                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
-                server.publish_diagnostics(uri, diagnostics).await;
-            }
+            Ok(result) => server.publish_document_diagnostics(uri, result.diagnostics),
             Err(err) => log::warn!(
                 "Failed to refresh open file after dependency open: {}: {err}",
                 uri.path()
@@ -416,7 +382,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     let indexer = interactive_file_processor(server, &uri);
 
     let process_start = Instant::now();
-    let (affected_uris, mut diagnostics, semantic_change) = match process_interactive_file(
+    let (syntax, semantic_change) = match process_interactive_file(
         &indexer,
         server,
         &uri,
@@ -425,34 +391,14 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     )
     .await
     {
-        Ok(result) => (
-            result.affected_uris,
-            result.diagnostics,
-            result.semantic_change,
-        ),
-        Err(_) => (
-            std::collections::HashSet::new(),
-            Vec::new(),
-            ruby_analysis::engine::SemanticChange::BodyOnly,
-        ),
+        Ok(result) => (result.diagnostics, result.semantic_change),
+        Err(_) => (Vec::new(), ruby_analysis::engine::SemanticChange::BodyOnly),
     };
     let process_elapsed = process_start.elapsed();
 
-    // Add unresolved diagnostics (now freshly computed with correct positions)
-    let diag_start = Instant::now();
-    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-    diagnostics.extend(query.get_unresolved_diagnostics(&uri));
-    let diag_count = diagnostics.len();
-    let diag_elapsed = diag_start.elapsed();
-
-    debug!(
-        "Publishing {} diagnostics for {} on change",
-        diagnostics.len(),
-        uri.path().split('/').next_back().unwrap_or("unknown")
-    );
-    let publish_start = Instant::now();
-    server.publish_diagnostics(uri.clone(), diagnostics).await;
-    let publish_elapsed = publish_start.elapsed();
+    let diagnostics_start = Instant::now();
+    server.publish_document_diagnostics(uri.clone(), syntax);
+    let diagnostics_elapsed = diagnostics_start.elapsed();
 
     let open_refresh_start = Instant::now();
     let open_refresh_count =
@@ -469,34 +415,17 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     debug!("Namespace tree cache invalidation scheduled due to index change");
     let cache_elapsed = cache_start.elapsed();
 
-    let affected_start = Instant::now();
-    let mut affected_count = 0usize;
-    // Publish diagnostics for affected files (cross-file propagation)
-    for affected_uri in affected_uris {
-        if affected_uri != uri {
-            affected_count += 1;
-            let affected_diagnostics = query.get_unresolved_diagnostics(&affected_uri);
-            server
-                .publish_diagnostics(affected_uri, affected_diagnostics)
-                .await;
-        }
-    }
-    let affected_elapsed = affected_start.elapsed();
     info!(
-        "[PERF][didChange waterfall] file={} total={:?} register={:?} doc_cache={:?} process={:?} diag_query={}@{:?} publish={:?} open_refresh={}@{:?} cache_invalidate={:?} affected_publish={}@{:?}",
+        "[PERF][didChange waterfall] file={} total={:?} register={:?} doc_cache={:?} process={:?} diagnostics={:?} open_refresh={}@{:?} cache_invalidate={:?}",
         uri.path(),
         total_start.elapsed(),
         register_elapsed,
         doc_elapsed,
         process_elapsed,
-        diag_count,
-        diag_elapsed,
-        publish_elapsed,
+        diagnostics_elapsed,
         open_refresh_count,
         open_refresh_elapsed,
-        cache_elapsed,
-        affected_count,
-        affected_elapsed
+        cache_elapsed
     );
 }
 
@@ -513,11 +442,7 @@ async fn refresh_bounded_open_diagnostics(
             log::warn!("Failed to refresh open-file diagnostics for {}", uri.path());
             continue;
         };
-        let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-        let mut diagnostics = result.diagnostics;
-        diagnostics.extend(query.get_unresolved_diagnostics(&uri));
-        server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
-        server.publish_diagnostics(uri, diagnostics).await;
+        server.publish_document_diagnostics(uri, result.diagnostics);
         refreshed += 1;
     }
     refreshed
@@ -569,7 +494,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     // diagnostics). Route by URI for multi-workspace correctness.
     let indexer = interactive_file_processor(server, &uri);
 
-    let (affected_uris, mut diagnostics) = match process_interactive_file(
+    let syntax = match process_interactive_file(
         &indexer,
         server,
         &uri,
@@ -578,39 +503,23 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     )
     .await
     {
-        Ok(result) => (result.affected_uris, result.diagnostics),
-        Err(_) => (std::collections::HashSet::new(), Vec::new()),
+        Ok(result) => result.diagnostics,
+        Err(_) => Vec::new(),
     };
 
     // Invalidate namespace tree cache
     server.invalidate_namespace_tree_cache_debounced();
 
-    // Add unresolved diagnostics from the analysis engine.
-    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-    diagnostics.extend(query.get_unresolved_diagnostics(&uri));
-    append_external_linter_diagnostics(server, &uri, &content, &mut diagnostics).await;
-    server.publish_diagnostics(uri.clone(), diagnostics).await;
-
-    // Publish diagnostics for files affected by removed definitions
-    for affected_uri in affected_uris {
-        if affected_uri != uri {
-            let affected_diagnostics = query.get_unresolved_diagnostics(&affected_uri);
-            server
-                .publish_diagnostics(affected_uri, affected_diagnostics)
-                .await;
-        }
-    }
+    run_external_linter(server, &uri, &content).await;
+    server.publish_document_diagnostics(uri, syntax);
 
     // Request the client to refresh inlay hints after save
     server.refresh_inlay_hints().await;
 }
 
-async fn append_external_linter_diagnostics(
-    server: &RubyLanguageServer,
-    uri: &Url,
-    content: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+/// Lint an editable document and retain the output for its exact current
+/// source, where every later composition of its diagnostics reads it.
+async fn run_external_linter(server: &RubyLanguageServer, uri: &Url, content: &str) {
     server.clear_external_linter_diagnostics(uri);
     if !analysis_file_kind(server, uri).is_some_and(SourceKind::is_editable) {
         return;
@@ -650,9 +559,7 @@ async fn append_external_linter_diagnostics(
     .await
     {
         Ok(linter_diagnostics) => {
-            if server.retain_external_linter_diagnostics(uri, snapshot, &linter_diagnostics) {
-                diagnostics.extend(linter_diagnostics);
-            }
+            server.retain_external_linter_diagnostics(uri, snapshot, &linter_diagnostics);
         }
         Err(error) => log::warn!(
             "External linter diagnostics unavailable for {}: {error:#}. \
@@ -683,9 +590,7 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     // Keep unresolved entry diagnostics visible (project-wide diagnostics).
     // Use the file's workspace index so we don't surface diagnostics from
     // other workspaces.
-    let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-    let diagnostics = query.get_unresolved_diagnostics(&uri);
-    server.publish_diagnostics(uri, diagnostics).await;
+    server.publish_document_diagnostics(uri, Vec::new());
 }
 
 pub async fn handle_watched_files_changed(
@@ -836,13 +741,7 @@ async fn refresh_open_project_files_for_dependency_engines(
 
     for (uri, content) in open_project_files {
         match reanalyze_open_file(processor, server, &uri, &content) {
-            Ok(result) => {
-                let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
-                let mut diagnostics = result.diagnostics;
-                diagnostics.extend(query.get_unresolved_diagnostics(&uri));
-                server.append_current_external_linter_diagnostics(&uri, &mut diagnostics);
-                server.publish_diagnostics(uri, diagnostics).await;
-            }
+            Ok(result) => server.publish_document_diagnostics(uri, result.diagnostics),
             Err(error) => log::warn!(
                 "Failed to refresh open project consumer after dependency change: {}: {error}",
                 uri.path()

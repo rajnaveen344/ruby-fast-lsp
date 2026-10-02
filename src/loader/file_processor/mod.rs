@@ -54,8 +54,6 @@ pub mod syntax_diagnostics;
 
 /// Result of processing a file
 pub struct ProcessResult {
-    /// Functionally affected URIs (files that need updated diagnostics)
-    pub affected_uris: HashSet<Url>,
     /// Syntax and early validation diagnostics
     pub diagnostics: Vec<Diagnostic>,
     /// Whether this pass changed declarations visible to other files.
@@ -459,7 +457,6 @@ impl LoadedFile {
             LoadedCommit::Analyzed(file) => file.commit(ctx),
         };
         ProcessResult {
-            affected_uris: HashSet::new(),
             diagnostics,
             semantic_change,
         }

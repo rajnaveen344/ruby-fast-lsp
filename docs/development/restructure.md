@@ -265,7 +265,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B7c. The server imports the engine's `unresolved-require` code.
   - [x] B7d. One engine-to-LSP projection; delete the coordinator's fast copy
         (keep the faster implementation). Measure open-project publish.
-  - [ ] B7e. One composition function for syntax, engine, and linter
+  - [x] B7e. One composition function for syntax, engine, and linter
         diagnostics; replace the hand-assembled publish sites.
   - [ ] B7f. Move composition with C3e; the linter stays a runner.
 

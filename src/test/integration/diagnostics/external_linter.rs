@@ -122,13 +122,10 @@ async fn dependency_open_retains_current_linter_output_without_rerunning_it() {
         ));
         assert_eq!(invocation_count(), 3);
         editor.close("sample.rb").await;
-        let mut retained_after_close = Vec::new();
-        editor.server().append_current_external_linter_diagnostics(
-            &crate::test::harness::fixture_uri("/sample.rb"),
-            &mut retained_after_close,
-        );
         assert!(
-            retained_after_close.is_empty(),
+            !editor
+                .server()
+                .has_retained_linter_diagnostics(&crate::test::harness::fixture_uri("/sample.rb")),
             "closing a document must release retained linter output"
         );
     })
