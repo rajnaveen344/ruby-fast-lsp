@@ -4,7 +4,6 @@
 mod debug;
 pub mod diagnostics;
 pub mod editing;
-pub mod navigation;
 pub mod presentation;
 
 pub use editing::signature_help::{SignatureData, SignatureHelpData, SignatureParameterData};

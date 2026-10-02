@@ -14,7 +14,7 @@ lsp/service -> features::<family>::<feature>::handle -> ruby-analysis engine
 | Module        | Owns                                                                                                                |
 | :------------ | :------------------------------------------------------------------------------------------------------------------ |
 | `cursor/`     | `EngineQuery` (document plus owning engine), method lookup, range conversion                                        |
-| `navigation/` | Definition (with indexing demand waits), implementation, references, document highlights, type and call hierarchies |
+| `navigation/` | Definition (with indexing demand waits), implementation, references, document highlights, type and call hierarchies, workspace symbols, namespace tree |
 
 ## Contract
 

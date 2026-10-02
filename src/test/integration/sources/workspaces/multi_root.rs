@@ -217,17 +217,17 @@ async fn workspace_symbol_search_aggregates_isolated_project_engines() {
         .open("workspace_b/b.rb", "class BetaService\nend\n")
         .await;
 
-    let symbols =
-        crate::lsp::capabilities::navigation::workspace_symbols::handle_workspace_symbols(
-            editor.server(),
-            WorkspaceSymbolParams {
-                query: "Service".to_string(),
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            },
-        )
-        .await
-        .unwrap();
+    let symbols = crate::features::navigation::workspace_symbols::handle(
+        editor.server(),
+        WorkspaceSymbolParams {
+            query: "Service".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let names = symbols
         .into_iter()
         .map(|symbol| symbol.name)

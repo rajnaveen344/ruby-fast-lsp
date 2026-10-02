@@ -420,7 +420,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] C3a. Add `src/features/` with `mod.rs` and a README. Move `lsp/query`
         shared code (`EngineQuery`, `analysis_location`, `method`) to
         `features/cursor/` with no other change.
-  - [ ] C3b. Navigation: merge capability, query, and handler body for
+  - [x] C3b. Navigation: merge capability, query, and handler body for
         definition, implementation, references, highlights, hierarchies,
         workspace symbols, and namespace tree into `features/navigation/`.
         One commit per two or three features.

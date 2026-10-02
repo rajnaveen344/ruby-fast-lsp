@@ -1,16 +1,40 @@
-use crate::features::cursor::EngineQuery;
-use crate::server::RubyLanguageServer;
-use log::debug;
+//! Namespace tree: the class and module tree of one project engine, cached by
+//! the engine's namespace hash.
+
+use log::{debug, info};
+use ruby_analysis::engine::{AnalysisQuery, NamespaceTreeResponse};
+use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
+use std::time::Instant;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::Url;
 
-// Re-export types for external consumers
-pub use crate::lsp::query::navigation::namespace_tree::{
-    IncluderInfo, LibraryNamespaceTree, LibraryPackageTree, LibrarySectionId, LocationInfo,
-    MixinInfo, NamespaceNode, NamespaceTreeParams, NamespaceTreeResponse, ViaModuleInfo,
-};
+use crate::server::RubyLanguageServer;
 
-pub async fn handle_namespace_tree(
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NamespaceTreeParams {
+    #[serde(default, rename = "uri", alias = "workspace_uri")]
+    pub workspace_uri: Option<String>,
+    #[serde(default)]
+    pub show_external_types: bool,
+}
+
+/// Handle the custom `ruby/namespaceTree` request.
+pub async fn handle(
+    lang_server: &RubyLanguageServer,
+    params: NamespaceTreeParams,
+) -> LspResult<NamespaceTreeResponse> {
+    info!("Namespace tree request received");
+    let start_time = Instant::now();
+    let response = namespace_tree(lang_server, params);
+    info!(
+        "[PERF] Namespace tree completed in {:?}",
+        start_time.elapsed()
+    );
+    Ok(response)
+}
+
+fn namespace_tree(
     lang_server: &RubyLanguageServer,
     params: NamespaceTreeParams,
 ) -> NamespaceTreeResponse {
@@ -33,8 +57,8 @@ pub async fn handle_namespace_tree(
             (workspaces.len() == 1).then(|| workspaces[0].analysis_engine.clone())
         })
         .unwrap_or_else(|| lang_server.orphan_engine().clone());
-    let query = EngineQuery::with_engine(analysis_engine);
-    let engine_hash = query.compute_namespace_tree_hash(params.show_external_types);
+    let engine_hash =
+        AnalysisQuery::new(&analysis_engine.read()).namespace_tree_hash(params.show_external_types);
     let mut cache_hasher = std::collections::hash_map::DefaultHasher::new();
     request_uri
         .as_ref()
@@ -49,7 +73,8 @@ pub async fn handle_namespace_tree(
     }
 
     debug!("[NAMESPACE_TREE] Cache miss, computing namespace tree");
-    let response = query.compute_namespace_tree(params.show_external_types);
+    let response =
+        AnalysisQuery::new(&analysis_engine.read()).namespace_tree(params.show_external_types);
 
     lang_server.cache_namespace_tree(combined_hash, response.clone());
 

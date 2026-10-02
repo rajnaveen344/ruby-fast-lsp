@@ -3,12 +3,13 @@
 //! server itself keeps state and state operations only.
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
+use crate::features::navigation::namespace_tree::{self, NamespaceTreeParams};
 use crate::features::navigation::{
     call_hierarchy, definition, document_highlights, implementation, references, type_hierarchy,
+    workspace_symbols,
 };
 use crate::lsp::capabilities::debug::{self, LookupParams, LookupResponse};
 use crate::lsp::handlers::{notification, request};
-use crate::lsp::query::navigation::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use crate::server::RubyLanguageServer;
 
 use log::info;
@@ -37,8 +38,8 @@ impl RubyLanguageServer {
     pub async fn handle_namespace_tree_request(
         &self,
         params: NamespaceTreeParams,
-    ) -> LspResult<NamespaceTreeResponse> {
-        request::handle_namespace_tree(self, params).await
+    ) -> LspResult<ruby_analysis::engine::NamespaceTreeResponse> {
+        namespace_tree::handle(self, params).await
     }
 
     // ========================================================================
@@ -343,7 +344,7 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         let start_time = Instant::now();
-        let result = request::handle_workspace_symbols(self, params).await;
+        let result = workspace_symbols::handle(self, params).await;
 
         info!(
             "[PERF] Workspace symbols completed in {:?}",

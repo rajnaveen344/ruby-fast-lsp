@@ -8,7 +8,6 @@ use crate::lsp::capabilities::debug;
 use crate::lsp::capabilities::editing::{
     code_actions, completion, formatting, rename, signature_help,
 };
-use crate::lsp::capabilities::navigation::{namespace_tree, workspace_symbols};
 use crate::lsp::capabilities::presentation::{
     code_lens, document_symbols, folding_range, hover, inlay_hints, selection_ranges,
     semantic_tokens,
@@ -90,13 +89,6 @@ pub async fn handle_document_symbols(
     document_symbols::handle_document_symbols(lang_server, params).await
 }
 
-pub async fn handle_workspace_symbols(
-    lang_server: &RubyLanguageServer,
-    params: WorkspaceSymbolParams,
-) -> LspResult<Option<Vec<SymbolInformation>>> {
-    Ok(workspace_symbols::handle_workspace_symbols(lang_server, params).await)
-}
-
 pub async fn handle_document_on_type_formatting(
     lang_server: &RubyLanguageServer,
     params: DocumentOnTypeFormattingParams,
@@ -125,20 +117,6 @@ pub async fn handle_folding_range(
             Ok(None)
         }
     }
-}
-
-pub async fn handle_namespace_tree(
-    lang_server: &RubyLanguageServer,
-    params: namespace_tree::NamespaceTreeParams,
-) -> LspResult<namespace_tree::NamespaceTreeResponse> {
-    info!("Namespace tree request received");
-    let start_time = std::time::Instant::now();
-    let result = namespace_tree::handle_namespace_tree(lang_server, params).await;
-    info!(
-        "[PERF] Namespace tree completed in {:?}",
-        start_time.elapsed()
-    );
-    Ok(result)
 }
 
 pub async fn handle_code_lens(
