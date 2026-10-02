@@ -34,7 +34,7 @@ over old status reports. Update the nearest guide when its contract changes.
 | `editors/`                          | Editor UX, distribution packaging, installed-artifact validation                              |
 | `crates/devtools`                   | Profilers, benchmarks, AST dump, and extension validation; never shipped                      |
 
-Keep reusable analysis independent of LSP types. `src/lsp/query/` adapts cursor and
+Keep reusable analysis independent of LSP types. `src/features/` adapts cursor and
 document context to `AnalysisQuery` and converts domain ranges to
 protocol responses. Do not duplicate MRO, identity, ranking, or missing-method
 policy in feature adapters. Engine resolution may coordinate inference solvers;

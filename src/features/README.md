@@ -16,6 +16,8 @@ lsp/service -> features::<family>::<feature>::handle -> ruby-analysis engine
 | `cursor/`     | `EngineQuery` (document plus owning engine), method lookup, range conversion                                        |
 | `navigation/` | Definition (with indexing demand waits), implementation, references, document highlights, type and call hierarchies, workspace symbols, namespace tree |
 | `editing/`     | Completion (constant, method, variable, snippet candidates), signature help, rename, code actions, formatting |
+| `diagnostics/`  | Engine unresolved-entry diagnostics for a document; the external linter and formatter runner |
+| `debug.rs`      | FQN lookup, graph export, and extension status requests |
 | `presentation/` | Hover, inlay hints, code lenses, document symbols, folding ranges, selection ranges, semantic tokens |
 
 ## Contract

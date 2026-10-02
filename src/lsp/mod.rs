@@ -6,6 +6,4 @@
 pub mod capabilities;
 pub mod check;
 pub mod handlers;
-pub mod linter;
-pub mod query;
 pub mod service;

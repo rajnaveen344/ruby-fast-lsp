@@ -2,7 +2,7 @@
 //! and `end` insertion on Enter.
 
 use crate::environment::config::FormatterKind;
-use crate::lsp::linter::format_document;
+use crate::features::diagnostics::linter::format_document;
 use crate::server::RubyLanguageServer;
 use log::warn;
 use ruby_analysis::indexer::is_erb_path;

@@ -429,7 +429,7 @@ Delete this file when the last task is done. Git history keeps the record.
         `features/presentation/`.
   - [x] C3d. Editing: completion, signature help, formatting, rename, and code
         actions into `features/editing/`.
-  - [ ] C3e. Diagnostics and debug: engine projection and linter into
+  - [x] C3e. Diagnostics and debug: engine projection and linter into
         `features/diagnostics/`, and debug and extension status into
         `features/debug.rs`.
   - [ ] C3f. Move `capabilities/indexing` and `handlers/notification` to

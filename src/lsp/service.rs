@@ -3,6 +3,7 @@
 //! server itself keeps state and state operations only.
 
 use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
+use crate::features::debug::{self, LookupParams, LookupResponse};
 use crate::features::editing::{code_actions, completion, formatting, rename, signature_help};
 use crate::features::navigation::namespace_tree::{self, NamespaceTreeParams};
 use crate::features::navigation::{
@@ -13,8 +14,7 @@ use crate::features::presentation::{
     code_lens, document_symbols, folding_range, hover, inlay_hints, selection_ranges,
     semantic_tokens,
 };
-use crate::lsp::capabilities::debug::{self, LookupParams, LookupResponse};
-use crate::lsp::handlers::{notification, request};
+use crate::lsp::handlers::notification;
 use crate::server::RubyLanguageServer;
 
 use log::info;
@@ -53,7 +53,7 @@ impl RubyLanguageServer {
 
     /// Handle `ruby-fast-lsp/debug/lookup` - query index for an FQN.
     pub async fn handle_debug_lookup(&self, params: LookupParams) -> LspResult<LookupResponse> {
-        request::handle_debug_lookup(self, params).await
+        debug::handle_lookup(self, params).await
     }
 
     /// Handle `ruby/exportGraph` - export the inheritance graph as JSON.
@@ -61,7 +61,7 @@ impl RubyLanguageServer {
         &self,
         params: debug::ExportGraphParams,
     ) -> LspResult<debug::ExportGraphResponse> {
-        request::handle_export_graph(self, params).await
+        debug::handle_export_graph(self, params).await
     }
 
     /// Handle `ruby-fast-lsp/extensions/status` - list loaded extension states.
@@ -69,7 +69,7 @@ impl RubyLanguageServer {
         &self,
         params: ExtensionStatusParams,
     ) -> LspResult<ExtensionStatusResponse> {
-        request::handle_extension_status(self, params).await
+        debug::handle_extension_status(self, params).await
     }
 }
 

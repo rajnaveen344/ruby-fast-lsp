@@ -1,8 +1,8 @@
 # Integration Tests
 
 This directory contains integration tests for the Ruby Fast LSP server. Tests
-are grouped by the same feature families as `src/lsp/capabilities/` and
-`src/lsp/query/`, then by the Ruby behaviour under test.
+are grouped by the same feature families as `src/features/`, then by the Ruby
+behaviour under test.
 
 ## Structure
 

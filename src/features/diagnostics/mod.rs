@@ -1,11 +1,12 @@
-//! Diagnostics Query — analysis-engine diagnostic projection.
+//! Diagnostics: the engine's unresolved-entry diagnostics for a document, and
+//! the external linter and formatter runner.
 //!
-//! Provides diagnostics for:
-//! - Unresolved constants and methods
-//!
-//! The projection itself is server-owned (`server::diagnostics`) so that
-//! publication and queries share one conversion. AST-only diagnostics (syntax
-//! errors/warnings) live in `loader/file_processor/syntax_diagnostics.rs`.
+//! The engine-to-LSP projection itself is server-owned (`server::diagnostics`)
+//! so that publication and queries share one conversion. AST-only diagnostics
+//! (syntax errors and warnings) live in
+//! `loader/file_processor/syntax_diagnostics.rs`.
+
+pub mod linter;
 
 use crate::invariant::ExpectInvariant;
 use crate::server::unresolved_diagnostics_from_engine;

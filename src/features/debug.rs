@@ -1,15 +1,16 @@
-//! Debug capabilities exposed through custom LSP requests: FQN lookup for the
-//! VS Code index view and graph export.
+//! Debug and status requests: FQN lookup for the VS Code index view, graph
+//! export, and extension status.
 
-use log::debug;
+use log::{debug, info};
 pub use ruby_analysis::engine::{ExportGraphResponse, LookupResponse};
 use serde::{Deserialize, Serialize};
 
-use crate::features::cursor::EngineQuery;
+use crate::environment::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
 use crate::server::RubyLanguageServer;
 use parking_lot::RwLock;
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
 use std::sync::Arc;
+use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::Url;
 
 fn project_engine(server: &RubyLanguageServer, uri: Option<&str>) -> Arc<RwLock<AnalysisEngine>> {
@@ -51,18 +52,36 @@ pub struct ExportGraphParams {
 // ============================================================================
 
 /// Handle `ruby-fast-lsp/debug/lookup` - query analysis state for an FQN.
-pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> LookupResponse {
+pub async fn handle_lookup(
+    server: &RubyLanguageServer,
+    params: LookupParams,
+) -> LspResult<LookupResponse> {
+    info!("Debug lookup request received for: {}", params.fqn);
     debug!("[DEBUG] Looking up FQN: {}", params.fqn);
-    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
-    query.debug_lookup(&params.fqn)
+    let engine = project_engine(server, params.uri.as_deref());
+    let engine = engine.read();
+    Ok(AnalysisQuery::new(&engine).debug_lookup(&params.fqn))
 }
 
 /// Handle `ruby/exportGraph` - export the inheritance graph as JSON.
-pub fn handle_export_graph(
+pub async fn handle_export_graph(
     server: &RubyLanguageServer,
     params: ExportGraphParams,
-) -> ExportGraphResponse {
+) -> LspResult<ExportGraphResponse> {
+    info!("Export graph request received");
     debug!("[DEBUG] Exporting inheritance graph");
-    let query = EngineQuery::with_engine(project_engine(server, params.uri.as_deref()));
-    query.debug_export_graph()
+    let engine = project_engine(server, params.uri.as_deref());
+    let engine = engine.read();
+    Ok(AnalysisQuery::new(&engine).debug_export_graph())
+}
+
+/// Handle `ruby-fast-lsp/extensions/status` - list loaded extension states.
+pub async fn handle_extension_status(
+    server: &RubyLanguageServer,
+    _params: ExtensionStatusParams,
+) -> LspResult<ExtensionStatusResponse> {
+    info!("Extension status request received");
+    Ok(ExtensionStatusResponse {
+        extensions: server.extensions.registry().status_reports(),
+    })
 }

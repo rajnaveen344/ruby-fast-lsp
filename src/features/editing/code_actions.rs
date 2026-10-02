@@ -1,9 +1,9 @@
 //! Code actions: the configured linter's safe autocorrect as a quick fix.
 
 use crate::environment::config::LinterKind;
+use crate::features::diagnostics::linter::fix_document;
 use crate::features::editing::formatting::full_document_range;
 use crate::invariant::ExpectInvariant;
-use crate::lsp::linter::fix_document;
 use crate::server::RubyLanguageServer;
 use log::warn;
 use std::collections::HashMap;
