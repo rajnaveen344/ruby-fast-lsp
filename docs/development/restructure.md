@@ -183,7 +183,11 @@ Delete this file when the last task is done. Git history keeps the record.
   - [ ] B5g. Make `Semantics` method reads call `lookup::method`. Profiler
         comparison.
 
-  Notes: `MethodAnswer::Unknown` carries the rule that unknown lookup edges
+  Notes: once B5f deletes the legacy wrappers, turn the B5a equality tests
+  in `engine/lookup/tests.rs` into expected-value assertions (several now
+  compare the lookup with itself). Open question for B5d: the builtin
+  constructor check in `call_outcomes.rs` treats `Unknown` like `Missing`.
+  `MethodAnswer::Unknown` carries the rule that unknown lookup edges
   suppress missing-method claims (file pass, grouped methods, workspace pass,
   rename). Answers are derived data and never enter fingerprints.
 - [ ] B6. Move `AnalysisQuery` methods to free functions over `View`, one
