@@ -40,7 +40,7 @@ use super::types::{literal_type, method_body_literal_type};
 use super::AnalysisIndexer;
 use crate::indexer::documents::scope_rules::{
     alias_reopen_target, eval_block, method_declaration, multi_write_targets,
-    namespace_is_proven_class, DefinitionVisibility, MethodDeclaration,
+    namespace_is_proven_class, self_definition_namespace, DefinitionVisibility, MethodDeclaration,
 };
 use crate::indexer::yard::parser::YardParser;
 use crate::indexer::yard::types::YardMethodDoc;
@@ -176,6 +176,11 @@ impl Visit<'_> for AnalysisIndexer {
         let mut owner_namespace = definition_namespace.clone();
         if let Some(receiver) = node.receiver() {
             if receiver.as_self_node().is_some() {
+                let Some(namespace) = self_definition_namespace(&self.scope) else {
+                    visit_def_node(self, node);
+                    return;
+                };
+                owner_namespace = namespace;
                 owner_kind = NamespaceKind::Singleton;
             } else if let Some(namespace) = self.resolve_constant_receiver_namespace(&receiver) {
                 owner_namespace = namespace;

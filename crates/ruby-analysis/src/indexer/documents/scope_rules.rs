@@ -189,6 +189,17 @@ pub fn implicit_singleton_namespace(scope_tracker: &ScopeTracker) -> Option<Vec<
     (receiver_kind == NamespaceKind::Singleton && !namespace.is_empty()).then_some(namespace)
 }
 
+/// The namespace whose singleton side a `def self.name` defines on. `self`
+/// must be a class or module object: in an instance method it is an instance,
+/// and in a `class << self` body it is the singleton class, whose own
+/// singleton side the index does not model.
+pub fn self_definition_namespace(scope_tracker: &ScopeTracker) -> Option<Vec<RubyConstant>> {
+    if scope_tracker.implicit_receiver_is_singleton_class() {
+        return None;
+    }
+    implicit_singleton_namespace(scope_tracker)
+}
+
 /// `Target.class_eval do … end` and its `module_*`/`instance_*` forms.
 /// `resolve_receiver` is the walk's knowledge of constant and `self`
 /// receivers.

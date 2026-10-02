@@ -185,3 +185,63 @@ Shapes::HEIGHT$0
     )
     .await;
 }
+
+/// A `def` inside a singleton method body defines an instance method on the
+/// class the outer method was written in.
+#[tokio::test]
+async fn nested_def_in_singleton_method_defines_instance_method() {
+    check(
+        r#"
+module Shapes
+  class Base
+    def self.build
+      <def>def area; end</def>
+    end
+  end
+end
+
+Shapes::Base.new.area$0
+"#,
+    )
+    .await;
+}
+
+/// In a `class << self` body `self` is the singleton class, so `def self.name`
+/// there is not a class method of the enclosing class.
+#[tokio::test]
+async fn self_def_in_singleton_class_body_is_not_a_class_method() {
+    check(
+        r#"
+module Shapes
+  class Base
+    class << self
+      def self.meta; end
+    end
+  end
+end
+
+Shapes::Base.meta$0<def none>
+"#,
+    )
+    .await;
+}
+
+/// In an instance method `self` is an instance, so `def self.name` there
+/// defines a method on that one object, not on its class.
+#[tokio::test]
+async fn self_def_in_instance_method_is_not_a_class_method() {
+    check(
+        r#"
+module Shapes
+  class Base
+    def outer
+      def self.solo; end
+    end
+  end
+end
+
+Shapes::Base.solo$0<def none>
+"#,
+    )
+    .await;
+}

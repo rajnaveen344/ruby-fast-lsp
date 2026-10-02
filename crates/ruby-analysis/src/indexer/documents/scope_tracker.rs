@@ -457,6 +457,27 @@ impl ScopeTracker {
         matches!(self.frames.last(), Some(ScopeFrame::Singleton))
     }
 
+    /// Whether `self` is the singleton class a `class << self` body opens,
+    /// rather than the class object or an instance. Method bodies and eval
+    /// blocks inside that body rebind `self`.
+    pub fn implicit_receiver_is_singleton_class(&self) -> bool {
+        if self.current_execution_context().is_some() {
+            return false;
+        }
+        for kind in self.scope_kind_stack.iter().rev() {
+            match kind {
+                LocalScopeKind::InstanceMethod
+                | LocalScopeKind::ClassMethod
+                | LocalScopeKind::FrameworkInstanceBlock => return false,
+                LocalScopeKind::Constant => break,
+                LocalScopeKind::Block
+                | LocalScopeKind::Rescue
+                | LocalScopeKind::ExplicitBlockLocal => continue,
+            }
+        }
+        self.in_singleton()
+    }
+
     pub fn current_method_context(&self) -> NamespaceKind {
         if let Some(context) = self.current_execution_context() {
             return context.implicit_receiver_kind;

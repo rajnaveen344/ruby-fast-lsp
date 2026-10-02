@@ -196,3 +196,40 @@ fn constant_path_write_finds_parent_lexically() {
     let source = "module Shapes\n  Kernel::LIMIT = 1\nend\n";
     assert_walks_declare(source, &["symbol Kernel::LIMIT Constant"]);
 }
+
+#[test]
+fn nested_defs_land_on_the_lexical_definition_owner() {
+    // A `def` inside a method body defines on the class the outer method was
+    // written in, whatever the outer method's receiver; `def self.name` needs
+    // `self` to be a class object, which it is in a singleton method body.
+    let source = "module Shapes\n  class Other; end\n  class Base\n    def self.build\n      \
+                  def area; end\n    end\n    class << self\n      def plain\n        \
+                  def self.scaled; end\n        def nested; end\n      end\n    end\n    \
+                  def Other.make\n      def made; end\n    end\n  end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "method Shapes::Base#area on Shapes::Base Some(Instance)",
+            "method Shapes::Base#scaled on #<Class:Shapes::Base> Some(Singleton)",
+            "method Shapes::Base#nested on #<Class:Shapes::Base> Some(Singleton)",
+            "method Shapes::Base#made on Shapes::Base Some(Instance)",
+        ],
+    );
+}
+
+#[test]
+fn self_receiver_def_needs_a_class_object_self() {
+    // `self` is the singleton class in a `class << self` body and an instance
+    // in an instance method, so neither `def self.name` defines a singleton
+    // method of the enclosing class.
+    let source = "module Shapes\n  class Base\n    class << self\n      def self.meta; end\n    \
+                  end\n    def outer\n      def self.solo; end\n    end\n  end\nend\n";
+    assert_walks_declare(source, &["method Shapes::Base#outer on Shapes::Base"]);
+    let (seed, _) = walk_declarations(source);
+    assert!(
+        !seed
+            .iter()
+            .any(|declaration| declaration.contains("#meta") || declaration.contains("#solo")),
+        "{seed:#?}"
+    );
+}

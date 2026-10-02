@@ -4,7 +4,8 @@ use crate::core::{
     NamespaceKind, RubyMethod, TextRange, TypeFact, TypeProvenance, TypeSubject, UnknownReason,
 };
 use crate::indexer::documents::scope_rules::{
-    method_declaration, namespace_is_proven_class, DefinitionVisibility, MethodDeclaration,
+    method_declaration, namespace_is_proven_class, self_definition_namespace, DefinitionVisibility,
+    MethodDeclaration,
 };
 use crate::indexer::LocalScopeKind as LVScopeKind;
 use crate::invariant::ExpectInvariant;
@@ -45,20 +46,24 @@ impl FactCollector {
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
 
-        // A receiver must be `self` or a constant this walk resolves;
-        // otherwise the method is skipped.
+        // A nested `def` in this body lands on the owner a receiverless `def`
+        // here would, whatever this method's receiver.
+        let (nested_definition_namespace, nested_definition_kind) =
+            self.scope_tracker.method_definition_context();
+
+        // A receiver must be `self` naming a class or module, or a constant
+        // this walk resolves; otherwise the method is skipped.
         let (definition_namespace, namespace_kind, skip_method) = match node.receiver() {
-            None => {
-                let (namespace, kind) = self.scope_tracker.method_definition_context();
-                (namespace, kind, false)
-            }
+            None => (
+                nested_definition_namespace.clone(),
+                nested_definition_kind,
+                false,
+            ),
             Some(receiver) if receiver.as_self_node().is_some() => {
-                let (namespace, receiver_kind) = self.scope_tracker.implicit_receiver_context();
-                (
-                    namespace,
-                    NamespaceKind::Singleton,
-                    receiver_kind != NamespaceKind::Singleton,
-                )
+                match self_definition_namespace(&self.scope_tracker) {
+                    Some(namespace) => (namespace, NamespaceKind::Singleton, false),
+                    None => (Vec::new(), NamespaceKind::Singleton, true),
+                }
             }
             Some(receiver) => match self.resolve_constant_receiver_namespace(&receiver) {
                 Some(namespace) => (namespace, NamespaceKind::Singleton, false),
@@ -257,8 +262,8 @@ impl FactCollector {
         self.scope_tracker.push_method_execution_context(
             namespace_parts.clone(),
             namespace_kind,
-            namespace_parts.clone(),
-            namespace_kind,
+            nested_definition_namespace,
+            nested_definition_kind,
         );
 
         self.document
