@@ -613,35 +613,50 @@ Delete this file when the last task is done. Git history keeps the record.
         fallback. Not merged: the catalog's
         `clean_version`/`version_family`, which parse free-form `ruby -v`
         output rather than a family string.
-  - [ ] C7d. RSpec (blocked on a product decision). There are two
-        implementations of the same patch contract: the native fallback
-        `crates/extension-rspec`, which the extension host runs in process
-        whenever no loaded Wasm package claims the call, and the
+  - [ ] C7d. One RSpec implementation. There were two implementations of
+        the same patch contract: the native fallback
+        `crates/extension-rspec`, which the extension host ran in process
+        whenever no loaded Wasm package claimed the call, and the
         `extensions/rspec-ruby` package. Differences:
-    - The npm server package ships no extension packages, so the native
-      fallback is its only RSpec support. The VSIX ships the package, which
+    - The npm server package shipped no extension packages, so the native
+      fallback was its only RSpec support. The VSIX ships the package, which
       then takes precedence.
     - The native fallback ignores the package's applicability gate
       (`rspec-core >= 3, < 4` in the lockfile) and runs in every project.
     - Only the package provides RSpec document symbols and code lenses.
-    - 15 library integration tests in `src/test/integration/sources/extensions.rs`
-      exercise RSpec only through the native fallback.
+    - The library integration tests in
+      `src/test/integration/sources/extensions.rs` exercised RSpec only
+      through the native fallback.
 
-    Deleting either one removes a feature or changes output, so it is not
-    done here. Options:
-    1. Keep the package (the plan's direction): ship the RSpec package in the
-       npm package and load bundled packages by default, port the 15 tests to
-       load the package, then delete `crates/extension-rspec` and its host
-       special case. Projects without a locked `rspec-core` stop getting
-       RSpec facts.
-    2. Keep the native crate: move document symbols and code lenses into it
-       and drop the Ruby package. This keeps a privileged in-process
-       extension, against the plan's direction.
-    3. Keep both and add a parity test that runs each RSpec integration case
-       through both, so they cannot drift.
+    Decision: keep the Wasm package `extensions/rspec-ruby` as the one RSpec
+    implementation and delete the native fallback, after a parity test proves
+    the switch case by case. Rejected: moving symbols and lenses into the
+    native crate (keeps a privileged in-process extension), and keeping both
+    behind a permanent parity test (two implementations to maintain).
 
-    Recommendation: option 1, preceded by option 3's parity test so the
-    switch is proven case by case.
+    Accepted behaviour change: projects without a locked `rspec-core` 3.x,
+    and files outside any project, no longer get RSpec facts. This already
+    held for VSIX users, whose bundled package claimed every RSpec call.
+
+    - [ ] C7d1. Parity test: run every RSpec integration case through the
+          native fallback and through the loaded package, in a project
+          that locks `rspec-core` 3.x, and assert identical observations.
+          Record each divergence below and fix bugs in the owning
+          implementation, preferring the package.
+    - [ ] C7d2. Ship the RSpec package in the npm platform packages and have
+          the server load packages bundled next to its executable by
+          default, at the lowest priority, so a configured package with the
+          same ID wins. The VSIX keeps passing its packages explicitly.
+    - [ ] C7d3. Port the RSpec integration cases to load the package. Each
+          fixture lives in a project with a minimal neutral `Gemfile.lock`
+          that locks `rspec-core` 3.x.
+    - [ ] C7d4. Delete `crates/extension-rspec` and the host special case
+          that runs it, from the workspace, `build.rs` fingerprints, and
+          docs. The producer identity changes, which forces one cold gem
+          reindex. Drop the native side of the parity test.
+    - [ ] C7d5. Describe `extensions/rspec-ruby` as the supported RSpec
+          extension in its README, the extensions README, `docs/`, and
+          `src/ARCHITECTURE.md`.
 
 ## Phase D: one walk, one flow engine
 
