@@ -613,9 +613,18 @@ Delete this file when the last task is done. Git history keeps the record.
       lexical stack and a separate definition-owner stack.
     - [x] `const_get` eval receivers were accepted by the cursor walk only.
     - Module alias reopening is followed by the seed only. Class alias
-      reopening is followed by everything except the cursor walk.
+      reopening is followed by everything except the cursor walk
+      (`identifiers/declarations/class_node.rs` pushes the syntactic name).
     - The seed turns every `initialize` into singleton `new`, including in
-      modules. The collector requires a proven class.
+      modules. The collector requires a proven class. Decide what a module's
+      `initialize` should navigate to before writing the test.
+    - `self.define_singleton_method(:x) { }` and `self.send(:define_method,
+      :x) { }` open a block context only in the cursor walk: its receiver
+      resolver handles `self`, while the collector's
+      (`resolve_receiver_namespace`) rejects it.
+    - Concern `class_methods` inside an eval block: the seed nests
+      `ClassMethods` under the eval receiver; the collector and cursor walk
+      nest it under the lexical namespace.
     - [x] The seed accepted only `self` as a `def` receiver and dropped
       `def Name.x` inside `class Name`. A constant-path receiver
       (`def A::B.x`) is still skipped by the seed; the collector attaches it
