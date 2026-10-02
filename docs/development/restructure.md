@@ -228,7 +228,10 @@ Delete this file when the last task is done. Git history keeps the record.
         Profiler comparison.
   - [ ] B8g. Architecture test: no upward `crate::` edges in non-test files.
 
-  Notes: `inference/` and `engine/diagnostics/` are full; B8b frees the slot
+  Notes: inference and the fact collector also take `AnalysisQueryCache`
+  (an engine type) directly; B8e–f must hide it behind `Semantics` (the
+  `View` carries its cache) rather than move the memo down a layer.
+  `inference/` and `engine/diagnostics/` are full; B8b frees the slot
   B8d needs. B4g, B7d–e, and B8f touch the loader, so they follow C1e; C1f
   follows B8f.
 
