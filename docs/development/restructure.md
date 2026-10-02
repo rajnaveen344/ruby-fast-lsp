@@ -299,11 +299,14 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] C2g. Move `impl LanguageServer` and the debug and namespace-tree
         request methods from `server/mod.rs` to `src/lsp/service.rs`. The
         server keeps state only.
-  - [ ] C2h. Move the namespace-tree response types to
+  - [x] C2h. Move the namespace-tree response types to
         `server/namespace_tree.rs` and the engine diagnostic projection to
         `server/diagnostics.rs`. Move
         `refresh_unresolved_require_diagnostics_for_workspace` up to lsp
-        lifecycle if it still needs the linter.
+        lifecycle if it still needs the linter. Done: the cached response is
+        the engine's `NamespaceTreeResponse`, so the server imports it from
+        `ruby_analysis` and `NamespaceTreeParams` stays with the lsp feature;
+        the refresh reads only server-retained linter output, so it stays.
   - [ ] C2i. Add a layering check to `support/structure/check.py`: no
         `crate::server`, `crate::lsp`, or `crate::features` in `src/loader`,
         `src/environment`, or `src/utils`, and no `crate::lsp` in

@@ -11,7 +11,7 @@ use ruby_analysis::core::{
 };
 use ruby_analysis::engine::{AnalysisEngine, SourceFile};
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
@@ -167,7 +167,6 @@ impl RubyLanguageServer {
             require_diagnostic_candidates, reresolve_unresolved_require_diagnostics,
             UNRESOLVED_REQUIRE_CODE,
         };
-        use crate::lsp::query::EngineQuery;
 
         let feature_index = workspace.require_feature_index();
         let generation = workspace.indexing_status.snapshot().generation;
@@ -323,9 +322,7 @@ impl RubyLanguageServer {
                     break 'commit;
                 }
                 if let Some(diagnostics) = diagnostics.as_mut() {
-                    diagnostics.extend(EngineQuery::unresolved_diagnostics_from_engine(
-                        &engine, &uri,
-                    ));
+                    diagnostics.extend(unresolved_diagnostics_from_engine(&engine, &uri));
                     self.append_external_linter_diagnostics_for_snapshot(
                         &uri,
                         Some(snapshot),
@@ -353,6 +350,33 @@ impl RubyLanguageServer {
             project_root.display(), open_files, closed_files, refresh_started.elapsed()
         );
     }
+}
+
+/// Project one file's engine diagnostic facts while the caller retains the
+/// engine guard through publication.
+pub(crate) fn unresolved_diagnostics_from_engine(
+    engine: &AnalysisEngine,
+    uri: &Url,
+) -> Vec<Diagnostic> {
+    let path = uri
+        .to_file_path()
+        .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+    let Some(file_id) = engine.file_id(&path) else {
+        return Vec::new();
+    };
+
+    engine
+        .diagnostic_facts_in_file(file_id)
+        .into_iter()
+        .filter_map(|fact| diagnostic_from_fact(engine, &fact))
+        .collect()
+}
+
+/// Project a fact through its owning source, which must form a file URI.
+fn diagnostic_from_fact(engine: &AnalysisEngine, fact: &DiagnosticFact) -> Option<Diagnostic> {
+    let file = engine.file(fact.range.file_id)?;
+    Url::from_file_path(&file.path).ok()?;
+    diagnostic_from_fact_fast(file, fact)
 }
 
 fn diagnostic_from_fact_fast(file: &SourceFile, fact: &DiagnosticFact) -> Option<Diagnostic> {

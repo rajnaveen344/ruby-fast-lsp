@@ -142,7 +142,9 @@ The Query Engine provides a unified service layer for querying the `AnalysisEngi
 - `editing/`: completion candidates and signature help
 - `presentation/`: hover, inlay hints, and code lenses
 - `method/`: Method resolution and dispatch logic
-- `analysis_location.rs`, `diagnostics.rs`: shared range conversion and diagnostic projection
+- `analysis_location.rs`: shared range conversion
+- `diagnostics.rs`: `get_unresolved_diagnostics`, a query entry point over the
+  server-owned engine diagnostic projection in `server/diagnostics.rs`
 
 Both folders use the same `navigation/`, `editing/`, and `presentation/`
 families, so a feature's handler and query adapter sit in matching places.

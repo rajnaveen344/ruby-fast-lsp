@@ -6,7 +6,9 @@ and locks. The semantic database remains isolated per Ruby project.
 Start with [server.rs](../../src/server/mod.rs): it constructs the owners. The LSP
 protocol facade (`impl LanguageServer` and the debug and namespace-tree custom
 requests) lives in [service.rs](../../src/lsp/service.rs) and routes to the
-handlers; the server keeps state and state operations only. Each module under `src/server/` keeps related state and
+handlers; the server keeps state and state operations only and does not import
+`crate::lsp`. The cached namespace-tree response is the engine's
+`NamespaceTreeResponse`; the request parameters stay with the lsp feature. Each module under `src/server/` keeps related state and
 operations together. The semantic database remains
 [AnalysisEngine](../../crates/ruby-analysis/src/engine/state/mod.rs), isolated per Ruby
 project, with a separate orphan engine for unowned documents.
@@ -22,7 +24,7 @@ project, with a separate orphan engine for unowned documents.
 | `indexing` | Project scheduler, resource governor, and sequenced status publication. | [indexing.rs](../../src/server/indexing.rs) |
 | `products` | Runtime discovery, shared immutable dependency products, and the `runtime/status` projection (`ProjectRuntimeStatus`). | [products.rs](../../src/server/products.rs) |
 | `extensions` | Extension registry and dynamic watcher registration lifecycle. | [extensions.rs](../../src/server/extensions.rs) |
-| `diagnostics` | Latest-per-URI outbound queue, exact-source retained linter output, and open-project diagnostic publication after a load. | [diagnostics.rs](../../src/server/diagnostics.rs) |
+| `diagnostics` | Latest-per-URI outbound queue, exact-source retained linter output, the engine diagnostic projection (`unresolved_diagnostics_from_engine`), the dependency-root `unresolved-require` refresh, and open-project diagnostic publication after a load. | [diagnostics.rs](../../src/server/diagnostics.rs) |
 | `file_changes` | Latest filesystem events and debounce generation. | [watched_files.rs](../../src/server/watched_files.rs) |
 | `namespace_tree` | Cached Ruby Index projection and debounced invalidation. | [namespace_tree.rs](../../src/server/namespace_tree.rs) |
 

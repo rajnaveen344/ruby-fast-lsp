@@ -8,6 +8,7 @@ mod projects;
 mod watched_files;
 
 use crate::invariant::ExpectInvariant;
+pub(crate) use diagnostics::unresolved_diagnostics_from_engine;
 use diagnostics::DiagnosticPublisher;
 pub(crate) use documents::OpenDocuments;
 pub(crate) use extensions::ExtensionServices;
@@ -82,7 +83,7 @@ fn is_process_alive(pid: u32) -> bool {
 }
 
 /// Server state: each owner preserves its own locks and shared clone identity.
-/// The protocol facade lives in `crate::lsp::service`.
+/// The protocol facade lives in `src/lsp/service.rs`.
 #[derive(Clone)]
 pub struct RubyLanguageServer {
     pub(crate) client: Option<Client>,
