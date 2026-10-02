@@ -76,6 +76,7 @@ The profiler is the executable source of truth for the fixed built-in budgets:
 | Body-only edit p95 | 100 ms |
 | Completion / references p95 | 50 ms |
 | Hover / definition / semantic diagnostics p95 | 25 ms |
+| Project writer wait p95 under concurrent hover, definition, and references | 50 ms |
 | Estimated engine heap | 32 MiB |
 
 These are regression ceilings for the built-in workload, not latency promises

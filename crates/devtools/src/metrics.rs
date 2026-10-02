@@ -59,6 +59,8 @@ pub struct ProductionBudget {
     pub definition: Duration,
     pub references: Duration,
     pub diagnostics: Duration,
+    /// Time a project writer waits for its engine lock while editor reads run.
+    pub writer_wait: Duration,
     pub engine_heap_bytes: usize,
 }
 
@@ -72,6 +74,7 @@ impl Default for ProductionBudget {
             definition: Duration::from_millis(25),
             references: Duration::from_millis(50),
             diagnostics: Duration::from_millis(25),
+            writer_wait: Duration::from_millis(50),
             engine_heap_bytes: 32 * 1024 * 1024,
         }
     }
@@ -86,6 +89,7 @@ pub struct ProductionMeasurements {
     pub definition: LatencySummary,
     pub references: LatencySummary,
     pub diagnostics: LatencySummary,
+    pub writer_wait: LatencySummary,
     pub engine_heap_bytes: usize,
 }
 
@@ -112,6 +116,9 @@ impl ProductionBudget {
         }
         if measurements.diagnostics.p95 > self.diagnostics {
             exceeded.push("diagnostics");
+        }
+        if measurements.writer_wait.p95 > self.writer_wait {
+            exceeded.push("writer_wait");
         }
         if measurements.engine_heap_bytes > self.engine_heap_bytes {
             exceeded.push("engine_heap");
@@ -154,6 +161,7 @@ mod tests {
             definition: summary_with_p95(budget.definition),
             references: summary_with_p95(budget.references),
             diagnostics: summary_with_p95(budget.diagnostics),
+            writer_wait: summary_with_p95(budget.writer_wait),
             engine_heap_bytes: budget.engine_heap_bytes + 1,
         };
 

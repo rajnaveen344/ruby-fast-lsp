@@ -9,6 +9,7 @@ use ruby_fast_lsp::features::presentation::hover;
 use ruby_fast_lsp::lsp::lifecycle::indexing;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::fs;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::{
     CompletionContext, CompletionResponse, CompletionTriggerKind, DidChangeTextDocumentParams,
@@ -186,6 +187,10 @@ pub(crate) async fn run_production_benchmark(
         );
     }
 
+    let writer_wait = tokio::task::block_in_place(|| {
+        measure_writer_wait(server, &uri, method_position, iterations)
+    });
+
     let analysis_engine = server.analysis_engine_for_uri(&uri);
     let mut diagnostic_samples = Vec::with_capacity(iterations);
     for _ in 0..iterations {
@@ -236,8 +241,78 @@ pub(crate) async fn run_production_benchmark(
         definition: LatencySummary::from_samples(&definition_samples),
         references: LatencySummary::from_samples(&reference_samples),
         diagnostics: LatencySummary::from_samples(&diagnostic_samples),
+        writer_wait,
         engine_heap_bytes,
     })
+}
+
+/// Concurrent editor reads that hold the project's engine read lock while a
+/// writer waits; mixed so each reader thread holds the lock for a different span.
+const WRITER_WAIT_READERS: usize = 3;
+
+/// Time to acquire the project engine's write lock while reader threads loop
+/// over hover, definition, and references. A request that holds its read guard
+/// across unrelated work, or reacquires it while a writer is queued, shows up
+/// here as writer wait (or as a deadlock).
+fn measure_writer_wait(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    position: Position,
+    iterations: usize,
+) -> LatencySummary {
+    let engine = server.analysis_engine_for_uri(uri);
+    let runtime = tokio::runtime::Handle::current();
+    let stop = AtomicBool::new(false);
+    let started_readers = AtomicUsize::new(0);
+    let mut samples = Vec::with_capacity(iterations);
+    std::thread::scope(|scope| {
+        for reader in 0..WRITER_WAIT_READERS {
+            let runtime = runtime.clone();
+            let (stop, started_readers) = (&stop, &started_readers);
+            scope.spawn(move || {
+                started_readers.fetch_add(1, Ordering::SeqCst);
+                while !stop.load(Ordering::SeqCst) {
+                    runtime.block_on(read_request(server, uri, position, reader));
+                }
+            });
+        }
+        while started_readers.load(Ordering::SeqCst) < WRITER_WAIT_READERS {
+            std::thread::yield_now();
+        }
+        for _ in 0..iterations {
+            std::thread::sleep(Duration::from_micros(500));
+            let start = Instant::now();
+            let guard = engine.write();
+            samples.push(start.elapsed());
+            drop(guard);
+        }
+        stop.store(true, Ordering::SeqCst);
+    });
+    LatencySummary::from_samples(&samples)
+}
+
+async fn read_request(server: &RubyLanguageServer, uri: &Url, position: Position, reader: usize) {
+    match reader % WRITER_WAIT_READERS {
+        0 => {
+            let _ = hover::handle(
+                server,
+                HoverParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position,
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                },
+            )
+            .await;
+        }
+        1 => {
+            let _ = definition::find_definition_at_position(server, uri.clone(), position).await;
+        }
+        _ => {
+            let _ = references::find_references_at_position(server, uri, position).await;
+        }
+    }
 }
 
 fn position_after(content: &str, needle: &str) -> anyhow::Result<Position> {
@@ -295,6 +370,7 @@ pub(crate) fn print_production_measurements(measurements: &ProductionMeasurement
     print_latency("definition", measurements.definition, budget.definition);
     print_latency("references", measurements.references, budget.references);
     print_latency("diagnostics", measurements.diagnostics, budget.diagnostics);
+    print_latency("writer_wait", measurements.writer_wait, budget.writer_wait);
     println!(
         "engine_heap: {:.1} MB (budget {:.1} MB)",
         bytes_to_mb(measurements.engine_heap_bytes),
