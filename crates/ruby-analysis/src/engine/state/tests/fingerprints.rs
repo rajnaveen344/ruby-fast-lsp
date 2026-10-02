@@ -72,16 +72,18 @@ fn semantic_context_fingerprint_is_path_independent_but_kind_and_fact_sensitive(
     let different_fact = engine_with("/runtime/a/shared.rb", SourceKind::Stub, "other");
 
     assert_eq!(
-        first.semantic_context_fingerprint(),
-        same_semantics_other_path.semantic_context_fingerprint()
+        first.view().semantic_context_fingerprint(),
+        same_semantics_other_path
+            .view()
+            .semantic_context_fingerprint()
     );
     assert_ne!(
-        first.semantic_context_fingerprint(),
-        different_kind.semantic_context_fingerprint()
+        first.view().semantic_context_fingerprint(),
+        different_kind.view().semantic_context_fingerprint()
     );
     assert_ne!(
-        first.semantic_context_fingerprint(),
-        different_fact.semantic_context_fingerprint()
+        first.view().semantic_context_fingerprint(),
+        different_fact.view().semantic_context_fingerprint()
     );
 }
 
@@ -165,13 +167,13 @@ fn semantic_result_fingerprint_is_file_id_independent_and_reference_sensitive() 
     let beta = engine_with("Beta", false);
 
     assert_eq!(
-        alpha.semantic_result_fingerprint(),
-        alpha_reversed.semantic_result_fingerprint(),
+        alpha.view().semantic_result_fingerprint(),
+        alpha_reversed.view().semantic_result_fingerprint(),
         "engine-local file IDs and insertion order must not change semantic evidence"
     );
     assert_ne!(
-        alpha.semantic_result_fingerprint(),
-        beta.semantic_result_fingerprint(),
+        alpha.view().semantic_result_fingerprint(),
+        beta.view().semantic_result_fingerprint(),
         "a different resolved definition target must change semantic evidence"
     );
 }
@@ -220,6 +222,7 @@ fn semantic_context_fingerprint_is_cross_process_stable() {
             ResolveMode::Deferred,
         );
         engine
+            .view()
             .semantic_context_fingerprint()
             .stable_bytes()
             .iter()

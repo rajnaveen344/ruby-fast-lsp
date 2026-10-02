@@ -30,6 +30,7 @@ fn bundled_jruby_core_seed_is_cross_process_stable() {
             .expect("bundled JRuby core stubs must index");
         let fingerprint = engine
             .read()
+            .view()
             .semantic_context_fingerprint()
             .stable_bytes()
             .iter()

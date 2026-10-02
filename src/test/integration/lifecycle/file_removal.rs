@@ -71,7 +71,7 @@ fn result_fingerprint(editor: &FakeEditor, filename: &str) -> SemanticResultFing
         .workspace_for(filename)
         .expect("file has a workspace");
     let engine = workspace.analysis_engine.read();
-    engine.semantic_result_fingerprint()
+    engine.view().semantic_result_fingerprint()
 }
 
 #[tokio::test]

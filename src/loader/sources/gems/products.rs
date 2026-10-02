@@ -371,6 +371,7 @@ impl IndexerGem {
                     "gem dependency product requires the dependency-only core/runtime semantic seed"
                 )
             })?
+            .view()
             .semantic_context_fingerprint();
         let manifests = self.required_gem_manifests(seed)?;
         self.index_prepared_required_gems_with_shared_product(ctx, analysis_engine, manifests, None)
@@ -389,6 +390,7 @@ impl IndexerGem {
                     "gem dependency product requires the dependency-only core/runtime semantic seed"
                 )
             })?
+            .view()
             .semantic_context_fingerprint();
         self.required_gem_manifest(gem_name, seed)
     }

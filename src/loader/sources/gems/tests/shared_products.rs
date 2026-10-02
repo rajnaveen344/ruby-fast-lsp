@@ -82,7 +82,7 @@ fn ordinary_gem_products_ignore_unrelated_jruby_classpaths_but_java_gems_do_not(
     first.set_runtime_provider_fingerprint(Some("classpath-a".to_string()));
     let mut second = shared_dependency_indexer(&second_project, &second_gem);
     second.set_runtime_provider_fingerprint(Some("classpath-b".to_string()));
-    let seed = AnalysisEngine::new().semantic_context_fingerprint();
+    let seed = AnalysisEngine::new().view().semantic_context_fingerprint();
     let first_key = first.required_gem_manifests(seed).unwrap()[0].key().clone();
     let second_key = second.required_gem_manifests(seed).unwrap()[0]
         .key()

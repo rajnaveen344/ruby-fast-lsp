@@ -414,13 +414,14 @@ fn exact_jruby_provider_handoff_preserves_generated_signature_facts() {
             );
         (
             engine
+                .view()
                 .semantic_export_fingerprint(first_signature_id)
                 .expect_invariant(
                     "generated First signature has no export fingerprint",
                     "every indexed signature enters through replace_facts",
                     "retain the ordinary file-owned signature lifecycle in the fixture",
                 ),
-            engine.semantic_result_fingerprint(),
+            engine.view().semantic_result_fingerprint(),
         )
     };
 
@@ -520,7 +521,7 @@ fn exact_jruby_provider_handoff_preserves_ordinary_include_diagnostics() {
         );
         (
             engine.query().diagnostic_facts_in_file(ordinary_id),
-            engine.semantic_result_fingerprint(),
+            engine.view().semantic_result_fingerprint(),
         )
     };
 
@@ -604,7 +605,7 @@ fn exact_jruby_replay_is_independent_of_exhaustive_batch_boundaries() {
         let symbols = AnalysisQuery::new(&engine).all_symbol_facts();
         assert!(symbols.iter().any(|fact| fact.fqn == first));
         assert!(symbols.iter().any(|fact| fact.fqn == second));
-        let actual = engine.semantic_result_fingerprint();
+        let actual = engine.view().semantic_result_fingerprint();
         if let Some(expected) = expected {
             assert_eq!(
                 actual, expected,

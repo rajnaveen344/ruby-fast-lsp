@@ -154,7 +154,7 @@ pub(crate) fn indexing_summary_json(
         dependency_navigation_ready_ms.push(dependencies_ready);
         semantic_complete_ms.push(status.elapsed_ms);
         let semantic_result_fingerprint_hex =
-            stable_fingerprint_hex(engine.semantic_result_fingerprint().stable_bytes());
+            stable_fingerprint_hex(engine.view().semantic_result_fingerprint().stable_bytes());
         project_evidence.push(serde_json::json!({
             "root": workspace.root_path,
             "runtime": workspace.runtime.selected().read().clone(),

@@ -106,7 +106,7 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
     let mut engine = Project::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "value");
     let range = engine.view().text_range(file_id, 0, 5);
-    let empty_fingerprint = engine.semantic_result_fingerprint();
+    let empty_fingerprint = engine.view().semantic_result_fingerprint();
 
     engine.update(
         file_id,
@@ -129,7 +129,10 @@ fn compact_local_read_type_is_queryable_and_replaced_without_a_type_store_fact()
         engine.view().local_read_types_in_file(file_id),
         Some(vec![(range, RubyType::string())])
     );
-    assert_ne!(engine.semantic_result_fingerprint(), empty_fingerprint);
+    assert_ne!(
+        engine.view().semantic_result_fingerprint(),
+        empty_fingerprint
+    );
 
     engine.update(file_id, FileAnalysis::default(), ResolveMode::Immediate);
     assert_eq!(engine.view().expression_type_at(file_id, 2), None);

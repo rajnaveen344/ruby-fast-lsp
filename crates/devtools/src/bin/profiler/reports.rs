@@ -17,10 +17,11 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
     for workspace in workspaces {
         let engine = workspace.analysis_engine.read();
         let result_fingerprints = engine
+            .view()
             .semantic_result_file_fingerprints()
             .into_iter()
             .collect::<std::collections::HashMap<_, _>>();
-        let resolution_fingerprints = engine.semantic_resolution_file_fingerprints();
+        let resolution_fingerprints = engine.view().semantic_resolution_file_fingerprints();
         let mut files = engine
             .view().files()
             .map(|file| {
@@ -41,7 +42,7 @@ pub(crate) fn print_semantic_export_manifest(server: &RubyLanguageServer) -> any
                     file.path.clone()
                 };
                 let fingerprint = engine
-                    .semantic_export_fingerprint(file.id)
+                    .view().semantic_export_fingerprint(file.id)
                     .map(|fingerprint| stable_fingerprint_hex(fingerprint.stable_bytes()));
                 let result_fingerprint = result_fingerprints.get(&file.id).unwrap_or_else(|| {
                     unreachable_invariant!(

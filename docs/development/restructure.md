@@ -175,7 +175,7 @@ Delete this file when the last task is done. Git history keeps the record.
     - [x] B4e6. Solver telemetry: `inference_telemetry`,
           `inference_telemetry_in_file`, `inference_evidence_in_file`,
           `method_return_outcomes_in_file`, `method_return_equations_in_file`.
-    - [ ] B4e7. Fingerprints: `semantic_export_fingerprint`,
+    - [x] B4e7. Fingerprints: `semantic_export_fingerprint`,
           `semantic_context_fingerprint`, `semantic_result_fingerprint`,
           `semantic_result_file_fingerprints`,
           `semantic_resolution_file_fingerprints`.

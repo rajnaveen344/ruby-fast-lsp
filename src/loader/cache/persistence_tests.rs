@@ -90,7 +90,7 @@ fn manifest_with_inputs(
         ruby_analysis::engine::ResolveMode::Deferred,
     );
     GemDependencyManifest::new(
-        seed_engine.semantic_context_fingerprint(),
+        seed_engine.view().semantic_context_fingerprint(),
         runtime_provider_fingerprint,
         closure_identities,
         vec![source_with_content(physical_path, content)],

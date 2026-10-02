@@ -187,6 +187,7 @@ fn cold_project_result_is_independent_of_a_prior_identical_file_pass() {
         let fingerprint = workspace_state
             .analysis_engine
             .read()
+            .view()
             .semantic_result_fingerprint();
         fingerprint
     };

@@ -495,7 +495,10 @@ impl IndexerProject {
                 .iter()
                 .filter_map(|registered| {
                     let file_id = engine.view().file_id(&registered.input.path)?;
-                    engine.semantic_export_fingerprint(file_id).map(|_| file_id)
+                    engine
+                        .view()
+                        .semantic_export_fingerprint(file_id)
+                        .map(|_| file_id)
                 })
                 .collect::<Vec<_>>();
             if stale_file_ids.is_empty() {

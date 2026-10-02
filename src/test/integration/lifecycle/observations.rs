@@ -75,10 +75,10 @@ async fn diagnostic_observation_cannot_repair_missing_semantic_facts() {
         FileAnalysis::default(),
         ResolveMode::Immediate,
     );
-    let before = engine.read().semantic_result_fingerprint();
+    let before = engine.read().view().semantic_result_fingerprint();
     let _observed = editor.diagnostics("observation.rb").await;
     assert_eq!(
-        engine.read().semantic_result_fingerprint(),
+        engine.read().view().semantic_result_fingerprint(),
         before,
         "diagnostic observation must not repair deliberately missing semantic facts"
     );
@@ -129,12 +129,12 @@ async fn tagged_diagnostic_observation_cannot_repair_missing_semantic_facts() {
         FileAnalysis::default(),
         ResolveMode::Immediate,
     );
-    let before = engine.read().semantic_result_fingerprint();
+    let before = engine.read().view().semantic_result_fingerprint();
     editor
         .check("observation.rb", &format!("<err none>{source}</err>"))
         .await;
     assert_eq!(
-        engine.read().semantic_result_fingerprint(),
+        engine.read().view().semantic_result_fingerprint(),
         before,
         "tagged diagnostic observation must not repair deliberately missing semantic facts"
     );
@@ -203,11 +203,11 @@ async fn opening_another_project_cannot_rebuild_or_publish_this_projects_state()
         FileAnalysis::default(),
         ResolveMode::Immediate,
     );
-    let facts = engine.read().semantic_result_fingerprint();
+    let facts = engine.read().view().semantic_result_fingerprint();
     let diagnostics = editor.published_diagnostics("alpha/caller.rb");
     editor.open("beta/definition.rb", "VALUE = 1\n").await;
     assert_eq!(
-        engine.read().semantic_result_fingerprint(),
+        engine.read().view().semantic_result_fingerprint(),
         facts,
         "opening a different project must not rebuild this project's deliberately incomplete facts"
     );
@@ -229,7 +229,7 @@ async fn editing_a_definition_cannot_refresh_another_projects_consumer() {
     let beta_uri = crate::test::harness::fixture_uri("/beta/definition.rb");
     let alpha = editor.server().analysis_engine_for_uri(&alpha_uri);
     let beta = editor.server().analysis_engine_for_uri(&beta_uri);
-    let alpha_facts = alpha.read().semantic_result_fingerprint();
+    let alpha_facts = alpha.read().view().semantic_result_fingerprint();
     let alpha_diagnostics = editor.diagnostics("alpha/caller.rb").await;
     assert_eq!(
         alpha_diagnostics.len(),
@@ -246,7 +246,7 @@ async fn editing_a_definition_cannot_refresh_another_projects_consumer() {
         "editing beta must preserve alpha's complete diagnostic publication"
     );
     assert_eq!(
-        alpha.read().semantic_result_fingerprint(),
+        alpha.read().view().semantic_result_fingerprint(),
         alpha_facts,
         "editing beta must leave alpha's semantic facts unchanged"
     );

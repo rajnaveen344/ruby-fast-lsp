@@ -301,6 +301,7 @@ impl FileProcessor {
         );
         let previous_export_fingerprint = analysis_engine
             .read()
+            .view()
             .semantic_export_fingerprint(analysis_file_id);
 
         // 2. Generate Syntax Diagnostics
@@ -482,6 +483,7 @@ impl AnalyzedFile {
         let replace_elapsed = replace_start.elapsed();
         let current_export_fingerprint = engine
             .read()
+            .view()
             .semantic_export_fingerprint(file_id)
             .expect_invariant(
                 "processed file has no semantic export fingerprint",

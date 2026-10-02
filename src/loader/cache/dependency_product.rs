@@ -687,7 +687,7 @@ mod tests {
     use ruby_analysis::engine::{AnalysisQuery, ProjectNeutralFileFactsTemplate};
 
     fn empty_seed() -> SemanticExportFingerprint {
-        AnalysisEngine::new().semantic_context_fingerprint()
+        AnalysisEngine::new().view().semantic_context_fingerprint()
     }
 
     fn source(path: &str, physical: &str, content: &str) -> GemDependencySource {
@@ -764,7 +764,7 @@ mod tests {
             ResolveMode::Deferred,
         );
         let changed_seed = GemDependencyManifest::new(
-            seed_engine.semantic_context_fingerprint(),
+            seed_engine.view().semantic_context_fingerprint(),
             None,
             &["widget:1:ruby:registry".to_string()],
             vec![source("widget/1/lib/widget.rb", "/a/widget.rb", "one")],

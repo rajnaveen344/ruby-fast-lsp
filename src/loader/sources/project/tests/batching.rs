@@ -273,6 +273,7 @@ fn exhaustive_semantics_do_not_depend_on_batch_boundaries() {
         let actual = workspace_state
             .analysis_engine
             .read()
+            .view()
             .semantic_result_fingerprint();
 
         if let Some(expected) = expected {
@@ -333,6 +334,7 @@ fn parallel_batch_collection_has_a_stable_semantic_result() {
         let actual = workspace_state
             .analysis_engine
             .read()
+            .view()
             .semantic_result_fingerprint();
 
         if let Some(expected) = expected {

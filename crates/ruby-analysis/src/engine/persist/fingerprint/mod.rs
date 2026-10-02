@@ -10,7 +10,7 @@ use std::hash::Hash;
 use crate::core::equations::method_return_equation::MethodReturnBase;
 use crate::core::{FileAnalysis, SourceFileId, SymbolKind, TypeSubject};
 
-use crate::engine::Project;
+use crate::engine::View;
 use stable_hash::{
     export_hash, result_hash, stable_bool, stable_callable_body_summary,
     stable_callable_signatures, stable_diagnostic_severity, stable_direct_yield_call,
@@ -216,12 +216,12 @@ pub enum SemanticChange {
     ExportsChanged,
 }
 
-impl Project {
+impl View<'_> {
     pub fn semantic_export_fingerprint(
         &self,
         file_id: SourceFileId,
     ) -> Option<SemanticExportFingerprint> {
-        self.files.export_fingerprint(file_id)
+        self.engine.files.export_fingerprint(file_id)
     }
 
     /// Stable semantic identity for an immutable dependency seed.
@@ -233,10 +233,11 @@ impl Project {
     /// signatures.
     pub fn semantic_context_fingerprint(&self) -> SemanticExportFingerprint {
         let mut file_fingerprints = self
+            .engine
             .files
             .export_fingerprints()
             .map(|(file_id, fingerprint)| {
-                let source = self.files.get(*file_id).expect_invariant(
+                let source = self.engine.files.get(*file_id).expect_invariant(
                     "semantic export fingerprint has no registered source file",
                     "update validates every file id before recording semantic state",
                     "remove fingerprints through the same file lifecycle as source registration",
@@ -282,12 +283,13 @@ impl Project {
         }
 
         let mut components = self
+            .engine
             .files
             .ids()
             .map(|file_id| (file_id, Vec::new()))
             .collect::<HashMap<_, _>>();
 
-        for fact in self.view().all_symbol_facts() {
+        for fact in self.all_symbol_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -300,7 +302,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.view().all_method_facts() {
+        for fact in self.all_method_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -329,7 +331,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.decls.method_visibility_overrides() {
+        for fact in self.engine.decls.method_visibility_overrides() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -342,7 +344,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.types.store().all_facts() {
+        for fact in self.engine.types.store().all_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -355,7 +357,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.view().all_graph_nodes() {
+        for fact in self.all_graph_nodes() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -367,7 +369,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.view().all_graph_edges() {
+        for fact in self.all_graph_edges() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -381,7 +383,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.view().unresolved_graph_edges() {
+        for fact in self.unresolved_graph_edges() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -400,8 +402,8 @@ impl Project {
                 }),
             );
         }
-        for (target, fact) in self.uses.resolved().iter_facts_with_targets() {
-            let target = self.names.fqn(target).unwrap_or_else(|| {
+        for (target, fact) in self.engine.uses.resolved().iter_facts_with_targets() {
+            let target = self.engine.names.fqn(target).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "resolved reference target {:?} has no interned FQN",
                     why = "stored references must retain a valid semantic target",
@@ -410,7 +412,7 @@ impl Project {
                 )
             });
             let caller = fact.caller.map(|caller| {
-                self.names.fqn(caller).unwrap_or_else(|| {
+                self.engine.names.fqn(caller).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "resolved reference caller {:?} has no interned FQN",
                         why = "caller provenance must remain valid while the reference exists",
@@ -431,7 +433,7 @@ impl Project {
                 }),
             );
         }
-        for fact in self.diagnostics.all_facts() {
+        for fact in self.engine.diagnostics.all_facts() {
             push_component(
                 &mut components,
                 fact.range.file_id,
@@ -444,7 +446,7 @@ impl Project {
                 }),
             );
         }
-        for (file_id, contexts) in self.decls.execution_contexts_by_file() {
+        for (file_id, contexts) in self.engine.decls.execution_contexts_by_file() {
             for context in contexts {
                 push_component(
                     &mut components,
@@ -462,7 +464,7 @@ impl Project {
                 );
             }
         }
-        for (file_id, reads) in self.types.local_read_types_by_file() {
+        for (file_id, reads) in self.engine.types.local_read_types_by_file() {
             for (range, ruby_type) in reads {
                 push_component(
                     &mut components,
@@ -479,7 +481,7 @@ impl Project {
         components
             .into_iter()
             .map(|(file_id, mut facts)| {
-                let source = self.files.get(file_id).expect_invariant(
+                let source = self.engine.files.get(file_id).expect_invariant(
                     "semantic result component owner has no registered source file",
                     "the component map is seeded exclusively from registered sources",
                     "keep source removal and semantic fact removal atomic",
@@ -519,13 +521,14 @@ impl Project {
             })
         };
         let mut components = self
+            .engine
             .files
             .ids()
             .map(|file_id| (file_id, [Vec::new(), Vec::new(), Vec::new()]))
             .collect::<HashMap<_, _>>();
 
-        for (target, fact) in self.uses.resolved().iter_facts_with_targets() {
-            let target = self.names.fqn(target).unwrap_or_else(|| {
+        for (target, fact) in self.engine.uses.resolved().iter_facts_with_targets() {
+            let target = self.engine.names.fqn(target).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "per-file reference fingerprint target {:?} has no interned FQN",
                     why = "resolved references retain their target identity",
@@ -534,7 +537,7 @@ impl Project {
                 )
             });
             let caller = fact.caller.map(|caller| {
-                self.names.fqn(caller).unwrap_or_else(|| {
+                self.engine.names.fqn(caller).unwrap_or_else(|| {
                     unreachable_invariant!(
                         what = "per-file reference fingerprint caller {:?} has no interned FQN",
                         why = "resolved references retain caller provenance",
@@ -559,7 +562,7 @@ impl Project {
             })[0]
                 .push(component);
         }
-        for (file_id, contexts) in self.decls.execution_contexts_by_file() {
+        for (file_id, contexts) in self.engine.decls.execution_contexts_by_file() {
             let output = &mut components.get_mut(&file_id).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "execution-context fingerprint belongs to unknown file {:?}",
@@ -580,7 +583,7 @@ impl Project {
                 })
             }));
         }
-        for (file_id, reads) in self.types.local_read_types_by_file() {
+        for (file_id, reads) in self.engine.types.local_read_types_by_file() {
             let output = &mut components.get_mut(&file_id).unwrap_or_else(|| {
                 unreachable_invariant!(
                     what = "local-read fingerprint belongs to unknown file {:?}",

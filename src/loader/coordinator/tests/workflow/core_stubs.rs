@@ -222,8 +222,8 @@ async fn dependency_core_seed_never_contains_an_open_project_document() {
         "the reusable dependency seed must never inherit project-owned open-document facts"
     );
     assert_eq!(
-        clean_seed.semantic_context_fingerprint(),
-        live_seed.semantic_context_fingerprint(),
+        clean_seed.view().semantic_context_fingerprint(),
+        live_seed.view().semantic_context_fingerprint(),
         "editor open timing must not change the immutable dependency seed identity"
     );
 }

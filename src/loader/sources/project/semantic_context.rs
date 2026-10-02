@@ -101,7 +101,10 @@ impl IndexerProject {
             .files()
             .filter(|file| {
                 matches!(file.kind, SourceKind::Project | SourceKind::Excluded)
-                    && snapshot.semantic_export_fingerprint(file.id).is_some()
+                    && snapshot
+                        .view()
+                        .semantic_export_fingerprint(file.id)
+                        .is_some()
             })
             .map(|file| file.id)
             .collect::<Vec<_>>();

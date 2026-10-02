@@ -173,7 +173,10 @@ fn removed_file_leaves_the_registered_sources() {
     );
     assert_eq!(engine.view().file_id("parent.rb"), None);
     assert!(engine.view().file(parent_file).is_none());
-    assert!(engine.semantic_export_fingerprint(parent_file).is_none());
+    assert!(engine
+        .view()
+        .semantic_export_fingerprint(parent_file)
+        .is_none());
     assert!(engine
         .view()
         .source_snapshot_for_path("parent.rb")
@@ -185,12 +188,12 @@ fn removal_matches_a_project_that_never_added_the_file() {
     let (never_added, removed, _, _) = child_only_and_removed_parent();
 
     assert_eq!(
-        removed.semantic_result_fingerprint(),
-        never_added.semantic_result_fingerprint()
+        removed.view().semantic_result_fingerprint(),
+        never_added.view().semantic_result_fingerprint()
     );
     assert_eq!(
-        removed.semantic_context_fingerprint(),
-        never_added.semantic_context_fingerprint()
+        removed.view().semantic_context_fingerprint(),
+        never_added.view().semantic_context_fingerprint()
     );
     assert_eq!(removed.stats(), never_added.stats());
     assert_eq!(
@@ -355,7 +358,10 @@ fn reregistering_a_removed_path_starts_empty_with_a_new_id() {
     assert!(!engine
         .hierarchy
         .has_node(&engine.names, &namespace("Parent")));
-    assert!(engine.semantic_export_fingerprint(reregistered).is_none());
+    assert!(engine
+        .view()
+        .semantic_export_fingerprint(reregistered)
+        .is_none());
     assert_eq!(
         engine.update(
             reregistered,
@@ -376,7 +382,7 @@ fn removing_an_unknown_file_is_a_no_op() {
         ResolveMode::Immediate,
     );
     let identity = engine.query_cache_identity();
-    let fingerprint = engine.semantic_result_fingerprint();
+    let fingerprint = engine.view().semantic_result_fingerprint();
 
     assert!(!engine.remove(SourceFileId(parent_file.0 + 1), ResolveMode::Immediate));
     assert!(engine.remove(parent_file, ResolveMode::Deferred));
@@ -385,5 +391,5 @@ fn removing_an_unknown_file_is_a_no_op() {
 
     assert_eq!(engine.query_cache_identity(), after_removal);
     assert!(after_removal.1 > identity.1);
-    assert_ne!(engine.semantic_result_fingerprint(), fingerprint);
+    assert_ne!(engine.view().semantic_result_fingerprint(), fingerprint);
 }
