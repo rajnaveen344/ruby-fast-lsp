@@ -302,8 +302,12 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] C2d. Move `loader/cache/persistent` to `src/utils/persistent_cache/`
         with no other change. Environment then no longer imports the loader.
         Done: environment has no `crate::loader` import, tests included.
-  - [ ] C2e. Move `collect_project_files` from `utils/file_ops.rs` to
+  - [x] C2e. Move `collect_project_files` from `utils/file_ops.rs` to
         `loader/sources/project`, so utils no longer reads `IndexingConfig`.
+        Done: `ProjectFilePolicy`, `collect_project_signature_files`, and
+        their glob helpers also read `IndexingConfig`, so they moved with it
+        to `loader/sources/project/files.rs`; `should_index_file` and the
+        configuration-free Ruby collectors stay in utils.
   - [ ] C2f. Make the extension registry return the seed `FileAnalysis`
         instead of writing the engine. The loader commits it through
         `LoadSink::commit_seed`.

@@ -22,6 +22,7 @@ mod jruby_replay;
 mod navigation;
 mod semantic_context;
 
+pub mod files;
 pub mod roots;
 
 pub(crate) const MAX_PROJECT_NAVIGATION_DEMAND_KEYS: usize = 16;

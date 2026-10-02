@@ -26,8 +26,10 @@ reference candidates, resolved references, and diagnostics.
 - `scheduling/`: the project indexing queue, progress status, and
   navigation demand; the resource governor it admits work through lives in
   `src/utils/admission/`
-- `sources/project/`: project root discovery, project file discovery,
-  navigation-demand collection, and dependency scan
+- `sources/project/`: project root discovery, project file discovery
+  (`files.rs` owns `ProjectFilePolicy` and the configured project and
+  signature file collectors), navigation-demand collection, and dependency
+  scan
 - `sources/stdlib/`: standard library file discovery and exact runtime load paths
 - `sources/gems/`: gem discovery, lockfile selection, vendor cache extraction,
   and shared gem dependency products

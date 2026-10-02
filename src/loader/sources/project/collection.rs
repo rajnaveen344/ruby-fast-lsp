@@ -7,7 +7,6 @@ use crate::environment::runtime::jruby::imports::{StaticJavaNavigationPlan, Stat
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::{LoadContext, LoadSink};
 use crate::loader::file_processor::ProjectFileCollectionTiming;
-use crate::utils;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use rayon::prelude::*;
@@ -309,7 +308,7 @@ impl IndexerProject {
 
     /// Collect all Ruby files in the project
     pub(super) fn collect_project_files(&self) -> Result<Vec<PathBuf>> {
-        utils::file_ops::collect_project_files(&self.workspace_root, &self.indexing_config)
+        super::files::collect_project_files(&self.workspace_root, &self.indexing_config)
     }
 
     /// Collect facts from files and track their dependencies (Parallelized with rayon)

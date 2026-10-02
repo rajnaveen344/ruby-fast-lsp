@@ -6,7 +6,6 @@ use super::MAX_PROJECT_NAVIGATION_DEMAND_KEYS;
 use crate::environment::runtime::jruby::imports::StaticJavaNavigationPlan;
 use crate::invariant::ExpectInvariant;
 use crate::loader::context::LoadContext;
-use crate::utils;
 use anyhow::Result;
 use log::info;
 use std::collections::HashSet;
@@ -173,7 +172,7 @@ impl IndexerProject {
         let (mut ruby_files, priority_file_count) =
             prioritize_project_files(project_files, &self.project_navigation_priority_keys);
         let exhaustive_files = ruby_files.split_off(priority_file_count);
-        let signature_files = utils::file_ops::collect_project_signature_files(
+        let signature_files = super::files::collect_project_signature_files(
             &self.workspace_root,
             &self.indexing_config,
         )?;

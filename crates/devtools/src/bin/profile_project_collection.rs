@@ -25,8 +25,8 @@ use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::AnalysisEngine;
 use ruby_fast_lsp::environment::config::IndexingConfig;
 use ruby_fast_lsp::loader::file_processor::{FileProcessor, ProjectFileCollectionTiming};
+use ruby_fast_lsp::loader::sources::project::files::collect_project_files;
 use ruby_fast_lsp::server::RubyLanguageServer;
-use ruby_fast_lsp::utils::file_ops::collect_project_files;
 use tower_lsp::lsp_types::Url;
 
 fn main() -> Result<()> {
