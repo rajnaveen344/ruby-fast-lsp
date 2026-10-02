@@ -33,7 +33,6 @@ use tower_lsp::lsp_types::{Position, Url};
 #[derive(Clone)]
 pub struct EngineQuery {
     doc: Option<Arc<RwLock<RubyDocument>>>,
-    uri: Option<Url>,
     analysis_engine: Arc<RwLock<AnalysisEngine>>,
 }
 
@@ -95,24 +94,13 @@ impl EngineQuery {
         })
     }
 
-    pub(crate) fn analyzer_at_position(
-        &self,
-        uri: &Url,
-        content: &str,
-        position: Position,
-    ) -> RubyPrismAnalyzer {
-        self.with_view(|cursor| cursor.analyzer(uri, content, position))
-    }
-
     /// Create an EngineQuery with document context and analysis engine access.
     pub fn with_doc_and_engine(
         doc: Arc<RwLock<RubyDocument>>,
         analysis_engine: Arc<RwLock<AnalysisEngine>>,
     ) -> Self {
-        let uri = doc.read().uri.clone();
         Self {
             doc: Some(doc),
-            uri: Some(uri),
             analysis_engine,
         }
     }
@@ -121,21 +109,8 @@ impl EngineQuery {
     pub fn with_engine(analysis_engine: Arc<RwLock<AnalysisEngine>>) -> Self {
         Self {
             doc: None,
-            uri: None,
             analysis_engine,
         }
-    }
-
-    /// Get the current file URI if set.
-    #[inline]
-    pub fn uri(&self) -> Option<&Url> {
-        self.uri.as_ref()
-    }
-
-    /// Get the document if attached.
-    #[inline]
-    pub fn doc(&self) -> Option<&Arc<RwLock<RubyDocument>>> {
-        self.doc.as_ref()
     }
 
     /// Get the analysis engine.

@@ -9,9 +9,8 @@
 //! of the enclosing method (the caller). This makes both incoming and outgoing
 //! calls simple grouping operations on existing analysis data.
 
-use crate::invariant::ExpectInvariant;
 use log::info;
-use ruby_analysis::engine::{AnalysisQuery, CallHierarchyMethod};
+use ruby_analysis::engine::{CallHierarchyMethod, View};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -24,7 +23,7 @@ use tower_lsp::lsp_types::{
 use ruby_analysis::indexer::Identifier;
 
 use crate::features::cursor::analysis_location::{location_for_range, lsp_ranges_for_ranges};
-use crate::features::cursor::EngineQuery;
+use crate::features::cursor::{method, Cursor, EngineQuery};
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::source_position;
 
@@ -40,12 +39,14 @@ pub async fn handle_prepare(
         uri.path()
     );
     let start_time = Instant::now();
-    let result = server.get_doc(&uri).and_then(|doc| {
-        EngineQuery::with_engine(server.analysis_engine_for_uri(&uri)).prepare_call_hierarchy(
-            &uri,
-            position,
-            doc.content.clone(),
-        )
+    let content = server
+        .documents
+        .read()
+        .get(&uri)
+        .map(|document| document.read().content.clone());
+    let result = content.and_then(|content| {
+        EngineQuery::with_engine(server.analysis_engine_for_uri(&uri))
+            .with_view(|cursor| prepare_at(cursor, &uri, position, &content))
     });
     info!(
         "[PERF] Prepare call hierarchy completed in {:?}",
@@ -61,8 +62,7 @@ pub async fn handle_incoming(
 ) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
     info!("Incoming calls request received for: {}", params.item.name);
     let start_time = Instant::now();
-    let result =
-        item_query(server, &params.item).and_then(|(query, data)| query.get_incoming_calls(&data));
+    let result = read_item(server, &params.item, incoming_calls);
     info!(
         "[PERF] Incoming calls completed in {:?}, returned {} items",
         start_time.elapsed(),
@@ -78,8 +78,7 @@ pub async fn handle_outgoing(
 ) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
     info!("Outgoing calls request received for: {}", params.item.name);
     let start_time = Instant::now();
-    let result =
-        item_query(server, &params.item).and_then(|(query, data)| query.get_outgoing_calls(&data));
+    let result = read_item(server, &params.item, outgoing_calls);
     info!(
         "[PERF] Outgoing calls completed in {:?}, returned {} items",
         start_time.elapsed(),
@@ -88,17 +87,19 @@ pub async fn handle_outgoing(
     Ok(result)
 }
 
-/// The owning engine and stored identity of a follow-up request's item.
-fn item_query(
+/// Read a follow-up request's stored item identity under one view of its
+/// owning engine.
+fn read_item<R>(
     server: &RubyLanguageServer,
     item: &CallHierarchyItem,
-) -> Option<(EngineQuery, CallHierarchyData)> {
-    let analysis_engine = server.analysis_engine_for_uri(&item.uri);
+    read: impl FnOnce(&View<'_>, &CallHierarchyData) -> Option<R>,
+) -> Option<R> {
     let data: CallHierarchyData = item
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
-    Some((EngineQuery::with_engine(analysis_engine), data))
+    EngineQuery::with_engine(server.analysis_engine_for_uri(&item.uri))
+        .with_view(|cursor| read(cursor.view, &data))
 }
 
 // ============================================================================
@@ -113,130 +114,84 @@ pub struct CallHierarchyData {
 }
 
 // ============================================================================
-// EngineQuery entry points
+// Queries over one cursor
 // ============================================================================
 
-impl EngineQuery {
-    /// Find the method at the cursor position and return a CallHierarchyItem.
-    pub fn prepare_call_hierarchy(
-        &self,
-        uri: &Url,
-        position: Position,
-        content: String,
-    ) -> Option<Vec<CallHierarchyItem>> {
+/// The call hierarchy item for the method at `position`.
+pub fn prepare_at(
+    cursor: Cursor<'_>,
+    uri: &Url,
+    position: Position,
+    content: &str,
+) -> Option<Vec<CallHierarchyItem>> {
+    info!(
+        "Prepare call hierarchy request for {:?} at {:?}",
+        uri.path(),
+        position
+    );
+    let (identifier, _, ancestors, _scope_id, namespace_kind) = cursor
+        .analyzer(uri, content, position)
+        .get_identifier_at_position(source_position(position));
+    let identifier = identifier?;
+    let Identifier::RubyMethod { receiver, iden, .. } = &identifier else {
         info!(
-            "Prepare call hierarchy request for {:?} at {:?}",
-            uri.path(),
-            position
+            "Call hierarchy only supports methods, got: {:?}",
+            identifier
         );
+        return None;
+    };
+    let owner_fqn =
+        method::receiver_namespace(cursor, receiver, &ancestors, namespace_kind, position)?;
+    let method = cursor
+        .view
+        .call_hierarchy_method_for_owner(&owner_fqn, iden)?;
+    Some(vec![call_hierarchy_item(cursor.view, method)?])
+}
 
-        let analyzer = self.analyzer_at_position(uri, &content, position);
-        let (identifier, _, ancestors, _scope_id, namespace_kind) =
-            analyzer.get_identifier_at_position(source_position(position));
-
-        let identifier = identifier?;
-
-        match &identifier {
-            Identifier::RubyMethod {
-                namespace: _,
-                receiver,
-                iden,
-            } => {
-                let owner_fqn = self.resolve_receiver_to_namespace(
-                    receiver,
-                    &ancestors,
-                    namespace_kind,
-                    position,
-                )?;
-                let engine_ref = self.analysis_engine().expect_invariant(
-                    "call hierarchy prepare requires an analysis engine",
-                    "LSP callHierarchy should be a thin wrapper over AnalysisEngine",
-                    "construct EngineQuery with with_engine()",
-                );
-                let engine = engine_ref.read();
-                let query = AnalysisQuery::new(&engine);
-                if let Some(item) = query
-                    .call_hierarchy_method_for_owner(&owner_fqn, iden)
-                    .and_then(|method| call_hierarchy_item_from_engine_method(&engine, method))
-                {
-                    return Some(vec![item]);
-                }
-                None
-            }
-            _ => {
-                info!(
-                    "Call hierarchy only supports methods, got: {:?}",
-                    identifier
-                );
-                None
-            }
-        }
-    }
-
-    /// Get all methods that call the given method.
-    pub fn get_incoming_calls(
-        &self,
-        data: &CallHierarchyData,
-    ) -> Option<Vec<CallHierarchyIncomingCall>> {
-        let engine_ref = self.analysis_engine().expect_invariant(
-            "incoming call hierarchy requires an analysis engine",
-            "LSP callHierarchy should be a thin wrapper over AnalysisEngine",
-            "construct EngineQuery with with_engine()",
-        );
-        let engine = engine_ref.read();
-        let query = AnalysisQuery::new(&engine);
-        let method_fqn = query.parse_method_fqn(&data.fqn)?;
-        Some(
-            query
-                .incoming_calls(&method_fqn)
-                .into_iter()
-                .filter_map(|call| {
-                    Some(CallHierarchyIncomingCall {
-                        from: call_hierarchy_item_from_engine_method(&engine, call.from)?,
-                        from_ranges: lsp_ranges_for_ranges(&engine.view(), call.from_ranges),
-                    })
+/// The methods that call the stored method.
+pub fn incoming_calls(
+    view: &View<'_>,
+    data: &CallHierarchyData,
+) -> Option<Vec<CallHierarchyIncomingCall>> {
+    let method_fqn = view.parse_method_fqn(&data.fqn)?;
+    Some(
+        view.incoming_calls(&method_fqn)
+            .into_iter()
+            .filter_map(|call| {
+                Some(CallHierarchyIncomingCall {
+                    from: call_hierarchy_item(view, call.from)?,
+                    from_ranges: lsp_ranges_for_ranges(view, call.from_ranges),
                 })
-                .collect(),
-        )
-    }
+            })
+            .collect(),
+    )
+}
 
-    /// Get all methods called by the given method.
-    pub fn get_outgoing_calls(
-        &self,
-        data: &CallHierarchyData,
-    ) -> Option<Vec<CallHierarchyOutgoingCall>> {
-        let engine_ref = self.analysis_engine().expect_invariant(
-            "outgoing call hierarchy requires an analysis engine",
-            "LSP callHierarchy should be a thin wrapper over AnalysisEngine",
-            "construct EngineQuery with with_engine()",
-        );
-        let engine = engine_ref.read();
-        let query = AnalysisQuery::new(&engine);
-        let method_fqn = query.parse_method_fqn(&data.fqn)?;
-        Some(
-            query
-                .outgoing_calls(&method_fqn)
-                .into_iter()
-                .filter_map(|call| {
-                    Some(CallHierarchyOutgoingCall {
-                        to: call_hierarchy_item_from_engine_method(&engine, call.to)?,
-                        from_ranges: lsp_ranges_for_ranges(&engine.view(), call.from_ranges),
-                    })
+/// The methods the stored method calls.
+pub fn outgoing_calls(
+    view: &View<'_>,
+    data: &CallHierarchyData,
+) -> Option<Vec<CallHierarchyOutgoingCall>> {
+    let method_fqn = view.parse_method_fqn(&data.fqn)?;
+    Some(
+        view.outgoing_calls(&method_fqn)
+            .into_iter()
+            .filter_map(|call| {
+                Some(CallHierarchyOutgoingCall {
+                    to: call_hierarchy_item(view, call.to)?,
+                    from_ranges: lsp_ranges_for_ranges(view, call.from_ranges),
                 })
-                .collect(),
-        )
-    }
+            })
+            .collect(),
+    )
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-fn call_hierarchy_item_from_engine_method(
-    engine: &ruby_analysis::engine::AnalysisEngine,
-    method: CallHierarchyMethod,
-) -> Option<CallHierarchyItem> {
-    let location = location_for_range(&engine.view(), method.range)?;
+fn call_hierarchy_item(view: &View<'_>, method: CallHierarchyMethod) -> Option<CallHierarchyItem> {
+    let location = location_for_range(view, method.range)?;
     Some(CallHierarchyItem {
         name: method.fqn.name(),
         kind: SymbolKind::METHOD,

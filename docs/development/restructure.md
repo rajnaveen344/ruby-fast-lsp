@@ -249,7 +249,7 @@ Delete this file when the last task is done. Git history keeps the record.
   - [x] B6d. Hover.
   - [x] B6e. Completion. Profiler comparison after B6b–e, including writer
         wait time.
-  - [ ] B6f. Inlay hints, signature help, rename, hierarchies, code lens,
+  - [x] B6f. Inlay hints, signature help, rename, hierarchies, code lens,
         workspace symbols.
   - [x] B6g. Diagnostics projection takes `&View` (with B7d).
   - [ ] B6h. Only `Project::view()` constructs views outside `engine/`.

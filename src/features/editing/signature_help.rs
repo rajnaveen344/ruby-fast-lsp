@@ -5,7 +5,6 @@ use crate::invariant::ExpectInvariant;
 use ruby_analysis::core::MethodReceiver;
 use ruby_analysis::core::{FullyQualifiedName, MethodFact, MethodParamFact, MethodParamKind};
 use ruby_analysis::engine::lookup::{self, LookupReceiver, MethodRequest, MethodWant};
-use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::inference::method::return_type::rbs_method_signatures_for_type;
 use ruby_analysis::inference::rbs::{RbsMethodSignature, RbsSignatureParameter};
 use ruby_analysis::inference::semantics::ReceiverAccess;
@@ -15,9 +14,8 @@ use tower_lsp::lsp_types::{
     SignatureHelp, SignatureHelpParams, SignatureInformation, Url,
 };
 
-use crate::features::cursor::EngineQuery;
+use crate::features::cursor::{method, Cursor, EngineQuery};
 use crate::server::RubyLanguageServer;
-use crate::utils::lsp::source_position;
 
 /// Handle `textDocument/signatureHelp`.
 pub async fn handle(
@@ -33,14 +31,12 @@ fn signature_help(
 ) -> Option<SignatureHelp> {
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
-    let (content, document) = {
-        let documents = server.documents.read();
-        let document = documents.get(&uri)?.clone();
-        let content = document.read().content.clone();
-        (content, document)
-    };
-    let query = EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri));
-    let help = query.signature_help_at_position(&uri, position, &content)?;
+    let document = server.documents.read().get(&uri)?.clone();
+    let help = EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri))
+        .with_view(|cursor| {
+            let content = &cursor.document?.content;
+            signature_help_at(cursor, &uri, position, content)
+        })?;
 
     Some(SignatureHelp {
         signatures: help
@@ -93,152 +89,145 @@ pub struct SignatureParameterData {
     pub documentation: Option<String>,
 }
 
-impl EngineQuery {
-    pub fn signature_help_at_position(
-        &self,
-        uri: &Url,
-        position: Position,
-        content: &str,
-    ) -> Option<SignatureHelpData> {
-        let document = self.doc()?.read();
-        let byte_offset = document.position_to_analysis_offset(source_position(position));
-        let analyzer = self.analyzer_at_position(uri, content, position);
-        let target = analyzer.get_signature_help_target(byte_offset)?;
-        let file_id = document.analysis_file_id();
-        drop(document);
+/// The overloads and active parameter of the call enclosing `position`.
+pub fn signature_help_at(
+    cursor: Cursor<'_>,
+    uri: &Url,
+    position: Position,
+    content: &str,
+) -> Option<SignatureHelpData> {
+    let file_id = cursor.file_id()?;
+    let byte_offset = cursor.offset(position)?;
+    let target = cursor
+        .analyzer(uri, content, position)
+        .get_signature_help_target(byte_offset)?;
+    let view = cursor.view;
 
-        if matches!(target.receiver, MethodReceiver::Super) {
-            return None;
-        }
+    if matches!(target.receiver, MethodReceiver::Super) {
+        return None;
+    }
 
-        let flow_sensitive_receiver = matches!(
-            &target.receiver,
-            MethodReceiver::LocalVariable(_)
-                | MethodReceiver::InstanceVariable(_)
-                | MethodReceiver::ClassVariable(_)
-                | MethodReceiver::GlobalVariable(_)
-                | MethodReceiver::MethodCall { .. }
-                | MethodReceiver::Literal(_)
-                | MethodReceiver::Expression
-        );
-        if flow_sensitive_receiver
-            && target.receiver_range.is_some_and(|(start, _end)| {
-                self.analysis_engine().is_some_and(|engine| {
-                    AnalysisQuery::new(&engine.read())
-                        .expression_unknown_reason_at(file_id, start)
-                        .is_some()
-                })
-            })
-        {
-            return None;
-        }
-
-        let receiver_type = self.resolve_receiver_type(
-            &target.receiver,
-            &target.namespace,
-            target.namespace_kind,
-            position,
-        );
-        if flow_sensitive_receiver && receiver_type == ruby_analysis::core::RubyType::Unknown {
-            return None;
-        }
-        let union_receiver = matches!(receiver_type, ruby_analysis::core::RubyType::Union(_));
-        let namespace_fqn = if union_receiver {
-            None
-        } else {
-            Some(self.resolve_receiver_to_namespace(
-                &target.receiver,
-                &target.namespace,
-                target.namespace_kind,
-                position,
-            )?)
-        };
-        let caller_namespace = FullyQualifiedName::namespace_with_kind(
-            target.namespace.clone(),
-            target.namespace_kind,
-        );
-        let engine = self.analysis_engine()?.read();
-        let query = AnalysisQuery::new(&engine);
-        let signatures = |receiver, access| {
-            let request = MethodRequest::new(receiver, target.method, MethodWant::Signatures)
-                .with_access(access);
-            lookup::method(&query, request).into_signature_vec()
-        };
-        let facts = match &target.receiver {
-            MethodReceiver::None => signatures(
-                LookupReceiver::Namespace(namespace_fqn.as_ref().expect_invariant(
-                    "an implicit receiver was classified as a union without a namespace",
-                    "implicit self has one lexical runtime namespace",
-                    "keep union receiver handling restricted to explicit typed expressions",
-                )),
-                ReceiverAccess::Any,
-            ),
-            MethodReceiver::SelfReceiver
-            | MethodReceiver::Constant(_)
-            | MethodReceiver::LocalVariable(_)
+    let flow_sensitive_receiver = matches!(
+        &target.receiver,
+        MethodReceiver::LocalVariable(_)
             | MethodReceiver::InstanceVariable(_)
             | MethodReceiver::ClassVariable(_)
             | MethodReceiver::GlobalVariable(_)
             | MethodReceiver::MethodCall { .. }
             | MethodReceiver::Literal(_)
-            | MethodReceiver::Expression => {
-                let receiver = if union_receiver {
-                    LookupReceiver::Type(&receiver_type)
-                } else {
-                    LookupReceiver::Namespace(namespace_fqn.as_ref().expect_invariant(
+            | MethodReceiver::Expression
+    );
+    if flow_sensitive_receiver
+        && target.receiver_range.is_some_and(|(start, _end)| {
+            view.expression_unknown_reason_at(file_id, start).is_some()
+        })
+    {
+        return None;
+    }
+
+    let receiver_type = method::receiver_type(
+        cursor,
+        &target.receiver,
+        &target.namespace,
+        target.namespace_kind,
+        position,
+    );
+    if flow_sensitive_receiver && receiver_type == ruby_analysis::core::RubyType::Unknown {
+        return None;
+    }
+    let union_receiver = matches!(receiver_type, ruby_analysis::core::RubyType::Union(_));
+    let namespace_fqn = if union_receiver {
+        None
+    } else {
+        Some(method::receiver_namespace(
+            cursor,
+            &target.receiver,
+            &target.namespace,
+            target.namespace_kind,
+            position,
+        )?)
+    };
+    let caller_namespace =
+        FullyQualifiedName::namespace_with_kind(target.namespace.clone(), target.namespace_kind);
+    let signatures = |receiver, access| {
+        let request =
+            MethodRequest::new(receiver, target.method, MethodWant::Signatures).with_access(access);
+        lookup::method(view, request).into_signature_vec()
+    };
+    let facts = match &target.receiver {
+        MethodReceiver::None => signatures(
+            LookupReceiver::Namespace(namespace_fqn.as_ref().expect_invariant(
+                "an implicit receiver was classified as a union without a namespace",
+                "implicit self has one lexical runtime namespace",
+                "keep union receiver handling restricted to explicit typed expressions",
+            )),
+            ReceiverAccess::Any,
+        ),
+        MethodReceiver::SelfReceiver
+        | MethodReceiver::Constant(_)
+        | MethodReceiver::LocalVariable(_)
+        | MethodReceiver::InstanceVariable(_)
+        | MethodReceiver::ClassVariable(_)
+        | MethodReceiver::GlobalVariable(_)
+        | MethodReceiver::MethodCall { .. }
+        | MethodReceiver::Literal(_)
+        | MethodReceiver::Expression => {
+            let receiver = if union_receiver {
+                LookupReceiver::Type(&receiver_type)
+            } else {
+                LookupReceiver::Namespace(namespace_fqn.as_ref().expect_invariant(
                         "a non-union explicit receiver lost its resolved namespace before signature lookup",
                         "receiver classification and namespace resolution use the same immutable target",
                         "retain the resolved namespace through signature selection",
                     ))
-                };
-                signatures(
-                    receiver,
-                    ReceiverAccess::Protected {
-                        caller: &caller_namespace,
-                    },
-                )
-            }
-            MethodReceiver::Super => unreachable_invariant!(
-                what = "super receiver reached ordinary signature resolution",
-                why = "super calls are rejected before receiver resolution",
-                fix = "keep the early super return above the receiver match",
-            ),
-        };
-        let mut signatures = facts
+            };
+            signatures(
+                receiver,
+                ReceiverAccess::Protected {
+                    caller: &caller_namespace,
+                },
+            )
+        }
+        MethodReceiver::Super => unreachable_invariant!(
+            what = "super receiver reached ordinary signature resolution",
+            why = "super calls are rejected before receiver resolution",
+            fix = "keep the early super return above the receiver match",
+        ),
+    };
+    let mut signatures = facts
+        .iter()
+        .map(|fact| {
+            signature_data(
+                target.method.as_str(),
+                fact,
+                target.active_parameter,
+                target.active_keyword.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    if signatures.is_empty() {
+        signatures = rbs_method_signatures_for_type(&receiver_type, target.method.as_str())
             .iter()
-            .map(|fact| {
-                signature_data(
+            .map(|signature| {
+                rbs_signature_data(
                     target.method.as_str(),
-                    fact,
+                    signature,
                     target.active_parameter,
                     target.active_keyword.as_deref(),
                 )
             })
-            .collect::<Vec<_>>();
-        if signatures.is_empty() {
-            signatures = rbs_method_signatures_for_type(&receiver_type, target.method.as_str())
-                .iter()
-                .map(|signature| {
-                    rbs_signature_data(
-                        target.method.as_str(),
-                        signature,
-                        target.active_parameter,
-                        target.active_keyword.as_deref(),
-                    )
-                })
-                .collect();
-        }
-        if signatures.is_empty() {
-            return None;
-        }
-
-        let active_parameter = signatures[0].active_parameter;
-        Some(SignatureHelpData {
-            signatures,
-            active_signature: 0,
-            active_parameter,
-        })
+            .collect();
     }
+    if signatures.is_empty() {
+        return None;
+    }
+
+    let active_parameter = signatures[0].active_parameter;
+    Some(SignatureHelpData {
+        signatures,
+        active_signature: 0,
+        active_parameter,
+    })
 }
 
 fn signature_data(

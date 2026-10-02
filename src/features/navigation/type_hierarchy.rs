@@ -19,11 +19,9 @@
 //!
 //! The supertypes list follows this exact order (excluding self).
 
-use crate::invariant::ExpectInvariant;
 use log::{debug, info};
-use ruby_analysis::engine::{
-    AnalysisQuery, TypeHierarchyEntry, TypeHierarchyNode, TypeHierarchyRelation,
-};
+use ruby_analysis::core::FullyQualifiedName;
+use ruby_analysis::engine::{TypeHierarchyEntry, TypeHierarchyNode, TypeHierarchyRelation, View};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -35,7 +33,7 @@ use tower_lsp::lsp_types::{
 use ruby_analysis::indexer::Identifier;
 
 use crate::features::cursor::analysis_location::location_for_range;
-use crate::features::cursor::EngineQuery;
+use crate::features::cursor::{Cursor, EngineQuery};
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::source_position;
 
@@ -51,12 +49,14 @@ pub async fn handle_prepare(
         uri.path()
     );
     let start_time = Instant::now();
-    let result = server.get_doc(&uri).and_then(|doc| {
-        EngineQuery::with_engine(server.analysis_engine_for_uri(&uri)).prepare_type_hierarchy(
-            &uri,
-            position,
-            doc.content.clone(),
-        )
+    let content = server
+        .documents
+        .read()
+        .get(&uri)
+        .map(|document| document.read().content.clone());
+    let result = content.and_then(|content| {
+        EngineQuery::with_engine(server.analysis_engine_for_uri(&uri))
+            .with_view(|cursor| prepare_at(cursor, &uri, position, &content))
     });
     info!(
         "[PERF] Prepare type hierarchy completed in {:?}",
@@ -72,8 +72,7 @@ pub async fn handle_supertypes(
 ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
     info!("Supertypes request received for: {}", params.item.name);
     let start_time = Instant::now();
-    let result =
-        item_query(server, &params.item).and_then(|(query, data)| query.get_supertypes(&data));
+    let result = read_item(server, &params.item, supertypes);
     info!(
         "[PERF] Supertypes completed in {:?}, returned {} items",
         start_time.elapsed(),
@@ -89,8 +88,7 @@ pub async fn handle_subtypes(
 ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
     info!("Subtypes request received for: {}", params.item.name);
     let start_time = Instant::now();
-    let result =
-        item_query(server, &params.item).and_then(|(query, data)| query.get_subtypes(&data));
+    let result = read_item(server, &params.item, subtypes);
     info!(
         "[PERF] Subtypes completed in {:?}, returned {} items",
         start_time.elapsed(),
@@ -99,17 +97,19 @@ pub async fn handle_subtypes(
     Ok(result)
 }
 
-/// The owning engine and stored identity of a follow-up request's item.
-fn item_query(
+/// Read a follow-up request's stored item identity under one view of its
+/// owning engine.
+fn read_item(
     server: &RubyLanguageServer,
     item: &TypeHierarchyItem,
-) -> Option<(EngineQuery, TypeHierarchyData)> {
-    let analysis_engine = server.analysis_engine_for_uri(&item.uri);
+    read: impl FnOnce(&View<'_>, &TypeHierarchyData) -> Option<Vec<TypeHierarchyItem>>,
+) -> Option<Vec<TypeHierarchyItem>> {
     let data: TypeHierarchyData = item
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
-    Some((EngineQuery::with_engine(analysis_engine), data))
+    EngineQuery::with_engine(server.analysis_engine_for_uri(&item.uri))
+        .with_view(|cursor| read(cursor.view, &data))
 }
 
 // ============================================================================
@@ -124,143 +124,76 @@ pub struct TypeHierarchyData {
 }
 
 // ============================================================================
-// EngineQuery entry points
+// Queries over one cursor
 // ============================================================================
 
-impl EngineQuery {
-    /// Find the class/module at the cursor position and return a TypeHierarchyItem.
-    ///
-    /// Uses RubyPrismAnalyzer to find the identifier at position, then resolves
-    /// it to a fully qualified name via the analysis engine.
-    pub fn prepare_type_hierarchy(
-        &self,
-        uri: &Url,
-        position: Position,
-        content: String,
-    ) -> Option<Vec<TypeHierarchyItem>> {
-        info!(
-            "Prepare type hierarchy request for {:?} at {:?}",
-            uri.path(),
-            position
-        );
+/// The type hierarchy item for the class or module name at `position`.
+pub fn prepare_at(
+    cursor: Cursor<'_>,
+    uri: &Url,
+    position: Position,
+    content: &str,
+) -> Option<Vec<TypeHierarchyItem>> {
+    info!(
+        "Prepare type hierarchy request for {:?} at {:?}",
+        uri.path(),
+        position
+    );
+    let (identifier, _, ancestors, _scope_id, _namespace_kind) = cursor
+        .analyzer(uri, content, position)
+        .get_identifier_at_position(source_position(position));
+    let Identifier::RubyConstant { iden, .. } = identifier? else {
+        debug!("Type hierarchy only supports constants (classes/modules)");
+        return None;
+    };
+    let node = cursor
+        .view
+        .type_hierarchy_node_for_constant(&iden, &ancestors)?;
+    let item = type_hierarchy_item_from_engine_node(cursor.view, node)?;
+    info!("Found type hierarchy item: {}", item.name);
+    Some(vec![item])
+}
 
-        // Use analyzer to find identifier at position before locking analysis state.
-        let analyzer = self.analyzer_at_position(uri, &content, position);
-        let (identifier, _, ancestors, _scope_id, _namespace_kind) =
-            analyzer.get_identifier_at_position(source_position(position));
+/// The ancestor chain of a class or module in Ruby's method resolution order:
+/// prepended modules (last first), included modules (last first), the
+/// superclass chain, then extended modules, which affect class methods.
+///
+/// A class reopened in several files collects mixins from all of them; mixins
+/// outside the primary definition carry a warning because the runtime order
+/// depends on require order.
+///
+/// `Some(vec![])` means no supertypes, including a type that no longer parses.
+pub fn supertypes(view: &View<'_>, data: &TypeHierarchyData) -> Option<Vec<TypeHierarchyItem>> {
+    info!("Supertypes request for: {}", data.fqn);
+    related_types(view, data, "supertypes", |view, fqn| view.supertypes(fqn))
+}
 
-        let identifier = identifier?;
+/// Direct subclasses, then the classes and modules that include, prepend, or
+/// extend this module.
+///
+/// `Some(vec![])` means no subtypes, including a type that no longer parses.
+pub fn subtypes(view: &View<'_>, data: &TypeHierarchyData) -> Option<Vec<TypeHierarchyItem>> {
+    info!("Subtypes request for: {}", data.fqn);
+    related_types(view, data, "subtypes", |view, fqn| view.subtypes(fqn))
+}
 
-        // Only handle constants (class/module names)
-        let constant_parts = match &identifier {
-            Identifier::RubyConstant { namespace: _, iden } => iden.clone(),
-            _ => {
-                debug!("Type hierarchy only supports constants (classes/modules)");
-                return None;
-            }
-        };
-
-        let engine_ref = self.analysis_engine().expect_invariant(
-            "type hierarchy prepare requires an analysis engine",
-            "LSP typeHierarchy should be a thin wrapper over AnalysisEngine",
-            "construct EngineQuery with with_engine()",
-        );
-        let engine = engine_ref.read();
-        let query = AnalysisQuery::new(&engine);
-        if let Some(item) = query
-            .type_hierarchy_node_for_constant(&constant_parts, &ancestors)
-            .and_then(|node| type_hierarchy_item_from_engine_node(&engine, node))
-        {
-            info!("Found type hierarchy item: {}", item.name);
-            return Some(vec![item]);
-        }
-        None
-    }
-
-    /// Get the ancestor chain for a class/module in Ruby's Method Resolution Order.
-    ///
-    /// Returns supertypes in MRO order:
-    /// 1. Prepended modules (last prepend first)
-    /// 2. Included modules (last include first)
-    /// 3. Superclass chain (recursively applying the same rules)
-    /// 4. Extended modules (shown separately as they affect class methods)
-    ///
-    /// When a class is reopened in multiple files, mixins from all files are collected.
-    /// Mixins from files other than the primary definition show a warning indicator
-    /// since the actual MRO depends on runtime require order which we can't determine statically.
-    ///
-    /// Returns `Some(vec![])` when there are no supertypes (valid but empty result).
-    /// Returns `None` only when the request data is malformed.
-    pub fn get_supertypes(&self, data: &TypeHierarchyData) -> Option<Vec<TypeHierarchyItem>> {
-        info!("Supertypes request for: {}", data.fqn);
-
-        // Parse the FQN string - return empty if can't parse (type might have been deleted)
-        let engine_ref = self.analysis_engine().expect_invariant(
-            "supertype query requires an analysis engine",
-            "LSP typeHierarchy should be a thin wrapper over AnalysisEngine",
-            "construct EngineQuery with with_engine()",
-        );
-        let engine = engine_ref.read();
-        let query = AnalysisQuery::new(&engine);
-        let fqn = match query.parse_namespace_fqn(&data.fqn) {
-            Some(f) => f,
-            None => {
-                info!("Could not parse FQN: {}", data.fqn);
-                return Some(vec![]);
-            }
-        };
-
-        let supertypes = query
-            .supertypes(&fqn)
-            .into_iter()
-            .filter_map(|entry| type_hierarchy_item_from_engine_entry(&engine, entry))
-            .collect::<Vec<_>>();
-
-        info!("Found {} supertypes for {}", supertypes.len(), data.fqn);
-        Some(supertypes)
-    }
-
-    /// Get types that inherit from or mix in this class/module.
-    ///
-    /// Returns:
-    /// - For classes: direct subclasses
-    /// - For modules: classes/modules that include/prepend/extend this module
-    ///
-    /// Subtypes are grouped by relationship type:
-    /// 1. Direct subclasses first
-    /// 2. Classes/modules that include this module
-    /// 3. Classes/modules that prepend this module
-    ///
-    /// Returns `Some(vec![])` when there are no subtypes (valid but empty result).
-    /// Returns `None` only when the request data is malformed.
-    pub fn get_subtypes(&self, data: &TypeHierarchyData) -> Option<Vec<TypeHierarchyItem>> {
-        info!("Subtypes request for: {}", data.fqn);
-
-        // Parse the FQN string - return empty if can't parse (type might have been deleted)
-        let engine_ref = self.analysis_engine().expect_invariant(
-            "subtype query requires an analysis engine",
-            "LSP typeHierarchy should be a thin wrapper over AnalysisEngine",
-            "construct EngineQuery with with_engine()",
-        );
-        let engine = engine_ref.read();
-        let query = AnalysisQuery::new(&engine);
-        let fqn = match query.parse_namespace_fqn(&data.fqn) {
-            Some(f) => f,
-            None => {
-                info!("Could not parse FQN: {}", data.fqn);
-                return Some(vec![]);
-            }
-        };
-
-        let subtypes = query
-            .subtypes(&fqn)
-            .into_iter()
-            .filter_map(|entry| type_hierarchy_item_from_engine_entry(&engine, entry))
-            .collect::<Vec<_>>();
-
-        info!("Found {} subtypes for {}", subtypes.len(), data.fqn);
-        Some(subtypes)
-    }
+fn related_types(
+    view: &View<'_>,
+    data: &TypeHierarchyData,
+    relation: &str,
+    related: impl FnOnce(&View<'_>, &FullyQualifiedName) -> Vec<TypeHierarchyEntry>,
+) -> Option<Vec<TypeHierarchyItem>> {
+    // A stored type that no longer parses may have been deleted.
+    let Some(fqn) = view.parse_namespace_fqn(&data.fqn) else {
+        info!("Could not parse FQN: {}", data.fqn);
+        return Some(vec![]);
+    };
+    let items = related(view, &fqn)
+        .into_iter()
+        .filter_map(|entry| type_hierarchy_item_from_engine_entry(view, entry))
+        .collect::<Vec<_>>();
+    info!("Found {} {relation} for {}", items.len(), data.fqn);
+    Some(items)
 }
 
 // ============================================================================
@@ -268,7 +201,7 @@ impl EngineQuery {
 // ============================================================================
 
 fn type_hierarchy_item_from_engine_entry(
-    engine: &ruby_analysis::engine::AnalysisEngine,
+    view: &View<'_>,
     entry: TypeHierarchyEntry,
 ) -> Option<TypeHierarchyItem> {
     let kind = match entry.node_kind {
@@ -285,17 +218,17 @@ fn type_hierarchy_item_from_engine_entry(
         format!("{} ({})", entry.fqn, relation_label(entry.relation))
     };
     if let Some(edge_file_id) = entry.edge_file_id {
-        detail = format!("{} ⚠️ from {}", detail, file_name_for(engine, edge_file_id));
+        detail = format!("{} ⚠️ from {}", detail, file_name_for(view, edge_file_id));
     }
-    type_hierarchy_item_from_parts(engine, &entry.fqn, kind, entry.range, Some(detail))
+    type_hierarchy_item_from_parts(view, &entry.fqn, kind, entry.range, Some(detail))
 }
 
 fn type_hierarchy_item_from_engine_node(
-    engine: &ruby_analysis::engine::AnalysisEngine,
+    view: &View<'_>,
     node: TypeHierarchyNode,
 ) -> Option<TypeHierarchyItem> {
     type_hierarchy_item_from_parts(
-        engine,
+        view,
         &node.fqn,
         graph_node_kind_to_symbol_kind(node.node_kind),
         node.range,
@@ -304,13 +237,13 @@ fn type_hierarchy_item_from_engine_node(
 }
 
 fn type_hierarchy_item_from_parts(
-    engine: &ruby_analysis::engine::AnalysisEngine,
+    view: &View<'_>,
     fqn: &ruby_analysis::core::FullyQualifiedName,
     kind: SymbolKind,
     range: ruby_analysis::core::TextRange,
     detail: Option<String>,
 ) -> Option<TypeHierarchyItem> {
-    let location = location_for_range(&engine.view(), range)?;
+    let location = location_for_range(view, range)?;
     Some(TypeHierarchyItem {
         name: fqn.name(),
         kind,
@@ -360,13 +293,8 @@ fn relation_symbol_kind(relation: TypeHierarchyRelation) -> SymbolKind {
     }
 }
 
-fn file_name_for(
-    engine: &ruby_analysis::engine::AnalysisEngine,
-    file_id: ruby_analysis::core::SourceFileId,
-) -> String {
-    engine
-        .view()
-        .file(file_id)
+fn file_name_for(view: &View<'_>, file_id: ruby_analysis::core::SourceFileId) -> String {
+    view.file(file_id)
         .and_then(|file| {
             file.path
                 .file_name()

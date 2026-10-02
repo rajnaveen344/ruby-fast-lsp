@@ -12,7 +12,7 @@
 //! LSP Request
 //!      │
 //!      ▼
-//! InlayHintQuery::get_inlay_hints()
+//! inlay_hints_at(cursor, range)
 //!      │
 //!      ├─► Parse AST
 //!      │
@@ -38,10 +38,11 @@ use generators::{
     generate_variable_type_hints, HintContext, InlayHintData, InlayHintKind,
 };
 
-use crate::features::cursor::EngineQuery;
+use crate::features::cursor::{Cursor, EngineQuery};
+use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::text_range;
-use ruby_analysis::indexer::{inlay_hints::InlayNodeCollector, RubyDocument};
+use ruby_analysis::indexer::inlay_hints::InlayNodeCollector;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
     InlayHint, InlayHintKind as LspInlayHintKind, InlayHintLabel, InlayHintParams, Range,
@@ -57,30 +58,14 @@ pub async fn handle(
     let semantic_lock = server.document_semantic_lock(&uri);
     let _semantic_guard = semantic_lock.lock().await;
 
-    // Get document content and Arc
-    let (content, doc_arc) = {
-        let doc_guard = server.documents.read();
-        match doc_guard.get(&uri) {
-            Some(doc_arc) => {
-                let doc = doc_arc.read();
-                (doc.content.clone(), doc_arc.clone())
-            }
-            None => return Ok(Some(Vec::new())),
-        }
+    let Some(document) = server.documents.read().get(&uri).cloned() else {
+        return Ok(Some(Vec::new()));
     };
-
-    // Create query context.
-    let query =
-        EngineQuery::with_doc_and_engine(doc_arc.clone(), server.analysis_engine_for_uri(&uri));
-
-    // Get document for query
-    let document = doc_arc.read();
-
-    // Delegate to query layer
-    let hints = query.get_inlay_hints(&document, &range, &content);
-
-    // Convert to LSP format
-    let hints = hints.into_iter().map(to_lsp_hint).collect::<Vec<_>>();
+    let hints = EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri))
+        .with_view(|cursor| inlay_hints_at(cursor, &range))
+        .into_iter()
+        .map(to_lsp_hint)
+        .collect::<Vec<_>>();
     if let Some(project) = server.analysis_workspace_for_uri(&uri) {
         for hint in &hints {
             if let InlayHintLabel::LabelParts(parts) = &hint.label {
@@ -113,53 +98,29 @@ fn to_lsp_hint(hint: InlayHintData) -> InlayHint {
     }
 }
 
-impl EngineQuery {
-    /// Get all inlay hints for a document within the specified range.
-    ///
-    /// This is the main entry point for inlay hints. It:
-    /// 1. Triggers method return type inference for visible methods
-    /// 2. Collects relevant AST nodes via InlayNodeCollector
-    /// 3. Generates hints from the collected nodes
-    pub fn get_inlay_hints(
-        &self,
-        document: &RubyDocument,
-        range: &Range,
-        _content: &str,
-    ) -> Vec<InlayHintData> {
-        // Step 2: Parse AST
-        let content = document.analysis_content();
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let root = parse_result.node();
+/// Inlay hints for the cursor's document within `range`: structural labels,
+/// then variable, method, and chained-call types.
+pub fn inlay_hints_at(cursor: Cursor<'_>, range: &Range) -> Vec<InlayHintData> {
+    let document = cursor.document.expect_invariant(
+        "inlay hints were read without a document",
+        "the handler builds its cursor from the open document",
+        "construct EngineQuery with with_doc_and_engine()",
+    );
+    let content = document.analysis_content();
+    let parse_result = ruby_prism::parse(content.as_bytes());
+    let root = parse_result.node();
+    let range = text_range(document, *range);
+    let nodes = InlayNodeCollector::new(range.start_byte, range.end_byte, content.as_bytes())
+        .collect(&root);
 
-        let range = text_range(document, *range);
-
-        // Step 3: Collect relevant domain nodes
-        let collector =
-            InlayNodeCollector::new(range.start_byte, range.end_byte, content.as_bytes());
-        let nodes = collector.collect(&root);
-
-        // Step 4: Create hint context
-        let context = HintContext {
-            file_id: document.analysis_file_id(),
-            document,
-            analysis_engine: self.analysis_engine().cloned(),
-        };
-
-        // Step 5: Generate hints from collected nodes
-        let mut hints = Vec::new();
-
-        // Structural hints (end labels, implicit returns)
-        hints.extend(generate_structural_hints(&nodes, &context));
-
-        // Variable type hints
-        hints.extend(generate_variable_type_hints(&nodes, &context));
-
-        // Method return type and parameter hints
-        hints.extend(generate_method_hints(&nodes, &context));
-
-        // Chained method call hints (currently placeholder)
-        hints.extend(generate_chained_call_hints(&nodes, &context));
-
-        hints
-    }
+    let context = HintContext {
+        file_id: document.analysis_file_id(),
+        document,
+        view: cursor.view,
+    };
+    let mut hints = generate_structural_hints(&nodes, &context);
+    hints.extend(generate_variable_type_hints(&nodes, &context));
+    hints.extend(generate_method_hints(&nodes, &context));
+    hints.extend(generate_chained_call_hints(&nodes, &context));
+    hints
 }

@@ -5,15 +5,13 @@
 
 use super::navigation::type_hint_label;
 use crate::utils::lsp::lsp_position;
-use parking_lot::RwLock;
 use ruby_analysis::core::RubyType;
 use ruby_analysis::core::{SourceFileId, VariableTypeKind};
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
+use ruby_analysis::engine::View;
 use ruby_analysis::indexer::{
     inlay_hints::{InlayNode, VariableKind},
     RubyDocument,
 };
-use std::sync::Arc;
 use tower_lsp::lsp_types::{InlayHintLabel, InlayHintTooltip, Position};
 
 /// Unified inlay hint data structure.
@@ -40,17 +38,16 @@ pub enum InlayHintKind {
     ChainedMethodType,
 }
 
-/// Context for hint generation (provides access to type inference).
+/// Context for hint generation: the document and one view of its engine.
 pub struct HintContext<'a> {
     pub file_id: SourceFileId,
     pub document: &'a RubyDocument,
-    pub analysis_engine: Option<Arc<RwLock<AnalysisEngine>>>,
+    pub view: &'a View<'a>,
 }
 
 impl HintContext<'_> {
     fn type_label(&self, ruby_type: &RubyType, prefix: &str) -> (InlayHintLabel, InlayHintTooltip) {
-        let engine = self.analysis_engine.as_ref().map(|engine| engine.read());
-        type_hint_label(ruby_type, prefix, engine.as_deref())
+        type_hint_label(ruby_type, prefix, self.view)
     }
 }
 
@@ -194,21 +191,17 @@ pub fn generate_chained_call_hints(
     nodes: &[InlayNode],
     context: &HintContext,
 ) -> Vec<InlayHintData> {
-    let Some(engine) = context.analysis_engine.as_ref() else {
-        return Vec::new();
-    };
-    let engine = engine.read();
-    let query = AnalysisQuery::new(&engine);
     let mut hints = Vec::new();
 
     for node in nodes {
         if let InlayNode::ChainedCall { call_end_offset } = node {
-            let Some(ruby_type) =
-                query.proven_expression_type_ending_at(context.file_id, *call_end_offset)
+            let Some(ruby_type) = context
+                .view
+                .proven_expression_type_ending_at(context.file_id, *call_end_offset)
             else {
                 continue;
             };
-            let (label, tooltip) = type_hint_label(&ruby_type, ": ", Some(&engine));
+            let (label, tooltip) = context.type_label(&ruby_type, ": ");
             hints.push(InlayHintData {
                 position: lsp_position(
                     context
@@ -292,9 +285,9 @@ fn method_return_type_from_analysis(
     byte_offset: u32,
     context: &HintContext,
 ) -> Option<RubyType> {
-    let engine = context.analysis_engine.as_ref()?;
-    let engine = engine.read();
-    AnalysisQuery::new(&engine).method_return_type_at(name, context.file_id, byte_offset)
+    context
+        .view
+        .method_return_type_at(name, context.file_id, byte_offset)
 }
 
 fn parameter_type_from_analysis(
@@ -303,14 +296,9 @@ fn parameter_type_from_analysis(
     byte_offset: u32,
     context: &HintContext,
 ) -> Option<RubyType> {
-    let engine = context.analysis_engine.as_ref()?;
-    let engine = engine.read();
-    AnalysisQuery::new(&engine).parameter_type_at(
-        method_name,
-        param_name,
-        context.file_id,
-        byte_offset,
-    )
+    context
+        .view
+        .parameter_type_at(method_name, param_name, context.file_id, byte_offset)
 }
 
 fn variable_type_from_analysis_facts(
@@ -320,9 +308,7 @@ fn variable_type_from_analysis_facts(
     name_start_offset: u32,
     name_end_offset: u32,
 ) -> Option<RubyType> {
-    let engine = context.analysis_engine.as_ref()?;
-    let engine = engine.read();
-    AnalysisQuery::new(&engine).variable_assignment_type_at(
+    context.view.variable_assignment_type_at(
         variable_type_kind(kind),
         name,
         context.file_id,

@@ -1,10 +1,9 @@
 //! Workspace symbols: symbol search across every project engine, or the
 //! top-level symbols for an empty query.
 
-use crate::invariant::ExpectInvariant;
 use log::info;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
-use ruby_analysis::engine::AnalysisQuery;
+use ruby_analysis::engine::View;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind, WorkspaceSymbolParams};
@@ -29,12 +28,15 @@ pub async fn handle(
     let start_time = Instant::now();
     let mut symbols = Vec::new();
     for analysis_engine in lang_server.analysis_engines() {
-        let engine_query = EngineQuery::with_engine(analysis_engine);
-        if query_text.is_empty() {
-            symbols.extend(engine_query.get_top_level_symbols());
-        } else {
-            symbols.extend(engine_query.search_workspace_symbols(&query_text));
-        }
+        symbols.extend(
+            EngineQuery::with_engine(analysis_engine).with_view(|cursor| {
+                if query_text.is_empty() {
+                    top_level_symbols(cursor.view)
+                } else {
+                    search_symbols(cursor.view, &query_text)
+                }
+            }),
+        );
     }
     symbols.sort_by(|left, right| {
         (
@@ -66,38 +68,24 @@ pub async fn handle(
     Ok(Some(symbols))
 }
 
-impl EngineQuery {
-    pub fn get_top_level_symbols(&self) -> Vec<SymbolInformation> {
-        let engine_ref = self.analysis_engine().expect_invariant(
-            "workspace symbols query requires an analysis engine",
-            "LSP workspace/symbol should be a thin wrapper over AnalysisEngine",
-            "construct EngineQuery with with_engine()",
-        );
-        let engine = engine_ref.read();
-        AnalysisQuery::new(&engine)
-            .top_level_symbols(50)
-            .into_iter()
-            .filter_map(|symbol| symbol_information_from_engine_symbol(&engine, symbol))
-            .collect()
-    }
-
-    pub fn search_workspace_symbols(&self, query: &str) -> Vec<SymbolInformation> {
-        let engine_ref = self.analysis_engine().expect_invariant(
-            "workspace symbol search requires an analysis engine",
-            "LSP workspace/symbol should be a thin wrapper over AnalysisEngine",
-            "construct EngineQuery with with_engine()",
-        );
-        let engine = engine_ref.read();
-        AnalysisQuery::new(&engine)
-            .search_workspace_symbols(query, 100)
-            .into_iter()
-            .filter_map(|symbol| symbol_information_from_engine_symbol(&engine, symbol))
-            .collect()
-    }
+/// The first top-level symbols of one project, for an empty query.
+pub fn top_level_symbols(view: &View<'_>) -> Vec<SymbolInformation> {
+    view.top_level_symbols(50)
+        .into_iter()
+        .filter_map(|symbol| symbol_information(view, symbol))
+        .collect()
 }
 
-fn symbol_information_from_engine_symbol(
-    engine: &ruby_analysis::engine::AnalysisEngine,
+/// One project's symbols that match `query`.
+pub fn search_symbols(view: &View<'_>, query: &str) -> Vec<SymbolInformation> {
+    view.search_workspace_symbols(query, 100)
+        .into_iter()
+        .filter_map(|symbol| symbol_information(view, symbol))
+        .collect()
+}
+
+fn symbol_information(
+    view: &View<'_>,
     symbol: ruby_analysis::engine::WorkspaceSymbolMatch,
 ) -> Option<SymbolInformation> {
     Some(SymbolInformation {
@@ -106,7 +94,7 @@ fn symbol_information_from_engine_symbol(
         tags: None,
         #[allow(deprecated)]
         deprecated: Some(false),
-        location: location_for_range(&engine.view(), symbol.range)?,
+        location: location_for_range(view, symbol.range)?,
         container_name: symbol.container_name,
     })
 }
@@ -126,9 +114,6 @@ fn analysis_symbol_kind_to_lsp_kind(kind: AnalysisSymbolKind) -> SymbolKind {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use parking_lot::RwLock;
     use ruby_analysis::core::{
         FileAnalysis, FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind,
         SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
@@ -137,7 +122,7 @@ mod tests {
 
     use super::*;
 
-    fn query_with_analysis_symbols() -> EngineQuery {
+    fn engine_with_analysis_symbols() -> AnalysisEngine {
         let source = "class User\n  def name\n  end\nend";
         let mut engine = AnalysisEngine::new();
         let file_id = engine.register_file(SourceFileInput {
@@ -177,14 +162,14 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        EngineQuery::with_engine(Arc::new(RwLock::new(engine)))
+        engine
     }
 
     #[test]
     fn workspace_symbols_can_read_analysis_engine_without_index_entries() {
-        let query = query_with_analysis_symbols();
+        let engine = engine_with_analysis_symbols();
 
-        let symbols = query.search_workspace_symbols("name");
+        let symbols = search_symbols(&engine.view(), "name");
 
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "name");
@@ -194,9 +179,9 @@ mod tests {
 
     #[test]
     fn top_level_symbols_can_read_analysis_engine_without_index_entries() {
-        let query = query_with_analysis_symbols();
+        let engine = engine_with_analysis_symbols();
 
-        let symbols = query.get_top_level_symbols();
+        let symbols = top_level_symbols(&engine.view());
 
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "User");

@@ -11,14 +11,15 @@ use tower_lsp::jsonrpc::Result as LspResult;
 
 use tower_lsp::lsp_types::{
     Position, PrepareRenameResponse, Range, RenameParams, TextDocumentPositionParams, TextEdit,
-    WorkspaceEdit,
+    Url, WorkspaceEdit,
 };
 
 use crate::features::cursor::analysis_location::locations_for_ranges;
+use crate::features::cursor::{Cursor, EngineQuery};
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::{lsp_text_range, source_position};
-use ruby_analysis::core::{RubyConstant, RubyMethod};
-use ruby_analysis::engine::AnalysisQuery;
+use ruby_analysis::core::{RubyConstant, RubyMethod, TextRange};
+use ruby_analysis::engine::View;
 use ruby_analysis::indexer::{Identifier, RenameVisitor, RubyDocument, RubyPrismAnalyzer};
 
 /// Handle `textDocument/prepareRename`.
@@ -50,19 +51,38 @@ fn prepare_rename(
     params: TextDocumentPositionParams,
 ) -> Option<PrepareRenameResponse> {
     let uri = params.text_document.uri;
-    let position = params.position;
-    let (content, version, analysis_file_id, analysis_offset) = {
-        let docs = server.documents.read();
-        let document = docs.get(&uri)?.read();
-        (
-            document.content.clone(),
-            document.version,
-            document.analysis_file_id(),
-            document.position_to_analysis_offset(source_position(position)),
-        )
-    };
+    let document = server.documents.read().get(&uri)?.clone();
+    EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri))
+        .with_view(|cursor| prepare_rename_at(cursor, &uri, params.position))
+}
 
-    let doc = RubyDocument::new(uri.clone(), content.clone(), version);
+fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<WorkspaceEdit> {
+    let uri = params.text_document_position.text_document.uri;
+    let document = server.documents.read().get(&uri)?.clone();
+    EngineQuery::with_doc_and_engine(document, server.analysis_engine_for_uri(&uri)).with_view(
+        |cursor| {
+            rename_at(
+                cursor,
+                &uri,
+                params.text_document_position.position,
+                &params.new_name,
+            )
+        },
+    )
+}
+
+/// The renameable range and current name at `position`: a local variable, then
+/// a method, then a constant. Ambiguous or external identities fail closed.
+pub fn prepare_rename_at(
+    cursor: Cursor<'_>,
+    uri: &Url,
+    position: Position,
+) -> Option<PrepareRenameResponse> {
+    let document = cursor.document?;
+    let analysis_file_id = document.analysis_file_id();
+    let analysis_offset = document.position_to_analysis_offset(source_position(position));
+
+    let doc = RubyDocument::new(uri.clone(), document.content.clone(), document.version);
     let cursor_offset = doc.position_to_offset(source_position(position));
     let parse_result = doc.parse();
     let root = parse_result.node();
@@ -76,35 +96,26 @@ fn prepare_rename(
         return Some(PrepareRenameResponse::Range(range));
     }
 
-    let analysis_engine = server.analysis_engine_for_uri(&uri);
-    let engine = analysis_engine.read();
-    if let Some(target) =
-        AnalysisQuery::new(&engine).method_rename_target_at(analysis_file_id, analysis_offset)
-    {
-        let location = locations_for_ranges(&engine.view(), target.ranges)
-            .into_iter()
-            .find(|location| location.uri == uri && range_contains(location.range, position))?;
-        return Some(PrepareRenameResponse::RangeWithPlaceholder {
-            range: location.range,
-            placeholder: target.current_name.to_string(),
-        });
-    }
-    drop(engine);
-
-    let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
-    let (identifier, _, ancestors, _, _) = analyzer.get_identifier(analysis_offset);
-    let Identifier::RubyConstant { iden, .. } = identifier? else {
-        return None;
-    };
-    let analysis_engine = server.analysis_engine_for_uri(&uri);
-    let engine = analysis_engine.read();
-    let target = AnalysisQuery::new(&engine).constant_rename_target(&iden, &ancestors)?;
-    let location = locations_for_ranges(&engine.view(), target.ranges)
+    let view = cursor.view;
+    let (ranges, placeholder) =
+        match view.method_rename_target_at(analysis_file_id, analysis_offset) {
+            Some(target) => (target.ranges, target.current_name.to_string()),
+            None => {
+                let analyzer = RubyPrismAnalyzer::new(uri.clone(), document.content.clone());
+                let (identifier, _, ancestors, _, _) = analyzer.get_identifier(analysis_offset);
+                let Identifier::RubyConstant { iden, .. } = identifier? else {
+                    return None;
+                };
+                let target = view.constant_rename_target(&iden, &ancestors)?;
+                (target.ranges, target.current_name.to_string())
+            }
+        };
+    let location = locations_for_ranges(view, ranges)
         .into_iter()
-        .find(|location| location.uri == uri && range_contains(location.range, position))?;
+        .find(|location| &location.uri == uri && range_contains(location.range, position))?;
     Some(PrepareRenameResponse::RangeWithPlaceholder {
         range: location.range,
-        placeholder: target.current_name.to_string(),
+        placeholder,
     })
 }
 
@@ -112,21 +123,18 @@ fn range_contains(range: Range, position: Position) -> bool {
     range.start <= position && position < range.end
 }
 
-fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<WorkspaceEdit> {
-    let uri = params.text_document_position.text_document.uri;
-    let position = params.text_document_position.position;
-    let new_name = params.new_name;
-
-    // Get document content
-    let (content, analysis_file_id, analysis_offset) = {
-        let docs = server.documents.read();
-        let document = docs.get(&uri)?.read();
-        (
-            document.content.clone(),
-            document.analysis_file_id(),
-            document.position_to_analysis_offset(source_position(position)),
-        )
-    };
+/// The edits that rename the local variable, method, or constant at
+/// `position` to `new_name`.
+pub fn rename_at(
+    cursor: Cursor<'_>,
+    uri: &Url,
+    position: Position,
+    new_name: &str,
+) -> Option<WorkspaceEdit> {
+    let document = cursor.document?;
+    let content = &document.content;
+    let analysis_file_id = document.analysis_file_id();
+    let analysis_offset = document.position_to_analysis_offset(source_position(position));
 
     // Parse and traverse the AST to find all rename targets
     let doc = RubyDocument::new(uri.clone(), content.clone(), 0);
@@ -141,59 +149,28 @@ fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<Workspace
         let edits = ranges
             .into_iter()
             .map(|range| TextEdit {
-                new_text: new_name.clone(),
+                new_text: new_name.to_string(),
                 range: lsp_text_range(&doc, range),
             })
             .collect();
-        changes.insert(uri, edits);
+        changes.insert(uri.clone(), edits);
     } else {
-        if let Ok(new_method) = RubyMethod::new(&new_name) {
-            let analysis_engine = server.analysis_engine_for_uri(&uri);
-            let engine = analysis_engine.read();
-            if let Some(target) = AnalysisQuery::new(&engine).method_rename_target_for_name_at(
-                analysis_file_id,
-                analysis_offset,
-                new_method,
-            ) {
-                for location in locations_for_ranges(&engine.view(), target.ranges) {
-                    changes
-                        .entry(location.uri)
-                        .or_insert_with(Vec::new)
-                        .push(TextEdit {
-                            new_text: new_name.clone(),
-                            range: location.range,
-                        });
-                }
-            }
+        let view = cursor.view;
+        let method_target = RubyMethod::new(new_name).ok().and_then(|new_method| {
+            view.method_rename_target_for_name_at(analysis_file_id, analysis_offset, new_method)
+        });
+        if let Some(target) = method_target {
+            push_edits(&mut changes, view, target.ranges, new_name);
         }
-
-        if !changes.is_empty() {
-            return Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            });
-        }
-
-        let new_constant = RubyConstant::new(&new_name).ok()?;
-        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
-        let (identifier, _, ancestors, _, _) = analyzer.get_identifier(analysis_offset);
-        let Identifier::RubyConstant { iden, .. } = identifier? else {
-            return None;
-        };
-
-        let analysis_engine = server.analysis_engine_for_uri(&uri);
-        let engine = analysis_engine.read();
-        let query = AnalysisQuery::new(&engine);
-        let target = query.constant_rename_target_for_name(&iden, &ancestors, new_constant)?;
-        for location in locations_for_ranges(&engine.view(), target.ranges) {
-            changes
-                .entry(location.uri)
-                .or_insert_with(Vec::new)
-                .push(TextEdit {
-                    new_text: new_name.clone(),
-                    range: location.range,
-                });
+        if changes.is_empty() {
+            let new_constant = RubyConstant::new(new_name).ok()?;
+            let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
+            let (identifier, _, ancestors, _, _) = analyzer.get_identifier(analysis_offset);
+            let Identifier::RubyConstant { iden, .. } = identifier? else {
+                return None;
+            };
+            let target = view.constant_rename_target_for_name(&iden, &ancestors, new_constant)?;
+            push_edits(&mut changes, view, target.ranges, new_name);
         }
     }
 
@@ -206,4 +183,18 @@ fn rename(server: &RubyLanguageServer, params: RenameParams) -> Option<Workspace
         document_changes: None,
         change_annotations: None,
     })
+}
+
+fn push_edits(
+    changes: &mut HashMap<Url, Vec<TextEdit>>,
+    view: &View<'_>,
+    ranges: Vec<TextRange>,
+    new_name: &str,
+) {
+    for location in locations_for_ranges(view, ranges) {
+        changes.entry(location.uri).or_default().push(TextEdit {
+            new_text: new_name.to_string(),
+            range: location.range,
+        });
+    }
 }

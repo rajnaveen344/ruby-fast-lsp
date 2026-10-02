@@ -3,7 +3,7 @@
 use super::type_display::TypeDisplay;
 use crate::features::cursor::analysis_location::location_for_range;
 use ruby_analysis::core::RubyType;
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery};
+use ruby_analysis::engine::View;
 use tower_lsp::lsp_types::{
     InlayHintLabel, InlayHintLabelPart, InlayHintLabelPartTooltip, InlayHintTooltip,
 };
@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::{
 pub(super) fn type_hint_label(
     ruby_type: &RubyType,
     prefix: &str,
-    engine: Option<&AnalysisEngine>,
+    view: &View<'_>,
 ) -> (InlayHintLabel, InlayHintTooltip) {
     let display = TypeDisplay::new(ruby_type);
     let mut parts = vec![InlayHintLabelPart {
@@ -19,16 +19,13 @@ pub(super) fn type_hint_label(
         ..Default::default()
     }];
     for part in display.parts {
-        let location = engine
-            .zip(part.target.as_ref())
-            .and_then(|(engine, target)| {
-                // Use the same exact symbol and source-preference query as ordinary
-                // navigation. A missing declaration remains an unlinked type.
-                AnalysisQuery::new(engine)
-                    .type_name_definition_ranges(target)
-                    .into_iter()
-                    .find_map(|range| location_for_range(&engine.view(), range))
-            });
+        // Use the same exact symbol and source-preference query as ordinary
+        // navigation. A missing declaration remains an unlinked type.
+        let location = part.target.as_ref().and_then(|target| {
+            view.type_name_definition_ranges(target)
+                .into_iter()
+                .find_map(|range| location_for_range(view, range))
+        });
         parts.push(InlayHintLabelPart {
             value: part.value,
             location,

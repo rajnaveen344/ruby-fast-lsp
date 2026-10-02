@@ -2,13 +2,13 @@
 //! prepend, extend) and classes that include it, plus extension lenses.
 
 use crate::features::cursor::analysis_location::location_for_range;
-use crate::features::cursor::EngineQuery;
+use crate::features::cursor::{Cursor, EngineQuery};
 use crate::invariant::ExpectInvariant;
 use crate::server::RubyLanguageServer;
 use crate::utils::lsp::lsp_position;
 use log::{debug, warn};
 use ruby_analysis::core::FullyQualifiedName;
-use ruby_analysis::engine::{AnalysisQuery, MixinUsageKind};
+use ruby_analysis::engine::{MixinUsageKind, View};
 use ruby_analysis::indexer::module_definitions_for_lens;
 use std::collections::HashMap;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -44,18 +44,14 @@ pub async fn handle(
         (doc.content.clone(), doc_arc.clone())
     };
 
-    // 3. Create query with document context.
-    let mut lenses: Vec<CodeLens> = {
-        // EngineQuery owns read-side query context. Destroy it before awaiting
-        // governed extension work so the LSP future remains Send.
-        let query =
-            EngineQuery::with_doc_and_engine(doc_arc, lang_server.analysis_engine_for_uri(uri));
-        query
-            .get_code_lenses(uri)
+    // 3. Read module lenses under one cursor. The guards are released before
+    // awaiting governed extension work, so the LSP future remains Send.
+    let mut lenses: Vec<CodeLens> =
+        EngineQuery::with_doc_and_engine(doc_arc, lang_server.analysis_engine_for_uri(uri))
+            .with_view(|cursor| code_lenses_at(cursor, uri))
             .into_iter()
             .map(to_lsp_code_lens)
-            .collect()
-    };
+            .collect();
     let project_root = lang_server
         .analysis_workspace_for_uri(uri)
         .map(|workspace| workspace.root_path);
@@ -128,111 +124,98 @@ pub struct CodeLensData {
 }
 
 // ============================================================================
-// EngineQuery entry point
+// Query over one cursor
 // ============================================================================
 
-impl EngineQuery {
-    /// Compute code lenses for every `module` definition in the file.
-    ///
-    /// Returns one `CodeLensData` per mixin-type bucket and one for classes,
-    /// for every module that has at least one usage.
-    pub fn get_code_lenses(&self, uri: &Url) -> Vec<CodeLensData> {
-        // 1. Parse the document's Ruby analysis projection. For ERB this preserves
-        // template byte offsets while masking host-language text.
-        let doc_arc = self.doc().expect_invariant(
-            "get_code_lenses has no document",
-            "callers attach one via with_doc_and_engine()",
-            "call EngineQuery::with_doc_and_engine() first",
-        );
-        let document = doc_arc.read();
-        let modules = module_definitions_for_lens(document.analysis_content());
+/// Code lenses for every `module` definition in the cursor's document: one
+/// `CodeLensData` per mixin-type bucket and one for classes, for every module
+/// that has at least one usage.
+pub fn code_lenses_at(cursor: Cursor<'_>, uri: &Url) -> Vec<CodeLensData> {
+    let document = cursor.document.expect_invariant(
+        "code lenses were read without a document",
+        "the handler builds its cursor from the open document",
+        "construct EngineQuery with with_doc_and_engine()",
+    );
+    // Parse the document's Ruby analysis projection. For ERB this preserves
+    // template byte offsets while masking host-language text.
+    let modules = module_definitions_for_lens(document.analysis_content());
 
-        if modules.is_empty() {
-            return Vec::new();
+    if modules.is_empty() {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+
+    for module in &modules {
+        let usages = mixin_usages_from_analysis(cursor.view, &module.fqn);
+        let class_locations = class_definition_locations_from_analysis(cursor.view, &module.fqn);
+
+        if usages.is_empty() && class_locations.is_empty() {
+            debug!("No usages or classes found for module: {:?}", module.fqn);
+            continue;
         }
 
-        let mut results = Vec::new();
+        // Convert byte offsets to LSP positions.
+        let start_position = lsp_position(document.offset_to_position(module.start_offset));
+        let end_position = lsp_position(document.offset_to_position(module.end_offset));
+        let range = Range {
+            start: start_position,
+            end: end_position,
+        };
 
-        for module in &modules {
-            let engine_ref = self.analysis_engine().expect_invariant(
-                "code lens query requires analysis engine",
-                "module usage lenses are derived from graph facts",
-                "construct EngineQuery with with_doc_and_engine()",
-            );
-            let engine = engine_ref.read();
-            let query = AnalysisQuery::new(&engine);
-            let usages = mixin_usages_from_analysis(&query, &engine, &module.fqn);
-            let class_locations =
-                class_definition_locations_from_analysis(&query, &engine, &module.fqn);
+        // Group mixin usages by type.
+        let mut usages_by_type: HashMap<MixinType, Vec<Location>> = HashMap::new();
+        for (mixin_type, location) in usages {
+            usages_by_type.entry(mixin_type).or_default().push(location);
+        }
 
-            if usages.is_empty() && class_locations.is_empty() {
-                debug!("No usages or classes found for module: {:?}", module.fqn);
-                continue;
-            }
+        // One CodeLensData per mixin type.
+        let mixin_types = [
+            (MixinType::Include, "include"),
+            (MixinType::Prepend, "prepend"),
+            (MixinType::Extend, "extend"),
+        ];
 
-            // Convert byte offsets to LSP positions.
-            let start_position = lsp_position(document.offset_to_position(module.start_offset));
-            let end_position = lsp_position(document.offset_to_position(module.end_offset));
-            let range = Range {
-                start: start_position,
-                end: end_position,
-            };
-
-            // Group mixin usages by type.
-            let mut usages_by_type: HashMap<MixinType, Vec<Location>> = HashMap::new();
-            for (mixin_type, location) in usages {
-                usages_by_type.entry(mixin_type).or_default().push(location);
-            }
-
-            // One CodeLensData per mixin type.
-            let mixin_types = [
-                (MixinType::Include, "include"),
-                (MixinType::Prepend, "prepend"),
-                (MixinType::Extend, "extend"),
-            ];
-
-            for (mixin_type, type_name) in &mixin_types {
-                if let Some(locations) = usages_by_type.get(mixin_type) {
-                    results.push(CodeLensData {
-                        range,
-                        title: format!("{} {}", locations.len(), type_name),
-                        command: "ruby-fast-lsp.showReferences".to_string(),
-                        uri: uri.clone(),
-                        target_position: start_position,
-                        locations: locations.clone(),
-                    });
-                }
-            }
-
-            // One CodeLensData for classes.
-            if !class_locations.is_empty() {
-                let count = class_locations.len();
+        for (mixin_type, type_name) in &mixin_types {
+            if let Some(locations) = usages_by_type.get(mixin_type) {
                 results.push(CodeLensData {
                     range,
-                    title: format!("{} {}", count, if count == 1 { "class" } else { "classes" }),
+                    title: format!("{} {}", locations.len(), type_name),
                     command: "ruby-fast-lsp.showReferences".to_string(),
                     uri: uri.clone(),
                     target_position: start_position,
-                    locations: class_locations,
+                    locations: locations.clone(),
                 });
             }
         }
 
-        results
+        // One CodeLensData for classes.
+        if !class_locations.is_empty() {
+            let count = class_locations.len();
+            results.push(CodeLensData {
+                range,
+                title: format!("{} {}", count, if count == 1 { "class" } else { "classes" }),
+                command: "ruby-fast-lsp.showReferences".to_string(),
+                uri: uri.clone(),
+                target_position: start_position,
+                locations: class_locations,
+            });
+        }
     }
+
+    results
 }
 
 fn mixin_usages_from_analysis(
-    query: &AnalysisQuery<'_>,
-    engine: &ruby_analysis::engine::AnalysisEngine,
+    view: &View<'_>,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<(MixinType, Location)> {
-    let mut usages = query
+    let mut usages = view
         .module_mixin_usages(module_fqn)
         .into_iter()
         .filter_map(|usage| {
             let mixin_type = mixin_type_from_usage_kind(usage.kind);
-            let location = location_for_range(&engine.view(), usage.range)?;
+            let location = location_for_range(view, usage.range)?;
             Some((mixin_type, location))
         })
         .collect::<Vec<_>>();
@@ -248,14 +231,13 @@ fn mixin_usages_from_analysis(
 }
 
 fn class_definition_locations_from_analysis(
-    query: &AnalysisQuery<'_>,
-    engine: &ruby_analysis::engine::AnalysisEngine,
+    view: &View<'_>,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<Location> {
-    let mut result = query
+    let mut result = view
         .module_including_class_definition_ranges(module_fqn)
         .into_iter()
-        .filter_map(|range| location_for_range(&engine.view(), range))
+        .filter_map(|range| location_for_range(view, range))
         .collect::<Vec<_>>();
     result.sort_by_key(|location| {
         (
