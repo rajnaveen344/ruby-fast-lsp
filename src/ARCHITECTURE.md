@@ -76,7 +76,7 @@ The loader is responsible for discovering Ruby files, parsing them, and feeding 
 
 - `context.rs`: `LoadContext`, the server-built inputs passed to each project load and interactive file pass, and `LoadSink`, the trait through which the loader writes
 - `coordinator/`: Orchestrates workspace indexing
-- `file_processor/`: Parses one file, runs `FactCollector`, and composes its `FileAnalysis` (`compose.rs`)
+- `file_processor/`: Parses one file, runs `FactCollector`, and composes its `FileAnalysis` (`compose.rs`). `FileProcessor::analyze_file*` returns an uncommitted `LoadedFile`; the caller commits it with `LoadedFile::commit`
 - `sources/project/`: Discovers and indexes project files
 - `sources/gems/`: Discovers and indexes gem files
 - `sources/stdlib/`: Discovers and indexes stdlib files

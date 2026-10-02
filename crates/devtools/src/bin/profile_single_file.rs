@@ -52,11 +52,10 @@ fn main() -> Result<()> {
     info!("Profile single file: {}", file_path.display());
     info!("File size: {} bytes", content.len());
     let start = Instant::now();
-    processor.process_file_current_file_resolution(
-        &file_uri,
-        &content,
-        &server.load_context_for_uri(&file_uri),
-    )?;
+    let ctx = server.load_context_for_uri(&file_uri);
+    processor
+        .analyze_file_current_file_resolution(&file_uri, &content, &ctx)?
+        .commit(&ctx);
     info!("Profile single file total: {:?}", start.elapsed());
 
     Ok(())

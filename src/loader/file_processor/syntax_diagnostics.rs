@@ -18,7 +18,7 @@ const PRISM_UNREACHABLE_MSG: &str = "statement not reached";
 /// Generate diagnostics from a parse result.
 ///
 /// Extracts syntax errors and warnings from an existing parse result.
-/// Used by process_file() to avoid re-parsing.
+/// Used by FileProcessor::analyze_file* to avoid re-parsing.
 pub fn generate_diagnostics(
     parse_result: &ruby_prism::ParseResult<'_>,
     document: &RubyDocument,

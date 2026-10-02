@@ -45,6 +45,14 @@ run is still current. The extension registry only produces the extension
 semantic seed; the loader commits it to the project engine through
 `LoadSink::commit_seed`.
 
+An interactive file pass (didOpen, didChange, didSave, open-document refreshes
+after a dependency change, and embedded `open_embedded_document`) calls
+`FileProcessor::analyze_file*`, which returns an uncommitted `LoadedFile`, and
+commits it with `LoadedFile::commit` in the same admitted task before any
+diagnostics are read. The commit replaces the file's facts, resolves them, and
+retains the processed document in `documents` through
+`LoadSink::mark_document_indexed`.
+
 A file leaves its project through `Project::remove`: a closed file that is
 deleted or falls outside the source policy, a closed excluded document, and a
 rehomed open document in every project except its new owner. Other files stop

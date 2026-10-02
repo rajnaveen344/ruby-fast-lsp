@@ -141,12 +141,14 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
     );
 
     let uri = Url::from_file_path(&source_path).unwrap();
+    let ctx = server.load_context_for_uri(&uri);
     coordinator
         .file_processor
         .as_ref()
         .unwrap()
-        .process_file(&uri, source, &server.load_context_for_uri(&uri))
-        .unwrap();
+        .analyze_file(&uri, source, &ctx)
+        .unwrap()
+        .commit(&ctx);
 
     let alias = FullyQualifiedName::try_from("Admin::RichFixture").unwrap();
     let engine = server.analysis_engine_for_uri(&uri);
@@ -351,16 +353,14 @@ async fn selected_jruby_catalog_contributes_import_facts_to_the_owning_project()
     );
     drop(engine);
 
+    let ctx = server.load_context_for_uri(&uri);
     coordinator
         .file_processor
         .as_ref()
         .unwrap()
-        .process_file_current_file_resolution_forced(
-            &uri,
-            "module Admin\nend\n",
-            &server.load_context_for_uri(&uri),
-        )
-        .unwrap();
+        .analyze_file_current_file_resolution_forced(&uri, "module Admin\nend\n", &ctx)
+        .unwrap()
+        .commit(&ctx);
     let engine = server.analysis_engine_for_uri(&uri);
     let engine = engine.read();
     assert!(

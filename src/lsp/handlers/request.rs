@@ -651,13 +651,11 @@ mod navigation_demand_tests {
         let target_path = project.join("account_record.rb");
         let target_uri = Url::from_file_path(&target_path).unwrap();
         std::fs::write(&target_path, "class AccountRecord\nend\n").unwrap();
+        let ctx = server.load_context_for_uri(&target_uri);
         FileProcessor::with_extension_registry(server.extensions.registry().clone())
-            .process_file(
-                &target_uri,
-                "class AccountRecord\nend\n",
-                &server.load_context_for_uri(&target_uri),
-            )
-            .unwrap();
+            .analyze_file(&target_uri, "class AccountRecord\nend\n", &ctx)
+            .unwrap()
+            .commit(&ctx);
         workspace.navigation_demands.complete_keys(
             run.generation(),
             NavigationDemandStage::Project,

@@ -78,11 +78,12 @@ async fn process_interactive_file(
             move || {
                 let start = Instant::now();
                 let ctx = server.load_context_for_uri(&uri);
-                let result = if current_file_resolution {
-                    indexer.process_file_current_file_resolution(&uri, &content, &ctx)
+                let loaded = if current_file_resolution {
+                    indexer.analyze_file_current_file_resolution(&uri, &content, &ctx)
                 } else {
-                    indexer.process_file(&uri, &content, &ctx)
+                    indexer.analyze_file(&uri, &content, &ctx)
                 };
+                let result = loaded.map(|loaded| loaded.commit(&ctx));
                 info!(
                     "[PERF][interactive] file={} mode={} elapsed={:?}",
                     uri.path(),
@@ -93,6 +94,20 @@ async fn process_interactive_file(
             },
         )
         .await?
+}
+
+/// Reanalyze an open document after another file changed what it depends on,
+/// and commit it immediately with current-file resolution. Runs even when the
+/// document's version is already indexed.
+fn reanalyze_open_file(
+    processor: &FileProcessor,
+    server: &RubyLanguageServer,
+    uri: &Url,
+    content: &str,
+) -> anyhow::Result<crate::loader::file_processor::ProcessResult> {
+    let ctx = server.load_context_for_uri(uri);
+    let loaded = processor.analyze_file_current_file_resolution_forced(uri, content, &ctx)?;
+    Ok(loaded.commit(&ctx))
 }
 
 /// Initialize workspace and run complete indexing.
@@ -179,7 +194,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let doc_elapsed = doc_start.elapsed();
     debug!("Doc cache size: {}", server.documents.read().len());
 
-    // Process file with unified FileProcessor::process_file. Route analysis state
+    // Analyze and commit the file with the unified FileProcessor. Route analysis state
     // by URI so the file lands in its workspace's own index.
     let indexer = interactive_file_processor(server, &uri);
 
@@ -304,11 +319,7 @@ async fn refresh_open_project_files_after_dependency_open(
     open_docs.sort_unstable_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
 
     for (uri, content) in open_docs {
-        match indexer.process_file_current_file_resolution_forced(
-            &uri,
-            &content,
-            &server.load_context_for_uri(&uri),
-        ) {
+        match reanalyze_open_file(indexer, server, &uri, &content) {
             Ok(result) => {
                 let mut diagnostics = result.diagnostics;
                 diagnostics.extend(
@@ -497,11 +508,7 @@ async fn refresh_bounded_open_diagnostics(
 
     let mut refreshed = 0;
     for (uri, content) in open_documents {
-        let Ok(result) = indexer.process_file_current_file_resolution_forced(
-            &uri,
-            &content,
-            &server.load_context_for_uri(&uri),
-        ) else {
+        let Ok(result) = reanalyze_open_file(indexer, server, &uri, &content) else {
             log::warn!("Failed to refresh open-file diagnostics for {}", uri.path());
             continue;
         };
@@ -827,11 +834,7 @@ async fn refresh_open_project_files_for_dependency_engines(
     open_project_files.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
 
     for (uri, content) in open_project_files {
-        match processor.process_file_current_file_resolution_forced(
-            &uri,
-            &content,
-            &server.load_context_for_uri(&uri),
-        ) {
+        match reanalyze_open_file(processor, server, &uri, &content) {
             Ok(result) => {
                 let query = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri));
                 let mut diagnostics = result.diagnostics;

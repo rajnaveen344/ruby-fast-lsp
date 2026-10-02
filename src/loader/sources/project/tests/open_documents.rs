@@ -166,13 +166,11 @@ fn cold_project_result_is_independent_of_a_prior_identical_file_pass() {
         let workspace_state = server.add_workspace(Url::from_directory_path(root).unwrap());
         if preindex {
             let uri = Url::from_file_path(&path).unwrap();
+            let ctx = server.load_context_for_uri(&uri);
             FileProcessor::new()
-                .process_file_current_file_resolution_forced(
-                    &uri,
-                    source,
-                    &server.load_context_for_uri(&uri),
-                )
-                .unwrap();
+                .analyze_file_current_file_resolution_forced(&uri, source, &ctx)
+                .unwrap()
+                .commit(&ctx);
         }
         let mut indexer = IndexerProject::new(
             root.to_path_buf(),

@@ -286,10 +286,19 @@ Delete this file when the last task is done. Git history keeps the record.
         through it, one source (`stdlib`, `gems`, `project`, `jruby`) per
         commit. `src/server` is at 10 entries, so the adapter replaces a file
         or lives under `projects`. Profiler comparison.
-  - [ ] C1f. Make `analyze_file` return `LoadedFile`: the caller commits and
+  - [x] C1f. Make `analyze_file` return `LoadedFile`: the caller commits and
         updates `documents`. Only the seed commit stays inside, through
         `LoadSink::commit_seed`, until B3k. Profiler comparison, with didOpen
-        p95 called out.
+        p95 called out. Done: `FileProcessor::process_file*` became
+        `analyze_file*` and returns an uncommitted `LoadedFile`; every caller
+        commits it immediately with `LoadedFile::commit`, which replaces the
+        facts in the engine the analysis read, resolves them, and retains the
+        document through `LoadSink::mark_document_indexed`. The commits were
+        and remain unconditional and synchronous with the analysis; the
+        direct declaration seed and the extension seed stay inside because
+        the walk reads them. didOpen and didChange share this path; the
+        profiler's edit p95 is unchanged within noise and the fingerprint is
+        unchanged.
   - [x] C1g. Remove the `server` parameter from the loader. Publish
         open-project diagnostics from `LoadSink::project_facts_ready` on the
         server side. Update `src/loader/README.md`, `src/ARCHITECTURE.md`, and

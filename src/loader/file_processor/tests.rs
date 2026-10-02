@@ -10,37 +10,50 @@ use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, ResolveMode, Semantic
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// Analyze `source` as the open document `uri` with forced current-file
+/// resolution and commit it, as an open-document refresh does.
+fn analyze_and_commit(
+    processor: &FileProcessor,
+    server: &RubyLanguageServer,
+    uri: &Url,
+    source: &str,
+) -> anyhow::Result<ProcessResult> {
+    let ctx = server.load_context_for_uri(uri);
+    let loaded = processor.analyze_file_current_file_resolution_forced(uri, source, &ctx)?;
+    Ok(loaded.commit(&ctx))
+}
+
 #[test]
 fn file_processor_reports_body_only_and_exported_api_changes() {
     let server = RubyLanguageServer::default();
     let processor = FileProcessor::with_extension_registry(server.extensions.registry().clone());
     let uri = crate::test::harness::fixture_uri("/app/user.rb");
 
-    let initial = processor
-        .process_file_current_file_resolution_forced(
-            &uri,
-            "class User\n  def name\n    'A'\n  end\nend\n",
-            &server.load_context_for_uri(&uri),
-        )
-        .unwrap();
+    let initial = analyze_and_commit(
+        &processor,
+        &server,
+        &uri,
+        "class User\n  def name\n    'A'\n  end\nend\n",
+    )
+    .unwrap();
     assert_eq!(initial.semantic_change, SemanticChange::InitialIndex);
 
-    let body = processor
-        .process_file_current_file_resolution_forced(
-            &uri,
-            "class User\n  def name\n    'B'\n  end\nend\n",
-            &server.load_context_for_uri(&uri),
-        )
-        .unwrap();
+    let body = analyze_and_commit(
+        &processor,
+        &server,
+        &uri,
+        "class User\n  def name\n    'B'\n  end\nend\n",
+    )
+    .unwrap();
     assert_eq!(body.semantic_change, SemanticChange::BodyOnly);
 
-    let api = processor
-        .process_file_current_file_resolution_forced(
-            &uri,
-            "class User\n  def name(prefix)\n    prefix\n  end\nend\n",
-            &server.load_context_for_uri(&uri),
-        )
-        .unwrap();
+    let api = analyze_and_commit(
+        &processor,
+        &server,
+        &uri,
+        "class User\n  def name(prefix)\n    prefix\n  end\nend\n",
+    )
+    .unwrap();
     assert_eq!(api.semantic_change, SemanticChange::ExportsChanged);
 }
 
@@ -353,12 +366,7 @@ fn file_processor_handles_shebang_source_without_crashing() {
     let uri = crate::test::harness::fixture_uri("/project/Rakefile");
     let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nrequire File.expand_path('../config/application', __FILE__)\nExampleApp::Application.load_tasks\n";
 
-    let result = processor
-        .process_file_current_file_resolution_forced(
-            &uri,
-            source,
-            &server.load_context_for_uri(&uri),
-        )
+    let result = analyze_and_commit(&processor, &server, &uri, source)
         .expect("shebang-bearing Ruby entry points must index successfully");
 
     assert_eq!(result.semantic_change, SemanticChange::InitialIndex);
@@ -373,29 +381,11 @@ fn reindexing_a_class_declaration_keeps_its_graph_node_and_mixin_lookup() {
     let helpers = "module API\n  module Catalog\n    def get_images\n    end\n  end\n\n  include Catalog\nend\n";
     let app = "class Base\n  include API\nend\n\nclass PlatformApp < Base\n  def route\n    get_images\n  end\nend\n";
 
-    processor
-        .process_file_current_file_resolution_forced(
-            &helpers_uri,
-            helpers,
-            &server.load_context_for_uri(&helpers_uri),
-        )
-        .unwrap();
-    processor
-        .process_file_current_file_resolution_forced(
-            &app_uri,
-            app,
-            &server.load_context_for_uri(&app_uri),
-        )
-        .unwrap();
+    analyze_and_commit(&processor, &server, &helpers_uri, helpers).unwrap();
+    analyze_and_commit(&processor, &server, &app_uri, app).unwrap();
     // Second pass mirrors didOpen-then-cold-index: the class constant already
     // carries a ClassReference from the first declaration of this same file.
-    processor
-        .process_file_current_file_resolution_forced(
-            &app_uri,
-            app,
-            &server.load_context_for_uri(&app_uri),
-        )
-        .unwrap();
+    analyze_and_commit(&processor, &server, &app_uri, app).unwrap();
 
     let platform_app =
         FullyQualifiedName::namespace(vec![RubyConstant::new("PlatformApp").unwrap()]);
@@ -430,20 +420,20 @@ fn file_processor_reopens_a_cross_file_class_alias_under_the_original_owner() {
     let declaration_uri = crate::test::harness::fixture_uri("/project/types.rb");
     let reopening_uri = crate::test::harness::fixture_uri("/project/reopening.rb");
 
-    processor
-        .process_file_current_file_resolution_forced(
-            &declaration_uri,
-            "module Types\n  class Original\n  end\n  Alias = Original\nend\n",
-            &server.load_context_for_uri(&declaration_uri),
-        )
-        .unwrap();
-    processor
-        .process_file_current_file_resolution_forced(
-            &reopening_uri,
-            "module Types\n  class Alias\n    def from_other_file\n    end\n  end\nend\n",
-            &server.load_context_for_uri(&reopening_uri),
-        )
-        .unwrap();
+    analyze_and_commit(
+        &processor,
+        &server,
+        &declaration_uri,
+        "module Types\n  class Original\n  end\n  Alias = Original\nend\n",
+    )
+    .unwrap();
+    analyze_and_commit(
+        &processor,
+        &server,
+        &reopening_uri,
+        "module Types\n  class Alias\n    def from_other_file\n    end\n  end\nend\n",
+    )
+    .unwrap();
 
     let expected = FullyQualifiedName::method(
         vec![

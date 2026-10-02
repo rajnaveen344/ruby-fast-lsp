@@ -122,9 +122,11 @@ impl RubyLanguageServer {
                 entries.insert(uri.clone(), Arc::new(RwLock::new(document)));
             }
         }
-        FileProcessor::with_extension_registry(self.extensions.registry().clone())
-            .process_file_current_file_resolution(uri, content, &self.load_context_for_uri(uri))
-            .map(|_| ())
+        let ctx = self.load_context_for_uri(uri);
+        let loaded = FileProcessor::with_extension_registry(self.extensions.registry().clone())
+            .analyze_file_current_file_resolution(uri, content, &ctx)?;
+        loaded.commit(&ctx);
+        Ok(())
     }
 
     /// Drop an embedded server's open buffer. Analysis facts stay, matching

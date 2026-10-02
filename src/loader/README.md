@@ -54,7 +54,7 @@ build their load through the server are named in its policy.
 The server builds a `LoadContext` for each whole-project load
 (`load_context_for_project`) and each interactive file pass
 (`load_context_for_uri`), and passes it to
-`IndexingCoordinator::run_complete_indexing` and the `FileProcessor::process_file*`
+`IndexingCoordinator::run_complete_indexing` and the `FileProcessor::analyze_file*`
 entry points. Its handles read live: configuration, published require roots,
 and open buffers are observed when the loader consults them. The loader reads
 configuration, require roots, shared products, the resource governor, runtime
@@ -73,6 +73,17 @@ queues, inlay-hint refresh, and extension registry and context. The loader
 calls them in its own order, so the owner observes the load's write sequence.
 Fact commits and resolution still run on the engine handle returned by
 `engine_for_uri`.
+
+A single-file pass is split into analysis and commit. `FileProcessor::analyze_file*`
+parses the file, walks it, and composes its `FileAnalysis`, writing only what
+the walk itself reads: the source registration, the direct declaration seed,
+and the extension seed through `LoadSink::commit_seed`. It returns an
+uncommitted `LoadedFile`. The caller commits it with `LoadedFile::commit`
+immediately, in the same task and with no await in between: the commit
+replaces the file's facts in the engine the analysis read, resolves them as
+requested, classifies the semantic change, and retains the processed document
+through `LoadSink::mark_document_indexed`. An open version that is already
+indexed commits nothing; a file too broken to analyze commits empty facts.
 
 The extension registry never writes an engine. Before a file walk the loader
 asks it for the semantic seed (extension namespaces and method targets) that
