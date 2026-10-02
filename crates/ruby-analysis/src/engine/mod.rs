@@ -25,6 +25,7 @@ mod state;
 
 pub use debug::reference_storage_sizes;
 pub use debug::types::{ExportGraphResponse, LookupResponse};
+pub use diagnostics::policy::UNRESOLVED_REQUIRE_CODE;
 pub use persist::external_facts_template::{
     ProjectNeutralFileFactsSnapshot, ProjectNeutralFileFactsTemplate,
     ProjectNeutralTemplateRejection,

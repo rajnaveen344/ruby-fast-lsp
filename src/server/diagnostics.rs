@@ -166,8 +166,8 @@ impl RubyLanguageServer {
     ) {
         use crate::loader::require_paths::{
             require_diagnostic_candidates, reresolve_unresolved_require_diagnostics,
-            UNRESOLVED_REQUIRE_CODE,
         };
+        use ruby_analysis::engine::UNRESOLVED_REQUIRE_CODE;
 
         let feature_index = workspace.require_feature_index();
         let generation = workspace.indexing_status.snapshot().generation;

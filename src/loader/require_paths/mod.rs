@@ -35,7 +35,7 @@ use std::path::{Component, Path, PathBuf};
 
 use log::trace;
 use ruby_analysis::core::{DiagnosticFact, DiagnosticSeverity, SourceFileId, TextRange};
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::{AnalysisEngine, UNRESOLVED_REQUIRE_CODE};
 use ruby_prism::{visit_call_node, CallNode, Visit};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
@@ -192,9 +192,6 @@ fn require_feature_keys(relative: &Path) -> Option<(String, Option<String>)> {
         .map(ToOwned::to_owned);
     Some((key, bare))
 }
-
-/// Diagnostic code for a static `require` / `require_relative` that cannot be resolved.
-pub const UNRESOLVED_REQUIRE_CODE: &str = "unresolved-require";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequireKind {
