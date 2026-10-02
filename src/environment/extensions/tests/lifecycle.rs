@@ -1,6 +1,6 @@
 use super::*;
 use crate::environment::extensions::ExtensionStat;
-use crate::loader::cache::persistent::PersistentProductStat;
+use crate::utils::persistent_cache::PersistentProductStat;
 
 #[test]
 fn tracked_call_name_set_is_shared_arc_and_covers_rspec_without_ordinary_ruby_names() {

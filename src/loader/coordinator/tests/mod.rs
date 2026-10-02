@@ -16,9 +16,9 @@ use crate::environment::config::runtime::{
 };
 use crate::environment::runtime::catalog::RuntimeDiscoverySource;
 use crate::environment::runtime::jruby::java_catalog::JavaArtifactProductCache;
-use crate::loader::cache::persistent::PersistentDerivedProductCache;
 use crate::loader::version::ruby_version::RubyImplementation;
 use crate::server::RubyLanguageServer;
+use crate::utils::persistent_cache::PersistentDerivedProductCache;
 use ruby_analysis::core::{FullyQualifiedName, RubyType, TypeSubject};
 use ruby_analysis::engine::{AnalysisQuery, SourceFileInput};
 use ruby_fast_lsp_jvm_metadata::ArchiveLimits;

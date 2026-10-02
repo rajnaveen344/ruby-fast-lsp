@@ -1,7 +1,7 @@
 //! Cached Java artifact metadata, classpath winner order, and JDK release features.
 
 use super::*;
-use crate::loader::cache::persistent::PersistentProductStat;
+use crate::utils::persistent_cache::PersistentProductStat;
 use crate::utils::single_flight::SingleFlightStat;
 
 #[test]

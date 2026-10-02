@@ -1,6 +1,6 @@
 use super::classpath::{ArtifactKind, ClasspathArtifact, ProjectClasspath};
 use crate::invariant::ExpectInvariant;
-use crate::loader::cache::persistent::{PersistentProduct, PersistentProductKind};
+use crate::utils::persistent_cache::{PersistentProduct, PersistentProductKind};
 use crate::utils::single_flight::{BlockingBoundedSingleFlightCache, SingleFlightStat};
 use anyhow::{anyhow, Context, Result as AnyResult};
 use ruby_analysis::stats::StatsSnapshot;

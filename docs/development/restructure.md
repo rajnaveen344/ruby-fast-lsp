@@ -299,8 +299,9 @@ Delete this file when the last task is done. Git history keeps the record.
         keeps its byte-artifact API. Gem and Java cache tests moved next to
         their products, with schema-1 compatibility tests that write the
         envelope from literal constants.
-  - [ ] C2d. Move `loader/cache/persistent` to `src/utils/persistent_cache/`
+  - [x] C2d. Move `loader/cache/persistent` to `src/utils/persistent_cache/`
         with no other change. Environment then no longer imports the loader.
+        Done: environment has no `crate::loader` import, tests included.
   - [ ] C2e. Move `collect_project_files` from `utils/file_ops.rs` to
         `loader/sources/project`, so utils no longer reads `IndexingConfig`.
   - [ ] C2f. Make the extension registry return the seed `FileAnalysis`

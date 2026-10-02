@@ -28,10 +28,10 @@ use crate::environment::extensions::{
     ProjectContextSnapshot, EXTENSION_LOAD_TRANSIENT_MEMORY_BYTES,
     EXTENSION_RESPONSE_TRANSIENT_MEMORY_BYTES,
 };
-use crate::loader::cache::persistent::PersistentDerivedProductCache;
 use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
 };
+use crate::utils::persistent_cache::PersistentDerivedProductCache;
 
 #[derive(Clone)]
 pub struct ExtensionRegistryHandle {

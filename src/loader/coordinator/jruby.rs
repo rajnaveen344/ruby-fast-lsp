@@ -23,10 +23,10 @@ use crate::environment::runtime::jruby::source_navigation::{
     JavaSourceResolutionLimits, JavaSourceResolver,
 };
 use crate::invariant::ExpectInvariant;
-use crate::loader::cache::persistent::{PersistentDerivedProductCache, PersistentProductLookup};
 use crate::loader::context::LoadContext;
 use crate::loader::file_processor::FileProcessor;
 use crate::loader::sources::gems::discover_locked_java_gem_roots;
+use crate::utils::persistent_cache::{PersistentDerivedProductCache, PersistentProductLookup};
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use rayon::prelude::*;

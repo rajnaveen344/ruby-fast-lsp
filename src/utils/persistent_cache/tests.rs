@@ -193,7 +193,7 @@ fn fresh_process_loads_compiled_wasm_artifact() {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "loader::cache::persistent::tests::fresh_process_loads_compiled_wasm_artifact",
+            "utils::persistent_cache::tests::fresh_process_loads_compiled_wasm_artifact",
             "--nocapture",
         ])
         .env(CHILD_ROOT, fixture.path())

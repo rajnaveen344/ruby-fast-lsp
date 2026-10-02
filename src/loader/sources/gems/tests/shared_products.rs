@@ -1,7 +1,7 @@
 //! Shared dependency products, single-flight provenance, and JRuby companion overlap.
 
 use super::*;
-use crate::loader::cache::persistent::PersistentProductStat;
+use crate::utils::persistent_cache::PersistentProductStat;
 use crate::utils::single_flight::SingleFlightStat;
 
 #[test]

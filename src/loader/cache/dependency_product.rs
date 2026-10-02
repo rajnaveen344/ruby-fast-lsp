@@ -1,5 +1,5 @@
 use crate::invariant::ExpectInvariant;
-use crate::loader::cache::persistent::{PersistentProduct, PersistentProductKind};
+use crate::utils::persistent_cache::{PersistentProduct, PersistentProductKind};
 use anyhow::{anyhow, Result};
 use ruby_analysis::core::SourceKind;
 use ruby_analysis::engine::{

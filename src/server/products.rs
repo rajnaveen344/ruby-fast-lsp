@@ -6,10 +6,10 @@ use crate::environment::runtime::catalog::{
 #[cfg(test)]
 use crate::invariant::ExpectInvariant;
 use crate::loader::cache::dependency_product::GemBindingStat;
-use crate::loader::cache::persistent::PersistentProductStat;
 use crate::loader::context::{RuntimeDiscovery, SharedProducts};
 use crate::loader::scheduling::status::ProjectIndexingSnapshot;
 use crate::utils::admission::IndexingResourceGovernor;
+use crate::utils::persistent_cache::PersistentProductStat;
 use crate::utils::single_flight::SingleFlightStat;
 use ruby_analysis::stats::StatsSnapshot;
 use serde::{Deserialize, Serialize};

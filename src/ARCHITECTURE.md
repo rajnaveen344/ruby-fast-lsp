@@ -15,7 +15,7 @@ src/
 ├── loader/         - Workspace discovery, fact collection, scheduling, and caches
 ├── lsp/            - Editor projections: service facade, capabilities, query adapters, handlers, check
 ├── server/         - Server state: documents, project routing, products, and publication
-├── utils/          - Shared helpers, single-flight, and the resource admission governor
+├── utils/          - Shared helpers, single-flight, the resource admission governor, and the persistent product cache
 └── main.rs         - Application entry point
 src/test/           - Test harnesses and integration tests
 editors/

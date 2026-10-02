@@ -210,11 +210,11 @@ impl IndexerGem {
                         format!("persistent gem-product lookup worker failed: {error}")
                     })?
                     .map_err(|error| format!("persistent gem-product lookup failed: {error:#}"))?;
-                let crate::loader::cache::persistent::PersistentProductLookup::Reservation(
+                let crate::utils::persistent_cache::PersistentProductLookup::Reservation(
                     reservation,
                 ) = lookup
                 else {
-                    let crate::loader::cache::persistent::PersistentProductLookup::Hit(product) =
+                    let crate::utils::persistent_cache::PersistentProductLookup::Hit(product) =
                         lookup
                     else {
                         unreachable_invariant!(

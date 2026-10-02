@@ -1,5 +1,5 @@
 use crate::invariant::ExpectInvariant;
-use crate::loader::cache::persistent::PersistentProductStat;
+use crate::utils::persistent_cache::PersistentProductStat;
 use crate::utils::single_flight::SingleFlightStat;
 use parking_lot::Mutex;
 use ruby_analysis::stats::StatsSnapshot;

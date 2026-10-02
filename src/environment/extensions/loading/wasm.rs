@@ -14,7 +14,7 @@ use crate::environment::extensions::loading::manifest::{
 use crate::environment::extensions::loading::packages::ExtensionPackage;
 use crate::environment::extensions::registry::loaded::LoadedWasmExtension;
 use crate::environment::extensions::MAX_EXTENSION_WASM_BYTES;
-use crate::loader::cache::persistent::{
+use crate::utils::persistent_cache::{
     CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
 };
 

@@ -4,5 +4,6 @@ pub mod cache;
 pub mod file_ops;
 pub mod lsp;
 pub mod parser;
+pub mod persistent_cache;
 pub mod single_flight;
 pub mod stub_loader;

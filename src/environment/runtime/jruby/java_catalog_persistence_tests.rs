@@ -4,7 +4,7 @@
 
 use super::classpath::{ArtifactKind, ArtifactOrigin, ClasspathArtifact, SourceFileIdentity};
 use super::java_catalog::{JavaArtifactProduct, JavaArtifactProductKey};
-use crate::loader::cache::persistent::{
+use crate::utils::persistent_cache::{
     PersistentDerivedProductCache, PersistentProduct, PersistentProductLookup,
     PersistentProductStat,
 };

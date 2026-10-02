@@ -12,7 +12,8 @@ reference candidates, resolved references, and diagnostics.
   runtime selection, JRuby companions, and resource admission
 - `cache/`: gem dependency products and their semantic-input identity;
   `GemDependencyProduct` implements `PersistentProduct`, the codec the
-  persistent derived-product cache stores it through
+  persistent derived-product cache in `src/utils/persistent_cache/` stores it
+  through
 - `context.rs`: `LoadContext`, the owner-supplied inputs the loader reads
   (live configuration, published require roots, shared products, the
   resource governor, runtime discovery, and open buffers through

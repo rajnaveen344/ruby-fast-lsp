@@ -59,12 +59,12 @@ use crate::environment::extensions::registry::status::{
 };
 use crate::environment::extensions::responses::response_patch_to_document_symbol;
 use crate::environment::extensions::{ProjectContextSeed, MAX_EXTENSION_WASM_BYTES};
-use crate::loader::cache::persistent::{
-    CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
-};
 use crate::server::RubyLanguageServer;
 use crate::utils::admission::{
     IndexingResourceGovernor, IndexingResourcePriority, IndexingWorkSpec,
+};
+use crate::utils::persistent_cache::{
+    CompiledWasmProductKey, PersistentCompiledWasmLookup, PersistentDerivedProductCache,
 };
 
 mod execution_contexts;

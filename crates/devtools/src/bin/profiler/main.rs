@@ -73,7 +73,7 @@ use crate::reports::{print_diagnostic_manifest, print_semantic_export_manifest, 
 use crate::workspace_indexing::{
     configure_server, run_full_indexing, run_indexing_only, run_type_inference_only,
 };
-use ruby_fast_lsp::loader::cache::persistent::PersistentProductStat;
+use ruby_fast_lsp::utils::persistent_cache::PersistentProductStat;
 
 // Conditionally use dhat for memory profiling
 #[cfg(feature = "memory-profiling")]

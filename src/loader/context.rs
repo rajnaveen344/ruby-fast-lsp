@@ -17,12 +17,12 @@ use crate::invariant::ExpectInvariant;
 use crate::loader::cache::dependency_product::{
     GemBindingStat, GemDependencyProduct, GemDependencyProductKey,
 };
-use crate::loader::cache::persistent::PersistentDerivedProductCache;
 use crate::loader::require_paths::RequireFeatureIndex;
 use crate::loader::scheduling::navigation_demand::NavigationDemandController;
 use crate::loader::scheduling::status::{IndexingPhase, IndexingRun};
 use crate::loader::sources::stdlib::{RuntimeStdlibPathKey, RuntimeStdlibPaths};
 use crate::utils::admission::IndexingResourceGovernor;
+use crate::utils::persistent_cache::PersistentDerivedProductCache;
 use crate::utils::single_flight::BoundedSingleFlightCache;
 use anyhow::Result;
 use log::warn;

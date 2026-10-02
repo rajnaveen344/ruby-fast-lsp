@@ -6,7 +6,7 @@
 use super::dependency_product::{
     GemDependencyFileTemplate, GemDependencyManifest, GemDependencyProduct, GemDependencySource,
 };
-use super::persistent::{
+use crate::utils::persistent_cache::{
     PersistentDerivedProductCache, PersistentProduct, PersistentProductLookup,
     PersistentProductStat, RESCAN_PUBLICATION_INTERVAL,
 };
