@@ -8,7 +8,7 @@ use crate::utils::lsp::lsp_file_range;
 use log::{info, warn};
 use parking_lot::{Mutex, RwLock};
 use ruby_analysis::core::DiagnosticSeverity as AnalysisDiagnosticSeverity;
-use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::engine::{AnalysisEngine, View};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -95,19 +95,19 @@ impl RubyLanguageServer {
 
     /// The one composition of a document's published diagnostics: `syntax`,
     /// then the engine's facts, then linter output retained for the exact
-    /// current source. Everything is read under the caller's single engine
-    /// guard, which the caller keeps through the synchronous enqueue.
+    /// current source. Everything is read through the caller's single view,
+    /// whose engine guard the caller keeps through the synchronous enqueue.
     pub(crate) fn compose_diagnostics(
         &self,
-        engine: &AnalysisEngine,
+        view: &View<'_>,
         uri: &Url,
         mut diagnostics: Vec<Diagnostic>,
     ) -> Vec<Diagnostic> {
-        diagnostics.extend(unresolved_diagnostics_from_engine(engine, uri));
+        diagnostics.extend(engine_diagnostics(view, uri));
         let snapshot = uri
             .to_file_path()
             .ok()
-            .and_then(|path| engine.view().source_snapshot_for_path(path));
+            .and_then(|path| view.source_snapshot_for_path(path));
         let mut publication = self.diagnostics.state.lock();
         if let Some((retained_snapshot, retained)) = publication.external_linter_results.get(uri) {
             if Some(*retained_snapshot) == snapshot {
@@ -124,7 +124,7 @@ impl RubyLanguageServer {
     pub(crate) fn publish_document_diagnostics(&self, uri: Url, syntax: Vec<Diagnostic>) {
         let analysis_engine = self.analysis_engine_for_uri(&uri);
         let engine = analysis_engine.read();
-        let diagnostics = self.compose_diagnostics(&engine, &uri, syntax);
+        let diagnostics = self.compose_diagnostics(&engine.view(), &uri, syntax);
         self.queue_diagnostics(uri, diagnostics);
     }
 
@@ -347,7 +347,7 @@ impl RubyLanguageServer {
                 // Synchronous enqueue keeps edits and resolution outside the
                 // projection-to-publication interval.
                 if let Some(syntax) = syntax {
-                    let diagnostics = self.compose_diagnostics(&engine, &uri, syntax);
+                    let diagnostics = self.compose_diagnostics(&engine.view(), &uri, syntax);
                     self.queue_diagnostics(uri, diagnostics);
                 }
             }
@@ -367,13 +367,10 @@ impl RubyLanguageServer {
     }
 }
 
-/// The single engine-to-LSP diagnostic projection for one document. A source
-/// that cannot form a file URI publishes no engine diagnostics.
-pub(crate) fn unresolved_diagnostics_from_engine(
-    engine: &AnalysisEngine,
-    uri: &Url,
-) -> Vec<Diagnostic> {
-    let view = engine.view();
+/// The single engine-to-LSP diagnostic projection for one document, read
+/// through the caller's one view. A source that cannot form a file URI, or a
+/// document the engine does not know, has no engine diagnostics.
+pub fn engine_diagnostics(view: &View<'_>, uri: &Url) -> Vec<Diagnostic> {
     let path = uri
         .to_file_path()
         .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
@@ -489,7 +486,7 @@ impl RubyLanguageServer {
                 {
                     continue;
                 }
-                let diagnostics = self.compose_diagnostics(&engine, &uri, syntax);
+                let diagnostics = self.compose_diagnostics(&engine.view(), &uri, syntax);
                 let state = run_state();
                 if state != IndexingRunState::Current {
                     return state;

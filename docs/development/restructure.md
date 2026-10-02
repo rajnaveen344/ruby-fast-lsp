@@ -251,7 +251,7 @@ Delete this file when the last task is done. Git history keeps the record.
         wait time.
   - [ ] B6f. Inlay hints, signature help, rename, hierarchies, code lens,
         workspace symbols.
-  - [ ] B6g. Diagnostics projection takes `&View` (with B7d).
+  - [x] B6g. Diagnostics projection takes `&View` (with B7d).
   - [ ] B6h. Only `Project::view()` constructs views outside `engine/`.
 
   Notes: B6 changes signatures and C3 moves files; never mix them in one

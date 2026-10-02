@@ -133,8 +133,8 @@ to protocol values. See the [feature guide](features/README.md).
   rename, code actions, and formatting
 - `presentation/`: hover, inlay hints, code lenses, semantic tokens, document
   symbols, folding ranges, and selection ranges
-- `diagnostics/`: the engine's unresolved-entry diagnostics for a document
-  over the server-owned projection in `server/diagnostics.rs`, and the
+- `diagnostics/`: the engine's diagnostics for a document (`engine_diagnostics`,
+  a free function over one `&View` owned by `server/diagnostics.rs`), and the
   external linter and formatter runner
 - `debug.rs`: FQN lookup, graph export, and extension status requests
 

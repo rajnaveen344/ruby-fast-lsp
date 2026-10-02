@@ -1,7 +1,7 @@
 //! Interleave the real dependency refresh with editor/source and root changes.
 //! Observe both engine facts and submitted LSP diagnostics before recovery.
 
-use crate::features::cursor::EngineQuery;
+use crate::features::diagnostics::engine_diagnostics;
 use crate::loader::scheduling::test_schedule::Point;
 use crate::test::harness::FakeEditor;
 use std::time::Duration;
@@ -164,7 +164,7 @@ async fn delayed_refresh(change: Change) {
     } else {
         expected.clone()
     };
-    assert_eq!(EngineQuery::with_engine(server.analysis_engine_for_uri(&uri)).get_unresolved_diagnostics(&uri), expected_facts,
+    assert_eq!(engine_diagnostics(&server.analysis_engine_for_uri(&uri).read().view(), &uri), expected_facts,
         "delayed dependency refresh must preserve current engine diagnostic facts as well as the UI");
     attempted.release();
     tokio::time::timeout(Duration::from_secs(15), refreshing)

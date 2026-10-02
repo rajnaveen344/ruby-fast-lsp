@@ -8,7 +8,7 @@ mod projects;
 mod watched_files;
 
 use crate::invariant::ExpectInvariant;
-pub(crate) use diagnostics::unresolved_diagnostics_from_engine;
+pub use diagnostics::engine_diagnostics;
 use diagnostics::DiagnosticPublisher;
 pub(crate) use documents::OpenDocuments;
 pub(crate) use extensions::ExtensionServices;

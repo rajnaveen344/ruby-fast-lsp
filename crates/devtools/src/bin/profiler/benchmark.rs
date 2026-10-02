@@ -2,7 +2,7 @@
 
 use crate::invariant::ExpectInvariant;
 use devtools::metrics::{LatencySummary, ProductionBudget, ProductionMeasurements};
-use ruby_fast_lsp::features::cursor::EngineQuery;
+use ruby_fast_lsp::features::diagnostics::engine_diagnostics;
 use ruby_fast_lsp::features::editing::completion;
 use ruby_fast_lsp::features::navigation::{definition, references};
 use ruby_fast_lsp::features::presentation::hover;
@@ -187,11 +187,10 @@ pub(crate) async fn run_production_benchmark(
     }
 
     let analysis_engine = server.analysis_engine_for_uri(&uri);
-    let diagnostic_query = EngineQuery::with_engine(analysis_engine.clone());
     let mut diagnostic_samples = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = Instant::now();
-        let _ = diagnostic_query.get_unresolved_diagnostics(&uri);
+        let _ = engine_diagnostics(&analysis_engine.read().view(), &uri);
         diagnostic_samples.push(start.elapsed());
     }
 

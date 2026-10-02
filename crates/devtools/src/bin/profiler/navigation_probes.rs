@@ -1,6 +1,6 @@
 //! Live and post-indexing navigation and diagnostic probes at workspace positions.
 
-use ruby_fast_lsp::features::cursor::EngineQuery;
+use ruby_fast_lsp::features::diagnostics::engine_diagnostics;
 use ruby_fast_lsp::features::navigation::{definition, references};
 use ruby_fast_lsp::loader::scheduling::status;
 use ruby_fast_lsp::lsp::lifecycle::indexing;
@@ -304,8 +304,8 @@ pub(crate) async fn sample_open_file_diagnostics(
             },
         )
         .await;
-        let diagnostics = EngineQuery::with_engine(server.analysis_engine_for_uri(&uri))
-            .get_unresolved_diagnostics(&uri);
+        let diagnostics =
+            engine_diagnostics(&server.analysis_engine_for_uri(&uri).read().view(), &uri);
 
         println!(
             "{}",
