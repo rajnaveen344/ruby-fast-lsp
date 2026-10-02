@@ -488,7 +488,9 @@ provenance, and engine facts.
 
 The server has ten production fields: client, configuration, open documents,
 project registry, indexing services, runtime products, extension services,
-diagnostic publisher, watched-file changes, and namespace-tree cache. Focused
+diagnostic publisher, watched-file changes, and namespace-tree cache.
+Per-project state stays under the project registry: each `ProjectHandle` owns
+its engine, runtime state, and published requires under separate locks. Focused
 modules under `src/server/` keep state with its operations; `server/mod.rs` retains
 common construction. The `tower-lsp` protocol facade (`impl LanguageServer`
 and the debug and namespace-tree custom requests) lives in

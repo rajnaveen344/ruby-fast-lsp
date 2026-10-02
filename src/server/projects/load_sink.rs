@@ -92,7 +92,9 @@ impl LoadSink for RubyLanguageServer {
     ) {
         if let Some(workspace) = self.project_at_root(root) {
             if workspace.handle().is_target(target) {
-                workspace.set_dependency_require_resolution(paths, index);
+                workspace
+                    .handle()
+                    .set_dependency_require_resolution(paths, index);
             }
         }
     }

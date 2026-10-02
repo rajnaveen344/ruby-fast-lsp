@@ -2,6 +2,7 @@
 use super::RubyLanguageServer;
 mod handle;
 mod load_sink;
+mod runtime;
 use crate::environment::config::runtime::SelectedRuntimeDescriptor;
 use crate::environment::extensions::{ProjectContextSeed, ProjectContextSnapshot};
 use crate::invariant::ExpectInvariant;
@@ -16,6 +17,7 @@ use parking_lot::RwLock;
 use ruby_analysis::core::{SourceFileId, SourceKind};
 use ruby_analysis::engine::AnalysisEngine;
 use ruby_fast_lsp_extension_api::ProjectContext;
+pub use runtime::ProjectRuntimeState;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -37,44 +39,17 @@ fn new_orphan_project() -> ProjectHandle {
     project
 }
 
-#[derive(Clone, Default)]
-pub struct ProjectRuntimeState {
-    selected: Arc<RwLock<Option<SelectedRuntimeDescriptor>>>,
-    ruby_version: Arc<RwLock<Option<String>>>,
-    jruby: Arc<RwLock<Option<JrubyAddOn>>>,
-}
-impl ProjectRuntimeState {
-    pub fn selected(&self) -> &RwLock<Option<SelectedRuntimeDescriptor>> {
-        &self.selected
-    }
-    pub fn ruby_version(&self) -> &RwLock<Option<String>> {
-        &self.ruby_version
-    }
-    /// The classpath fingerprint of the project's JRuby add-on, if any.
-    pub fn classpath_fingerprint(&self) -> Option<String> {
-        self.jruby
-            .read()
-            .as_ref()
-            .map(|add_on| add_on.classpath_fingerprint().to_string())
-    }
-    pub(crate) fn jruby_add_on(&self) -> &RwLock<Option<JrubyAddOn>> {
-        &self.jruby
-    }
-}
-
 /// One Ruby project root. Files are routed to the workspace whose `root_path`
 /// is the longest prefix of the file's path. Each project owns an isolated
-/// analysis engine; external documents may retain one project's context.
+/// project handle; external documents may retain one project's context.
 #[derive(Clone)]
 pub struct Workspace {
     pub root_uri: Url,
     pub root_path: PathBuf,
     pub indexing_status: Arc<ProjectIndexingStatus>,
     handle: ProjectHandle,
-    pub runtime: ProjectRuntimeState,
     pub(crate) extension_project_context_seed: Arc<RwLock<ProjectContextSeed>>,
     pub(crate) navigation_demands: NavigationDemandController,
-    requires: PublishedRequires,
     workspace_folder_uris: Arc<RwLock<std::collections::HashSet<Url>>>,
 }
 
@@ -102,10 +77,8 @@ impl Workspace {
             indexing_status: Arc::new(ProjectIndexingStatus::new(root_path.clone())),
             root_path,
             handle: ProjectHandle::new(AnalysisEngine::new()),
-            runtime: ProjectRuntimeState::default(),
             extension_project_context_seed,
             navigation_demands: NavigationDemandController::default(),
-            requires: PublishedRequires::default(),
             workspace_folder_uris: Arc::new(RwLock::new(std::collections::HashSet::from([
                 workspace_folder_uri,
             ]))),
@@ -128,39 +101,6 @@ impl Workspace {
         let generation = self.indexing_status.snapshot().generation;
         let _ = self.indexing_status.cancel_current();
         self.navigation_demands.cancel_generation(generation);
-    }
-
-    /// Absolute gem/stdlib require roots retained after dependency indexing.
-    pub fn dependency_require_paths(&self) -> Vec<PathBuf> {
-        self.requires.paths()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_dependency_require_paths(&self, paths: Vec<PathBuf>) {
-        let index = Arc::new(crate::loader::require_paths::RequireFeatureIndex::build(
-            &paths, None,
-        ));
-        self.set_dependency_require_resolution(paths, index);
-    }
-
-    /// Hold this identity guard through delayed require-fact commit/publication.
-    pub(super) fn require_feature_guard(
-        &self,
-    ) -> parking_lot::RwLockReadGuard<'_, Arc<crate::loader::require_paths::RequireFeatureIndex>>
-    {
-        self.requires.feature_index_guard()
-    }
-
-    pub fn require_feature_index(&self) -> Arc<crate::loader::require_paths::RequireFeatureIndex> {
-        self.requires.feature_index()
-    }
-
-    pub(crate) fn set_dependency_require_resolution(
-        &self,
-        paths: Vec<PathBuf>,
-        index: Arc<crate::loader::require_paths::RequireFeatureIndex>,
-    ) {
-        self.requires.replace(paths, index);
     }
 }
 
@@ -198,7 +138,7 @@ impl RubyLanguageServer {
             .list_workspaces()
             .into_iter()
             .find(|workspace| workspace.root_path == project_root)
-            .map(|workspace| workspace.requires)
+            .map(|workspace| workspace.handle.published_requires())
             .unwrap_or_default();
         self.load_context(RequireContext::new(
             Some(project_root.to_path_buf()),
@@ -210,7 +150,10 @@ impl RubyLanguageServer {
     /// longest prefix of `uri`. A file outside every project has no root.
     pub fn load_context_for_uri(&self, uri: &Url) -> LoadContext {
         let requires = match self.workspace_for_uri(uri) {
-            Some(workspace) => RequireContext::new(Some(workspace.root_path), workspace.requires),
+            Some(workspace) => RequireContext::new(
+                Some(workspace.root_path),
+                workspace.handle.published_requires(),
+            ),
             None => RequireContext::new(None, PublishedRequires::default()),
         };
         self.load_context(requires)
@@ -323,7 +266,7 @@ impl RubyLanguageServer {
             .iter()
             .find(|workspace| &workspace.root_path == root)
         {
-            *workspace.runtime.ruby_version().write() = ruby_version;
+            *workspace.handle.runtime().ruby_version().write() = ruby_version;
         }
     }
 
@@ -334,13 +277,13 @@ impl RubyLanguageServer {
             .iter()
             .find(|workspace| workspace.root_path == root)
         {
-            *workspace.runtime.jruby_add_on().write() = add_on;
+            *workspace.handle.runtime().jruby_add_on().write() = add_on;
         }
     }
 
     pub(crate) fn jruby_add_on_for_uri(&self, uri: &Url) -> Option<JrubyAddOn> {
         self.analysis_workspace_for_uri(uri)
-            .and_then(|workspace| workspace.runtime.jruby_add_on().read().clone())
+            .and_then(|workspace| workspace.handle.runtime().jruby_add_on().read().clone())
     }
 
     pub(crate) fn set_effective_runtime(
@@ -354,7 +297,7 @@ impl RubyLanguageServer {
             .iter()
             .find(|workspace| &workspace.root_path == root)
         {
-            *workspace.runtime.selected().write() = runtime;
+            *workspace.handle.runtime().selected().write() = runtime;
         }
     }
 
@@ -495,7 +438,7 @@ impl ProjectRegistry {
 
     pub fn dependency_require_paths_for_uri(&self, uri: &Url) -> Vec<PathBuf> {
         self.workspace_for_uri(uri)
-            .map(|workspace| workspace.dependency_require_paths())
+            .map(|workspace| workspace.handle.dependency_require_paths())
             .unwrap_or_default()
     }
 
@@ -504,7 +447,7 @@ impl ProjectRegistry {
         uri: &Url,
     ) -> Arc<crate::loader::require_paths::RequireFeatureIndex> {
         self.workspace_for_uri(uri)
-            .map(|workspace| workspace.require_feature_index())
+            .map(|workspace| workspace.handle.require_feature_index())
             .unwrap_or_else(|| Arc::new(crate::loader::require_paths::RequireFeatureIndex::empty()))
     }
 

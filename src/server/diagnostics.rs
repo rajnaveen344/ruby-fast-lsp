@@ -181,7 +181,7 @@ impl RubyLanguageServer {
         };
         use ruby_analysis::engine::UNRESOLVED_REQUIRE_CODE;
 
-        let feature_index = workspace.require_feature_index();
+        let feature_index = workspace.handle().require_feature_index();
         let generation = workspace.indexing_status.snapshot().generation;
         let load_paths = self
             .config
@@ -281,7 +281,7 @@ impl RubyLanguageServer {
                 }
                 // Retain the immutable root identity through commit/publication:
                 // a newer dependency refresh must never be overwritten by this one.
-                let current_features = workspace.require_feature_guard();
+                let current_features = workspace.handle().require_feature_guard();
                 if !Arc::ptr_eq(&current_features, &feature_index)
                     || self
                         .config

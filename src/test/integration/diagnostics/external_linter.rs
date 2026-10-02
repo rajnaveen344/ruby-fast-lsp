@@ -229,7 +229,7 @@ async fn dependency_refresh_preserves_current_syntax_and_linter_output() {
                 diagnostic.code != Some(NumberOrString::String("unresolved-require".into()))
             })
             .collect::<Vec<_>>();
-        workspace.set_dependency_require_paths(vec![library]);
+        workspace.handle().set_dependency_require_paths(vec![library]);
         server
             .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
             .await;

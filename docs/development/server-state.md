@@ -44,6 +44,24 @@ compaction). `is_target` tells whether a target is this project.
 | `file_changes` | Latest filesystem events and debounce generation. | [watched_files.rs](../../src/server/watched_files.rs) |
 | `namespace_tree` | Cached Ruby Index projection and debounced invalidation. | [namespace_tree.rs](../../src/server/namespace_tree.rs) |
 
+### What stays on the server and why
+
+Per-project state lives in the project registry: the handle owns the engine,
+runtime state, and published requires, and `Workspace` keeps the routing root,
+indexing status, extension context seed, navigation demand, and editor folders.
+The six fields besides `client`, `config`, `documents`, and `projects` are
+server-wide by design. `indexing` admits work for every project through one
+scheduler and one CPU/memory/I/O governor, so a per-project copy would defeat
+the budget. `products` holds bounded immutable products shared across
+projects, which the isolation rules allow. `extensions` is one registry loaded
+from configuration and workspace trust, with one dynamic watcher registration.
+`diagnostics` is the single outbound diagnostic queue for the client, so
+publication stays latest-per-URI across projects. `file_changes` debounces the
+client's watcher events before they are routed to projects. `namespace_tree`
+caches one response for the whole Ruby Index view. The type keeps its name,
+`RubyLanguageServer`: renaming it to `Server` touches more than a hundred files
+for no change in ownership, so it waits for a quiet tree.
+
 No server field is public outside the crate. Fields used by sibling modules
 are explicitly `pub(crate)`; server-owned fields are explicitly `pub(self)`.
 This keeps the declaration visually consistent without widening access. Separate
@@ -113,9 +131,10 @@ they are not counts of allocations or independent copies of state.
 | --- | ---: | --- |
 | `OpenDocuments` | 2 | Buffer map and weak per-document semantic locks. |
 | `ProjectRegistry` | 3 | Projects, orphan project handle, external-document provenance. |
-| `Workspace` | 9 | Root URI/path, indexing status, project handle (`handle()`), runtime, extension context, navigation demand, require resolution, owning editor folders. |
-| `ProjectRuntimeState` | 3 | Selected runtime, Ruby version, JRuby add-on (`loader::jruby_add_on::JrubyAddOn`; the classpath fingerprint is read from it). |
-| `DependencyRequireState` | 2 | Require roots and their feature index. |
+| `Workspace` | 7 | Root URI/path, indexing status, project handle (`handle()`), extension context, navigation demand, owning editor folders. |
+| `ProjectHandle` | 3 | Engine lock, runtime state (`runtime()`), and published requires (`dependency_require_paths`, `require_feature_index`). Each has its own lock; neither runtime nor requires is held under the engine guard. |
+| `ProjectRuntimeState` | 3 | Selected runtime, Ruby version, JRuby add-on (`loader::jruby_add_on::JrubyAddOn`; the classpath fingerprint is read from it). Defined in [runtime.rs](../../src/server/projects/runtime.rs). |
+| `PublishedRequires` | 2 | Require roots and their feature index (`loader::context`), which loads of the project read live. |
 | `IndexingServices` | 3 | Scheduler, resource governor, status publisher. |
 | `IndexingStatusPublisher` | 4 | Sequence, publication state, worker wakeup, runtime handle. |
 | `IndexingStatusPublicationState` | 5 | Last/pending snapshots and sender/counter-flush state. |

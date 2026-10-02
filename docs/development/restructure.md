@@ -451,7 +451,7 @@ Delete this file when the last task is done. Git history keeps the record.
   Notes: each feature exposes `handle(server, params)`, absorbing its body
   from `handlers/request.rs`. Split any merged file over 1,000 lines inside
   its feature folder.
-- [ ] C4. Introduce `ProjectHandle`. A single writer task owns each project's
+- [x] C4. Introduce `ProjectHandle`. A single writer task owns each project's
       mutations and readers share the project for reads. Remove the per-project
       locks from `RubyLanguageServer`.
   - [x] C4a. Add `ProjectHandle` wrapping the existing
@@ -498,8 +498,10 @@ Delete this file when the last task is done. Git history keeps the record.
           guard; enqueueing there rather than after the guard keeps the
           interval edit-free. `LoadSink::commit_seed` is gone; the loader
           calls `commit_extension_seed` on its `LoadTarget`.
-  - [ ] C4e. Fold `ProjectRuntimeState`'s locks and the require index into
-        the handle. Owner decision (see below).
+  - [x] C4e. Fold `ProjectRuntimeState`'s locks and the require index into
+        the handle. Owner decision (see below). Done in C5a as separate
+        handle fields; C4c2 chose Option A, so nothing folds under the
+        engine guard.
     - [x] C4e1. Remove `Workspace::analysis_engine`, `analysis_engine_for_uri`,
           `analysis_engines`, and `orphan_engine`. Update
           `docs/development/server-state.md`.
@@ -545,6 +547,26 @@ Delete this file when the last task is done. Git history keeps the record.
   `Workspace` shrinks, and fold them under one owner only if C4c3 chooses
   a writer that owns all project state.
 - [ ] C5. Reduce the server to `Server { client, config, documents, projects }`.
+  - [x] C5a. Move `ProjectRuntimeState` (selected runtime, Ruby version,
+        JRuby add-on) and `PublishedRequires` (require roots and feature
+        index) from `Workspace` into `ProjectHandle`, each keeping its own
+        lock and none under the engine guard. `Workspace` keeps routing,
+        indexing status, extension context, navigation demand, and editor
+        folders. `ProjectRuntimeState` moves to
+        `src/server/projects/runtime.rs`.
+  - [x] C5b. Record what stays on the server and why
+        (`docs/development/server-state.md`): `indexing`, `products`,
+        `extensions`, `diagnostics`, `file_changes`, and `namespace_tree`
+        are server-wide by design (one governor, shared immutable products,
+        one registry, one outbound queue, one watcher debounce, one index
+        view), so none moves to a project.
+  - [ ] C5c. Owner decision: rename `RubyLanguageServer` to `Server`, and
+        whether the six server-wide services should sit under one
+        `services` field so the struct literally reads
+        `Server { client, config, documents, projects, services }`. The
+        rename touches more than a hundred files across `src/`, devtools,
+        the test harness, and docs, so it is deferred until no parallel
+        restructure branches are open. Not done: the type keeps its name.
 - [x] C6. Put JRuby support behind the existing `jruby-support` crate boundary
       so the server only sees an add-on interface.
   - [x] C6a. Bug: the persisted gem product identity hashed the JRuby import

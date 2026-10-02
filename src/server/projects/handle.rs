@@ -1,5 +1,6 @@
 //! `ProjectHandle`: one Ruby project's semantic state, shared by readers and
-//! written through one owner operation at a time.
+//! written through one owner operation at a time, beside the project's runtime
+//! state and published requires, which keep their own locks.
 //!
 //! Readers take [`ProjectHandle::view`], which holds the engine read guard for
 //! exactly one synchronous closure, so a request's answer reflects one
@@ -13,8 +14,10 @@
 //! the named operations of the [`LoadTarget`] that [`ProjectHandle::load_target`]
 //! returns, and never receives the engine lock. The named operations are the
 //! vocabulary a single project writer would accept as commands.
+use super::ProjectRuntimeState;
 use crate::invariant::ExpectInvariant;
-use crate::loader::context::{LoadTarget, NamedWrite};
+use crate::loader::context::{LoadTarget, NamedWrite, PublishedRequires};
+use crate::loader::require_paths::RequireFeatureIndex;
 use parking_lot::RwLock;
 use ruby_analysis::core::{DiagnosticFact, FileAnalysis, SourceFileId, SourceKind};
 use ruby_analysis::engine::{
@@ -27,13 +30,64 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct ProjectHandle {
     engine: Arc<RwLock<AnalysisEngine>>,
+    /// Runtime selection, detected Ruby version, and JRuby add-on, each under
+    /// its own lock and never under the engine guard.
+    runtime: ProjectRuntimeState,
+    /// Require roots and feature index published after dependency indexing,
+    /// replaced independently of engine writes.
+    requires: PublishedRequires,
 }
 
 impl ProjectHandle {
     pub(crate) fn new(engine: AnalysisEngine) -> Self {
         Self {
             engine: Arc::new(RwLock::new(engine)),
+            runtime: ProjectRuntimeState::default(),
+            requires: PublishedRequires::default(),
         }
+    }
+
+    /// The project's runtime selection, Ruby version, and JRuby add-on.
+    pub fn runtime(&self) -> &ProjectRuntimeState {
+        &self.runtime
+    }
+
+    /// Absolute gem/stdlib require roots retained after dependency indexing.
+    pub fn dependency_require_paths(&self) -> Vec<PathBuf> {
+        self.requires.paths()
+    }
+
+    /// The require feature index published for the project.
+    pub fn require_feature_index(&self) -> Arc<RequireFeatureIndex> {
+        self.requires.feature_index()
+    }
+
+    /// Hold this identity guard through delayed require-fact commit and
+    /// publication.
+    pub(in crate::server) fn require_feature_guard(
+        &self,
+    ) -> parking_lot::RwLockReadGuard<'_, Arc<RequireFeatureIndex>> {
+        self.requires.feature_index_guard()
+    }
+
+    /// The published requires a load of this project reads live.
+    pub(crate) fn published_requires(&self) -> PublishedRequires {
+        self.requires.clone()
+    }
+
+    /// Publish the require roots and feature index dependency indexing built.
+    pub(crate) fn set_dependency_require_resolution(
+        &self,
+        paths: Vec<PathBuf>,
+        index: Arc<RequireFeatureIndex>,
+    ) {
+        self.requires.replace(paths, index);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_dependency_require_paths(&self, paths: Vec<PathBuf>) {
+        let index = Arc::new(RequireFeatureIndex::build(&paths, None));
+        self.set_dependency_require_resolution(paths, index);
     }
 
     /// Run `read` over one view of the project's current semantic state. The

@@ -207,6 +207,7 @@ async fn goto_require_uses_workspace_dependency_require_roots() {
     editor
         .workspace_for("project/main.rb")
         .expect("project workspace")
+        .handle()
         .set_dependency_require_paths(vec![gem_lib]);
     editor
         .open("project/main.rb", "require 'platform/helpers/json'\n")
@@ -245,7 +246,9 @@ async fn unresolved_require_clears_after_dependency_roots_without_edit() {
     let workspace = editor
         .workspace_for("project/main.rb")
         .expect("project workspace");
-    workspace.set_dependency_require_paths(vec![gem_lib]);
+    workspace
+        .handle()
+        .set_dependency_require_paths(vec![gem_lib]);
     editor
         .server()
         .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
@@ -282,7 +285,9 @@ async fn unresolved_require_stays_after_refresh_when_still_missing() {
     let workspace = editor
         .workspace_for("project/main.rb")
         .expect("project workspace");
-    workspace.set_dependency_require_paths(vec![gem_lib]);
+    workspace
+        .handle()
+        .set_dependency_require_paths(vec![gem_lib]);
     editor
         .server()
         .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
@@ -317,7 +322,9 @@ async fn unresolved_require_refresh_clears_only_resolved_requires_in_one_file() 
     let workspace = editor
         .workspace_for("project/main.rb")
         .expect("project workspace");
-    workspace.set_dependency_require_paths(vec![gem_lib]);
+    workspace
+        .handle()
+        .set_dependency_require_paths(vec![gem_lib]);
     editor
         .server()
         .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
@@ -365,7 +372,9 @@ async fn unresolved_require_clears_on_closed_file_after_dependency_roots() {
     let workspace = editor
         .workspace_for("project/app.rb")
         .expect("project workspace");
-    workspace.set_dependency_require_paths(vec![gem_lib]);
+    workspace
+        .handle()
+        .set_dependency_require_paths(vec![gem_lib]);
     editor
         .server()
         .refresh_unresolved_require_diagnostics_for_workspace(&workspace)

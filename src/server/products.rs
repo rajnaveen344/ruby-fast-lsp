@@ -199,7 +199,7 @@ impl RubyLanguageServer {
                         )
                     }
                     crate::environment::config::runtime::EffectiveRuntimeSelection::Auto => {
-                        if let Some(runtime) = workspace.runtime.selected().read().clone() {
+                        if let Some(runtime) = workspace.handle().runtime().selected().read().clone() {
                             let stub_overlay = (runtime.implementation
                                 == RuntimeImplementation::Jruby)
                                 .then(|| runtime.family.clone());
@@ -234,6 +234,8 @@ impl RubyLanguageServer {
                         )
                     }
                 };
+                let classpath_fingerprint_sha256 =
+                    workspace.handle().runtime().classpath_fingerprint();
                 ProjectRuntimeStatus {
                     root: workspace.root_path,
                     mode,
@@ -244,7 +246,7 @@ impl RubyLanguageServer {
                     executable,
                     java_home,
                     stub_overlay,
-                    classpath_fingerprint_sha256: workspace.runtime.classpath_fingerprint(),
+                    classpath_fingerprint_sha256,
                     indexing_complete: workspace.indexing_status.snapshot().is_ready(),
                     indexing: workspace.indexing_status.snapshot(),
                 }

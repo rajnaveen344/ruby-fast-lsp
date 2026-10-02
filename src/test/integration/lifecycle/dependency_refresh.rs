@@ -40,7 +40,9 @@ async fn delayed_refresh(change: Change) {
     };
     let workspace = server.add_workspace(root_uri.clone());
     if matches!(change, Change::NewMissingRequire | Change::RootsRemoved) {
-        workspace.set_dependency_require_paths(vec![dependency.clone()]);
+        workspace
+            .handle()
+            .set_dependency_require_paths(vec![dependency.clone()]);
     }
     editor.open(filename, source).await;
     let initial = observe();
@@ -57,7 +59,9 @@ async fn delayed_refresh(change: Change) {
         .view()
         .source_snapshot_for_path(&path);
     if matches!(change, Change::Close) {
-        workspace.set_dependency_require_paths(vec![dependency.clone()]);
+        workspace
+            .handle()
+            .set_dependency_require_paths(vec![dependency.clone()]);
     }
 
     let mut collected = server
@@ -76,11 +80,13 @@ async fn delayed_refresh(change: Change) {
         Change::CorrectingEdit => editor.set(filename, "# corrected source\n").await,
         Change::NewMissingRequire => editor.set(filename, "require 'absent'\n").await,
         Change::RootsAdded | Change::RootsRemoved => {
-            workspace.set_dependency_require_paths(if matches!(change, Change::RootsAdded) {
-                vec![dependency.clone()]
-            } else {
-                Vec::new()
-            });
+            workspace.handle().set_dependency_require_paths(
+                if matches!(change, Change::RootsAdded) {
+                    vec![dependency.clone()]
+                } else {
+                    Vec::new()
+                },
+            );
             server
                 .refresh_unresolved_require_diagnostics_for_workspace(&workspace)
                 .await;
