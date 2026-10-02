@@ -411,7 +411,7 @@ impl FactCollector {
         range: TextRange,
     ) {
         let owner = FullyQualifiedName::namespace_with_kind(
-            self.scope_tracker.get_ns_stack(),
+            self.scope_tracker.method_definition_context().0,
             self.scope_tracker.current_macro_definition_context(),
         );
         self.facts

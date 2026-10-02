@@ -100,7 +100,7 @@ impl FactCollector {
                 .push(ReferenceCandidate::method(
                     old_range,
                     crate::core::MethodReferenceCandidate {
-                        owner: self.scope_tracker.get_ns_stack(),
+                        owner: self.scope_tracker.method_definition_context().0,
                         owner_kind: self.scope_tracker.current_macro_definition_context(),
                         method: old_method,
                         is_super: false,
@@ -122,7 +122,7 @@ impl FactCollector {
                 ));
         }
 
-        let namespace = self.scope_tracker.get_ns_stack();
+        let namespace = self.scope_tracker.method_definition_context().0;
         let owner_kind = self.scope_tracker.current_macro_definition_context();
         let range = self.direct_range(&node.location());
         self.direct_push_method_fact_with_visibility(
@@ -182,7 +182,7 @@ impl FactCollector {
             if reader {
                 if let Ok(method) = RubyMethod::new(&name) {
                     self.direct_push_method_fact(
-                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.method_definition_context().0,
                         owner_kind,
                         method,
                         range,
@@ -193,7 +193,7 @@ impl FactCollector {
             if writer {
                 if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
                     self.direct_push_method_fact(
-                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.method_definition_context().0,
                         owner_kind,
                         method,
                         range,
@@ -212,7 +212,7 @@ impl FactCollector {
         let namespace = node
             .receiver()
             .and_then(|receiver| self.resolve_constant_receiver_namespace(&receiver))
-            .unwrap_or_else(|| self.scope_tracker.get_ns_stack());
+            .unwrap_or_else(|| self.scope_tracker.method_definition_context().0);
 
         for arg in arguments.arguments().iter() {
             let Some((name, range)) = direct_attr_name_and_range(self, &arg) else {
@@ -272,7 +272,7 @@ impl FactCollector {
             let Ok(method) = RubyMethod::new(&name) else {
                 continue;
             };
-            let namespace = self.scope_tracker.get_ns_stack();
+            let namespace = self.scope_tracker.method_definition_context().0;
             let fqn = FullyQualifiedName::method(namespace.clone(), method);
             let instance_owner =
                 FullyQualifiedName::namespace_with_kind(namespace.clone(), NamespaceKind::Instance);
@@ -299,8 +299,10 @@ impl FactCollector {
         let Some(arguments) = node.arguments() else {
             return;
         };
-        let source = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
-        let in_singleton = self.scope_tracker.in_singleton();
+        let source =
+            FullyQualifiedName::namespace(self.scope_tracker.method_definition_context().0);
+        let in_singleton =
+            self.scope_tracker.current_macro_definition_context() == NamespaceKind::Singleton;
         let source_for_edge = if in_singleton {
             source.to_singleton_namespace().expect_invariant(
                 "singleton class mixin source could not convert to singleton namespace",

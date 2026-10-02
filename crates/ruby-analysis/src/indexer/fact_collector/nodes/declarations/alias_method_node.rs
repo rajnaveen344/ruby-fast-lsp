@@ -29,13 +29,16 @@ impl FactCollector {
             .value_loc()
             .unwrap_or_else(|| old_symbol.location());
         let old_range = self.direct_range(&old_location);
+        // `alias` acts where a `def` here would define, which in an eval
+        // block is the receiver rather than the lexical class.
+        let namespace_parts = self.scope_tracker.method_definition_context().0;
         self.facts
             .analysis
             .reference_candidates
             .push(ReferenceCandidate::method(
                 old_range,
                 MethodReferenceCandidate {
-                    owner: self.scope_tracker.get_ns_stack(),
+                    owner: namespace_parts.clone(),
                     owner_kind: self.scope_tracker.current_macro_definition_context(),
                     method: old_method,
                     is_super: false,
@@ -61,7 +64,6 @@ impl FactCollector {
         // collection (bundled core, dependencies) keeps only these direct
         // facts, so the alias must be declared here too or an ancestor's
         // aliased method disappears from lookup.
-        let namespace_parts = self.scope_tracker.get_ns_stack();
         self.direct_push_method_fact_with_visibility(
             namespace_parts.clone(),
             self.scope_tracker.current_macro_definition_context(),

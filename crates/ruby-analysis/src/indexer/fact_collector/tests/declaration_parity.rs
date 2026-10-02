@@ -319,3 +319,28 @@ fn extend_edges_do_not_join_the_instance_ancestry() {
         ],
     );
 }
+
+#[test]
+fn declarations_in_eval_blocks_land_on_the_receiver() {
+    // `class_eval` and `module_eval` run the block with the receiver as both
+    // `self` and the definition target, so `alias`, `alias_method`,
+    // `attr_reader`, `include`, `private`, and `module_function` act on the
+    // receiver rather than on the lexically enclosing class.
+    let source = "module Shapes\n  module Sized; end\n  class Base\n    def area; end\n  end\n  \
+                  class Builder\n    Base.class_eval do\n      alias size area\n      \
+                  alias_method :extent, :area\n      attr_reader :width\n      include Sized\n      \
+                  private :area\n    end\n    Sized.module_eval do\n      def depth; end\n      \
+                  module_function :depth\n    end\n  end\nend\n";
+    assert_walks_declare(
+        source,
+        &[
+            "method Shapes::Base#size on Shapes::Base Some(Instance)",
+            "method Shapes::Base#extent on Shapes::Base Some(Instance)",
+            "method Shapes::Base#width on Shapes::Base Some(Instance)",
+            "edge Shapes::Base Include Shapes::Sized",
+            "visibility Shapes::Base Some(Instance) area Private",
+            "method Shapes::Sized#depth on #<Class:Shapes::Sized> Some(Singleton) Public",
+            "visibility Shapes::Sized Some(Instance) depth Private",
+        ],
+    );
+}
