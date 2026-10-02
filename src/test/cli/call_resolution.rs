@@ -290,6 +290,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
     assert_eq!(
         analysis_engine
             .read()
+            .view()
             .last_resolve_stats()
             .get(ResolveStat::MethodReturnEquationSolveRuns),
         0,
@@ -311,6 +312,7 @@ async fn cross_file_recursive_return_proof_matches_cli_and_lsp() {
     assert_eq!(
         analysis_engine
             .read()
+            .view()
             .last_resolve_stats()
             .get(ResolveStat::MethodReturnEquationSolveRuns),
         1,

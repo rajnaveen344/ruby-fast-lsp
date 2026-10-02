@@ -184,7 +184,7 @@ fn resolve_pass_stats_record_cache_cardinality_after_full_resolve() {
 
     engine.resolve();
 
-    let resolve_pass = engine.last_resolve_stats();
+    let resolve_pass = engine.view().last_resolve_stats();
     assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheMisses), 1);
     assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheHits), 1);
     assert_eq!(resolve_pass.get(ResolveStat::ConstantCacheUniqueKeys), 1);
@@ -275,7 +275,7 @@ fn resolve_local_call_outcome_caches_reuse_one_exact_method_proof() {
 
     engine.resolve();
 
-    let resolve_pass = engine.last_resolve_stats();
+    let resolve_pass = engine.view().last_resolve_stats();
     assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheMisses), 1);
     assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheHits), 1);
     assert_eq!(resolve_pass.get(ResolveStat::MethodReturnCacheEntries), 1);
@@ -391,7 +391,7 @@ fn resolve_local_call_outcome_cache_reuses_one_ambiguous_method_proof() {
 
     engine.resolve();
 
-    let resolve_pass = engine.last_resolve_stats();
+    let resolve_pass = engine.view().last_resolve_stats();
     assert_eq!(
         resolve_pass.get(ResolveStat::AmbiguousMethodReturnCacheMisses),
         1
@@ -496,7 +496,7 @@ fn nested_call_uses_the_same_pass_inner_outcome_as_deferred_receiver() {
 
     engine.resolve();
 
-    let resolve_pass = engine.last_resolve_stats();
+    let resolve_pass = engine.view().last_resolve_stats();
     assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverCandidates), 1);
     assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverProven), 1);
     assert_eq!(resolve_pass.get(ResolveStat::DeferredReceiverUnknown), 0);

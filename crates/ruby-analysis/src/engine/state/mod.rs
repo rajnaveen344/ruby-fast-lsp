@@ -223,25 +223,38 @@ impl Project {
         self.view()
     }
 
+    pub fn shrink_to_fit(&mut self) {
+        self.files.shrink_to_fit();
+        self.names.shrink_to_fit();
+        self.decls.shrink_to_fit();
+        self.types.shrink_to_fit();
+        self.hierarchy.shrink_to_fit();
+        self.uses.shrink_to_fit();
+        self.diagnostics.shrink_to_fit();
+        self.solver.shrink_to_fit();
+    }
+}
+
+impl<'a> View<'a> {
     pub fn stats(&self) -> StatsSnapshot<AnalysisStat> {
-        let reference_candidate_stats = self.uses.candidate_stats();
+        let reference_candidate_stats = self.engine.uses.candidate_stats();
         let mut stats = StatsSnapshot::default();
-        stats.set(AnalysisStat::Files, stats::count(self.files.len()));
+        stats.set(AnalysisStat::Files, stats::count(self.engine.files.len()));
         stats.set(
             AnalysisStat::SourceBytes,
-            stats::count(self.files.source_bytes()),
+            stats::count(self.engine.files.source_bytes()),
         );
         stats.set(
             AnalysisStat::Symbols,
-            stats::count(self.decls.symbol_count()),
+            stats::count(self.engine.decls.symbol_count()),
         );
         stats.set(
             AnalysisStat::Methods,
-            stats::count(self.decls.method_count()),
+            stats::count(self.engine.decls.method_count()),
         );
         stats.set(
             AnalysisStat::ReferenceCandidates,
-            stats::count(self.uses.candidate_count()),
+            stats::count(self.engine.uses.candidate_count()),
         );
         stats.set(
             AnalysisStat::ConstantReferenceCandidates,
@@ -257,65 +270,62 @@ impl Project {
         );
         stats.set(
             AnalysisStat::References,
-            stats::count(self.uses.resolved_count()),
+            stats::count(self.engine.uses.resolved_count()),
         );
-        stats.set(AnalysisStat::Types, stats::count(self.types.fact_count()));
+        stats.set(
+            AnalysisStat::Types,
+            stats::count(self.engine.types.fact_count()),
+        );
         stats.set(
             AnalysisStat::DiagnosticCandidates,
-            stats::count(self.diagnostics.candidate_count()),
+            stats::count(self.engine.diagnostics.candidate_count()),
         );
         stats.set(
             AnalysisStat::Diagnostics,
-            stats::count(self.diagnostics.fact_count()),
+            stats::count(self.engine.diagnostics.fact_count()),
         );
         stats.set(
             AnalysisStat::GraphNodes,
-            stats::count(self.hierarchy.node_count()),
+            stats::count(self.engine.hierarchy.node_count()),
         );
         stats.set(
             AnalysisStat::GraphEdges,
-            stats::count(self.hierarchy.edge_count()),
+            stats::count(self.engine.hierarchy.edge_count()),
         );
         stats.set(
             AnalysisStat::UnresolvedGraphEdges,
-            stats::count(self.hierarchy.unresolved_edge_count()),
+            stats::count(self.engine.hierarchy.unresolved_edge_count()),
         );
         stats
     }
 
     pub fn estimated_memory_stats(&self) -> AnalysisMemoryStats {
         AnalysisMemoryStats {
-            names: self.names.estimated_heap_bytes(),
+            names: self.engine.names.estimated_heap_bytes(),
             files: self.estimated_file_store_heap_bytes(),
-            symbols: self.decls.symbols_heap_bytes(),
-            methods: self.decls.methods_heap_bytes(),
-            execution_contexts: self.decls.execution_contexts_heap_bytes(),
-            types: self.types.facts_heap_bytes(),
-            reference_candidates: self.uses.candidates_heap_bytes(),
-            references: self.uses.resolved_heap_bytes(),
-            diagnostics: self.diagnostics.resolved_heap_bytes(),
-            diagnostic_candidates: self.diagnostics.candidates_heap_bytes(),
-            graph: self.hierarchy.graph_heap_bytes(),
-            unresolved_graph_edges: self.hierarchy.unresolved_heap_bytes(),
-            query_caches: self.hierarchy.method_lookup_chain_heap_bytes(),
+            symbols: self.engine.decls.symbols_heap_bytes(),
+            methods: self.engine.decls.methods_heap_bytes(),
+            execution_contexts: self.engine.decls.execution_contexts_heap_bytes(),
+            types: self.engine.types.facts_heap_bytes(),
+            reference_candidates: self.engine.uses.candidates_heap_bytes(),
+            references: self.engine.uses.resolved_heap_bytes(),
+            diagnostics: self.engine.diagnostics.resolved_heap_bytes(),
+            diagnostic_candidates: self.engine.diagnostics.candidates_heap_bytes(),
+            graph: self.engine.hierarchy.graph_heap_bytes(),
+            unresolved_graph_edges: self.engine.hierarchy.unresolved_heap_bytes(),
+            query_caches: self.engine.hierarchy.method_lookup_chain_heap_bytes(),
         }
     }
 
     fn estimated_file_store_heap_bytes(&self) -> usize {
-        self.files.estimated_heap_bytes()
-            + self.solver.estimated_heap_bytes()
-            + self.types.file_outcomes_heap_bytes()
+        self.engine.files.estimated_heap_bytes()
+            + self.engine.solver.estimated_heap_bytes()
+            + self.engine.types.file_outcomes_heap_bytes()
     }
 
-    pub fn shrink_to_fit(&mut self) {
-        self.files.shrink_to_fit();
-        self.names.shrink_to_fit();
-        self.decls.shrink_to_fit();
-        self.types.shrink_to_fit();
-        self.hierarchy.shrink_to_fit();
-        self.uses.shrink_to_fit();
-        self.diagnostics.shrink_to_fit();
-        self.solver.shrink_to_fit();
+    /// Profiler evidence for the most recent full `resolve()` pass.
+    pub fn last_resolve_stats(&self) -> &'a StatsSnapshot<ResolveStat> {
+        &self.engine.last_resolve_pass
     }
 }
 

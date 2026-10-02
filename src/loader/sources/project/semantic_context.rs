@@ -36,7 +36,7 @@ impl IndexerProject {
             "rebuilding it later makes results depend on navigation demand",
             "initialize one baseline before collecting any project file",
         );
-        let estimated_bytes = snapshot.read().estimated_memory_stats().total();
+        let estimated_bytes = snapshot.read().view().estimated_memory_stats().total();
         invariant!(
             estimated_bytes <= MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
             what = "collection baseline for {} needs about {} bytes, over the {}-byte clone budget",
@@ -179,7 +179,11 @@ impl IndexerProject {
             let engine = semantic_context.read();
             ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
         });
-        let estimated_bytes = semantic_context.read().estimated_memory_stats().total();
+        let estimated_bytes = semantic_context
+            .read()
+            .view()
+            .estimated_memory_stats()
+            .total();
         invariant!(
             estimated_bytes <= MAX_EXHAUSTIVE_SEMANTIC_CONTEXT_BYTES,
             what = "semantic baseline for {} needs about {} bytes, over the {}-byte clone budget",

@@ -139,11 +139,6 @@ impl Project {
         self.last_resolve_pass = stats;
     }
 
-    /// Profiler evidence for the most recent full `resolve()` pass.
-    pub fn last_resolve_stats(&self) -> &StatsSnapshot<ResolveStat> {
-        &self.last_resolve_pass
-    }
-
     pub fn resolve_file(&mut self, file_id: SourceFileId) {
         self.resolve_files(&[file_id]);
     }

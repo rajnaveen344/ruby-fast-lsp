@@ -150,7 +150,7 @@ Delete this file when the last task is done. Git history keeps the record.
         forwards to `view()` until the loader callers migrate (B4h).
   - [x] B4d. `impl Semantics for View`; the `RwLock<Project>` impl takes a
         guard and delegates.
-  - [ ] B4e. Move read-only methods from `Project` to `View`, one component
+  - [x] B4e. Move read-only methods from `Project` to `View`, one component
         per commit. `Project` keeps writes and `view()`; callers read through
         `project.view().x()`. Each component's reads become an `impl View`
         block in the component's own module.
@@ -179,7 +179,7 @@ Delete this file when the last task is done. Git history keeps the record.
           `semantic_context_fingerprint`, `semantic_result_fingerprint`,
           `semantic_result_file_fingerprints`,
           `semantic_resolution_file_fingerprints`.
-    - [ ] B4e8. Statistics: `stats`, `estimated_memory_stats`,
+    - [x] B4e8. Statistics: `stats`, `estimated_memory_stats`,
           `last_resolve_stats`. Profiler comparison.
   - [x] B4f. Add `Project::remove(file_id)` and `remove_if_snapshot`: drop
         the file from every component, `Files` maps, and export fingerprints;

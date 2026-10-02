@@ -79,10 +79,10 @@ pub(crate) fn indexing_summary_json(
     for workspace in server.list_workspaces() {
         let engine = workspace.analysis_engine.read();
         inference_telemetry.merge(&engine.view().inference_telemetry());
-        analysis.merge(&engine.stats());
-        resolve_pass.merge(engine.last_resolve_stats());
+        analysis.merge(&engine.view().stats());
+        resolve_pass.merge(engine.view().last_resolve_stats());
         estimated_engine_heap_bytes = estimated_engine_heap_bytes
-            .checked_add(engine.estimated_memory_stats().total())
+            .checked_add(engine.view().estimated_memory_stats().total())
             .expect_invariant(
                 "profiler aggregate engine heap overflowed usize",
                 "estimated live engine memory must fit the process address space",

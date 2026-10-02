@@ -240,7 +240,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
 
     for workspace in server.list_workspaces() {
         let engine = workspace.analysis_engine.read();
-        let stats = engine.stats();
+        let stats = engine.view().stats();
         info!("=== ANALYSIS STATS: {} ===", workspace.root_path.display());
         info!("Files: {}", stats.get(AnalysisStat::Files));
         info!(
@@ -259,7 +259,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
             stats.get(AnalysisStat::MethodReferenceCandidates),
             stats.get(AnalysisStat::ResolvedReferenceCandidates)
         );
-        let resolve_pass = engine.last_resolve_stats();
+        let resolve_pass = engine.view().last_resolve_stats();
         info!(
             "Resolve pass ns: graph_retry={}, diagnostic_seed={}, constants={}, methods={}, sort_all={}, diagnostic_rebuild={}",
             resolve_pass.get(ResolveStat::GraphRetryNs),
@@ -331,7 +331,7 @@ pub(crate) fn print_stats(server: &RubyLanguageServer) {
             stats.get(AnalysisStat::UnresolvedGraphEdges)
         );
 
-        let memory = engine.estimated_memory_stats();
+        let memory = engine.view().estimated_memory_stats();
         let total = memory.total();
         info!(
             "=== ESTIMATED ENGINE HEAP: {} ===",

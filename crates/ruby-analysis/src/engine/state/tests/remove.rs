@@ -195,7 +195,7 @@ fn removal_matches_a_project_that_never_added_the_file() {
         removed.view().semantic_context_fingerprint(),
         never_added.view().semantic_context_fingerprint()
     );
-    assert_eq!(removed.stats(), never_added.stats());
+    assert_eq!(removed.view().stats(), never_added.view().stats());
     assert_eq!(
         removed.view().unresolved_graph_edges().len(),
         never_added.view().unresolved_graph_edges().len()

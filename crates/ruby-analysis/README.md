@@ -95,9 +95,11 @@ background producers must retain `SourceFileSnapshot` and use
 `update_if_snapshot`; an obsolete producer cannot replace newer
 source facts.
 
-`AnalysisQuery` reads an engine snapshot, including file-scoped type facts
-(`type_at`, `local_variable_type_at`); it does not trigger inference or copy
-stores. During collection, extensions use `FactCollector::add_type_fact` and
+`AnalysisEngine` exposes writes and `view()`; every read goes through the
+`AnalysisQuery` it returns (`engine.view().file_id(path)`). A view reads an
+engine snapshot, including file-scoped type facts (`type_at`,
+`local_variable_type_at`), statistics, and fingerprints; it does not trigger
+inference or copy stores. During collection, extensions use `FactCollector::add_type_fact` and
 the collector's fact views. Final publication still goes through replacement.
 
 ## Storage stays internal

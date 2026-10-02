@@ -272,6 +272,7 @@ async fn cold_indexing_retains_but_does_not_publish_closed_file_diagnostics() {
         server
             .analysis_engine_for_uri(&uri)
             .read()
+            .view()
             .stats()
             .get(AnalysisStat::Diagnostics)
             > 0,

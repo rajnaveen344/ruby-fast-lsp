@@ -141,7 +141,7 @@ fn new_core_engine_cache() -> BoundedSingleFlightCache<String, AnalysisEngine> {
         CORE_ENGINE_CACHE_MAX_ENTRIES,
         CORE_ENGINE_CACHE_MAX_WEIGHT_BYTES,
         |engine: &AnalysisEngine| {
-            u64::try_from(engine.estimated_memory_stats().total()).expect_invariant(
+            u64::try_from(engine.view().estimated_memory_stats().total()).expect_invariant(
                 "a core template heap estimate does not fit u64",
                 "one in-memory engine cannot exceed the process address space",
                 "inspect engine memory estimation overflow",

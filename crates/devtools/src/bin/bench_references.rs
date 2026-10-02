@@ -186,6 +186,7 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
         engine.view().all_symbol_facts().len(),
         engine.view().all_method_facts().len(),
         engine
+            .view()
             .stats()
             .get(ruby_analysis::engine::AnalysisStat::References)
     );

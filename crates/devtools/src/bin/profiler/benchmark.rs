@@ -221,7 +221,11 @@ pub(crate) async fn run_production_benchmark(
         edit_samples.push(start.elapsed());
     }
 
-    let engine_heap_bytes = analysis_engine.read().estimated_memory_stats().total();
+    let engine_heap_bytes = analysis_engine
+        .read()
+        .view()
+        .estimated_memory_stats()
+        .total();
     Ok(ProductionMeasurements {
         cold_indexing,
         edit: LatencySummary::from_samples(&edit_samples),

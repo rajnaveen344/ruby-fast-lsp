@@ -410,8 +410,8 @@ fn memory_stats_count_visibility_overrides_and_execution_contexts() {
     without_facts.update(without_id, FileAnalysis::default(), ResolveMode::Immediate);
 
     assert!(
-        with_facts.estimated_memory_stats().total()
-            > without_facts.estimated_memory_stats().total(),
+        with_facts.view().estimated_memory_stats().total()
+            > without_facts.view().estimated_memory_stats().total(),
         "visibility overrides and execution contexts must count toward the engine heap"
     );
 }

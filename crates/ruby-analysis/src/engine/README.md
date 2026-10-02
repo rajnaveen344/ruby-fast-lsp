@@ -34,10 +34,12 @@ Implementation folders are private to the engine.
 `Project` holds one private-field component per kind of semantic state.
 Each component owns its fields and exposes `pub(in crate::engine)` operations;
 components that need names take `&Names` or `&mut Names` as a parameter. A
-component's public reads are an `impl View` block in the component's module
-(`Files`, `DeclIndex`, `Hierarchy`, `UseIndex`, `TypeTable`, `Diagnostics`, and `Solver` so far), so callers write `project.view().file_id(path)`. The
-engine keeps only its identity, `semantic_revision`, `query_cache_identity`,
-and last resolve statistics.
+component's public reads are an `impl View` block in the component's module;
+fingerprints and statistics are `impl View` blocks in `persist/fingerprint/`
+and `state/mod.rs`. `Project` has no public reads: it exposes writes,
+`resolve*`, `shrink_to_fit`, and `view()`, and callers write
+`project.view().file_id(path)`. The engine keeps only its identity,
+`semantic_revision`, `query_cache_identity`, and last resolve statistics.
 
 | Component | Module | Owns |
 | --- | --- | --- |
